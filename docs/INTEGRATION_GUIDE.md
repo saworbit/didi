@@ -1,15 +1,15 @@
 # Didi Integration & Setup Guide
 
-This guide walks through configuring Didi with popular AI coding assistants and the Godot 4.x editor.
+This guide walks through configuring Didi with popular AI coding assistants and the Godot 4.5+ editor.
 
 ---
 
 ## 🛠️ Prerequisites
 
-- **Godot 4.x** (e.g. Godot 4.1+) installed and accessible in `PATH` or at `C:\Godot\`.
+- **Godot 4.5+** installed and accessible in `PATH` or at `C:\Godot\`.
 - **C++20 Build Artifacts** or precompiled Didi binaries:
-  - `didi.exe` (MCP stdio executable)
-  - `didi_extension.dll` (GDExtension module)
+  - `didi.exe` on Windows or `didi` on POSIX (MCP stdio executable)
+  - `didi_extension.dll`, `libdidi_extension.so`, or `libdidi_extension.dylib` for the target platform
 
 ---
 
@@ -24,13 +24,13 @@ This guide walks through configuring Didi with popular AI coding assistants and 
    │       ├── plugin.cfg
    │       ├── didi_plugin.gd
    │       └── bin/
-   │           └── didi_extension.dll
+   │           └── <platform extension library>
    └── project.godot
    ```
 2. Open your project in the **Godot Editor**.
 3. Navigate to **Project $\rightarrow$ Project Settings $\rightarrow$ Plugins**.
 4. Check the **Enable** box next to **Didi Native MCP Bridge**.
-5. The GDExtension starts the in-memory IPC server on `\\.\pipe\godot_didi_ipc`.
+5. The GDExtension starts local IPC on `\\.\pipe\godot_didi_ipc` (Windows) or `/tmp/godot_didi_ipc.sock` (POSIX).
 
 ---
 
@@ -41,7 +41,7 @@ In Cursor, open **Settings $\rightarrow$ Features $\rightarrow$ MCP Servers** an
 - **Name**: `didi`
 - **Type**: `stdio`
 - **Command**: `D:/didi/build/Release/didi.exe`
-- **Args**: `["--log-level", "INFO"]`
+- **Args**: `["--project", "D:/my_game", "--log-level", "INFO"]`
 
 Or edit your project's `.cursor/mcp.json`:
 ```json
@@ -49,11 +49,13 @@ Or edit your project's `.cursor/mcp.json`:
   "mcpServers": {
     "didi": {
       "command": "D:/didi/build/Release/didi.exe",
-      "args": ["--log-level", "INFO"]
+      "args": ["--project", "D:/my_game", "--log-level", "INFO"]
     }
   }
 }
 ```
+
+On macOS or Linux, replace the Windows `command` value with the absolute path to the platform's `didi` executable.
 
 ---
 
@@ -67,7 +69,7 @@ Edit your `claude_desktop_config.json`:
   "mcpServers": {
     "didi": {
       "command": "D:\\didi\\build\\Release\\didi.exe",
-      "args": ["--log-level", "INFO"]
+      "args": ["--project", "D:/my_game", "--log-level", "INFO"]
     }
   }
 }
@@ -82,7 +84,7 @@ In your VS Code workspace settings or MCP extension configuration:
   "mcpServers": {
     "didi": {
       "command": "D:/didi/build/Release/didi.exe",
-      "args": ["--log-level", "INFO"]
+      "args": ["--project", "D:/my_game", "--log-level", "INFO"]
     }
   }
 }
@@ -97,7 +99,7 @@ Add to your `mcp_config.json`:
   "mcpServers": {
     "didi": {
       "command": "D:/didi/build/Release/didi.exe",
-      "args": ["--log-level", "INFO"]
+      "args": ["--project", "D:/my_game", "--log-level", "INFO"]
     }
   }
 }
@@ -118,10 +120,15 @@ Add to your `mcp_config.json`:
 ## 4. Troubleshooting & FAQ
 
 ### Q: Does Didi require Godot Editor to be open at all times?
-**A:** No! Didi features an **offline fallback engine**. When the Godot Editor is closed, tools like `analyze_script_diagnostics`, `query_project_resources`, and `execute_test_session` continue to operate smoothly by inspecting files and launching headless test sessions.
+**A:** No. File-based tools such as `script_check_syntax`, `project_list_resources`, and `runtime_launch` remain available in `offline_fallback` mode. Scene mutations and editor lifecycle tools require the editor connection.
 
-### Q: Why is `capture_viewport` returning an offline message?
-**A:** Live viewport and in-memory scene hierarchy inspection require an active Godot Editor instance with the Didi addon enabled so that the GDExtension can capture GPU frames.
+### Q: Why does viewport capture return a grid?
+**A:** The grid is an explicitly synthesized offline preview (`is_live_frame: false`). A real editor image requires an active Godot 4.5+ editor with the addon enabled and reports `execution_mode: "live"` and `is_live_frame: true`.
+
+### Q: Why is a listed tool rejected as unimplemented?
+**A:** Didi retains the full protocol surface for compatibility. Inspect `_meta.didi` from `tools/list`; only call entries with `implemented: true`, and require `currentMode: "live"` for live-only tools. See [Current Capability Matrix](CAPABILITIES.md).
 
 ### Q: Is there any network port conflict?
-**A:** No! Didi communicates exclusively over native OS Named Pipes (`\\.\pipe\godot_didi_ipc`), eliminating network port conflicts and firewall restrictions.
+**A:** Didi uses a local Windows named pipe (`\\.\pipe\godot_didi_ipc`) or POSIX Unix-domain socket instead of a TCP port, so it does not allocate a network port or require a firewall rule.
+
+The default pipe name is shared by local Didi instances. Use the same `--pipe-name`/`DIDI_PIPE_NAME` value for the standalone server and editor process when isolating projects.

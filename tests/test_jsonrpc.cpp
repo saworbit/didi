@@ -45,11 +45,37 @@ static void test_mcp_initialize() {
     ASSERT_EQ(resp.result["serverInfo"]["name"].get<std::string>(), "didi");
 }
 
+static void test_mcp_tool_list_reports_current_availability() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+
+    didi::mcp::JsonRpcRequest initialize;
+    initialize.id = 1;
+    initialize.method = "initialize";
+    initialize.params = didi::json::object();
+    server.handleRequest(initialize);
+
+    didi::mcp::JsonRpcRequest list;
+    list.id = 2;
+    list.method = "tools/list";
+    list.params = didi::json::object();
+    auto response = server.handleRequest(list);
+    ASSERT_TRUE(!response.error.has_value());
+
+    didi::json by_name = didi::json::object();
+    for (const auto& tool : response.result["tools"]) by_name[tool["name"].get<std::string>()] = tool;
+    ASSERT_EQ(by_name["scene_get_hierarchy"]["_meta"]["didi"]["currentMode"], "offline_fallback");
+    ASSERT_EQ(by_name["scene_instantiate_node"]["_meta"]["didi"]["currentMode"], "unavailable");
+    ASSERT_EQ(by_name["signal_connect"]["_meta"]["didi"]["currentMode"], "unimplemented");
+    ASSERT_EQ(by_name["scene_instantiate_node"]["_meta"]["didi"]["liveAvailable"], false);
+}
+
 struct RegisterJsonRpcTests {
     RegisterJsonRpcTests() {
         registerTest("JsonRpc.ParseValid", test_jsonrpc_parse_valid);
         registerTest("JsonRpc.ParseNotification", test_jsonrpc_parse_notification);
         registerTest("JsonRpc.ResponseSerialization", test_jsonrpc_response_serialization);
         registerTest("McpServer.Initialize", test_mcp_initialize);
+        registerTest("McpServer.ToolAvailability", test_mcp_tool_list_reports_current_availability);
     }
 } g_registerJsonRpcTests;

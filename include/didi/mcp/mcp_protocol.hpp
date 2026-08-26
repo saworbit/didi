@@ -100,17 +100,36 @@ struct CallToolResult {
 
 using ToolHandler = std::function<CallToolResult(const json& arguments)>;
 
+struct ExecutionCapability {
+    std::vector<std::string> modes{"unimplemented"};
+    bool implemented{false};
+    std::string reason;
+
+    json toJson() const {
+        json data = {
+            {"executionModes", modes},
+            {"implemented", implemented}
+        };
+        if (!reason.empty()) {
+            data["reason"] = reason;
+        }
+        return data;
+    }
+};
+
 struct ToolDefinition {
     std::string name;
     std::string description;
     json inputSchema;
     ToolHandler handler;
+    ExecutionCapability capability;
 
     json toJson() const {
         return {
             {"name", name},
             {"description", description},
-            {"inputSchema", inputSchema}
+            {"inputSchema", inputSchema},
+            {"_meta", {{"didi", capability.toJson()}}}
         };
     }
 };
@@ -121,13 +140,15 @@ struct ResourceDefinition {
     std::string description;
     std::string mimeType;
     std::function<Result<std::string>()> readHandler;
+    ExecutionCapability capability;
 
     json toJson() const {
         return {
             {"uri", uri},
             {"name", name},
             {"description", description},
-            {"mimeType", mimeType}
+            {"mimeType", mimeType},
+            {"_meta", {{"didi", capability.toJson()}}}
         };
     }
 };

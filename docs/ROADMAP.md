@@ -1,7 +1,7 @@
 # Didi Strategic Roadmap & Technical Build Order 🗺️
 
 > **Core Philosophy**:
-> The 36-tool suite is already fully specified. The next capability is not more MCP tool names — it is making those tools **actually drive Godot**, then filling the operational gaps AI agents encounter when attempting to autonomously build and ship Godot games.
+> The 40-tool canonical surface is already specified. The next capability is not more MCP names — it is implementing the reserved tools honestly, then filling the operational gaps AI agents encounter when attempting to build and ship Godot games.
 
 ---
 
@@ -27,13 +27,13 @@
 
 ---
 
-## 🛑 Phase 1: Live Engine Integration Substrate (DO THIS FIRST)
+## ✅ Phase 1: Live Engine Integration Substrate (COMPLETE — 2026-08-27)
 
 Before adding any additional tool endpoints, live engine integration must be genuine. Without these four capabilities, every additional tool is another fake-success path that increases hallucinated world-state.
 
 1. **Main-Thread Queue Pump**:
-   - Register `DidiHook` (or equivalent GDExtension ClassDB singleton).
-   - Drain the command queue strictly from Godot editor `_process`, never on a background worker thread.
+   - Register a native GDExtension main-loop frame callback.
+   - Drain the bounded command queue strictly from Godot's main thread, never on the IPC worker.
 2. **Real `GodotApi` Engine Calls**:
    - Directly invoke `SceneTree`, `EditorInterface`, `EditorUndoRedoManager`, `Input`, and `RenderingServer`.
    - Return clean errors when the editor is disconnected or unhooked.
@@ -43,6 +43,16 @@ Before adding any additional tool endpoints, live engine integration must be gen
    - Transparently attribute offline synthesized previews when the engine is not attached.
 4. **Honest Capability Discovery**:
    - `tools/list` and `resources/list` explicitly declare which tools are `live`, `offline_fallback`, or `unimplemented` so AI agents can accurately plan actions.
+
+### Acceptance record
+
+- Native `register_main_loop_callbacks` dispatches a bounded queue exclusively on Godot's main thread; timed-out commands are cancelled before execution.
+- Live hierarchy, scalar property get/set, built-in node instantiate/remove/reparent/duplicate, editor undo/redo/save/rescan, and editor viewport capture execute against real Godot objects.
+- Only real editor pixels emit `is_live_frame: true`; synthesized previews identify `execution_mode: offline_fallback`.
+- Capability metadata blocks registered-but-unimplemented endpoints before legacy handlers can report success.
+- The end-to-end integration suite passes on Godot 4.5.1, 4.6.2, and 4.7.2.
+
+Phase 1 deliberately does not implement the remaining registered domains. Their protocol definitions remain discoverable with `executionModes: ["unimplemented"]` and `implemented: false` until later phases supply trustworthy execution.
 
 ---
 
@@ -124,8 +134,8 @@ Beyond a basic recursive directory walk:
 
 - ❌ **Do NOT add more domain stubs** (e.g. `audio_bus_*`, `multiplayer_*`, `particle_*`, `xr_*`) until Domains 1–4 are actively mutating Godot.
 - ❌ **Do NOT create a second plugin architecture or network transport** — local named pipes and UNIX domain sockets are optimal.
-- ❌ **Do NOT build a custom GDScript language server** — `script_get_symbols` combined with Godot's live compiler is fast and sufficient.
-- ❌ **Do NOT maintain fake static ClassDB reflection maps** — query live Godot `ClassDB` or load `extension_api.json`.
+- ❌ **Do NOT build a custom GDScript language server** — extend the existing symbol extractor and headless Godot compiler check only where evidence requires it.
+- ❌ **Do NOT expand the limited static ClassDB map** — replace it with live Godot `ClassDB` or generated `extension_api.json` data.
 
 ---
 
@@ -133,24 +143,26 @@ Beyond a basic recursive directory walk:
 
 | Phase | Milestone / Capability | Strategic Rationale |
 | :--- | :--- | :--- |
-| **Phase 1 (NOW)** | **Live Pump + Real SceneTree / UndoRedo + Honest Errors** | Foundation substrate — everything else is untrustworthy without this. |
-| **Phase 2 (NEXT)** | **Attach Script, Autoloads, Project Settings, Save/Open Scene** | Completes the fundamental "Create & Wire a Node" game dev loop. |
+| **Phase 1 (DONE)** | **Live Pump + Real SceneTree / UndoRedo + Honest Errors** | Verified on Godot 4.5.1, 4.6.2, and 4.7.2. |
+| **Phase 2 (NEXT)** | **Attach Script, Autoloads, Project Settings, Create/Open/Pack Scene** | Completes the fundamental "Create & Wire a Node" game dev loop beyond Phase 1's active-scene save. |
 | **Phase 3 (THEN)** | **`eval_gdscript`, Runtime Log Stream, Attach-to-Running** | Replaces dozens of one-off tools with dynamic, sandboxed engine execution. |
 | **Phase 4 (THEN)** | **Symbol Search, Asset Reimport, Viewport Diffing & Isolation** | Closes the autonomous verification and feedback loop for AI agents. |
 | **Phase 5 (LATER)** | **C# / Shaders, Project Export, GridMap MeshLibrary, UI Hit-Testing** | Provides deep domain depth across all Godot engine subsystems. |
 
 ---
 
-## 📋 The 36-Tool Reference Matrix (Current Specification)
+## 📋 The 40-Tool Canonical Surface
 
-| Domain | Key Tools | Primary Purpose |
+This is the planned protocol surface, not a claim that every row executes today. See [Current Capability Matrix](CAPABILITIES.md) for per-tool status.
+
+| Domain | Key Tools | Current status |
 | :--- | :--- | :--- |
-| **1. Scene & Nodes (7)** | `scene_get_hierarchy`, `scene_instantiate_node`, `scene_remove_node`, `scene_reparent_node`, `scene_set_property`, `scene_get_property`, `scene_duplicate_node` | Live SceneTree inspection, node spawning, reparenting, and UndoRedo property mutations. |
-| **2. Signals & Events (4)** | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` | Dynamic event binding, listener inspection, and synthetic event dispatch. |
-| **3. Scripting & AST (4)** | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method` | Bytecode validation, engine documentation lookup, AST extraction, surgical method patching. |
-| **4. Vision & Render (4)** | `viewport_capture_frame`, `viewport_set_camera_transform`, `viewport_create_test_lab`, `viewport_toggle_debug_draw` | Multi-angle PNG viewport captures, isolated sandbox test stages, debug wireframes. |
-| **5. Physics & Nav (6)** | `physics_raycast_query`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track` | Raycast testing, deterministic physics ticking, navmesh baking, animation playback. |
-| **6. Tilemaps & Grids (3)**| `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells` | 2D `TileMapLayer` cell updates, boundary calculation, 3D `GridMap` mesh placements. |
-| **7. Resources & UIDs (4)**| `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map` | `.tres` resource generation, UID resolution, asset discovery. |
-| **8. Runtime & Debug (4)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Headless test runner, synthetic input simulation, crash stack extraction, FPS/profiler telemetry. |
-| **9. Editor Lifecycle (4)**| `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Complete UndoRedo transaction management, scene file saving, filesystem rescan. |
+| **1. Scene & Nodes (7)** | `scene_get_hierarchy`, `scene_instantiate_node`, `scene_remove_node`, `scene_reparent_node`, `scene_set_property`, `scene_get_property`, `scene_duplicate_node` | Implemented live; hierarchy also has offline parsing. Phase 1 scalar/built-in-node limits apply. |
+| **2. Signals & Events (4)** | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` | Unimplemented. |
+| **3. Scripting & AST (4)** | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method` | Implemented offline/file-based with documented coverage limits. |
+| **4. Vision & Render (4)** | `viewport_capture_frame`, `viewport_set_camera_transform`, `viewport_create_test_lab`, `viewport_toggle_debug_draw` | Capture and offline lab generation implemented; camera/debug controls unimplemented. |
+| **5. Physics & Nav (6)** | `physics_raycast_query`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track` | Unimplemented. |
+| **6. Tilemaps & Grids (3)**| `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells` | Unimplemented. |
+| **7. Resources & UIDs (4)**| `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map` | Implemented offline/file-based. |
+| **8. Runtime & Debug (4)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Process launch implemented; input/debug/profiler tools unimplemented. |
+| **9. Editor Lifecycle (4)**| `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Implemented live; reload requests a filesystem source scan. |

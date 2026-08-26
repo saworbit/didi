@@ -12,6 +12,11 @@ ResourceRegistry& ResourceRegistry::instance() {
 }
 
 void ResourceRegistry::registerResource(ResourceDefinition res) {
+    if (res.uri == "godot://editor/state" || res.uri == "godot://runtime/logs") {
+        res.capability = {{"live", "offline_fallback"}, true, {}};
+    } else if (res.uri == "godot://project/tree") {
+        res.capability = {{"offline_fallback"}, true, {}};
+    }
     m_resources[res.uri] = std::move(res);
 }
 
@@ -49,7 +54,7 @@ void ResourceRegistry::registerAllDefaultResources() {
     ResourceDefinition proj_tree;
     proj_tree.uri = "godot://project/tree";
     proj_tree.name = "Godot Project Resource Tree";
-    proj_tree.description = "Complete recursive layout of res:// including scene dependencies and UID maps.";
+    proj_tree.description = "Offline filesystem/resource index rooted at the standalone server's project working directory.";
     proj_tree.mimeType = "application/json";
     proj_tree.readHandler = [this]() -> Result<std::string> {
         if (m_ipcClient && m_ipcClient->isConnected()) {
@@ -69,7 +74,7 @@ void ResourceRegistry::registerAllDefaultResources() {
     ResourceDefinition editor_state;
     editor_state.uri = "godot://editor/state";
     editor_state.name = "Godot Editor State";
-    editor_state.description = "Currently selected scene, selected nodes, active camera position, and Undo/Redo stack depth.";
+    editor_state.description = "Connection state and active edited-scene root when live, or an explicit offline status.";
     editor_state.mimeType = "application/json";
     editor_state.readHandler = [this]() -> Result<std::string> {
         if (m_ipcClient && m_ipcClient->isConnected()) {
@@ -92,7 +97,7 @@ void ResourceRegistry::registerAllDefaultResources() {
     ResourceDefinition runtime_logs;
     runtime_logs.uri = "godot://runtime/logs";
     runtime_logs.name = "Godot Runtime Engine Logs";
-    runtime_logs.description = "Real-time stream of engine logs, shader compile warnings, and debugger stack frames.";
+    runtime_logs.description = "Didi extension-side log ring when connected, or a minimal server-status payload offline; not a full Godot debugger stream.";
     runtime_logs.mimeType = "application/json";
     runtime_logs.readHandler = [this]() -> Result<std::string> {
         if (m_ipcClient && m_ipcClient->isConnected()) {

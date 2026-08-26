@@ -78,6 +78,43 @@ static void test_tool_registry_default_tools() {
     ASSERT_TRUE(reg.getTool("mutate_scene_tree") != nullptr);
 }
 
+static void test_tool_capabilities_are_honest() {
+    auto& reg = didi::mcp::ToolRegistry::instance();
+    reg.registerAllDefaultTools();
+
+    const auto* hierarchy = reg.getTool("scene_get_hierarchy");
+    const auto* instantiate = reg.getTool("scene_instantiate_node");
+    const auto* signal_connect = reg.getTool("signal_connect");
+    const auto* syntax = reg.getTool("script_check_syntax");
+
+    ASSERT_TRUE(hierarchy != nullptr);
+    ASSERT_TRUE(instantiate != nullptr);
+    ASSERT_TRUE(signal_connect != nullptr);
+    ASSERT_TRUE(syntax != nullptr);
+
+    auto hierarchy_json = hierarchy->toJson();
+    auto instantiate_json = instantiate->toJson();
+    auto signal_json = signal_connect->toJson();
+    auto syntax_json = syntax->toJson();
+
+    ASSERT_EQ(hierarchy_json["_meta"]["didi"]["executionModes"],
+              didi::json::array({"live", "offline_fallback"}));
+    ASSERT_EQ(instantiate_json["_meta"]["didi"]["executionModes"],
+              didi::json::array({"live"}));
+    ASSERT_EQ(instantiate_json["inputSchema"]["properties"]["node_type"]["default"], "Node");
+    ASSERT_EQ(signal_json["_meta"]["didi"]["executionModes"],
+              didi::json::array({"unimplemented"}));
+    ASSERT_EQ(signal_json["_meta"]["didi"]["implemented"], false);
+    ASSERT_TRUE(signal_json["description"].get<std::string>().rfind("UNIMPLEMENTED:", 0) == 0);
+    ASSERT_EQ(syntax_json["_meta"]["didi"]["executionModes"],
+              didi::json::array({"offline_fallback"}));
+
+    reg.setIpcClient(nullptr);
+    auto unavailable = reg.callTool("signal_list_connections", {{"target_node", "/root"}});
+    ASSERT_TRUE(unavailable.isError);
+    ASSERT_TRUE(unavailable.content[0].text.find("no trustworthy execution path") != std::string::npos);
+}
+
 static void test_resource_registry() {
     auto& reg = didi::mcp::ResourceRegistry::instance();
     reg.registerAllDefaultResources();
@@ -87,6 +124,13 @@ static void test_resource_registry() {
     ASSERT_TRUE(reg.getResource("godot://project/tree") != nullptr);
     ASSERT_TRUE(reg.getResource("godot://editor/state") != nullptr);
     ASSERT_TRUE(reg.getResource("godot://runtime/logs") != nullptr);
+
+    const auto project_tree = reg.getResource("godot://project/tree")->toJson();
+    const auto editor_state = reg.getResource("godot://editor/state")->toJson();
+    ASSERT_EQ(project_tree["_meta"]["didi"]["executionModes"],
+              didi::json::array({"offline_fallback"}));
+    ASSERT_EQ(editor_state["_meta"]["didi"]["executionModes"],
+              didi::json::array({"live", "offline_fallback"}));
 }
 
 static void test_prompt_registry() {
@@ -101,6 +145,17 @@ static void test_prompt_registry() {
     auto res = reg.getPromptResult("godot_debug_visual_anomaly", {{"target_resource_path", "res://models/hero.glb"}});
     ASSERT_TRUE(res.isOk());
     ASSERT_TRUE(res.value().contains("messages"));
+    const std::string visual_text = res.value()["messages"][0]["content"]["text"].get<std::string>();
+    ASSERT_TRUE(visual_text.find("tools/list") != std::string::npos);
+    ASSERT_TRUE(visual_text.find("mutate_scene_tree") == std::string::npos);
+
+    auto gameplay = reg.getPromptResult("godot_generate_gameplay_slice", {
+        {"feature_name", "PlayerController"}, {"requirements", "Move a character"}
+    });
+    ASSERT_TRUE(gameplay.isOk());
+    const std::string gameplay_text = gameplay.value()["messages"][0]["content"]["text"].get<std::string>();
+    ASSERT_TRUE(gameplay_text.find("implemented: false") != std::string::npos);
+    ASSERT_TRUE(gameplay_text.find("inject_input_event") == std::string::npos);
 }
 
 static void test_tool_capture_viewport_with_ipc() {
@@ -140,6 +195,25 @@ static void test_tool_capture_viewport_with_ipc() {
 
     client->disconnect();
     server->stop();
+}
+
+static void test_tool_capture_viewport_offline_is_attributed() {
+    auto& reg = didi::mcp::ToolRegistry::instance();
+    reg.setIpcClient(nullptr);
+    auto result = reg.callTool("viewport_capture_frame", {
+        {"camera_identifier", "active_editor_view"},
+        {"resolution", {{"width", 64}, {"height", 48}}}
+    });
+
+    ASSERT_TRUE(!result.isError);
+    ASSERT_EQ(result.content.size(), 2);
+    ASSERT_EQ(result.content[0].type, "text");
+    auto metadata = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(metadata["execution_mode"], "offline_fallback");
+    ASSERT_EQ(metadata["is_live_frame"], false);
+    ASSERT_EQ(result.content[1].type, "image");
+    ASSERT_EQ(result.content[1].mimeType, "image/png");
+    ASSERT_TRUE(result.content[1].data.rfind("iVBORw0K", 0) == 0);
 }
 
 #include "didi/common/base64.hpp"
@@ -217,7 +291,9 @@ static void test_symbol_extraction() {
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.DefaultRegistration", test_tool_registry_default_tools);
+        registerTest("Tools.HonestCapabilities", test_tool_capabilities_are_honest);
         registerTest("Tools.CaptureViewportWithIpc", test_tool_capture_viewport_with_ipc);
+        registerTest("Tools.CaptureViewportOfflineAttribution", test_tool_capture_viewport_offline_is_attributed);
         registerTest("Tools.Base64Padding", test_base64_rfc4648_padding);
         registerTest("Tools.IpcErrorPropagation", test_ipc_error_propagation);
         registerTest("Tools.ClassReflection", test_class_reflection);

@@ -8,10 +8,10 @@ This guide covers deployment, security controls, system configuration, monitorin
 
 | Component | Minimum Requirement | Recommended |
 | :--- | :--- | :--- |
-| **Operating System** | Windows 10 (64-bit), Ubuntu 20.04+, macOS 12+ | Windows 11 (64-bit), Ubuntu 22.04+, macOS 14+ |
+| **Operating System** | Windows 10 (64-bit), Ubuntu 20.04+, macOS 12+ | Windows 11 (64-bit) for the currently verified live matrix |
 | **CPU Architecture** | x86_64 / ARM64 (Apple Silicon) | Multi-core x86_64 / Apple Silicon M-series |
 | **RAM** | 4 GB | 16 GB+ (for large Godot 3D scenes) |
-| **Engine Target** | Godot 4.1+ (Standard / .NET) | Godot 4.3+ or 4.7+ |
+| **Engine Target** | Godot 4.5+ (Standard / .NET) | Godot 4.5+ or 4.7+ |
 | **Dependencies** | None (Static/Self-Contained C++ Binary) | None |
 
 ---
@@ -21,11 +21,12 @@ This guide covers deployment, security controls, system configuration, monitorin
 ### 1. Named Pipe Security Descriptor (Windows)
 Didi provisions its IPC pipe (`\\.\pipe\godot_didi_ipc`) with an explicit SDDL Discretionary Access Control List (DACL):
 ```
-D:(A;;GRGW;;;WD)(A;;GA;;;BA)(A;;GA;;;OW)
+D:(A;;GA;;;BA)(A;;GA;;;OW)
 ```
-- `WD` (World): Generic Read / Generic Write for local processes.
 - `BA` (Built-in Administrators): Generic All (Full Control).
 - `OW` (Owner / Creator): Generic All (Full Control).
+
+World access is not granted. POSIX sockets are created with mode `0600`.
 
 ### 2. Standalone Export Game Isolation
 To prevent security exposure in production game builds:
@@ -34,7 +35,7 @@ To prevent security exposure in production game builds:
 
 ### 3. Buffer & Payload Overflow Protection
 - **Content-Length & Pipe Frame Cap**: Enforced at `128 MB` maximum payload size to prevent memory exhaustion attacks.
-- **Viewport Dimension Clamping**: Clamp width and height strictly between `16` and `4096` pixels.
+- **Viewport Bounds**: Live captures reject non-positive dimensions and dimensions above `8192`; offline preview dimensions are clamped to `16`–`1024`.
 
 ---
 
@@ -49,6 +50,8 @@ Administrators can configure Didi globally or per-service using standard environ
 | `DIDI_PROJECT_ROOT` | Directory path | Current directory | Root folder of the target Godot project (e.g. `D:/my_game`) |
 | `DIDI_LOG_LEVEL` | `DEBUG`, `INFO`, `WARN`, `ERROR`, `NONE` | `INFO` | Stderr logging verbosity |
 | `DIDI_PIPE_NAME` | Pipe / Socket Path | Default | Override Named Pipe / UNIX domain socket path |
+
+`DIDI_PIPE_NAME` must be present in both the standalone server and Godot editor environments. Use a distinct value per simultaneously open project; the default name is otherwise shared.
 
 ---
 
@@ -84,8 +87,8 @@ jobs:
 - **Stdio Isolation**: Didi guarantees that `stdout` is strictly reserved for valid JSON-RPC 2.0 frames.
 - **Diagnostics Output**: All operational logs, connection notices, and error traces are routed to `stderr`.
 - **Log Levels**:
-  - `DEBUG`: Full trace of IPC frames, method calls, and memory allocations.
-  - `INFO`: Normal startup, shutdown, and tool execution lifecycle events.
+  - `DEBUG`: Detailed registered-tool, IPC request, and method-dispatch traces.
+  - `INFO`: Startup, shutdown, connection, and major operation events.
   - `WARN`: Recoverable parser errors, unexpected tool arguments, or degraded fallbacks.
   - `ERROR`: Subprocess failures, pipe broken errors, and script compiler errors.
 
@@ -99,3 +102,4 @@ jobs:
 | `Failed to spawn Godot process` | `godot` is not in `PATH` and not found in default locations. | Set the `GODOT_BIN` environment variable to the exact path of your Godot console executable (e.g. `C:\Godot\Godot_v4.7.2-stable_win64_console.exe`). |
 | `Content-Length header parse error` | Malformed framing sent by a non-standard MCP client. | Check MCP client configuration to ensure clean UTF-8 framing without trailing garbage bytes. |
 | `Timeout waiting for response length` | Godot Editor is suspended in a script breakpoint. | Resume execution in Godot Debugger or restart the editor session. |
+| Tool is listed but returns `unimplemented` | The name is reserved in the protocol surface but has no trustworthy execution path. | Check `_meta.didi.implemented` and use only implemented tools from [Current Capability Matrix](CAPABILITIES.md). |

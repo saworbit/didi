@@ -1,222 +1,226 @@
-# Didi MCP Tool Reference Manual 🛠️
+# Didi MCP Tool Reference
 
-This document provides a comprehensive specification of the **36 MCP tools** provided by Didi across **9 distinct operational domains**.
+Didi exposes 40 canonical tool names across nine domains plus 10 legacy names. This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
----
+The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
-## 📋 Table of Contents
+## Status legend
 
-1. [Domain 1: Scene Tree & Node Manipulation (7 tools)](#1-domain-1-scene-tree--node-manipulation)
-2. [Domain 2: Signals & Event Wiring (4 tools)](#2-domain-2-signals--event-wiring)
-3. [Domain 3: Scripting, Class Reflection & Diagnostics (4 tools)](#3-domain-3-scripting-class-reflection--diagnostics)
-4. [Domain 4: Visual Verification & Viewport Rendering (4 tools)](#4-domain-4-visual-verification--viewport-rendering)
-5. [Domain 5: Physics, Animation & Navigation (6 tools)](#5-domain-5-physics-animation--navigation)
-6. [Domain 6: Tilemaps, GridMaps & Procedural Generation (3 tools)](#6-domain-6-tilemaps-gridmaps--procedural-generation)
-7. [Domain 7: Resources & Project File Management (4 tools)](#7-domain-7-resources--project-file-management)
-8. [Domain 8: Execution, Input Injection & Debugging (4 tools)](#8-domain-8-execution-input-injection--debugging)
-9. [Domain 9: Editor Lifecycle & Undo/Redo (4 tools)](#9-domain-9-editor-lifecycle--undoredo)
+| Status | Meaning |
+| :--- | :--- |
+| Live + offline | Selects real editor execution when connected and an attributed file/synthetic fallback otherwise. |
+| Live | Requires Godot 4.5+ with the Didi addon enabled. |
+| Offline | Operates on project files or launches a separate Godot process. |
+| Unimplemented | Schema reserved for compatibility; calls are rejected. |
 
----
+## 1. Scene Tree and nodes
 
-## 1. Domain 1: Scene Tree & Node Manipulation
+### `scene_get_hierarchy` — Live + offline
 
-### `scene_get_hierarchy` *(Alias: `get_scene_hierarchy`)*
-Returns recursive node tree with node types, script attachments, global/local transforms, and properties.
-- **Parameters**:
-  - `root_path` (`string`, default `"/root"`): Target node or `.tscn` file path.
-  - `max_depth` (`integer`, default `10`): Maximum recursion depth.
-  - `include_properties` (`boolean`, default `true`): Include node property values.
-  - `include_signals` (`boolean`, default `true`): Include declared signals.
-  - `include_scripts` (`boolean`, default `true`): Include attached script paths.
+Returns a recursive hierarchy. Live results contain node name, class, logical path, and children; unsupported bulk fields are named in `omitted_fields`. Offline mode parses a `.tscn` file and returns `source: "parsed_tscn_file"`.
 
-### `scene_instantiate_node`
-Spawns built-in nodes or instantiates sub-scenes (`.tscn`) at a target NodePath.
-- **Parameters**:
-  - `node_type` (`string`, default `"Node3D"`): Built-in engine class name.
-  - `scene_path` (`string`): Optional `.tscn` resource path.
-  - `parent_path` (`string`, default `"/root"`): Parent node path.
-  - `name` (`string`): Node name.
-  - `properties` (`object`): Initial property values.
+- `root_path` (`string`, default `"/root"`): Live logical node path or offline `.tscn` path.
+- `max_depth` (`integer`, default `10`, live maximum `64`).
+- `include_properties` (`boolean`, default `true`): Honored by the offline parser; live bulk properties are omitted.
+- `include_signals` and `include_scripts` (`boolean`, default `true`): Currently reported as omitted in live mode.
+- Legacy alias: `get_scene_hierarchy`.
 
-### `scene_remove_node`
-Deletes a node and safely frees references via `queue_free()` with UndoRedo support.
-- **Parameters**: `target_node` (`string`, required).
+### `scene_instantiate_node` — Live
 
-### `scene_reparent_node`
-Moves a node to a new parent while preserving global transforms.
-- **Parameters**: `target_node` (`string`, required), `new_parent_path` (`string`, required), `keep_global_transform` (`boolean`, default `true`).
+Creates a built-in ClassDB node under the active edited scene and registers add/remove operations with UndoRedo.
 
-### `scene_set_property`
-Dynamically mutates any exported or built-in node property with type-coerced Variant values.
-- **Parameters**: `target_node` (`string`, required), `property_name` (`string`, required), `value` (required).
+- `node_type` (`string`, default `"Node"`).
+- `parent_path` (`string`, default `"/root"`).
+- `name` (`string`, optional).
+- `properties` (`object`, optional): Initial scalar properties subject to the Phase 1 type contract.
+- `scene_path` is present in the schema, but PackedScene instantiation currently returns `501`.
 
-### `scene_get_property`
-Queries precise property values, metadata, and export hints.
-- **Parameters**: `target_node` (`string`, required), `property_name` (`string`, required).
+### `scene_remove_node` — Live
 
-### `scene_duplicate_node`
-Duplicates an existing node branch with unique names.
-- **Parameters**: `target_node` (`string`, required).
+Detaches a node through UndoRedo while retaining its lifetime for undo/redo. Undo restores its original sibling index.
 
-### `mutate_scene_tree` *(Legacy Compatibility)*
-Adds, removes, reparents, duplicates, or edits nodes via UndoRedo transactions.
+- `target_node` (`string`, required).
 
----
+### `scene_reparent_node` — Live
 
-## 2. Domain 2: Signals & Event Wiring
+Calls Godot's `Node.reparent` through UndoRedo.
 
-### `signal_list_connections`
-Lists all signals declared on a node, including incoming and outgoing connections.
-- **Parameters**: `target_node` (`string`, required).
+- `target_node` (`string`, required).
+- `new_parent_path` (`string`, required).
+- `keep_global_transform` (`boolean`, default `true`).
 
-### `signal_connect`
-Binds a signal from an emitter node to a target method or callable.
-- **Parameters**: `emitter_node` (`string`, required), `signal_name` (`string`, required), `target_node` (`string`, required), `target_method` (`string`, required).
+### `scene_set_property` — Live
 
-### `signal_disconnect`
-Unbinds existing signal connections.
-- **Parameters**: `emitter_node` (`string`, required), `signal_name` (`string`, required), `target_node` (`string`, required), `target_method` (`string`, required).
+Sets an existing scalar property through UndoRedo. Unknown properties and incompatible types are rejected.
 
-### `signal_emit`
-Emits a custom signal manually with arguments for event testing.
-- **Parameters**: `target_node` (`string`, required), `signal_name` (`string`, required), `arguments` (`array`).
+- `target_node` (`string`, required).
+- `property_name` (`string`, required).
+- `value` (required): JSON null, boolean, signed integer, real, or string compatible with the existing Godot property type.
 
----
+### `scene_get_property` — Live
 
-## 3. Domain 3: Scripting, Class Reflection & Diagnostics
+Returns one existing scalar property. Metadata and export hints are not returned.
 
-### `script_check_syntax` *(Alias: `analyze_script_diagnostics`)*
-Runs Godot’s internal GDScript compiler to return compile errors, warnings, and byte-code validity.
-- **Parameters**: `file_path` (`string`), `source_text` (`string`).
+- `target_node` (`string`, required).
+- `property_name` (`string`, required).
 
-### `script_reflect_class`
-Looks up engine documentation, methods, properties, and constants for any engine class (e.g., `CharacterBody3D`, `NavigationAgent3D`, `TileMapLayer`, `GridMap`).
-- **Parameters**: `class_name` (`string`, required).
+### `scene_duplicate_node` — Live
 
-### `script_get_symbols`
-Extracts AST symbols, functions, signals, enums, and typed variables from any script file.
-- **Parameters**: `file_path` (`string`), `source_text` (`string`).
+Duplicates a node branch through UndoRedo and names the copy from `<source-name>Copy`, subject to Godot's uniqueness rules.
 
-### `script_patch_method` *(Alias: `patch_script_symbols`)*
-Safely rewrites a single method body in a `.gd` file without touching other functions.
-- **Parameters**: `file_path` (`string`, required), `method_name` (`string`, required), `new_definition` (`string`, required).
+- `target_node` (`string`, required).
 
----
+### `mutate_scene_tree` — Unimplemented legacy name
 
-## 4. Domain 4: Visual Verification & Viewport Rendering
+Use the focused `scene_*` tools instead.
 
-### `viewport_capture_frame` *(Alias: `capture_viewport`)*
-Captures Base64 PNG snapshots from active 2D/3D viewports or designated camera nodes.
-- **Parameters**: `camera_identifier` (`string`), `resolution` (`object`), `render_debug_flags` (`array`).
+## 2. Signals and events
 
-### `viewport_set_camera_transform`
-Positions and rotates the editor or test camera to inspect specific coordinates.
-- **Parameters**: `position` (`object`, required), `rotation` (`object`), `fov` (`number`, default `75.0`).
+The following schemas are reserved but unimplemented:
 
-### `viewport_create_test_lab` *(Alias: `create_visual_test_lab`)*
-Generates an isolated test stage with neutral lighting, grid plane, and multi-angle cameras.
-- **Parameters**: `target_resource_path` (`string`, required), `environment` (`string`), `camera_rig` (`array`).
+- `signal_list_connections`
+- `signal_connect`
+- `signal_disconnect`
+- `signal_emit`
 
-### `viewport_toggle_debug_draw`
-Toggles collision wireframes, navigation meshes, normal vectors, and lighting modes.
-- **Parameters**: `collision_shapes` (`boolean`), `navigation_mesh` (`boolean`), `wireframe` (`boolean`).
+Calls return an MCP tool error; they do not inspect or mutate Godot signals.
 
----
+## 3. Scripts and diagnostics
 
-## 5. Domain 5: Physics, Animation & Navigation
+### `script_check_syntax` — Offline
 
-### `physics_raycast_query`
-Fires a 2D/3D physics raycast to check line-of-sight, ray hits, and collision masks.
-- **Parameters**: `from` (`object`, required), `to` (`object`, required), `collision_mask` (`integer`, default `1`).
+Runs Didi's lightweight GDScript diagnostics. When `file_path` is supplied, it also attempts `godot --headless --check-only`; `source_text`-only checks do not invoke Godot.
 
-### `physics_simulate_step`
-Advances the physics engine by $N$ ticks to test gravity, velocity, or collision response deterministically.
-- **Parameters**: `steps` (`integer`, default `1`), `delta` (`number`, default `0.0166667`).
+- `file_path` (`string`, optional).
+- `source_text` (`string`, optional).
+- At least one is required.
+- Legacy alias: `analyze_script_diagnostics`.
 
-### `nav_bake_mesh`
-Triggers runtime or editor navigation mesh baking (`NavigationMesh` / `NavigationPolygon`).
-- **Parameters**: `nav_node_path` (`string`).
+### `script_reflect_class` — Offline
 
-### `nav_query_path`
-Tests pathfinding between two points to verify walkable navmeshes.
-- **Parameters**: `start_point` (`object`, required), `end_point` (`object`, required).
+Looks up a class in Didi's small built-in reference map. This is not live ClassDB reflection and coverage is intentionally limited.
 
-### `anim_list_tracks`
-Lists animations, keyframes, and blend trees in an `AnimationPlayer` or `AnimationTree`.
-- **Parameters**: `animation_player_path` (`string`, required).
+- `class_name` (`string`, required).
 
-### `anim_play_track`
-Plays a specific animation keyframe sequence to verify transitions.
-- **Parameters**: `animation_player_path` (`string`, required), `animation_name` (`string`, required), `custom_speed` (`number`, default `1.0`).
+### `script_get_symbols` — Offline
 
----
+Extracts functions, variables, signals, and enums from GDScript text using Didi's parser.
 
-## 6. Domain 6: Tilemaps, GridMaps & Procedural Generation
+- `file_path` (`string`, optional).
+- `source_text` (`string`, optional).
 
-### `tilemap_set_cells`
-Batch updates 2D `TileMapLayer` cells with source IDs, atlas coordinates, and alternate tiles.
-- **Parameters**: `tilemap_path` (`string`, required), `cells` (`array`, required).
+### `script_patch_method` — Offline
 
-### `tilemap_get_used_rect`
-Returns used cell boundaries and layer structures.
-- **Parameters**: `tilemap_path` (`string`, required).
+Rewrites a matching GDScript symbol in a project-root-confined file, then runs the available diagnostics.
 
-### `gridmap_set_cells`
-Places 3D mesh library tiles inside a `GridMap` with coordinate orientations.
-- **Parameters**: `gridmap_path` (`string`, required), `cells` (`array`, required).
+- `file_path` (`string`, required).
+- `method_name` (`string`, required).
+- `new_definition` (`string`, required).
+- `symbol_type` (`string`, default `"function"`).
+- Legacy alias: `patch_script_symbols`.
 
----
+## 4. Viewport and visual helpers
 
-## 7. Domain 7: Resources & Project File Management
+### `viewport_capture_frame` — Live + offline
 
-### `resource_create`
-Generates new resource instances (`StandardMaterial3D`, `AudioStreamRandomizer`, `Curve3D`, `Shape3D`).
-- **Parameters**: `resource_type` (`string`), `save_path` (`string`, required), `properties` (`object`).
+Live mode copies RGBA8 pixels from the active editor 3D viewport, or from the 2D editor viewport when `camera_identifier` is `editor_2d` or `active_editor_view_2d`, and encodes them as PNG. Offline mode returns an attributed synthetic grid preview.
 
-### `resource_inspect`
-Reads inner resource properties and dependent UIDs.
-- **Parameters**: `resource_path` (`string`, required).
+- `camera_identifier` (`string`, default `"active_editor_view"`).
+- `resolution`, `render_debug_flags`, and `node_isolation_path` are reserved schema fields. Live capture currently uses the editor viewport's actual size and does not apply those options. Offline preview honors `resolution` with each dimension clamped to 16–1024.
+- Legacy alias: `capture_viewport`.
 
-### `project_list_resources` *(Alias: `query_project_resources`)*
-Scans `res://` for assets filtered by type (e.g., `.glb`, `.png`, `.tres`).
-- **Parameters**: `search_path` (`string`), `type_filter` (`string`), `fuzzy_query` (`string`), `include_uid` (`boolean`).
+### `viewport_create_test_lab` — Offline
 
-### `project_get_uid_map`
-Resolves `uid://` references to local filesystem paths.
+Writes `res://addons/didi/test_lab_sandbox.tscn` with a basic light, environment node, ground box, and three cameras. The target resource is recorded but not instanced automatically.
 
-### `instantiate_asset` *(Legacy Compatibility)*
-Creates an instance of a resource or scene and parents it with collision assignment.
+- `target_resource_path` (`string`, required).
+- `environment` (`string`, default `"studio_neutral"`).
+- `orthographic` (`boolean`, default `false`).
+- `camera_rig` (`array`, default `["front", "top", "isometric"]`; metadata matching the generated cameras).
+- Legacy alias: `create_visual_test_lab`.
 
----
+### Reserved visual schemas — Unimplemented
 
-## 8. Domain 8: Execution, Input Injection & Debugging
+- `viewport_set_camera_transform`
+- `viewport_toggle_debug_draw`
 
-### `runtime_launch` *(Alias: `execute_test_session`)*
-Starts a specific scene or test runner with custom CLI flags (`--debug`, `--headless`).
-- **Parameters**: `scene_path` (`string`), `timeout_seconds` (`integer`), `headless` (`boolean`), `extra_args` (`array`).
+## 5. Physics, animation, and navigation
 
-### `runtime_inject_input` *(Alias: `inject_input_event`)*
-Synthesizes `InputEventKey`, `InputEventMouseButton`, or `InputEventAction` to simulate player movement and gameplay.
-- **Parameters**: `event_type` (`string`, required), `action_name` (`string`), `key_code` (`string`), `pressed` (`boolean`), `strength` (`number`).
+All six schemas are unimplemented:
 
-### `runtime_get_call_stack`
-Fetches current debugger call stack and variable scopes on engine break/crash.
+- `physics_raycast_query`
+- `physics_simulate_step`
+- `nav_bake_mesh`
+- `nav_query_path`
+- `anim_list_tracks`
+- `anim_play_track`
 
-### `runtime_read_profiler`
-Pulls frame times, draw calls, draw passes, and physics tick metrics.
+## 6. TileMap and GridMap
 
----
+All three schemas are unimplemented:
 
-## 9. Domain 9: Editor Lifecycle & Undo/Redo
+- `tilemap_set_cells`
+- `tilemap_get_used_rect`
+- `gridmap_set_cells`
 
-### `editor_undo`
-Reverts the last operation through Godot's `EditorUndoRedoManager`.
+## 7. Resources and project files
 
-### `editor_redo`
-Replays the previously reverted editor transaction.
+### `resource_create` — Offline
 
-### `editor_save_scene`
-Saves the active scene to disk.
+Writes a textual `.tres` file under the project root. Supported JSON encodings include strings, booleans, numbers, arrays, and `{x,y}`/`{x,y,z}` objects emitted as Vector2/Vector3. Didi does not instantiate or validate the requested Resource class in Godot.
 
-### `editor_reload_project`
-Reloads all modified scripts and rescans project resources.
+- `resource_type` (`string`, default `"StandardMaterial3D"`).
+- `save_path` (`string`, required).
+- `properties` (`object`, optional).
+
+### `resource_inspect` — Offline
+
+Returns indexed file metadata, detected type, UID, and parsed dependencies for a matching project resource. It does not expose arbitrary inner Godot Resource properties.
+
+- `resource_path` (`string`, required).
+
+### `project_list_resources` — Offline
+
+Scans the project working directory for resources.
+
+- `search_path` (`string`, default `"res://"`).
+- `type_filter` (`string`, optional).
+- `fuzzy_query` (`string`, optional).
+- `include_uid` (`boolean`, default `true`).
+- Legacy alias: `query_project_resources`.
+
+### `project_get_uid_map` — Offline
+
+Returns UID-to-path mappings discovered in indexed project resources.
+
+### `instantiate_asset` — Unimplemented legacy name
+
+Asset or PackedScene instantiation is not implemented.
+
+## 8. Runtime and debugging
+
+### `runtime_launch` — Offline
+
+Launches a separate Godot process, optionally headless, captures stdout/stderr, classifies errors, and enforces a timeout.
+
+- `scene_path` (`string`, optional).
+- `timeout_seconds` (`integer`, default `10`).
+- `headless` (`boolean`, default `true`).
+- `break_on_error` (`boolean`, default `true`).
+- `extra_args` (`array`, optional; unsafe shell metacharacters are rejected).
+- Legacy alias: `execute_test_session`.
+
+### Reserved runtime schemas — Unimplemented
+
+- `runtime_inject_input` (legacy alias: `inject_input_event`)
+- `runtime_get_call_stack`
+- `runtime_read_profiler`
+
+## 9. Editor lifecycle
+
+All four tools are live-only:
+
+- `editor_undo`: Undoes the active edited scene's most recent UndoRedo action.
+- `editor_redo`: Redoes the active edited scene's next action.
+- `editor_save_scene`: Calls `EditorInterface.save_scene` for the active scene.
+- `editor_reload_project`: Requests an `EditorFileSystem.scan_sources` rescan; it is not a full editor restart.

@@ -32,6 +32,8 @@ Thank you for your interest in contributing to **Didi** (`godot-mcp-native`)!
    ```
    *Make sure all tests pass before opening a Pull Request.*
 
+   On Windows, changes to the live bridge must also pass `tests/run_godot_integration.ps1` against a supported Godot 4.5+ editor build.
+
 ---
 
 ## 📝 Coding Standards
@@ -40,6 +42,8 @@ Thank you for your interest in contributing to **Didi** (`godot-mcp-native`)!
 - **Formatting**: 4 spaces indentation, PascalCase for classes, camelCase for methods/variables, `m_` prefix for private members.
 - **Logging**: Never write debug text to `stdout` (which is reserved exclusively for MCP JSON-RPC messages). Always use `DIDI_LOG_INFO`, `DIDI_LOG_DEBUG`, or `DIDI_LOG_ERROR` (routed to `stderr`).
 - **New Tools**: Must include schema definition in `ToolRegistry`, unit tests in `tests/`, and documentation in `docs/TOOL_REFERENCE.md`.
+- **Capability Honesty**: Classify every new name as `live`, `offline_fallback`, both, or `unimplemented`; never merge a success stub.
+- **Live Tools**: Add a real Godot integration case and keep all Godot object access on the registered main-loop callback.
 
 ---
 

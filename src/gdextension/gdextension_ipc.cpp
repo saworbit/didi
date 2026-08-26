@@ -28,12 +28,13 @@ bool GDExtensionIpc::start() {
         DIDI_LOG_DEBUG("GDEXT_IPC", "Handling request: ", method);
 
         // Forward to EditorHook to execute safely on Godot's Main Thread
-        auto fut = EditorHook::instance().postCommand(method, params);
+        auto ticket = EditorHook::instance().postCommand(method, params);
 
-        auto status = fut.wait_for(std::chrono::seconds(15));
+        auto status = ticket.response.wait_for(std::chrono::seconds(15));
         if (status == std::future_status::ready) {
-            return fut.get();
+            return ticket.response.get();
         } else {
+            ticket.cancelled->store(true);
             DIDI_LOG_ERROR("GDEXT_IPC", "Command timed out on main thread: ", method);
             return {{"error", {{"code", 504}, {"message", "Main thread command execution timed out"}}}};
         }

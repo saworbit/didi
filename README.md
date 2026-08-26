@@ -2,15 +2,15 @@
 
 [![Didi Fast & Efficient CI](https://github.com/saworbit/didi/actions/workflows/ci.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Godot Engine](https://img.shields.io/badge/Godot-4.x-478cbf?logo=godotengine&logoColor=white)](https://godotengine.org/)
+[![Godot Engine](https://img.shields.io/badge/Godot-4.5%2B-478cbf?logo=godotengine&logoColor=white)](https://godotengine.org/)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=c%2B%2B&logoColor=white)](https://isocpp.org/)
 [![MCP Standard](https://img.shields.io/badge/MCP-2024--11--05-8A2BE2)](https://modelcontextprotocol.io/)
 
 > *"Nothing happens. Nobody comes, nobody goes. It's awful!"* — *Waiting for Godot*
 > 
-> *Except with Didi, everything happens natively, instantly, and with zero bridges.*
+> *Didi keeps the bridge native, local, and explicit about what it can actually execute.*
 
-**Didi** (`godot-mcp-native`) is a high-performance, native [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for **Godot 4.x**, engineered in **C++20** as a unified binary (`didi.exe`) and in-engine GDExtension module (`didi_extension.dll`).
+**Didi** (`godot-mcp-native`) is a high-performance, native [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for **Godot 4.5+**, engineered in **C++20** as a unified binary (`didi.exe`) and in-engine GDExtension module (`didi_extension.dll`).
 
 ---
 
@@ -20,8 +20,9 @@
 | :--- | :--- | :--- |
 | 🚀 [**Quickstart Guide**](docs/QUICKSTART.md) | **Developers / Humans** | 5-minute step-by-step setup for Godot, Cursor, Claude, and VS Code. |
 | 🤖 [**LLM Agent Instructions**](docs/LLM_INSTRUCTIONS.md) | **AI Assistants / LLMs** | Dedicated system prompt & decision tree for Claude, Cursor, Windsurf, Antigravity. |
-| 🗺️ [**Roadmap & 36-Tool Suite**](docs/ROADMAP.md) | **Developers / Contributors** | Exhaustive 9-domain roadmap and technical specification. |
-| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Complete specifications for all 36 domain tools across 9 functional domains. |
+| ✅ [**Current Capability Matrix**](docs/CAPABILITIES.md) | **Everyone** | Authoritative live, offline, unavailable, and unimplemented behavior. |
+| 🗺️ [**Roadmap & 40-Tool Surface**](docs/ROADMAP.md) | **Developers / Contributors** | Nine-domain roadmap and technical build order. |
+| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 40 canonical tools plus 10 legacy names. |
 | 🏛️ [**Architecture & System Topology**](docs/ARCHITECTURE.md) | **Engineers / Architects** | Deep-dive into C++20 design, dual execution topology, threading safety, and named-pipe IPC. |
 | 📦 [**Dynamic Resources & Prompts**](docs/RESOURCES_AND_PROMPTS.md) | **Developers / LLMs** | Technical specs for `godot://...` resources and prompt workflows. |
 | 🛡️ [**Administrator & Operations Guide**](docs/ADMIN_GUIDE.md) | **DevOps / Admins** | Security DACL hardening, CI/CD headless execution, observability, and troubleshooting. |
@@ -36,10 +37,10 @@
 | Feature | Legacy Script/CLI Wrappers | Multi-Hop Network Bridges | **Didi (godot-mcp-native)** |
 | :--- | :--- | :--- | :--- |
 | **Execution Topology** | Offline CLI subprocesses | Node.js + WebSocket + C# Plugin | **Direct C++ GDExtension + Standalone Binary** |
-| **In-Memory Scene Access** | ❌ Blind to live editor state | ⚠️ High-latency serialization | ✅ **Direct pointers to SceneTree & EditorInterface** |
-| **Undo / Redo Safety** | ❌ None (file overwrites) | ⚠️ Partial / Unreliable | ✅ **Native `EditorUndoRedoManager` transactions** |
-| **Visual Inspection** | ❌ None | ⚠️ Multi-second export cycle | ✅ **Direct SubViewport PNG memory blit (< 20ms)** |
-| **Round-Trip Latency** | > 500 ms | 50 – 150 ms | **< 1 ms (Local Named Pipes)** |
+| **In-Memory Scene Access** | ❌ Blind to live editor state | ⚠️ Depends on bridge | ✅ **Direct Godot objects for supported Phase 1 tools** |
+| **Undo / Redo Safety** | ❌ None (file overwrites) | ⚠️ Varies | ✅ **Native `EditorUndoRedoManager` transactions** |
+| **Visual Inspection** | ❌ None | ⚠️ Often requires export | ✅ **Actual editor viewport pixels encoded as PNG** |
+| **Transport** | Process startup per call | Network or multi-process bridge | **Local named pipe / Unix socket** |
 | **External Dependencies**| Node.js / Python runtime | Node.js runtime + WebSockets | **Zero external runtime dependencies** |
 
 ---
@@ -56,7 +57,7 @@
 ┌─────────────────────────────────────────────────────────────┐
 │             Didi (C++ MCP Core Engine - didi.exe)           │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2024-11-05 standard)       │
-│  - Tool Registry (36 Tools across 9 Domains)                │
+│  - Registry (40 canonical tools + 10 legacy names)          │
 │  - Dynamic Resources (godot://project/tree, editor/state)   │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
 │  - Offline Fallback Engine (GDScript AST, .tscn parser)     │
@@ -64,32 +65,34 @@
                                │  Fast Local Named Pipe (\\.\pipe\godot_didi_ipc)
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│             Godot 4.x Process (didi_extension.dll)          │
+│            Godot 4.5+ Process (didi_extension.dll)          │
 │  ┌───────────────────────┬───────────────────────────────┐  │
-│  │ EditorInterface Hook  │ RenderingServer Off-screen    │  │
-│  │ (Main-thread Dispatch)│ (PNG Viewport & Test Lab)     │  │
+│  │ EditorInterface Hook  │ Editor ViewportTexture        │  │
+│  │ (Main-thread Dispatch)│ (RGBA8 → PNG capture)         │  │
 │  ├───────────────────────┼───────────────────────────────┤  │
-│  │ Live SceneTree & Undo │ Debugger & Log Interceptor    │  │
-│  │ (EditorUndoRedoManager│ (Diagnostics & Input Inject)  │  │
+│  │ Live SceneTree & Undo │ Extension IPC lifecycle       │  │
+│  │ (EditorUndoRedoManager│ (timeouts and cancellation)   │  │
 │  └───────────────────────┴───────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🛠️ Exhaustive 9-Domain Tool Suite (36 Tools)
+## 🛠️ Nine-Domain Protocol Surface (40 Canonical Tools)
 
-| Domain | Key Tools | Capabilities |
+The 40 canonical names are the stable protocol surface, with 10 additional legacy registrations. Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, and `liveAvailable` from `tools/list`. Phase 1 live support covers scene hierarchy, scalar property access, built-in node mutations with UndoRedo, editor lifecycle, and viewport capture; unsupported registered endpoints return errors and advertise `unimplemented`.
+
+| Domain | Key Tools | Current execution |
 | :--- | :--- | :--- |
-| **1. Scene Tree & Nodes (7)** | `scene_get_hierarchy`, `scene_instantiate_node`, `scene_remove_node`, `scene_reparent_node`, `scene_set_property`, `scene_get_property`, `scene_duplicate_node` | Recursive tree inspection, live instantiations, property mutations with UndoRedo. |
-| **2. Signals & Events (4)** | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` | Dynamic event binding, listener inspection, and synthetic signal dispatch. |
-| **3. Scripting & Reflection (4)** | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method` | Bytecode validation, engine class documentation reflection, AST symbol extraction, surgical method patching. |
-| **4. Vision & Render (4)** | `viewport_capture_frame`, `viewport_set_camera_transform`, `viewport_create_test_lab`, `viewport_toggle_debug_draw` | Multi-angle Base64 PNG viewport captures, isolated sandbox test labs, debug visualizers. |
-| **5. Physics & Navigation (6)** | `physics_raycast_query`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track` | Raycast collision queries, deterministic physics stepping, navmesh baking, animation playback. |
-| **6. Tilemaps & GridMaps (3)** | `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells` | 2D `TileMapLayer` atlas editing, bound calculation, 3D `GridMap` mesh placements. |
-| **7. Resources & Files (4)** | `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map` | `.tres` material/curve generation, UID resolution, recursive resource indexing. |
-| **8. Runtime & Debug (4)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Headless test harness, synthetic input simulation, callstack extraction, FPS/draw call telemetry. |
-| **9. Editor Lifecycle (4)** | `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Complete UndoRedo transaction management, disk saving, script reload. |
+| **1. Scene Tree & Nodes (7)** | `scene_get_hierarchy`, `scene_instantiate_node`, `scene_remove_node`, `scene_reparent_node`, `scene_set_property`, `scene_get_property`, `scene_duplicate_node` | Implemented live; hierarchy also has an offline `.tscn` fallback. Built-in nodes and scalar properties only. |
+| **2. Signals & Events (4)** | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` | Unimplemented. |
+| **3. Scripting & Reflection (4)** | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method` | Implemented offline/file-based; reflection uses a limited built-in map. |
+| **4. Vision & Render (4)** | `viewport_capture_frame`, `viewport_set_camera_transform`, `viewport_create_test_lab`, `viewport_toggle_debug_draw` | Capture is live + synthetic fallback; test-lab generation is offline; camera/debug controls are unimplemented. |
+| **5. Physics & Navigation (6)** | `physics_raycast_query`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track` | Unimplemented. |
+| **6. Tilemaps & GridMaps (3)** | `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells` | Unimplemented. |
+| **7. Resources & Files (4)** | `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map` | Implemented offline/file-based. |
+| **8. Runtime & Debug (4)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Process launch is implemented offline; input, call stack, and profiler tools are unimplemented. |
+| **9. Editor Lifecycle (4)** | `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Implemented live. Reload requests a resource-filesystem rescan. |
 
 ---
 
@@ -108,7 +111,8 @@
    {
      "mcpServers": {
        "didi": {
-         "command": "D:/didi/build/Release/didi.exe"
+          "command": "D:/didi/build/Release/didi.exe",
+          "args": ["--project", "D:/my_game"]
        }
      }
    }
@@ -118,7 +122,7 @@
 
 ## 🤖 Instructions for AI Assistants (LLMs)
 
-Copy the prompt contents from [**`docs/LLM_INSTRUCTIONS.md`**](docs/LLM_INSTRUCTIONS.md) into your `.cursorrules`, custom agent instructions, or system prompt to provide your AI model with complete knowledge of Godot 4 development workflows, tool selection heuristics, and runtime verification commands.
+Copy [**`docs/LLM_INSTRUCTIONS.md`**](docs/LLM_INSTRUCTIONS.md) into your agent instructions and keep [**`docs/CAPABILITIES.md`**](docs/CAPABILITIES.md) available as the current execution contract.
 
 ---
 

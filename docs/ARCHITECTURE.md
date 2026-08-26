@@ -1,6 +1,6 @@
 # Didi Architecture & Technical Design Document
 
-**Didi** (`godot-mcp-native`) is a native Model Context Protocol (MCP) server engineered in modern C++20 for the Godot 4.x game engine.
+**Didi** (`godot-mcp-native`) is a native Model Context Protocol (MCP) server engineered in modern C++20 for Godot 4.5+.
 
 ---
 
@@ -11,7 +11,7 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
 2. **Multi-Hop Bridges (e.g., TS Server $\rightarrow$ WebSocket $\rightarrow$ C#/GDScript Plugin)**: Suffer from network port conflicts, process lifecycle fragmentation, serialization bottlenecks, and 50–200ms round-trip latency.
 
 ### The C++ & GDExtension Solution
-- **Zero-Bridge In-Process Access**: Didi compiles against Godot's native GDExtension C interface, directly accessing `EditorInterface`, `SceneTree`, `RenderingServer`, and `EditorUndoRedoManager`.
+- **Native In-Process Access**: The extension uses Godot's GDExtension C interface to call `EditorInterface`, edited-scene nodes, `EditorUndoRedoManager`, and editor viewport textures for the supported live surface.
 - **Dual Execution Topology**: The codebase builds both a standalone MCP stdio executable (`didi.exe`) and an in-engine shared library (`didi_extension.dll`), connected via high-throughput OS Named Pipes.
 - **Deterministic Lifetime & Zero External Runtime**: Single compiled binary with zero Node.js, npm, or Python runtime dependencies.
 
@@ -29,21 +29,21 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
 ┌─────────────────────────────────────────────────────────────┐
 │             Didi (C++ MCP Core Engine - didi.exe)           │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2024-11-05 standard)       │
-│  - Tool Registry (10 Tools across 5 Domains)                │
+│  - Registry (40 canonical tools + 10 legacy names)          │
 │  - Dynamic Resources (godot://project/tree, editor/state)   │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
-│  - Offline Fallback Engine (GDScript AST, .tscn parser)     │
+│  - Offline file/process tools and capability metadata       │
 └──────────────────────────────┬──────────────────────────────┘
                                │  Fast Local Named Pipe (\\.\pipe\godot_didi_ipc)
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│             Godot 4.x Process (didi_extension.dll)          │
+│            Godot 4.5+ Process (didi_extension.dll)          │
 │  ┌───────────────────────┬───────────────────────────────┐  │
-│  │ EditorInterface Hook  │ RenderingServer Off-screen    │  │
-│  │ (Main-thread Dispatch)│ (PNG Viewport & Test Lab)     │  │
+│  │ EditorInterface Hook  │ Editor ViewportTexture        │  │
+│  │ (Main-thread Dispatch)│ (RGBA8 → PNG capture)         │  │
 │  ├───────────────────────┼───────────────────────────────┤  │
-│  │ Live SceneTree & Undo │ Debugger & Log Interceptor    │  │
-│  │ (EditorUndoRedoManager│ (Diagnostics & Input Inject)  │  │
+│  │ Live SceneTree & Undo │ IPC lifecycle and timeout     │  │
+│  │ (EditorUndoRedoManager│ cancellation                  │  │
 │  └───────────────────────┴───────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -63,9 +63,8 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
        ▼
 [Command Queue (Thread-Safe FIFO)]
        │
-       ├─► Dual Dispatch Mechanism:
-       │    1. Continuous Auto-Pump Dispatcher (10ms tick rate)
-       │    2. Godot Editor Main-Thread Frame Hook (didi_plugin.gd _process)
+       ├─► Native GDExtension main-loop frame callback
+       │    (bounded to 64 commands per frame)
        ▼
 [Godot Main Thread / Engine Context]
        │
@@ -81,11 +80,11 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
 ```
 
 ### Key Safety Guarantees:
-1. **No Data Races**: All scene tree mutations, additions, reparenting, and deletions occur strictly through synchronized engine queues.
+1. **Main-Thread Godot Calls**: Supported live scene and viewport operations run only after the native main-loop callback drains the synchronized queue.
 2. **Editor Undo/Redo Integration**: All modifications register transactions with Godot's `EditorUndoRedoManager`, allowing human developers to press `Ctrl+Z` in the editor to undo any AI-generated modification.
 3. **Timeout & Deadlock Protection**:
    - IPC client operations utilize recursive mutexes and non-blocking `PeekNamedPipe` polling with millisecond timeouts.
-   - GDExtension command executions enforce a strict timeout that serializes failures as top-level JSON-RPC errors rather than silently reporting fake success.
+   - GDExtension command executions enforce a strict timeout, cancel queued work before it can mutate late, and serialize failures as top-level JSON-RPC errors.
 4. **Restricted Security DACL**:
    - Windows Named Pipes are provisioned with an SDDL security descriptor restricting read/write access exclusively to the Current User (`OW`) and Administrators (`BA`).
    - GDExtension IPC initialization is restricted to `GDEXTENSION_INITIALIZATION_EDITOR` only, ensuring standalone exported games never expose an open pipe.
@@ -103,11 +102,11 @@ Didi uses an optimized, low-overhead framing protocol over local Named Pipes (`\
 └─────────────────────────┴────────────────────────────────────────────┘
 ```
 
-### Performance Characteristics:
-- Round-trip latency: `< 0.8 ms` (compared to 30–80 ms for WebSocket wrappers).
-- Max throughput: `> 800 MB/s` for raw viewport image streams.
-- Safety Cap: Maximum payload size enforced at `128 MB`.
-- Zero network port conflicts or firewall prompt issues.
+### Transport characteristics
+
+- Maximum framed payload: `128 MB`.
+- The local pipe/socket avoids TCP port allocation and firewall prompts.
+- No latency or throughput target is part of the compatibility contract; measure the target workstation and scene when performance matters.
 
 ---
 
@@ -121,9 +120,8 @@ LLM tool call (capture_viewport)
        ▼
 GDExtension ViewportRenderer
        │
-       ├─► Attach to active Camera3D / SubViewport
-       ├─► Clamp render resolution (16x16 to 4096x4096)
-       ├─► Apply debug flags (wireframe, collision_shapes, normals)
+       ├─► Resolve active editor 3D or 2D SubViewport
+       ├─► Read its ViewportTexture image at actual dimensions
        ├─► Blit pixel buffer (RGBA8888)
        ├─► Compress to PNG in memory via stb_image_write
        ├─► Encode buffer to RFC 4648 Base64 (with strict padding)
@@ -132,13 +130,17 @@ GDExtension ViewportRenderer
 MCP Response: { "type": "image", "data": "iVBORw0KGgo...", "mimeType": "image/png" }
 ```
 
+Camera-node selection, requested live resizing, debug flags, and node isolation remain unimplemented. Without an editor connection, the standalone tool produces a clearly attributed synthetic grid PNG instead.
+
 ---
 
 ## 6. Offline Fallback Subsystem
 
 When the Godot Editor is not open, Didi automatically switches to its built-in offline engine:
-- **`analyze_script_diagnostics`**: Analyzes syntax using AST parser and invokes `godot --headless --check-only` compiler check using sanitized arguments.
-- **`get_scene_hierarchy`**: Parses `.tscn` text files into structured node hierarchies with node types, properties, spatial transforms, and nested instances.
-- **`query_project_resources`**: Scans the `res://` filesystem on disk, extracting Godot 4 `uid://...` references and dependency maps while pruning deny-listed directories (`.godot`, `.git`, `build`, `.vs`).
-- **`execute_test_session`**: Spawns Godot in `--headless` mode via `CreateProcessA` (Windows) or `fork()` + `pipe()` + `poll()` (POSIX), captures stdout/stderr with real-time error classification, and enforces execution timeouts with `kill(pid, SIGKILL)` / `TerminateProcess`.
-- **`create_visual_test_lab`**: Generates a standalone sandbox `.tscn` file on disk with lights and cameras.
+- **`script_check_syntax`**: Runs lightweight diagnostics and, for a file path, attempts a sanitized `godot --headless --check-only` compiler check.
+- **`scene_get_hierarchy`**: Parses `.tscn` text files into a structured hierarchy when live editor state is unavailable.
+- **`project_list_resources`**: Scans the project filesystem, extracts `uid://` references and dependencies, and prunes deny-listed directories.
+- **`runtime_launch`**: Spawns a separate Godot process, captures stdout/stderr, classifies errors, and enforces a timeout.
+- **`viewport_create_test_lab`**: Writes a basic standalone sandbox `.tscn` with lights and cameras.
+
+The exact live/offline/unimplemented split is documented in [Current Capability Matrix](CAPABILITIES.md).

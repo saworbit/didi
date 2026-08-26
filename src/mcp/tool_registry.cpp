@@ -1,8 +1,42 @@
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/common/logger.hpp"
+#include <unordered_set>
 
 namespace didi {
 namespace mcp {
+
+static ExecutionCapability capabilityForTool(const std::string& name) {
+    static const std::unordered_set<std::string> live_and_offline = {
+        "scene_get_hierarchy", "get_scene_hierarchy",
+        "viewport_capture_frame", "capture_viewport"
+    };
+    static const std::unordered_set<std::string> live = {
+        "scene_instantiate_node", "scene_remove_node", "scene_reparent_node",
+        "scene_set_property", "scene_get_property", "scene_duplicate_node",
+        "editor_undo", "editor_redo", "editor_save_scene",
+        "editor_reload_project"
+    };
+    static const std::unordered_set<std::string> offline = {
+        "script_check_syntax", "analyze_script_diagnostics", "script_reflect_class",
+        "script_get_symbols", "script_patch_method", "patch_script_symbols",
+        "viewport_create_test_lab", "create_visual_test_lab", "resource_create",
+        "resource_inspect", "project_list_resources", "query_project_resources",
+        "project_get_uid_map", "runtime_launch",
+        "execute_test_session"
+    };
+
+    if (live_and_offline.count(name)) {
+        return {{"live", "offline_fallback"}, true, {}};
+    }
+    if (live.count(name)) {
+        return {{"live"}, true, {}};
+    }
+    if (offline.count(name)) {
+        return {{"offline_fallback"}, true, {}};
+    }
+    return {{"unimplemented"}, false,
+            "Registered for protocol compatibility; no trustworthy execution path is available yet."};
+}
 
 // External handler forward declarations
 CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -63,6 +97,11 @@ ToolRegistry& ToolRegistry::instance() {
 
 void ToolRegistry::registerTool(ToolDefinition tool) {
     std::string name = tool.name;
+    tool.capability = capabilityForTool(name);
+    if (!tool.capability.implemented) {
+        tool.description = "UNIMPLEMENTED: Reserved schema; calls are rejected. Intended contract: " +
+                           tool.description;
+    }
     m_tools[name] = std::move(tool);
     DIDI_LOG_DEBUG("TOOL_REG", "Registered tool: ", name);
 }
@@ -92,6 +131,9 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
     if (!tool->handler) {
         return CallToolResult::error("Tool handler not set for: " + name);
     }
+    if (!tool->capability.implemented) {
+        return CallToolResult::error("Tool '" + name + "' is unimplemented: " + tool->capability.reason);
+    }
     try {
         return tool->handler(arguments);
     } catch (const std::exception& e) {
@@ -115,7 +157,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "scene_get_hierarchy";
-        t.description = "Returns recursive node tree with node types, script attachments, and global/local transforms.";
+        t.description = "Returns a live name/type/path hierarchy or an offline parsed .tscn hierarchy; live bulk properties, scripts, and signals are explicitly omitted.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -137,11 +179,11 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "scene_instantiate_node";
-        t.description = "Spawns built-in nodes or instantiates sub-scenes (.tscn) at a target NodePath.";
+        t.description = "Creates a built-in ClassDB node in the active edited scene with UndoRedo; PackedScene paths are not implemented.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
-                {"node_type", {{"type", "string"}, {"default", "Node3D"}, {"description", "Class name to instantiate"}}},
+                {"node_type", {{"type", "string"}, {"default", "Node"}, {"description", "Built-in ClassDB Node type to instantiate"}}},
                 {"scene_path", {{"type", "string"}, {"description", "Optional .tscn path"}}},
                 {"parent_path", {{"type", "string"}, {"default", "/root"}}},
                 {"name", {{"type", "string"}, {"description", "Node name"}}},
@@ -154,7 +196,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "scene_remove_node";
-        t.description = "Deletes a node and safely frees references via queue_free() with UndoRedo.";
+        t.description = "Detaches a node through UndoRedo while retaining its lifetime for undo and redo.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -184,7 +226,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "scene_set_property";
-        t.description = "Dynamically mutates any exported or built-in node property with type-coerced Variant values.";
+        t.description = "Sets an existing scalar node property through UndoRedo with strict JSON/Godot type compatibility.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -200,7 +242,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "scene_get_property";
-        t.description = "Queries precise property values, metadata, and export hints.";
+        t.description = "Returns one existing scalar node property from the live edited scene.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -317,7 +359,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "script_check_syntax";
-        t.description = "Runs Godot’s internal GDScript compiler to return compile errors, warnings, and byte-code validity.";
+        t.description = "Runs lightweight file/source diagnostics and attempts Godot --headless --check-only when a file path is supplied.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -336,7 +378,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "script_reflect_class";
-        t.description = "Looks up engine documentation, methods, properties, and constants for any engine class.";
+        t.description = "Looks up a class in Didi's limited built-in offline reference map; this is not live ClassDB reflection.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -390,12 +432,12 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "viewport_capture_frame";
-        t.description = "Captures Base64 PNG snapshots from active 2D/3D viewports or designated camera nodes.";
+        t.description = "Captures the active editor 2D/3D viewport as PNG when live, or returns an attributed synthetic grid preview offline.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
                 {"camera_identifier", {{"type", "string"}, {"default", "active_editor_view"}}},
-                {"resolution", {{"type", "object"}, {"default", {{"width", 1024}, {"height", 768}}}}},
+                {"resolution", {{"type", "object"}, {"default", {{"width", 256}, {"height", 192}}}, {"description", "Offline preview size; reserved and ignored by live capture"}}},
                 {"render_debug_flags", {{"type", "array"}}},
                 {"node_isolation_path", {{"type", "string"}}}
             }}
@@ -427,14 +469,14 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "viewport_create_test_lab";
-        t.description = "Generates an isolated test stage with neutral lighting, grid plane, and multi-angle cameras.";
+        t.description = "Writes a basic offline sandbox .tscn with lighting, a ground box, and three cameras; it does not instance the target resource.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
                 {"target_resource_path", {{"type", "string"}}},
                 {"environment", {{"type", "string"}, {"default", "studio_neutral"}}},
                 {"orthographic", {{"type", "boolean"}, {"default", false}}},
-                {"camera_rig", {{"type", "array"}, {"default", {"front", "back", "left", "right"}}}}
+                {"camera_rig", {{"type", "array"}, {"default", {"front", "top", "isometric"}}, {"description", "Metadata only; generated scene contains front, top, and isometric cameras"}}}
             }},
             {"required", {"target_resource_path"}}
         };
@@ -608,7 +650,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "resource_create";
-        t.description = "Generates new resource instances (StandardMaterial3D, AudioStreamRandomizer, Curve3D, Shape3D).";
+        t.description = "Writes textual .tres content under the project root from supported scalar, array, and vector-shaped JSON values.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -624,7 +666,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "resource_inspect";
-        t.description = "Reads inner resource properties and dependent UIDs.";
+        t.description = "Returns offline indexed file metadata, detected type, UID, and parsed dependencies for a resource path.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -688,7 +730,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "runtime_launch";
-        t.description = "Starts a specific scene or test runner with custom CLI flags (--debug, --headless).";
+        t.description = "Starts a separate Godot process, captures stdout/stderr, classifies errors, and enforces a timeout.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -778,7 +820,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "editor_reload_project";
-        t.description = "Reloads all modified scripts and rescans project resources.";
+        t.description = "Requests EditorFileSystem.scan_sources for the connected editor; this is not a full project restart.";
         t.inputSchema = {{"type", "object"}};
         t.handler = [this](const json& args) { return handleEditorReloadProject(args, m_ipcClient); };
         registerTool(std::move(t));
