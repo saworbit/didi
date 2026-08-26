@@ -12,19 +12,70 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 10);
+    ASSERT_TRUE(tools.size() >= 36);
 
-    // Verify key tool presence
+    // Domain 1: Scene Tree & Node Manipulation
+    ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
+    ASSERT_TRUE(reg.getTool("scene_instantiate_node") != nullptr);
+    ASSERT_TRUE(reg.getTool("scene_remove_node") != nullptr);
+    ASSERT_TRUE(reg.getTool("scene_reparent_node") != nullptr);
+    ASSERT_TRUE(reg.getTool("scene_set_property") != nullptr);
+    ASSERT_TRUE(reg.getTool("scene_get_property") != nullptr);
+    ASSERT_TRUE(reg.getTool("scene_duplicate_node") != nullptr);
+
+    // Domain 2: Signals & Event Wiring
+    ASSERT_TRUE(reg.getTool("signal_list_connections") != nullptr);
+    ASSERT_TRUE(reg.getTool("signal_connect") != nullptr);
+    ASSERT_TRUE(reg.getTool("signal_disconnect") != nullptr);
+    ASSERT_TRUE(reg.getTool("signal_emit") != nullptr);
+
+    // Domain 3: Scripting, Class Reflection & Diagnostics
+    ASSERT_TRUE(reg.getTool("script_check_syntax") != nullptr);
+    ASSERT_TRUE(reg.getTool("script_reflect_class") != nullptr);
+    ASSERT_TRUE(reg.getTool("script_get_symbols") != nullptr);
+    ASSERT_TRUE(reg.getTool("script_patch_method") != nullptr);
+
+    // Domain 4: Visual Verification & Viewport Rendering
+    ASSERT_TRUE(reg.getTool("viewport_capture_frame") != nullptr);
+    ASSERT_TRUE(reg.getTool("viewport_set_camera_transform") != nullptr);
+    ASSERT_TRUE(reg.getTool("viewport_create_test_lab") != nullptr);
+    ASSERT_TRUE(reg.getTool("viewport_toggle_debug_draw") != nullptr);
+
+    // Domain 5: Physics, Animation & Navigation
+    ASSERT_TRUE(reg.getTool("physics_raycast_query") != nullptr);
+    ASSERT_TRUE(reg.getTool("physics_simulate_step") != nullptr);
+    ASSERT_TRUE(reg.getTool("nav_bake_mesh") != nullptr);
+    ASSERT_TRUE(reg.getTool("nav_query_path") != nullptr);
+    ASSERT_TRUE(reg.getTool("anim_list_tracks") != nullptr);
+    ASSERT_TRUE(reg.getTool("anim_play_track") != nullptr);
+
+    // Domain 6: Tilemaps, GridMaps & Procedural Generation
+    ASSERT_TRUE(reg.getTool("tilemap_set_cells") != nullptr);
+    ASSERT_TRUE(reg.getTool("tilemap_get_used_rect") != nullptr);
+    ASSERT_TRUE(reg.getTool("gridmap_set_cells") != nullptr);
+
+    // Domain 7: Resources & Project File Management
+    ASSERT_TRUE(reg.getTool("resource_create") != nullptr);
+    ASSERT_TRUE(reg.getTool("resource_inspect") != nullptr);
+    ASSERT_TRUE(reg.getTool("project_list_resources") != nullptr);
+    ASSERT_TRUE(reg.getTool("project_get_uid_map") != nullptr);
+
+    // Domain 8: Execution, Input Injection & Debugging
+    ASSERT_TRUE(reg.getTool("runtime_launch") != nullptr);
+    ASSERT_TRUE(reg.getTool("runtime_inject_input") != nullptr);
+    ASSERT_TRUE(reg.getTool("runtime_get_call_stack") != nullptr);
+    ASSERT_TRUE(reg.getTool("runtime_read_profiler") != nullptr);
+
+    // Domain 9: Editor Lifecycle & Undo/Redo
+    ASSERT_TRUE(reg.getTool("editor_undo") != nullptr);
+    ASSERT_TRUE(reg.getTool("editor_redo") != nullptr);
+    ASSERT_TRUE(reg.getTool("editor_save_scene") != nullptr);
+    ASSERT_TRUE(reg.getTool("editor_reload_project") != nullptr);
+
+    // Legacy Aliases
     ASSERT_TRUE(reg.getTool("capture_viewport") != nullptr);
-    ASSERT_TRUE(reg.getTool("create_visual_test_lab") != nullptr);
     ASSERT_TRUE(reg.getTool("get_scene_hierarchy") != nullptr);
     ASSERT_TRUE(reg.getTool("mutate_scene_tree") != nullptr);
-    ASSERT_TRUE(reg.getTool("analyze_script_diagnostics") != nullptr);
-    ASSERT_TRUE(reg.getTool("patch_script_symbols") != nullptr);
-    ASSERT_TRUE(reg.getTool("execute_test_session") != nullptr);
-    ASSERT_TRUE(reg.getTool("inject_input_event") != nullptr);
-    ASSERT_TRUE(reg.getTool("query_project_resources") != nullptr);
-    ASSERT_TRUE(reg.getTool("instantiate_asset") != nullptr);
 }
 
 static void test_resource_registry() {
@@ -137,12 +188,40 @@ static void test_ipc_error_propagation() {
     server->stop();
 }
 
+static void test_class_reflection() {
+    auto& reg = didi::mcp::ToolRegistry::instance();
+    auto res = reg.callTool("script_reflect_class", {{"class_name", "CharacterBody3D"}});
+    ASSERT_TRUE(!res.isError);
+    ASSERT_TRUE(!res.content.empty());
+    didi::json parsed = didi::json::parse(res.content[0].text);
+    ASSERT_EQ(parsed["class_name"], "CharacterBody3D");
+    ASSERT_EQ(parsed["inherits"], "PhysicsBody3D");
+    ASSERT_TRUE(parsed["methods"].contains("move_and_slide"));
+}
+
+static void test_symbol_extraction() {
+    auto& reg = didi::mcp::ToolRegistry::instance();
+    std::string script = "extends CharacterBody3D\n\n@export var speed: float = 5.0\nsignal reached_goal(time_taken)\n\nfunc jump() -> void:\n\tpass\n";
+    auto res = reg.callTool("script_get_symbols", {{"source_text", script}});
+    ASSERT_TRUE(!res.isError);
+    ASSERT_TRUE(!res.content.empty());
+    didi::json parsed = didi::json::parse(res.content[0].text);
+    ASSERT_EQ(parsed["functions"].size(), 1);
+    ASSERT_EQ(parsed["functions"][0]["name"], "jump");
+    ASSERT_EQ(parsed["variables"].size(), 1);
+    ASSERT_EQ(parsed["variables"][0]["name"], "speed");
+    ASSERT_EQ(parsed["signals"].size(), 1);
+    ASSERT_EQ(parsed["signals"][0]["name"], "reached_goal");
+}
+
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.DefaultRegistration", test_tool_registry_default_tools);
         registerTest("Tools.CaptureViewportWithIpc", test_tool_capture_viewport_with_ipc);
         registerTest("Tools.Base64Padding", test_base64_rfc4648_padding);
         registerTest("Tools.IpcErrorPropagation", test_ipc_error_propagation);
+        registerTest("Tools.ClassReflection", test_class_reflection);
+        registerTest("Tools.SymbolExtraction", test_symbol_extraction);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }

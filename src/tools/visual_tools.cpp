@@ -32,6 +32,17 @@ CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpc
     return CallToolResult::error("Godot Editor is offline. Open Godot with the Didi plugin active to capture live viewports. " + offline_info.dump(2));
 }
 
+CallToolResult handleViewportSetCameraTransform(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (ipc && ipc->isConnected()) {
+        auto res = ipc->sendRequest("vision.setCameraTransform", args);
+        if (res.isOk()) {
+            return CallToolResult::successJson(res.value());
+        }
+        return CallToolResult::error("Failed to set camera transform: " + res.error().message);
+    }
+    return CallToolResult::error("Godot Editor is offline. Launch Godot Editor to position editor camera.");
+}
+
 CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     std::string target_path = args.value("target_resource_path", "");
     std::string env = args.value("environment", "studio_neutral");
@@ -92,6 +103,17 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
     }
 
     return CallToolResult::error("Failed to generate visual test lab sandbox scene file.");
+}
+
+CallToolResult handleViewportToggleDebugDraw(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (ipc && ipc->isConnected()) {
+        auto res = ipc->sendRequest("vision.toggleDebugDraw", args);
+        if (res.isOk()) {
+            return CallToolResult::successJson(res.value());
+        }
+        return CallToolResult::error("Failed to toggle debug draw: " + res.error().message);
+    }
+    return CallToolResult::error("Godot Editor is offline. Launch Godot Editor to toggle debug draw modes.");
 }
 
 } // namespace mcp

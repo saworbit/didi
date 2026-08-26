@@ -36,6 +36,9 @@ public:
                                            const std::string& symbol_type = "function");
 
     static std::vector<ScriptDiagnostic> runGodotCompilerCheck(const std::string& script_file_path);
+
+    static json reflectClass(const std::string& class_name);
+    static json extractSymbols(const std::string& source_text);
 };
 
 } // namespace offline

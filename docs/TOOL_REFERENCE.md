@@ -1,232 +1,222 @@
-# Didi MCP Tool Reference Manual
+# Didi MCP Tool Reference Manual 🛠️
 
-This document provides a comprehensive specification of the 10 MCP tools provided by Didi across 5 operational domains.
+This document provides a comprehensive specification of the **36 MCP tools** provided by Didi across **9 distinct operational domains**.
 
 ---
 
 ## 📋 Table of Contents
 
-1. [Visual & Vision Domain](#1-visual--vision-domain)
-   - [`capture_viewport`](#capture_viewport)
-   - [`create_visual_test_lab`](#create_visual_test_lab)
-2. [Scene Tree Domain](#2-scene-tree-domain)
-   - [`get_scene_hierarchy`](#get_scene_hierarchy)
-   - [`mutate_scene_tree`](#mutate_scene_tree)
-3. [Scripting & Code Domain](#3-scripting--code-domain)
-   - [`analyze_script_diagnostics`](#analyze_script_diagnostics)
-   - [`patch_script_symbols`](#patch_script_symbols)
-4. [Runtime & Debug Domain](#4-runtime--debug-domain)
-   - [`execute_test_session`](#execute_test_session)
-   - [`inject_input_event`](#inject_input_event)
-5. [Asset Pipeline Domain](#5-asset-pipeline-domain)
-   - [`query_project_resources`](#query_project_resources)
-   - [`instantiate_asset`](#instantiate_asset)
+1. [Domain 1: Scene Tree & Node Manipulation (7 tools)](#1-domain-1-scene-tree--node-manipulation)
+2. [Domain 2: Signals & Event Wiring (4 tools)](#2-domain-2-signals--event-wiring)
+3. [Domain 3: Scripting, Class Reflection & Diagnostics (4 tools)](#3-domain-3-scripting-class-reflection--diagnostics)
+4. [Domain 4: Visual Verification & Viewport Rendering (4 tools)](#4-domain-4-visual-verification--viewport-rendering)
+5. [Domain 5: Physics, Animation & Navigation (6 tools)](#5-domain-5-physics-animation--navigation)
+6. [Domain 6: Tilemaps, GridMaps & Procedural Generation (3 tools)](#6-domain-6-tilemaps-gridmaps--procedural-generation)
+7. [Domain 7: Resources & Project File Management (4 tools)](#7-domain-7-resources--project-file-management)
+8. [Domain 8: Execution, Input Injection & Debugging (4 tools)](#8-domain-8-execution-input-injection--debugging)
+9. [Domain 9: Editor Lifecycle & Undo/Redo (4 tools)](#9-domain-9-editor-lifecycle--undoredo)
 
 ---
 
-## 1. Visual & Vision Domain
+## 1. Domain 1: Scene Tree & Node Manipulation
 
-### `capture_viewport`
-Renders a live editor/game viewport or isolated node to a PNG image encoded in Base64 (strictly conforming to RFC 4648 with `=` padding).
+### `scene_get_hierarchy` *(Alias: `get_scene_hierarchy`)*
+Returns recursive node tree with node types, script attachments, global/local transforms, and properties.
+- **Parameters**:
+  - `root_path` (`string`, default `"/root"`): Target node or `.tscn` file path.
+  - `max_depth` (`integer`, default `10`): Maximum recursion depth.
+  - `include_properties` (`boolean`, default `true`): Include node property values.
+  - `include_signals` (`boolean`, default `true`): Include declared signals.
+  - `include_scripts` (`boolean`, default `true`): Include attached script paths.
 
-#### Parameters:
-| Parameter | Type | Required | Default | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `camera_identifier` | `string` | No | `"active_editor_view"` | Camera node path or preset (`active_editor_view`, `lab_camera_front`, `lab_camera_top`) |
-| `resolution` | `object` | No | `{"width": 1024, "height": 768}` | Output render resolution (clamped between 16x16 and 4096x4096) |
-| `render_debug_flags` | `array` | No | `[]` | Debug visualizers: `wireframe`, `collision_shapes`, `normals`, `lighting_only` |
-| `node_isolation_path` | `string` | No | `""` | Node path to isolate while hiding surrounding objects |
+### `scene_instantiate_node`
+Spawns built-in nodes or instantiates sub-scenes (`.tscn`) at a target NodePath.
+- **Parameters**:
+  - `node_type` (`string`, default `"Node3D"`): Built-in engine class name.
+  - `scene_path` (`string`): Optional `.tscn` resource path.
+  - `parent_path` (`string`, default `"/root"`): Parent node path.
+  - `name` (`string`): Node name.
+  - `properties` (`object`): Initial property values.
 
-#### Example Request:
-```json
-{
-  "name": "capture_viewport",
-  "arguments": {
-    "camera_identifier": "active_editor_view",
-    "resolution": { "width": 1024, "height": 768 },
-    "render_debug_flags": ["collision_shapes"]
-  }
-}
-```
+### `scene_remove_node`
+Deletes a node and safely frees references via `queue_free()` with UndoRedo support.
+- **Parameters**: `target_node` (`string`, required).
 
-#### Example Response:
-```json
-{
-  "content": [
-    { "type": "text", "text": "Viewport frame captured successfully from active_editor_view (1024x768)" },
-    { "type": "image", "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "mimeType": "image/png" }
-  ],
-  "isError": false
-}
-```
+### `scene_reparent_node`
+Moves a node to a new parent while preserving global transforms.
+- **Parameters**: `target_node` (`string`, required), `new_parent_path` (`string`, required), `keep_global_transform` (`boolean`, default `true`).
 
----
+### `scene_set_property`
+Dynamically mutates any exported or built-in node property with type-coerced Variant values.
+- **Parameters**: `target_node` (`string`, required), `property_name` (`string`, required), `value` (required).
 
-### `create_visual_test_lab`
-Spawns a temporary, isolated 3D/2D sandbox scene with lighting, ground plane, and multi-angle test cameras for spatial verification.
+### `scene_get_property`
+Queries precise property values, metadata, and export hints.
+- **Parameters**: `target_node` (`string`, required), `property_name` (`string`, required).
 
-#### Parameters:
-| Parameter | Type | Required | Default | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `target_resource_path` | `string` | **Yes** | — | Resource path to inspect (e.g. `res://models/character.glb`, `res://scenes/player.tscn`) |
-| `environment` | `string` | No | `"studio_neutral"` | Environment preset: `studio_neutral`, `dark_grid`, `outdoor_sun` |
-| `orthographic` | `boolean` | No | `false` | Enable orthographic camera projection |
-| `camera_rig` | `array` | No | `["front", "back", "left", "right"]` | Camera angles: `front`, `back`, `left`, `right`, `top`, `isometric` |
+### `scene_duplicate_node`
+Duplicates an existing node branch with unique names.
+- **Parameters**: `target_node` (`string`, required).
 
-#### Example Response:
-```json
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "{\n  \"status\": \"created\",\n  \"test_lab_scene\": \"res://addons/didi/test_lab_sandbox.tscn\",\n  \"target_resource_path\": \"res://scenes/player.tscn\",\n  \"available_cameras\": [\n    {\"id\": \"lab_camera_front\", \"position\": {\"x\": 0, \"y\": 1.5, \"z\": 3}}\n  ]\n}"
-    }
-  ],
-  "isError": false
-}
-```
+### `mutate_scene_tree` *(Legacy Compatibility)*
+Adds, removes, reparents, duplicates, or edits nodes via UndoRedo transactions.
 
 ---
 
-## 2. Scene Tree Domain
+## 2. Domain 2: Signals & Event Wiring
 
-### `get_scene_hierarchy`
-Returns the scene tree hierarchy with real node types, transforms, script bindings, signals, and exported properties extracted from the live editor or parsed from `.tscn` scene files.
+### `signal_list_connections`
+Lists all signals declared on a node, including incoming and outgoing connections.
+- **Parameters**: `target_node` (`string`, required).
 
-#### Parameters:
-| Parameter | Type | Required | Default | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `root_path` | `string` | No | `"res://scenes/main.tscn"` | Node path or `.tscn` file path to start traversal from |
-| `max_depth` | `integer` | No | `10` | Maximum recursion depth |
-| `include_properties` | `boolean` | No | `true` | Include node properties and spatial transform data |
-| `include_signals` | `boolean` | No | `true` | Include signal connection definitions |
-| `include_scripts` | `boolean` | No | `true` | Include attached script file paths |
+### `signal_connect`
+Binds a signal from an emitter node to a target method or callable.
+- **Parameters**: `emitter_node` (`string`, required), `signal_name` (`string`, required), `target_node` (`string`, required), `target_method` (`string`, required).
 
-#### Example Response:
-```json
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "{\n  \"file_path\": \"res://scenes/main.tscn\",\n  \"nodes\": [\n    {\"name\": \"Main\", \"parent\": \".\", \"type\": \"Node3D\"},\n    {\"name\": \"WorldEnvironment\", \"parent\": \".\", \"type\": \"WorldEnvironment\"},\n    {\"name\": \"DirectionalLight3D\", \"parent\": \".\", \"type\": \"DirectionalLight3D\"},\n    {\"name\": \"Ground\", \"parent\": \".\", \"type\": \"CSGBox3D\"},\n    {\"name\": \"Player\", \"parent\": \".\", \"type\": \"Instance\"},\n    {\"name\": \"Camera3D\", \"parent\": \".\", \"type\": \"Camera3D\"}\n  ],\n  \"source\": \"parsed_tscn_file\"\n}"
-    }
-  ],
-  "isError": false
-}
-```
+### `signal_disconnect`
+Unbinds existing signal connections.
+- **Parameters**: `emitter_node` (`string`, required), `signal_name` (`string`, required), `target_node` (`string`, required), `target_method` (`string`, required).
+
+### `signal_emit`
+Emits a custom signal manually with arguments for event testing.
+- **Parameters**: `target_node` (`string`, required), `signal_name` (`string`, required), `arguments` (`array`).
 
 ---
 
-### `mutate_scene_tree`
-Adds, removes, reparents, duplicates, or edits nodes with full `EditorUndoRedoManager` transaction support.
+## 3. Domain 3: Scripting, Class Reflection & Diagnostics
 
-#### Parameters:
-| Parameter | Type | Required | Default | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `action` | `string` | **Yes** | — | Mutation type: `add`, `remove`, `modify`, `reparent`, `duplicate` |
-| `target_node` | `string` | **Yes** | — | Target node path |
-| `payload` | `object` | No | `{}` | Arguments: `node_type`, `name`, `properties`, `script_path`, `transform` |
+### `script_check_syntax` *(Alias: `analyze_script_diagnostics`)*
+Runs Godot’s internal GDScript compiler to return compile errors, warnings, and byte-code validity.
+- **Parameters**: `file_path` (`string`), `source_text` (`string`).
 
-#### Example Mutation (`add`):
-```json
-{
-  "name": "mutate_scene_tree",
-  "arguments": {
-    "action": "add",
-    "target_node": "/root/Main",
-    "payload": {
-      "node_type": "DirectionalLight3D",
-      "name": "SunLight",
-      "properties": {
-        "light_energy": 1.5,
-        "shadow_enabled": true
-      }
-    }
-  }
-}
-```
+### `script_reflect_class`
+Looks up engine documentation, methods, properties, and constants for any engine class (e.g., `CharacterBody3D`, `NavigationAgent3D`, `TileMapLayer`, `GridMap`).
+- **Parameters**: `class_name` (`string`, required).
+
+### `script_get_symbols`
+Extracts AST symbols, functions, signals, enums, and typed variables from any script file.
+- **Parameters**: `file_path` (`string`), `source_text` (`string`).
+
+### `script_patch_method` *(Alias: `patch_script_symbols`)*
+Safely rewrites a single method body in a `.gd` file without touching other functions.
+- **Parameters**: `file_path` (`string`, required), `method_name` (`string`, required), `new_definition` (`string`, required).
 
 ---
 
-## 3. Scripting & Code Domain
+## 4. Domain 4: Visual Verification & Viewport Rendering
 
-### `analyze_script_diagnostics`
-Evaluates GDScript or C# files using Godot's built-in parser and linter for compilation errors, warnings, unresolved symbols, and type mismatches.
+### `viewport_capture_frame` *(Alias: `capture_viewport`)*
+Captures Base64 PNG snapshots from active 2D/3D viewports or designated camera nodes.
+- **Parameters**: `camera_identifier` (`string`), `resolution` (`object`), `render_debug_flags` (`array`).
 
-#### Parameters:
-| Parameter | Type | Required | Default | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `file_path` | `string` | **Yes** | — | Path to script file (e.g. `res://scripts/player.gd`) |
-| `source_text` | `string` | No | `""` | Optional unsaved in-memory script buffer to analyze |
+### `viewport_set_camera_transform`
+Positions and rotates the editor or test camera to inspect specific coordinates.
+- **Parameters**: `position` (`object`, required), `rotation` (`object`), `fov` (`number`, default `75.0`).
 
----
+### `viewport_create_test_lab` *(Alias: `create_visual_test_lab`)*
+Generates an isolated test stage with neutral lighting, grid plane, and multi-angle cameras.
+- **Parameters**: `target_resource_path` (`string`, required), `environment` (`string`), `camera_rig` (`array`).
 
-### `patch_script_symbols`
-Replaces or inserts specific functions, variables, signals, or enums with safe regex escaping without modifying the rest of the file.
-
-#### Parameters:
-| Parameter | Type | Required | Default | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `file_path` | `string` | **Yes** | — | Target script file path |
-| `symbol_name` | `string` | **Yes** | — | Name of symbol (e.g. `take_damage`, `speed`, `health_changed`) |
-| `new_definition` | `string` | **Yes** | — | Full replacement or new symbol code block |
-| `symbol_type` | `string` | No | `"function"` | Symbol type: `function`, `variable`, `signal`, `enum`, `class` |
+### `viewport_toggle_debug_draw`
+Toggles collision wireframes, navigation meshes, normal vectors, and lighting modes.
+- **Parameters**: `collision_shapes` (`boolean`), `navigation_mesh` (`boolean`), `wireframe` (`boolean`).
 
 ---
 
-## 4. Runtime & Debug Domain
+## 5. Domain 5: Physics, Animation & Navigation
 
-### `execute_test_session`
-Boots the project or specific scene in headless or windowed mode with structured capture of engine stdout, warnings, assertions, and crash call stacks, with cross-platform execution timeout enforcement.
+### `physics_raycast_query`
+Fires a 2D/3D physics raycast to check line-of-sight, ray hits, and collision masks.
+- **Parameters**: `from` (`object`, required), `to` (`object`, required), `collision_mask` (`integer`, default `1`).
 
-#### Parameters:
-| Parameter | Type | Required | Default | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `scene_path` | `string` | No | `""` | Scene path (e.g. `res://scenes/main.tscn`) |
-| `timeout_seconds` | `integer` | No | `10` | Execution timeout before aborting |
-| `headless` | `boolean` | No | `true` | Run engine with `--headless` flag |
-| `break_on_error` | `boolean` | No | `true` | Mark session failed if engine error occurs |
-| `extra_args` | `array` | No | `[]` | Additional command-line flags (e.g. `["--path", "demo", "--quit"]`) |
+### `physics_simulate_step`
+Advances the physics engine by $N$ ticks to test gravity, velocity, or collision response deterministically.
+- **Parameters**: `steps` (`integer`, default `1`), `delta` (`number`, default `0.0166667`).
 
----
+### `nav_bake_mesh`
+Triggers runtime or editor navigation mesh baking (`NavigationMesh` / `NavigationPolygon`).
+- **Parameters**: `nav_node_path` (`string`).
 
-### `inject_input_event`
-Emulates mouse, keyboard, gamepad, or action events into the running game instance.
+### `nav_query_path`
+Tests pathfinding between two points to verify walkable navmeshes.
+- **Parameters**: `start_point` (`object`, required), `end_point` (`object`, required).
 
-#### Parameters:
-| Parameter | Type | Required | Default | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `event_type` | `string` | **Yes** | — | Type: `action`, `key`, `mouse_button`, `mouse_motion`, `gamepad` |
-| `action_name` | `string` | No | `""` | InputMap action name (e.g. `ui_accept`, `jump`) |
-| `key_code` | `string` | No | `""` | Key string (e.g. `KEY_SPACE`, `KEY_W`) |
-| `pressed` | `boolean` | No | `true` | Pressed vs released |
-| `strength` | `number` | No | `1.0` | Analog trigger strength (0.0 to 1.0) |
-| `duration_ms` | `integer` | No | `100` | Hold duration in milliseconds |
+### `anim_list_tracks`
+Lists animations, keyframes, and blend trees in an `AnimationPlayer` or `AnimationTree`.
+- **Parameters**: `animation_player_path` (`string`, required).
+
+### `anim_play_track`
+Plays a specific animation keyframe sequence to verify transitions.
+- **Parameters**: `animation_player_path` (`string`, required), `animation_name` (`string`, required), `custom_speed` (`number`, default `1.0`).
 
 ---
 
-## 5. Asset Pipeline Domain
+## 6. Domain 6: Tilemaps, GridMaps & Procedural Generation
 
-### `query_project_resources`
-Scans the `res://` filesystem for scenes, textures, meshes, sounds, shaders, and scripts with UID resolution and automatic exclusion of build/temporary directories.
+### `tilemap_set_cells`
+Batch updates 2D `TileMapLayer` cells with source IDs, atlas coordinates, and alternate tiles.
+- **Parameters**: `tilemap_path` (`string`, required), `cells` (`array`, required).
 
-#### Parameters:
-| Parameter | Type | Required | Default | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `search_path` | `string` | No | `"res://"` | Root search path |
-| `type_filter` | `string` | No | `""` | Filter: `PackedScene`, `Texture2D`, `MeshResource`, `GDScript`, `AudioStream` |
-| `fuzzy_query` | `string` | No | `""` | Substring keyword to match against names and paths |
-| `include_uid` | `boolean` | No | `true` | Resolve Godot 4 `uid://...` references |
+### `tilemap_get_used_rect`
+Returns used cell boundaries and layer structures.
+- **Parameters**: `tilemap_path` (`string`, required).
+
+### `gridmap_set_cells`
+Places 3D mesh library tiles inside a `GridMap` with coordinate orientations.
+- **Parameters**: `gridmap_path` (`string`, required), `cells` (`array`, required).
 
 ---
 
-### `instantiate_asset`
-Creates an instance of a resource or scene and parents it with automatic collision shape and transform assignment.
+## 7. Domain 7: Resources & Project File Management
 
-#### Parameters:
-| Parameter | Type | Required | Default | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `asset_path` | `string` | **Yes** | — | Path to asset (e.g. `res://models/tree.glb`, `res://scenes/player.tscn`) |
-| `parent_path` | `string` | No | `"/root"` | Parent node path to attach instance to |
-| `transform` | `object` | No | `{}` | Spatial transform (`position`, `rotation`, `scale`) |
-| `collision_mode` | `string` | No | `"none"` | Collision mode: `none`, `auto_trimesh`, `auto_convex`, `box_bounds` |
+### `resource_create`
+Generates new resource instances (`StandardMaterial3D`, `AudioStreamRandomizer`, `Curve3D`, `Shape3D`).
+- **Parameters**: `resource_type` (`string`), `save_path` (`string`, required), `properties` (`object`).
+
+### `resource_inspect`
+Reads inner resource properties and dependent UIDs.
+- **Parameters**: `resource_path` (`string`, required).
+
+### `project_list_resources` *(Alias: `query_project_resources`)*
+Scans `res://` for assets filtered by type (e.g., `.glb`, `.png`, `.tres`).
+- **Parameters**: `search_path` (`string`), `type_filter` (`string`), `fuzzy_query` (`string`), `include_uid` (`boolean`).
+
+### `project_get_uid_map`
+Resolves `uid://` references to local filesystem paths.
+
+### `instantiate_asset` *(Legacy Compatibility)*
+Creates an instance of a resource or scene and parents it with collision assignment.
+
+---
+
+## 8. Domain 8: Execution, Input Injection & Debugging
+
+### `runtime_launch` *(Alias: `execute_test_session`)*
+Starts a specific scene or test runner with custom CLI flags (`--debug`, `--headless`).
+- **Parameters**: `scene_path` (`string`), `timeout_seconds` (`integer`), `headless` (`boolean`), `extra_args` (`array`).
+
+### `runtime_inject_input` *(Alias: `inject_input_event`)*
+Synthesizes `InputEventKey`, `InputEventMouseButton`, or `InputEventAction` to simulate player movement and gameplay.
+- **Parameters**: `event_type` (`string`, required), `action_name` (`string`), `key_code` (`string`), `pressed` (`boolean`), `strength` (`number`).
+
+### `runtime_get_call_stack`
+Fetches current debugger call stack and variable scopes on engine break/crash.
+
+### `runtime_read_profiler`
+Pulls frame times, draw calls, draw passes, and physics tick metrics.
+
+---
+
+## 9. Domain 9: Editor Lifecycle & Undo/Redo
+
+### `editor_undo`
+Reverts the last operation through Godot's `EditorUndoRedoManager`.
+
+### `editor_redo`
+Replays the previously reverted editor transaction.
+
+### `editor_save_scene`
+Saves the active scene to disk.
+
+### `editor_reload_project`
+Reloads all modified scripts and rescans project resources.

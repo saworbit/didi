@@ -4,11 +4,12 @@
 #include "didi/offline/gdscript_diagnostics.hpp"
 #include <fstream>
 #include <sstream>
+#include <filesystem>
 
 namespace didi {
 namespace mcp {
 
-CallToolResult handleAnalyzeScriptDiagnostics(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     std::string file_path = args.value("file_path", "");
     std::string source_text = args.value("source_text", "");
 
@@ -17,7 +18,7 @@ CallToolResult handleAnalyzeScriptDiagnostics(const json& args, std::shared_ptr<
     }
 
     if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("script.diagnostics", args);
+        auto res = ipc->sendRequest("script.checkSyntax", args);
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
@@ -42,14 +43,60 @@ CallToolResult handleAnalyzeScriptDiagnostics(const json& args, std::shared_ptr<
     return CallToolResult::successJson(result);
 }
 
-CallToolResult handlePatchScriptSymbols(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+CallToolResult handleScriptReflectClass(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    std::string class_name = args.value("class_name", "");
+    if (class_name.empty()) {
+        return CallToolResult::error("Parameter 'class_name' is required.");
+    }
+
+    if (ipc && ipc->isConnected()) {
+        auto res = ipc->sendRequest("script.reflectClass", args);
+        if (res.isOk()) {
+            return CallToolResult::successJson(res.value());
+        }
+    }
+
+    // Run offline class reflection
+    json doc = offline::GDScriptDiagnostics::reflectClass(class_name);
+    return CallToolResult::successJson(doc);
+}
+
+CallToolResult handleScriptGetSymbols(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     std::string file_path = args.value("file_path", "");
-    std::string symbol_name = args.value("symbol_name", "");
+    std::string source_text = args.value("source_text", "");
+
+    if (source_text.empty() && !file_path.empty()) {
+        std::string disk_path = file_path;
+        if (strings::startsWith(disk_path, "res://")) disk_path = disk_path.substr(6);
+        std::ifstream file(disk_path);
+        if (!file.is_open() && std::filesystem::exists("demo/" + disk_path)) {
+            disk_path = "demo/" + disk_path;
+            file.open(disk_path);
+        }
+        if (file.is_open()) {
+            std::stringstream ss;
+            ss << file.rdbuf();
+            source_text = ss.str();
+        }
+    }
+
+    if (source_text.empty()) {
+        return CallToolResult::error("No source text or valid script file found for symbol extraction.");
+    }
+
+    json syms = offline::GDScriptDiagnostics::extractSymbols(source_text);
+    syms["file_path"] = file_path;
+    return CallToolResult::successJson(syms);
+}
+
+CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    std::string file_path = args.value("file_path", "");
+    std::string symbol_name = args.value("method_name", args.value("symbol_name", ""));
     std::string new_definition = args.value("new_definition", "");
     std::string symbol_type = args.value("symbol_type", "function");
 
     if (file_path.empty() || symbol_name.empty() || new_definition.empty()) {
-        return CallToolResult::error("Parameters 'file_path', 'symbol_name', and 'new_definition' are required.");
+        return CallToolResult::error("Parameters 'file_path', 'method_name'/'symbol_name', and 'new_definition' are required.");
     }
 
     std::string disk_path = file_path;
@@ -74,13 +121,18 @@ CallToolResult handlePatchScriptSymbols(const json& args, std::shared_ptr<ipc::I
 
     std::string original_content;
     std::ifstream in_file(disk_path);
+    if (!in_file.is_open() && fs::exists("demo/" + disk_path)) {
+        disk_path = "demo/" + disk_path;
+        in_file.open(disk_path);
+    }
+
     if (in_file.is_open()) {
         std::stringstream ss;
         ss << in_file.rdbuf();
         original_content = ss.str();
         in_file.close();
     } else {
-        return CallToolResult::error("Cannot open file for symbol patching: " + file_path);
+        return CallToolResult::error("Cannot open file for method patching: " + file_path);
     }
 
     auto patch_res = offline::GDScriptDiagnostics::patchSymbol(original_content, symbol_name, new_definition, symbol_type);
@@ -113,11 +165,9 @@ CallToolResult handlePatchScriptSymbols(const json& args, std::shared_ptr<ipc::I
     json result = {
         {"status", "success"},
         {"file_path", file_path},
-        {"symbol_name", symbol_name},
-        {"symbol_type", symbol_type},
-        {"has_syntax_errors", has_error},
-        {"diagnostics", diag_arr},
-        {"message", "Symbol '" + symbol_name + "' successfully patched in " + file_path}
+        {"method_name", symbol_name},
+        {"has_errors", has_error},
+        {"diagnostics", diag_arr}
     };
 
     return CallToolResult::successJson(result);

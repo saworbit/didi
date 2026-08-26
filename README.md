@@ -20,8 +20,9 @@
 | :--- | :--- | :--- |
 | 🚀 [**Quickstart Guide**](docs/QUICKSTART.md) | **Developers / Humans** | 5-minute step-by-step setup for Godot, Cursor, Claude, and VS Code. |
 | 🤖 [**LLM Agent Instructions**](docs/LLM_INSTRUCTIONS.md) | **AI Assistants / LLMs** | Dedicated system prompt & decision tree for Claude, Cursor, Windsurf, Antigravity. |
+| 🗺️ [**Roadmap & 36-Tool Suite**](docs/ROADMAP.md) | **Developers / Contributors** | Exhaustive 9-domain roadmap and technical specification. |
+| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Complete specifications for all 36 domain tools across 9 functional domains. |
 | 🏛️ [**Architecture & System Topology**](docs/ARCHITECTURE.md) | **Engineers / Architects** | Deep-dive into C++20 design, dual execution topology, threading safety, and named-pipe IPC. |
-| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Complete specifications for all 10 domain tools across Visuals, SceneTree, Scripting, Runtime, and Assets. |
 | 📦 [**Dynamic Resources & Prompts**](docs/RESOURCES_AND_PROMPTS.md) | **Developers / LLMs** | Technical specs for `godot://...` resources and prompt workflows. |
 | 🛡️ [**Administrator & Operations Guide**](docs/ADMIN_GUIDE.md) | **DevOps / Admins** | Security DACL hardening, CI/CD headless execution, observability, and troubleshooting. |
 | 👩‍💻 [**Developer & Extension Guide**](docs/DEVELOPER_GUIDE.md) | **Contributors** | How to build from source, write tests, and add custom MCP tools. |
@@ -55,7 +56,7 @@
 ┌─────────────────────────────────────────────────────────────┐
 │             Didi (C++ MCP Core Engine - didi.exe)           │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2024-11-05 standard)       │
-│  - Tool Registry (10 Tools across 5 Domains)                │
+│  - Tool Registry (36 Tools across 9 Domains)                │
 │  - Dynamic Resources (godot://project/tree, editor/state)   │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
 │  - Offline Fallback Engine (GDScript AST, .tscn parser)     │
@@ -76,20 +77,19 @@
 
 ---
 
-## 🛠️ Tool Registry & Capability Matrix
+## 🛠️ Exhaustive 9-Domain Tool Suite (36 Tools)
 
-| Domain | Tool Name | Description | Key Parameters |
-| :--- | :--- | :--- | :--- |
-| **Visual & Vision** | `capture_viewport` | Renders a live editor/game viewport or isolated node to PNG base64 for spatial verification. | `camera_identifier`, `resolution`, `render_debug_flags`, `node_isolation_path` |
-| **Visual & Vision** | `create_visual_test_lab` | Spawns a temporary, isolated 3D/2D sandbox scene with lighting, ground plane, and multi-angle test cameras. | `target_resource_path`, `environment`, `orthographic`, `camera_rig` |
-| **Scene Tree** | `get_scene_hierarchy` | Returns the active scene tree with node types, script bindings, signals, and transforms. | `root_path`, `max_depth`, `include_properties`, `include_signals`, `include_scripts` |
-| **Scene Tree** | `mutate_scene_tree` | Adds, removes, reparents, duplicates, or edits nodes via UndoRedo transactions. | `action` (`add`\|`remove`\|`modify`\|`reparent`\|`duplicate`), `target_node`, `payload` |
-| **Scripting & Code** | `analyze_script_diagnostics` | Evaluates GDScript/C# files for compilation errors, warnings, and syntax issues. | `file_path`, `source_text` |
-| **Scripting & Code** | `patch_script_symbols` | Replaces specific functions, variables, or signal bindings without touching the rest of the file. | `file_path`, `symbol_name`, `new_definition`, `symbol_type` |
-| **Runtime & Debug** | `execute_test_session` | Boots the project/scene in headless or windowed mode with structured capture of engine stdout, warnings, and stack traces. | `scene_path`, `timeout_seconds`, `headless`, `break_on_error` |
-| **Runtime & Debug** | `inject_input_event` | Emulates mouse/keyboard/gamepad/action events into the running game instance. | `event_type`, `action_name`, `key_code`, `pressed`, `strength`, `duration_ms` |
-| **Asset Pipeline** | `query_project_resources` | Scans `res://` for textures, meshes, sounds, shaders, and metadata with UID resolution. | `search_path`, `type_filter`, `fuzzy_query`, `include_uid` |
-| **Asset Pipeline** | `instantiate_asset` | Creates an instance of a resource or scene and parents it with automatic collision and transform assignment. | `asset_path`, `parent_path`, `transform`, `collision_mode` |
+| Domain | Key Tools | Capabilities |
+| :--- | :--- | :--- |
+| **1. Scene Tree & Nodes (7)** | `scene_get_hierarchy`, `scene_instantiate_node`, `scene_remove_node`, `scene_reparent_node`, `scene_set_property`, `scene_get_property`, `scene_duplicate_node` | Recursive tree inspection, live instantiations, property mutations with UndoRedo. |
+| **2. Signals & Events (4)** | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` | Dynamic event binding, listener inspection, and synthetic signal dispatch. |
+| **3. Scripting & Reflection (4)** | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method` | Bytecode validation, engine class documentation reflection, AST symbol extraction, surgical method patching. |
+| **4. Vision & Render (4)** | `viewport_capture_frame`, `viewport_set_camera_transform`, `viewport_create_test_lab`, `viewport_toggle_debug_draw` | Multi-angle Base64 PNG viewport captures, isolated sandbox test labs, debug visualizers. |
+| **5. Physics & Navigation (6)** | `physics_raycast_query`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track` | Raycast collision queries, deterministic physics stepping, navmesh baking, animation playback. |
+| **6. Tilemaps & GridMaps (3)** | `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells` | 2D `TileMapLayer` atlas editing, bound calculation, 3D `GridMap` mesh placements. |
+| **7. Resources & Files (4)** | `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map` | `.tres` material/curve generation, UID resolution, recursive resource indexing. |
+| **8. Runtime & Debug (4)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Headless test harness, synthetic input simulation, callstack extraction, FPS/draw call telemetry. |
+| **9. Editor Lifecycle (4)** | `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Complete UndoRedo transaction management, disk saving, script reload. |
 
 ---
 

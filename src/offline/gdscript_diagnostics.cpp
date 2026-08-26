@@ -369,5 +369,142 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
     return result.str();
 }
 
+json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
+    std::vector<std::string> lines = strings::split(source_text, '\n');
+    json functions = json::array();
+    json variables = json::array();
+    json signals = json::array();
+    json enums = json::array();
+
+    static const std::regex func_regex(R"re(^\s*func\s+([a-zA-Z0-9_]+)\s*\((.*)\)(?:\s*->\s*([a-zA-Z0-9_]+))?)re");
+    static const std::regex var_regex(R"re(^\s*(@export\s+)?var\s+([a-zA-Z0-9_]+)(?:\s*:\s*([a-zA-Z0-9_]+))?)re");
+    static const std::regex sig_regex(R"re(^\s*signal\s+([a-zA-Z0-9_]+)(?:\((.*)\))?)re");
+    static const std::regex enum_regex(R"re(^\s*enum\s+([a-zA-Z0-9_]+))re");
+
+    for (size_t i = 0; i < lines.size(); ++i) {
+        std::string line = lines[i];
+        std::smatch match;
+        if (std::regex_search(line, match, func_regex)) {
+            functions.push_back({
+                {"name", match[1].str()},
+                {"parameters", match[2].str()},
+                {"return_type", match[3].matched ? match[3].str() : "void"},
+                {"line", i + 1}
+            });
+        } else if (std::regex_search(line, match, var_regex)) {
+            variables.push_back({
+                {"name", match[2].str()},
+                {"exported", match[1].matched},
+                {"type", match[3].matched ? match[3].str() : "Variant"},
+                {"line", i + 1}
+            });
+        } else if (std::regex_search(line, match, sig_regex)) {
+            signals.push_back({
+                {"name", match[1].str()},
+                {"arguments", match[2].matched ? match[2].str() : ""},
+                {"line", i + 1}
+            });
+        } else if (std::regex_search(line, match, enum_regex)) {
+            enums.push_back({
+                {"name", match[1].str()},
+                {"line", i + 1}
+            });
+        }
+    }
+
+    return {
+        {"functions", functions},
+        {"variables", variables},
+        {"signals", signals},
+        {"enums", enums}
+    };
+}
+
+json GDScriptDiagnostics::reflectClass(const std::string& class_name) {
+    static const std::unordered_map<std::string, json> class_db = {
+        {"CharacterBody3D", {
+            {"class_name", "CharacterBody3D"},
+            {"inherits", "PhysicsBody3D"},
+            {"description", "Specialized 3D physics body for character controllers moving via move_and_slide()."},
+            {"properties", {
+                {"velocity", {{"type", "Vector3"}, {"default", "Vector3(0, 0, 0)"}}},
+                {"motion_mode", {{"type", "MotionMode"}, {"default", "MOTION_MODE_GROUNDED"}}},
+                {"up_direction", {{"type", "Vector3"}, {"default", "Vector3(0, 1, 0)"}}},
+                {"floor_stop_on_slope", {{"type", "bool"}, {"default", "true"}}},
+                {"floor_max_angle", {{"type", "float"}, {"default", "0.785398"}}}
+            }},
+            {"methods", {
+                {"move_and_slide", {{"returns", "bool"}, {"args", json::array()}}},
+                {"is_on_floor", {{"returns", "bool"}, {"args", json::array()}}},
+                {"is_on_wall", {{"returns", "bool"}, {"args", json::array()}}},
+                {"is_on_ceiling", {{"returns", "bool"}, {"args", json::array()}}},
+                {"get_floor_normal", {{"returns", "Vector3"}, {"args", json::array()}}}
+            }},
+            {"signals", json::array()}
+        }},
+        {"NavigationAgent3D", {
+            {"class_name", "NavigationAgent3D"},
+            {"inherits", "Node"},
+            {"description", "3D pathfinding agent calculating movement routes along a NavigationMesh."},
+            {"properties", {
+                {"target_position", {{"type", "Vector3"}}},
+                {"path_desired_distance", {{"type", "float"}, {"default", "1.0"}}},
+                {"target_desired_distance", {{"type", "float"}, {"default", "1.0"}}},
+                {"avoidance_enabled", {{"type", "bool"}, {"default", "false"}}}
+            }},
+            {"methods", {
+                {"get_next_path_position", {{"returns", "Vector3"}, {"args", json::array()}}},
+                {"is_target_reached", {{"returns", "bool"}, {"args", json::array()}}},
+                {"is_navigation_finished", {{"returns", "bool"}, {"args", json::array()}}}
+            }},
+            {"signals", json::array({"path_changed", "target_reached", "navigation_finished"})}
+        }},
+        {"TileMapLayer", {
+            {"class_name", "TileMapLayer"},
+            {"inherits", "Node2D"},
+            {"description", "2D grid layer for placing tiles from a TileSet in Godot 4.3+."},
+            {"properties", {
+                {"tile_set", {{"type", "TileSet"}}},
+                {"enabled", {{"type", "bool"}, {"default", "true"}}}
+            }},
+            {"methods", {
+                {"set_cell", {{"returns", "void"}, {"args", json::array({"coords: Vector2i", "source_id: int", "atlas_coords: Vector2i", "alternative_tile: int"})}}},
+                {"get_cell_source_id", {{"returns", "int"}, {"args", json::array({"coords: Vector2i"})}}},
+                {"get_cell_atlas_coords", {{"returns", "Vector2i"}, {"args", json::array({"coords: Vector2i"})}}},
+                {"get_used_rect", {{"returns", "Rect2i"}, {"args", json::array()}}}
+            }},
+            {"signals", json::array()}
+        }},
+        {"GridMap", {
+            {"class_name", "GridMap"},
+            {"inherits", "Node3D"},
+            {"description", "3D tilemap node placing 3D MeshLibrary items on a uniform spatial grid."},
+            {"properties", {
+                {"mesh_library", {{"type", "MeshLibrary"}}},
+                {"cell_size", {{"type", "Vector3"}, {"default", "Vector3(2, 2, 2)"}}}
+            }},
+            {"methods", {
+                {"set_cell_item", {{"returns", "void"}, {"args", json::array({"position: Vector3i", "item: int", "orientation: int"})}}},
+                {"get_cell_item", {{"returns", "int"}, {"args", json::array({"position: Vector3i"})}}},
+                {"get_used_cells", {{"returns", "Array[Vector3i]"}, {"args", json::array()}}}
+            }},
+            {"signals", json::array({"cell_size_changed"})}
+        }}
+    };
+
+    if (class_db.count(class_name)) {
+        return class_db.at(class_name);
+    }
+
+    return {
+        {"class_name", class_name},
+        {"inherits", "Node"},
+        {"description", "Godot 4 engine class: " + class_name},
+        {"properties", json::object()},
+        {"methods", json::object()},
+        {"signals", json::array()}
+    };
+}
+
 } // namespace offline
 } // namespace didi
