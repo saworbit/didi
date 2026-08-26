@@ -241,12 +241,6 @@ public:
             CancelIoEx(curPipe, NULL);
         }
 
-        // Connect dummy client to unblock ConnectNamedPipe
-        HANDLE dummy = CreateFileA(m_pipeName.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
-        if (dummy != INVALID_HANDLE_VALUE) {
-            CloseHandle(dummy);
-        }
-
         if (m_thread.joinable()) {
             m_thread.join();
         }
@@ -268,6 +262,35 @@ public:
     }
 
 private:
+    bool readExactOverlapped(HANDLE pipe, void* buffer, DWORD bytesToRead, HANDLE hIoEvent) {
+        OVERLAPPED ov{};
+        ov.hEvent = hIoEvent;
+        ResetEvent(hIoEvent);
+
+        DWORD bytesRead = 0;
+        BOOL ok = ReadFile(pipe, buffer, bytesToRead, &bytesRead, &ov);
+        if (!ok) {
+            DWORD err = GetLastError();
+            if (err == ERROR_IO_PENDING) {
+                HANDLE events[2] = {m_stopEvent, hIoEvent};
+                DWORD waitRes = WaitForMultipleObjects(2, events, FALSE, INFINITE);
+                if (waitRes == WAIT_OBJECT_0) { // Stop signaled
+                    CancelIo(pipe);
+                    return false;
+                } else if (waitRes == WAIT_OBJECT_0 + 1) {
+                    if (!GetOverlappedResult(pipe, &ov, &bytesRead, FALSE) || bytesRead != bytesToRead) {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        return bytesRead == bytesToRead;
+    }
+
     void serverLoop() {
         SECURITY_ATTRIBUTES sa;
         sa.nLength = sizeof(SECURITY_ATTRIBUTES);
@@ -282,10 +305,12 @@ private:
             sa.lpSecurityDescriptor = pSD;
         }
 
+        HANDLE hIoEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
+
         while (m_running.load()) {
             HANDLE pipe = CreateNamedPipeA(
                 m_pipeName.c_str(),
-                PIPE_ACCESS_DUPLEX,
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
                 PIPE_UNLIMITED_INSTANCES,
                 64 * 1024,
@@ -300,7 +325,29 @@ private:
                 continue;
             }
 
-            BOOL connected = ConnectNamedPipe(pipe, NULL) ? TRUE : (GetLastError() == ERROR_PIPE_CONNECTED);
+            OVERLAPPED connectOv{};
+            connectOv.hEvent = hIoEvent;
+            ResetEvent(hIoEvent);
+
+            BOOL connected = ConnectNamedPipe(pipe, &connectOv);
+            if (!connected) {
+                DWORD err = GetLastError();
+                if (err == ERROR_IO_PENDING) {
+                    HANDLE events[2] = {m_stopEvent, hIoEvent};
+                    DWORD waitRes = WaitForMultipleObjects(2, events, FALSE, INFINITE);
+                    if (waitRes == WAIT_OBJECT_0) { // Stop signaled
+                        CancelIo(pipe);
+                        CloseHandle(pipe);
+                        break;
+                    } else if (waitRes == WAIT_OBJECT_0 + 1) {
+                        DWORD dummy = 0;
+                        connected = GetOverlappedResult(pipe, &connectOv, &dummy, FALSE);
+                    }
+                } else if (err == ERROR_PIPE_CONNECTED) {
+                    connected = TRUE;
+                }
+            }
+
             if (!connected || !m_running.load()) {
                 CloseHandle(pipe);
                 continue;
@@ -312,10 +359,8 @@ private:
             // Process requests on this connection
             while (m_running.load()) {
                 uint8_t len_buf[4] = {0};
-                DWORD bytes_read = 0;
-                BOOL read_res = ReadFile(pipe, len_buf, 4, &bytes_read, NULL);
-                if (!read_res || bytes_read != 4) {
-                    break; // Client disconnected or error
+                if (!readExactOverlapped(pipe, len_buf, 4, hIoEvent)) {
+                    break; // Disconnected or stop requested
                 }
 
                 uint32_t req_len = static_cast<uint32_t>(len_buf[0]) |
@@ -328,20 +373,9 @@ private:
                 }
 
                 std::vector<char> req_payload(req_len);
-                size_t total_read = 0;
-                bool read_ok = true;
-                while (total_read < req_len) {
-                    DWORD chunk = 0;
-                    read_res = ReadFile(pipe, req_payload.data() + total_read,
-                                        static_cast<DWORD>(req_len - total_read), &chunk, NULL);
-                    if (!read_res || chunk == 0) {
-                        read_ok = false;
-                        break;
-                    }
-                    total_read += chunk;
+                if (!readExactOverlapped(pipe, req_payload.data(), req_len, hIoEvent)) {
+                    break;
                 }
-
-                if (!read_ok) break;
 
                 json response_json;
                 try {
@@ -382,8 +416,14 @@ private:
 
                 std::vector<uint8_t> frame = frameMessage(response_json);
                 DWORD bytes_written = 0;
-                BOOL write_res = WriteFile(pipe, frame.data(), static_cast<DWORD>(frame.size()), &bytes_written, NULL);
-                if (!write_res || bytes_written != frame.size()) {
+                OVERLAPPED writeOv{};
+                writeOv.hEvent = hIoEvent;
+                ResetEvent(hIoEvent);
+                BOOL write_res = WriteFile(pipe, frame.data(), static_cast<DWORD>(frame.size()), &bytes_written, &writeOv);
+                if (!write_res && GetLastError() == ERROR_IO_PENDING) {
+                    GetOverlappedResult(pipe, &writeOv, &bytes_written, TRUE);
+                }
+                if (bytes_written != frame.size()) {
                     break;
                 }
             }
@@ -393,6 +433,10 @@ private:
             DisconnectNamedPipe(pipe);
             CloseHandle(pipe);
             DIDI_LOG_DEBUG("IPC_SERVER", "Client disconnected from IPC pipe");
+        }
+
+        if (hIoEvent) {
+            CloseHandle(hIoEvent);
         }
 
         if (pSD) {

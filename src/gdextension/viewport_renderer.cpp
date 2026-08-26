@@ -111,8 +111,10 @@ json ViewportRenderer::captureViewport(const json& params) {
         {"camera_identifier", cam_id},
         {"resolution", {{"width", width}, {"height", height}}},
         {"format", "image/png"},
+        {"source", "godot_subviewport_renderer"},
+        {"is_live_frame", true},
         {"image_base64", b64_png},
-        {"description", "Godot 4.x viewport frame captured successfully from camera '" + cam_id + "' (" + std::to_string(width) + "x" + std::to_string(height) + ")"}
+        {"description", "Godot 4.x SubViewport frame rendered from camera '" + cam_id + "' (" + std::to_string(width) + "x" + std::to_string(height) + ")"}
     };
 }
 

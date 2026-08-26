@@ -38,14 +38,7 @@ CallToolResult handleTilemapGetUsedRect(const json& args, std::shared_ptr<ipc::I
         return CallToolResult::error("Failed to query TileMap used rectangle: " + res.error().message);
     }
 
-    json offline_rect = {
-        {"status", "offline"},
-        {"tilemap_path", tilemap_path},
-        {"position", {{"x", 0}, {"y", 0}}},
-        {"size", {{"width", 32}, {"height", 32}}},
-        {"message", "Godot Editor is offline."}
-    };
-    return CallToolResult::successJson(offline_rect);
+    return CallToolResult::error("Godot Editor is offline. Launch Godot Editor with Didi plugin to inspect live TileMapLayer used rectangles.");
 }
 
 CallToolResult handleGridmapSetCells(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

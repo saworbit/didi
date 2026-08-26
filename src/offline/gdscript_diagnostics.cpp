@@ -422,6 +422,40 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
 
 json GDScriptDiagnostics::reflectClass(const std::string& class_name) {
     static const std::unordered_map<std::string, json> class_db = {
+        {"Node", {
+            {"class_name", "Node"},
+            {"inherits", "Object"},
+            {"description", "Base class for all scene tree nodes in Godot."},
+            {"properties", {
+                {"name", {{"type", "StringName"}}},
+                {"process_mode", {{"type", "ProcessMode"}, {"default", "PROCESS_MODE_INHERIT"}}}
+            }},
+            {"methods", {
+                {"add_child", {{"returns", "void"}, {"args", json::array({"node: Node", "force_readable_name: bool = false", "@unnamed: InternalMode = 0"})}}},
+                {"remove_child", {{"returns", "void"}, {"args", json::array({"node: Node"})}}},
+                {"get_node", {{"returns", "Node"}, {"args", json::array({"path: NodePath"})}}},
+                {"queue_free", {{"returns", "void"}, {"args", json::array()}}}
+            }},
+            {"signals", json::array({"ready", "tree_entered", "tree_exited", "child_entered_tree", "child_exiting_tree"})}
+        }},
+        {"Node3D", {
+            {"class_name", "Node3D"},
+            {"inherits", "Node"},
+            {"description", "Most basic 3D game object, with a 3D Transform and the ability to be invisible."},
+            {"properties", {
+                {"position", {{"type", "Vector3"}, {"default", "Vector3(0, 0, 0)"}}},
+                {"rotation_degrees", {{"type", "Vector3"}, {"default", "Vector3(0, 0, 0)"}}},
+                {"scale", {{"type", "Vector3"}, {"default", "Vector3(1, 1, 1)"}}},
+                {"visible", {{"type", "bool"}, {"default", "true"}}},
+                {"transform", {{"type", "Transform3D"}}}
+            }},
+            {"methods", {
+                {"look_at", {{"returns", "void"}, {"args", json::array({"target: Vector3", "up: Vector3 = Vector3(0, 1, 0)"})}}},
+                {"translate", {{"returns", "void"}, {"args", json::array({"offset: Vector3"})}}},
+                {"rotate_y", {{"returns", "void"}, {"args", json::array({"angle: float"})}}}
+            }},
+            {"signals", json::array({"visibility_changed"})}
+        }},
         {"CharacterBody3D", {
             {"class_name", "CharacterBody3D"},
             {"inherits", "PhysicsBody3D"},
@@ -439,6 +473,38 @@ json GDScriptDiagnostics::reflectClass(const std::string& class_name) {
                 {"is_on_wall", {{"returns", "bool"}, {"args", json::array()}}},
                 {"is_on_ceiling", {{"returns", "bool"}, {"args", json::array()}}},
                 {"get_floor_normal", {{"returns", "Vector3"}, {"args", json::array()}}}
+            }},
+            {"signals", json::array()}
+        }},
+        {"CharacterBody2D", {
+            {"class_name", "CharacterBody2D"},
+            {"inherits", "PhysicsBody2D"},
+            {"description", "Specialized 2D physics body for 2D character controllers moving via move_and_slide()."},
+            {"properties", {
+                {"velocity", {{"type", "Vector2"}, {"default", "Vector2(0, 0)"}}},
+                {"motion_mode", {{"type", "MotionMode"}, {"default", "MOTION_MODE_GROUNDED"}}}
+            }},
+            {"methods", {
+                {"move_and_slide", {{"returns", "bool"}, {"args", json::array()}}},
+                {"is_on_floor", {{"returns", "bool"}, {"args", json::array()}}},
+                {"is_on_wall", {{"returns", "bool"}, {"args", json::array()}}}
+            }},
+            {"signals", json::array()}
+        }},
+        {"Camera3D", {
+            {"class_name", "Camera3D"},
+            {"inherits", "Node3D"},
+            {"description", "Camera node that displays the 3D scene."},
+            {"properties", {
+                {"current", {{"type", "bool"}, {"default", "false"}}},
+                {"fov", {{"type", "float"}, {"default", "75.0"}}},
+                {"near", {{"type", "float"}, {"default", "0.05"}}},
+                {"far", {{"type", "float"}, {"default", "4000.0"}}}
+            }},
+            {"methods", {
+                {"project_ray_origin", {{"returns", "Vector3"}, {"args", json::array({"screen_point: Vector2"})}}},
+                {"project_ray_normal", {{"returns", "Vector3"}, {"args", json::array({"screen_point: Vector2"})}}},
+                {"make_current", {{"returns", "void"}, {"args", json::array()}}}
             }},
             {"signals", json::array()}
         }},
@@ -489,17 +555,91 @@ json GDScriptDiagnostics::reflectClass(const std::string& class_name) {
                 {"get_used_cells", {{"returns", "Array[Vector3i]"}, {"args", json::array()}}}
             }},
             {"signals", json::array({"cell_size_changed"})}
+        }},
+        {"AnimationPlayer", {
+            {"class_name", "AnimationPlayer"},
+            {"inherits", "Node"},
+            {"description", "Player for animation resources controlling node properties over time."},
+            {"properties", {
+                {"current_animation", {{"type", "String"}}},
+                {"speed_scale", {{"type", "float"}, {"default", "1.0"}}},
+                {"autoplay", {{"type", "String"}}}
+            }},
+            {"methods", {
+                {"play", {{"returns", "void"}, {"args", json::array({"name: StringName", "custom_blend: float = -1", "custom_speed: float = 1.0"})}}},
+                {"stop", {{"returns", "void"}, {"args", json::array({"keep_state: bool = false"})}}},
+                {"pause", {{"returns", "void"}, {"args", json::array()}}},
+                {"has_animation", {{"returns", "bool"}, {"args", json::array({"name: StringName"})}}}
+            }},
+            {"signals", json::array({"animation_finished", "animation_started", "animation_changed"})}
+        }},
+        {"AudioStreamPlayer", {
+            {"class_name", "AudioStreamPlayer"},
+            {"inherits", "Node"},
+            {"description", "Plays non-positional audio streams."},
+            {"properties", {
+                {"stream", {{"type", "AudioStream"}}},
+                {"volume_db", {{"type", "float"}, {"default", "0.0"}}},
+                {"autoplay", {{"type", "bool"}, {"default", "false"}}}
+            }},
+            {"methods", {
+                {"play", {{"returns", "void"}, {"args", json::array({"from_position: float = 0.0"})}}},
+                {"stop", {{"returns", "void"}, {"args", json::array()}}}
+            }},
+            {"signals", json::array({"finished"})}
+        }},
+        {"Timer", {
+            {"class_name", "Timer"},
+            {"inherits", "Node"},
+            {"description", "Countdown timer node for recurring or one-shot time events."},
+            {"properties", {
+                {"wait_time", {{"type", "float"}, {"default", "1.0"}}},
+                {"one_shot", {{"type", "bool"}, {"default", "false"}}},
+                {"autostart", {{"type", "bool"}, {"default", "false"}}}
+            }},
+            {"methods", {
+                {"start", {{"returns", "void"}, {"args", json::array({"time_sec: float = -1"})}}},
+                {"stop", {{"returns", "void"}, {"args", json::array()}}}
+            }},
+            {"signals", json::array({"timeout"})}
+        }},
+        {"CollisionShape3D", {
+            {"class_name", "CollisionShape3D"},
+            {"inherits", "Node3D"},
+            {"description", "Node that provides a Shape3D to a CollisionObject3D parent."},
+            {"properties", {
+                {"shape", {{"type", "Shape3D"}}},
+                {"disabled", {{"type", "bool"}, {"default", "false"}}}
+            }},
+            {"methods", json::object()},
+            {"signals", json::array()}
+        }},
+        {"StandardMaterial3D", {
+            {"class_name", "StandardMaterial3D"},
+            {"inherits", "BaseMaterial3D"},
+            {"description", "PBR 3D material with albedo, metallic, roughness, and normal maps."},
+            {"properties", {
+                {"albedo_color", {{"type", "Color"}, {"default", "Color(1, 1, 1, 1)"}}},
+                {"metallic", {{"type", "float"}, {"default", "0.0"}}},
+                {"roughness", {{"type", "float"}, {"default", "1.0"}}},
+                {"emission_enabled", {{"type", "bool"}, {"default", "false"}}}
+            }},
+            {"methods", json::object()},
+            {"signals", json::array()}
         }}
     };
 
     if (class_db.count(class_name)) {
-        return class_db.at(class_name);
+        json res = class_db.at(class_name);
+        res["is_known_class"] = true;
+        return res;
     }
 
     return {
         {"class_name", class_name},
         {"inherits", "Node"},
-        {"description", "Godot 4 engine class: " + class_name},
+        {"is_known_class", false},
+        {"description", "Godot 4 class: " + class_name + " (not in offline snapshot; launch Godot with Didi plugin for live engine reflection)."},
         {"properties", json::object()},
         {"methods", json::object()},
         {"signals", json::array()}

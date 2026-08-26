@@ -57,17 +57,10 @@ CallToolResult handleRuntimeReadProfiler(const json& args, std::shared_ptr<ipc::
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
+        return CallToolResult::error("Failed to read profiler telemetry from Godot: " + res.error().message);
     }
 
-    json offline_prof = {
-        {"status", "offline"},
-        {"frame_time_ms", 16.66},
-        {"fps", 60.0},
-        {"draw_calls", 12},
-        {"physics_tick_ms", 1.2},
-        {"message", "Godot Editor is offline. Standard baseline telemetry reported."}
-    };
-    return CallToolResult::successJson(offline_prof);
+    return CallToolResult::error("Godot Editor / game instance is offline. Launch Godot to inspect live profiler metrics (FPS, frame time, draw calls).");
 }
 
 } // namespace mcp

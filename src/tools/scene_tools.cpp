@@ -58,24 +58,132 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
     }
 
     if (file.is_open()) {
-        json nodes = json::array();
+        struct NodeEntry {
+            std::string name;
+            std::string type;
+            std::string parent;
+            std::string instance_path;
+            json properties = json::object();
+            json transform = json::object();
+        };
+
+        std::vector<NodeEntry> nodes;
+        std::unordered_map<std::string, std::string> ext_resources;
+
+        static const std::regex ext_res_regex(R"re(\[ext_resource type="([^"]+)" path="([^"]+)" id="([^"]+)"\])re");
+        static const std::regex node_regex(R"re(\[node name="([^"]+)"(?:\s+type="([^"]+)")?(?:\s+parent="([^"]+)")?(?:\s+instance=ExtResource\("([^"]+)"\))?\])re");
+
         std::string line;
-        static const std::regex node_regex(R"re(\[node name="([^"]+)"(?:\s+type="([^"]+)")?(?:\s+parent="([^"]+)")?)re");
+        NodeEntry* current_node = nullptr;
+
         while (std::getline(file, line)) {
-            std::smatch match;
-            if (std::regex_search(line, match, node_regex)) {
-                json n = {
-                    {"name", match[1].str()},
-                    {"type", match[2].matched ? match[2].str() : "Instance"},
-                    {"parent", match.size() > 3 && match[3].matched ? match[3].str() : "."}
-                };
-                nodes.push_back(n);
+            std::string trimmed = strings::trim(line);
+            if (trimmed.empty()) continue;
+
+            std::smatch ext_match;
+            if (std::regex_match(trimmed, ext_match, ext_res_regex)) {
+                ext_resources[ext_match[3].str()] = ext_match[2].str();
+                continue;
+            }
+
+            std::smatch node_match;
+            if (std::regex_match(trimmed, node_match, node_regex)) {
+                NodeEntry ne;
+                ne.name = node_match[1].str();
+                ne.type = node_match[2].matched ? node_match[2].str() : "Instance";
+                ne.parent = node_match[3].matched ? node_match[3].str() : "";
+                if (node_match[4].matched) {
+                    std::string ext_id = node_match[4].str();
+                    if (ext_resources.count(ext_id)) {
+                        ne.instance_path = ext_resources[ext_id];
+                    }
+                }
+                nodes.push_back(ne);
+                current_node = &nodes.back();
+                continue;
+            }
+
+            if (current_node && trimmed.find('=') != std::string::npos && !strings::startsWith(trimmed, "[")) {
+                auto eq_pos = trimmed.find('=');
+                std::string key = strings::trim(trimmed.substr(0, eq_pos));
+                std::string val = strings::trim(trimmed.substr(eq_pos + 1));
+                if (key == "transform") {
+                    current_node->transform = {{"raw", val}};
+                } else if (args.value("include_properties", true)) {
+                    current_node->properties[key] = val;
+                }
             }
         }
+
+        if (nodes.empty()) {
+            json empty_tree = {
+                {"name", "Root"},
+                {"type", "Node"},
+                {"path", "/root"},
+                {"children", json::array()}
+            };
+            return CallToolResult::successJson({{"source", "parsed_tscn_file"}, {"file_path", root}, {"scene_tree", empty_tree}});
+        }
+
+        std::unordered_map<int, std::vector<int>> children_by_index;
+        std::unordered_map<std::string, int> path_to_index;
+
+        std::string root_name = nodes[0].name;
+        path_to_index["."] = 0;
+        path_to_index[root_name] = 0;
+
+        std::vector<std::string> node_full_paths(nodes.size());
+        node_full_paths[0] = "/root/" + root_name;
+
+        for (size_t i = 1; i < nodes.size(); ++i) {
+            std::string p = nodes[i].parent;
+            int parent_idx = 0;
+            if (p == "." || p.empty()) {
+                parent_idx = 0;
+                node_full_paths[i] = node_full_paths[0] + "/" + nodes[i].name;
+                path_to_index[nodes[i].name] = static_cast<int>(i);
+            } else {
+                if (path_to_index.count(p)) {
+                    parent_idx = path_to_index[p];
+                } else {
+                    parent_idx = 0;
+                }
+                node_full_paths[i] = node_full_paths[parent_idx] + "/" + nodes[i].name;
+                path_to_index[p + "/" + nodes[i].name] = static_cast<int>(i);
+                path_to_index[nodes[i].name] = static_cast<int>(i);
+            }
+            children_by_index[parent_idx].push_back(static_cast<int>(i));
+        }
+
+        int max_depth = args.value("max_depth", 10);
+        std::function<json(int, int)> buildNode = [&](int idx, int depth) -> json {
+            const auto& ne = nodes[idx];
+            json n = {
+                {"name", ne.name},
+                {"type", ne.type},
+                {"path", node_full_paths[idx]},
+                {"properties", ne.properties},
+                {"children", json::array()}
+            };
+            if (!ne.instance_path.empty()) {
+                n["instance"] = ne.instance_path;
+            }
+            if (!ne.transform.empty()) {
+                n["transform"] = ne.transform;
+            }
+            if (depth < max_depth && children_by_index.count(idx)) {
+                for (int child_idx : children_by_index[idx]) {
+                    n["children"].push_back(buildNode(child_idx, depth + 1));
+                }
+            }
+            return n;
+        };
+
+        json tree = buildNode(0, 0);
         json tree_res = {
             {"source", "parsed_tscn_file"},
             {"file_path", root},
-            {"nodes", nodes}
+            {"scene_tree", tree}
         };
         return CallToolResult::successJson(tree_res);
     }

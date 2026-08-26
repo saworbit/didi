@@ -29,7 +29,7 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--version" || arg == "-v") {
-            std::cout << "didi (godot-mcp-native) v1.0.0" << std::endl;
+            std::cout << "didi (godot-mcp-native) v1.1.0" << std::endl;
             return 0;
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "Didi - Native Model Context Protocol (MCP) Server for Godot 4.x\n\n"

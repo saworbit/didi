@@ -56,15 +56,47 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     }
 
     // Offline generator for common .tres resources
+    namespace fs = std::filesystem;
     std::string disk_path = save_path;
     if (strings::startsWith(disk_path, "res://")) disk_path = disk_path.substr(6);
+
+    fs::path target_p(disk_path);
+    fs::path current_root = fs::current_path();
+    try {
+        auto canon_root = fs::weakly_canonical(current_root);
+        auto canon_target = fs::weakly_canonical(current_root / target_p);
+        auto [root_end, _] = std::mismatch(canon_root.begin(), canon_root.end(), canon_target.begin());
+        if (root_end != canon_root.end()) {
+            return CallToolResult::error("Access denied: save_path is outside the project root directory.");
+        }
+        if (target_p.has_parent_path()) {
+            fs::create_directories(target_p.parent_path());
+        }
+    } catch (const std::exception& e) {
+        return CallToolResult::error(std::string("Path resolution error: ") + e.what());
+    }
 
     std::ofstream out(disk_path);
     if (out.is_open()) {
         out << "[gd_resource type=\"" << resource_type << "\" format=3]\n\n"
             << "[resource]\n";
         for (auto it = properties.begin(); it != properties.end(); ++it) {
-            out << it.key() << " = " << it.value().dump() << "\n";
+            out << it.key() << " = ";
+            if (it.value().is_string()) {
+                out << "\"" << it.value().get<std::string>() << "\"\n";
+            } else if (it.value().is_boolean()) {
+                out << (it.value().get<bool>() ? "true" : "false") << "\n";
+            } else if (it.value().is_number()) {
+                out << it.value().dump() << "\n";
+            } else if (it.value().is_object() && it.value().contains("x") && it.value().contains("y")) {
+                if (it.value().contains("z")) {
+                    out << "Vector3(" << it.value()["x"] << ", " << it.value()["y"] << ", " << it.value()["z"] << ")\n";
+                } else {
+                    out << "Vector2(" << it.value()["x"] << ", " << it.value()["y"] << ")\n";
+                }
+            } else {
+                out << it.value().dump() << "\n";
+            }
         }
         out.close();
         return CallToolResult::successJson({

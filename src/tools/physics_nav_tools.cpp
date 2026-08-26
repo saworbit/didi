@@ -18,22 +18,10 @@ CallToolResult handlePhysicsRaycastQuery(const json& args, std::shared_ptr<ipc::
         return CallToolResult::error("Physics raycast query failed: " + res.error().message);
     }
 
-    // Offline mock response
-    json offline_res = {
-        {"status", "offline"},
-        {"hit", false},
-        {"collider", nullptr},
-        {"position", nullptr},
-        {"normal", nullptr},
-        {"message", "Godot Editor is offline. Launch Godot with Didi plugin to perform live 2D/3D physics raycasting."}
-    };
-    return CallToolResult::successJson(offline_res);
+    return CallToolResult::error("Godot Editor is offline. Launch Godot Editor or game instance with Didi plugin to query live 2D/3D physics raycasts.");
 }
 
 CallToolResult handlePhysicsSimulateStep(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    int steps = args.value("steps", 1);
-    float delta = args.value("delta", 0.0166667f);
-
     if (ipc && ipc->isConnected()) {
         auto res = ipc->sendRequest("physics.simulateStep", args);
         if (res.isOk()) {
@@ -46,8 +34,6 @@ CallToolResult handlePhysicsSimulateStep(const json& args, std::shared_ptr<ipc::
 }
 
 CallToolResult handleNavBakeMesh(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    std::string nav_node = args.value("nav_node_path", "");
-
     if (ipc && ipc->isConnected()) {
         auto res = ipc->sendRequest("nav.bakeMesh", args, 30000);
         if (res.isOk()) {
@@ -72,17 +58,7 @@ CallToolResult handleNavQueryPath(const json& args, std::shared_ptr<ipc::IIpcCli
         return CallToolResult::error("Navigation path query failed: " + res.error().message);
     }
 
-    json offline_nav = {
-        {"status", "offline"},
-        {"points", json::array({
-            args["start_point"],
-            args["end_point"]
-        })},
-        {"path_length", 0.0},
-        {"walkable", true},
-        {"message", "Godot Editor is offline. Straight-line approximate path returned."}
-    };
-    return CallToolResult::successJson(offline_nav);
+    return CallToolResult::error("Godot Editor is offline. Launch Godot Editor with Didi plugin to query live NavigationMesh paths.");
 }
 
 CallToolResult handleAnimListTracks(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -99,13 +75,7 @@ CallToolResult handleAnimListTracks(const json& args, std::shared_ptr<ipc::IIpcC
         return CallToolResult::error("Failed to query animation tracks: " + res.error().message);
     }
 
-    json offline_anim = {
-        {"status", "offline"},
-        {"animation_player", player_path},
-        {"animations", json::array({"idle", "walk", "run", "jump"})},
-        {"message", "Godot Editor is offline. Standard animation tracks listed."}
-    };
-    return CallToolResult::successJson(offline_anim);
+    return CallToolResult::error("Godot Editor is offline. Launch Godot to inspect live AnimationPlayer tracks and keyframes.");
 }
 
 CallToolResult handleAnimPlayTrack(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

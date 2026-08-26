@@ -78,15 +78,19 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
         cmd_builder << " --headless";
     }
 
+    // Filter shell metacharacters
+    auto is_safe_arg = [](const std::string& s) {
+        return s.find_first_of("&|;`$\\<>\r\n\"'") == std::string::npos;
+    };
+
     if (!scene_path.empty()) {
-        // Sanitize scene_path to prevent injection
-        if (scene_path.find('\"') == std::string::npos && scene_path.find('\n') == std::string::npos) {
+        if (is_safe_arg(scene_path)) {
             cmd_builder << " \"" << scene_path << "\"";
         }
     }
 
     for (const auto& arg : extra_args) {
-        if (arg.find('\"') != std::string::npos || arg.find('\n') != std::string::npos) {
+        if (!is_safe_arg(arg)) {
             continue; // Skip dangerous arguments
         }
         if (arg.find(' ') != std::string::npos) {
@@ -101,9 +105,6 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
 
 #if defined(_WIN32)
     std::string win_command_line = command_line;
-    if (strings::endsWith(godot_exe, ".cmd") || strings::endsWith(godot_exe, ".bat") || godot_exe == "godot") {
-        win_command_line = "cmd.exe /c \"" + command_line + "\"";
-    }
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(SECURITY_ATTRIBUTES);
     sa.bInheritHandle = TRUE;
