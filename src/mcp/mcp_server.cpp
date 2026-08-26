@@ -91,6 +91,10 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         return JsonRpcResponse::makeSuccess(req.id, json::object());
     }
 
+    if (!m_initialized) {
+        return JsonRpcResponse::makeError(req.id, static_cast<JsonRpcErrorCode>(-32002), "Server not initialized. Must call 'initialize' first.");
+    }
+
     // Tools
     if (req.method == "tools/list") {
         auto tools = ToolRegistry::instance().listTools();
@@ -182,12 +186,18 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
 }
 
 void McpServer::runStdio() {
+#if defined(_WIN32)
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
+
     m_running.store(true);
     DIDI_LOG_INFO("MCP_SERVER", "Starting Didi MCP server over stdio...");
 
     // Try background initial connection to Godot GDExtension Named Pipe
     if (m_ipcClient) {
-        if (m_ipcClient->connect(ipc::kDefaultPipeName, 500)) {
+        std::string pipe_name = ipc::resolvePipeName();
+        if (m_ipcClient->connect(pipe_name, 500)) {
             DIDI_LOG_INFO("MCP_SERVER", "Connected to active Godot Editor GDExtension IPC pipe");
         } else {
             DIDI_LOG_INFO("MCP_SERVER", "Godot Editor IPC pipe not detected; running with offline fallback engine");
@@ -212,7 +222,12 @@ void McpServer::runStdio() {
                         }
                         std::vector<char> buffer(content_len);
                         std::cin.read(buffer.data(), content_len);
-                        trimmed = std::string(buffer.data(), buffer.size());
+                        std::streamsize bytes_read = std::cin.gcount();
+                        if (bytes_read != content_len) {
+                            DIDI_LOG_WARN("MCP_SERVER", "Short read on Content-Length payload");
+                            continue;
+                        }
+                        trimmed = std::string(buffer.data(), static_cast<size_t>(bytes_read));
                     }
                 } catch (const std::exception& e) {
                     DIDI_LOG_WARN("MCP_SERVER", "Invalid Content-Length header: ", e.what());

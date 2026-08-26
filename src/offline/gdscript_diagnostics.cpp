@@ -202,6 +202,12 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const s
         actual_path = actual_path.substr(6);
     }
 
+    if (actual_path.find('\"') != std::string::npos || actual_path.find(';') != std::string::npos ||
+        actual_path.find('&') != std::string::npos || actual_path.find('|') != std::string::npos ||
+        actual_path.find('`') != std::string::npos || actual_path.find('$') != std::string::npos) {
+        return diags; // Prevent command injection
+    }
+
     if (!fs::exists(actual_path)) {
         if (fs::exists("demo/" + actual_path)) {
             actual_path = "demo/" + actual_path;

@@ -44,10 +44,11 @@ Administrators can configure Didi globally or per-service using standard environ
 
 | Variable | Values | Default | Purpose |
 | :--- | :--- | :--- | :--- |
-| `GODOT_BIN` | File path | Auto-detected | Path to the Godot binary (e.g. `C:\Godot\Godot_v4.7.2-stable_win64_console.exe` or `/usr/bin/godot`) |
-| `GODOT_PATH` | Directory path | Auto-detected | Directory containing Godot executable |
+| `GODOT_BIN` | File path | Auto-detected | Path to the Godot binary executable (e.g. `C:\Godot\Godot_v4.7.2-stable_win64_console.exe` or `/usr/bin/godot`) |
+| `GODOT_PATH` | Directory path | Auto-detected | Directory or path containing Godot executable |
+| `DIDI_PROJECT_ROOT` | Directory path | Current directory | Root folder of the target Godot project (e.g. `D:/my_game`) |
 | `DIDI_LOG_LEVEL` | `DEBUG`, `INFO`, `WARN`, `ERROR`, `NONE` | `INFO` | Stderr logging verbosity |
-| `DIDI_PIPE_NAME` | Pipe / Socket Path | Default | Override Named Pipe / UNIX socket path |
+| `DIDI_PIPE_NAME` | Pipe / Socket Path | Default | Override Named Pipe / UNIX domain socket path |
 
 ---
 

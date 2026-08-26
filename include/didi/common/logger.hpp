@@ -53,14 +53,14 @@ private:
 
     template <typename... Args>
     void logFormat(LogLevel level, std::string_view tag, Args&&... args) {
-        if (level < m_level) return;
+        if (level < m_level.load(std::memory_order_relaxed)) return;
         std::ostringstream ss;
         (ss << ... << args);
         log(level, tag, ss.str());
     }
 
-    LogLevel m_level{LogLevel::Info};
-    std::mutex m_mutex;
+    std::atomic<LogLevel> m_level{LogLevel::Info};
+    mutable std::mutex m_mutex;
 };
 
 #define DIDI_LOG_DEBUG(tag, ...) ::didi::Logger::instance().debug(tag, __VA_ARGS__)

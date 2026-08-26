@@ -22,10 +22,30 @@ namespace offline {
 
 std::string resolveGodotExecutable() {
     const char* env_bin = std::getenv("GODOT_BIN");
-    if (env_bin && std::filesystem::exists(env_bin)) return std::string(env_bin);
+    if (env_bin && std::filesystem::exists(env_bin) && !std::filesystem::is_directory(env_bin)) {
+        return std::string(env_bin);
+    }
 
     const char* env_path = std::getenv("GODOT_PATH");
-    if (env_path && std::filesystem::exists(env_path)) return std::string(env_path);
+    if (env_path && std::filesystem::exists(env_path)) {
+        if (std::filesystem::is_directory(env_path)) {
+            static const std::vector<std::string> dir_candidates = {
+                "Godot_v4.7.2-stable_win64_console.exe",
+                "Godot_v4.7.2-stable_win64.exe",
+                "godot.exe",
+                "godot.cmd",
+                "godot"
+            };
+            for (const auto& cand : dir_candidates) {
+                auto p = std::filesystem::path(env_path) / cand;
+                if (std::filesystem::exists(p)) {
+                    return p.string();
+                }
+            }
+        } else {
+            return std::string(env_path);
+        }
+    }
 
 #if defined(_WIN32)
     static const std::vector<std::string> known_locations = {
@@ -59,11 +79,21 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
     }
 
     if (!scene_path.empty()) {
-        cmd_builder << " \"" << scene_path << "\"";
+        // Sanitize scene_path to prevent injection
+        if (scene_path.find('\"') == std::string::npos && scene_path.find('\n') == std::string::npos) {
+            cmd_builder << " \"" << scene_path << "\"";
+        }
     }
 
     for (const auto& arg : extra_args) {
-        cmd_builder << " " << arg;
+        if (arg.find('\"') != std::string::npos || arg.find('\n') != std::string::npos) {
+            continue; // Skip dangerous arguments
+        }
+        if (arg.find(' ') != std::string::npos) {
+            cmd_builder << " \"" << arg << "\"";
+        } else {
+            cmd_builder << " " << arg;
+        }
     }
 
     std::string command_line = cmd_builder.str();

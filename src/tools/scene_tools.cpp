@@ -7,6 +7,32 @@
 namespace didi {
 namespace mcp {
 
+static std::string findProjectMainScene() {
+    for (const auto& p : {"project.godot", "demo/project.godot"}) {
+        std::ifstream cfg(p);
+        if (cfg.is_open()) {
+            std::string line;
+            while (std::getline(cfg, line)) {
+                if (line.find("run/main_scene=\"") != std::string::npos) {
+                    auto start = line.find('\"') + 1;
+                    auto end = line.rfind('\"');
+                    if (start < end) {
+                        return line.substr(start, end - start);
+                    }
+                }
+            }
+        }
+    }
+    try {
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(".")) {
+            if (entry.path().extension() == ".tscn") {
+                return "res://" + entry.path().lexically_relative(".").generic_string();
+            }
+        }
+    } catch (...) {}
+    return "res://scenes/main.tscn";
+}
+
 CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (ipc && ipc->isConnected()) {
         auto res = ipc->sendRequest("scene.getHierarchy", args);
@@ -16,9 +42,11 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
         return CallToolResult::error("Failed to query scene hierarchy from Godot: " + res.error().message);
     }
 
-    // Offline mode: attempt to parse root .tscn file if specified in args or default scene
+    // Offline mode: resolve scene file path if root is a node path (/root) or empty
     std::string root = args.value("root_path", "");
-    if (strings::endsWith(root, ".tscn")) {
+    if (root.empty() || root == "/root" || root == "." || !strings::endsWith(root, ".tscn")) {
+        root = findProjectMainScene();
+    }
         std::string disk_path = root;
         if (strings::startsWith(disk_path, "res://")) disk_path = disk_path.substr(6);
 
@@ -50,14 +78,13 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
             };
             return CallToolResult::successJson(tree_res);
         }
-    }
 
-    json offline_msg = {
-        {"status", "offline"},
-        {"message", "Godot Editor is offline. Connect Godot Editor with Didi GDExtension to inspect live in-memory SceneTree, or provide a '.tscn' path in root_path."}
-    };
-    return CallToolResult::error("Godot Editor is offline. " + offline_msg.dump(2));
-}
+        json offline_msg = {
+            {"status", "offline"},
+            {"message", "Godot Editor is offline. Connect Godot Editor with Didi GDExtension to inspect live in-memory SceneTree, or provide a '.tscn' path in root_path."}
+        };
+        return CallToolResult::error("Godot Editor is offline. " + offline_msg.dump(2));
+    }
 
 CallToolResult handleMutateSceneTree(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     std::string action = args.value("action", "");

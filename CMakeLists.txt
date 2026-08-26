@@ -41,8 +41,11 @@ set(CORE_SOURCES
     src/tools/asset_tools.cpp
 )
 
+find_package(Threads REQUIRED)
+
 add_library(didi_core STATIC ${CORE_SOURCES})
 set_target_properties(didi_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(didi_core PUBLIC Threads::Threads)
 
 # 1. Standalone MCP Server Executable (didi.exe)
 add_executable(didi src/standalone/main.cpp)

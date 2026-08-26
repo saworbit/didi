@@ -22,16 +22,15 @@ Logger::Logger() {
 }
 
 void Logger::setLevel(LogLevel level) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_level = level;
+    m_level.store(level, std::memory_order_relaxed);
 }
 
 LogLevel Logger::getLevel() const {
-    return m_level;
+    return m_level.load(std::memory_order_relaxed);
 }
 
 void Logger::log(LogLevel level, std::string_view tag, std::string_view message) {
-    if (level < m_level) return;
+    if (level < m_level.load(std::memory_order_relaxed)) return;
 
     auto now = std::chrono::system_clock::now();
     auto in_time_t = std::chrono::system_clock::to_time_t(now);

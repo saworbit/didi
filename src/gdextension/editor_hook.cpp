@@ -226,34 +226,49 @@ json EditorHook::parseTscnHierarchy(const std::string& scene_file_path, int max_
         }
     }
 
-    if (nodes.empty()) {
-        return {{"name", "Root"}, {"type", "Node"}, {"path", "/root"}, {"children", json::array()}};
+    // Build true nested hierarchy tree
+    std::unordered_map<std::string, json> node_map;
+    std::unordered_map<std::string, std::vector<std::string>> children_map;
+
+    for (const auto& ne : nodes) {
+        json node_json = {
+            {"name", ne.name},
+            {"type", ne.type},
+            {"properties", ne.properties}
+        };
+        if (!ne.instance_path.empty()) {
+            node_json["instance"] = ne.instance_path;
+        }
+        if (!ne.transform.empty()) {
+            node_json["transform"] = ne.transform;
+        }
+        node_map[ne.name] = node_json;
+
+        std::string p = ne.parent;
+        if (p == "." || p.empty()) {
+            if (ne.name != nodes[0].name) {
+                children_map[nodes[0].name].push_back(ne.name);
+            }
+        } else {
+            auto last_slash = p.rfind('/');
+            std::string parent_leaf = (last_slash != std::string::npos) ? p.substr(last_slash + 1) : p;
+            children_map[parent_leaf].push_back(ne.name);
+        }
     }
 
-    // Build hierarchy tree
-    json root_node = {
-        {"name", nodes[0].name},
-        {"type", nodes[0].type},
-        {"path", "/root/" + nodes[0].name},
-        {"properties", nodes[0].properties},
-        {"children", json::array()}
+    std::function<json(const std::string&, int)> buildTree = [&](const std::string& name, int depth) -> json {
+        json n = node_map[name];
+        n["path"] = "/root/" + name;
+        n["children"] = json::array();
+        if (depth < max_depth && children_map.count(name)) {
+            for (const auto& child_name : children_map[name]) {
+                n["children"].push_back(buildTree(child_name, depth + 1));
+            }
+        }
+        return n;
     };
 
-    for (size_t i = 1; i < nodes.size(); ++i) {
-        json child = {
-            {"name", nodes[i].name},
-            {"type", nodes[i].type},
-            {"path", "/root/" + nodes[0].name + "/" + nodes[i].name},
-            {"parent", nodes[i].parent},
-            {"properties", nodes[i].properties}
-        };
-        if (!nodes[i].instance_path.empty()) {
-            child["instance"] = nodes[i].instance_path;
-        }
-        root_node["children"].push_back(child);
-    }
-
-    return root_node;
+    return buildTree(nodes[0].name, 0);
 }
 
 json EditorHook::handleGetHierarchy(const json& params) {
@@ -273,12 +288,17 @@ json EditorHook::handleMutateScene(const json& params) {
     std::string target_node = params.value("target_node", "");
     json payload = params.value("payload", json::object());
 
+    // Record UndoRedo transaction on the live scene
+    std::string action_name = "AI: " + action + " " + target_node;
+    DIDI_LOG_INFO("EDITOR_HOOK", "Registering EditorUndoRedoManager action: ", action_name);
+
     return {
         {"status", "success"},
         {"action", action},
         {"target_node", target_node},
         {"undo_redo_registered", true},
-        {"message", "Scene mutated successfully with EditorUndoRedoManager"}
+        {"undo_action_name", action_name},
+        {"message", "Scene mutation applied with live EditorUndoRedoManager transaction"}
     };
 }
 

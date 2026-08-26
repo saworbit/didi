@@ -43,8 +43,9 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
         if (res.isOk()) {
             json result_data = res.value();
             if (result_data.contains("image_base64") && !result_data["image_base64"].get<std::string>().empty()) {
-                return CallToolResult::successImage(result_data["image_base64"].get<std::string>(),
-                                                   "Visual Test Lab created for " + target_path + "\n" + result_data.dump(2));
+                std::string b64 = result_data["image_base64"].get<std::string>();
+                result_data.erase("image_base64");
+                return CallToolResult::successImage(b64, "Visual Test Lab created for " + target_path + "\n" + result_data.dump(2));
             }
             return CallToolResult::successJson(result_data);
         }

@@ -216,10 +216,10 @@ public:
         stop();
     }
 
-    bool start(const std::string& pipe_name = kDefaultPipeName) override {
+    bool start(const std::string& pipe_name = "") override {
         if (m_running.load()) return true;
 
-        m_pipeName = pipe_name;
+        m_pipeName = resolvePipeName(pipe_name);
         m_running.store(true);
         m_stopEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
 
@@ -233,6 +233,11 @@ public:
 
         if (m_stopEvent) {
             SetEvent(m_stopEvent);
+        }
+
+        HANDLE curPipe = m_activePipe.load();
+        if (curPipe != INVALID_HANDLE_VALUE) {
+            CancelIoEx(curPipe, NULL);
         }
 
         // Connect dummy client to unblock ConnectNamedPipe
@@ -268,10 +273,10 @@ private:
         sa.bInheritHandle = FALSE;
         sa.lpSecurityDescriptor = NULL;
 
-        // Restrict to Current User / Administrators DACL
+        // Restrict strictly to Current Owner (OW) and Administrators (BA)
         PSECURITY_DESCRIPTOR pSD = NULL;
         if (ConvertStringSecurityDescriptorToSecurityDescriptorA(
-                "D:(A;;GRGW;;;WD)(A;;GA;;;BA)(A;;GA;;;OW)",
+                "D:(A;;GA;;;BA)(A;;GA;;;OW)",
                 SDDL_REVISION_1, &pSD, NULL)) {
             sa.lpSecurityDescriptor = pSD;
         }
@@ -300,6 +305,7 @@ private:
                 continue;
             }
 
+            m_activePipe.store(pipe);
             DIDI_LOG_DEBUG("IPC_SERVER", "Client connected to IPC pipe");
 
             // Process requests on this connection
@@ -381,6 +387,7 @@ private:
                 }
             }
 
+            m_activePipe.store(INVALID_HANDLE_VALUE);
             FlushFileBuffers(pipe);
             DisconnectNamedPipe(pipe);
             CloseHandle(pipe);
@@ -393,6 +400,7 @@ private:
     }
 
     std::atomic<bool> m_running{false};
+    std::atomic<HANDLE> m_activePipe{INVALID_HANDLE_VALUE};
     std::string m_pipeName;
     HANDLE m_stopEvent{NULL};
     std::thread m_thread;
@@ -531,7 +539,7 @@ public:
 private:
     int m_sock{-1};
     std::string m_pipeName{kDefaultPipeName};
-    mutable std::mutex m_mutex;
+    mutable std::recursive_mutex m_mutex;
 };
 
 class PosixIpcServer : public IIpcServer {
@@ -539,9 +547,9 @@ public:
     PosixIpcServer() : m_running(false), m_listenSock(-1) {}
     ~PosixIpcServer() override { stop(); }
 
-    bool start(const std::string& pipe_name = kDefaultPipeName) override {
+    bool start(const std::string& pipe_name = "") override {
         if (m_running.load()) return true;
-        m_pipeName = pipe_name;
+        m_pipeName = resolvePipeName(pipe_name);
         unlink(m_pipeName.c_str());
 
         m_listenSock = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -563,6 +571,9 @@ public:
             return false;
         }
 
+        // Restrict Unix domain socket permissions to owner only
+        chmod(m_pipeName.c_str(), 0600);
+
         m_running.store(true);
         m_thread = std::thread(&PosixIpcServer::serverLoop, this);
         return true;
@@ -571,6 +582,7 @@ public:
     void stop() override {
         if (!m_running.exchange(false)) return;
         if (m_listenSock >= 0) {
+            shutdown(m_listenSock, SHUT_RDWR);
             close(m_listenSock);
             m_listenSock = -1;
         }

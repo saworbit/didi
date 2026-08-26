@@ -57,6 +57,21 @@ CallToolResult handlePatchScriptSymbols(const json& args, std::shared_ptr<ipc::I
         disk_path = disk_path.substr(6);
     }
 
+    namespace fs = std::filesystem;
+    fs::path target_p(disk_path);
+    fs::path current_root = fs::current_path();
+
+    try {
+        auto canon_root = fs::weakly_canonical(current_root);
+        auto canon_target = fs::weakly_canonical(current_root / target_p);
+        auto [root_end, _] = std::mismatch(canon_root.begin(), canon_root.end(), canon_target.begin());
+        if (root_end != canon_root.end()) {
+            return CallToolResult::error("Access denied: file path is outside the project root directory.");
+        }
+    } catch (const std::exception& e) {
+        return CallToolResult::error(std::string("Path resolution error: ") + e.what());
+    }
+
     std::string original_content;
     std::ifstream in_file(disk_path);
     if (in_file.is_open()) {
