@@ -1,0 +1,367 @@
+#include "didi/offline/gdscript_diagnostics.hpp"
+#include "didi/common/logger.hpp"
+#include <fstream>
+#include <sstream>
+#include <regex>
+#include <filesystem>
+#include <cstdlib>
+
+namespace didi {
+namespace offline {
+
+namespace fs = std::filesystem;
+
+std::string resolveGodotExecutable();
+
+std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& file_path, const std::string& source_text) {
+    std::vector<ScriptDiagnostic> diagnostics;
+    std::string content = source_text;
+
+    if (content.empty() && !file_path.empty()) {
+        std::string actual_path = file_path;
+        if (strings::startsWith(actual_path, "res://")) {
+            actual_path = actual_path.substr(6);
+        }
+
+        std::ifstream file(actual_path);
+        if (!file.is_open() && fs::exists("demo/" + actual_path)) {
+            actual_path = "demo/" + actual_path;
+            file.open(actual_path);
+        }
+
+        if (file.is_open()) {
+            std::stringstream ss;
+            ss << file.rdbuf();
+            content = ss.str();
+        } else {
+            ScriptDiagnostic d;
+            d.line = 1;
+            d.column = 1;
+            d.severity = "error";
+            d.message = "File not found or cannot be opened: " + file_path;
+            d.rule = "file_not_found";
+            diagnostics.push_back(d);
+            return diagnostics;
+        }
+    }
+
+    std::vector<std::string> lines = strings::split(content, '\n');
+    int open_paren = 0, open_bracket = 0, open_brace = 0;
+    bool in_multiline_string = false;
+    std::string multiline_quote_type;
+
+    for (size_t i = 0; i < lines.size(); ++i) {
+        int line_num = static_cast<int>(i + 1);
+        std::string raw_line = lines[i];
+        std::string trimmed = strings::trim(raw_line);
+
+        if (trimmed.empty()) continue;
+
+        // Multiline string check """ or '''
+        if (trimmed.find("\"\"\"") != std::string::npos || trimmed.find("'''") != std::string::npos) {
+            in_multiline_string = !in_multiline_string;
+            continue;
+        }
+        if (in_multiline_string) continue;
+
+        // Skip full comment lines
+        if (trimmed[0] == '#') continue;
+
+        // Check brackets & parentheses balance
+        for (char c : trimmed) {
+            if (c == '(') open_paren++;
+            else if (c == ')') open_paren--;
+            else if (c == '[') open_bracket++;
+            else if (c == ']') open_bracket--;
+            else if (c == '{') open_brace++;
+            else if (c == '}') open_brace--;
+        }
+
+        // Godot 3 -> 4 deprecation checks
+        if (trimmed.find("export(") != std::string::npos || trimmed.find("export (") != std::string::npos) {
+            ScriptDiagnostic d;
+            d.line = line_num;
+            d.column = static_cast<int>(raw_line.find("export") + 1);
+            d.severity = "warning";
+            d.message = "Godot 3 'export' syntax is deprecated. Use Godot 4 '@export' annotation.";
+            d.rule = "deprecated_export";
+            diagnostics.push_back(d);
+        }
+
+        if (trimmed.find("onready var") != std::string::npos) {
+            ScriptDiagnostic d;
+            d.line = line_num;
+            d.column = static_cast<int>(raw_line.find("onready") + 1);
+            d.severity = "warning";
+            d.message = "Godot 3 'onready var' is deprecated. Use Godot 4 '@onready var'.";
+            d.rule = "deprecated_onready";
+            diagnostics.push_back(d);
+        }
+
+        if (trimmed.find("yield(") != std::string::npos) {
+            ScriptDiagnostic d;
+            d.line = line_num;
+            d.column = static_cast<int>(raw_line.find("yield") + 1);
+            d.severity = "error";
+            d.message = "'yield()' was removed in Godot 4. Use 'await' instead.";
+            d.rule = "deprecated_yield";
+            diagnostics.push_back(d);
+        }
+
+        // Check for missing colon on block statements
+        static const std::vector<std::string> block_keywords = {
+            "func ", "static func ", "if ", "elif ", "else", "for ", "while ", "match ", "class "
+        };
+
+        for (const auto& kw : block_keywords) {
+            if (strings::startsWith(trimmed, kw)) {
+                // If statement doesn't end with : and no trailing comment
+                std::string code_part = trimmed;
+                auto hash_pos = code_part.find('#');
+                if (hash_pos != std::string::npos) {
+                    code_part = strings::trim(code_part.substr(0, hash_pos));
+                }
+                if (!code_part.empty() && code_part.back() != ':' && open_paren == 0 && open_bracket == 0) {
+                    ScriptDiagnostic d;
+                    d.line = line_num;
+                    d.column = static_cast<int>(raw_line.size());
+                    d.severity = "error";
+                    d.message = "Expected ':' at end of '" + kw + "' statement.";
+                    d.rule = "missing_colon";
+                    diagnostics.push_back(d);
+                }
+                break;
+            }
+        }
+    }
+
+    if (open_paren != 0) {
+        ScriptDiagnostic d;
+        d.line = static_cast<int>(lines.size());
+        d.column = 1;
+        d.severity = "error";
+        d.message = "Unbalanced parentheses '()' in script.";
+        d.rule = "unbalanced_parentheses";
+        diagnostics.push_back(d);
+    }
+
+    if (open_bracket != 0) {
+        ScriptDiagnostic d;
+        d.line = static_cast<int>(lines.size());
+        d.column = 1;
+        d.severity = "error";
+        d.message = "Unbalanced square brackets '[]' in script.";
+        d.rule = "unbalanced_brackets";
+        diagnostics.push_back(d);
+    }
+
+    if (open_brace != 0) {
+        ScriptDiagnostic d;
+        d.line = static_cast<int>(lines.size());
+        d.column = 1;
+        d.severity = "error";
+        d.message = "Unbalanced curly braces '{}' in script.";
+        d.rule = "unbalanced_braces";
+        diagnostics.push_back(d);
+    }
+
+    // Also run godot compiler check if file exists on disk and no source_text override
+    if (source_text.empty() && !file_path.empty()) {
+        auto godot_diags = runGodotCompilerCheck(file_path);
+        diagnostics.insert(diagnostics.end(), godot_diags.begin(), godot_diags.end());
+    }
+
+    return diagnostics;
+}
+
+#if defined(_WIN32)
+#define DIDI_POPEN _popen
+#define DIDI_PCLOSE _pclose
+#else
+#define DIDI_POPEN popen
+#define DIDI_PCLOSE pclose
+#endif
+
+static std::string escapeRegex(std::string_view str) {
+    static const std::string special = R"re(\.^$|()[]{}*+?-)re";
+    std::string out;
+    out.reserve(str.size() * 2);
+    for (char c : str) {
+        if (special.find(c) != std::string::npos) {
+            out.push_back('\\');
+        }
+        out.push_back(c);
+    }
+    return out;
+}
+
+std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const std::string& script_file_path) {
+    std::vector<ScriptDiagnostic> diags;
+    std::string actual_path = script_file_path;
+    if (strings::startsWith(actual_path, "res://")) {
+        actual_path = actual_path.substr(6);
+    }
+
+    if (!fs::exists(actual_path)) {
+        if (fs::exists("demo/" + actual_path)) {
+            actual_path = "demo/" + actual_path;
+        } else {
+            return diags;
+        }
+    }
+
+    std::string godot_exe = resolveGodotExecutable();
+    // Run godot --headless --check-only -s <path>
+    std::string cmd = "\"" + godot_exe + "\" --headless --check-only -s \"" + actual_path + "\" 2>&1";
+    FILE* pipe = DIDI_POPEN(cmd.c_str(), "r");
+    if (!pipe) return diags;
+
+    char buffer[512];
+    std::string output;
+    while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+        output += buffer;
+    }
+    DIDI_PCLOSE(pipe);
+
+    // Parse errors like: "SCRIPT ERROR: Parse Error: ... at res://...:12"
+    static const std::regex err_regex(R"re((SCRIPT ERROR|ERROR|WARNING): (.*) at (res:\/\/[^:]+):(\d+))re");
+    auto words_begin = std::sregex_iterator(output.begin(), output.end(), err_regex);
+    auto words_end = std::sregex_iterator();
+
+    for (std::sregex_iterator i = words_begin; i != words_end; ++i) {
+        std::smatch match = *i;
+        ScriptDiagnostic d;
+        std::string type = match[1].str();
+        d.severity = (type.find("WARNING") != std::string::npos) ? "warning" : "error";
+        d.message = match[2].str();
+        d.line = std::stoi(match[4].str());
+        d.column = 1;
+        d.rule = "godot_compiler";
+        diags.push_back(d);
+    }
+
+    return diags;
+}
+
+static size_t getIndentLevel(std::string_view line) {
+    size_t count = 0;
+    for (char c : line) {
+        if (c == '\t') count += 4;
+        else if (c == ' ') count += 1;
+        else break;
+    }
+    return count;
+}
+
+Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_text,
+                                                    const std::string& symbol_name,
+                                                    const std::string& new_definition,
+                                                    const std::string& symbol_type) {
+    std::vector<std::string> lines = strings::split(source_text, '\n');
+    std::string escaped_name = escapeRegex(symbol_name);
+    std::string pattern;
+
+    if (symbol_type == "function") {
+        pattern = R"re(^\s*(static\s+)?func\s+)re" + escaped_name + R"re(\s*(\(|$))re";
+    } else if (symbol_type == "variable") {
+        pattern = R"re(^\s*(@\w+\s+)*(var|const)\s+)re" + escaped_name + R"re(\s*(:|=|$))re";
+    } else if (symbol_type == "signal") {
+        pattern = R"re(^\s*signal\s+)re" + escaped_name + R"re(\s*(\(|$))re";
+    } else if (symbol_type == "enum") {
+        pattern = R"re(^\s*enum\s+)re" + escaped_name + R"re(\s*(\{|\s|$))re";
+    } else if (symbol_type == "class") {
+        pattern = R"re(^\s*class\s+)re" + escaped_name + R"re(\s*:)re";
+    } else {
+        pattern = R"re(^\s*(\w+\s+)*)re" + escaped_name + R"re(\s*(\(|$|:|=))re";
+    }
+
+    std::regex symbol_regex(pattern);
+    int start_line = -1;
+    int end_line = -1;
+
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (std::regex_search(lines[i], symbol_regex)) {
+            // Check previous lines for annotations / doc comments
+            int actual_start = static_cast<int>(i);
+            while (actual_start > 0) {
+                std::string prev = strings::trim(lines[actual_start - 1]);
+                if (strings::startsWith(prev, "@") || strings::startsWith(prev, "##") || strings::startsWith(prev, "#")) {
+                    actual_start--;
+                } else {
+                    break;
+                }
+            }
+            start_line = actual_start;
+
+            // Find end of symbol block (next non-indented declaration or EOF)
+            size_t base_indent = getIndentLevel(lines[i]);
+            size_t j = i + 1;
+            while (j < lines.size()) {
+                std::string cur = lines[j];
+                std::string trimmed_cur = strings::trim(cur);
+                if (trimmed_cur.empty() || trimmed_cur[0] == '#') {
+                    j++;
+                    continue;
+                }
+                size_t cur_indent = getIndentLevel(cur);
+                if (cur_indent <= base_indent) {
+                    break;
+                }
+                j++;
+            }
+            end_line = static_cast<int>(j);
+            break;
+        }
+    }
+
+    std::ostringstream result;
+    if (start_line != -1 && end_line != -1) {
+        // Replace existing block
+        for (int i = 0; i < start_line; ++i) {
+            result << lines[i] << "\n";
+        }
+        result << new_definition;
+        if (!strings::endsWith(new_definition, "\n")) {
+            result << "\n";
+        }
+        for (size_t i = end_line; i < lines.size(); ++i) {
+            result << lines[i];
+            if (i + 1 < lines.size()) result << "\n";
+        }
+    } else {
+        // Symbol not found, insert intelligently
+        if (symbol_type == "signal" || symbol_type == "variable" || symbol_type == "enum") {
+            // Insert near top after extends/class_name
+            int insert_pos = 0;
+            for (size_t i = 0; i < lines.size(); ++i) {
+                std::string trimmed = strings::trim(lines[i]);
+                if (strings::startsWith(trimmed, "extends ") ||
+                    strings::startsWith(trimmed, "class_name ") ||
+                    strings::startsWith(trimmed, "@tool") ||
+                    strings::startsWith(trimmed, "@icon")) {
+                    insert_pos = static_cast<int>(i + 1);
+                }
+            }
+            for (int i = 0; i < insert_pos; ++i) {
+                result << lines[i] << "\n";
+            }
+            result << "\n" << new_definition << "\n";
+            for (size_t i = insert_pos; i < lines.size(); ++i) {
+                result << lines[i];
+                if (i + 1 < lines.size()) result << "\n";
+            }
+        } else {
+            // Append at the bottom
+            result << source_text;
+            if (!strings::endsWith(source_text, "\n")) {
+                result << "\n";
+            }
+            result << "\n" << new_definition << "\n";
+        }
+    }
+
+    return result.str();
+}
+
+} // namespace offline
+} // namespace didi

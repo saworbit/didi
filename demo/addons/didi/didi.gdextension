@@ -1,0 +1,12 @@
+[configuration]
+entry_symbol = "didi_library_init"
+compatibility_minimum = "4.1"
+reloadable = true
+
+[libraries]
+windows.debug.x86_64 = "res://addons/didi/bin/didi_extension.dll"
+windows.release.x86_64 = "res://addons/didi/bin/didi_extension.dll"
+linux.debug.x86_64 = "res://addons/didi/bin/libdidi_extension.so"
+linux.release.x86_64 = "res://addons/didi/bin/libdidi_extension.so"
+macos.debug = "res://addons/didi/bin/libdidi_extension.dylib"
+macos.release = "res://addons/didi/bin/libdidi_extension.dylib"

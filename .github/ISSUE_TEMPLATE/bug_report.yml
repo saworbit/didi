@@ -1,0 +1,56 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in Didi
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug in Didi!
+  - type: input
+    id: version
+    attributes:
+      label: Didi Version
+      placeholder: e.g. 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: godot_version
+    attributes:
+      label: Godot Version
+      placeholder: e.g. 4.7.2 stable
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Windows
+        - Linux
+        - macOS
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what happened.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Open Godot project
+        2. Call MCP tool '...'
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Terminal Output
+      description: Attach relevant stderr logs or error stack traces.
+      render: shell

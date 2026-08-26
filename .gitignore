@@ -1,0 +1,55 @@
+# CMake & Build Artifacts
+build/
+bin/
+out/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# Compiled Binaries & Libraries
+*.exe
+*.dll
+*.so
+*.dylib
+*.lib
+*.a
+*.exp
+*.pdb
+*.ilk
+*.obj
+*.o
+
+# Compiled Addon Binaries (keep directory structure with .gitkeep if needed)
+addons/didi/bin/*
+demo/addons/didi/bin/*
+!addons/didi/bin/.gitkeep
+!demo/addons/didi/bin/.gitkeep
+
+# Godot Engine Import and Cache
+.godot/
+*.translation
+*.tmp
+addons/didi/test_lab_sandbox.tscn
+
+# Root Dump Artifacts
+/extension_api.json
+/gdextension_interface.h
+
+# Visual Studio & IDEs
+.vs/
+*.user
+*.suo
+*.sln.docstates
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Agent & System Metadata
+.gemini/
+.DS_Store
+Thumbs.db
+Desktop.ini
