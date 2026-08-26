@@ -9,7 +9,7 @@ Get **Didi** (`godot-mcp-native`) running with your Godot 4 project and your fav
 ### Option A: Build from Source (Fast)
 ```powershell
 # Clone repository
-git clone https://github.com/your-username/didi.git
+git clone https://github.com/saworbit/didi.git
 cd didi
 
 # Build Release binaries with CMake
@@ -52,7 +52,7 @@ Add to your project's `.cursor/mcp.json` (or via **Settings $\rightarrow$ Featur
   "mcpServers": {
     "didi": {
       "command": "D:/didi/build/Release/didi.exe",
-      "args": ["--log-level", "INFO"]
+      "args": ["--project", "D:/my_game", "--log-level", "INFO"]
     }
   }
 }
@@ -70,7 +70,7 @@ Edit your `claude_desktop_config.json`:
   "mcpServers": {
     "didi": {
       "command": "D:\\didi\\build\\Release\\didi.exe",
-      "args": ["--log-level", "INFO"]
+      "args": ["--project", "D:/my_game", "--log-level", "INFO"]
     }
   }
 }
@@ -85,7 +85,7 @@ Add to your VS Code MCP settings:
   "mcpServers": {
     "didi": {
       "command": "D:/didi/build/Release/didi.exe",
-      "args": ["--log-level", "INFO"]
+      "args": ["--project", "D:/my_game", "--log-level", "INFO"]
     }
   }
 }
@@ -97,8 +97,10 @@ Add to your VS Code MCP settings:
 
 Once connected, ask your AI assistant any of the following:
 
-- 🔍 *"Inspect my Godot project tree and list all available scenes and scripts."*
-- 📸 *"Capture a viewport render of the active editor camera."*
-- 🛠️ *"Check my player script `res://scripts/player.gd` for syntax or compiler errors."*
-- 🧪 *"Run an automated headless test session on `res://scenes/main.tscn` and show me the engine logs."*
-- 🎮 *"Add a double-jump mechanic to my character controller."*
+- 🔍 **Scene Inspection**: *"Inspect my scene hierarchy and tell me what nodes have scripts attached."* (`scene_get_hierarchy`)
+- ⚡ **Signal Wiring**: *"List all signals on Player and connect 'health_depleted' to GameOverUI."* (`signal_list_connections`, `signal_connect`)
+- 📖 **Class Reflection**: *"What methods and properties does CharacterBody3D have in Godot 4?"* (`script_reflect_class`)
+- 🐛 **Syntax & Error Check**: *"Check `res://scripts/player.gd` for syntax errors or deprecations."* (`script_check_syntax`)
+- 📸 **Visual Capture**: *"Capture a PNG of the active viewport and check the player positioning."* (`viewport_capture_frame`)
+- 🧪 **Sandbox Lab**: *"Generate a visual test lab with neutral lighting to inspect `res://models/hero.glb`."* (`viewport_create_test_lab`)
+- 🚀 **Runtime Test**: *"Run `res://scenes/main.tscn` headlessly and report any engine errors or warnings."* (`runtime_launch`)
