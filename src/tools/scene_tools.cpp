@@ -255,6 +255,7 @@ CallToolResult handleSceneReparentNode(const json& args, std::shared_ptr<ipc::II
     std::string target_node = args.value("target_node", "");
     std::string new_parent = args.value("new_parent_path", "");
     bool keep_global = args.value("keep_global_transform", true);
+    (void)keep_global;
 
     if (target_node.empty() || new_parent.empty()) {
         return CallToolResult::error("Parameters 'target_node' and 'new_parent_path' are required.");

@@ -310,6 +310,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
 }
 
 json EditorHook::handleGetState(const json& params) {
+    (void)params;
     std::string active_scene = "res://scenes/main.tscn";
     if (fs::exists("demo/scenes/main.tscn")) {
         active_scene = "res://scenes/main.tscn";

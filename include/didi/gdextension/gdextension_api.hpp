@@ -21,6 +21,7 @@ public:
     void init(GDExtensionInterfaceGetProcAddress p_get_proc_address,
               GDExtensionClassLibraryPtr p_library,
               GDExtensionInitialization* r_initialization) {
+        (void)r_initialization;
         m_getProcAddress = p_get_proc_address;
         m_library = p_library;
 

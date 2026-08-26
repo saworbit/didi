@@ -5,6 +5,8 @@
 #include <regex>
 #include <filesystem>
 #include <cstdlib>
+#include <chrono>
+#include <thread>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -13,6 +15,8 @@
 #include <windows.h>
 #else
 #include <unistd.h>
+#include <fcntl.h>
+#include <signal.h>
 #include <sys/wait.h>
 #endif
 
