@@ -90,9 +90,20 @@ Save scene / reload modified scripts       editor_save_scene / editor_reload_pro
 
 ---
 
+## 🎯 Capability Awareness & Response Interpretation
+
+Didi provides honest tool capability reporting:
+- **`is_live_engine: true`**: The command was dispatched directly to Godot's live main thread (`EditorInterface` / `SceneTree` / `EditorUndoRedoManager`).
+- **`is_live_engine: false` / `source: parsed_tscn_file`**: Godot editor is currently offline or unhooked; operation succeeded via offline AST/disk analysis.
+- **`is_live_frame: true`**: Real GPU viewport memory blit from the active editor/subviewport.
+- **`is_live_frame: false`**: Synthesized offline viewport preview frame.
+
+---
+
 ## 💡 Best Practices for LLMs
 - **Use `script_reflect_class`** before writing GDScript to ensure method names and types match Godot 4.x specifications.
 - **Prefer `script_patch_method`** over rewriting entire large script files to avoid regressions.
-- **Always run `script_check_syntax`** after editing scripts to verify syntax.
+- **Always run `script_check_syntax`** after editing scripts to verify syntax with Godot's internal compiler.
 - **Use `runtime_launch`** with a short timeout (5–10s) to run headless tests and extract structured engine logs.
 - **Read resources** (`godot://project/tree`, `godot://editor/state`, `godot://runtime/logs`) for instant zero-latency context.
+- **Refer to [Strategic Roadmap & Build Order](ROADMAP.md)** for upcoming capabilities (`eval_gdscript`, script attachment, autoloads, and visual diffing).

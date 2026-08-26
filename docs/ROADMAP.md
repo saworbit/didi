@@ -1,112 +1,156 @@
-# Didi Roadmap & Exhaustive Tool Suite Specification 🗺️
+# Didi Strategic Roadmap & Technical Build Order 🗺️
 
-This document outlines the strategic roadmap and technical specification for expanding **Didi** (`godot-mcp-native`) into an exhaustive, 36-tool suite across 9 distinct functional domains.
+> **Core Philosophy**:
+> The 36-tool suite is already fully specified. The next capability is not more MCP tool names — it is making those tools **actually drive Godot**, then filling the operational gaps AI agents encounter when attempting to autonomously build and ship Godot games.
 
 ---
 
-## 🎯 Architectural Vision
-
-Didi aims to be the definitive, native Model Context Protocol (MCP) server for Godot 4.x, providing AI agents and human developers with comprehensive in-process access to the entire Godot engine ecosystem.
+## 🎯 Architectural Vision & Implementation Sequence
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            Didi 9-Domain Tool Suite                         │
-├─────────────────────────┬─────────────────────────┬─────────────────────────┤
-│ 1. Scene & Nodes (7)    │ 2. Signals & Events (4) │ 3. Scripting & AST (4)  │
-│  - scene_get_hierarchy  │  - signal_list_conn     │  - script_check_syntax  │
-│  - scene_instantiate    │  - signal_connect       │  - script_reflect_class │
-│  - scene_remove_node    │  - signal_disconnect    │  - script_get_symbols   │
-│  - scene_reparent_node  │  - signal_emit          │  - script_patch_method  │
-│  - scene_set_property   │                         │                         │
-│  - scene_get_property   │                         │                         │
-│  - scene_duplicate_node │                         │                         │
-├─────────────────────────┼─────────────────────────┼─────────────────────────┤
-│ 4. Vision & Render (4)  │ 5. Physics & Nav (6)    │ 6. Tilemaps & Grids (3) │
-│  - viewport_capture     │  - physics_raycast      │  - tilemap_set_cells    │
-│  - viewport_set_camera  │  - physics_sim_step     │  - tilemap_get_used_rect│
-│  - viewport_test_lab    │  - nav_bake_mesh        │  - gridmap_set_cells    │
-│  - viewport_debug_draw  │  - nav_query_path       │                         │
-│                         │  - anim_list_tracks     │                         │
-│                         │  - anim_play_track      │                         │
-├─────────────────────────┼─────────────────────────┼─────────────────────────┤
-│ 7. Resources & UIDs (4) │ 8. Runtime & Debug (4)  │ 9. Editor Lifecycle (4) │
-│  - resource_create      │  - runtime_launch       │  - editor_undo          │
-│  - resource_inspect     │  - runtime_inject_input │  - editor_redo          │
-│  - project_list_res     │  - runtime_call_stack   │  - editor_save_scene    │
-│  - project_get_uid_map  │  - runtime_read_profiler│  - editor_reload_project│
-└─────────────────────────┴─────────────────────────┴─────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                              Didi Phased Build Sequence                                │
+├─────────────────────────┬─────────────────────────┬────────────────────────────────────┤
+│ Phase 1: Substrate      │ Phase 2: Project Wiring │ Phase 3: In-Engine Eval & Runtime  │
+│  - Main-thread pump     │  - attach_script        │  - eval_gdscript                   │
+│  - Real SceneTree/Undo  │  - Autoloads / InputMap │  - Runtime stream & attach         │
+│  - Real Viewport Blit   │  - ProjectSettings      │  - First-class scene file ops      │
+│  - Honest tool caps     │  - Group management     │  - UI hit-testing                  │
+├─────────────────────────┼─────────────────────────┼────────────────────────────────────┤
+│ Phase 4: Verification   │ Phase 5: Deep Domains   │ Phase 6: Enterprise Safety         │
+│  - Symbol/Text Search   │  - C# & Shaders         │  - Per-project pipe isolation      │
+│  - Asset Reimport       │  - Animation keyframing │  - Multi-project session locking   │
+│  - Viewport image diff  │  - MeshLibrary export   │  - Mutation preview / dry-run      │
+│  - Node isolation frame │  - Live MCP subscriptions│ - Confirm-before-write             │
+└─────────────────────────┴─────────────────────────┴────────────────────────────────────┘
 ```
 
 ---
 
-## 📋 Comprehensive Domain Breakdown (36 Tools)
+## 🛑 Phase 1: Live Engine Integration Substrate (DO THIS FIRST)
 
-### Domain 1: Scene Tree & Node Manipulation
-1. **`scene_get_hierarchy`**: Returns recursive node tree with node types, script attachments, and global/local transforms.
-2. **`scene_instantiate_node`**: Spawns built-in nodes or instantiates sub-scenes (`.tscn`) at a target NodePath.
-3. **`scene_remove_node`**: Deletes a node and safely frees references via `queue_free()` with UndoRedo support.
-4. **`scene_reparent_node`**: Moves a node to a new parent while preserving global transforms.
-5. **`scene_set_property`**: Dynamically mutates any exported or built-in node property with type-coerced Variant values.
-6. **`scene_get_property`**: Queries precise property values, metadata, and export hints.
-7. **`scene_duplicate_node`**: Duplicates an existing node branch with unique names.
+Before adding any additional tool endpoints, live engine integration must be genuine. Without these four capabilities, every additional tool is another fake-success path that increases hallucinated world-state.
 
-### Domain 2: Signals & Event Wiring
-8. **`signal_list_connections`**: Lists all signals declared on a node, including incoming and outgoing connections.
-9. **`signal_connect`**: Binds a signal from an emitter node to a target method or callable.
-10. **`signal_disconnect`**: Unbinds existing signal connections.
-11. **`signal_emit`**: Emits a custom signal manually with arguments for event testing.
-
-### Domain 3: Scripting, Class Reflection & Diagnostics
-12. **`script_check_syntax`**: Runs Godot’s internal GDScript compiler to return compile errors, warnings, and byte-code validity.
-13. **`script_reflect_class`**: Looks up engine documentation, methods, properties, and constants for any engine class (e.g. `CharacterBody3D`, `NavigationAgent3D`).
-14. **`script_get_symbols`**: Extracts AST symbols, functions, signals, and typed variables from any script file.
-15. **`script_patch_method`**: Safely rewrites a single method body in a `.gd` file without touching other functions.
-
-### Domain 4: Visual Verification & Viewport Rendering
-16. **`viewport_capture_frame`**: Captures Base64 PNG snapshots from active 2D/3D viewports or designated camera nodes.
-17. **`viewport_set_camera_transform`**: Positions and rotates the editor or test camera to inspect specific coordinates.
-18. **`viewport_create_test_lab`**: Generates an isolated test stage with neutral lighting, grid plane, and multi-angle cameras.
-19. **`viewport_toggle_debug_draw`**: Toggles collision wireframes, navigation meshes, normal vectors, and lighting modes.
-
-### Domain 5: Physics, Animation & Navigation
-20. **`physics_raycast_query`**: Fires a 2D/3D physics raycast to check line-of-sight, ray hits, and collision masks.
-21. **`physics_simulate_step`**: Advances the physics engine by $N$ ticks to test gravity, velocity, or collision response deterministically.
-22. **`nav_bake_mesh`**: Triggers runtime or editor navigation mesh baking (`NavigationMesh` / `NavigationPolygon`).
-23. **`nav_query_path`**: Tests pathfinding between two points to verify walkable navmeshes.
-24. **`anim_list_tracks`**: Lists animations, keyframes, and blend trees in an `AnimationPlayer` or `AnimationTree`.
-25. **`anim_play_track`**: Plays a specific animation keyframe sequence to verify transitions.
-
-### Domain 6: Tilemaps, GridMaps & Procedural Generation
-26. **`tilemap_set_cells`**: Batch updates 2D `TileMapLayer` cells with source IDs, atlas coordinates, and alternate tiles.
-27. **`tilemap_get_used_rect`**: Returns used cell boundaries and layer structures.
-28. **`gridmap_set_cells`**: Places 3D mesh library tiles inside a `GridMap` with coordinate orientations.
-
-### Domain 7: Resources & Project File Management
-29. **`resource_create`**: Generates new resource instances (`StandardMaterial3D`, `AudioStreamRandomizer`, `Curve3D`, `Shape3D`).
-30. **`resource_inspect`**: Reads inner resource properties and dependent UIDs.
-31. **`project_list_resources`**: Scans `res://` for assets filtered by type (e.g., `.glb`, `.png`, `.tres`).
-32. **`project_get_uid_map`**: Resolves `uid://` references to local filesystem paths.
-
-### Domain 8: Execution, Input Injection & Debugging
-33. **`runtime_launch`**: Starts a specific scene or test runner with custom CLI flags (`--debug`, `--headless`).
-34. **`runtime_inject_input`**: Synthesizes `InputEventKey`, `InputEventMouseButton`, or `InputEventAction` to simulate player movement and gameplay.
-35. **`runtime_get_call_stack`**: Fetches current debugger call stack and variable scopes on engine break/crash.
-36. **`runtime_read_profiler`**: Pulls frame times, draw calls, draw passes, and physics tick metrics.
-
-### Domain 9: Editor Lifecycle & Undo/Redo
-37. **`editor_undo`**: Reverts the last operation through Godot's `EditorUndoRedoManager`.
-38. **`editor_redo`**: Replays the previously reverted editor transaction.
-39. **`editor_save_scene`**: Saves the active scene to disk.
-40. **`editor_reload_project`**: Reloads all modified scripts and rescans project resources.
-
-*(Note: Legacy alias mappings are preserved for backwards compatibility with earlier v1.0 tools).*
+1. **Main-Thread Queue Pump**:
+   - Register `DidiHook` (or equivalent GDExtension ClassDB singleton).
+   - Drain the command queue strictly from Godot editor `_process`, never on a background worker thread.
+2. **Real `GodotApi` Engine Calls**:
+   - Directly invoke `SceneTree`, `EditorInterface`, `EditorUndoRedoManager`, `Input`, and `RenderingServer`.
+   - Return clean errors when the editor is disconnected or unhooked.
+   - **Never return `status: success` / `undo_redo_registered: true` / `is_live_frame: true` on stubs.**
+3. **Real GPU Viewport Memory Blit**:
+   - Read actual `SubViewport` / editor camera pixels into PNG buffers via `RenderingServer` or `EditorInterface.get_editor_viewport_3d()`.
+   - Transparently attribute offline synthesized previews when the engine is not attached.
+4. **Honest Capability Discovery**:
+   - `tools/list` and `resources/list` explicitly declare which tools are `live`, `offline_fallback`, or `unimplemented` so AI agents can accurately plan actions.
 
 ---
 
-## 🗓️ Implementation Phases
+## 🚀 Capabilities to Add (After Live Hooks Work)
 
-- [x] **Phase 1: Foundations & Core Architecture (v1.0)** — Stdio transport, initial 10 tools, C++20 dual binary architecture, Windows/Linux/macOS CI matrix.
-- [ ] **Phase 2: Full Scene, Node, Signal & Reflection Suite (v1.1)** — Domains 1, 2, 3 (15 tools).
-- [ ] **Phase 3: Visual Inspection, Physics, Animation & Navigation (v1.2)** — Domains 4, 5 (10 tools).
-- [ ] **Phase 4: Procedural Grids, Resources, Profiler & Lifecycle (v1.3)** — Domains 6, 7, 8, 9 (11 tools).
-- [ ] **Phase 5: Exhaustive Test Suite & Documentation** — Unit test expansion to 36+ tests, updated tool reference manuals, and live Godot 4 verification.
+These are missing capabilities that an AI agent actually requires to complete full development cycles and ship Godot changes.
+
+### 1. Script Attachment and Project Wiring
+The current suite can patch a `.gd` file and spawn a node, but cannot complete the usual "Add a Player" loop:
+- **`attach_script` / `detach_script`**: Dynamically attach or detach a GDScript/C# script on a target `NodePath`.
+- **Autoload Management**: List, add, remove, and update project-wide Singletons / Autoloads.
+- **Input Map Configuration**: List, register, and modify action bindings and input events (`InputMap`).
+- **Project Settings**: Get and set project configurations (`application/run/main_scene`, physics layers, rendering modes, display sizes).
+- **Group Management**: Add/remove nodes from groups and query group members.
+
+### 2. Scene File Operations as First-Class Tools
+Hierarchy mutation without file operations leaves unsaved editor state:
+- **Create Empty Scene**: Create a new `Node2D`, `Node3D`, or `Control` root and set it as the active edited scene.
+- **Scene Lifecycle**: Open, close, and switch the active edited scene in the editor tab bar.
+- **Pack Branch to Scene**: Pack any existing branch into a reusable `.tscn` (`PackedScene`).
+- **Scene Dependency Graph (`get_scene_dependencies`)**: Query dependency hierarchy and instanced sub-scene trees.
+- **Atomic Batch Scene Operations**: Execute compound actions in a single `EditorUndoRedoManager` transaction (e.g. *Add Node + Attach Script + Set Properties + Connect Signal*).
+
+### 3. Runtime Attach and Observation
+`runtime_launch` starts a process; agents also need to interact with a running game or editor:
+- **Attach to Running Game/Editor**: Named pipe session handshake with already-running instances.
+- **Live Stream Stdout/Stderr/Errors**: Subscribe to `godot://runtime/logs` with real-time change notifications.
+- **Execution Control**: Stop, pause, resume, and step running game scenes.
+- **In-Game Node Inspection**: Query and inspect nodes on the live running game tree, not only the editor tree.
+- **UI Hit-Testing**: List `Control` bounding rects and simulate clicks/typing by `NodePath` (`get_ui_elements`, `click_element`).
+
+### 4. In-Engine GDScript Execution
+The highest-leverage single tool once live hooks are established:
+- **`eval_gdscript` / `run_script`**: Evaluates GDScript expressions or ephemeral scripts on a `RefCounted` with `SceneTree` access, returning a JSON-coerced `Variant`.
+- **Enables One-Off Agent Queries**: Find nodes by predicate, dump export vars, and inspect state without requiring a new dedicated MCP tool for every Godot API.
+- **Sandboxed Security**: Confined strictly to project root, enforced timeout (5s), and restricted `OS.execute`.
+
+### 5. Search and Indexing That Agents Can Trust
+Beyond a basic recursive directory walk:
+- **Full-Text & Symbol Search**: Fast ripgrep-style search across `.gd`, `.cs`, `.tscn`, `.tres`.
+- **Reverse Usage Lookup**: "Where is this node type used?" and "Which scenes instance this sub-scene?"
+- **UID ↔ Path Synchronization**: Real-time sync with `.godot/uid_cache.bin` to resolve `uid://` references.
+- **Import Status Tracking**: Inspect `.import` remaps and detect broken/missing asset imports.
+
+### 6. Visual Verification & Image Diffing
+- **Named Node Isolation Capture**: Focus the camera and isolate a specific node against a transparent or neutral background.
+- **Visual Diffing (`viewport_diff_capture`)**: Generate visual pixel diffs between before/after mutation frames.
+- **Multi-Target Viewports**: Explicitly capture 2D canvas, 3D world, active editor viewport, or running game window.
+- **Debug Draw Modifiers**: Non-destructive debug wireframes passed as capture parameters rather than global sticky toggles.
+
+### 7. Asset Import and Pipeline Management
+- **Trigger Reimport & Wait for Idle**: Force reimporting dropped assets (`.png`, `.glb`, `.wav`) and await editor idle.
+- **Import Preset Configuration**: Configure compression modes, 3D normal filters, and mesh collision generation.
+- **Export Presets & Headless Export**: Query export presets and trigger `export_project` for target platforms.
+- **MeshLibrary Export**: Generate `.meshlib` assets from 3D scenes for `GridMap` workflows.
+
+### 8. C#, Shaders, and Animation Keyframing
+- **C# (`.cs`) Diagnostics**: Compiler checks via `dotnet build` / Godot C# bindings.
+- **Shader Compilation Diagnostics**: Intercept and parse `*.gdshader` compile errors from the engine log.
+- **Animation Track Keyframing**: Add, remove, and interpolate keyframes and track lengths in `AnimationPlayer`.
+- **Theme & Layout Inspection**: Inspect Control node anchors, margins, minimum sizes, and theme overrides.
+
+### 9. Enhanced MCP Protocol Surface
+- **Live MCP Resources**: `godot://editor/state`, `godot://project/tree`, `godot://runtime/logs` with active push notifications.
+- **Resource Templates**: Dynamic URI templates `godot://node/{path}` and `godot://script/{res_path}`.
+- **Structured Workflows (Prompts)**: Encode guided multi-step agent prompts (*Create Character*, *Wire Signal*, *Visual Verification Loop*).
+- **Structured Engine Logging**: Support `logging/setLevel` and stream Godot engine warnings and errors into MCP notifications.
+
+### 10. Multi-Project Hardening & Enterprise Safety
+- **Per-Project Pipe/Socket Isolation**: Derive pipe names from project paths or editor PIDs (`\\.\pipe\godot_didi_<project_hash>`).
+- **Explicit Project Enforcement**: Refuse execution against Didi's own repository CWD; require explicit `--project`.
+- **Mutation Previews & Dry-Runs**: Allow agents to preview AST/scene diffs before committing transactions.
+- **Confirm-Before-Write**: Safe safeguards for `editor_reload_project` and destructive file modifications.
+- **Session Locking**: Ensure one MCP client per active editor instance.
+
+---
+
+## 🚫 What NOT to Add Yet
+
+- ❌ **Do NOT add more domain stubs** (e.g. `audio_bus_*`, `multiplayer_*`, `particle_*`, `xr_*`) until Domains 1–4 are actively mutating Godot.
+- ❌ **Do NOT create a second plugin architecture or network transport** — local named pipes and UNIX domain sockets are optimal.
+- ❌ **Do NOT build a custom GDScript language server** — `script_get_symbols` combined with Godot's live compiler is fast and sufficient.
+- ❌ **Do NOT maintain fake static ClassDB reflection maps** — query live Godot `ClassDB` or load `extension_api.json`.
+
+---
+
+## 📊 Suggested Implementation Sequence
+
+| Phase | Milestone / Capability | Strategic Rationale |
+| :--- | :--- | :--- |
+| **Phase 1 (NOW)** | **Live Pump + Real SceneTree / UndoRedo + Honest Errors** | Foundation substrate — everything else is untrustworthy without this. |
+| **Phase 2 (NEXT)** | **Attach Script, Autoloads, Project Settings, Save/Open Scene** | Completes the fundamental "Create & Wire a Node" game dev loop. |
+| **Phase 3 (THEN)** | **`eval_gdscript`, Runtime Log Stream, Attach-to-Running** | Replaces dozens of one-off tools with dynamic, sandboxed engine execution. |
+| **Phase 4 (THEN)** | **Symbol Search, Asset Reimport, Viewport Diffing & Isolation** | Closes the autonomous verification and feedback loop for AI agents. |
+| **Phase 5 (LATER)** | **C# / Shaders, Project Export, GridMap MeshLibrary, UI Hit-Testing** | Provides deep domain depth across all Godot engine subsystems. |
+
+---
+
+## 📋 The 36-Tool Reference Matrix (Current Specification)
+
+| Domain | Key Tools | Primary Purpose |
+| :--- | :--- | :--- |
+| **1. Scene & Nodes (7)** | `scene_get_hierarchy`, `scene_instantiate_node`, `scene_remove_node`, `scene_reparent_node`, `scene_set_property`, `scene_get_property`, `scene_duplicate_node` | Live SceneTree inspection, node spawning, reparenting, and UndoRedo property mutations. |
+| **2. Signals & Events (4)** | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` | Dynamic event binding, listener inspection, and synthetic event dispatch. |
+| **3. Scripting & AST (4)** | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method` | Bytecode validation, engine documentation lookup, AST extraction, surgical method patching. |
+| **4. Vision & Render (4)** | `viewport_capture_frame`, `viewport_set_camera_transform`, `viewport_create_test_lab`, `viewport_toggle_debug_draw` | Multi-angle PNG viewport captures, isolated sandbox test stages, debug wireframes. |
+| **5. Physics & Nav (6)** | `physics_raycast_query`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track` | Raycast testing, deterministic physics ticking, navmesh baking, animation playback. |
+| **6. Tilemaps & Grids (3)**| `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells` | 2D `TileMapLayer` cell updates, boundary calculation, 3D `GridMap` mesh placements. |
+| **7. Resources & UIDs (4)**| `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map` | `.tres` resource generation, UID resolution, asset discovery. |
+| **8. Runtime & Debug (4)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Headless test runner, synthetic input simulation, crash stack extraction, FPS/profiler telemetry. |
+| **9. Editor Lifecycle (4)**| `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Complete UndoRedo transaction management, scene file saving, filesystem rescan. |
