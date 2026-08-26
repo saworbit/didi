@@ -11,6 +11,7 @@
 #else
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -417,7 +418,7 @@ public:
     ~PosixIpcClient() override { disconnect(); }
 
     bool connect(const std::string& pipe_name = kDefaultPipeName, int timeout_ms = 2000) override {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
         m_pipeName = pipe_name;
 
         struct sockaddr_un addr{};
@@ -444,7 +445,7 @@ public:
     }
 
     void disconnect() override {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
         if (m_sock >= 0) {
             close(m_sock);
             m_sock = -1;
@@ -452,12 +453,12 @@ public:
     }
 
     bool isConnected() const override {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
         return m_sock >= 0;
     }
 
     Result<json> sendRequest(const std::string& method, const json& params = json::object(), int timeout_ms = 10000) override {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
         if (m_sock < 0) {
             if (!connect(m_pipeName.empty() ? kDefaultPipeName : m_pipeName, 500)) {
                 return Error::notConnected();

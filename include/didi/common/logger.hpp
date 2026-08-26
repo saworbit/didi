@@ -4,6 +4,7 @@
 #include <string_view>
 #include <iostream>
 #include <mutex>
+#include <atomic>
 #include <sstream>
 #include <chrono>
 #include <iomanip>
