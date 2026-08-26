@@ -411,19 +411,28 @@ public:
     bool connect(const std::string& pipe_name = kDefaultPipeName, int timeout_ms = 2000) override {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_pipeName = pipe_name;
-        m_sock = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (m_sock < 0) return false;
 
         struct sockaddr_un addr{};
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, m_pipeName.c_str(), sizeof(addr.sun_path) - 1);
 
-        if (::connect(m_sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-            close(m_sock);
-            m_sock = -1;
-            return false;
+        auto start = std::chrono::steady_clock::now();
+        while (true) {
+            m_sock = socket(AF_UNIX, SOCK_STREAM, 0);
+            if (m_sock >= 0) {
+                if (::connect(m_sock, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+                    return true;
+                }
+                close(m_sock);
+                m_sock = -1;
+            }
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= timeout_ms) {
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
-        return true;
     }
 
     void disconnect() override {
@@ -544,11 +553,13 @@ public:
 
         if (bind(m_listenSock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
             close(m_listenSock);
+            m_listenSock = -1;
             return false;
         }
 
         if (listen(m_listenSock, 5) < 0) {
             close(m_listenSock);
+            m_listenSock = -1;
             return false;
         }
 
@@ -575,14 +586,29 @@ public:
 
 private:
     void serverLoop() {
+        struct pollfd pfd;
+        pfd.fd = m_listenSock;
+        pfd.events = POLLIN;
+
         while (m_running.load()) {
+            int pr = poll(&pfd, 1, 50);
+            if (pr <= 0) continue;
+
             int client = accept(m_listenSock, NULL, NULL);
             if (client < 0) {
                 if (!m_running.load()) break;
                 continue;
             }
 
+            struct pollfd cpfd;
+            cpfd.fd = client;
+            cpfd.events = POLLIN;
+
             while (m_running.load()) {
+                int cpr = poll(&cpfd, 1, 50);
+                if (cpr < 0) break;
+                if (cpr == 0) continue;
+
                 uint8_t len_buf[4] = {0};
                 ssize_t r = read(client, len_buf, 4);
                 if (r != 4) break;
@@ -595,6 +621,7 @@ private:
                 size_t total = 0;
                 bool ok = true;
                 while (total < req_len) {
+                    if (poll(&cpfd, 1, 5000) <= 0) { ok = false; break; }
                     ssize_t c = read(client, payload.data() + total, req_len - total);
                     if (c <= 0) { ok = false; break; }
                     total += c;
