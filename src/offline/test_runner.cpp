@@ -78,9 +78,9 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
         cmd_builder << " --headless";
     }
 
-    // Filter shell metacharacters
+    // Filter shell metacharacters (allow standard path separators / and \)
     auto is_safe_arg = [](const std::string& s) {
-        return s.find_first_of("&|;`$\\<>\r\n\"'") == std::string::npos;
+        return s.find_first_of("&|;`$<>^%\"'\r\n") == std::string::npos;
     };
 
     if (!scene_path.empty()) {

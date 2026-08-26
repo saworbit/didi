@@ -6,6 +6,16 @@
 #include <filesystem>
 #include <cstdlib>
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#include <unistd.h>
+#include <sys/wait.h>
+#endif
+
 namespace didi {
 namespace offline {
 
@@ -202,9 +212,7 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const s
         actual_path = actual_path.substr(6);
     }
 
-    if (actual_path.find('\"') != std::string::npos || actual_path.find(';') != std::string::npos ||
-        actual_path.find('&') != std::string::npos || actual_path.find('|') != std::string::npos ||
-        actual_path.find('`') != std::string::npos || actual_path.find('$') != std::string::npos) {
+    if (actual_path.find_first_of("&|;`$<>^%\"'\r\n") != std::string::npos) {
         return diags; // Prevent command injection
     }
 
@@ -217,17 +225,90 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const s
     }
 
     std::string godot_exe = resolveGodotExecutable();
-    // Run godot --headless --check-only -s <path>
-    std::string cmd = "\"" + godot_exe + "\" --headless --check-only -s \"" + actual_path + "\" 2>&1";
-    FILE* pipe = DIDI_POPEN(cmd.c_str(), "r");
-    if (!pipe) return diags;
-
-    char buffer[512];
     std::string output;
-    while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
-        output += buffer;
+
+#if defined(_WIN32)
+    std::string win_command_line = "\"" + godot_exe + "\" --headless --check-only -s \"" + actual_path + "\"";
+    if (strings::endsWith(godot_exe, ".cmd") || strings::endsWith(godot_exe, ".bat")) {
+        win_command_line = "cmd.exe /c \"" + win_command_line + "\"";
     }
-    DIDI_PCLOSE(pipe);
+
+    SECURITY_ATTRIBUTES sa;
+    sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = NULL;
+
+    HANDLE hReadPipe, hWritePipe;
+    if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
+        return diags;
+    }
+    SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
+
+    STARTUPINFOA si;
+    ZeroMemory(&si, sizeof(STARTUPINFOA));
+    si.cb = sizeof(STARTUPINFOA);
+    si.hStdError = hWritePipe;
+    si.hStdOutput = hWritePipe;
+    si.dwFlags |= STARTF_USESTDHANDLES;
+
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&pi, sizeof(PROCESS_INFORMATION));
+
+    std::vector<char> cmd_writable(win_command_line.begin(), win_command_line.end());
+    cmd_writable.push_back('\0');
+
+    if (CreateProcessA(NULL, cmd_writable.data(), NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
+        CloseHandle(hWritePipe);
+
+        char buffer[1024];
+        DWORD bytes_read = 0;
+        while (ReadFile(hReadPipe, buffer, sizeof(buffer) - 1, &bytes_read, NULL) && bytes_read > 0) {
+            buffer[bytes_read] = '\0';
+            output += buffer;
+        }
+
+        WaitForSingleObject(pi.hProcess, 5000);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        CloseHandle(hReadPipe);
+    } else {
+        CloseHandle(hWritePipe);
+        CloseHandle(hReadPipe);
+    }
+#else
+    int pipefd[2];
+    if (pipe(pipefd) == 0) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            close(pipefd[0]);
+            dup2(pipefd[1], STDOUT_FILENO);
+            dup2(pipefd[1], STDERR_FILENO);
+            close(pipefd[1]);
+
+            char* const argv[] = {
+                const_cast<char*>(godot_exe.c_str()),
+                const_cast<char*>("--headless"),
+                const_cast<char*>("--check-only"),
+                const_cast<char*>("-s"),
+                const_cast<char*>(actual_path.c_str()),
+                nullptr
+            };
+            execvp(godot_exe.c_str(), argv);
+            _exit(127);
+        } else if (pid > 0) {
+            close(pipefd[1]);
+            char buffer[1024];
+            ssize_t bytes = 0;
+            while ((bytes = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
+                buffer[bytes] = '\0';
+                output += buffer;
+            }
+            close(pipefd[0]);
+            int status = 0;
+            waitpid(pid, &status, 0);
+        }
+    }
+#endif
 
     // Parse errors like: "SCRIPT ERROR: Parse Error: ... at res://...:12"
     static const std::regex err_regex(R"re((SCRIPT ERROR|ERROR|WARNING): (.*) at (res:\/\/[^:]+):(\d+))re");
@@ -626,6 +707,156 @@ json GDScriptDiagnostics::reflectClass(const std::string& class_name) {
             }},
             {"methods", json::object()},
             {"signals", json::array()}
+        }},
+        {"Control", {
+            {"class_name", "Control"},
+            {"inherits", "CanvasItem"},
+            {"description", "Base class for all UI-related nodes in Godot."},
+            {"properties", {
+                {"size", {{"type", "Vector2"}}},
+                {"position", {{"type", "Vector2"}}},
+                {"mouse_filter", {{"type", "MouseFilter"}, {"default", "MOUSE_FILTER_STOP"}}}
+            }},
+            {"methods", {
+                {"get_rect", {{"returns", "Rect2"}, {"args", json::array()}}},
+                {"grab_focus", {{"returns", "void"}, {"args", json::array()}}}
+            }},
+            {"signals", json::array({"resized", "gui_input", "mouse_entered", "mouse_exited"})}
+        }},
+        {"Button", {
+            {"class_name", "Button"},
+            {"inherits", "Control"},
+            {"description", "Standard GUI button node."},
+            {"properties", {
+                {"text", {{"type", "String"}, {"default", ""}}},
+                {"disabled", {{"type", "bool"}, {"default", "false"}}},
+                {"flat", {{"type", "bool"}, {"default", "false"}}}
+            }},
+            {"methods", json::object()},
+            {"signals", json::array({"pressed", "button_up", "button_down", "toggled"})}
+        }},
+        {"Label", {
+            {"class_name", "Label"},
+            {"inherits", "Control"},
+            {"description", "Displays plain text on screen."},
+            {"properties", {
+                {"text", {{"type", "String"}, {"default", ""}}},
+                {"horizontal_alignment", {{"type", "HorizontalAlignment"}, {"default", "HORIZONTAL_ALIGNMENT_LEFT"}}}
+            }},
+            {"methods", json::object()},
+            {"signals", json::array()}
+        }},
+        {"Sprite2D", {
+            {"class_name", "Sprite2D"},
+            {"inherits", "Node2D"},
+            {"description", "General-purpose 2D sprite node."},
+            {"properties", {
+                {"texture", {{"type", "Texture2D"}}},
+                {"flip_h", {{"type", "bool"}, {"default", "false"}}},
+                {"flip_v", {{"type", "bool"}, {"default", "false"}}}
+            }},
+            {"methods", json::object()},
+            {"signals", json::array({"texture_changed"})}
+        }},
+        {"Sprite3D", {
+            {"class_name", "Sprite3D"},
+            {"inherits", "GeometryInstance3D"},
+            {"description", "2D sprite displayed in 3D world space."},
+            {"properties", {
+                {"texture", {{"type", "Texture2D"}}},
+                {"billboard", {{"type", "BillboardMode"}, {"default", "BILLBOARD_DISABLED"}}}
+            }},
+            {"methods", json::object()},
+            {"signals", json::array()}
+        }},
+        {"RayCast3D", {
+            {"class_name", "RayCast3D"},
+            {"inherits", "Node3D"},
+            {"description", "3D raycast query node detecting physics colliders."},
+            {"properties", {
+                {"target_position", {{"type", "Vector3"}, {"default", "Vector3(0, -1, 0)"}}},
+                {"enabled", {{"type", "bool"}, {"default", "true"}}},
+                {"collision_mask", {{"type", "int"}, {"default", "1"}}}
+            }},
+            {"methods", {
+                {"is_colliding", {{"returns", "bool"}, {"args", json::array()}}},
+                {"get_collider", {{"returns", "Object"}, {"args", json::array()}}},
+                {"get_collision_point", {{"returns", "Vector3"}, {"args", json::array()}}},
+                {"get_collision_normal", {{"returns", "Vector3"}, {"args", json::array()}}}
+            }},
+            {"signals", json::array()}
+        }},
+        {"RayCast2D", {
+            {"class_name", "RayCast2D"},
+            {"inherits", "Node2D"},
+            {"description", "2D raycast query node detecting physics colliders."},
+            {"properties", {
+                {"target_position", {{"type", "Vector2"}, {"default", "Vector2(0, 50)"}}},
+                {"enabled", {{"type", "bool"}, {"default", "true"}}}
+            }},
+            {"methods", {
+                {"is_colliding", {{"returns", "bool"}, {"args", json::array()}}},
+                {"get_collider", {{"returns", "Object"}, {"args", json::array()}}},
+                {"get_collision_point", {{"returns", "Vector2"}, {"args", json::array()}}}
+            }},
+            {"signals", json::array()}
+        }},
+        {"Area3D", {
+            {"class_name", "Area3D"},
+            {"inherits", "CollisionObject3D"},
+            {"description", "3D region for 3D physics influence and collision detection."},
+            {"properties", {
+                {"monitoring", {{"type", "bool"}, {"default", "true"}}},
+                {"monitorable", {{"type", "bool"}, {"default", "true"}}}
+            }},
+            {"methods", {
+                {"get_overlapping_bodies", {{"returns", "Array[Node3D]"}, {"args", json::array()}}},
+                {"get_overlapping_areas", {{"returns", "Array[Area3D]"}, {"args", json::array()}}}
+            }},
+            {"signals", json::array({"body_entered", "body_exited", "area_entered", "area_exited"})}
+        }},
+        {"Area2D", {
+            {"class_name", "Area2D"},
+            {"inherits", "CollisionObject2D"},
+            {"description", "2D region for 2D physics influence and collision detection."},
+            {"properties", {
+                {"monitoring", {{"type", "bool"}, {"default", "true"}}},
+                {"monitorable", {{"type", "bool"}, {"default", "true"}}}
+            }},
+            {"methods", {
+                {"get_overlapping_bodies", {{"returns", "Array[Node2D]"}, {"args", json::array()}}},
+                {"get_overlapping_areas", {{"returns", "Array[Area2D]"}, {"args", json::array()}}}
+            }},
+            {"signals", json::array({"body_entered", "body_exited", "area_entered", "area_exited"})}
+        }},
+        {"Object", {
+            {"class_name", "Object"},
+            {"inherits", ""},
+            {"description", "Base class for almost everything in Godot."},
+            {"properties", json::object()},
+            {"methods", {
+                {"get_class", {{"returns", "String"}, {"args", json::array()}}},
+                {"is_class", {{"returns", "bool"}, {"args", json::array({"type: String"})}}},
+                {"set", {{"returns", "void"}, {"args", json::array({"property: StringName", "value: Variant"})}}},
+                {"get", {{"returns", "Variant"}, {"args", json::array({"property: StringName"})}}},
+                {"emit_signal", {{"returns", "Error"}, {"args", json::array({"signal: StringName"})}}},
+                {"connect", {{"returns", "Error"}, {"args", json::array({"signal: StringName", "callable: Callable", "flags: int = 0"})}}},
+                {"disconnect", {{"returns", "void"}, {"args", json::array({"signal: StringName", "callable: Callable"})}}}
+            }},
+            {"signals", json::array({"script_changed"})}
+        }},
+        {"Resource", {
+            {"class_name", "Resource"},
+            {"inherits", "RefCounted"},
+            {"description", "Base class for all serializable engine resources."},
+            {"properties", {
+                {"resource_path", {{"type", "String"}}},
+                {"resource_name", {{"type", "String"}}}
+            }},
+            {"methods", {
+                {"duplicate", {{"returns", "Resource"}, {"args", json::array({"subresources: bool = false"})}}}
+            }},
+            {"signals", json::array({"changed"})}
         }}
     };
 
@@ -637,7 +868,7 @@ json GDScriptDiagnostics::reflectClass(const std::string& class_name) {
 
     return {
         {"class_name", class_name},
-        {"inherits", "Node"},
+        {"inherits", "Object"},
         {"is_known_class", false},
         {"description", "Godot 4 class: " + class_name + " (not in offline snapshot; launch Godot with Didi plugin for live engine reflection)."},
         {"properties", json::object()},

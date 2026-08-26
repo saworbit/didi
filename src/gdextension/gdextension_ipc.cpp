@@ -39,7 +39,7 @@ bool GDExtensionIpc::start() {
         }
     });
 
-    return m_server->start(ipc::resolvePipeName(ipc::kDefaultPipeName));
+    return m_server->start(ipc::resolvePipeName());
 }
 
 void GDExtensionIpc::stop() {

@@ -263,32 +263,83 @@ public:
 
 private:
     bool readExactOverlapped(HANDLE pipe, void* buffer, DWORD bytesToRead, HANDLE hIoEvent) {
-        OVERLAPPED ov{};
-        ov.hEvent = hIoEvent;
-        ResetEvent(hIoEvent);
+        uint8_t* ptr = static_cast<uint8_t*>(buffer);
+        DWORD totalRead = 0;
 
-        DWORD bytesRead = 0;
-        BOOL ok = ReadFile(pipe, buffer, bytesToRead, &bytesRead, &ov);
-        if (!ok) {
-            DWORD err = GetLastError();
-            if (err == ERROR_IO_PENDING) {
-                HANDLE events[2] = {m_stopEvent, hIoEvent};
-                DWORD waitRes = WaitForMultipleObjects(2, events, FALSE, INFINITE);
-                if (waitRes == WAIT_OBJECT_0) { // Stop signaled
-                    CancelIo(pipe);
-                    return false;
-                } else if (waitRes == WAIT_OBJECT_0 + 1) {
-                    if (!GetOverlappedResult(pipe, &ov, &bytesRead, FALSE) || bytesRead != bytesToRead) {
+        while (totalRead < bytesToRead && m_running.load()) {
+            OVERLAPPED ov{};
+            ov.hEvent = hIoEvent;
+            ResetEvent(hIoEvent);
+
+            DWORD chunkToRead = bytesToRead - totalRead;
+            DWORD bytesRead = 0;
+            BOOL ok = ReadFile(pipe, ptr + totalRead, chunkToRead, &bytesRead, &ov);
+            if (!ok) {
+                DWORD err = GetLastError();
+                if (err == ERROR_IO_PENDING) {
+                    HANDLE events[2] = {m_stopEvent, hIoEvent};
+                    DWORD waitRes = WaitForMultipleObjects(2, events, FALSE, INFINITE);
+                    if (waitRes == WAIT_OBJECT_0) { // Stop signaled
+                        CancelIo(pipe);
+                        DWORD dummy = 0;
+                        GetOverlappedResult(pipe, &ov, &dummy, FALSE);
+                        ResetEvent(hIoEvent);
+                        return false;
+                    } else if (waitRes == WAIT_OBJECT_0 + 1) {
+                        if (!GetOverlappedResult(pipe, &ov, &bytesRead, FALSE) || bytesRead == 0) {
+                            return false;
+                        }
+                    } else {
                         return false;
                     }
                 } else {
                     return false;
                 }
-            } else {
-                return false;
             }
+            if (bytesRead == 0) return false;
+            totalRead += bytesRead;
         }
-        return bytesRead == bytesToRead;
+        return totalRead == bytesToRead;
+    }
+
+    bool writeExactOverlapped(HANDLE pipe, const void* buffer, DWORD bytesToWrite, HANDLE hIoEvent) {
+        const uint8_t* ptr = static_cast<const uint8_t*>(buffer);
+        DWORD totalWritten = 0;
+
+        while (totalWritten < bytesToWrite && m_running.load()) {
+            OVERLAPPED ov{};
+            ov.hEvent = hIoEvent;
+            ResetEvent(hIoEvent);
+
+            DWORD chunkToWrite = bytesToWrite - totalWritten;
+            DWORD bytesWritten = 0;
+            BOOL ok = WriteFile(pipe, ptr + totalWritten, chunkToWrite, &bytesWritten, &ov);
+            if (!ok) {
+                DWORD err = GetLastError();
+                if (err == ERROR_IO_PENDING) {
+                    HANDLE events[2] = {m_stopEvent, hIoEvent};
+                    DWORD waitRes = WaitForMultipleObjects(2, events, FALSE, INFINITE);
+                    if (waitRes == WAIT_OBJECT_0) { // Stop signaled
+                        CancelIo(pipe);
+                        DWORD dummy = 0;
+                        GetOverlappedResult(pipe, &ov, &dummy, FALSE);
+                        ResetEvent(hIoEvent);
+                        return false;
+                    } else if (waitRes == WAIT_OBJECT_0 + 1) {
+                        if (!GetOverlappedResult(pipe, &ov, &bytesWritten, FALSE) || bytesWritten == 0) {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            }
+            if (bytesWritten == 0) return false;
+            totalWritten += bytesWritten;
+        }
+        return totalWritten == bytesToWrite;
     }
 
     void serverLoop() {
@@ -415,15 +466,7 @@ private:
                 }
 
                 std::vector<uint8_t> frame = frameMessage(response_json);
-                DWORD bytes_written = 0;
-                OVERLAPPED writeOv{};
-                writeOv.hEvent = hIoEvent;
-                ResetEvent(hIoEvent);
-                BOOL write_res = WriteFile(pipe, frame.data(), static_cast<DWORD>(frame.size()), &bytes_written, &writeOv);
-                if (!write_res && GetLastError() == ERROR_IO_PENDING) {
-                    GetOverlappedResult(pipe, &writeOv, &bytes_written, TRUE);
-                }
-                if (bytes_written != frame.size()) {
+                if (!writeExactOverlapped(pipe, frame.data(), static_cast<DWORD>(frame.size()), hIoEvent)) {
                     break;
                 }
             }

@@ -65,8 +65,11 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     try {
         auto canon_root = fs::weakly_canonical(current_root);
         auto canon_target = fs::weakly_canonical(current_root / target_p);
-        auto [root_end, _] = std::mismatch(canon_root.begin(), canon_root.end(), canon_target.begin());
-        if (root_end != canon_root.end()) {
+        auto [root_it, target_it] = std::mismatch(
+            canon_root.begin(), canon_root.end(),
+            canon_target.begin(), canon_target.end()
+        );
+        if (root_it != canon_root.end()) {
             return CallToolResult::error("Access denied: save_path is outside the project root directory.");
         }
         if (target_p.has_parent_path()) {
@@ -76,6 +79,19 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         return CallToolResult::error(std::string("Path resolution error: ") + e.what());
     }
 
+    auto escape_tres_str = [](const std::string& s) -> std::string {
+        std::string out;
+        for (char c : s) {
+            if (c == '\\') out += "\\\\";
+            else if (c == '"') out += "\\\"";
+            else if (c == '\n') out += "\\n";
+            else if (c == '\r') out += "\\r";
+            else if (c == '\t') out += "\\t";
+            else out += c;
+        }
+        return out;
+    };
+
     std::ofstream out(disk_path);
     if (out.is_open()) {
         out << "[gd_resource type=\"" << resource_type << "\" format=3]\n\n"
@@ -83,11 +99,26 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         for (auto it = properties.begin(); it != properties.end(); ++it) {
             out << it.key() << " = ";
             if (it.value().is_string()) {
-                out << "\"" << it.value().get<std::string>() << "\"\n";
+                out << "\"" << escape_tres_str(it.value().get<std::string>()) << "\"\n";
             } else if (it.value().is_boolean()) {
                 out << (it.value().get<bool>() ? "true" : "false") << "\n";
             } else if (it.value().is_number()) {
                 out << it.value().dump() << "\n";
+            } else if (it.value().is_array()) {
+                out << "[";
+                bool first = true;
+                for (const auto& elem : it.value()) {
+                    if (!first) out << ", ";
+                    first = false;
+                    if (elem.is_string()) {
+                        out << "\"" << escape_tres_str(elem.get<std::string>()) << "\"";
+                    } else if (elem.is_boolean()) {
+                        out << (elem.get<bool>() ? "true" : "false");
+                    } else {
+                        out << elem.dump();
+                    }
+                }
+                out << "]\n";
             } else if (it.value().is_object() && it.value().contains("x") && it.value().contains("y")) {
                 if (it.value().contains("z")) {
                     out << "Vector3(" << it.value()["x"] << ", " << it.value()["y"] << ", " << it.value()["z"] << ")\n";

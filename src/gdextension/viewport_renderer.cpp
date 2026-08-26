@@ -1,6 +1,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "didi/common/stb_image_write.h"
 #include "didi/gdextension/viewport_renderer.hpp"
+#include "didi/gdextension/gdextension_api.hpp"
 #include "didi/common/base64.hpp"
 #include "didi/common/logger.hpp"
 #include <cmath>
@@ -106,15 +107,18 @@ json ViewportRenderer::captureViewport(const json& params) {
     }
 
     std::string b64_png = encodeImageToPngBase64(pixels.data(), width, height);
+    bool is_live = GodotApi::instance().isInitialized();
 
     return {
         {"camera_identifier", cam_id},
         {"resolution", {{"width", width}, {"height", height}}},
         {"format", "image/png"},
-        {"source", "godot_subviewport_renderer"},
-        {"is_live_frame", true},
+        {"source", is_live ? "godot_subviewport_renderer" : "offline_preview_renderer"},
+        {"is_live_frame", is_live},
         {"image_base64", b64_png},
-        {"description", "Godot 4.x SubViewport frame rendered from camera '" + cam_id + "' (" + std::to_string(width) + "x" + std::to_string(height) + ")"}
+        {"description", is_live ? 
+            ("Godot 4.x SubViewport frame rendered from camera '" + cam_id + "' (" + std::to_string(width) + "x" + std::to_string(height) + ")") :
+            ("Synthesized offline viewport preview for camera '" + cam_id + "' (" + std::to_string(width) + "x" + std::to_string(height) + ")")}
     };
 }
 

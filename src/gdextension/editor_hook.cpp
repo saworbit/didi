@@ -1,6 +1,7 @@
 #include "didi/gdextension/editor_hook.hpp"
 #include "didi/gdextension/viewport_renderer.hpp"
 #include "didi/gdextension/visual_test_lab.hpp"
+#include "didi/gdextension/gdextension_api.hpp"
 #include "didi/offline/resource_indexer.hpp"
 #include "didi/offline/gdscript_diagnostics.hpp"
 #include "didi/common/logger.hpp"
@@ -61,6 +62,13 @@ std::future<json> EditorHook::postCommand(const std::string& method, const json&
     cmd.response_promise = prom;
 
     enqueueCommand(std::move(cmd));
+
+    // If Godot engine host is not running the main loop (e.g. standalone test mode),
+    // process immediately to prevent timeout.
+    if (!GodotApi::instance().isInitialized()) {
+        processQueue();
+    }
+
     return fut;
 }
 
@@ -356,18 +364,39 @@ json EditorHook::parseTscnHierarchy(const std::string& scene_file_path, int max_
             continue;
         }
 
-        std::smatch node_match;
-        if (std::regex_match(trimmed, node_match, node_regex)) {
+        if (strings::startsWith(trimmed, "[node ") && strings::endsWith(trimmed, "]")) {
             NodeEntry ne;
-            ne.name = node_match[1].str();
-            ne.type = node_match[2].matched ? node_match[2].str() : "Instance";
-            ne.parent = node_match[3].matched ? node_match[3].str() : "";
-            if (node_match[4].matched) {
-                std::string ext_id = node_match[4].str();
+            static const std::regex name_regex(R"re(name="([^"]+)")re");
+            static const std::regex type_regex(R"re(type="([^"]+)")re");
+            static const std::regex parent_regex(R"re(parent="([^"]+)")re");
+            static const std::regex inst_regex(R"re(instance=ExtResource\("([^"]+)"\))re");
+
+            std::smatch match;
+            if (std::regex_search(trimmed, match, name_regex)) {
+                ne.name = match[1].str();
+            } else {
+                continue;
+            }
+
+            if (std::regex_search(trimmed, match, type_regex)) {
+                ne.type = match[1].str();
+            } else {
+                ne.type = "Instance";
+            }
+
+            if (std::regex_search(trimmed, match, parent_regex)) {
+                ne.parent = match[1].str();
+            } else {
+                ne.parent = "";
+            }
+
+            if (std::regex_search(trimmed, match, inst_regex)) {
+                std::string ext_id = match[1].str();
                 if (ext_resources.count(ext_id)) {
                     ne.instance_path = ext_resources[ext_id];
                 }
             }
+
             nodes.push_back(ne);
             current_node = &nodes.back();
             continue;
@@ -403,20 +432,22 @@ json EditorHook::parseTscnHierarchy(const std::string& scene_file_path, int max_
     for (size_t i = 1; i < nodes.size(); ++i) {
         std::string p = nodes[i].parent;
         int parent_idx = 0;
+        std::string this_rel_path;
+
         if (p == "." || p.empty()) {
             parent_idx = 0;
-            node_full_paths[i] = node_full_paths[0] + "/" + nodes[i].name;
-            path_to_index[nodes[i].name] = static_cast<int>(i);
+            this_rel_path = nodes[i].name;
         } else {
             if (path_to_index.count(p)) {
                 parent_idx = path_to_index[p];
             } else {
                 parent_idx = 0;
             }
-            node_full_paths[i] = node_full_paths[parent_idx] + "/" + nodes[i].name;
-            path_to_index[p + "/" + nodes[i].name] = static_cast<int>(i);
-            path_to_index[nodes[i].name] = static_cast<int>(i);
+            this_rel_path = p + "/" + nodes[i].name;
         }
+
+        node_full_paths[i] = node_full_paths[parent_idx] + "/" + nodes[i].name;
+        path_to_index[this_rel_path] = static_cast<int>(i);
         children_by_index[parent_idx].push_back(static_cast<int>(i));
     }
 
@@ -447,9 +478,13 @@ json EditorHook::parseTscnHierarchy(const std::string& scene_file_path, int max_
 }
 
 json EditorHook::handleGetHierarchy(const json& params) {
-    std::string root_path = params.value("root_path", "res://scenes/main.tscn");
+    std::string root_path = params.value("root_path", "");
     int max_depth = params.value("max_depth", 10);
     bool inc_props = params.value("include_properties", true);
+
+    if (root_path.empty() || root_path == "/root" || root_path == "." || !strings::endsWith(root_path, ".tscn")) {
+        root_path = "res://scenes/main.tscn";
+    }
 
     json tree = parseTscnHierarchy(root_path, max_depth, inc_props);
     return {

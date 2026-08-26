@@ -78,7 +78,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    DIDI_LOG_INFO("MAIN", "Starting Didi MCP Native Server v1.0.0 for Godot 4.x...");
+    DIDI_LOG_INFO("MAIN", "Starting Didi MCP Native Server v1.1.0 for Godot 4.x...");
 
     didi::mcp::McpServer server;
     g_server = &server;

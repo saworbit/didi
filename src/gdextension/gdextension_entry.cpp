@@ -36,6 +36,10 @@ static void deinitialize_didi_module(void *userdata, GDExtensionInitializationLe
 
 extern "C" {
 
+GDE_EXPORT void didi_pump_queue() {
+    didi::godot::EditorHook::instance().processQueue();
+}
+
 GDE_EXPORT GDExtensionBool didi_library_init(GDExtensionInterfaceGetProcAddress p_get_proc_address,
                                             GDExtensionClassLibraryPtr p_library,
                                             GDExtensionInitialization *r_initialization) {

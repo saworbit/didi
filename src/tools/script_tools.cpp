@@ -111,8 +111,11 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
     try {
         auto canon_root = fs::weakly_canonical(current_root);
         auto canon_target = fs::weakly_canonical(current_root / target_p);
-        auto [root_end, _] = std::mismatch(canon_root.begin(), canon_root.end(), canon_target.begin());
-        if (root_end != canon_root.end()) {
+        auto [root_it, target_it] = std::mismatch(
+            canon_root.begin(), canon_root.end(),
+            canon_target.begin(), canon_target.end()
+        );
+        if (root_it != canon_root.end()) {
             return CallToolResult::error("Access denied: file path is outside the project root directory.");
         }
     } catch (const std::exception& e) {

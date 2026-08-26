@@ -86,74 +86,97 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
                 continue;
             }
 
-            std::smatch node_match;
-            if (std::regex_match(trimmed, node_match, node_regex)) {
-                NodeEntry ne;
-                ne.name = node_match[1].str();
-                ne.type = node_match[2].matched ? node_match[2].str() : "Instance";
-                ne.parent = node_match[3].matched ? node_match[3].str() : "";
-                if (node_match[4].matched) {
-                    std::string ext_id = node_match[4].str();
-                    if (ext_resources.count(ext_id)) {
-                        ne.instance_path = ext_resources[ext_id];
-                    }
-                }
-                nodes.push_back(ne);
-                current_node = &nodes.back();
+        if (strings::startsWith(trimmed, "[node ") && strings::endsWith(trimmed, "]")) {
+            NodeEntry ne;
+            static const std::regex name_regex(R"re(name="([^"]+)")re");
+            static const std::regex type_regex(R"re(type="([^"]+)")re");
+            static const std::regex parent_regex(R"re(parent="([^"]+)")re");
+            static const std::regex inst_regex(R"re(instance=ExtResource\("([^"]+)"\))re");
+
+            std::smatch match;
+            if (std::regex_search(trimmed, match, name_regex)) {
+                ne.name = match[1].str();
+            } else {
                 continue;
             }
 
-            if (current_node && trimmed.find('=') != std::string::npos && !strings::startsWith(trimmed, "[")) {
-                auto eq_pos = trimmed.find('=');
-                std::string key = strings::trim(trimmed.substr(0, eq_pos));
-                std::string val = strings::trim(trimmed.substr(eq_pos + 1));
-                if (key == "transform") {
-                    current_node->transform = {{"raw", val}};
-                } else if (args.value("include_properties", true)) {
-                    current_node->properties[key] = val;
-                }
-            }
-        }
-
-        if (nodes.empty()) {
-            json empty_tree = {
-                {"name", "Root"},
-                {"type", "Node"},
-                {"path", "/root"},
-                {"children", json::array()}
-            };
-            return CallToolResult::successJson({{"source", "parsed_tscn_file"}, {"file_path", root}, {"scene_tree", empty_tree}});
-        }
-
-        std::unordered_map<int, std::vector<int>> children_by_index;
-        std::unordered_map<std::string, int> path_to_index;
-
-        std::string root_name = nodes[0].name;
-        path_to_index["."] = 0;
-        path_to_index[root_name] = 0;
-
-        std::vector<std::string> node_full_paths(nodes.size());
-        node_full_paths[0] = "/root/" + root_name;
-
-        for (size_t i = 1; i < nodes.size(); ++i) {
-            std::string p = nodes[i].parent;
-            int parent_idx = 0;
-            if (p == "." || p.empty()) {
-                parent_idx = 0;
-                node_full_paths[i] = node_full_paths[0] + "/" + nodes[i].name;
-                path_to_index[nodes[i].name] = static_cast<int>(i);
+            if (std::regex_search(trimmed, match, type_regex)) {
+                ne.type = match[1].str();
             } else {
-                if (path_to_index.count(p)) {
-                    parent_idx = path_to_index[p];
-                } else {
-                    parent_idx = 0;
-                }
-                node_full_paths[i] = node_full_paths[parent_idx] + "/" + nodes[i].name;
-                path_to_index[p + "/" + nodes[i].name] = static_cast<int>(i);
-                path_to_index[nodes[i].name] = static_cast<int>(i);
+                ne.type = "Instance";
             }
-            children_by_index[parent_idx].push_back(static_cast<int>(i));
+
+            if (std::regex_search(trimmed, match, parent_regex)) {
+                ne.parent = match[1].str();
+            } else {
+                ne.parent = "";
+            }
+
+            if (std::regex_search(trimmed, match, inst_regex)) {
+                std::string ext_id = match[1].str();
+                if (ext_resources.count(ext_id)) {
+                    ne.instance_path = ext_resources[ext_id];
+                }
+            }
+
+            nodes.push_back(ne);
+            current_node = &nodes.back();
+            continue;
         }
+
+        if (current_node && trimmed.find('=') != std::string::npos && !strings::startsWith(trimmed, "[")) {
+            auto eq_pos = trimmed.find('=');
+            std::string key = strings::trim(trimmed.substr(0, eq_pos));
+            std::string val = strings::trim(trimmed.substr(eq_pos + 1));
+            if (key == "transform") {
+                current_node->transform = {{"raw", val}};
+            } else if (args.value("include_properties", true)) {
+                current_node->properties[key] = val;
+            }
+        }
+    }
+
+    if (nodes.empty()) {
+        json empty_tree = {
+            {"name", "Root"},
+            {"type", "Node"},
+            {"path", "/root"},
+            {"children", json::array()}
+        };
+        return CallToolResult::successJson({{"source", "parsed_tscn_file"}, {"file_path", root}, {"scene_tree", empty_tree}});
+    }
+
+    std::unordered_map<int, std::vector<int>> children_by_index;
+    std::unordered_map<std::string, int> path_to_index;
+
+    std::string root_name = nodes[0].name;
+    path_to_index["."] = 0;
+    path_to_index[root_name] = 0;
+
+    std::vector<std::string> node_full_paths(nodes.size());
+    node_full_paths[0] = "/root/" + root_name;
+
+    for (size_t i = 1; i < nodes.size(); ++i) {
+        std::string p = nodes[i].parent;
+        int parent_idx = 0;
+        std::string this_rel_path;
+
+        if (p == "." || p.empty()) {
+            parent_idx = 0;
+            this_rel_path = nodes[i].name;
+        } else {
+            if (path_to_index.count(p)) {
+                parent_idx = path_to_index[p];
+            } else {
+                parent_idx = 0;
+            }
+            this_rel_path = p + "/" + nodes[i].name;
+        }
+
+        node_full_paths[i] = node_full_paths[parent_idx] + "/" + nodes[i].name;
+        path_to_index[this_rel_path] = static_cast<int>(i);
+        children_by_index[parent_idx].push_back(static_cast<int>(i));
+    }
 
         int max_depth = args.value("max_depth", 10);
         std::function<json(int, int)> buildNode = [&](int idx, int depth) -> json {

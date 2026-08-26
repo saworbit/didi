@@ -20,14 +20,14 @@ inline const char* kDefaultPipeName = "/tmp/godot_didi_ipc.sock";
 #endif
 
 inline std::string resolvePipeName(const std::string& explicit_name = "") {
-    if (!explicit_name.empty()) {
+    if (!explicit_name.empty() && explicit_name != kDefaultPipeName) {
         return explicit_name;
     }
     const char* env_pipe = std::getenv("DIDI_PIPE_NAME");
     if (env_pipe && std::strlen(env_pipe) > 0) {
         return env_pipe;
     }
-    return kDefaultPipeName;
+    return !explicit_name.empty() ? explicit_name : kDefaultPipeName;
 }
 
 // Framing helper: 4-byte length prefix (little-endian) + JSON payload
