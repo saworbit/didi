@@ -280,9 +280,9 @@ private:
                     HANDLE events[2] = {m_stopEvent, hIoEvent};
                     DWORD waitRes = WaitForMultipleObjects(2, events, FALSE, INFINITE);
                     if (waitRes == WAIT_OBJECT_0) { // Stop signaled
-                        CancelIo(pipe);
+                        CancelIoEx(pipe, &ov);
                         DWORD dummy = 0;
-                        GetOverlappedResult(pipe, &ov, &dummy, FALSE);
+                        GetOverlappedResult(pipe, &ov, &dummy, TRUE);
                         ResetEvent(hIoEvent);
                         return false;
                     } else if (waitRes == WAIT_OBJECT_0 + 1) {
@@ -320,9 +320,9 @@ private:
                     HANDLE events[2] = {m_stopEvent, hIoEvent};
                     DWORD waitRes = WaitForMultipleObjects(2, events, FALSE, INFINITE);
                     if (waitRes == WAIT_OBJECT_0) { // Stop signaled
-                        CancelIo(pipe);
+                        CancelIoEx(pipe, &ov);
                         DWORD dummy = 0;
-                        GetOverlappedResult(pipe, &ov, &dummy, FALSE);
+                        GetOverlappedResult(pipe, &ov, &dummy, TRUE);
                         ResetEvent(hIoEvent);
                         return false;
                     } else if (waitRes == WAIT_OBJECT_0 + 1) {
@@ -387,7 +387,9 @@ private:
                     HANDLE events[2] = {m_stopEvent, hIoEvent};
                     DWORD waitRes = WaitForMultipleObjects(2, events, FALSE, INFINITE);
                     if (waitRes == WAIT_OBJECT_0) { // Stop signaled
-                        CancelIo(pipe);
+                        CancelIoEx(pipe, &connectOv);
+                        DWORD dummy = 0;
+                        GetOverlappedResult(pipe, &connectOv, &dummy, TRUE);
                         CloseHandle(pipe);
                         break;
                     } else if (waitRes == WAIT_OBJECT_0 + 1) {

@@ -260,14 +260,44 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const s
     if (CreateProcessA(NULL, cmd_writable.data(), NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
         CloseHandle(hWritePipe);
 
-        char buffer[1024];
-        DWORD bytes_read = 0;
-        while (ReadFile(hReadPipe, buffer, sizeof(buffer) - 1, &bytes_read, NULL) && bytes_read > 0) {
-            buffer[bytes_read] = '\0';
-            output += buffer;
+        auto start_time = std::chrono::steady_clock::now();
+        while (true) {
+            DWORD avail = 0;
+            if (PeekNamedPipe(hReadPipe, NULL, 0, NULL, &avail, NULL) && avail > 0) {
+                char buffer[1024];
+                DWORD bytes_read = 0;
+                DWORD to_read = std::min<DWORD>(avail, sizeof(buffer) - 1);
+                if (ReadFile(hReadPipe, buffer, to_read, &bytes_read, NULL) && bytes_read > 0) {
+                    buffer[bytes_read] = '\0';
+                    output += buffer;
+                }
+            }
+
+            DWORD wait_res = WaitForSingleObject(pi.hProcess, 50);
+            if (wait_res == WAIT_OBJECT_0) {
+                DWORD avail_final = 0;
+                while (PeekNamedPipe(hReadPipe, NULL, 0, NULL, &avail_final, NULL) && avail_final > 0) {
+                    char buffer[1024];
+                    DWORD bytes_read = 0;
+                    DWORD to_read = std::min<DWORD>(avail_final, sizeof(buffer) - 1);
+                    if (ReadFile(hReadPipe, buffer, to_read, &bytes_read, NULL) && bytes_read > 0) {
+                        buffer[bytes_read] = '\0';
+                        output += buffer;
+                    } else {
+                        break;
+                    }
+                }
+                break;
+            }
+
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start_time).count();
+            if (elapsed > 5000) {
+                TerminateProcess(pi.hProcess, 124);
+                break;
+            }
         }
 
-        WaitForSingleObject(pi.hProcess, 5000);
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
         CloseHandle(hReadPipe);
@@ -297,15 +327,38 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const s
             _exit(127);
         } else if (pid > 0) {
             close(pipefd[1]);
+            int flags = fcntl(pipefd[0], F_GETFL, 0);
+            fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
+
+            auto start_time = std::chrono::steady_clock::now();
             char buffer[1024];
-            ssize_t bytes = 0;
-            while ((bytes = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
-                buffer[bytes] = '\0';
-                output += buffer;
+            while (true) {
+                ssize_t bytes = read(pipefd[0], buffer, sizeof(buffer) - 1);
+                if (bytes > 0) {
+                    buffer[bytes] = '\0';
+                    output += buffer;
+                }
+
+                int status = 0;
+                pid_t w = waitpid(pid, &status, WNOHANG);
+                if (w == pid) {
+                    while ((bytes = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
+                        buffer[bytes] = '\0';
+                        output += buffer;
+                    }
+                    break;
+                }
+
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - start_time).count();
+                if (elapsed > 5000) {
+                    kill(pid, SIGKILL);
+                    waitpid(pid, &status, 0);
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
             }
             close(pipefd[0]);
-            int status = 0;
-            waitpid(pid, &status, 0);
         }
     }
 #endif

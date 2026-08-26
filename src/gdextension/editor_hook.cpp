@@ -98,7 +98,8 @@ void EditorHook::processQueue() {
 }
 
 json EditorHook::executeOnMainThread(const std::string& method, const json& params) {
-    DIDI_LOG_DEBUG("EDITOR_HOOK", "Executing on main thread: ", method);
+    bool is_live = GodotApi::instance().isInitialized();
+    DIDI_LOG_DEBUG("EDITOR_HOOK", "Executing command: ", method, " (live engine: ", is_live ? "yes" : "no", ")");
 
     if (method == "editor.getState") {
         return handleGetState(params);
@@ -113,14 +114,14 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
             {"node_type", params.value("node_type", "Node3D")},
             {"parent_path", params.value("parent_path", "/root")},
             {"node_name", params.value("name", "")},
-            {"undo_redo_registered", true}
+            {"is_live_engine", is_live}
         };
     } else if (method == "scene.removeNode") {
         return {
             {"status", "success"},
             {"action", "remove_node"},
             {"target_node", params.value("target_node", "")},
-            {"undo_redo_registered", true}
+            {"is_live_engine", is_live}
         };
     } else if (method == "scene.reparentNode") {
         return {
@@ -128,7 +129,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
             {"action", "reparent_node"},
             {"target_node", params.value("target_node", "")},
             {"new_parent_path", params.value("new_parent_path", "")},
-            {"undo_redo_registered", true}
+            {"is_live_engine", is_live}
         };
     } else if (method == "scene.setProperty") {
         return {
@@ -137,14 +138,15 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
             {"target_node", params.value("target_node", "")},
             {"property_name", params.value("property_name", "")},
             {"value", params.value("value", json{})},
-            {"undo_redo_registered", true}
+            {"is_live_engine", is_live}
         };
     } else if (method == "scene.getProperty") {
         return {
             {"status", "success"},
             {"target_node", params.value("target_node", "")},
             {"property_name", params.value("property_name", "")},
-            {"value", nullptr}
+            {"value", nullptr},
+            {"is_live_engine", is_live}
         };
     } else if (method == "scene.duplicateNode") {
         return {
@@ -152,13 +154,14 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
             {"action", "duplicate_node"},
             {"target_node", params.value("target_node", "")},
             {"duplicated_node", params.value("target_node", "") + "2"},
-            {"undo_redo_registered", true}
+            {"is_live_engine", is_live}
         };
     } else if (method == "signal.listConnections") {
         return {
             {"status", "success"},
             {"target_node", params.value("target_node", "")},
-            {"signals", json::array()}
+            {"signals", json::array()},
+            {"is_live_engine", is_live}
         };
     } else if (method == "signal.connect") {
         return {
@@ -168,7 +171,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
             {"signal_name", params.value("signal_name", "")},
             {"target_node", params.value("target_node", "")},
             {"target_method", params.value("target_method", "")},
-            {"undo_redo_registered", true}
+            {"is_live_engine", is_live}
         };
     } else if (method == "signal.disconnect") {
         return {
@@ -177,86 +180,99 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
             {"emitter_node", params.value("emitter_node", "")},
             {"signal_name", params.value("signal_name", "")},
             {"target_node", params.value("target_node", "")},
-            {"target_method", params.value("target_method", "")}
+            {"target_method", params.value("target_method", "")},
+            {"is_live_engine", is_live}
         };
     } else if (method == "signal.emit") {
         return {
             {"status", "emitted"},
             {"target_node", params.value("target_node", "")},
-            {"signal_name", params.value("signal_name", "")}
+            {"signal_name", params.value("signal_name", "")},
+            {"is_live_engine", is_live}
         };
     } else if (method == "physics.raycast") {
         return {
             {"status", "success"},
             {"hit", false},
-            {"collider", nullptr}
+            {"collider", nullptr},
+            {"is_live_engine", is_live}
         };
     } else if (method == "physics.simulateStep") {
         return {
             {"status", "stepped"},
             {"steps", params.value("steps", 1)},
-            {"delta", params.value("delta", 0.0166667)}
+            {"delta", params.value("delta", 0.0166667)},
+            {"is_live_engine", is_live}
         };
     } else if (method == "nav.bakeMesh") {
         return {
             {"status", "baked"},
-            {"nav_node_path", params.value("nav_node_path", "")}
+            {"nav_node_path", params.value("nav_node_path", "")},
+            {"is_live_engine", is_live}
         };
     } else if (method == "nav.queryPath") {
         return {
             {"status", "success"},
             {"points", json::array({params.value("start_point", json{}), params.value("end_point", json{})})},
-            {"walkable", true}
+            {"walkable", true},
+            {"is_live_engine", is_live}
         };
     } else if (method == "anim.listTracks") {
         return {
             {"status", "success"},
             {"animation_player", params.value("animation_player_path", "")},
-            {"animations", json::array()}
+            {"animations", json::array()},
+            {"is_live_engine", is_live}
         };
     } else if (method == "anim.playTrack") {
         return {
             {"status", "playing"},
             {"animation_player", params.value("animation_player_path", "")},
-            {"animation_name", params.value("animation_name", "")}
+            {"animation_name", params.value("animation_name", "")},
+            {"is_live_engine", is_live}
         };
     } else if (method == "tilemap.setCells") {
         return {
             {"status", "success"},
             {"tilemap_path", params.value("tilemap_path", "")},
-            {"cells_updated", params.value("cells", json::array()).size()}
+            {"cells_updated", params.value("cells", json::array()).size()},
+            {"is_live_engine", is_live}
         };
     } else if (method == "tilemap.getUsedRect") {
         return {
             {"status", "success"},
             {"tilemap_path", params.value("tilemap_path", "")},
-            {"rect", {{"x", 0}, {"y", 0}, {"width", 0}, {"height", 0}}}
+            {"rect", {{"x", 0}, {"y", 0}, {"width", 0}, {"height", 0}}},
+            {"is_live_engine", is_live}
         };
     } else if (method == "gridmap.setCells") {
         return {
             {"status", "success"},
             {"gridmap_path", params.value("gridmap_path", "")},
-            {"cells_updated", params.value("cells", json::array()).size()}
+            {"cells_updated", params.value("cells", json::array()).size()},
+            {"is_live_engine", is_live}
         };
     } else if (method == "resource.create") {
         return {
             {"status", "created"},
             {"save_path", params.value("save_path", "")},
-            {"resource_type", params.value("resource_type", "StandardMaterial3D")}
+            {"resource_type", params.value("resource_type", "StandardMaterial3D")},
+            {"is_live_engine", is_live}
         };
     } else if (method == "resource.inspect") {
         return {
             {"status", "inspected"},
-            {"resource_path", params.value("resource_path", "")}
+            {"resource_path", params.value("resource_path", "")},
+            {"is_live_engine", is_live}
         };
     } else if (method == "editor.undo") {
-        return {{"status", "success"}, {"action", "undo"}, {"undo_redo_performed", true}};
+        return {{"status", "success"}, {"action", "undo"}, {"is_live_engine", is_live}};
     } else if (method == "editor.redo") {
-        return {{"status", "success"}, {"action", "redo"}, {"undo_redo_performed", true}};
+        return {{"status", "success"}, {"action", "redo"}, {"is_live_engine", is_live}};
     } else if (method == "editor.saveScene") {
-        return {{"status", "saved"}, {"active_scene", "res://scenes/main.tscn"}};
+        return {{"status", "saved"}, {"active_scene", "res://scenes/main.tscn"}, {"is_live_engine", is_live}};
     } else if (method == "editor.reloadProject") {
-        return {{"status", "reloaded"}, {"message", "Filesystem rescanned and script cache refreshed."}};
+        return {{"status", "reloaded"}, {"message", "Filesystem rescanned and script cache refreshed."}, {"is_live_engine", is_live}};
     } else if (method == "asset.instantiate") {
         return handleInstantiateAsset(params);
     } else if (method == "asset.query") {
@@ -350,7 +366,6 @@ json EditorHook::parseTscnHierarchy(const std::string& scene_file_path, int max_
     std::unordered_map<std::string, std::string> ext_resources; // id -> path
 
     static const std::regex ext_res_regex(R"re(\[ext_resource type="([^"]+)" path="([^"]+)" id="([^"]+)"\])re");
-    static const std::regex node_regex(R"re(\[node name="([^"]+)"(?:\s+type="([^"]+)")?(?:\s+parent="([^"]+)")?(?:\s+instance=ExtResource\("([^"]+)"\))?\])re");
 
     NodeEntry* current_node = nullptr;
 

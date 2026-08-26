@@ -71,7 +71,6 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
         std::unordered_map<std::string, std::string> ext_resources;
 
         static const std::regex ext_res_regex(R"re(\[ext_resource type="([^"]+)" path="([^"]+)" id="([^"]+)"\])re");
-        static const std::regex node_regex(R"re(\[node name="([^"]+)"(?:\s+type="([^"]+)")?(?:\s+parent="([^"]+)")?(?:\s+instance=ExtResource\("([^"]+)"\))?\])re");
 
         std::string line;
         NodeEntry* current_node = nullptr;
