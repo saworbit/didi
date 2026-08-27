@@ -48,9 +48,16 @@ $shutdownGame = $null
 $editorEnginePid = 0
 $gameEnginePid = 0
 $shutdownGameEnginePid = 0
+$editorEngineStartedAtMs = 0
+$gameEngineStartedAtMs = 0
+$shutdownGameEngineStartedAtMs = 0
 $editorSessionToken = ""
 $gameSessionToken = ""
+$editorSessionId = ""
+$gameSessionId = ""
+$shutdownGameSessionId = ""
 $integrationSucceeded = $false
+$primaryFailureMessage = ""
 
 function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
@@ -76,10 +83,43 @@ function Runtime-FrameCounter($TreePayload) {
     return [int]([regex]::Match($counterNode.name, '^FrameCounter_(\d+)$').Groups[1].Value)
 }
 
-function Stop-RuntimeProcess($Launcher, [uint64]$EnginePid) {
+function Process-StartedAtMs($Process) {
+    try {
+        return ([DateTimeOffset]::new($Process.StartTime.ToUniversalTime())).ToUnixTimeMilliseconds()
+    }
+    catch {
+        throw "Could not verify start identity for process $($Process.Id): $($_.Exception.Message)"
+    }
+}
+
+function Exact-ProcessAlive([uint64]$EnginePid, [int64]$EngineStartedAtMs) {
+    if ($EnginePid -eq 0 -or $EngineStartedAtMs -le 0) { return $false }
+    $process = Get-Process -Id $EnginePid -ErrorAction SilentlyContinue
+    if ($null -eq $process) { return $false }
+    return [Math]::Abs((Process-StartedAtMs $process) - $EngineStartedAtMs) -le 1
+}
+
+function Request-ExactProcessClose([uint64]$EnginePid, [int64]$EngineStartedAtMs, [int]$TimeoutSeconds) {
+    $process = Get-Process -Id $EnginePid -ErrorAction SilentlyContinue
+    if ($null -eq $process) { return $true }
+    $actualStartedAtMs = Process-StartedAtMs $process
+    Assert-True ([Math]::Abs($actualStartedAtMs - $EngineStartedAtMs) -le 1) "Refusing to close reused engine PID $EnginePid (expected start $EngineStartedAtMs, found $actualStartedAtMs)."
+    Assert-True $process.CloseMainWindow() "Exact editor process $EnginePid did not accept a graceful close request."
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline -and
+           (Exact-ProcessAlive $EnginePid $EngineStartedAtMs)) {
+        Start-Sleep -Milliseconds 100
+    }
+    return -not (Exact-ProcessAlive $EnginePid $EngineStartedAtMs)
+}
+
+function Stop-RuntimeProcess($Launcher, [uint64]$EnginePid, [int64]$EngineStartedAtMs) {
     if ($EnginePid -gt 0) {
+        Assert-True ($EngineStartedAtMs -gt 0) "Refusing to stop engine PID $EnginePid without its process-start identity."
         $engine = Get-Process -Id $EnginePid -ErrorAction SilentlyContinue
         if ($null -ne $engine) {
+            $actualStartedAtMs = Process-StartedAtMs $engine
+            Assert-True ([Math]::Abs($actualStartedAtMs - $EngineStartedAtMs) -le 1) "Refusing to stop reused engine PID $EnginePid (expected start $EngineStartedAtMs, found $actualStartedAtMs)."
             Stop-Process -Id $EnginePid -ErrorAction SilentlyContinue
             $engine.WaitForExit(5000) | Out-Null
         }
@@ -152,8 +192,11 @@ try {
     Assert-True ($null -eq $editorSession.PSObject.Properties["token"]) "Runtime discovery leaked the editor session token."
     $editorEnginePid = [uint64]$editorSession.pid
     $editorDescriptor = Get-Content -LiteralPath (Join-Path $sessionDirectory ($editorSession.session_id + ".json")) -Raw | ConvertFrom-Json
+    $editorEngineStartedAtMs = [int64]$editorDescriptor.started_at_ms
+    $editorSessionId = [string]$editorSession.session_id
     $editorSessionToken = [string]$editorDescriptor.token
     Assert-True ($editorSessionToken -match '^[0-9a-f]{64}$') "Editor descriptor token did not meet the private protocol shape."
+    Assert-True ($editorEngineStartedAtMs -eq [int64]$editorSession.started_at_ms) "Editor discovery and private descriptor disagreed on process-start identity."
 
     $game = Start-Process -FilePath $GodotExecutable `
         -ArgumentList @("--headless", "--path", $fixtureRoot, "--log-file", $gameEngineLogPath, "res://runtime_main.tscn") `
@@ -190,8 +233,11 @@ try {
     Assert-True ($null -eq $gameSession.PSObject.Properties["token"]) "Runtime discovery leaked the game session token."
     $gameEnginePid = [uint64]$gameSession.pid
     $gameDescriptor = Get-Content -LiteralPath (Join-Path $sessionDirectory ($gameSession.session_id + ".json")) -Raw | ConvertFrom-Json
+    $gameEngineStartedAtMs = [int64]$gameDescriptor.started_at_ms
+    $gameSessionId = [string]$gameSession.session_id
     $gameSessionToken = [string]$gameDescriptor.token
     Assert-True ($gameSessionToken -match '^[0-9a-f]{64}$') "Game descriptor token did not meet the private protocol shape."
+    Assert-True ($gameEngineStartedAtMs -eq [int64]$gameSession.started_at_ms) "Game discovery and private descriptor disagreed on process-start identity."
     Assert-True ($gameEnginePid -gt 0 -and $editorEnginePid -gt 0) "Runtime descriptors did not publish usable engine PIDs."
 
     $deepEval = "0"
@@ -812,6 +858,8 @@ try {
     }
     Assert-True ($null -ne $shutdownSession) "Shutdown-cancellation fixture did not publish a game session."
     $shutdownGameEnginePid = [uint64]$shutdownSession.pid
+    $shutdownGameEngineStartedAtMs = [int64]$shutdownSession.started_at_ms
+    $shutdownGameSessionId = [string]$shutdownSession.session_id
 
     $pauseForShutdownRequests = @(
         (@{ jsonrpc = "2.0"; id = 430; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
@@ -886,6 +934,31 @@ try {
         Move-Item -LiteralPath $projectBackupPath -Destination $projectConfigPath
     }
 
+    Assert-True (Request-ExactProcessClose $editorEnginePid $editorEngineStartedAtMs $StartupTimeoutSeconds) "Graceful close did not terminate the exact editor process."
+
+    $responseTranscript = @(
+        @($rawPrelaunchResponses)
+        @($rawDiscoveryResponses)
+        @($rawGameDiscovery)
+        @($rawRuntimeResponses)
+        @($rawResponses)
+        @($rawNextLogResponses)
+        @($rawStopResponses)
+        @($rawCleanupResponses)
+        @($shutdownDiscoveryResponses | ConvertTo-Json -Compress -Depth 100)
+        @($pauseForShutdownResponses | ConvertTo-Json -Compress -Depth 100)
+        @($shutdownStepResponses | ConvertTo-Json -Compress -Depth 100)
+        @($rawFailureResponses)
+    )
+    $logTranscript = @(
+        Get-Content $stdoutPath, $stderrPath, $gameStdoutPath, $gameStderrPath,
+            $editorEngineLogPath, $gameEngineLogPath, $shutdownGameStdoutPath,
+            $shutdownGameStderrPath, $shutdownGameEngineLogPath -ErrorAction SilentlyContinue
+    )
+    $completePublicTranscript = (@($responseTranscript) + @($logTranscript)) -join "`n"
+    Assert-True ($completePublicTranscript -notmatch [regex]::Escape($editorSessionToken)) "Editor session token leaked into a response or complete engine/process log transcript."
+    Assert-True ($completePublicTranscript -notmatch [regex]::Escape($gameSessionToken)) "Game session token leaked into a response or complete engine/process log transcript."
+
     $unexpectedSourceArtifacts = @(Get-ChildItem -LiteralPath $sourceFixtureRoot -Force -Recurse | Where-Object {
         $_.Name -like "*.didi-retired-*" -or
         $_.Name -in @("packed_branch.tscn", "created_phase2.tscn", "transient_probe.tscn")
@@ -894,23 +967,43 @@ try {
     $integrationSucceeded = $true
     Write-Output "Godot integration passed: Phase 1/2 editor workflows plus concurrent Phase 3 game tree and execution control."
 }
+catch {
+    $primaryFailureMessage = $_.Exception.Message
+    throw
+}
 finally {
-    Stop-RuntimeProcess $game $gameEnginePid
-    Stop-RuntimeProcess $shutdownGame $shutdownGameEnginePid
-    Stop-RuntimeProcess $godot $editorEnginePid
+    Stop-RuntimeProcess $game $gameEnginePid $gameEngineStartedAtMs
+    Stop-RuntimeProcess $shutdownGame $shutdownGameEnginePid $shutdownGameEngineStartedAtMs
+    Stop-RuntimeProcess $godot $editorEnginePid $editorEngineStartedAtMs
     $descriptorDeadline = [DateTime]::UtcNow.AddSeconds(5)
     do {
-        $descriptorEntries = @(Get-ChildItem -LiteralPath $sessionDirectory -Force -ErrorAction SilentlyContinue)
-        if ($descriptorEntries.Count -eq 0) { break }
+        $activeDescriptors = @(Get-ChildItem -LiteralPath $sessionDirectory -Filter "*.json" -Force -ErrorAction SilentlyContinue)
+        if ($activeDescriptors.Count -eq 0) { break }
         Start-Sleep -Milliseconds 100
     }
     while ([DateTime]::UtcNow -lt $descriptorDeadline)
+    if ($activeDescriptors.Count -ne 0) {
+        $activeMessage = "Active runtime descriptors remained after exact-instance shutdown: $($activeDescriptors.Name -join ', ')"
+        if ($primaryFailureMessage) {
+            Write-Warning "$activeMessage (preserving primary failure: $primaryFailureMessage)"
+        }
+        else {
+            throw $activeMessage
+        }
+    }
+
+    $knownSessionIds = @($editorSessionId, $gameSessionId, $shutdownGameSessionId) | Where-Object { $_ -match '^[0-9a-f]{32}$' }
+    $descriptorEntries = @(Get-ChildItem -LiteralPath $sessionDirectory -Force -ErrorAction SilentlyContinue | Where-Object { $_.Extension -ne '.json' })
     foreach ($entry in $descriptorEntries) {
         $entryPath = [IO.Path]::GetFullPath($entry.FullName)
         if (-not $entryPath.StartsWith($sessionDirectory + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Refusing to remove a descriptor artifact outside the disposable session directory: $entryPath"
         }
-        Remove-Item -LiteralPath $entryPath -Recurse -Force
+        Assert-True (-not $entry.PSIsContainer) "Refusing to recursively remove unexpected descriptor directory: $($entry.Name)"
+        Assert-True (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) "Refusing to remove descriptor reparse entry: $($entry.Name)"
+        Assert-True ($entry.Name -match '^([0-9a-f]{32})\.json\.didi-retired-\1-[0-9a-f]{32}$') "Refusing to remove unrecognized descriptor artifact: $($entry.Name)"
+        Assert-True ($knownSessionIds -contains $Matches[1]) "Refusing to remove a tombstone for an unknown session: $($entry.Name)"
+        Remove-Item -LiteralPath $entryPath -Force
     }
     $descriptorEntries = @(Get-ChildItem -LiteralPath $sessionDirectory -Force -ErrorAction SilentlyContinue)
     Remove-Item Env:DIDI_SESSION_DIR -ErrorAction SilentlyContinue

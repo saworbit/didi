@@ -259,6 +259,11 @@ Result<void> SessionHost::prepare(const std::string& kind, const std::string& pr
     descriptor.session_id = lowerHex(session_bytes.value());
     descriptor.token = lowerHex(token_bytes.value());
     descriptor.pid = processId();
+    const auto process_identity = runtime::queryProcessIdentity(descriptor.pid);
+    if (process_identity.isErr()) {
+        return Error::internal("Unable to establish the runtime process identity: " +
+                               process_identity.error().message);
+    }
     descriptor.kind = kind;
     descriptor.project_path = canonicalPath(project_path).string();
 #if defined(_WIN32)
@@ -270,8 +275,7 @@ Result<void> SessionHost::prepare(const std::string& kind, const std::string& pr
     descriptor.endpoint = (temp_directory /
                            ("godot_didi_" + std::to_string(descriptor.pid) + "_" + descriptor.session_id + ".sock")).string();
 #endif
-    descriptor.started_at_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
+    descriptor.started_at_ms = process_identity.value().started_at_ms;
     descriptor.protocol_version = "1.3";
     auto directory = sessionDirectory();
     if (directory.isErr()) return directory.error();

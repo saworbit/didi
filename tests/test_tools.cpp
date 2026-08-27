@@ -507,6 +507,16 @@ static void test_running_editor_command_cannot_be_cancelled_as_pending() {
     ASSERT_TRUE(!pending.tryClaimResponse());
 }
 
+static void test_runtime_step_gate_rejects_a_second_pending_step() {
+    didi::godot::RuntimeStepGate gate;
+    ASSERT_TRUE(gate.tryAcquire());
+    ASSERT_TRUE(!gate.tryAcquire());
+    ASSERT_TRUE(gate.active());
+    gate.release();
+    ASSERT_TRUE(!gate.active());
+    ASSERT_TRUE(gate.tryAcquire());
+}
+
 static void test_class_reflection() {
     auto& reg = didi::mcp::ToolRegistry::instance();
     auto res = reg.callTool("script_reflect_class", {{"class_name", "CharacterBody3D"}});
@@ -547,6 +557,7 @@ struct RegisterToolTests {
         registerTest("Tools.Base64Padding", test_base64_rfc4648_padding);
         registerTest("Tools.IpcErrorPropagation", test_ipc_error_propagation);
         registerTest("EditorHook.TimeoutState", test_running_editor_command_cannot_be_cancelled_as_pending);
+        registerTest("EditorHook.PendingStepGate", test_runtime_step_gate_rejects_a_second_pending_step);
         registerTest("Tools.ClassReflection", test_class_reflection);
         registerTest("Tools.SymbolExtraction", test_symbol_extraction);
         registerTest("Resources.DefaultRegistration", test_resource_registry);

@@ -62,6 +62,20 @@ struct CommandTicket {
     std::shared_ptr<CommandControl> control;
 };
 
+class RuntimeStepGate {
+public:
+    bool tryAcquire() {
+        bool expected = false;
+        return m_active.compare_exchange_strong(expected, true);
+    }
+
+    void release() { m_active.store(false); }
+    bool active() const { return m_active.load(); }
+
+private:
+    std::atomic<bool> m_active{false};
+};
+
 class EditorHook {
 public:
     static EditorHook& instance();
@@ -97,6 +111,7 @@ private:
     std::queue<EngineCommand> m_commandQueue;
     std::mutex m_queueMutex;
     std::mutex m_stepMutex;
+    RuntimeStepGate m_runtimeStepGate;
     std::optional<PendingRuntimeStep> m_pendingRuntimeStep;
     std::string m_sessionKind{"editor"};
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -7,6 +9,15 @@
 #include "didi/common/ipc_channel.hpp"
 
 namespace didi::runtime {
+
+struct ProcessIdentity {
+    int64_t started_at_ms{0};
+    int64_t resolution_ms{1};
+};
+
+Result<ProcessIdentity> queryProcessIdentity(uint64_t pid);
+
+using DescriptorOpenedHook = std::function<void(const std::filesystem::path&)>;
 
 struct SessionDescriptor {
     int schema_version{1};
@@ -33,6 +44,7 @@ public:
 
 std::shared_ptr<IRuntimeSessionClient> createRuntimeSessionClient(
     const std::string& project_root,
-    ipc::IpcClientFactory ipc_client_factory = ipc::createIpcClient);
+    ipc::IpcClientFactory ipc_client_factory = ipc::createIpcClient,
+    DescriptorOpenedHook descriptor_opened_hook = {});
 
 } // namespace didi::runtime

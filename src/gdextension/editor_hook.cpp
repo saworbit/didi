@@ -168,7 +168,15 @@ void EditorHook::scheduleRuntimeStep(
 
     {
         std::lock_guard<std::mutex> lock(m_stepMutex);
+        if (!m_runtimeStepGate.tryAcquire()) {
+            control->markCompleted();
+            fulfillCommand(promise, control,
+                           {{"error", {{"code", 409},
+                                        {"message", "A runtime frame step is already active"}}}});
+            return;
+        }
         if (m_pendingRuntimeStep.has_value()) {
+            m_runtimeStepGate.release();
             control->markCompleted();
             fulfillCommand(promise, control,
                            {{"error", {{"code", 409},
@@ -187,6 +195,7 @@ void EditorHook::scheduleRuntimeStep(
             if (m_pendingRuntimeStep.has_value() &&
                 m_pendingRuntimeStep->control == control) {
                 m_pendingRuntimeStep.reset();
+                m_runtimeStepGate.release();
             }
         }
         control->markCompleted();
@@ -209,6 +218,7 @@ void EditorHook::processRuntimeStepFrame() {
         if (m_pendingRuntimeStep->remaining_frames > 0) return;
         completed = std::move(m_pendingRuntimeStep);
         m_pendingRuntimeStep.reset();
+        m_runtimeStepGate.release();
     }
 
     auto paused = executeRuntimeBridge("runtime.setPaused", {{"paused", true}}, m_sessionKind);
@@ -249,6 +259,7 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
         if (m_pendingRuntimeStep.has_value()) {
             active_step = std::move(m_pendingRuntimeStep);
             m_pendingRuntimeStep.reset();
+            m_runtimeStepGate.release();
         }
     }
     if (active_step.has_value() && active_step->control &&

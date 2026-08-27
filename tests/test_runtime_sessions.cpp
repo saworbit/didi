@@ -6,12 +6,16 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <sstream>
 #include <set>
 #include <utility>
 #include <vector>
 
 #if defined(_WIN32)
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <libproc.h>
+#include <unistd.h>
 #else
 #include <unistd.h>
 #endif
@@ -24,11 +28,64 @@ void registerTest(const std::string& name, std::function<void()> fn);
 
 namespace {
 
+int g_lastHandshakeTimeoutMs = 0;
+
 uint64_t currentProcessId() {
 #if defined(_WIN32)
     return static_cast<uint64_t>(GetCurrentProcessId());
 #else
     return static_cast<uint64_t>(getpid());
+#endif
+}
+
+std::pair<int64_t, int64_t> currentProcessStartIdentity() {
+#if defined(_WIN32)
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                 static_cast<DWORD>(currentProcessId()));
+    ASSERT_TRUE(process != nullptr);
+    FILETIME created{}, exited{}, kernel{}, user{};
+    ASSERT_TRUE(GetProcessTimes(process, &created, &exited, &kernel, &user) != 0);
+    CloseHandle(process);
+    ULARGE_INTEGER ticks{};
+    ticks.LowPart = created.dwLowDateTime;
+    ticks.HighPart = created.dwHighDateTime;
+    return {static_cast<int64_t>(ticks.QuadPart / 10000ULL - 11644473600000ULL), 1};
+#elif defined(__linux__)
+    std::ifstream stat("/proc/self/stat");
+    std::ifstream system_stat("/proc/stat");
+    std::string stat_line;
+    ASSERT_TRUE(std::getline(stat, stat_line));
+    const auto command_end = stat_line.rfind(')');
+    ASSERT_TRUE(command_end != std::string::npos);
+    std::istringstream fields(stat_line.substr(command_end + 2));
+    std::string field;
+    uint64_t start_ticks = 0;
+    for (int index = 0; index <= 19; ++index) {
+        ASSERT_TRUE(static_cast<bool>(fields >> field));
+        if (index == 19) start_ticks = std::stoull(field);
+    }
+    int64_t boot_seconds = 0;
+    std::string line;
+    while (std::getline(system_stat, line)) {
+        if (line.rfind("btime ", 0) == 0) {
+            boot_seconds = std::stoll(line.substr(6));
+            break;
+        }
+    }
+    ASSERT_TRUE(boot_seconds > 0);
+    const long ticks_per_second = sysconf(_SC_CLK_TCK);
+    ASSERT_TRUE(ticks_per_second > 0);
+    const int64_t resolution = std::max<int64_t>(1, (1000 + ticks_per_second - 1) / ticks_per_second);
+    return {boot_seconds * 1000 + static_cast<int64_t>(start_ticks * 1000ULL /
+                                                       static_cast<uint64_t>(ticks_per_second)), resolution};
+#elif defined(__APPLE__)
+    proc_bsdinfo info{};
+    ASSERT_TRUE(proc_pidinfo(static_cast<int>(currentProcessId()), PROC_PIDTBSDINFO, 0,
+                             &info, sizeof(info)) == sizeof(info));
+    return {static_cast<int64_t>(info.pbi_start_tvsec) * 1000 +
+            static_cast<int64_t>(info.pbi_start_tvusec) / 1000, 1};
+#else
+    throw std::runtime_error("Process start identity test is unsupported on this platform");
 #endif
 }
 
@@ -42,8 +99,8 @@ std::string endpointFor(const std::string& session_id, uint64_t pid = currentPro
 }
 
 didi::json validDescriptor(const std::string& session_id, const std::string& endpoint) {
-    const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
+    const auto [started_at_ms, resolution_ms] = currentProcessStartIdentity();
+    (void)resolution_ms;
     return {
         {"schema_version", 1},
         {"session_id", session_id},
@@ -52,7 +109,7 @@ didi::json validDescriptor(const std::string& session_id, const std::string& end
         {"kind", "editor"},
         {"project_path", std::filesystem::current_path().string()},
         {"endpoint", endpoint},
-        {"started_at_ms", now_ms},
+        {"started_at_ms", started_at_ms},
         {"protocol_version", "1.3"}
     };
 }
@@ -68,9 +125,13 @@ public:
     void disconnect() override { m_connected = false; }
     bool isConnected() const override { return m_connected; }
 
-    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json& params, int) override {
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json& params, int timeout_ms) override {
         if (!m_connected) return didi::Error::notConnected();
         if (method == "session.handshake") {
+            g_lastHandshakeTimeoutMs = timeout_ms;
+            if (m_endpoint.find("77777777777777777777777777777777") != std::string::npos) {
+                return didi::Error(504, "Black-hole handshake timed out");
+            }
             if (params.value("_didi_session_token", "") != std::string(64, 'a')) {
                 return didi::Error(401, "token rejected");
             }
@@ -170,6 +231,8 @@ void test_session_host_prepares_private_unique_descriptor_and_authorizes_without
     const auto descriptor = host.descriptor();
     ASSERT_TRUE(descriptor.has_value());
     ASSERT_EQ(descriptor->pid, currentProcessId());
+    const auto [process_started_at_ms, process_resolution_ms] = currentProcessStartIdentity();
+    ASSERT_TRUE(std::llabs(descriptor->started_at_ms - process_started_at_ms) <= process_resolution_ms);
     ASSERT_TRUE(descriptor->endpoint.find(std::to_string(descriptor->pid)) != std::string::npos);
     ASSERT_TRUE(descriptor->endpoint.find(descriptor->session_id) != std::string::npos);
     ASSERT_TRUE(std::filesystem::is_empty(directory));
@@ -478,14 +541,24 @@ void test_session_descriptor_rejects_wrong_token_length() {
     auto pid_mismatch = valid;
     pid_mismatch["endpoint"] = endpointFor(session_id, 9999);
     ASSERT_TRUE(didi::runtime::SessionDescriptor::fromJson(pid_mismatch).isErr());
+
+#if !defined(_WIN32)
+    auto wrong_socket_parent = valid;
+    wrong_socket_parent["endpoint"] =
+        (std::filesystem::temp_directory_path().parent_path() /
+         ("godot_didi_" + std::to_string(currentProcessId()) + "_" + session_id + ".sock")).string();
+    ASSERT_TRUE(didi::runtime::SessionDescriptor::fromJson(wrong_socket_parent).isErr());
+#endif
 }
 
 void test_session_attach_keeps_existing_route_when_candidate_handshake_fails() {
     const auto directory = makeSessionDirectory();
     const auto healthy_id = "0123456789abcdef0123456789abcdef";
     const auto bad_id = "fedcba9876543210fedcba9876543210";
+    const auto black_hole_id = "77777777777777777777777777777777";
     writeDescriptor(directory, "healthy.json", validDescriptor(healthy_id, endpointFor(healthy_id)));
     writeDescriptor(directory, "bad.json", validDescriptor(bad_id, endpointFor(bad_id)));
+    writeDescriptor(directory, "black-hole.json", validDescriptor(black_hole_id, endpointFor(black_hole_id)));
 
 #if defined(_WIN32)
     _putenv_s("DIDI_SESSION_DIR", directory.string().c_str());
@@ -497,6 +570,10 @@ void test_session_attach_keeps_existing_route_when_candidate_handshake_fails() {
 
     ASSERT_TRUE(client->attachSession(healthy_id).isOk());
     ASSERT_TRUE(client->attachSession(bad_id).isErr());
+    g_lastHandshakeTimeoutMs = 0;
+    ASSERT_TRUE(client->attachSession(black_hole_id).isErr());
+    ASSERT_TRUE(g_lastHandshakeTimeoutMs > 0);
+    ASSERT_TRUE(g_lastHandshakeTimeoutMs <= 5000);
     ASSERT_TRUE(client->activeSession().has_value());
     ASSERT_EQ(client->activeSession()->session_id, healthy_id);
 
@@ -590,6 +667,48 @@ void test_session_discovery_does_not_treat_reused_pid_metadata_as_live() {
     ASSERT_EQ(listed.value()["sessions"].size(), 1u);
     ASSERT_FALSE(listed.value()["sessions"][0]["alive"].get<bool>());
 
+    auto near_mismatch = validDescriptor(session_id, endpointFor(session_id));
+    const auto [process_started_at_ms, resolution_ms] = currentProcessStartIdentity();
+    near_mismatch["started_at_ms"] = process_started_at_ms + resolution_ms + 1;
+    writeDescriptor(directory, "near-mismatch.json", near_mismatch);
+    const auto relisted = client->listSessions(std::nullopt);
+    ASSERT_TRUE(relisted.isOk());
+    const auto mismatched = std::find_if(relisted.value()["sessions"].begin(),
+                                         relisted.value()["sessions"].end(),
+                                         [&](const didi::json& item) {
+                                             return item["started_at_ms"] == near_mismatch["started_at_ms"];
+                                         });
+    ASSERT_TRUE(mismatched != relisted.value()["sessions"].end());
+    ASSERT_FALSE((*mismatched)["alive"].get<bool>());
+
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
+void test_session_discovery_reads_the_validated_descriptor_object() {
+    // Break caught: discovery validates one pathname object, then reopens and trusts a replacement.
+    const auto directory = makeSessionDirectory();
+    const auto session_id = std::string("0123456789abcdef0123456789abcdef");
+    const auto descriptor_path = directory / "swap.json";
+    writeDescriptor(directory, descriptor_path.filename().string(),
+                    validDescriptor(session_id, endpointFor(session_id)));
+    setSessionDirectory(directory);
+
+    bool swapped = false;
+    auto client = didi::runtime::createRuntimeSessionClient(
+        std::filesystem::current_path().string(),
+        [] { return std::make_unique<FakeIpcClient>(); },
+        [&](const std::filesystem::path& opened) {
+            if (swapped || opened != descriptor_path) return;
+            swapped = true;
+            std::filesystem::rename(opened, directory / "original.retired");
+            auto replacement = validDescriptor(session_id, endpointFor(session_id));
+            replacement["token"] = std::string(64, 'b');
+            writeDescriptor(directory, descriptor_path.filename().string(), replacement);
+        });
+    ASSERT_TRUE(client->attachSession(session_id).isOk());
+    ASSERT_TRUE(swapped);
+
     clearSessionDirectory();
     std::filesystem::remove_all(directory);
 }
@@ -606,6 +725,8 @@ struct RegisterRuntimeSessionTests {
                      test_session_discovery_rejects_non_regular_json_entries);
         registerTest("RuntimeSessions.RejectsReusedPidMetadata",
                      test_session_discovery_does_not_treat_reused_pid_metadata_as_live);
+        registerTest("RuntimeSessions.ReadsValidatedDescriptorObject",
+                     test_session_discovery_reads_the_validated_descriptor_object);
         registerTest("RuntimeSessions.HostPreparesAndAuthorizesWithoutForwardingToken",
                      test_session_host_prepares_private_unique_descriptor_and_authorizes_without_token_forwarding);
         registerTest("RuntimeSessions.HostPublishesAtomicallyAndRemovesOnlyOwnedDescriptor",
