@@ -5,7 +5,10 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <chrono>
+#include <cmath>
 #include <mutex>
+#include <sstream>
 #include <set>
 #include <system_error>
 #include <vector>
@@ -39,12 +42,14 @@ bool hasOnlyDescriptorFields(const json& value) {
     return true;
 }
 
-bool validEndpoint(const std::string& endpoint) {
+bool validEndpoint(const std::string& endpoint, uint64_t pid, const std::string& session_id) {
     if (endpoint.empty() || endpoint.find_first_of("\r\n") != std::string::npos) return false;
+    const auto stem = "godot_didi_" + std::to_string(pid) + "_" + session_id;
 #if defined(_WIN32)
-    return endpoint.rfind("\\\\.\\pipe\\godot_didi_", 0) == 0;
+    return endpoint == "\\\\.\\pipe\\" + stem;
 #else
-    return std::filesystem::path(endpoint).is_absolute();
+    const std::filesystem::path path(endpoint);
+    return path.is_absolute() && path.filename() == stem + ".sock";
 #endif
 }
 
@@ -73,15 +78,49 @@ bool isReparseOrSymlink(const std::filesystem::directory_entry& entry) {
 #endif
 }
 
-bool isPidRunning(uint64_t pid) {
+bool isProcessInstanceAlive(uint64_t pid, int64_t started_at_ms) {
     if (pid == 0) return false;
 #if defined(_WIN32)
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
     if (!process) return false;
     DWORD exit_code = 0;
+    FILETIME created{}, exited{}, kernel{}, user{};
     const bool running = GetExitCodeProcess(process, &exit_code) && exit_code == STILL_ACTIVE;
+    const bool has_times = GetProcessTimes(process, &created, &exited, &kernel, &user) != 0;
     CloseHandle(process);
-    return running;
+    if (!running || !has_times) return false;
+    ULARGE_INTEGER created_ticks{};
+    created_ticks.LowPart = created.dwLowDateTime;
+    created_ticks.HighPart = created.dwHighDateTime;
+    constexpr uint64_t kWindowsEpochOffsetMs = 11644473600000ULL;
+    const auto created_ms = static_cast<int64_t>(created_ticks.QuadPart / 10000ULL - kWindowsEpochOffsetMs);
+    return std::llabs(created_ms - started_at_ms) <= 30000;
+#elif defined(__linux__)
+    if (kill(static_cast<pid_t>(pid), 0) != 0 && errno != EPERM) return false;
+    std::ifstream stat("/proc/" + std::to_string(pid) + "/stat");
+    std::ifstream uptime_file("/proc/uptime");
+    std::string stat_line;
+    double uptime_seconds = 0.0;
+    if (!std::getline(stat, stat_line) || !(uptime_file >> uptime_seconds)) return false;
+    const auto command_end = stat_line.rfind(')');
+    if (command_end == std::string::npos) return false;
+    std::istringstream fields(stat_line.substr(command_end + 2));
+    std::string field;
+    uint64_t start_ticks = 0;
+    for (int index = 0; index <= 19; ++index) {
+        if (!(fields >> field)) return false;
+        if (index == 19) {
+            try { start_ticks = std::stoull(field); } catch (...) { return false; }
+        }
+    }
+    const long ticks_per_second = sysconf(_SC_CLK_TCK);
+    if (ticks_per_second <= 0) return false;
+    const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    const auto boot_ms = now_ms - static_cast<int64_t>(uptime_seconds * 1000.0);
+    const auto created_ms = boot_ms + static_cast<int64_t>(start_ticks * 1000ULL /
+                                                            static_cast<uint64_t>(ticks_per_second));
+    return std::llabs(created_ms - started_at_ms) <= 30000;
 #else
     if (kill(static_cast<pid_t>(pid), 0) == 0) return true;
     return errno == EPERM;
@@ -138,7 +177,8 @@ std::vector<DiscoveredSession> discoverSessions(json& diagnostics) {
             }
             auto descriptor = decoded.value();
             descriptor.project_path = canonicalPath(descriptor.project_path).string();
-            sessions.push_back({std::move(descriptor), isPidRunning(decoded.value().pid)});
+            const bool alive = isProcessInstanceAlive(descriptor.pid, descriptor.started_at_ms);
+            sessions.push_back({std::move(descriptor), alive});
         } catch (const std::exception& error) {
             diagnostics.push_back({{"path", path.string()}, {"error", std::string("Malformed descriptor: ") + error.what()}});
         }
@@ -293,7 +333,9 @@ Result<SessionDescriptor> SessionDescriptor::fromJson(const json& value) {
             !value.at("pid").is_number_unsigned() || value.at("pid").get<uint64_t>() == 0 ||
             !value.at("kind").is_string() || (value.at("kind") != "editor" && value.at("kind") != "game") ||
             !value.at("project_path").is_string() || value.at("project_path").get<std::string>().empty() ||
-            !value.at("endpoint").is_string() || !validEndpoint(value.at("endpoint").get<std::string>()) ||
+            !value.at("endpoint").is_string() ||
+            !validEndpoint(value.at("endpoint").get<std::string>(), value.at("pid").get<uint64_t>(),
+                           value.at("session_id").get<std::string>()) ||
             !value.at("started_at_ms").is_number_integer() || value.at("started_at_ms").get<int64_t>() <= 0 ||
             !value.at("protocol_version").is_string() || value.at("protocol_version") != "1.3") {
             return Error::invalidArgument("Invalid session descriptor values");

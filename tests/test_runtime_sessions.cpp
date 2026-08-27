@@ -2,11 +2,13 @@
 #include "didi/gdextension/session_host.hpp"
 
 #include <cstdlib>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <set>
 #include <utility>
+#include <vector>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -30,7 +32,18 @@ uint64_t currentProcessId() {
 #endif
 }
 
+std::string endpointFor(const std::string& session_id, uint64_t pid = currentProcessId()) {
+#if defined(_WIN32)
+    return "\\\\.\\pipe\\godot_didi_" + std::to_string(pid) + "_" + session_id;
+#else
+    return (std::filesystem::temp_directory_path() /
+            ("godot_didi_" + std::to_string(pid) + "_" + session_id + ".sock")).string();
+#endif
+}
+
 didi::json validDescriptor(const std::string& session_id, const std::string& endpoint) {
+    const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
     return {
         {"schema_version", 1},
         {"session_id", session_id},
@@ -39,7 +52,7 @@ didi::json validDescriptor(const std::string& session_id, const std::string& end
         {"kind", "editor"},
         {"project_path", std::filesystem::current_path().string()},
         {"endpoint", endpoint},
-        {"started_at_ms", 1787790000000LL},
+        {"started_at_ms", now_ms},
         {"protocol_version", "1.3"}
     };
 }
@@ -48,7 +61,7 @@ class FakeIpcClient final : public didi::ipc::IIpcClient {
 public:
     bool connect(const std::string& endpoint, int) override {
         m_endpoint = endpoint;
-        m_connected = endpoint.find("bad-handshake") == std::string::npos;
+        m_connected = endpoint.find("fedcba9876543210fedcba9876543210") == std::string::npos;
         return m_connected;
     }
 
@@ -61,19 +74,19 @@ public:
             if (params.value("_didi_session_token", "") != std::string(64, 'a')) {
                 return didi::Error(401, "token rejected");
             }
-            if (m_endpoint.find("missing-handshake") != std::string::npos) return didi::json::object();
-            if (m_endpoint.find("nonobject-handshake") != std::string::npos) return didi::json::array();
-            if (m_endpoint.find("bad-status") != std::string::npos) {
+            if (m_endpoint.find("11111111111111111111111111111111") != std::string::npos) return didi::json::object();
+            if (m_endpoint.find("22222222222222222222222222222222") != std::string::npos) return didi::json::array();
+            if (m_endpoint.find("33333333333333333333333333333333") != std::string::npos) {
                 return didi::json{{"status", "rejected"},
                                   {"session_id", "0123456789abcdef0123456789abcdef"},
                                   {"protocol_version", "1.3"}};
             }
-            if (m_endpoint.find("bad-session") != std::string::npos) {
+            if (m_endpoint.find("44444444444444444444444444444444") != std::string::npos) {
                 return didi::json{{"status", "ok"},
                                   {"session_id", "fedcba9876543210fedcba9876543210"},
                                   {"protocol_version", "1.3"}};
             }
-            if (m_endpoint.find("bad-protocol") != std::string::npos) {
+            if (m_endpoint.find("55555555555555555555555555555555") != std::string::npos) {
                 return didi::json{{"status", "ok"},
                                   {"session_id", "0123456789abcdef0123456789abcdef"},
                                   {"protocol_version", "1.2"}};
@@ -358,6 +371,40 @@ void test_session_host_retirement_collision_preserves_selected_destination() {
     std::filesystem::remove_all(directory);
 }
 
+void test_session_host_retirement_exhaustion_never_overwrites_collisions() {
+    // Break caught: bounded retirement retries overwrite an attacker-selected destination.
+    const auto directory = makeSessionDirectory();
+    setSessionDirectory(directory);
+    didi::godot::SessionHost host;
+    ASSERT_TRUE(host.prepare("editor", std::filesystem::current_path().string()).isOk());
+    const auto descriptor = host.descriptor();
+    ASSERT_TRUE(descriptor.has_value());
+    ASSERT_TRUE(host.publish().isOk());
+
+    std::vector<std::filesystem::path> collisions;
+    auto collision = validDescriptor(descriptor->session_id, descriptor->endpoint);
+    collision["kind"] = descriptor->kind;
+    collision["project_path"] = descriptor->project_path;
+    collision["started_at_ms"] = descriptor->started_at_ms;
+    host.setBeforeRetirementHookForTesting([&](const std::filesystem::path& selected) {
+        collisions.push_back(selected);
+        writeDescriptor(directory, selected.filename().string(), collision);
+    });
+    host.stop();
+
+    ASSERT_EQ(collisions.size(), 8u);
+    for (const auto& path : collisions) {
+        ASSERT_TRUE(std::filesystem::exists(path));
+        std::ifstream input(path, std::ios::binary);
+        ASSERT_EQ(didi::json::parse(input)["token"], std::string(64, 'a'));
+    }
+    // Exhaustion fails safe: the owned active pathname remains rather than deleting
+    // or overwriting a path whose identity cannot be proven after the collision race.
+    ASSERT_TRUE(std::filesystem::exists(directory / (descriptor->session_id + ".json")));
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
 void test_session_host_retained_file_survives_replacement_after_verification() {
     // Would fail if cleanup deleted or overwrote the retired pathname after ownership verification.
     const auto directory = makeSessionDirectory();
@@ -414,23 +461,31 @@ void test_runtime_session_discovery_ignores_retained_retirement_files() {
 }
 
 void test_session_descriptor_rejects_wrong_token_length() {
-    auto valid = validDescriptor("0123456789abcdef0123456789abcdef",
-                                "\\\\.\\pipe\\godot_didi_1234_healthy");
+    const auto session_id = std::string("0123456789abcdef0123456789abcdef");
+    auto valid = validDescriptor(session_id, endpointFor(session_id));
     ASSERT_TRUE(didi::runtime::SessionDescriptor::fromJson(valid).isOk());
 
     auto wrong_token = valid;
     wrong_token["token"] = std::string(63, 'a');
     ASSERT_TRUE(didi::runtime::SessionDescriptor::fromJson(wrong_token).isErr());
+
+    // Break caught: a pipe that merely shares the public prefix can route attach
+    // to an endpoint unrelated to the descriptor's claimed process/session.
+    auto prefix_trick = valid;
+    prefix_trick["endpoint"] = "\\\\.\\pipe\\godot_didi_unrelated";
+    ASSERT_TRUE(didi::runtime::SessionDescriptor::fromJson(prefix_trick).isErr());
+
+    auto pid_mismatch = valid;
+    pid_mismatch["endpoint"] = endpointFor(session_id, 9999);
+    ASSERT_TRUE(didi::runtime::SessionDescriptor::fromJson(pid_mismatch).isErr());
 }
 
 void test_session_attach_keeps_existing_route_when_candidate_handshake_fails() {
     const auto directory = makeSessionDirectory();
     const auto healthy_id = "0123456789abcdef0123456789abcdef";
     const auto bad_id = "fedcba9876543210fedcba9876543210";
-    writeDescriptor(directory, "healthy.json", validDescriptor(healthy_id,
-                    "\\\\.\\pipe\\godot_didi_1234_healthy"));
-    writeDescriptor(directory, "bad.json", validDescriptor(bad_id,
-                    "\\\\.\\pipe\\godot_didi_1234_bad-handshake"));
+    writeDescriptor(directory, "healthy.json", validDescriptor(healthy_id, endpointFor(healthy_id)));
+    writeDescriptor(directory, "bad.json", validDescriptor(bad_id, endpointFor(bad_id)));
 
 #if defined(_WIN32)
     _putenv_s("DIDI_SESSION_DIR", directory.string().c_str());
@@ -447,7 +502,7 @@ void test_session_attach_keeps_existing_route_when_candidate_handshake_fails() {
 
     auto routed = client->sendRequest("runtime.getTree", {{"root_path", "/root"}});
     ASSERT_TRUE(routed.isOk());
-    ASSERT_TRUE(routed.value()["endpoint"].get<std::string>().find("healthy") != std::string::npos);
+    ASSERT_TRUE(routed.value()["endpoint"].get<std::string>().find(healthy_id) != std::string::npos);
     ASSERT_EQ(routed.value()["token"], std::string(64, 'a'));
 
 #if defined(_WIN32)
@@ -468,11 +523,9 @@ void test_session_attach_rejects_semantically_invalid_handshakes_without_replaci
         {"44444444444444444444444444444444", "bad-session"},
         {"55555555555555555555555555555555", "bad-protocol"}
     };
-    writeDescriptor(directory, "healthy.json", validDescriptor(healthy_id,
-                    "\\\\.\\pipe\\godot_didi_1234_healthy"));
+    writeDescriptor(directory, "healthy.json", validDescriptor(healthy_id, endpointFor(healthy_id)));
     for (const auto& [session_id, handshake_kind] : invalid_sessions) {
-        writeDescriptor(directory, handshake_kind + ".json", validDescriptor(session_id,
-                        "\\\\.\\pipe\\godot_didi_1234_" + handshake_kind));
+        writeDescriptor(directory, handshake_kind + ".json", validDescriptor(session_id, endpointFor(session_id)));
     }
 
 #if defined(_WIN32)
@@ -490,7 +543,7 @@ void test_session_attach_rejects_semantically_invalid_handshakes_without_replaci
         ASSERT_EQ(client->activeSession()->session_id, healthy_id);
         auto routed = client->sendRequest("runtime.getTree", didi::json::object());
         ASSERT_TRUE(routed.isOk());
-        ASSERT_TRUE(routed.value()["endpoint"].get<std::string>().find("healthy") != std::string::npos);
+        ASSERT_TRUE(routed.value()["endpoint"].get<std::string>().find(healthy_id) != std::string::npos);
     }
 
 #if defined(_WIN32)
@@ -522,6 +575,25 @@ void test_session_discovery_rejects_non_regular_json_entries() {
     std::filesystem::remove_all(directory);
 }
 
+void test_session_discovery_does_not_treat_reused_pid_metadata_as_live() {
+    // Break caught: a stale descriptor inherits liveness when its PID is reused.
+    const auto directory = makeSessionDirectory();
+    const auto session_id = std::string("66666666666666666666666666666666");
+    auto stale = validDescriptor(session_id, endpointFor(session_id));
+    stale["started_at_ms"] = 1;
+    writeDescriptor(directory, "stale.json", stale);
+    setSessionDirectory(directory);
+
+    auto client = didi::runtime::createRuntimeSessionClient(std::filesystem::current_path().string());
+    const auto listed = client->listSessions(std::nullopt);
+    ASSERT_TRUE(listed.isOk());
+    ASSERT_EQ(listed.value()["sessions"].size(), 1u);
+    ASSERT_FALSE(listed.value()["sessions"][0]["alive"].get<bool>());
+
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
 struct RegisterRuntimeSessionTests {
     RegisterRuntimeSessionTests() {
         registerTest("RuntimeSessions.DescriptorRejectsWrongTokenLength",
@@ -532,6 +604,8 @@ struct RegisterRuntimeSessionTests {
                      test_session_attach_rejects_semantically_invalid_handshakes_without_replacing_route);
         registerTest("RuntimeSessions.RejectsNonRegularDescriptorEntries",
                      test_session_discovery_rejects_non_regular_json_entries);
+        registerTest("RuntimeSessions.RejectsReusedPidMetadata",
+                     test_session_discovery_does_not_treat_reused_pid_metadata_as_live);
         registerTest("RuntimeSessions.HostPreparesAndAuthorizesWithoutForwardingToken",
                      test_session_host_prepares_private_unique_descriptor_and_authorizes_without_token_forwarding);
         registerTest("RuntimeSessions.HostPublishesAtomicallyAndRemovesOnlyOwnedDescriptor",
@@ -546,6 +620,8 @@ struct RegisterRuntimeSessionTests {
                      test_session_host_cleanup_preserves_same_path_replacement);
         registerTest("RuntimeSessions.HostRetirementCollisionPreservesSelectedDestination",
                      test_session_host_retirement_collision_preserves_selected_destination);
+        registerTest("RuntimeSessions.HostRetirementExhaustionNeverOverwritesCollisions",
+                     test_session_host_retirement_exhaustion_never_overwrites_collisions);
         registerTest("RuntimeSessions.HostRetainedFileSurvivesReplacementAfterVerification",
                      test_session_host_retained_file_survives_replacement_after_verification);
         registerTest("RuntimeSessions.DiscoveryIgnoresRetainedRetirementFiles",

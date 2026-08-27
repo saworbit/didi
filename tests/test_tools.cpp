@@ -288,6 +288,12 @@ static void test_resource_registry() {
         ASSERT_TRUE(payload.isOk());
         auto parsed = didi::json::parse(payload.value());
         ASSERT_EQ(parsed["execution_mode"], "offline_fallback");
+        if (std::string(uri) == "godot://runtime/logs") {
+            // Break caught: offline records drift from the live structured-log schema.
+            ASSERT_EQ(parsed["records"].size(), 1u);
+            ASSERT_TRUE(parsed["records"][0].contains("details"));
+            ASSERT_TRUE(parsed["records"][0]["details"].is_null());
+        }
     }
 }
 

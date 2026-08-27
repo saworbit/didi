@@ -134,7 +134,8 @@ void ResourceRegistry::registerAllDefaultResources() {
             {"execution_mode", "offline_fallback"},
             {"records", json::array({
                 {{"sequence", 1}, {"timestamp_ms", now}, {"level", "info"},
-                 {"source", "standalone"}, {"message", "Didi MCP server active; no runtime session is attached."}}
+                 {"source", "standalone"}, {"message", "Didi MCP server active; no runtime session is attached."},
+                 {"details", nullptr}}
             })},
             {"next_cursor", 2},
             {"oldest_cursor", 1},

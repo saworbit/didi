@@ -3,14 +3,18 @@ extends Node
 var frame_counter: int = 0
 @onready var frame_counter_node: Node = $FrameCounter_0
 var detached_probe: Node
+var stop_during_step := false
+var observed_pause := false
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	stop_during_step = OS.get_environment("DIDI_TEST_STOP_DURING_STEP") == "1"
 	set_meta("frame_counter", 0)
 	set_meta("huge_metadata", "x".repeat(300000))
 	detached_probe = Node.new()
 	detached_probe.name = "DetachedRuntimeProbe"
 	set_meta("detached_node", detached_probe)
-	for index in 1024:
+	for index in 10001:
 		var child := Node.new()
 		child.name = "LargeRuntimeChild_%d" % index
 		$RuntimeChild/Nested.add_child(child)
@@ -20,10 +24,15 @@ func _exit_tree() -> void:
 		detached_probe.free()
 
 func _process(_delta: float) -> void:
+	if get_tree().paused:
+		observed_pause = true
+		return
 	frame_counter += 1
 	process_priority = frame_counter
 	set_meta("frame_counter", frame_counter)
 	frame_counter_node.name = "FrameCounter_%d" % frame_counter
+	if stop_during_step and observed_pause:
+		get_tree().quit(0)
 
 func _mark_unsafe_callback() -> void:
 	process_physics_priority += 1
