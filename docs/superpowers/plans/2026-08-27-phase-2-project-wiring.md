@@ -1,6 +1,6 @@
 # Phase 2 Project Wiring Implementation Plan
 
-> **Status: Complete (2026-08-27).** The implementation followed the TDD slices and acceptance matrix below. To keep raw GDExtension ownership wrappers in one translation unit, the planned helper-file extraction was deliberately deferred; private helpers and dispatch remain in `godot_bridge.cpp`. The commits and disposable 105-request Godot harness are the execution record.
+> **Status: Complete (2026-08-27).** The implementation followed the TDD slices and acceptance matrix below. To keep raw GDExtension ownership wrappers in one translation unit, the planned helper-file extraction was deliberately deferred; private helpers and dispatch remain in `godot_bridge.cpp`. The commits and disposable 106-request Godot harness are the execution record.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

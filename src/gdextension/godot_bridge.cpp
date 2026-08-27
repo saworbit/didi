@@ -662,8 +662,11 @@ Result<json> inputEventToJson(VariantValue& event_value) {
 }
 
 Result<void> validateResPath(const std::string& path, const std::string& expected_suffix) {
-    if (!strings::startsWith(path, "res://") || path.find("..") != std::string::npos ||
-        path.find('\\') != std::string::npos ||
+    const std::string remainder = strings::startsWith(path, "res://") ? path.substr(6) : std::string();
+    if (remainder.empty() || remainder.front() == '/' || remainder.find("//") != std::string::npos ||
+        remainder.find("./") == 0 || remainder.find("/./") != std::string::npos ||
+        strings::endsWith(remainder, "/.") || remainder.find(':') != std::string::npos ||
+        path.find("..") != std::string::npos || path.find('\\') != std::string::npos ||
         (!expected_suffix.empty() && !strings::endsWith(path, expected_suffix))) {
         return Error::invalidArgument("path must be a normalized res:// path ending in " + expected_suffix);
     }
@@ -1442,6 +1445,10 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
         auto preflight = preflightUndoManagerBindings();
         if (preflight.isErr()) return errorJson(preflight.error().code, preflight.error().message);
+        auto add_bind = requireMethodBind("Node", "add_to_group", 3683006648LL);
+        auto remove_bind = requireMethodBind("Node", "remove_from_group", 3304788590LL);
+        if (add_bind.isErr()) return errorJson(add_bind.error().code, add_bind.error().message);
+        if (remove_bind.isErr()) return errorJson(remove_bind.error().code, remove_bind.error().message);
         auto action = createAction(manager.value(), adding ? "Didi: add node to group" : "Didi: remove node from group", root.value());
         if (action.isErr()) return errorJson(action.error().code, action.error().message);
         auto apply = adding
@@ -2031,7 +2038,7 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         return liveResult({{"status", "reloaded"}, {"message", "EditorFileSystem source scan requested"}});
     }
 
-    return errorJson(501, "No trustworthy Phase 1 live implementation for method: " + method);
+    return errorJson(501, "No trustworthy live implementation for method: " + method);
 }
 
 Result<ViewportPixels> GodotBridge::captureEditorViewport(const std::string& camera_identifier) {

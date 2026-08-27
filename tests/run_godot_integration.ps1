@@ -179,7 +179,8 @@ try {
         (Tool-Request 102 "scene_open" @{ scene_path = "res://main.tscn" }),
         (Tool-Request 103 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/Subject"; script_path = "res://missing.gd" }),
         (Tool-Request 104 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/Subject"; script_path = "res://main.tscn" }),
-        (Tool-Request 105 "scene_close" @{ discard_unsaved = $true })
+        (Tool-Request 105 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 106 "scene_create" @{ scene_path = "res:////escape.tscn" })
     )
 
     $rawResponses = $requests | & $didiExecutable
@@ -333,6 +334,8 @@ try {
     Assert-True $byId[103].result.isError "Missing script resource was accepted."
     Assert-True $byId[104].result.isError "Non-script scene resource was accepted for script attachment."
     Assert-True ((Tool-Payload $byId[105]).closed -eq $true) "Smoke scene cleanup failed."
+    Assert-True $byId[106].result.isError "Non-normalized res:// scene path was accepted."
+    Assert-True ($byId[106].result.content[0].text -match "normalized") "Non-normalized path error was not actionable."
 
     $engineErrors = @(
         Get-Content $stderrPath -ErrorAction SilentlyContinue |
