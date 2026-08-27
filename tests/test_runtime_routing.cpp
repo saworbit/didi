@@ -49,10 +49,20 @@ CallToolResult handleEvalGdscript(const json&, std::shared_ptr<ipc::IIpcClient>)
 
 namespace {
 
+std::string descriptorEndpoint(uint64_t pid, const std::string& session_id) {
+#if defined(_WIN32)
+    return "\\\\.\\pipe\\godot_didi_" + std::to_string(pid) + "_" + session_id;
+#else
+    return (std::filesystem::temp_directory_path() /
+            ("godot_didi_" + std::to_string(pid) + "_" + session_id + ".sock")).string();
+#endif
+}
+
 didi::runtime::SessionDescriptor descriptorFor(const std::string& kind) {
+    const std::string session_id = "0123456789abcdef0123456789abcdef";
     return didi::runtime::SessionDescriptor{
-        1, "0123456789abcdef0123456789abcdef", std::string(64, 'a'), 77,
-        kind, "C:/project", "\\\\.\\pipe\\godot_didi_77_0123456789abcdef0123456789abcdef",
+        1, session_id, std::string(64, 'a'), 77,
+        kind, "C:/project", descriptorEndpoint(77, session_id),
         123456789, "1.3"};
 }
 
@@ -121,6 +131,8 @@ public:
           selected(editor), selected_client(editor_client) {
         editor.session_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         game.session_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        editor.endpoint = descriptorEndpoint(editor.pid, editor.session_id);
+        game.endpoint = descriptorEndpoint(game.pid, game.session_id);
         selected = editor;
     }
 
@@ -189,6 +201,93 @@ public:
     }
     int requests{0};
     int disconnects{0};
+};
+
+class DescriptorlessSessionFake final : public didi::runtime::IRuntimeSessionClient,
+                                        public std::enable_shared_from_this<DescriptorlessSessionFake> {
+public:
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override { ++disconnects; }
+    bool isConnected() const override { return true; }
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json&, int) override {
+        ++requests;
+        last_method = method;
+        return didi::json{{"status", "ok"}};
+    }
+    didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
+        return didi::json::object();
+    }
+    didi::Result<didi::json> attachSession(const std::string&) override { return didi::json::object(); }
+    didi::Result<didi::json> detachSession() override { return didi::json::object(); }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override {
+        return descriptorFor("editor");
+    }
+    std::optional<didi::runtime::RuntimeRouteLease> acquireRouteLease() override {
+        return didi::runtime::RuntimeRouteLease{
+            std::static_pointer_cast<didi::ipc::IIpcClient>(shared_from_this()), std::nullopt, 1};
+    }
+    bool quarantineRoute(const didi::runtime::RuntimeRouteLease&) override {
+        ++quarantines;
+        return true;
+    }
+
+    int requests{0};
+    int disconnects{0};
+    int quarantines{0};
+    std::string last_method;
+};
+
+class FixedRecordingClient final : public didi::ipc::IIpcClient {
+public:
+    bool connect(const std::string&, int) override { connected = true; return true; }
+    void disconnect() override { connected = false; }
+    bool isConnected() const override { return connected; }
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json&, int timeout_ms) override {
+        ++requests;
+        last_method = method;
+        last_timeout_ms = timeout_ms;
+        return didi::json{{"status", "ok"}, {"method", method}};
+    }
+
+    bool connected{true};
+    int requests{0};
+    int last_timeout_ms{-2};
+    std::string last_method;
+};
+
+class ProviderOnlyFake final : public didi::ipc::IIpcClient,
+                               public didi::runtime::IRuntimeRouteLeaseProvider,
+                               public std::enable_shared_from_this<ProviderOnlyFake> {
+public:
+    explicit ProviderOnlyFake(std::optional<didi::runtime::SessionDescriptor> descriptor)
+        : descriptor_(std::move(descriptor)) {}
+
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override { ++disconnects; }
+    bool isConnected() const override { return true; }
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json&, int) override {
+        ++requests;
+        last_method = method;
+        return didi::json{{"status", "ok"}};
+    }
+    std::optional<didi::runtime::RuntimeRouteLease> acquireRouteLease() override {
+        if (!provide_lease) return std::nullopt;
+        return didi::runtime::RuntimeRouteLease{
+            std::static_pointer_cast<didi::ipc::IIpcClient>(shared_from_this()), descriptor_, 9};
+    }
+    bool quarantineRoute(const didi::runtime::RuntimeRouteLease&) override {
+        ++quarantines;
+        return true;
+    }
+
+    bool provide_lease{true};
+    int requests{0};
+    int disconnects{0};
+    int quarantines{0};
+    std::string last_method;
+
+private:
+    std::optional<didi::runtime::SessionDescriptor> descriptor_;
 };
 
 uint64_t currentPid() {
@@ -548,7 +647,8 @@ void test_availability_is_selected_session_kind_aware_for_tools_and_resources() 
     ASSERT_EQ(game_tools["runtime_read_logs"]["editorConnected"], false);
 
     const auto game_resources = byResourceUri(inspect(game, "resources/list"));
-    ASSERT_EQ(game_resources["godot://editor/state"]["currentMode"], "offline_fallback");
+    ASSERT_EQ(game_resources["godot://editor/state"]["currentMode"], "unavailable");
+    ASSERT_EQ(game_resources["godot://editor/state"]["liveAvailable"], false);
     ASSERT_EQ(game_resources["godot://runtime/logs"]["currentMode"], "live");
     ASSERT_EQ(game_resources["godot://runtime/logs"]["sessionKind"], "game");
     ASSERT_EQ(game_resources["godot://runtime/logs"]["editorConnected"], false);
@@ -595,12 +695,55 @@ void test_live_resources_keep_session_and_error_provenance_and_respect_kind() {
     auto game = std::make_shared<RoutedFake>("game");
     resources.setIpcClient(game);
     const auto editor_state = resources.readResource("godot://editor/state");
-    ASSERT_TRUE(editor_state.isOk());
-    const auto editor_payload = didi::json::parse(editor_state.value());
-    ASSERT_EQ(editor_payload["execution_mode"], "offline_fallback");
-    ASSERT_EQ(editor_payload["editor_connected"], false);
+    ASSERT_TRUE(editor_state.isErr());
+    ASSERT_EQ(editor_state.error().code, 409);
+    ASSERT_EQ(editor_state.error().data["execution_mode"], "live");
+    ASSERT_EQ(editor_state.error().data["session"]["kind"], "game");
+    ASSERT_FALSE(editor_state.error().data["session"].contains("token"));
+    ASSERT_EQ(editor_state.error().data["error"]["code"], 409);
+    ASSERT_EQ(editor_state.error().data["error"]["data"]["selected_session_kind"], "game");
+    ASSERT_EQ(editor_state.error().data["error"]["data"]["allowed_session_kinds"],
+              didi::json::array({"editor"}));
     ASSERT_EQ(game->last_method, "");
     resources.setIpcClient(nullptr);
+}
+
+void test_public_live_dispatch_deadline_is_central_and_finite() {
+    // Break caught: generic editor handlers pass -1 and can wait forever despite public guarantees.
+    auto& tools = didi::mcp::ToolRegistry::instance();
+    tools.registerAllDefaultTools();
+    auto editor = std::make_shared<RoutedFake>("editor");
+    tools.setIpcClient(editor);
+    const auto capture = tools.callTool("capture_viewport", didi::json::object());
+    ASSERT_FALSE(capture.isError);
+    ASSERT_EQ(editor->last_method, "vision.captureViewport");
+    ASSERT_EQ(editor->last_timeout_ms, 17000);
+    tools.setIpcClient(nullptr);
+
+    auto& resources = didi::mcp::ResourceRegistry::instance();
+    resources.registerAllDefaultResources();
+    resources.setIpcClient(editor);
+    editor->last_timeout_ms = -2;
+    ASSERT_TRUE(resources.readResource("godot://editor/state").isOk());
+    ASSERT_EQ(editor->last_method, "editor.getState");
+    ASSERT_EQ(editor->last_timeout_ms, 17000);
+    editor->last_timeout_ms = -2;
+    ASSERT_TRUE(resources.readResource("godot://runtime/logs").isOk());
+    ASSERT_EQ(editor->last_method, "runtime.getLogs");
+    ASSERT_EQ(editor->last_timeout_ms, 17000);
+    resources.setIpcClient(nullptr);
+
+    auto fixed = std::make_shared<FixedRecordingClient>();
+    const auto legacy_lease = didi::runtime::acquireRuntimeRouteLease(fixed);
+    ASSERT_TRUE(legacy_lease.has_value());
+    ASSERT_FALSE(legacy_lease->descriptor.has_value());
+    ASSERT_TRUE(legacy_lease->sendRequest("vision.captureViewport", {}, -1).isOk());
+    ASSERT_EQ(fixed->requests, 1);
+    ASSERT_EQ(fixed->last_timeout_ms, 17000);
+    ASSERT_TRUE(legacy_lease->sendRequest("vision.captureViewport", {}, 250).isOk());
+    ASSERT_EQ(fixed->last_timeout_ms, 250);
+    ASSERT_TRUE(legacy_lease->sendRequest("vision.captureViewport", {}, 60000).isOk());
+    ASSERT_EQ(fixed->last_timeout_ms, 17000);
 }
 
 void test_auto_attach_selects_one_matching_session_and_notices_first_availability() {
@@ -903,6 +1046,67 @@ void test_non_atomic_session_router_fails_closed() {
     registry.setIpcClient(nullptr);
 }
 
+void test_descriptorless_session_lease_fails_closed() {
+    // Break caught: an atomic-looking session lease without authenticated identity dispatched live.
+    auto route = std::make_shared<DescriptorlessSessionFake>();
+    ASSERT_FALSE(didi::runtime::acquireRuntimeRouteLease(route).has_value());
+    const auto runtime = didi::mcp::handleRuntimeReadLogs(didi::json::object(), route);
+    ASSERT_TRUE(runtime.isError);
+    ASSERT_EQ(payload(runtime)["error"]["code"], 503);
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(route);
+    const auto capture = registry.callTool("capture_viewport", didi::json::object());
+    ASSERT_FALSE(capture.isError);
+    ASSERT_EQ(didi::json::parse(capture.content[0].text)["execution_mode"],
+              "offline_fallback");
+    const auto mutation = registry.callTool(
+        "scene_instantiate_node", {{"node_type", "Node"}});
+    ASSERT_TRUE(mutation.isError);
+    ASSERT_EQ(payload(mutation)["error"]["code"], 503);
+    ASSERT_EQ(route->requests, 0);
+    ASSERT_EQ(route->disconnects, 0);
+    ASSERT_EQ(route->quarantines, 0);
+    registry.setIpcClient(nullptr);
+
+    auto invalid = std::make_shared<RoutedFake>("editor");
+    invalid->session.token = "not-a-valid-session-token";
+    ASSERT_FALSE(didi::runtime::acquireRuntimeRouteLease(invalid).has_value());
+    const auto invalid_runtime = didi::mcp::handleRuntimeReadLogs(
+        didi::json::object(), invalid);
+    ASSERT_TRUE(invalid_runtime.isError);
+    ASSERT_TRUE(invalid->last_method.empty());
+}
+
+void test_provider_only_routes_are_kind_gated_and_fail_closed() {
+    // Break caught: only IRuntimeSessionClient sources were treated as managed routes.
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    auto game = std::make_shared<ProviderOnlyFake>(descriptorFor("game"));
+    registry.setIpcClient(game);
+    const auto wrong_kind = registry.callTool("capture_viewport", didi::json::object());
+    ASSERT_TRUE(wrong_kind.isError);
+    const auto wrong_kind_payload = payload(wrong_kind);
+    ASSERT_EQ(wrong_kind_payload["execution_mode"], "live");
+    ASSERT_EQ(wrong_kind_payload["session"]["kind"], "game");
+    ASSERT_EQ(wrong_kind_payload["error"]["code"], 409);
+    ASSERT_EQ(game->requests, 0);
+
+    auto unavailable = std::make_shared<ProviderOnlyFake>(descriptorFor("editor"));
+    unavailable->provide_lease = false;
+    registry.setIpcClient(unavailable);
+    const auto no_route = registry.callTool(
+        "scene_instantiate_node", {{"node_type", "Node"}});
+    ASSERT_TRUE(no_route.isError);
+    ASSERT_EQ(payload(no_route)["error"]["code"], 503);
+    ASSERT_EQ(unavailable->requests, 0);
+    ASSERT_EQ(unavailable->disconnects, 0);
+    ASSERT_EQ(unavailable->quarantines, 0);
+    registry.setIpcClient(nullptr);
+}
+
 void test_nested_offline_call_cannot_inherit_outer_route_lease() {
     // Break caught: nested no-lease calls saw the outer ToolRegistry TLS lease frame.
     auto& registry = didi::mcp::ToolRegistry::instance();
@@ -1039,6 +1243,8 @@ struct RegisterRuntimeRoutingTests {
                      test_availability_is_selected_session_kind_aware_for_tools_and_resources);
         registerTest("RuntimeRouting.LiveResourceProvenanceAndKind",
                      test_live_resources_keep_session_and_error_provenance_and_respect_kind);
+        registerTest("RuntimeRouting.PublicLiveDeadlineClamp",
+                     test_public_live_dispatch_deadline_is_central_and_finite);
         registerTest("RuntimeRouting.AutoAttachFirstAvailability",
                      test_auto_attach_selects_one_matching_session_and_notices_first_availability);
         registerTest("RuntimeRouting.AutoAttachBeforeFirstLiveCall",
@@ -1065,6 +1271,10 @@ struct RegisterRuntimeRoutingTests {
                      test_editor_state_transport_failure_is_structured_and_quarantined);
         registerTest("RuntimeRouting.NonAtomicSessionFailsClosed",
                      test_non_atomic_session_router_fails_closed);
+        registerTest("RuntimeRouting.DescriptorlessSessionFailsClosed",
+                     test_descriptorless_session_lease_fails_closed);
+        registerTest("RuntimeRouting.ProviderOnlyRoutesAreManaged",
+                     test_provider_only_routes_are_kind_gated_and_fail_closed);
         registerTest("RuntimeRouting.NestedDispatchIsolation",
                      test_nested_offline_call_cannot_inherit_outer_route_lease);
         registerTest("RuntimeRouting.WrongKindExtensionDispatch",

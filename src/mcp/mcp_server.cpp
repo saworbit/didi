@@ -34,9 +34,9 @@ static void addCurrentAvailability(json& definition, const ExecutionCapability& 
     std::string current_mode = "unavailable";
     if (!capability.implemented) current_mode = "unimplemented";
     else if (live_available) current_mode = "live";
-    // Tool handlers prefer a connected transport over their offline fallback. On a live route of
-    // the wrong kind, advertising that fallback would promise execution the handler cannot take.
-    else if (!resource && connected && has_mode("live")) current_mode = "unavailable";
+    // A connected route of the wrong kind is an authoritative live selection, not an invitation
+    // to silently run an offline fallback. This applies equally to tools and resources.
+    else if (connected && has_mode("live")) current_mode = "unavailable";
     else if (has_mode("offline_fallback")) current_mode = "offline_fallback";
     definition["_meta"]["didi"]["currentMode"] = current_mode;
     definition["_meta"]["didi"]["liveAvailable"] = live_available;
@@ -137,9 +137,11 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     if (req.method == "tools/list") {
         auto tools = ToolRegistry::instance().listTools();
         json tool_list = json::array();
-        const bool connected = m_ipcClient && m_ipcClient->isConnected();
-        const auto active = m_runtimeSessionClient ? m_runtimeSessionClient->activeSession()
-                                                   : std::optional<runtime::SessionDescriptor>{};
+        const auto lease = runtime::acquireRuntimeRouteLease(m_ipcClient);
+        const bool connected = lease.has_value();
+        const auto active = lease.has_value()
+                                ? lease->descriptor
+                                : std::optional<runtime::SessionDescriptor>{};
         const auto session_kind = active.has_value()
                                       ? std::optional<std::string>(active->kind)
                                       : std::optional<std::string>{};
@@ -170,9 +172,11 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     if (req.method == "resources/list") {
         auto resources = ResourceRegistry::instance().listResources();
         json res_list = json::array();
-        const bool connected = m_ipcClient && m_ipcClient->isConnected();
-        const auto active = m_runtimeSessionClient ? m_runtimeSessionClient->activeSession()
-                                                   : std::optional<runtime::SessionDescriptor>{};
+        const auto lease = runtime::acquireRuntimeRouteLease(m_ipcClient);
+        const bool connected = lease.has_value();
+        const auto active = lease.has_value()
+                                ? lease->descriptor
+                                : std::optional<runtime::SessionDescriptor>{};
         const auto session_kind = active.has_value()
                                       ? std::optional<std::string>(active->kind)
                                       : std::optional<std::string>{};

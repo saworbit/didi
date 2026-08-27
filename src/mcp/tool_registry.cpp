@@ -139,7 +139,8 @@ Error normalizeLiveRouteError(Error error) {
     return error;
 }
 
-class LeaseDispatchClient final : public runtime::IRuntimeSessionClient {
+class LeaseDispatchClient final : public ipc::IIpcClient,
+                                  public runtime::IRuntimeRouteLeaseProvider {
 public:
     explicit LeaseDispatchClient(std::shared_ptr<ipc::IIpcClient> source)
         : m_source(std::move(source)),
@@ -221,30 +222,6 @@ public:
         return result;
     }
 
-    Result<json> listSessions(const std::optional<std::string>& project_path) override {
-        return m_sessions ? m_sessions->listSessions(project_path)
-                          : Result<json>(Error::notConnected("Runtime session routing is unavailable"));
-    }
-    Result<json> attachSession(const std::string& session_id) override {
-        return m_sessions ? m_sessions->attachSession(session_id)
-                          : Result<json>(Error::notConnected("Runtime session routing is unavailable"));
-    }
-    Result<json> detachSession() override {
-        return m_sessions ? m_sessions->detachSession()
-                          : Result<json>(Error::notConnected("Runtime session routing is unavailable"));
-    }
-    Result<json> refreshSession() override {
-        return m_sessions ? m_sessions->refreshSession()
-                          : Result<json>(Error::notConnected("Runtime session routing is unavailable"));
-    }
-    std::optional<runtime::SessionDescriptor> activeSession() const override {
-        const auto* state = current();
-        return state ? (state->lease.has_value()
-                            ? state->lease->descriptor
-                            : std::optional<runtime::SessionDescriptor>{})
-                     : (m_sessions ? m_sessions->activeSession()
-                                   : std::optional<runtime::SessionDescriptor>{});
-    }
     std::optional<runtime::RuntimeRouteLease> acquireRouteLease() override {
         const auto* state = current();
         return state ? state->lease
@@ -344,11 +321,13 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
         tool->capability.modes.end();
     std::optional<runtime::RuntimeRouteLease> lease;
     if (supports_live) {
+        const bool managed_route =
+            std::dynamic_pointer_cast<runtime::IRuntimeRouteLeaseProvider>(m_sourceIpcClient) != nullptr;
         lease = runtime::acquireRuntimeRouteLease(m_sourceIpcClient);
         const auto selected = lease.has_value()
                                   ? lease->descriptor
                                   : std::optional<runtime::SessionDescriptor>{};
-        if (m_runtimeSessionClient && selected.has_value()) {
+        if (managed_route && selected.has_value()) {
             const auto policy = runtime::livePolicyForTool(name);
             if (!runtime::allowsSessionKind(policy, selected->kind)) {
                 json allowed = policy == runtime::LiveSessionKindPolicy::editor_only
@@ -368,7 +347,7 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
                 return rejected;
             }
         }
-        if (m_runtimeSessionClient && !lease.has_value() && !supports_offline) {
+        if (managed_route && !lease.has_value() && !supports_offline) {
             return structuredLiveToolError(
                 Error::notConnected("No atomic runtime route is available for live dispatch"),
                 std::nullopt);

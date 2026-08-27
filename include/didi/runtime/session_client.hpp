@@ -10,6 +10,8 @@
 
 namespace didi::runtime {
 
+inline constexpr int kMaxPublicLiveRequestMs = 17000;
+
 struct ProcessIdentity {
     int64_t started_at_ms{0};
     int64_t resolution_ms{1};
@@ -44,6 +46,13 @@ struct RuntimeRouteLease {
                              int timeout_ms = 5000) const;
 };
 
+class IRuntimeRouteLeaseProvider {
+public:
+    virtual ~IRuntimeRouteLeaseProvider() = default;
+    virtual std::optional<RuntimeRouteLease> acquireRouteLease() = 0;
+    virtual bool quarantineRoute(const RuntimeRouteLease& lease) = 0;
+};
+
 enum class DescriptorRetirementOutcome {
     deleted,
     retained_collision_or_race,
@@ -57,7 +66,7 @@ DescriptorRetirementOutcome retireOwnedSessionDescriptor(
     const std::function<void(const std::filesystem::path&)>& after_verification = {},
     const std::function<void(const std::filesystem::path&)>& before_final_delete = {});
 
-class IRuntimeSessionClient : public ipc::IIpcClient {
+class IRuntimeSessionClient : public ipc::IIpcClient, public IRuntimeRouteLeaseProvider {
 public:
     virtual Result<json> listSessions(const std::optional<std::string>& project_path) = 0;
     virtual Result<json> attachSession(const std::string& session_id) = 0;
@@ -66,8 +75,8 @@ public:
         return Error::notConnected("Fresh runtime session state is unavailable");
     }
     virtual std::optional<SessionDescriptor> activeSession() const = 0;
-    virtual std::optional<RuntimeRouteLease> acquireRouteLease() { return std::nullopt; }
-    virtual bool quarantineRoute(const RuntimeRouteLease&) { return false; }
+    std::optional<RuntimeRouteLease> acquireRouteLease() override { return std::nullopt; }
+    bool quarantineRoute(const RuntimeRouteLease&) override { return false; }
 };
 
 std::optional<RuntimeRouteLease> acquireRuntimeRouteLease(

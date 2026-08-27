@@ -1059,7 +1059,10 @@ Result<json> RuntimeRouteLease::sendRequest(const std::string& method, const jso
     }
     json routed_params = params.is_object() ? params : json::object();
     if (descriptor.has_value()) routed_params["_didi_session_token"] = descriptor->token;
-    return client->sendRequest(method, routed_params, timeout_ms);
+    const int bounded_timeout_ms = timeout_ms < 0
+                                       ? kMaxPublicLiveRequestMs
+                                       : std::min(timeout_ms, kMaxPublicLiveRequestMs);
+    return client->sendRequest(method, routed_params, bounded_timeout_ms);
 }
 
 std::optional<RuntimeRouteLease> acquireRuntimeRouteLease(
@@ -1067,18 +1070,32 @@ std::optional<RuntimeRouteLease> acquireRuntimeRouteLease(
     if (!router || !router->isConnected()) return std::nullopt;
     const auto sessions = std::dynamic_pointer_cast<IRuntimeSessionClient>(router);
     if (sessions) {
-        if (auto lease = sessions->acquireRouteLease(); lease.has_value()) return lease;
-        // A mutable session router cannot be made atomic by separately reading activeSession().
-        // Alternate implementations must expose a lease or live dispatch fails closed.
-        return std::nullopt;
+        auto lease = sessions->acquireRouteLease();
+        if (!lease.has_value() || !lease->client || !lease->descriptor.has_value()) {
+            return std::nullopt;
+        }
+        if (SessionDescriptor::fromJson(lease->descriptor->toJson(true)).isErr()) {
+            return std::nullopt;
+        }
+        return lease;
+    }
+    const auto provider = std::dynamic_pointer_cast<IRuntimeRouteLeaseProvider>(router);
+    if (provider) {
+        auto lease = provider->acquireRouteLease();
+        if (!lease.has_value() || !lease->client) return std::nullopt;
+        if (lease->descriptor.has_value() &&
+            SessionDescriptor::fromJson(lease->descriptor->toJson(true)).isErr()) {
+            return std::nullopt;
+        }
+        return lease;
     }
     return RuntimeRouteLease{router, std::nullopt, 0};
 }
 
 bool quarantineRuntimeRoute(const std::shared_ptr<ipc::IIpcClient>& router,
                             const RuntimeRouteLease& lease) {
-    const auto sessions = std::dynamic_pointer_cast<IRuntimeSessionClient>(router);
-    if (sessions) return sessions->quarantineRoute(lease);
+    const auto provider = std::dynamic_pointer_cast<IRuntimeRouteLeaseProvider>(router);
+    if (provider) return provider->quarantineRoute(lease);
     if (!lease.client) return false;
     lease.client->disconnect();
     return true;

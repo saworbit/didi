@@ -137,10 +137,18 @@ void ResourceRegistry::registerAllDefaultResources() {
     editor_state.mimeType = "application/json";
     editor_state.readHandler = [this]() -> Result<std::string> {
         const auto lease = runtime::acquireRuntimeRouteLease(m_ipcClient);
-        if (lease.has_value() &&
-            (!lease->descriptor.has_value() || lease->descriptor->kind == "editor")) {
+        if (lease.has_value()) {
             const auto session = lease->descriptor;
-            auto res = lease->sendRequest("editor.getState", {}, ipc::kWaitForDefinitiveResponse);
+            if (session.has_value() && session->kind != "editor") {
+                return liveResourceError(
+                    Error(409, "Resource is unavailable for the selected session kind",
+                          {{"resource", "godot://editor/state"},
+                           {"selected_session_kind", session->kind},
+                           {"allowed_session_kinds", json::array({"editor"})}}),
+                    session, "");
+            }
+            auto res = lease->sendRequest("editor.getState", {},
+                                          ipc::kWaitForDefinitiveResponse);
             if (res.isOk()) {
                 return liveResourcePayload(res.value(), session).dump(2);
             }
@@ -169,8 +177,8 @@ void ResourceRegistry::registerAllDefaultResources() {
         const auto lease = runtime::acquireRuntimeRouteLease(m_ipcClient);
         if (lease.has_value()) {
             const auto session = lease->descriptor;
-            constexpr int kEndToEndLiveDeadlineMs = 17000;
-            auto res = lease->sendRequest("runtime.getLogs", {}, kEndToEndLiveDeadlineMs);
+            auto res = lease->sendRequest("runtime.getLogs", {},
+                                          runtime::kMaxPublicLiveRequestMs);
             if (res.isOk()) {
                 return liveResourcePayload(res.value(), session).dump(2);
             }
