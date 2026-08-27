@@ -120,7 +120,7 @@ Signal wiring, physics/navigation queries, TileMap/GridMap editing, runtime inpu
 
 ## 🔗 Step 6: Attach to a running editor or game
 
-Phase 3 starts detached. On first availability, v1.3.0 selects only an unambiguous canonical-project match: a sole editor/game, or a unique editor among games. Multiple editors or game-only multiplicity stay detached. With the addon enabled in one or more editor/game processes:
+Phase 3 routing starts detached. On first availability, v1.4.0 selects only an unambiguous canonical-project match: a sole editor/game, or a unique editor among games. Multiple editors or game-only multiplicity stay detached. With the addon enabled in one or more editor/game processes:
 
 1. Call `runtime_list_sessions` with your canonical `project_path`.
 2. Choose the token-free descriptor whose `kind` is `editor` or `game` as intended.

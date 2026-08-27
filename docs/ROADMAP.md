@@ -1,7 +1,7 @@
 # Didi Strategic Roadmap & Technical Build Order 🗺️
 
 > **Core Philosophy**:
-> The 68-tool canonical surface includes completed Phases 1–3: live editor substrate, project wiring, and authenticated editor/game runtime sessions. The next capability is Phase 4 verification/search work, implemented honestly without success stubs.
+> The 72-tool canonical surface includes completed Phases 1–4: live editor substrate, project wiring, authenticated editor/game runtime sessions, and bounded search/reimport/visual verification. The next milestone is Phase 5 deep-domain support.
 
 ---
 
@@ -84,25 +84,33 @@ The structured ring does not intercept arbitrary external `print()` output. `run
 
 ---
 
-## 🚀 Remaining Capabilities After Phase 3
+## ✅ Phase 4: Autonomous Verification Loop (COMPLETE — 2026-08-28)
+
+Phase 4 adds four canonical tools and closes the locate–change–reimport–capture–compare loop:
+
+- `project_search_text` performs bounded literal search; `project_search_symbols` extracts lexical GDScript/C# declarations while excluding comments and strings. Both enforce canonical project containment, allowlisted extensions, deterministic ordering, and hard file/byte/result limits.
+- `asset_reimport` validates an all-or-nothing source batch in the editor, permits one active request, and completes only after two consecutive idle callbacks.
+- Live captures receive opaque 32-hex IDs backed by an 8-entry/64 MiB raw RGBA LRU cache; offline previews remain ID-free.
+- Named-node isolation temporarily hides unrelated visible 2D/3D branches and restores original visibility/background state before success. `viewport_diff_capture` compares exact-sized live frames at a `0..255` threshold and returns metrics plus a transparent PNG diff.
+
+The native suite covers containment, lexical filtering, lifecycle states, arithmetic, eviction, schema honesty, and restoration guards. The Godot 4.5.1 harness verifies real search, SVG reimport, isolation restoration, a non-empty mutation diff, and an exact zero-pixel post-undo diff.
+
+---
+
+## 🚀 Remaining Capabilities After Phase 4
 
 These are missing capabilities that an AI agent actually requires to complete full development cycles and ship Godot changes.
 
-### 5. Search and Indexing That Agents Can Trust
-Beyond a basic recursive directory walk:
-- **Full-Text & Symbol Search**: Fast ripgrep-style search across `.gd`, `.cs`, `.tscn`, `.tres`.
+### 5. Deeper Search and Indexing
 - **Reverse Usage Lookup**: "Where is this node type used?" and "Which scenes instance this sub-scene?"
 - **UID ↔ Path Synchronization**: Real-time sync with `.godot/uid_cache.bin` to resolve `uid://` references.
 - **Import Status Tracking**: Inspect `.import` remaps and detect broken/missing asset imports.
 
 ### 6. Visual Verification & Image Diffing
-- **Named Node Isolation Capture**: Focus the camera and isolate a specific node against a transparent or neutral background.
-- **Visual Diffing (`viewport_diff_capture`)**: Generate visual pixel diffs between before/after mutation frames.
 - **Multi-Target Viewports**: Explicitly capture 2D canvas, 3D world, active editor viewport, or running game window.
 - **Debug Draw Modifiers**: Non-destructive debug wireframes passed as capture parameters rather than global sticky toggles.
 
 ### 7. Asset Import and Pipeline Management
-- **Trigger Reimport & Wait for Idle**: Force reimporting dropped assets (`.png`, `.glb`, `.wav`) and await editor idle.
 - **Import Preset Configuration**: Configure compression modes, 3D normal filters, and mesh collision generation.
 - **Export Presets & Headless Export**: Query export presets and trigger `export_project` for target platforms.
 - **MeshLibrary Export**: Generate `.meshlib` assets from 3D scenes for `GridMap` workflows.
@@ -144,12 +152,12 @@ Beyond a basic recursive directory walk:
 | **Phase 1 (DONE)** | **Live Pump + Real SceneTree / UndoRedo + Honest Errors** | Verified on Godot 4.5.1, 4.6.2, and 4.7.2. |
 | **Phase 2 (DONE)** | **Attach Script, Autoloads, InputMap, Project Settings, Groups, Scene Lifecycle** | Verified through real Godot persistence, UndoRedo, resource packing, and adversarial rejection paths. |
 | **Phase 3 (DONE)** | **`eval_gdscript`, Runtime Log Stream, Attach-to-Running** | Verified authenticated concurrent editor/game routing, bounded controls/logs/tree, and a strict read-only expression subset. |
-| **Phase 4 (NEXT)** | **Symbol Search, Asset Reimport, Viewport Diffing & Isolation** | Closes the autonomous verification and feedback loop for AI agents. |
+| **Phase 4 (DONE)** | **Symbol Search, Asset Reimport, Viewport Diffing & Isolation** | Verified bounded search and reversible live visual feedback against Godot 4.5.1. |
 | **Phase 5 (LATER)** | **C# / Shaders, Project Export, GridMap MeshLibrary, UI Hit-Testing** | Provides deep domain depth across all Godot engine subsystems. |
 
 ---
 
-## 📋 The 68-Tool Canonical Surface
+## 📋 The 72-Tool Canonical Surface
 
 This is the planned protocol surface, not a claim that every row executes today. See [Current Capability Matrix](CAPABILITIES.md) for per-tool status.
 
@@ -166,3 +174,4 @@ This is the planned protocol surface, not a claim that every row executes today.
 | **9. Editor Lifecycle (4)**| `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Implemented live; reload requests a filesystem source scan. |
 | **10. Phase 2 Project Wiring (18)** | Script attach/detach; autoloads; InputMap; project settings; groups; scene create/open/close/pack | Implemented live. Project writes persist with rollback; node writes use UndoRedo; resource writes require safe paths and explicit overwrite. |
 | **11. Phase 3 Runtime Sessions (10)** | Session list/attach/detach/get; logs; pause/step/stop/tree; `eval_gdscript` | Implemented. Four tools execute as local session management; six require an authenticated auto-selected or explicitly attached live editor/game. Evaluation is read-only and expression-only. |
+| **12. Phase 4 Verification (4)** | `project_search_text`, `project_search_symbols`, `asset_reimport`, `viewport_diff_capture` | Implemented. Search is bounded/offline; reimport and diff are editor-only; capture isolation is a reversible option on the existing live viewport tool. |

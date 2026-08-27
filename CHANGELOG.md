@@ -11,9 +11,31 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [1.4.0] - 2026-08-28
+
+### Added
+
+- Closed Phase 4 with four canonical tools: bounded literal `project_search_text`, lexical GDScript/C# `project_search_symbols`, editor-backed `asset_reimport`, and exact live `viewport_diff_capture`.
+- Added 32-lowercase-hex live capture IDs backed by an 8-entry/64 MiB process-local RGBA LRU cache with a 2,048 × 2,048 per-image limit.
+- Added reversible `node_isolation_path` capture with optional transparent background, instance-ID-safe reverse restoration, forced redraws, and explicit restoration metadata.
+- Added exact-dimension RGBA diff metrics and transparent PNG output, including threshold, pixel count/ratio, per-channel mean error, maximum delta, and nullable bounding box.
+
 ### Changed
 
-- Reconciled current Phase 3 documentation, corrected security support to the current `1.3.x` line, made cross-platform executable/library and local-IPC terminology explicit, and added automated version, release-fact, support-policy, and Markdown-link drift validation.
+- Version is now `1.4.0`; discovery exposes 72 canonical tools plus 10 legacy registrations (82 total). Fifty-four canonical tools are implemented and 18 remain unimplemented.
+- Project search enforces canonical containment, allowlisted `.gd`/`.cs`/`.tscn`/`.tres` formats, symlink/generated-tree exclusion, UTF-8 validation, deterministic order, and file/byte/result/preview limits.
+- Asset reimport validates the complete source batch before mutation, permits one active request, and requires two consecutive editor-idle callbacks before success.
+
+### Fixed
+
+- Prevented synchronous `EditorFileSystem.reimport_files` callbacks from deadlocking the pending-reimport lifecycle lock.
+
+### Verified
+
+- Extended the Godot 4.5.1 disposable integration harness through real search, SVG reimport, reversible node isolation, a non-empty visual mutation diff, and an exact post-undo diff while preserving fixture and session cleanup.
+
 
 ## [1.3.0] - 2026-08-27
 

@@ -2,13 +2,13 @@
 
 ## Supported Versions
 
-The current documented release is **1.3.0**. Security fixes are provided only for the current minor line.
+The current documented release is **1.4.0**. Security fixes are provided only for the current minor line.
 
 | Version | Supported |
 | ------- | --------- |
-| 1.3.x | :white_check_mark: |
-| 1.2.x | :x: |
-| <=1.1.x | :x: |
+| 1.4.x | :white_check_mark: |
+| 1.3.x | :x: |
+| <=1.2.x | :x: |
 
 ## Security Boundary
 

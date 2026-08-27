@@ -28,24 +28,24 @@ class DocumentationValidatorTests(unittest.TestCase):
 
     def make_valid_repository(self) -> Path:
         self.write("LICENSE", "MIT License\n")
-        self.write("CMakeLists.txt", "project(didi VERSION 1.3.0 LANGUAGES C CXX)\n")
+        self.write("CMakeLists.txt", "project(didi VERSION 1.4.0 LANGUAGES C CXX)\n")
         self.write(
             "include/didi/mcp/mcp_protocol.hpp",
-            'inline const char* kServerVersion = "1.3.0";\n',
+            'inline const char* kServerVersion = "1.4.0";\n',
         )
         self.write(
             "src/standalone/main.cpp",
-            'std::cout << "didi (godot-mcp-native) v1.3.0";\n',
+            'std::cout << "didi (godot-mcp-native) v1.4.0";\n',
         )
-        self.write("addons/didi/plugin.cfg", 'version="1.3.0"\n')
+        self.write("addons/didi/plugin.cfg", 'version="1.4.0"\n')
 
         self.write(
             "README.md",
             """# Didi
 
-Current documented release: **1.3.0**.
+Current documented release: **1.4.0**.
 
-Didi exposes 68 canonical tools plus 10 legacy names (78 total).
+Didi exposes 72 canonical tools plus 10 legacy names (82 total).
 
 [Guide](docs/GUIDE.md#details-1) | [Security](SECURITY.md) | [Overview](#didi)
 """,
@@ -56,22 +56,22 @@ Didi exposes 68 canonical tools plus 10 legacy names (78 total).
 
 ## [Unreleased]
 
-## [1.3.0] - 2026-08-27
+## [1.4.0] - 2026-08-28
 
-Version 1.3.0 exposes 68 canonical tools, 10 legacy registrations, and 78 total registrations. Fifty canonical tools are implemented and 18 remain unimplemented.
+Version 1.4.0 exposes 72 canonical tools, 10 legacy registrations, and 82 total registrations. Fifty-four canonical tools are implemented and 18 remain unimplemented.
 """,
         )
         self.write(
             "SECURITY.md",
             """# Security Policy
 
-Current release: 1.3.0.
+Current release: 1.4.0.
 
 | Version | Supported |
 | --- | --- |
-| 1.3.x | :white_check_mark: |
-| 1.2.x | :x: |
-| <=1.1.x | :x: |
+| 1.4.x | :white_check_mark: |
+| 1.3.x | :x: |
+| <=1.2.x | :x: |
 """,
         )
         self.write("CONTRIBUTING.md", "# Contributing\n")
@@ -94,14 +94,14 @@ Current release: 1.3.0.
             "docs/CAPABILITIES.md",
             """# Current Capability Matrix
 
-Didi v1.3.0 registers 68 canonical tool names. Fifty are implemented in at least one mode; 18 remain reserved. Ten legacy names are registered separately, for exactly 78 tools/list entries.
+Didi v1.4.0 registers 72 canonical tool names. Fifty-four are implemented in at least one mode; 18 remain reserved. Ten legacy names are registered separately, for exactly 82 tools/list entries.
 """,
         )
         self.write(
             "docs/TOOL_REFERENCE.md",
             """# Tool Reference
 
-Didi exposes 68 canonical tool names plus 10 legacy names (78 registrations).
+Didi exposes 72 canonical tool names plus 10 legacy names (82 registrations).
 """,
         )
         self.write(
@@ -137,7 +137,7 @@ Second section.
         errors = VALIDATOR.validate_repository(root)
 
         self.assertTrue(
-            any("addons/didi/plugin.cfg" in error and "1.3.0" in error for error in errors),
+            any("addons/didi/plugin.cfg" in error and "1.4.0" in error for error in errors),
             errors,
         )
 
@@ -154,21 +154,21 @@ Second section.
         security = (root / "SECURITY.md").read_text(encoding="utf-8")
         self.write(
             "SECURITY.md",
-            security.replace("| 1.2.x | :x: |", "| 1.2.x | :white_check_mark: |"),
+            security.replace("| 1.3.x | :x: |", "| 1.3.x | :white_check_mark: |"),
         )
 
         errors = VALIDATOR.validate_repository(root)
 
-        self.assertTrue(any("unsupported release 1.2.x" in error for error in errors), errors)
+        self.assertTrue(any("unsupported release 1.3.x" in error for error in errors), errors)
 
     def test_reports_missing_current_release_fact(self):
         root = self.make_valid_repository()
         readme = (root / "README.md").read_text(encoding="utf-8")
-        self.write("README.md", readme.replace("68 canonical", "67 canonical"))
+        self.write("README.md", readme.replace("72 canonical", "71 canonical"))
 
         errors = VALIDATOR.validate_repository(root)
 
-        self.assertTrue(any("README.md" in error and "68 canonical" in error for error in errors), errors)
+        self.assertTrue(any("README.md" in error and "72 canonical" in error for error in errors), errors)
 
     def test_reports_missing_markdown_target(self):
         root = self.make_valid_repository()

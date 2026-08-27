@@ -133,11 +133,12 @@ Offset 4..N:  char payload_bytes[payload_length] (UTF-8 JSON string)
 - `scene.listGroups`, `scene.addToGroup`, `scene.removeFromGroup`, `scene.getGroupMembers`
 - `scene.create`, `scene.open`, `scene.close`, `scene.packBranch`
 - `editor.undo`, `editor.redo`, `editor.saveScene`, `editor.reloadProject`
-- `vision.captureViewport`
+- `asset.reimport`
+- `vision.captureViewport`, `vision.diffViewport`
 - `runtime.getLogs`, `runtime.getTree`, `runtime.setPaused`, `runtime.step`, `runtime.stop`
 - `runtime.evalGdscript`
 
-These scene/editor/viewport/log methods execute through the extension's main-thread bridge. Public asset queries, script diagnostics/reflection, and visual-test-lab generation are standalone filesystem/parser handlers and are never routed through extension IPC. If an offline-only helper name is sent to the extension directly, it returns `409`; other reserved internal names return a structured `501` envelope:
+These scene/editor/reimport/viewport/log methods execute through the extension's main-thread bridge. Public project search, asset queries, script diagnostics/reflection, and visual-test-lab generation are standalone filesystem/parser handlers and are never routed through extension IPC. If an offline-only helper name is sent to the extension directly, it returns `409`; other reserved internal names return a structured `501` envelope:
 
 ```json
 {

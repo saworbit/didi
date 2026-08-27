@@ -1,6 +1,6 @@
 # Didi MCP Tool Reference
 
-Didi exposes 68 canonical tool names plus 10 legacy names (78 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 72 canonical tool names plus 10 legacy names (82 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
@@ -126,8 +126,21 @@ Rewrites a matching GDScript symbol in a project-root-confined file, then runs t
 Live mode copies RGBA8 pixels from the active editor 3D viewport, or from the 2D editor viewport when `camera_identifier` is `editor_2d` or `active_editor_view_2d`, and encodes them as PNG. Offline mode returns an attributed synthetic grid preview.
 
 - `camera_identifier` (`string`, default `"active_editor_view"`).
-- `resolution`, `render_debug_flags`, and `node_isolation_path` are reserved schema fields. Live capture currently uses the editor viewport's actual size and does not apply those options. Offline preview honors `resolution` with each dimension clamped to 16–1024.
+- `resolution` remains reserved for live capture; offline preview honors it with each dimension clamped to 16–1024. `render_debug_flags` remains unsupported.
+- `node_isolation_path` optionally names a node in the active edited scene. The live renderer preserves that branch and its ancestors, temporarily hides unrelated visible 2D/3D branches, and restores every saved value before success. `isolation_background` is `original` (default) or `transparent`.
 - Legacy alias: `capture_viewport`.
+
+Successful live frames include a 32-lowercase-hex `capture_id` for the exact RGBA8 buffer encoded as PNG. IDs are extension-process-local and retained in an 8-entry/64 MiB LRU cache; each image is limited to 2,048 × 2,048. Offline previews never receive IDs.
+
+### `viewport_diff_capture` — Live
+
+Captures a fresh editor frame and compares it with a cached live baseline without accepting caller-supplied image bytes.
+
+- `baseline_capture_id`: required 32-lowercase-hex live capture ID.
+- `threshold`: integer `0..255`, default `0`; a pixel changes when any RGBA channel delta is greater than the threshold.
+- `camera_identifier`, `node_isolation_path`, and `isolation_background`: same live selectors as capture.
+
+Dimensions must match exactly; Didi does not resample or color-convert. Metadata reports both IDs, resolution, changed/total pixels, ratio, per-channel mean absolute error, maximum channel delta, nullable bounding box, and `identical`. A second MCP content item contains one PNG with transparent unchanged pixels and opaque absolute RGB deltas. Missing/evicted baselines return `404`; dimension mismatch returns `409`.
 
 ### `viewport_create_test_lab` — Offline
 
@@ -196,6 +209,16 @@ Returns UID-to-path mappings discovered in indexed project resources.
 ### `instantiate_asset` — Unimplemented legacy name
 
 Asset or PackedScene instantiation is not implemented.
+
+### `project_search_text` and `project_search_symbols` — Offline
+
+Both tools search only `.gd`, `.cs`, `.tscn`, and `.tres` beneath a normalized in-project `search_path`. They reject traversal/absolute paths, skip symlinks plus `.git`, `.godot`, `.worktrees`, and build outputs, and cap each file at 4 MiB, each request at 10,000 files/64 MiB, results at 500, queries at 256 UTF-8 bytes, and previews at 1,024 bytes.
+
+Text matching is literal with optional ASCII case folding and whole-word boundaries; regular expressions are not supported. Symbol matching is lexical (`exact`, `prefix`, or `contains`) across GDScript and C# declarations after comments and strings are excluded. Symbol kinds are `class`, `function`, `signal`, `variable`, `constant`, and `enum`. Results use one-based locations and canonical `res://` paths; diagnostics are bounded per file.
+
+### `asset_reimport` — Live
+
+Accepts `paths` containing 1–256 unique normalized `res://` source files and `timeout_ms` from 1–10,000. The editor revalidates the whole batch before calling `EditorFileSystem.reimport_files`, rejects `.godot`, `.import`, directories, and missing/out-of-project files, and allows one pending reimport. Success requires two consecutive main-loop callbacks with `is_scanning() == false`. A timeout returns `504` with an unknown outcome because Godot may finish afterward.
 
 ## 8. Runtime and debugging
 

@@ -69,7 +69,8 @@ Use `viewport_capture_frame`.
 - `is_live_frame: true` means pixels came from the active editor viewport.
 - `is_live_frame: false` means a synthesized offline grid preview.
 - Use `camera_identifier: "editor_2d"` or `"active_editor_view_2d"` for the 2D viewport; other values currently select the first 3D editor viewport.
-- Do not assume requested resolution, camera-node selection, debug flags, or node isolation were applied to live capture.
+- Do not assume requested resolution, camera-node selection, or debug flags were applied. Named-node isolation is supported only on a live editor and success must include `state_restored: true`.
+- Keep each live `capture_id` only for the selected extension process. Use `viewport_diff_capture` before eviction/restart; require exact dimensions and inspect `threshold`, `changed_pixels`, `bounding_box`, and `identical`.
 
 ### Work with scripts
 
@@ -83,6 +84,8 @@ For API details outside that limited map, inspect the project or use official Go
 ### Work with project resources
 
 - `project_list_resources` indexes project files.
+- `project_search_text` performs bounded literal matching; `project_search_symbols` is lexical GDScript/C# declaration search, not a language server.
+- After changing a source asset, call live editor-only `asset_reimport` and require `idle: true` before drawing conclusions from a capture.
 - `project_get_uid_map` returns discovered UID mappings.
 - `resource_inspect` returns indexed metadata and dependencies, not arbitrary inner Resource properties.
 - `resource_create` writes textual `.tres` content and does not validate arbitrary Resource classes in Godot.
@@ -94,7 +97,7 @@ Use `runtime_launch` to start a separate Godot process, optionally headless, and
 
 ### Observe or control an already-running session
 
-Didi v1.3.0 starts detached and exposes 68 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
+Didi v1.4.0 starts detached and exposes 72 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
 
 1. Call `runtime_list_sessions`, preferably with the canonical project path.
 2. Choose the intended `editor` or `game` descriptor and call `runtime_attach_session` if deterministic auto-selection did not choose it.
