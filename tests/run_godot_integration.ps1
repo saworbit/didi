@@ -154,7 +154,9 @@ try {
         (Tool-Request 302 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 2 }),
         (Tool-Request 303 "runtime_set_paused" @{ paused = $true }),
         (Tool-Request 304 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 2 }),
+        (Tool-Request 322 "eval_gdscript" @{ expression = "node.get('process_priority')" }),
         (Tool-Request 305 "runtime_step" @{ frames = 1 }),
+        (Tool-Request 363 "eval_gdscript" @{ expression = "node.get('process_priority')" }),
         (Tool-Request 306 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 2 }),
         (Tool-Request 307 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 17 }),
         (Tool-Request 308 "runtime_get_tree" @{ root_path = ".."; max_depth = 1 }),
@@ -166,7 +168,6 @@ try {
         (Tool-Request 314 "runtime_stop" @{ exit_code = 256 }),
         (Tool-Request 315 "scene_set_property" @{ target_node = "/root/RuntimeRoot"; property_name = "process_priority"; value = 12 }),
         (Tool-Request 316 "runtime_set_paused" @{ paused = $false }),
-        (Tool-Request 322 "eval_gdscript" @{ expression = "node.get_path()" }),
         (Tool-Request 323 "eval_gdscript" @{ expression = "node.get_child_count()"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 324 "eval_gdscript" @{ expression = "[1, 2, 3]"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 325 "eval_gdscript" @{ expression = "{'answer': 42, 'ok': true}"; context_node = "/root/RuntimeRoot" }),
@@ -229,15 +230,17 @@ try {
     $step = Tool-Payload $runtimeById[305]
     $afterStepTree = Tool-Payload $runtimeById[306]
     $afterStep = Runtime-FrameCounter $afterStepTree
+    $beforeStepEval = Tool-Payload $runtimeById[322]
+    $afterStepEval = Tool-Payload $runtimeById[363]
     Assert-True ($afterStep -eq ($beforeStep + 1)) "One-frame step advanced from $beforeStep to $afterStep."
+    Assert-True ($beforeStepEval.value -eq $beforeStep) "Pre-step expression observed $($beforeStepEval.value), not live frame $beforeStep."
+    Assert-True ($afterStepEval.value -eq ($beforeStepEval.value + 1) -and $afterStepEval.value -eq $afterStep) "Native scalar expression did not advance exactly once with the processed frame."
     Assert-True ($step.frames -eq 1 -and $step.paused -eq $true -and $afterStepTree.paused -eq $true) "Step did not finish re-paused."
+    Assert-True ($beforeStepEval.context_node -eq "/root/RuntimeRoot" -and $afterStepEval.context_node -eq "/root/RuntimeRoot" -and $beforeStepEval.session_kind -eq "game" -and $afterStepEval.session_kind -eq "game") "Live frame expressions used incorrect game context or provenance."
     foreach ($rejectedId in 307, 308, 310, 312, 313, 314, 315, 318, 320, 321) {
         Assert-True ([bool]$runtimeById[$rejectedId].result.isError) "Runtime rejection $rejectedId returned fake success."
     }
     Assert-True ((Tool-Payload $runtimeById[316]).paused -eq $false) "Game resume was not verified."
-    $gamePathEval = Tool-Payload $runtimeById[322]
-    Assert-True ($gamePathEval.value -eq "/root/RuntimeRoot") "Game expression did not return the bounded context path."
-    Assert-True ($gamePathEval.context_node -eq "/root/RuntimeRoot" -and $gamePathEval.session_kind -eq "game") "Game expression default context or provenance was incorrect."
     Assert-True ((Tool-Payload $runtimeById[323]).value -eq 2) "Game expression child count was incorrect."
     Assert-True (@((Tool-Payload $runtimeById[324]).value).Count -eq 3) "Game expression array was not preserved."
     Assert-True ((Tool-Payload $runtimeById[325]).value.answer -eq 42) "Game expression dictionary was not preserved."

@@ -467,3 +467,70 @@ caveats are the documented cooperative timeout model and the necessary trust in
 Godot core/ClassDB-native property getters; a separately loaded hostile native
 GDExtension already has process authority and is outside this expression
 sandbox's isolation boundary.
+
+## Fix round 2: changing live game-state proof
+
+### Finding and root cause
+
+Fix round 1 correctly removed the unsafe `node.get_meta('frame_counter')`
+expression, but its replacement `node.get_path()` proved only a static live
+value. The runtime-control assertions still proved that the game advanced, and
+the expression tests still proved engine execution, but no assertion tied an
+accepted expression result to state changed by a deterministic runtime step.
+
+The correction leaves the hardened policy unchanged. The game probe mirrors
+its frame counter into Node's engine-native integer `process_priority` during
+each `_process`. The malicious callback counter remains the distinct native
+property `process_physics_priority`. Immediately before and after an already
+paused one-frame `runtime_step`, the harness evaluates the exact expression
+`node.get('process_priority')`. This continues through the ClassDB native
+property prebinding path and never calls the script's `_get` implementation.
+
+### RED evidence
+
+The two expression requests and cross-check assertions were added before the
+fixture mirror. Godot 4.5.1 then failed for the intended missing-live-mirror
+reason:
+
+```text
+Pre-step expression observed 0, not live frame 17.
+```
+
+The expected values are independent: the pre/post frame numbers come from the
+existing live tree's `FrameCounter_N` child names. The new assertions require
+the native expression value to match those observations, advance by exactly
+one, and accompany a step result and post-step tree that both report the game
+re-paused.
+
+### GREEN evidence
+
+The production fixture change is one assignment after incrementing the frame
+counter:
+
+```gdscript
+process_priority = frame_counter
+```
+
+The final matrix was run against the restored implementation:
+
+```powershell
+.\build\Release\didi_tests.exe
+.\tests\run_godot_integration.ps1 -GodotExecutable 'C:\Godot\Godot_v4.5.1-stable_win64_console.exe' -Configuration Release
+.\tests\run_godot_integration.ps1 -GodotExecutable 'C:\Godot\Godot_v4.7.2-stable_win64_console.exe' -Configuration Release
+```
+
+Results:
+
+```text
+Results: 53 passed, 0 failed, 53 total.
+Godot integration passed: Phase 1/2 editor workflows plus concurrent Phase 3 game tree and execution control.
+Godot integration passed: Phase 1/2 editor workflows plus concurrent Phase 3 game tree and execution control.
+```
+
+### Files changed in fix round 2
+
+- `tests/godot_smoke/runtime_probe.gd`
+- `tests/run_godot_integration.ps1`
+
+No expression policy, evaluator, ClassDB prebinding, logging, or conversion
+code changed in this round.

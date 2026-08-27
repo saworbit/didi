@@ -21,6 +21,7 @@ func _exit_tree() -> void:
 
 func _process(_delta: float) -> void:
 	frame_counter += 1
+	process_priority = frame_counter
 	set_meta("frame_counter", frame_counter)
 	frame_counter_node.name = "FrameCounter_%d" % frame_counter
 
