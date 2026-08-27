@@ -2,6 +2,7 @@
 
 #include "didi/common/types.hpp"
 #include "didi/common/json.hpp"
+#include "didi/gdextension/runtime_log.hpp"
 #include <queue>
 #include <mutex>
 #include <future>
@@ -27,6 +28,11 @@ public:
 
     bool tryCancelPending() {
         CommandState expected = CommandState::Pending;
+        return m_state.compare_exchange_strong(expected, CommandState::Cancelled);
+    }
+
+    bool tryCancelRunning() {
+        CommandState expected = CommandState::Running;
         return m_state.compare_exchange_strong(expected, CommandState::Cancelled);
     }
 
@@ -56,31 +62,60 @@ struct CommandTicket {
     std::shared_ptr<CommandControl> control;
 };
 
+class RuntimeStepGate {
+public:
+    bool tryAcquire() {
+        bool expected = false;
+        return m_active.compare_exchange_strong(expected, true);
+    }
+
+    void release() { m_active.store(false); }
+    bool active() const { return m_active.load(); }
+
+private:
+    std::atomic<bool> m_active{false};
+};
+
 class EditorHook {
 public:
     static EditorHook& instance();
 
     CommandTicket postCommand(const std::string& method, const json& params = json::object());
+    void setSessionKind(const std::string& session_kind);
+
+    void scheduleRuntimeStep(int frames,
+                             const std::shared_ptr<std::promise<json>>& promise,
+                             const std::shared_ptr<CommandControl>& control);
 
     // Pumping queue
     void processQueue();
     void cancelPendingCommands(const std::string& reason);
 
-    // Log interceptor ring buffer
-    void addLogMessage(const std::string& level, const std::string& message);
-    json getRecentLogs(size_t max_count = 100);
+    RuntimeLogRing& runtimeLogs();
 
 private:
     EditorHook();
     ~EditorHook();
 
     json executeOnMainThread(const std::string& method, const json& params);
+    void processRuntimeStepFrame();
+
+    struct PendingRuntimeStep {
+        int requested_frames{0};
+        int remaining_frames{0};
+        bool awaiting_next_callback{true};
+        std::shared_ptr<std::promise<json>> response_promise;
+        std::shared_ptr<CommandControl> control;
+    };
 
     std::queue<EngineCommand> m_commandQueue;
     std::mutex m_queueMutex;
+    std::mutex m_stepMutex;
+    RuntimeStepGate m_runtimeStepGate;
+    std::optional<PendingRuntimeStep> m_pendingRuntimeStep;
+    std::string m_sessionKind{"editor"};
 
-    std::vector<json> m_logBuffer;
-    std::mutex m_logMutex;
+    std::shared_ptr<RuntimeLogRing> m_runtimeLogs{std::make_shared<RuntimeLogRing>()};
 };
 
 } // namespace godot

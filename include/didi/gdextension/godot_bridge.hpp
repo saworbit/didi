@@ -19,12 +19,15 @@ class GodotBridge {
 public:
     static GodotBridge& instance();
 
-    json execute(const std::string& method, const json& params);
+    json execute(const std::string& method, const json& params,
+                 const std::string& session_kind = "editor");
     Result<ViewportPixels> captureEditorViewport(const std::string& camera_identifier);
 
 private:
     GodotBridge() = default;
 };
+
+Result<std::string> resolveGodotProjectPath();
 
 } // namespace godot
 } // namespace didi

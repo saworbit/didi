@@ -1,6 +1,8 @@
 #include "didi/mcp/mcp_server.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/runtime/session_kind_policy.hpp"
 #include <algorithm>
+#include <filesystem>
 
 #if defined(_WIN32)
 #include <io.h>
@@ -10,22 +12,54 @@
 namespace didi {
 namespace mcp {
 
+static bool liveAllowedFor(const std::string& identifier, bool resource,
+                           const std::string& session_kind) {
+    if (resource) {
+        if (identifier == "godot://runtime/logs") return session_kind == "editor" || session_kind == "game";
+        return session_kind == "editor";
+    }
+    return runtime::allowsSessionKind(runtime::livePolicyForTool(identifier), session_kind);
+}
+
+static bool managedRouteUnavailable(const std::shared_ptr<ipc::IIpcClient>& client,
+                                    bool connected) {
+    if (connected ||
+        !std::dynamic_pointer_cast<runtime::IRuntimeRouteLeaseProvider>(client)) {
+        return false;
+    }
+    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(client);
+    if (!sessions) return true;
+    // A real session manager with nothing selected is the normal offline state. Once a route is
+    // selected, failure to produce its authenticated lease is authoritative unavailability.
+    return sessions->activeSession().has_value();
+}
+
 static void addCurrentAvailability(json& definition, const ExecutionCapability& capability,
-                                   bool editor_connected) {
+                                   bool connected, const std::optional<std::string>& session_kind,
+                                   bool resource = false, bool managed_unavailable = false) {
     const auto has_mode = [&](const std::string& mode) {
         return std::find(capability.modes.begin(), capability.modes.end(), mode) != capability.modes.end();
     };
+    const auto identifier = definition.value(resource ? "uri" : "name", "");
+    const auto effective_kind = session_kind.value_or(connected ? "editor" : "");
+    const bool live_available = connected && has_mode("live") &&
+                                liveAllowedFor(identifier, resource, effective_kind);
     std::string current_mode = "unavailable";
     if (!capability.implemented) current_mode = "unimplemented";
-    else if (editor_connected && has_mode("live")) current_mode = "live";
+    else if (live_available) current_mode = "live";
+    // A connected route of the wrong kind is an authoritative live selection, not an invitation
+    // to silently run an offline fallback. This applies equally to tools and resources.
+    else if ((connected || managed_unavailable) && has_mode("live")) current_mode = "unavailable";
     else if (has_mode("offline_fallback")) current_mode = "offline_fallback";
     definition["_meta"]["didi"]["currentMode"] = current_mode;
-    definition["_meta"]["didi"]["liveAvailable"] = editor_connected && has_mode("live");
-    definition["_meta"]["didi"]["editorConnected"] = editor_connected;
+    definition["_meta"]["didi"]["liveAvailable"] = live_available;
+    definition["_meta"]["didi"]["editorConnected"] = connected && effective_kind == "editor";
+    if (!effective_kind.empty()) definition["_meta"]["didi"]["sessionKind"] = effective_kind;
 }
 
 McpServer::McpServer() {
-    m_ipcClient = ipc::createIpcClient();
+    m_runtimeSessionClient = runtime::createRuntimeSessionClient(std::filesystem::current_path().string());
+    m_ipcClient = m_runtimeSessionClient;
     initializeRegistries();
 }
 
@@ -35,6 +69,7 @@ McpServer::~McpServer() {
 
 void McpServer::initializeRegistries() {
     ToolRegistry::instance().setIpcClient(m_ipcClient);
+    ToolRegistry::instance().setRuntimeSessionClient(m_runtimeSessionClient);
     ToolRegistry::instance().registerAllDefaultTools();
 
     ResourceRegistry::instance().setIpcClient(m_ipcClient);
@@ -45,6 +80,7 @@ void McpServer::initializeRegistries() {
 
 void McpServer::setIpcClient(std::shared_ptr<ipc::IIpcClient> ipc_client) {
     m_ipcClient = ipc_client;
+    m_runtimeSessionClient = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(m_ipcClient);
     ToolRegistry::instance().setIpcClient(m_ipcClient);
     ResourceRegistry::instance().setIpcClient(m_ipcClient);
 }
@@ -59,7 +95,7 @@ void McpServer::stop() {
 
 void McpServer::sendResponse(const JsonRpcResponse& resp) {
     std::string out = resp.serialize();
-    DIDI_LOG_DEBUG("MCP_OUT", out);
+    DIDI_LOG_DEBUG("MCP_OUT", "JSON-RPC response bytes=", out.size());
     std::cout << out << "\n";
     std::cout.flush();
 }
@@ -71,7 +107,7 @@ void McpServer::sendNotification(const std::string& method, const json& params) 
         {"params", params}
     };
     std::string out = notif.dump();
-    DIDI_LOG_DEBUG("MCP_NOTIF", out);
+    DIDI_LOG_DEBUG("MCP_NOTIF", "JSON-RPC notification bytes=", out.size());
     std::cout << out << "\n";
     std::cout.flush();
 }
@@ -114,10 +150,19 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     if (req.method == "tools/list") {
         auto tools = ToolRegistry::instance().listTools();
         json tool_list = json::array();
-        const bool editor_connected = m_ipcClient && m_ipcClient->isConnected();
+        const auto lease = runtime::acquireRuntimeRouteLease(m_ipcClient);
+        const bool connected = lease.has_value();
+        const bool managed_unavailable = managedRouteUnavailable(m_ipcClient, connected);
+        const auto active = lease.has_value()
+                                ? lease->descriptor
+                                : std::optional<runtime::SessionDescriptor>{};
+        const auto session_kind = active.has_value()
+                                      ? std::optional<std::string>(active->kind)
+                                      : std::optional<std::string>{};
         for (const auto& t : tools) {
             json definition = t.toJson();
-            addCurrentAvailability(definition, t.capability, editor_connected);
+            addCurrentAvailability(definition, t.capability, connected, session_kind, false,
+                                   managed_unavailable);
             tool_list.push_back(std::move(definition));
         }
         return JsonRpcResponse::makeSuccess(req.id, {{"tools", tool_list}});
@@ -142,10 +187,19 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     if (req.method == "resources/list") {
         auto resources = ResourceRegistry::instance().listResources();
         json res_list = json::array();
-        const bool editor_connected = m_ipcClient && m_ipcClient->isConnected();
+        const auto lease = runtime::acquireRuntimeRouteLease(m_ipcClient);
+        const bool connected = lease.has_value();
+        const bool managed_unavailable = managedRouteUnavailable(m_ipcClient, connected);
+        const auto active = lease.has_value()
+                                ? lease->descriptor
+                                : std::optional<runtime::SessionDescriptor>{};
+        const auto session_kind = active.has_value()
+                                      ? std::optional<std::string>(active->kind)
+                                      : std::optional<std::string>{};
         for (const auto& r : resources) {
             json definition = r.toJson();
-            addCurrentAvailability(definition, r.capability, editor_connected);
+            addCurrentAvailability(definition, r.capability, connected, session_kind, true,
+                                   managed_unavailable);
             res_list.push_back(std::move(definition));
         }
         return JsonRpcResponse::makeSuccess(req.id, {{"resources", res_list}});
@@ -161,7 +215,8 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         }
         auto read_res = ResourceRegistry::instance().readResource(uri);
         if (read_res.isErr()) {
-            return JsonRpcResponse::makeError(req.id, read_res.error().code, read_res.error().message);
+            return JsonRpcResponse::makeError(req.id, read_res.error().code, read_res.error().message,
+                                              read_res.error().data);
         }
         auto r_def = ResourceRegistry::instance().getResource(uri);
         std::string mime = r_def ? r_def->mimeType : "text/plain";
@@ -215,15 +270,7 @@ void McpServer::runStdio() {
     m_running.store(true);
     DIDI_LOG_INFO("MCP_SERVER", "Starting Didi MCP server over stdio...");
 
-    // Try background initial connection to Godot GDExtension Named Pipe
-    if (m_ipcClient) {
-        std::string pipe_name = ipc::resolvePipeName();
-        if (m_ipcClient->connect(pipe_name, 500)) {
-            DIDI_LOG_INFO("MCP_SERVER", "Connected to active Godot Editor GDExtension IPC pipe");
-        } else {
-            DIDI_LOG_INFO("MCP_SERVER", "Godot Editor IPC pipe not detected; running with offline fallback engine");
-        }
-    }
+    DIDI_LOG_INFO("MCP_SERVER", "Runtime session router ready; use runtime_list_sessions to discover local Godot sessions");
 
     std::string line;
     while (m_running.load() && std::getline(std::cin, line)) {

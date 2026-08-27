@@ -29,12 +29,12 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
 ┌─────────────────────────────────────────────────────────────┐
 │             Didi (C++ MCP Core Engine - didi.exe)           │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2024-11-05 standard)       │
-│  - Registry (58 canonical tools + 10 legacy names)          │
+│  - Registry (68 canonical tools + 10 legacy names)          │
 │  - Dynamic Resources (godot://project/tree, editor/state)   │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
 │  - Offline file/process tools and capability metadata       │
 └──────────────────────────────┬──────────────────────────────┘
-                               │  Fast Local Named Pipe (\\.\pipe\godot_didi_ipc)
+                               │  Process-unique authenticated local IPC endpoint
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
 │            Godot 4.5+ Process (didi_extension.dll)          │
@@ -85,17 +85,18 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
 2. **Editor Undo/Redo Integration**: All modifications register transactions with Godot's `EditorUndoRedoManager`, allowing human developers to press `Ctrl+Z` in the editor to undo any AI-generated modification.
 3. **Timeout & Deadlock Protection**:
    - IPC client operations utilize recursive mutexes and non-blocking `PeekNamedPipe` polling with millisecond timeouts.
-   - A command that has not started within 15 seconds is atomically cancelled before it can mutate. Once main-thread execution has started, both the extension bridge and the outer MCP transport wait for the definitive result instead of returning an ambiguous timeout followed by a late mutation.
+   - The extension applies a 15-second main-thread deadline. A still-pending command is atomically cancelled and returns `504` with `outcome: "not_started"` and no quarantine. A started but unresolved command returns `504` with `outcome: "unknown_outcome"` and `route_quarantine: true`; it may still complete inside Godot, so clients must not blindly retry mutations.
+   - Public live tools and `godot://runtime/logs` apply a finite 17-second outer transport deadline. Explicit unknown-outcome responses and transport timeouts quarantine only the exact routed generation, preserving a concurrently selected replacement. No live path waits forever for a definitive response.
    - Filesystem reads, static GDScript parsing, and offline process tools stay in the standalone MCP process and never enter the Godot main-thread queue.
 4. **Restricted Security DACL**:
-   - Windows Named Pipes are provisioned with an SDDL security descriptor restricting read/write access exclusively to the Current User (`OW`) and Administrators (`BA`).
-   - GDExtension IPC initialization is restricted to `GDEXTENSION_INITIALIZATION_EDITOR` only, ensuring standalone exported games never expose an open pipe.
+   - Windows Named Pipes use SDDL grants for the owning SID (`OW`) and local Administrators (`BA`); this is access-controlled but not strictly owner-only.
+   - Phase 3 initializes the session host at `GDEXTENSION_INITIALIZATION_SCENE` in both editor and game processes. Each endpoint is process-unique and token-authenticated. POSIX defaults are owner-only; Windows grants the owning SID and local administrators. This is a local attachment boundary, not remote authentication.
 
 ---
 
 ## 4. IPC Wire Protocol & Framing
 
-Didi uses an optimized, low-overhead framing protocol over local Named Pipes (`\\.\pipe\godot_didi_ipc` on Windows, UNIX domain sockets on POSIX):
+Didi uses an optimized, low-overhead framing protocol over process-unique local Named Pipes (`\\.\pipe\godot_didi_<pid>_<session-id>` on Windows) or UNIX domain sockets in the OS temporary directory:
 
 ```
 ┌─────────────────────────┬────────────────────────────────────────────┐
@@ -146,3 +147,28 @@ When the Godot Editor is not open, Didi automatically switches to its built-in o
 - **`viewport_create_test_lab`**: Writes a basic standalone sandbox `.tscn` with lights and cameras.
 
 The exact live/offline/unimplemented split is documented in [Current Capability Matrix](CAPABILITIES.md).
+
+---
+
+## 7. Phase 3 session router and runtime bridge
+
+Each loaded Didi extension follows bind-before-publish startup:
+
+```text
+Godot editor/game process
+  -> create 32-hex session ID + 64-hex token
+  -> bind access-controlled process-unique endpoint
+  -> atomically publish schema-1 descriptor in the platform session registry
+  -> authenticate session.handshake and every routed request
+  -> queue Godot-object work on the main-thread bridge
+```
+
+Descriptors bind identity to PID plus process start time, preventing PID reuse from appearing live. Windows uses `<OS temp>/didi-sessions`; POSIX uses `$XDG_RUNTIME_DIR/didi-sessions` when that variable is absolute and set, otherwise `<OS temp>/didi-sessions-<euid>`. Discovery reads only direct `*.json` regular files through validated handles, limits each file to 64 KiB, validates exact field/endpoint shapes, and reports malformed entries without deleting them. Clean shutdown and proven-stale cleanup retire only an exact identity-matched descriptor with an atomic no-replace move and re-verify it. Windows deletes the exact verified object through its open handle. POSIX lacks a portable object-bound unlink, so normal proof-safe cleanup retains the unpredictable `.didi-retired-<session-id>-<32hex>` tombstone; the active `.json` name is gone and discovery ignores it. A move collision/race or unavailable atomic operation retains the safer object/path rather than risk another entry.
+
+The standalone `RuntimeSessionClient` starts detached. On first availability it considers only live canonical-project matches: a sole session is selected, a unique editor is preferred over games, and editor or game same-kind ambiguity remains detached. Explicit attach performs a 3-second authenticated handshake before atomically replacing a previous route; explicit attach/detach or route quarantine disables later auto-selection. `runtime_get_session` performs a fresh bounded authoritative handshake and quarantines a route on transport, authentication, or identity failure. A concurrently superseding explicit route wins the race and is retained while the stale refresh returns `409`. These operations report `local_session_management`; public metadata never contains the token.
+
+The runtime bridge resolves `Engine.get_main_loop()` as `SceneTree`, supports both editor and game tree inspection, and labels every response with `session_kind`. Tree traversal caps nodes at 10,000; UTF-8 names, types, and paths at 1,024, 256, and 4,096 bytes; and the complete payload at 256 KiB. Field and child truncation are explicit. Pause, frame step, and stop are game controls. A step holds one pending main-thread command across exactly 1–60 callbacks and resolves only after re-pause verification or shutdown cancellation.
+
+The 2,000-record sequence ring is structured Didi telemetry. Cursor reads advance across filtered records and disclose retention gaps. It is not a hook for arbitrary Godot/external `print()` output; offline `runtime_launch` remains the bounded child stdout/stderr capture path.
+
+`eval_gdscript` scans a deliberately small expression grammar before Godot parses with `const_calls_only=true`. Exact native scalar `node.get(<literal>)` reads are ClassDB-resolved and prebound so project script getters cannot execute. Object traversal, dynamic/indexed property access, callbacks, reflection, mutation, and unbounded live operations are rejected. Conversion enforces depth 16, 4,096 container elements, finite numbers, in-subtree Nodes, and a 256 KiB full-response bound. The timeout is cooperative rather than thread-preemptive, so the accepted call surface remains conservative.

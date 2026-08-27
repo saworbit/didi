@@ -1,19 +1,149 @@
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/mcp/resource_registry.hpp"
 #include "didi/mcp/prompt_registry.hpp"
+#include "didi/mcp/mcp_server.hpp"
 #include "didi/gdextension/editor_hook.hpp"
+
+#include <unordered_set>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
 #define ASSERT_EQ(a, b) ASSERT_TRUE((a) == (b))
 
 void registerTest(const std::string& name, std::function<void()> fn);
 
+class DisconnectedIpcClient final : public didi::ipc::IIpcClient {
+public:
+    bool connect(const std::string&, int) override { return false; }
+    void disconnect() override {}
+    bool isConnected() const override { return false; }
+    didi::Result<didi::json> sendRequest(const std::string&, const didi::json&, int) override {
+        return didi::Error::notConnected();
+    }
+};
+
+class LocalSessionClient final : public didi::runtime::IRuntimeSessionClient {
+public:
+    bool connect(const std::string&, int) override { return false; }
+    void disconnect() override {}
+    bool isConnected() const override { return true; }
+    didi::Result<didi::json> sendRequest(const std::string&, const didi::json&, int) override {
+        return didi::Error::internal("A local session query must not issue a live handshake");
+    }
+    didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
+        return didi::json::object();
+    }
+    didi::Result<didi::json> attachSession(const std::string&) override {
+        return didi::Error::internal("attach should not be called by this test");
+    }
+    didi::Result<didi::json> detachSession() override { return didi::json::object(); }
+    didi::Result<didi::json> refreshSession() override {
+        const auto session = activeSession()->toJson();
+        auto handshake = session;
+        handshake["status"] = "ok";
+        return didi::json{{"session", session}, {"handshake", handshake}, {"connected", true}};
+    }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override {
+        return didi::runtime::SessionDescriptor{
+            1, "0123456789abcdef0123456789abcdef", std::string(64, 'a'), 1,
+            "editor", "C:/project", "\\\\.\\pipe\\godot_didi_1", 1, "1.3"};
+    }
+};
+
+class AttachedDisconnectedRuntimeClient final : public didi::runtime::IRuntimeSessionClient {
+public:
+    bool connect(const std::string&, int) override { return false; }
+    void disconnect() override {}
+    bool isConnected() const override { return false; }
+    didi::Result<didi::json> sendRequest(const std::string&, const didi::json&, int) override {
+        return didi::Error::notConnected("Selected runtime transport is disconnected");
+    }
+    didi::Result<didi::json> listSessions(const std::optional<std::string>&) override { return didi::json::array(); }
+    didi::Result<didi::json> attachSession(const std::string&) override { return didi::Error::notConnected(); }
+    didi::Result<didi::json> detachSession() override { return didi::json::object(); }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override {
+        return didi::runtime::SessionDescriptor{1, "abcdefabcdefabcdefabcdefabcdefab", std::string(64, 'b'),
+            99, "editor", "C:/project", "\\\\.\\pipe\\godot_didi_99", 1, "1.3"};
+    }
+};
+
+static void test_mcp_server_preserves_injected_ipc_client() {
+    didi::mcp::McpServer server;
+    auto injected = std::make_shared<DisconnectedIpcClient>();
+    server.setIpcClient(injected);
+    ASSERT_EQ(server.getIpcClient(), injected);
+    ASSERT_EQ(didi::mcp::ToolRegistry::instance().getIpcClient(), injected);
+}
+
+static void test_runtime_get_session_is_local_and_attach_rejects_non_string_id() {
+    auto& reg = didi::mcp::ToolRegistry::instance();
+    auto local = std::make_shared<LocalSessionClient>();
+    reg.setRuntimeSessionClient(local);
+    reg.registerAllDefaultTools();
+
+    auto current = reg.callTool("runtime_get_session", didi::json::object());
+    ASSERT_TRUE(!current.isError);
+    const auto current_json = didi::json::parse(current.content[0].text);
+    ASSERT_EQ(current_json["execution_mode"], "local_session_management");
+    ASSERT_EQ(current_json["session"]["session_id"], "0123456789abcdef0123456789abcdef");
+    ASSERT_TRUE(!current_json["session"].contains("token"));
+
+    auto invalid_attach = reg.callTool("runtime_attach_session", {{"session_id", 42}});
+    ASSERT_TRUE(invalid_attach.isError);
+    ASSERT_TRUE(invalid_attach.content[0].text.find("session_id must be a string") != std::string::npos);
+    reg.setIpcClient(nullptr);
+}
+
+static void test_runtime_read_logs_rejects_invalid_cursor_limit_and_level() {
+    // Break caught: malformed polling inputs reach a live session instead of producing a local validation error.
+    auto& reg = didi::mcp::ToolRegistry::instance();
+    reg.registerAllDefaultTools();
+    reg.setIpcClient(std::make_shared<DisconnectedIpcClient>());
+
+    for (const auto& args : {
+        didi::json{{"cursor", -1}},
+        didi::json{{"limit", 0}},
+        didi::json{{"limit", 501}},
+        didi::json{{"minimum_level", "fatal"}},
+        didi::json{{"minimum_level", 3}}
+    }) {
+        const auto result = reg.callTool("runtime_read_logs", args);
+        ASSERT_TRUE(result.isError);
+        ASSERT_TRUE(result.content[0].text.find("Invalid runtime log request") != std::string::npos);
+    }
+    reg.setIpcClient(nullptr);
+}
+
+static void test_runtime_log_resource_reports_selected_disconnected_session_as_live_error() {
+    // Break caught: a selected but disconnected runtime session is misreported as an offline fallback.
+    auto& resources = didi::mcp::ResourceRegistry::instance();
+    resources.registerAllDefaultResources();
+    resources.setIpcClient(std::make_shared<AttachedDisconnectedRuntimeClient>());
+    const auto result = resources.readResource("godot://runtime/logs");
+    ASSERT_TRUE(result.isErr());
+    ASSERT_EQ(result.error().code, 503);
+    ASSERT_EQ(result.error().data["execution_mode"], "live");
+    ASSERT_EQ(result.error().data["error"]["code"], 503);
+    resources.setIpcClient(nullptr);
+}
+
 static void test_tool_registry_default_tools() {
     auto& reg = didi::mcp::ToolRegistry::instance();
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 68u);
+    ASSERT_EQ(tools.size(), 78u);
+    const std::unordered_set<std::string> legacy_names = {
+        "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
+        "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
+        "execute_test_session", "mutate_scene_tree", "instantiate_asset",
+        "inject_input_event"
+    };
+    size_t canonical_count = 0;
+    for (const auto& tool : tools) {
+        if (legacy_names.count(tool.name) == 0) ++canonical_count;
+    }
+    ASSERT_EQ(legacy_names.size(), 10u);
+    ASSERT_EQ(canonical_count, 68u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -90,6 +220,14 @@ static void test_tool_registry_default_tools() {
     ASSERT_TRUE(reg.getTool("capture_viewport") != nullptr);
     ASSERT_TRUE(reg.getTool("get_scene_hierarchy") != nullptr);
     ASSERT_TRUE(reg.getTool("mutate_scene_tree") != nullptr);
+
+    for (const auto* name : {
+        "runtime_list_sessions", "runtime_attach_session", "runtime_detach_session",
+        "runtime_get_session", "runtime_read_logs", "runtime_set_paused",
+        "runtime_step", "runtime_stop", "runtime_get_tree", "eval_gdscript"
+    }) {
+        ASSERT_TRUE(reg.getTool(name) != nullptr);
+    }
 }
 
 static void test_tool_capabilities_are_honest() {
@@ -101,18 +239,45 @@ static void test_tool_capabilities_are_honest() {
     const auto* signal_connect = reg.getTool("signal_connect");
     const auto* syntax = reg.getTool("script_check_syntax");
     const auto* attach_script = reg.getTool("script_attach_to_node");
+    const auto* list_sessions = reg.getTool("runtime_list_sessions");
+    const auto* get_session = reg.getTool("runtime_get_session");
+    const auto* read_logs = reg.getTool("runtime_read_logs");
+    const auto* attach_session = reg.getTool("runtime_attach_session");
+    const auto* runtime_tree = reg.getTool("runtime_get_tree");
+    const auto* evaluate = reg.getTool("eval_gdscript");
+    const auto* inject_input = reg.getTool("runtime_inject_input");
+    const auto* call_stack = reg.getTool("runtime_get_call_stack");
+    const auto* profiler = reg.getTool("runtime_read_profiler");
 
     ASSERT_TRUE(hierarchy != nullptr);
     ASSERT_TRUE(instantiate != nullptr);
     ASSERT_TRUE(signal_connect != nullptr);
     ASSERT_TRUE(syntax != nullptr);
     ASSERT_TRUE(attach_script != nullptr);
+    ASSERT_TRUE(list_sessions != nullptr);
+    ASSERT_TRUE(get_session != nullptr);
+    ASSERT_TRUE(read_logs != nullptr);
+    ASSERT_TRUE(attach_session != nullptr);
+    ASSERT_TRUE(runtime_tree != nullptr);
+    ASSERT_TRUE(evaluate != nullptr);
+    ASSERT_TRUE(inject_input != nullptr);
+    ASSERT_TRUE(call_stack != nullptr);
+    ASSERT_TRUE(profiler != nullptr);
 
     auto hierarchy_json = hierarchy->toJson();
     auto instantiate_json = instantiate->toJson();
     auto signal_json = signal_connect->toJson();
     auto syntax_json = syntax->toJson();
     auto attach_script_json = attach_script->toJson();
+    auto list_sessions_json = list_sessions->toJson();
+    auto get_session_json = get_session->toJson();
+    auto read_logs_json = read_logs->toJson();
+    auto attach_session_json = attach_session->toJson();
+    auto runtime_tree_json = runtime_tree->toJson();
+    auto evaluate_json = evaluate->toJson();
+    auto inject_input_json = inject_input->toJson();
+    auto call_stack_json = call_stack->toJson();
+    auto profiler_json = profiler->toJson();
 
     ASSERT_EQ(hierarchy_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"live", "offline_fallback"}));
@@ -128,6 +293,39 @@ static void test_tool_capabilities_are_honest() {
     ASSERT_EQ(attach_script_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"live"}));
     ASSERT_EQ(attach_script_json["_meta"]["didi"]["implemented"], true);
+    ASSERT_EQ(list_sessions_json["_meta"]["didi"]["executionModes"],
+              didi::json::array({"offline_fallback"}));
+    ASSERT_EQ(list_sessions_json["_meta"]["didi"]["implemented"], true);
+    ASSERT_EQ(get_session_json["_meta"]["didi"]["executionModes"],
+              didi::json::array({"offline_fallback"}));
+    const auto get_session_description = get_session_json["description"].get<std::string>();
+    ASSERT_TRUE(get_session_description.find("fresh authenticated handshake") != std::string::npos);
+    ASSERT_TRUE(get_session_description.find("token-free authoritative session identity") !=
+                std::string::npos);
+    ASSERT_EQ(read_logs_json["_meta"]["didi"]["executionModes"],
+              didi::json::array({"live"}));
+    ASSERT_EQ(read_logs_json["_meta"]["didi"]["implemented"], true);
+    ASSERT_EQ(read_logs_json["inputSchema"]["properties"]["cursor"]["default"], 0);
+    ASSERT_EQ(read_logs_json["inputSchema"]["properties"]["cursor"]["minimum"], 0);
+    ASSERT_EQ(attach_session_json["inputSchema"]["properties"]["session_id"]["minLength"], 32);
+    ASSERT_EQ(attach_session_json["inputSchema"]["properties"]["session_id"]["maxLength"], 32);
+    ASSERT_EQ(attach_session_json["inputSchema"]["properties"]["session_id"]["pattern"], "^[0-9a-f]{32}$");
+    ASSERT_EQ(runtime_tree_json["inputSchema"]["properties"]["root_path"]["minLength"], 1);
+    ASSERT_EQ(runtime_tree_json["inputSchema"]["properties"]["root_path"]["maxLength"], 1024);
+    ASSERT_EQ(evaluate_json["inputSchema"]["properties"]["expression"]["minLength"], 1);
+    ASSERT_EQ(evaluate_json["inputSchema"]["properties"]["expression"]["maxLength"], 2048);
+    ASSERT_EQ(evaluate_json["inputSchema"]["properties"]["context_node"]["minLength"], 1);
+    ASSERT_EQ(evaluate_json["inputSchema"]["properties"]["context_node"]["maxLength"], 1024);
+    ASSERT_EQ(read_logs_json["inputSchema"]["properties"]["limit"]["maximum"], 500);
+    ASSERT_EQ(evaluate_json["_meta"]["didi"]["executionModes"],
+              didi::json::array({"live"}));
+    ASSERT_EQ(evaluate_json["_meta"]["didi"]["implemented"], true);
+    ASSERT_EQ(evaluate_json["inputSchema"]["properties"]["timeout_ms"]["maximum"], 5000);
+    for (const auto& reserved : {inject_input_json, call_stack_json, profiler_json}) {
+        ASSERT_EQ(reserved["_meta"]["didi"]["executionModes"],
+                  didi::json::array({"unimplemented"}));
+        ASSERT_EQ(reserved["_meta"]["didi"]["implemented"], false);
+    }
 
     reg.setIpcClient(nullptr);
     auto unavailable = reg.callTool("signal_list_connections", {{"target_node", "/root"}});
@@ -158,6 +356,12 @@ static void test_resource_registry() {
         ASSERT_TRUE(payload.isOk());
         auto parsed = didi::json::parse(payload.value());
         ASSERT_EQ(parsed["execution_mode"], "offline_fallback");
+        if (std::string(uri) == "godot://runtime/logs") {
+            // Break caught: offline records drift from the live structured-log schema.
+            ASSERT_EQ(parsed["records"].size(), 1u);
+            ASSERT_TRUE(parsed["records"][0].contains("details"));
+            ASSERT_TRUE(parsed["records"][0]["details"].is_null());
+        }
     }
 }
 
@@ -208,7 +412,25 @@ static void test_tool_capture_viewport_with_ipc() {
             };
         }
         if (method == "runtime.getLogs") {
-            return {{"error", {{"code", 500}, {"message", "simulated live log failure"}}}};
+            const auto params = req.contains("params") && req["params"].is_object()
+                                    ? req["params"] : didi::json::object();
+            const auto cursor = params.value("cursor", 0u);
+            didi::json records = didi::json::array();
+            if (cursor <= 42) {
+                records.push_back({{"sequence", 42}, {"timestamp_ms", 1787790000123LL},
+                                   {"level", "info"}, {"source", "RUNTIME"},
+                                   {"message", "fake live cursor record"}, {"details", nullptr}});
+            }
+            return {{"records", std::move(records)}, {"oldest_cursor", 42},
+                    {"next_cursor", cursor <= 42 ? 43 : cursor},
+                    {"dropped_before_cursor", false}, {"execution_mode", "live"},
+                    {"session_kind", "game"}};
+        }
+        if (method == "runtime.evalGdscript") {
+            return {{"context_node", "/root"}, {"value", 1}, {"value_type", "int"},
+                    {"elapsed_ms", 0}, {"timeout_ms", 1000}, {"read_only", true},
+                    {"sandbox_profile", "expression_const_v1"},
+                    {"execution_mode", "live"}, {"session_kind", "game"}};
         }
         if (method == "script.attachToNode") {
             return {{"error", {{"code", 422}, {"message", "simulated script attachment rejection"}}}};
@@ -238,6 +460,23 @@ static void test_tool_capture_viewport_with_ipc() {
     ASSERT_EQ(result.content[1].mimeType, "image/png");
     ASSERT_TRUE(!result.content[1].data.empty());
 
+    const auto live_logs = reg.callTool("runtime_read_logs", {{"cursor", 0}, {"limit", 1}});
+    ASSERT_TRUE(!live_logs.isError);
+    const auto live_page = didi::json::parse(live_logs.content[0].text);
+    ASSERT_EQ(live_page["execution_mode"], "live");
+    ASSERT_EQ(live_page["records"].size(), 1u);
+    ASSERT_EQ(live_page["records"][0]["sequence"], 42);
+    ASSERT_EQ(live_page["next_cursor"], 43);
+    const auto next_logs = reg.callTool("runtime_read_logs", {{"cursor", 43}, {"limit", 1}});
+    ASSERT_TRUE(!next_logs.isError);
+    const auto next_page = didi::json::parse(next_logs.content[0].text);
+    ASSERT_TRUE(next_page["records"].empty());
+    ASSERT_EQ(next_page["next_cursor"], 43);
+
+    const auto evaluation = reg.callTool("eval_gdscript", {{"expression", "1"}});
+    ASSERT_TRUE(!evaluation.isError);
+    ASSERT_EQ(didi::json::parse(evaluation.content[0].text)["value"], 1);
+
     auto reflected = reg.callTool("script_reflect_class", {{"class_name", "CharacterBody3D"}});
     ASSERT_TRUE(!reflected.isError);
     auto reflected_json = didi::json::parse(reflected.content[0].text);
@@ -254,8 +493,27 @@ static void test_tool_capture_viewport_with_ipc() {
 
     auto runtime_logs = resources.readResource("godot://runtime/logs");
     ASSERT_TRUE(runtime_logs.isOk());
-    auto runtime_logs_json = didi::json::parse(runtime_logs.value());
-    ASSERT_EQ(runtime_logs_json["execution_mode"], "offline_fallback");
+    ASSERT_EQ(didi::json::parse(runtime_logs.value())["execution_mode"], "live");
+
+    didi::mcp::McpServer mcp_server;
+    mcp_server.setIpcClient(client);
+    didi::mcp::JsonRpcRequest initialize_request;
+    initialize_request.id = 6;
+    initialize_request.method = "initialize";
+    initialize_request.params = didi::json::object();
+    ASSERT_TRUE(!mcp_server.handleRequest(initialize_request).error.has_value());
+    didi::mcp::JsonRpcRequest resource_request;
+    resource_request.id = 7;
+    resource_request.method = "resources/read";
+    resource_request.params = {{"uri", "godot://runtime/logs"}};
+    const auto resource_response = mcp_server.handleRequest(resource_request);
+    ASSERT_TRUE(!resource_response.error.has_value());
+    const auto rpc_live_logs = didi::json::parse(
+        resource_response.result["contents"][0]["text"].get<std::string>());
+    ASSERT_EQ(rpc_live_logs["execution_mode"], "live");
+    ASSERT_EQ(rpc_live_logs["records"].size(), 1u);
+    ASSERT_EQ(rpc_live_logs["records"][0]["sequence"], 42);
+    ASSERT_EQ(rpc_live_logs["next_cursor"], 43);
 
     auto attach = reg.callTool("script_attach_to_node", {
         {"target_node", "/root/SmokeRoot/Subject"},
@@ -350,6 +608,16 @@ static void test_running_editor_command_cannot_be_cancelled_as_pending() {
     ASSERT_TRUE(!pending.tryClaimResponse());
 }
 
+static void test_runtime_step_gate_rejects_a_second_pending_step() {
+    didi::godot::RuntimeStepGate gate;
+    ASSERT_TRUE(gate.tryAcquire());
+    ASSERT_TRUE(!gate.tryAcquire());
+    ASSERT_TRUE(gate.active());
+    gate.release();
+    ASSERT_TRUE(!gate.active());
+    ASSERT_TRUE(gate.tryAcquire());
+}
+
 static void test_class_reflection() {
     auto& reg = didi::mcp::ToolRegistry::instance();
     auto res = reg.callTool("script_reflect_class", {{"class_name", "CharacterBody3D"}});
@@ -380,12 +648,17 @@ static void test_symbol_extraction() {
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.DefaultRegistration", test_tool_registry_default_tools);
+        registerTest("McpServer.PreservesInjectedIpcClient", test_mcp_server_preserves_injected_ipc_client);
+        registerTest("Tools.RuntimeSessionLocalAndValidated", test_runtime_get_session_is_local_and_attach_rejects_non_string_id);
+        registerTest("Tools.RuntimeReadLogsInputValidation", test_runtime_read_logs_rejects_invalid_cursor_limit_and_level);
+        registerTest("Resources.SelectedDisconnectedRuntime", test_runtime_log_resource_reports_selected_disconnected_session_as_live_error);
         registerTest("Tools.HonestCapabilities", test_tool_capabilities_are_honest);
         registerTest("Tools.CaptureViewportWithIpc", test_tool_capture_viewport_with_ipc);
         registerTest("Tools.CaptureViewportOfflineAttribution", test_tool_capture_viewport_offline_is_attributed);
         registerTest("Tools.Base64Padding", test_base64_rfc4648_padding);
         registerTest("Tools.IpcErrorPropagation", test_ipc_error_propagation);
         registerTest("EditorHook.TimeoutState", test_running_editor_command_cannot_be_cancelled_as_pending);
+        registerTest("EditorHook.PendingStepGate", test_runtime_step_gate_rejects_a_second_pending_step);
         registerTest("Tools.ClassReflection", test_class_reflection);
         registerTest("Tools.SymbolExtraction", test_symbol_extraction);
         registerTest("Resources.DefaultRegistration", test_resource_registry);

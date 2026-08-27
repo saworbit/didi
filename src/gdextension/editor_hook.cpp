@@ -2,6 +2,7 @@
 #include "didi/gdextension/viewport_renderer.hpp"
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/gdextension_api.hpp"
+#include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/types.hpp"
 #include <unordered_set>
@@ -27,10 +28,26 @@ EditorHook& EditorHook::instance() {
 }
 
 EditorHook::EditorHook() {
-    // Queue is pumped by Godot's registered main-loop frame callback.
+    std::weak_ptr<RuntimeLogRing> logs = m_runtimeLogs;
+    Logger::instance().setSink([logs](LogLevel level, std::string_view source, std::string_view message) {
+        const auto ring = logs.lock();
+        if (!ring) return;
+        const char* name = "info";
+        switch (level) {
+            case LogLevel::Debug: name = "debug"; break;
+            case LogLevel::Info: name = "info"; break;
+            case LogLevel::Warn: name = "warning"; break;
+            case LogLevel::Error: name = "error"; break;
+            case LogLevel::None: return;
+        }
+        ring->append(name, source, message);
+    });
+    DIDI_LOG_INFO("EDITOR_HOOK", "Runtime log stream initialized");
 }
 
-EditorHook::~EditorHook() = default;
+EditorHook::~EditorHook() {
+    Logger::instance().setSink({});
+}
 
 CommandTicket EditorHook::postCommand(const std::string& method, const json& params) {
     auto prom = std::make_shared<std::promise<json>>();
@@ -56,6 +73,10 @@ CommandTicket EditorHook::postCommand(const std::string& method, const json& par
     return {std::move(fut), std::move(prom), std::move(control)};
 }
 
+void EditorHook::setSessionKind(const std::string& session_kind) {
+    m_sessionKind = session_kind;
+}
+
 void EditorHook::processQueue() {
     std::vector<EngineCommand> commands;
     {
@@ -74,16 +95,148 @@ void EditorHook::processQueue() {
             continue;
         }
         try {
+            if (cmd.method == "runtime.step") {
+                if (!cmd.params.is_object() ||
+                    (cmd.params.contains("frames") &&
+                     !cmd.params["frames"].is_number_integer() &&
+                     !cmd.params["frames"].is_number_unsigned())) {
+                    cmd.control->markCompleted();
+                    fulfillCommand(cmd.response_promise, cmd.control,
+                                   {{"error", {{"code", 400},
+                                                {"message", "frames must be an integer from 1 to 60"}}}});
+                    continue;
+                }
+                int frames = 1;
+                if (cmd.params.contains("frames")) {
+                    if ((cmd.params["frames"].is_number_integer() &&
+                         (cmd.params["frames"].get<int64_t>() < 1 ||
+                          cmd.params["frames"].get<int64_t>() > 60)) ||
+                        (cmd.params["frames"].is_number_unsigned() &&
+                         (cmd.params["frames"].get<uint64_t>() < 1 ||
+                          cmd.params["frames"].get<uint64_t>() > 60))) {
+                        cmd.control->markCompleted();
+                        fulfillCommand(cmd.response_promise, cmd.control,
+                                       {{"error", {{"code", 400},
+                                                    {"message", "frames must be an integer from 1 to 60"}}}});
+                        continue;
+                    }
+                    frames = static_cast<int>(cmd.params["frames"].get<uint64_t>());
+                }
+                scheduleRuntimeStep(frames, cmd.response_promise, cmd.control);
+                continue;
+            }
             json result = executeOnMainThread(cmd.method, cmd.params);
             cmd.control->markCompleted();
             fulfillCommand(cmd.response_promise, cmd.control, std::move(result));
         } catch (const std::exception& e) {
-            DIDI_LOG_ERROR("EDITOR_HOOK", "Exception executing command '", cmd.method, "': ", e.what());
+            DIDI_LOG_ERROR("EDITOR_HOOK", "Exception executing command: ", cmd.method);
             cmd.control->markCompleted();
             fulfillCommand(cmd.response_promise, cmd.control,
                            {{"error", {{"code", 500}, {"message", e.what()}}}});
         }
     }
+    processRuntimeStepFrame();
+}
+
+void EditorHook::scheduleRuntimeStep(
+    int frames,
+    const std::shared_ptr<std::promise<json>>& promise,
+    const std::shared_ptr<CommandControl>& control) {
+    if (m_sessionKind != "game") {
+        control->markCompleted();
+        fulfillCommand(promise, control,
+                       {{"error", {{"code", 409},
+                                    {"message", "Frame stepping is available only for game sessions"}}}});
+        return;
+    }
+
+    auto state = executeRuntimeBridge("runtime.getTree",
+                                      {{"root_path", "/root"}, {"max_depth", 0}},
+                                      m_sessionKind);
+    if (state.contains("error")) {
+        control->markCompleted();
+        fulfillCommand(promise, control, std::move(state));
+        return;
+    }
+    if (!state.value("paused", false)) {
+        control->markCompleted();
+        fulfillCommand(promise, control,
+                       {{"error", {{"code", 409},
+                                    {"message", "Frame stepping requires a paused game session"}}}});
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_stepMutex);
+        if (!m_runtimeStepGate.tryAcquire()) {
+            control->markCompleted();
+            fulfillCommand(promise, control,
+                           {{"error", {{"code", 409},
+                                        {"message", "A runtime frame step is already active"}}}});
+            return;
+        }
+        if (m_pendingRuntimeStep.has_value()) {
+            m_runtimeStepGate.release();
+            control->markCompleted();
+            fulfillCommand(promise, control,
+                           {{"error", {{"code", 409},
+                                        {"message", "A runtime frame step is already active"}}}});
+            return;
+        }
+        m_pendingRuntimeStep = PendingRuntimeStep{
+            frames, frames, true, promise, control
+        };
+    }
+
+    auto resumed = executeRuntimeBridge("runtime.setPaused", {{"paused", false}}, m_sessionKind);
+    if (resumed.contains("error")) {
+        {
+            std::lock_guard<std::mutex> lock(m_stepMutex);
+            if (m_pendingRuntimeStep.has_value() &&
+                m_pendingRuntimeStep->control == control) {
+                m_pendingRuntimeStep.reset();
+                m_runtimeStepGate.release();
+            }
+        }
+        control->markCompleted();
+        fulfillCommand(promise, control, std::move(resumed));
+        return;
+    }
+    DIDI_LOG_INFO("EDITOR_HOOK", "Scheduled runtime frame step for ", frames, " frame(s)");
+}
+
+void EditorHook::processRuntimeStepFrame() {
+    std::optional<PendingRuntimeStep> completed;
+    {
+        std::lock_guard<std::mutex> lock(m_stepMutex);
+        if (!m_pendingRuntimeStep.has_value()) return;
+        if (m_pendingRuntimeStep->awaiting_next_callback) {
+            m_pendingRuntimeStep->awaiting_next_callback = false;
+            return;
+        }
+        --m_pendingRuntimeStep->remaining_frames;
+        if (m_pendingRuntimeStep->remaining_frames > 0) return;
+        completed = std::move(m_pendingRuntimeStep);
+        m_pendingRuntimeStep.reset();
+        m_runtimeStepGate.release();
+    }
+
+    auto paused = executeRuntimeBridge("runtime.setPaused", {{"paused", true}}, m_sessionKind);
+    if (paused.contains("error") || !paused.value("paused", false)) {
+        completed->control->markCompleted();
+        if (!paused.contains("error")) {
+            paused = {{"error", {{"code", 500},
+                                  {"message", "Godot did not re-pause after the runtime frame step"}}}};
+        }
+        fulfillCommand(completed->response_promise, completed->control, std::move(paused));
+        return;
+    }
+
+    completed->control->markCompleted();
+    fulfillCommand(completed->response_promise, completed->control,
+                   {{"status", "success"}, {"frames", completed->requested_frames},
+                    {"paused", true}, {"execution_mode", "live"},
+                    {"is_live_engine", true}, {"session_kind", m_sessionKind}});
 }
 
 void EditorHook::cancelPendingCommands(const std::string& reason) {
@@ -100,6 +253,20 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
                            {{"error", {{"code", 503}, {"message", reason}}}});
         }
     }
+    std::optional<PendingRuntimeStep> active_step;
+    {
+        std::lock_guard<std::mutex> lock(m_stepMutex);
+        if (m_pendingRuntimeStep.has_value()) {
+            active_step = std::move(m_pendingRuntimeStep);
+            m_pendingRuntimeStep.reset();
+            m_runtimeStepGate.release();
+        }
+    }
+    if (active_step.has_value() && active_step->control &&
+        active_step->control->tryCancelRunning()) {
+        fulfillCommand(active_step->response_promise, active_step->control,
+                       {{"error", {{"code", 503}, {"message", reason}}}});
+    }
 }
 
 json EditorHook::executeOnMainThread(const std::string& method, const json& params) {
@@ -115,17 +282,58 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "project.removeInputAction", "project.getSetting", "project.setSetting",
         "scene.listGroups", "scene.addToGroup", "scene.removeFromGroup",
         "scene.getGroupMembers", "scene.create", "scene.open", "scene.close",
-        "scene.packBranch"
+        "scene.packBranch", "runtime.getTree", "runtime.setPaused", "runtime.stop",
+        "runtime.evalGdscript"
     };
     if (live_bridge_methods.count(method)) {
-        return GodotBridge::instance().execute(method, params);
+        if (m_sessionKind == "game" && method.rfind("runtime.", 0) != 0) {
+            return {{"error", {{"code", 409},
+                                {"message", "Editor-only method is unavailable in a game session: " + method}}}};
+        }
+        return GodotBridge::instance().execute(method, params, m_sessionKind);
     }
 
     if (method == "vision.captureViewport") {
         return ViewportRenderer::instance().captureViewport(params);
     }
     if (method == "runtime.getLogs") {
-        return {{"execution_mode", "live"}, {"logs", getRecentLogs()}};
+        uint64_t cursor = 0;
+        size_t limit = 100;
+        std::string minimum_level = "debug";
+        if (!params.is_object()) {
+            return {{"error", {{"code", 400}, {"message", "Invalid runtime log request: params must be an object"}}}};
+        }
+        if (params.contains("cursor")) {
+            const auto& value = params["cursor"];
+            if ((!value.is_number_integer() && !value.is_number_unsigned()) ||
+                (value.is_number_integer() && value.get<int64_t>() < 0)) {
+                return {{"error", {{"code", 400}, {"message", "Invalid runtime log request: cursor must be a non-negative integer"}}}};
+            }
+            cursor = value.get<uint64_t>();
+        }
+        if (params.contains("limit")) {
+            const auto& value = params["limit"];
+            if ((!value.is_number_integer() && !value.is_number_unsigned()) ||
+                (value.is_number_integer() && value.get<int64_t>() < 1) ||
+                value.get<uint64_t>() > 500) {
+                return {{"error", {{"code", 400}, {"message", "Invalid runtime log request: limit must be an integer from 1 to 500"}}}};
+            }
+            limit = static_cast<size_t>(value.get<uint64_t>());
+        }
+        if (params.contains("minimum_level")) {
+            if (!params["minimum_level"].is_string() ||
+                !RuntimeLogRing::isValidLevel(params["minimum_level"].get<std::string>())) {
+                return {{"error", {{"code", 400}, {"message", "Invalid runtime log request: minimum_level must be debug, info, warning, or error"}}}};
+            }
+            minimum_level = params["minimum_level"].get<std::string>();
+        }
+        const auto page_result = m_runtimeLogs->read(cursor, limit, minimum_level);
+        if (page_result.isErr()) {
+            return {{"error", {{"code", page_result.error().code}, {"message", page_result.error().message}}}};
+        }
+        auto page = page_result.value();
+        page["execution_mode"] = "live";
+        return page;
     }
 
     static const std::unordered_set<std::string> offline_only = {
@@ -153,26 +361,8 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
     return {{"error", {{"code", 404}, {"message", "Unknown method: " + method}}}};
 }
 
-void EditorHook::addLogMessage(const std::string& level, const std::string& message) {
-    std::lock_guard<std::mutex> lock(m_logMutex);
-    m_logBuffer.push_back({
-        {"level", level},
-        {"message", message},
-        {"timestamp", ""}
-    });
-    if (m_logBuffer.size() > 500) {
-        m_logBuffer.erase(m_logBuffer.begin());
-    }
-}
-
-json EditorHook::getRecentLogs(size_t max_count) {
-    std::lock_guard<std::mutex> lock(m_logMutex);
-    json logs = json::array();
-    size_t start = (m_logBuffer.size() > max_count) ? (m_logBuffer.size() - max_count) : 0;
-    for (size_t i = start; i < m_logBuffer.size(); ++i) {
-        logs.push_back(m_logBuffer[i]);
-    }
-    return logs;
+RuntimeLogRing& EditorHook::runtimeLogs() {
+    return *m_runtimeLogs;
 }
 
 } // namespace godot

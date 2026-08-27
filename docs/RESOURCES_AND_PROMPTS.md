@@ -4,7 +4,7 @@ Resources are read-only MCP context endpoints. Prompt templates return advisory 
 
 ## Resource capability metadata
 
-`resources/list` includes `_meta.didi` with the same fields documented for tools: `executionModes`, `implemented`, `currentMode`, `liveAvailable`, and `editorConnected`. See [Current Capability Matrix](CAPABILITIES.md).
+`resources/list` includes `_meta.didi` with the same fields documented for tools: `executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind`. Availability is kind-aware: runtime logs allow editor or game, editor state is editor-only, and project tree remains offline. See [Current Capability Matrix](CAPABILITIES.md).
 
 ## `godot://project/tree`
 
@@ -45,9 +45,10 @@ Example shape:
 
 - Modes: `live`, `offline_fallback`.
 - MIME type: `application/json`.
-- Live mode returns Didi's extension-side ring buffer.
-- Offline mode returns a minimal server-status log entry.
-- This resource is not yet a subscription and does not intercept complete Godot stdout, shader warnings, debugger exceptions, or running-game logs.
+- Live mode returns the selected session's 2,000-record Didi ring in cursor shape: `records`, `oldest_cursor`, `next_cursor`, and `dropped_before_cursor`, plus live session provenance. Records contain `sequence`, `timestamp_ms`, `level`, `source`, `message`, and nullable `details`.
+- Offline mode returns the same cursor-shaped contract with one server-status record and `execution_mode: "offline_fallback"`.
+- Resource reads are snapshots, not subscriptions. Use the `runtime_read_logs` tool for explicit `cursor`, `limit` (`1..500`), and minimum-level polling; advance to every returned `next_cursor` even when filtering.
+- The ring records structured Didi lifecycle/command/control/evaluation events. It does **not** intercept arbitrary Godot/external-process `print()` output. `runtime_launch` remains the bounded child stdout/stderr capture path.
 
 ## `godot_debug_visual_anomaly`
 
@@ -65,4 +66,4 @@ Arguments:
 - `feature_name` (required).
 - `requirements` (required).
 
-The generated prompt scopes work to the current surface: index files, inspect hierarchy, create built-in nodes through focused live scene tools when connected, patch and check GDScript files, run a separate Godot test process, and report unsupported wiring/runtime-interaction steps rather than calling unimplemented tools.
+The generated prompt scopes work to the current surface: index files, inspect hierarchy, create built-in nodes through focused live scene tools when connected, patch and check GDScript files, and run a separate Godot test process. For Phase 3 observation, callers may explicitly list/attach an editor or game, poll structured logs, inspect the runtime tree, use verified game pause/step/stop, and issue only allowlisted read-only expressions. Runtime input injection, call stacks, profiler telemetry, arbitrary scripts, and raw stdout subscription remain unsupported.

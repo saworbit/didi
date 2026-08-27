@@ -1,6 +1,6 @@
 # Didi MCP Tool Reference
 
-Didi exposes 58 canonical tool names plus 10 legacy names. This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 68 canonical tool names plus 10 legacy names (78 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
@@ -281,3 +281,100 @@ Group mutations use UndoRedo.
 - `scene_pack_branch`: requires `target_node` and `scene_path`; duplicates the branch, normalizes descendant ownership, packs it, and protects existing targets unless `overwrite: true`.
 
 Scene paths reject absolute filesystem paths, backslashes, and parent-relative segments.
+
+## 11. Phase 3 runtime sessions
+
+Phase 3 routes live operations to one authenticated Godot editor or game. The four session-management tools advertise `offline_fallback` because they run locally in the MCP process; successful payloads identify `execution_mode: "local_session_management"`. The other six tools advertise `live` and require an attached session. On first availability, Didi auto-attaches only when canonical-project discovery yields one session, or one editor among games. Multiple editors or game-only multiplicity remain detached. Explicit attach/detach or route quarantine disables later auto-selection.
+
+### `runtime_list_sessions` — Local session management
+
+Scans direct `*.json` children of the platform registry: Windows `<OS temp>/didi-sessions`; POSIX `$XDG_RUNTIME_DIR/didi-sessions` when that variable is absolute and set, otherwise `<OS temp>/didi-sessions-<euid>`; or the controlled `DIDI_SESSION_DIR` override. A relative/invalid XDG value uses the UID-qualified fallback. It validates each descriptor through an opened regular-file handle and optionally filters by canonical `project_path`. It returns token-free `sessions` plus bounded `diagnostics`; it does not connect.
+
+Published private descriptors use this exact schema:
+
+```json
+{
+  "schema_version": 1,
+  "session_id": "0123456789abcdef0123456789abcdef",
+  "token": "<64 lowercase hex characters; private file only>",
+  "pid": 1234,
+  "kind": "editor",
+  "project_path": "D:/game",
+  "endpoint": "\\\\.\\pipe\\godot_didi_1234_0123456789abcdef0123456789abcdef",
+  "started_at_ms": 1787790000000,
+  "protocol_version": "1.3"
+}
+```
+
+On POSIX the endpoint is the OS temporary directory plus `godot_didi_<pid>_<session-id>.sock`. Session ID and token are cryptographically random lowercase hex values of 32 and 64 characters. PID plus process-start identity prevents PID reuse from reviving a stale descriptor. Malformed, symlink/reparse, oversized (>64 KiB), escaped, or unprovably stale descriptors are diagnosed rather than deleted. Orderly shutdown and proven-stale cleanup atomically retire an exact identity-matched descriptor to an unpredictable no-replace non-`.json` path and re-verify it. Windows deletes the exact verified object through its open handle. POSIX normally retains the verified `.didi-retired-<session-id>-<32hex>` tombstone because no portable object-bound unlink exists; its active `.json` name is gone and discovery ignores it. A move collision/race or unavailable atomic operation retains the safer object/path rather than risk deleting another entry.
+
+### `runtime_attach_session` — Local session management
+
+Requires `session_id`. Didi connects to the exact validated process-unique endpoint and performs a token-authenticated protocol `1.3` handshake with a 3,000 ms finite deadline. The token is inserted only into the internal envelope and stripped before bridge dispatch, responses, logs, and diagnostics. Route replacement is transactional: connection, authentication, ID, or protocol failure leaves the previous session selected.
+
+### `runtime_detach_session` and `runtime_get_session` — Local session management
+
+`runtime_detach_session` drops the selected route and returns its prior public descriptor; repeated detach is an error. `runtime_get_session` performs a new token-authenticated handshake within 3,000 ms. Success returns `execution_mode: "local_session_management"`, `connected: true`, the public `session`, and the complete token-free authoritative `handshake` (`status`, schema, session ID, PID, kind, project path, endpoint, start identity, and protocol). Transport, authentication, or any identity mismatch disconnects and clears that route, then returns an error payload with `execution_mode: "local_session_management"` and `session: null`. If an explicit route change concurrently supersedes the refresh, the new route is retained and the stale refresh returns `409`; no selected route is also an error.
+
+### `runtime_read_logs` — Live
+
+Arguments are `cursor` (default `0`, non-negative), `limit` (default `100`, `1..500`), and `minimum_level` (`debug`, `info`, `warning`, or `error`). The extension retains 2,000 monotonically sequenced Didi records; messages are UTF-8-safe and capped at 16 KiB, and structured `details` at 64 KiB.
+
+```json
+{
+  "records": [{
+    "sequence": 42,
+    "timestamp_ms": 1787790000123,
+    "level": "info",
+    "source": "RUNTIME",
+    "message": "Runtime pause state changed",
+    "details": {"paused": true}
+  }],
+  "oldest_cursor": 40,
+  "next_cursor": 43,
+  "dropped_before_cursor": false,
+  "execution_mode": "live",
+  "session_kind": "game"
+}
+```
+
+The cursor is the next sequence to inspect. Cursor `0` starts at the oldest retained record. `next_cursor` advances over inspected records even if a level filter excludes them, preventing filter starvation. `dropped_before_cursor: true` means retention discarded part of the requested range.
+
+**Important:** this ring contains Didi lifecycle, handshake, command, control, and evaluation events. It does not intercept arbitrary `print()` output from Godot or any external process. `runtime_launch` remains the bounded child-process API that captures stdout/stderr and returns it after the child exits.
+
+### `runtime_set_paused`, `runtime_step`, and `runtime_stop` — Live
+
+- `runtime_set_paused` requires boolean `paused` and verifies the observed `SceneTree.paused` value.
+- `runtime_step` accepts `frames` (default `1`, `1..60`), requires an already-paused **game**, allows one pending step, advances exactly that many process callbacks, and re-pauses before resolving. Editor sessions, concurrent steps, failure to verify pause, and shutdown cancellation are errors.
+- `runtime_stop` accepts `exit_code` (default `0`, `0..255`) for a game and requests `SceneTree.quit`. Success means shutdown was requested, not that the process has exited; confirm exit by polling session discovery.
+
+### `runtime_get_tree` — Live
+
+Traverses the selected process's running `SceneTree`, not necessarily the editor's edited scene. `root_path` defaults to `/root`; `max_depth` defaults to `4` and is limited to `0..16`. Results include canonical path, name, class, child count, pause state, `node_count`, `max_nodes`, `max_response_bytes`, and truncation metadata. Traversal is capped at 10,000 nodes and the complete public tool payload, including token-free session provenance, at 256 KiB. Each name is capped at 1,024 valid UTF-8 bytes, type at 256, and path at 4,096; a clipped value has the corresponding `name_truncated`, `type_truncated`, or `path_truncated` flag. `children_truncated` and top-level `truncated` identify depth, node, or response-budget truncation. Editor and game results always identify `session_kind` so callers do not confuse edited-state and running-game state.
+
+### `eval_gdscript` — Live
+
+Evaluates one strict, read-only Godot `Expression` with `const_calls_only=true` in the selected editor or game. This is not arbitrary GDScript and not a general sandbox.
+
+- `expression`: required, 1–2048 bytes of valid UTF-8 without NUL.
+- `context_node`: optional canonical absolute NodePath, at most 1,024 bytes, confined to the active edited-scene subtree for an editor or the running SceneTree for a game. Parent traversal is rejected.
+- `timeout_ms`: default `1000`, range `1..5000`.
+
+Accepted forms are literals; arrays and string-keyed dictionaries made only from source-local scalar/container literals; arithmetic, comparison, and boolean operators; a direct in-subtree `node` summary; and this receiver-aware call surface. `tree` is present as an internal Expression input but direct return is an unsupported non-Node Object and no `tree` methods are allowlisted.
+
+- Globals with source-local numeric arguments only: `min`, `max`, `abs`, `clamp`, `snapped`, `Vector2`, `Vector3`, `Color`.
+- Exact direct `node` calls: `get_child_count()`, `get_path()`, `get_class()`, plus `is_class(<string>)`, `is_in_group(<string>)`, `has_method(<string>)`, and `has_meta(<string>)`.
+- `node.get(<string literal>)` only when ClassDB confirms an exact native scalar property; Didi prebinds the value before evaluation so script `_get`/getters cannot run.
+- String literals: `size()`, `is_empty()`, `find(<string>)`, `count(<string>)`, and bounded `repeat(<integer literal>)` (maximum produced string 512 KiB, then normal result bounds apply).
+- Source-local array literals: `size()`, `is_empty()`, `find(<scalar>)`, `count(<scalar>)`, `has(<scalar>)`.
+- Source-local dictionary literals: `size()`, `is_empty()`, `has(<string>)`.
+
+Statements, comments, semicolons/newlines, assignment, annotations, loops, `await`, non-ASCII executable identifiers, object member/index syntax, `in`, traversal (`get_node`, `get_child`, metadata values/children), chaining, callbacks, dynamic calls, reflection, file/process/network APIs, `str(object)`, mutation, and unsafe singletons are rejected before Godot parsing.
+
+Results support JSON null, booleans, finite numbers, strings, arrays, string-keyed dictionaries, `Vector2`, `Vector3`, `Color`, and in-subtree Node summaries. Maximum nesting is 16, maximum container elements is 4,096, and the complete serialized response is at most 256 KiB. The response omits the submitted expression to avoid reflecting sensitive source into MCP/log transcripts and includes `context_node`, `value`, `value_type`, `elapsed_ms`, `timeout_ms`, `read_only: true`, `sandbox_profile: "expression_const_v1"`, `execution_mode: "live"`, and `session_kind`.
+
+Timeout checks run before/after policy, context resolution, parse, execution, and during conversion. They are **cooperative, not preemptive**: Didi cannot interrupt a native call already executing inside Godot. The strict grammar excludes unbounded project callbacks and limits accepted local operations so the deadline remains an honest budget rather than a claim of hard preemption.
+
+### Runtime debugger tools still unavailable
+
+`runtime_inject_input`, `runtime_get_call_stack`, and `runtime_read_profiler` remain registered with `implemented: false`; Phase 3 does not synthesize input, debugger stacks, or profiler telemetry.

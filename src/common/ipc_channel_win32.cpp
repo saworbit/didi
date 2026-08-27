@@ -4,6 +4,9 @@
 #include <mutex>
 #include <condition_variable>
 #include <chrono>
+#include <algorithm>
+#include <cerrno>
+#include <climits>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -22,6 +25,145 @@ namespace ipc {
 
 #if defined(_WIN32)
 
+namespace {
+
+constexpr uint32_t kMaximumFrameBytes = 128U * 1024U * 1024U;
+constexpr uint32_t kMaximumHandshakeResponseBytes = 64U * 1024U;
+constexpr int kServerFrameTimeoutMs = 1000;
+
+struct Win32Deadline {
+    bool finite{false};
+    std::chrono::steady_clock::time_point expires_at{};
+};
+
+Win32Deadline win32DeadlineAfter(int timeout_ms) {
+    if (timeout_ms < 0) return {};
+    return {true, std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms)};
+}
+
+DWORD remainingWaitMilliseconds(const Win32Deadline& deadline) {
+    if (!deadline.finite) return INFINITE;
+    const auto remaining = deadline.expires_at - std::chrono::steady_clock::now();
+    if (remaining <= std::chrono::steady_clock::duration::zero()) return 0;
+    const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(remaining);
+    const auto rounded = milliseconds +
+        (milliseconds < remaining ? std::chrono::milliseconds(1) : std::chrono::milliseconds(0));
+    return static_cast<DWORD>(std::min<int64_t>(rounded.count(), MAXDWORD - 1));
+}
+
+bool deadlineExpired(const Win32Deadline& deadline) {
+    return deadline.finite && std::chrono::steady_clock::now() >= deadline.expires_at;
+}
+
+enum class ExactIoStatus {
+    completed,
+    timed_out,
+    failed,
+    stopped,
+};
+
+struct ExactIoResult {
+    ExactIoStatus status{ExactIoStatus::failed};
+    size_t transferred{0};
+};
+
+class ScopedWinHandle {
+public:
+    explicit ScopedWinHandle(HANDLE handle) : m_handle(handle) {}
+    ~ScopedWinHandle() {
+        if (m_handle && m_handle != INVALID_HANDLE_VALUE) CloseHandle(m_handle);
+    }
+    ScopedWinHandle(const ScopedWinHandle&) = delete;
+    ScopedWinHandle& operator=(const ScopedWinHandle&) = delete;
+    HANDLE get() const { return m_handle; }
+
+private:
+    HANDLE m_handle{INVALID_HANDLE_VALUE};
+};
+
+ExactIoResult exactOverlappedIo(HANDLE pipe,
+                                void* buffer,
+                                size_t length,
+                                bool write,
+                                HANDLE io_event,
+                                HANDLE stop_event,
+                                const Win32Deadline& deadline) {
+    auto* bytes = static_cast<uint8_t*>(buffer);
+    size_t offset = 0;
+    while (offset < length) {
+        if (deadlineExpired(deadline)) {
+            return {ExactIoStatus::timed_out, offset};
+        }
+        OVERLAPPED operation{};
+        operation.hEvent = io_event;
+        ResetEvent(io_event);
+        DWORD transferred = 0;
+        const DWORD chunk = static_cast<DWORD>(std::min<size_t>(length - offset, MAXDWORD));
+        const BOOL initiated = write
+            ? WriteFile(pipe, bytes + offset, chunk, &transferred, &operation)
+            : ReadFile(pipe, bytes + offset, chunk, &transferred, &operation);
+        if (initiated) {
+            if (transferred == 0) return {ExactIoStatus::failed, offset};
+            offset += transferred;
+            continue;
+        }
+
+        if (GetLastError() != ERROR_IO_PENDING) {
+            return {ExactIoStatus::failed, offset};
+        }
+
+        const DWORD remaining = remainingWaitMilliseconds(deadline);
+        DWORD wait_result = WAIT_FAILED;
+        if (stop_event) {
+            HANDLE events[2] = {stop_event, io_event};
+            wait_result = WaitForMultipleObjects(2, events, FALSE, remaining);
+        } else {
+            wait_result = WaitForSingleObject(io_event, remaining);
+        }
+
+        const bool stopped = stop_event && wait_result == WAIT_OBJECT_0;
+        const bool completed = wait_result == (stop_event ? WAIT_OBJECT_0 + 1 : WAIT_OBJECT_0);
+        if (!completed) {
+            (void)CancelIoEx(pipe, &operation);
+            DWORD completed_bytes = 0;
+            if (GetOverlappedResult(pipe, &operation, &completed_bytes, TRUE)) {
+                offset += completed_bytes;
+                if (offset == length) return {ExactIoStatus::completed, offset};
+            }
+            if (stopped) return {ExactIoStatus::stopped, offset};
+            if (wait_result == WAIT_TIMEOUT) return {ExactIoStatus::timed_out, offset};
+            return {ExactIoStatus::failed, offset};
+        }
+
+        if (!GetOverlappedResult(pipe, &operation, &transferred, FALSE) || transferred == 0) {
+            return {ExactIoStatus::failed, offset};
+        }
+        offset += transferred;
+    }
+    return {ExactIoStatus::completed, offset};
+}
+
+ExactIoResult readExactOverlapped(HANDLE pipe,
+                                  void* buffer,
+                                  size_t length,
+                                  HANDLE io_event,
+                                  HANDLE stop_event,
+                                  const Win32Deadline& deadline) {
+    return exactOverlappedIo(pipe, buffer, length, false, io_event, stop_event, deadline);
+}
+
+ExactIoResult writeExactOverlapped(HANDLE pipe,
+                                   const void* buffer,
+                                   size_t length,
+                                   HANDLE io_event,
+                                   HANDLE stop_event,
+                                   const Win32Deadline& deadline) {
+    return exactOverlappedIo(pipe, const_cast<void*>(buffer), length, true, io_event,
+                             stop_event, deadline);
+}
+
+} // namespace
+
 class Win32IpcClient : public IIpcClient {
 public:
     Win32IpcClient() : m_pipe(INVALID_HANDLE_VALUE) {}
@@ -31,7 +173,7 @@ public:
 
     bool connect(const std::string& pipe_name = kDefaultPipeName, int timeout_ms = 2000) override {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
-        return connectUnlocked(pipe_name, timeout_ms);
+        return connectUnlocked(pipe_name, win32DeadlineAfter(timeout_ms));
     }
 
     void disconnect() override {
@@ -50,9 +192,11 @@ public:
 
     Result<json> sendRequest(const std::string& method, const json& params = json::object(), int timeout_ms = 10000) override {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        const auto deadline = win32DeadlineAfter(timeout_ms);
         if (m_pipe == INVALID_HANDLE_VALUE) {
-            if (!connectUnlocked(m_pipeName.empty() ? kDefaultPipeName : m_pipeName, 500)) {
-                return Error::notConnected("Cannot connect to Godot Didi GDExtension IPC pipe.");
+            if (!connectUnlocked(m_pipeName.empty() ? kDefaultPipeName : m_pipeName, deadline)) {
+                return transportFailure("Cannot connect to Godot Didi GDExtension IPC pipe.",
+                                        {false, false, deadlineExpired(deadline)});
             }
         }
 
@@ -65,47 +209,25 @@ public:
             {"params", params}
         };
 
-        std::vector<uint8_t> frame = frameMessage(request_json);
-        DWORD bytes_written = 0;
-        BOOL write_res = WriteFile(m_pipe, frame.data(), static_cast<DWORD>(frame.size()), &bytes_written, NULL);
-        if (!write_res || bytes_written != frame.size()) {
-            CloseHandle(m_pipe);
-            m_pipe = INVALID_HANDLE_VALUE;
-            return Error::internal("Failed to write request to IPC pipe");
+        const std::vector<uint8_t> frame = frameMessage(request_json);
+        ScopedWinHandle io_event(CreateEventA(nullptr, TRUE, FALSE, nullptr));
+        if (!io_event.get()) {
+            return failLocked("Unable to create IPC request event", false, false, false);
         }
 
-        auto start_wait = std::chrono::steady_clock::now();
-        auto timeout_dur = std::chrono::milliseconds(timeout_ms);
+        const auto write_result = writeExactOverlapped(
+            m_pipe, frame.data(), frame.size(), io_event.get(), nullptr, deadline);
+        if (write_result.status != ExactIoStatus::completed) {
+            return failLocked("Failed or timed out writing request to IPC pipe", false, false,
+                              write_result.status == ExactIoStatus::timed_out);
+        }
 
-        // Read 4-byte response length with timeout checking
         uint8_t len_buf[4] = {0};
-        size_t len_read = 0;
-
-        while (len_read < 4) {
-            DWORD avail = 0;
-            if (PeekNamedPipe(m_pipe, NULL, 0, NULL, &avail, NULL)) {
-                if (avail > 0) {
-                    DWORD chunk = 0;
-                    DWORD to_read = static_cast<DWORD>(4 - len_read);
-                    if (to_read > avail) to_read = avail;
-                    if (ReadFile(m_pipe, len_buf + len_read, to_read, &chunk, NULL) && chunk > 0) {
-                        len_read += chunk;
-                        continue;
-                    }
-                }
-            } else {
-                CloseHandle(m_pipe);
-                m_pipe = INVALID_HANDLE_VALUE;
-                return Error::internal("IPC pipe broken while waiting for response length");
-            }
-
-            if (timeout_ms >= 0 && std::chrono::steady_clock::now() - start_wait > timeout_dur) {
-                CloseHandle(m_pipe);
-                m_pipe = INVALID_HANDLE_VALUE;
-                return Error::internal("Timeout waiting for response length from IPC pipe");
-            }
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        const auto header_result = readExactOverlapped(
+            m_pipe, len_buf, sizeof(len_buf), io_event.get(), nullptr, deadline);
+        if (header_result.status != ExactIoStatus::completed) {
+            return failLocked("Failed or timed out reading response length from IPC pipe", true,
+                              true, header_result.status == ExactIoStatus::timed_out);
         }
 
         uint32_t resp_len = static_cast<uint32_t>(len_buf[0]) |
@@ -113,41 +235,20 @@ public:
                            (static_cast<uint32_t>(len_buf[2]) << 16) |
                            (static_cast<uint32_t>(len_buf[3]) << 24);
 
-        if (resp_len == 0 || resp_len > 128 * 1024 * 1024) { // 128MB safety limit
-            CloseHandle(m_pipe);
-            m_pipe = INVALID_HANDLE_VALUE;
-            return Error::internal("Invalid response payload size from IPC pipe");
+        const uint32_t maximum_response = method == "session.handshake"
+            ? kMaximumHandshakeResponseBytes
+            : kMaximumFrameBytes;
+        if (resp_len == 0 || resp_len > maximum_response) {
+            return failLocked("Invalid response payload size from IPC pipe", true, true, false);
         }
 
         std::vector<char> resp_payload(resp_len);
-        size_t total_read = 0;
-        while (total_read < resp_len) {
-            DWORD avail = 0;
-            if (PeekNamedPipe(m_pipe, NULL, 0, NULL, &avail, NULL)) {
-                if (avail > 0) {
-                    DWORD chunk = 0;
-                    DWORD to_read = static_cast<DWORD>(resp_len - total_read);
-                    if (to_read > avail) to_read = avail;
-                    if (ReadFile(m_pipe, resp_payload.data() + total_read, to_read, &chunk, NULL) && chunk > 0) {
-                        total_read += chunk;
-                        continue;
-                    }
-                }
-            } else {
-                CloseHandle(m_pipe);
-                m_pipe = INVALID_HANDLE_VALUE;
-                return Error::internal("IPC pipe broken while reading response payload");
-            }
-
-            if (timeout_ms >= 0 && std::chrono::steady_clock::now() - start_wait > timeout_dur) {
-                CloseHandle(m_pipe);
-                m_pipe = INVALID_HANDLE_VALUE;
-                return Error::internal("Timeout waiting for response payload from IPC pipe");
-            }
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        const auto payload_result = readExactOverlapped(
+            m_pipe, resp_payload.data(), resp_payload.size(), io_event.get(), nullptr, deadline);
+        if (payload_result.status != ExactIoStatus::completed) {
+            return failLocked("Failed or timed out reading response payload from IPC pipe", true,
+                              true, payload_result.status == ExactIoStatus::timed_out);
         }
-
         try {
             json resp_json = json::parse(resp_payload.begin(), resp_payload.end());
             if (resp_json.contains("error") && !resp_json["error"].is_null()) {
@@ -158,28 +259,38 @@ public:
             }
             return resp_json.value("result", json{});
         } catch (const std::exception& e) {
-            return Error::internal(std::string("Failed to parse response JSON: ") + e.what());
+            return failLocked(std::string("Failed to parse response JSON: ") + e.what(),
+                              true, true, false);
         }
     }
 
 private:
-    bool connectUnlocked(const std::string& pipe_name, int timeout_ms) {
+    Result<json> failLocked(const std::string& message,
+                            bool request_started,
+                            bool outcome_unknown,
+                            bool timed_out) {
+        if (m_pipe != INVALID_HANDLE_VALUE) CloseHandle(m_pipe);
+        m_pipe = INVALID_HANDLE_VALUE;
+        return transportFailure(message, {request_started, outcome_unknown, timed_out});
+    }
+
+    bool connectUnlocked(const std::string& pipe_name, const Win32Deadline& deadline) {
         if (m_pipe != INVALID_HANDLE_VALUE) {
             CloseHandle(m_pipe);
             m_pipe = INVALID_HANDLE_VALUE;
         }
 
         m_pipeName = pipe_name;
-        auto start = std::chrono::steady_clock::now();
 
         while (true) {
+            if (deadlineExpired(deadline)) return false;
             m_pipe = CreateFileA(
                 m_pipeName.c_str(),
                 GENERIC_READ | GENERIC_WRITE,
                 0,
                 NULL,
                 OPEN_EXISTING,
-                0,
+                FILE_FLAG_OVERLAPPED,
                 NULL
             );
 
@@ -190,16 +301,15 @@ private:
 
             DWORD err = GetLastError();
             if (err != ERROR_PIPE_BUSY) {
-                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - start).count();
-                if (elapsed >= timeout_ms) {
-                    return false;
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                const DWORD remaining = remainingWaitMilliseconds(deadline);
+                if (remaining == 0) return false;
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(std::min<DWORD>(50, remaining)));
                 continue;
             }
 
-            if (!WaitNamedPipeA(m_pipeName.c_str(), timeout_ms)) {
+            const DWORD remaining = remainingWaitMilliseconds(deadline);
+            if (remaining == 0 || !WaitNamedPipeA(m_pipeName.c_str(), remaining)) {
                 return false;
             }
         }
@@ -221,16 +331,39 @@ public:
         if (m_running.load()) return true;
 
         m_pipeName = resolvePipeName(pipe_name);
-        m_running.store(true);
         m_stopEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
+        if (!m_stopEvent) {
+            DIDI_LOG_ERROR("IPC_SERVER", "Unable to create named pipe stop event");
+            return false;
+        }
+        {
+            std::lock_guard<std::mutex> lock(m_startupMutex);
+            m_startupReady = false;
+            m_startupSucceeded = false;
+        }
+        m_running.store(true);
 
         m_thread = std::thread(&Win32IpcServer::serverLoop, this);
+        std::unique_lock<std::mutex> lock(m_startupMutex);
+        m_startupCv.wait(lock, [this] { return m_startupReady; });
+        const bool started = m_startupSucceeded;
+        lock.unlock();
+        if (!started) {
+            m_running.store(false);
+            if (m_thread.joinable()) {
+                m_thread.join();
+            }
+            CloseHandle(m_stopEvent);
+            m_stopEvent = NULL;
+            return false;
+        }
         DIDI_LOG_INFO("IPC_SERVER", "Named pipe server started on ", m_pipeName);
         return true;
     }
 
     void stop() override {
-        if (!m_running.exchange(false)) return;
+        const bool wasRunning = m_running.exchange(false);
+        if (!wasRunning && !m_thread.joinable()) return;
 
         if (m_stopEvent) {
             SetEvent(m_stopEvent);
@@ -262,84 +395,13 @@ public:
     }
 
 private:
-    bool readExactOverlapped(HANDLE pipe, void* buffer, DWORD bytesToRead, HANDLE hIoEvent) {
-        uint8_t* ptr = static_cast<uint8_t*>(buffer);
-        DWORD totalRead = 0;
-
-        while (totalRead < bytesToRead && m_running.load()) {
-            OVERLAPPED ov{};
-            ov.hEvent = hIoEvent;
-            ResetEvent(hIoEvent);
-
-            DWORD chunkToRead = bytesToRead - totalRead;
-            DWORD bytesRead = 0;
-            BOOL ok = ReadFile(pipe, ptr + totalRead, chunkToRead, &bytesRead, &ov);
-            if (!ok) {
-                DWORD err = GetLastError();
-                if (err == ERROR_IO_PENDING) {
-                    HANDLE events[2] = {m_stopEvent, hIoEvent};
-                    DWORD waitRes = WaitForMultipleObjects(2, events, FALSE, INFINITE);
-                    if (waitRes == WAIT_OBJECT_0) { // Stop signaled
-                        CancelIoEx(pipe, &ov);
-                        DWORD dummy = 0;
-                        GetOverlappedResult(pipe, &ov, &dummy, TRUE);
-                        ResetEvent(hIoEvent);
-                        return false;
-                    } else if (waitRes == WAIT_OBJECT_0 + 1) {
-                        if (!GetOverlappedResult(pipe, &ov, &bytesRead, FALSE) || bytesRead == 0) {
-                            return false;
-                        }
-                    } else {
-                        return false;
-                    }
-                } else {
-                    return false;
-                }
-            }
-            if (bytesRead == 0) return false;
-            totalRead += bytesRead;
+    void signalStartup(bool succeeded) {
+        std::lock_guard<std::mutex> lock(m_startupMutex);
+        if (!m_startupReady) {
+            m_startupSucceeded = succeeded;
+            m_startupReady = true;
+            m_startupCv.notify_all();
         }
-        return totalRead == bytesToRead;
-    }
-
-    bool writeExactOverlapped(HANDLE pipe, const void* buffer, DWORD bytesToWrite, HANDLE hIoEvent) {
-        const uint8_t* ptr = static_cast<const uint8_t*>(buffer);
-        DWORD totalWritten = 0;
-
-        while (totalWritten < bytesToWrite && m_running.load()) {
-            OVERLAPPED ov{};
-            ov.hEvent = hIoEvent;
-            ResetEvent(hIoEvent);
-
-            DWORD chunkToWrite = bytesToWrite - totalWritten;
-            DWORD bytesWritten = 0;
-            BOOL ok = WriteFile(pipe, ptr + totalWritten, chunkToWrite, &bytesWritten, &ov);
-            if (!ok) {
-                DWORD err = GetLastError();
-                if (err == ERROR_IO_PENDING) {
-                    HANDLE events[2] = {m_stopEvent, hIoEvent};
-                    DWORD waitRes = WaitForMultipleObjects(2, events, FALSE, INFINITE);
-                    if (waitRes == WAIT_OBJECT_0) { // Stop signaled
-                        CancelIoEx(pipe, &ov);
-                        DWORD dummy = 0;
-                        GetOverlappedResult(pipe, &ov, &dummy, TRUE);
-                        ResetEvent(hIoEvent);
-                        return false;
-                    } else if (waitRes == WAIT_OBJECT_0 + 1) {
-                        if (!GetOverlappedResult(pipe, &ov, &bytesWritten, FALSE) || bytesWritten == 0) {
-                            return false;
-                        }
-                    } else {
-                        return false;
-                    }
-                } else {
-                    return false;
-                }
-            }
-            if (bytesWritten == 0) return false;
-            totalWritten += bytesWritten;
-        }
-        return totalWritten == bytesToWrite;
     }
 
     void serverLoop() {
@@ -357,6 +419,16 @@ private:
         }
 
         HANDLE hIoEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
+        if (!hIoEvent) {
+            m_running.store(false);
+            signalStartup(false);
+            if (pSD) {
+                LocalFree(pSD);
+            }
+            return;
+        }
+
+        bool firstPipeInstance = true;
 
         while (m_running.load()) {
             HANDLE pipe = CreateNamedPipeA(
@@ -371,9 +443,19 @@ private:
             );
 
             if (pipe == INVALID_HANDLE_VALUE) {
+                if (firstPipeInstance) {
+                    m_running.store(false);
+                    signalStartup(false);
+                    break;
+                }
                 if (!m_running.load()) break;
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
                 continue;
+            }
+
+            if (firstPipeInstance) {
+                firstPipeInstance = false;
+                signalStartup(true);
             }
 
             OVERLAPPED connectOv{};
@@ -411,8 +493,10 @@ private:
 
             // Process requests on this connection
             while (m_running.load()) {
+                const auto request_deadline = win32DeadlineAfter(kServerFrameTimeoutMs);
                 uint8_t len_buf[4] = {0};
-                if (!readExactOverlapped(pipe, len_buf, 4, hIoEvent)) {
+                if (readExactOverlapped(pipe, len_buf, sizeof(len_buf), hIoEvent, m_stopEvent,
+                                        request_deadline).status != ExactIoStatus::completed) {
                     break; // Disconnected or stop requested
                 }
 
@@ -421,12 +505,14 @@ private:
                                   (static_cast<uint32_t>(len_buf[2]) << 16) |
                                   (static_cast<uint32_t>(len_buf[3]) << 24);
 
-                if (req_len == 0 || req_len > 128 * 1024 * 1024) {
+                if (req_len == 0 || req_len > kMaximumFrameBytes) {
                     break;
                 }
 
                 std::vector<char> req_payload(req_len);
-                if (!readExactOverlapped(pipe, req_payload.data(), req_len, hIoEvent)) {
+                if (readExactOverlapped(pipe, req_payload.data(), req_payload.size(), hIoEvent,
+                                        m_stopEvent, request_deadline).status !=
+                    ExactIoStatus::completed) {
                     break;
                 }
 
@@ -468,13 +554,14 @@ private:
                 }
 
                 std::vector<uint8_t> frame = frameMessage(response_json);
-                if (!writeExactOverlapped(pipe, frame.data(), static_cast<DWORD>(frame.size()), hIoEvent)) {
+                const auto response_deadline = win32DeadlineAfter(kServerFrameTimeoutMs);
+                if (writeExactOverlapped(pipe, frame.data(), frame.size(), hIoEvent, m_stopEvent,
+                                         response_deadline).status != ExactIoStatus::completed) {
                     break;
                 }
             }
 
             m_activePipe.store(INVALID_HANDLE_VALUE);
-            FlushFileBuffers(pipe);
             DisconnectNamedPipe(pipe);
             CloseHandle(pipe);
             DIDI_LOG_DEBUG("IPC_SERVER", "Client disconnected from IPC pipe");
@@ -487,6 +574,10 @@ private:
         if (pSD) {
             LocalFree(pSD);
         }
+
+        if (firstPipeInstance) {
+            signalStartup(false);
+        }
     }
 
     std::atomic<bool> m_running{false};
@@ -496,11 +587,132 @@ private:
     std::thread m_thread;
     MessageHandler m_handler;
     std::mutex m_mutex;
+    std::mutex m_startupMutex;
+    std::condition_variable m_startupCv;
+    bool m_startupReady{false};
+    bool m_startupSucceeded{false};
 };
 
 #else
 
 // POSIX Domain Socket implementation
+namespace {
+
+constexpr uint32_t kMaximumFrameBytes = 128U * 1024U * 1024U;
+constexpr uint32_t kMaximumHandshakeResponseBytes = 64U * 1024U;
+constexpr int kServerFrameTimeoutMs = 5000;
+#if defined(MSG_NOSIGNAL)
+constexpr int kNoSignalSendFlag = MSG_NOSIGNAL;
+#else
+constexpr int kNoSignalSendFlag = 0;
+#endif
+
+struct MonotonicDeadline {
+    bool finite{false};
+    std::chrono::steady_clock::time_point expires_at{};
+};
+
+MonotonicDeadline deadlineAfter(int timeout_ms) {
+    if (timeout_ms < 0) return {};
+    return {true, std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms)};
+}
+
+int remainingPollMilliseconds(const MonotonicDeadline& deadline) {
+    if (!deadline.finite) return -1;
+    const auto remaining = deadline.expires_at - std::chrono::steady_clock::now();
+    if (remaining <= std::chrono::steady_clock::duration::zero()) return 0;
+    const auto rounded = std::chrono::duration_cast<std::chrono::milliseconds>(
+        remaining + std::chrono::milliseconds(1) - std::chrono::steady_clock::duration(1));
+    return static_cast<int>(std::min<int64_t>(rounded.count(), INT_MAX));
+}
+
+bool setNonblockingCloseOnExec(int socket_fd) {
+#if defined(SO_NOSIGPIPE)
+    const int enabled = 1;
+    if (setsockopt(socket_fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof(enabled)) != 0) {
+        return false;
+    }
+#endif
+    const int status_flags = fcntl(socket_fd, F_GETFL, 0);
+    if (status_flags < 0 || fcntl(socket_fd, F_SETFL, status_flags | O_NONBLOCK) < 0) {
+        return false;
+    }
+    const int descriptor_flags = fcntl(socket_fd, F_GETFD, 0);
+    return descriptor_flags >= 0 &&
+           fcntl(socket_fd, F_SETFD, descriptor_flags | FD_CLOEXEC) == 0;
+}
+
+bool waitForSocket(int socket_fd,
+                   short events,
+                   const MonotonicDeadline& deadline,
+                   const std::atomic<bool>* running = nullptr) {
+    while (!running || running->load()) {
+        const int timeout_ms = remainingPollMilliseconds(deadline);
+        if (deadline.finite && timeout_ms == 0) return false;
+
+        pollfd descriptor{socket_fd, events, 0};
+        const int result = poll(&descriptor, 1, timeout_ms);
+        if (result > 0) {
+            if ((descriptor.revents & events) != 0) return true;
+            return false;
+        }
+        if (result == 0) return false;
+        if (errno != EINTR) return false;
+    }
+    return false;
+}
+
+bool readExact(int socket_fd,
+               void* buffer,
+               size_t length,
+               const MonotonicDeadline& deadline,
+               const std::atomic<bool>* running = nullptr) {
+    auto* bytes = static_cast<uint8_t*>(buffer);
+    size_t offset = 0;
+    while (offset < length && (!running || running->load())) {
+        const ssize_t count = recv(socket_fd, bytes + offset, length - offset, 0);
+        if (count > 0) {
+            offset += static_cast<size_t>(count);
+            continue;
+        }
+        if (count == 0) return false;
+        if (errno == EINTR) continue;
+        if (errno != EAGAIN && errno != EWOULDBLOCK) return false;
+        if (!waitForSocket(socket_fd, POLLIN, deadline, running)) return false;
+    }
+    return offset == length;
+}
+
+bool writeExact(int socket_fd,
+                const void* buffer,
+                size_t length,
+                const MonotonicDeadline& deadline,
+                const std::atomic<bool>* running = nullptr) {
+    const auto* bytes = static_cast<const uint8_t*>(buffer);
+    size_t offset = 0;
+    while (offset < length && (!running || running->load())) {
+        const ssize_t count = send(socket_fd, bytes + offset, length - offset, kNoSignalSendFlag);
+        if (count > 0) {
+            offset += static_cast<size_t>(count);
+            continue;
+        }
+        if (count == 0) return false;
+        if (errno == EINTR) continue;
+        if (errno != EAGAIN && errno != EWOULDBLOCK) return false;
+        if (!waitForSocket(socket_fd, POLLOUT, deadline, running)) return false;
+    }
+    return offset == length;
+}
+
+uint32_t decodeFrameLength(const uint8_t (&header)[4]) {
+    return static_cast<uint32_t>(header[0]) |
+           (static_cast<uint32_t>(header[1]) << 8) |
+           (static_cast<uint32_t>(header[2]) << 16) |
+           (static_cast<uint32_t>(header[3]) << 24);
+}
+
+} // namespace
+
 class PosixIpcClient : public IIpcClient {
 public:
     PosixIpcClient() : m_sock(-1) {}
@@ -510,26 +722,36 @@ public:
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         m_pipeName = pipe_name;
 
-        struct sockaddr_un addr{};
+        sockaddr_un addr{};
+        if (m_pipeName.size() >= sizeof(addr.sun_path)) return false;
+
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, m_pipeName.c_str(), sizeof(addr.sun_path) - 1);
 
-        auto start = std::chrono::steady_clock::now();
+        const auto deadline = deadlineAfter(timeout_ms);
         while (true) {
             m_sock = socket(AF_UNIX, SOCK_STREAM, 0);
-            if (m_sock >= 0) {
-                if (::connect(m_sock, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+            if (m_sock >= 0 && setNonblockingCloseOnExec(m_sock)) {
+                if (::connect(m_sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
                     return true;
                 }
+                if (errno == EINPROGRESS && waitForSocket(m_sock, POLLOUT, deadline)) {
+                    int socket_error = 0;
+                    socklen_t length = sizeof(socket_error);
+                    if (getsockopt(m_sock, SOL_SOCKET, SO_ERROR, &socket_error, &length) == 0 &&
+                        socket_error == 0) {
+                        return true;
+                    }
+                }
+            }
+            if (m_sock >= 0) {
                 close(m_sock);
                 m_sock = -1;
             }
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start).count();
-            if (elapsed >= timeout_ms) {
-                return false;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            const int remaining_ms = remainingPollMilliseconds(deadline);
+            if (deadline.finite && remaining_ms == 0) return false;
+            const int retry_delay_ms = remaining_ms < 0 ? 20 : std::min(20, remaining_ms);
+            (void)poll(nullptr, 0, retry_delay_ms);
         }
     }
 
@@ -550,7 +772,7 @@ public:
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         if (m_sock < 0) {
             if (!connect(m_pipeName.empty() ? kDefaultPipeName : m_pipeName, 500)) {
-                return Error::notConnected();
+                return transportFailure("Cannot connect to Unix socket", {false, false, false});
             }
         }
         static uint64_t req_id_counter = 1;
@@ -562,56 +784,34 @@ public:
             {"params", params}
         };
 
-        std::vector<uint8_t> frame = frameMessage(request_json);
-        ssize_t sent = write(m_sock, frame.data(), frame.size());
-        if (sent != (ssize_t)frame.size()) {
-            close(m_sock);
-            m_sock = -1;
-            return Error::internal("Failed to write to Unix socket");
-        }
-
-        struct pollfd pfd;
-        pfd.fd = m_sock;
-        pfd.events = POLLIN;
-
-        if (poll(&pfd, 1, timeout_ms) <= 0) {
-            close(m_sock);
-            m_sock = -1;
-            return Error::internal("Timeout waiting for Unix socket response");
+        const auto deadline = deadlineAfter(timeout_ms);
+        const std::vector<uint8_t> frame = frameMessage(request_json);
+        if (!writeExact(m_sock, frame.data(), frame.size(), deadline)) {
+            const bool timed_out = deadline.finite && remainingPollMilliseconds(deadline) == 0;
+            return failLocked("Failed or timed out writing to Unix socket", false, false, timed_out);
         }
 
         uint8_t len_buf[4] = {0};
-        ssize_t r = read(m_sock, len_buf, 4);
-        if (r != 4) {
-            close(m_sock);
-            m_sock = -1;
-            return Error::internal("Failed to read response length from Unix socket");
+        if (!readExact(m_sock, len_buf, sizeof(len_buf), deadline)) {
+            const bool timed_out = deadline.finite && remainingPollMilliseconds(deadline) == 0;
+            return failLocked("Failed or timed out reading response length from Unix socket",
+                              true, true, timed_out);
         }
 
-        uint32_t resp_len = (uint32_t)len_buf[0] | ((uint32_t)len_buf[1] << 8) |
-                            ((uint32_t)len_buf[2] << 16) | ((uint32_t)len_buf[3] << 24);
+        const uint32_t resp_len = decodeFrameLength(len_buf);
+        const uint32_t maximum_response = method == "session.handshake"
+            ? kMaximumHandshakeResponseBytes
+            : kMaximumFrameBytes;
 
-        if (resp_len == 0 || resp_len > 128 * 1024 * 1024) {
-            close(m_sock);
-            m_sock = -1;
-            return Error::internal("Invalid payload length from Unix socket");
+        if (resp_len == 0 || resp_len > maximum_response) {
+            return failLocked("Invalid payload length from Unix socket", true, true, false);
         }
 
         std::vector<char> payload(resp_len);
-        size_t total = 0;
-        while (total < resp_len) {
-            if (poll(&pfd, 1, timeout_ms) <= 0) {
-                close(m_sock);
-                m_sock = -1;
-                return Error::internal("Timeout reading full response payload from Unix socket");
-            }
-            ssize_t c = read(m_sock, payload.data() + total, resp_len - total);
-            if (c <= 0) {
-                close(m_sock);
-                m_sock = -1;
-                return Error::internal("Failed to read full response payload from Unix socket");
-            }
-            total += c;
+        if (!readExact(m_sock, payload.data(), payload.size(), deadline)) {
+            const bool timed_out = deadline.finite && remainingPollMilliseconds(deadline) == 0;
+            return failLocked("Failed or timed out reading response payload from Unix socket",
+                              true, true, timed_out);
         }
 
         try {
@@ -622,11 +822,20 @@ public:
             }
             return resp_json.value("result", json{});
         } catch (const std::exception& e) {
-            return Error::internal(e.what());
+            return failLocked(e.what(), true, true, false);
         }
     }
 
 private:
+    Result<json> failLocked(const std::string& message,
+                            bool request_started,
+                            bool outcome_unknown,
+                            bool timed_out) {
+        if (m_sock >= 0) close(m_sock);
+        m_sock = -1;
+        return transportFailure(message, {request_started, outcome_unknown, timed_out});
+    }
+
     int m_sock{-1};
     std::string m_pipeName{kDefaultPipeName};
     mutable std::recursive_mutex m_mutex;
@@ -643,9 +852,19 @@ public:
         unlink(m_pipeName.c_str());
 
         m_listenSock = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (m_listenSock < 0) return false;
+        if (m_listenSock < 0 || !setNonblockingCloseOnExec(m_listenSock)) {
+            if (m_listenSock >= 0) close(m_listenSock);
+            m_listenSock = -1;
+            return false;
+        }
 
-        struct sockaddr_un addr{};
+        sockaddr_un addr{};
+        if (m_pipeName.size() >= sizeof(addr.sun_path)) {
+            close(m_listenSock);
+            m_listenSock = -1;
+            return false;
+        }
+
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, m_pipeName.c_str(), sizeof(addr.sun_path) - 1);
 
@@ -662,7 +881,12 @@ public:
         }
 
         // Restrict Unix domain socket permissions to owner only
-        chmod(m_pipeName.c_str(), 0600);
+        if (chmod(m_pipeName.c_str(), 0600) != 0) {
+            close(m_listenSock);
+            m_listenSock = -1;
+            unlink(m_pipeName.c_str());
+            return false;
+        }
 
         m_running.store(true);
         m_thread = std::thread(&PosixIpcServer::serverLoop, this);
@@ -676,6 +900,8 @@ public:
             close(m_listenSock);
             m_listenSock = -1;
         }
+        const int active_client = m_activeClient.exchange(-1);
+        if (active_client >= 0) shutdown(active_client, SHUT_RDWR);
         unlink(m_pipeName.c_str());
         if (m_thread.joinable()) m_thread.join();
     }
@@ -696,39 +922,27 @@ private:
             int pr = poll(&pfd, 1, 50);
             if (pr <= 0) continue;
 
-            int client = accept(m_listenSock, NULL, NULL);
+            int client = accept(m_listenSock, nullptr, nullptr);
             if (client < 0) {
                 if (!m_running.load()) break;
                 continue;
             }
-
-            struct pollfd cpfd;
-            cpfd.fd = client;
-            cpfd.events = POLLIN;
+            if (!setNonblockingCloseOnExec(client)) {
+                close(client);
+                continue;
+            }
+            m_activeClient.store(client);
 
             while (m_running.load()) {
-                int cpr = poll(&cpfd, 1, 50);
-                if (cpr < 0) break;
-                if (cpr == 0) continue;
-
+                const auto request_deadline = deadlineAfter(kServerFrameTimeoutMs);
                 uint8_t len_buf[4] = {0};
-                ssize_t r = read(client, len_buf, 4);
-                if (r != 4) break;
+                if (!readExact(client, len_buf, sizeof(len_buf), request_deadline, &m_running)) break;
 
-                uint32_t req_len = (uint32_t)len_buf[0] | ((uint32_t)len_buf[1] << 8) |
-                                  ((uint32_t)len_buf[2] << 16) | ((uint32_t)len_buf[3] << 24);
-                if (req_len == 0 || req_len > 128 * 1024 * 1024) break;
+                const uint32_t req_len = decodeFrameLength(len_buf);
+                if (req_len == 0 || req_len > kMaximumFrameBytes) break;
 
                 std::vector<char> payload(req_len);
-                size_t total = 0;
-                bool ok = true;
-                while (total < req_len) {
-                    if (poll(&cpfd, 1, 5000) <= 0) { ok = false; break; }
-                    ssize_t c = read(client, payload.data() + total, req_len - total);
-                    if (c <= 0) { ok = false; break; }
-                    total += c;
-                }
-                if (!ok) break;
+                if (!readExact(client, payload.data(), payload.size(), request_deadline, &m_running)) break;
 
                 json resp_json;
                 try {
@@ -754,13 +968,17 @@ private:
                 }
 
                 auto frame = frameMessage(resp_json);
-                write(client, frame.data(), frame.size());
+                const auto response_deadline = deadlineAfter(kServerFrameTimeoutMs);
+                if (!writeExact(client, frame.data(), frame.size(), response_deadline, &m_running)) break;
             }
+            int expected_client = client;
+            (void)m_activeClient.compare_exchange_strong(expected_client, -1);
             close(client);
         }
     }
 
     std::atomic<bool> m_running{false};
+    std::atomic<int> m_activeClient{-1};
     int m_listenSock{-1};
     std::string m_pipeName;
     std::thread m_thread;

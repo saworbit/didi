@@ -8,6 +8,9 @@ on:
       - 'include/**'
       - 'tests/**'
       - 'addons/**'
+      - 'docs/**/*.md'
+      - 'README.md'
+      - 'CHANGELOG.md'
       - 'CMakeLists.txt'
       - '.github/workflows/ci.yml'
   pull_request:
@@ -17,6 +20,9 @@ on:
       - 'include/**'
       - 'tests/**'
       - 'addons/**'
+      - 'docs/**/*.md'
+      - 'README.md'
+      - 'CHANGELOG.md'
       - 'CMakeLists.txt'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
@@ -77,7 +83,21 @@ jobs:
       - name: Compile Targets in Parallel
         run: cmake --build build --config Release --parallel
 
-      - name: Run Unit Tests
+      - name: Select Python Interpreter
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ] && command -v python >/dev/null 2>&1; then
+            echo "DIDI_PYTHON=python" >> "$GITHUB_ENV"
+          elif command -v python3 >/dev/null 2>&1; then
+            echo "DIDI_PYTHON=python3" >> "$GITHUB_ENV"
+          elif command -v python >/dev/null 2>&1; then
+            echo "DIDI_PYTHON=python" >> "$GITHUB_ENV"
+          else
+            echo "No Python interpreter is available" >&2
+            exit 1
+          fi
+
+      - name: Run Native Tests (including fake-live cursor routing)
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
@@ -86,10 +106,124 @@ jobs:
             ./build/didi_tests
           fi
 
+      - name: Validate Internal Markdown Links
+        shell: bash
+        run: |
+          "$DIDI_PYTHON" - << 'EOF'
+          import pathlib
+          import re
+          import sys
+          from urllib.parse import unquote
+
+          repo = pathlib.Path.cwd().resolve()
+          failures = []
+          markdown = [pathlib.Path('README.md'), pathlib.Path('CHANGELOG.md')]
+          markdown.extend(pathlib.Path('docs').rglob('*.md'))
+          link_pattern = re.compile(r'!?\[[^\]]*\]\(([^)]+)\)')
+
+          required_claims = {
+              pathlib.Path('README.md'): (
+                  'sessionKind', '$XDG_RUNTIME_DIR/didi-sessions', '17-second outer transport deadline'),
+              pathlib.Path('CHANGELOG.md'): (
+                  'session-kind-aware', '15-second extension deadline',
+                  '$XDG_RUNTIME_DIR/didi-sessions'),
+              pathlib.Path('docs/DEVELOPER_GUIDE.md'): (
+                  "runner's reported total is authoritative",
+                  'Coverage is organized by contract'),
+              pathlib.Path('docs/CAPABILITIES.md'): (
+                  'sessionKind', 'connected wrong-kind route', '$XDG_RUNTIME_DIR/didi-sessions'),
+              pathlib.Path('docs/API_SPECIFICATION.md'): (
+                  '17-second outer transport deadline', 'outcome: "unknown_outcome"',
+                  'POSIX intentionally retains'),
+              pathlib.Path('docs/ARCHITECTURE.md'): (
+                  'No live path waits forever', '.didi-retired-<session-id>-<32hex>'),
+              pathlib.Path('docs/TOOL_REFERENCE.md'): (
+                  'POSIX normally retains', '<OS temp>/didi-sessions-<euid>'),
+              pathlib.Path('docs/superpowers/specs/2026-08-27-phase-3-runtime-eval-design.md'): (
+                  'No live route waits indefinitely', 'Verified POSIX retirement tombstones'),
+          }
+          forbidden_claims = {
+              pathlib.Path('README.md'): (
+                  "under the OS temporary directory's `didi-sessions` child",),
+              pathlib.Path('CHANGELOG.md'): (
+                  'already-running main-thread work returns a definitive result',
+                  'same definitive-response contract'),
+              pathlib.Path('docs/DEVELOPER_GUIDE.md'): ('Didi currently includes 23 native tests',),
+              pathlib.Path('docs/CAPABILITIES.md'): (
+                  'liveAvailable means the tool has a live implementation and the Godot editor IPC connection is active',),
+              pathlib.Path('docs/API_SPECIFICATION.md'): (
+                  "A command already running on Godot's main thread is allowed to return its definitive result",),
+              pathlib.Path('docs/ARCHITECTURE.md'): (
+                  'wait for the definitive result instead of returning an ambiguous timeout',),
+              pathlib.Path('docs/TOOL_REFERENCE.md'): ('re-verify it, and normally delete it',),
+              pathlib.Path('docs/superpowers/plans/2026-08-27-phase-3-runtime-eval.md'): (
+                  'descriptor directory is empty after cleanup',),
+          }
+
+          def heading_anchors(path):
+              anchors = set()
+              seen = {}
+              text = path.read_text(encoding='utf-8')
+              for line in text.splitlines():
+                  match = re.match(r'^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$', line)
+                  if not match:
+                      continue
+                  heading = re.sub(r'<[^>]+>', '', match.group(1))
+                  heading = re.sub(r'!?\[([^\]]*)\]\([^)]*\)', r'\1', heading)
+                  heading = heading.replace('`', '').lower()
+                  slug = re.sub(r'[^\w\- ]', '', heading, flags=re.UNICODE)
+                  slug = re.sub(r'\s', '-', slug).strip('-')
+                  duplicate = seen.get(slug, 0)
+                  seen[slug] = duplicate + 1
+                  anchors.add(slug if duplicate == 0 else f'{slug}-{duplicate}')
+              anchors.update(re.findall(r'<a\s+(?:name|id)=["\']([^"\']+)["\']', text, re.I))
+              return anchors
+
+          anchor_cache = {}
+          for source, phrases in required_claims.items():
+              text = source.read_text(encoding='utf-8')
+              for phrase in phrases:
+                  if phrase not in text:
+                      failures.append(f'{source}: missing required contract text: {phrase}')
+          for source, phrases in forbidden_claims.items():
+              text = source.read_text(encoding='utf-8')
+              for phrase in phrases:
+                  if phrase in text:
+                      failures.append(f'{source}: stale contract text remains: {phrase}')
+
+          for source in markdown:
+              text = source.read_text(encoding='utf-8')
+              text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
+              for raw in link_pattern.findall(text):
+                  target = raw.strip().split()[0].strip('<>')
+                  if not target or target.startswith(('http://', 'https://', 'mailto:')):
+                      continue
+                  file_part, separator, fragment = target.partition('#')
+                  candidate = source if not file_part else source.parent / unquote(file_part)
+                  resolved = candidate.resolve()
+                  try:
+                      resolved.relative_to(repo)
+                  except ValueError:
+                      failures.append(f'{source}: target escapes repository: {target}')
+                      continue
+                  if not resolved.exists():
+                      failures.append(f'{source}: missing {target}')
+                      continue
+                  if separator and fragment and resolved.suffix.lower() == '.md':
+                      anchors = anchor_cache.setdefault(resolved, heading_anchors(resolved))
+                      decoded = unquote(fragment).lower()
+                      if decoded not in anchors:
+                          failures.append(f'{source}: missing anchor {target}')
+          if failures:
+              print('\n'.join(failures), file=sys.stderr)
+              raise SystemExit(1)
+          print(f'Validated internal links in {len(markdown)} Markdown files')
+          EOF
+
       - name: Run End-to-End MCP Integration Test
         shell: bash
         run: |
-          python3 - << 'EOF' || python - << 'EOF'
+          "$DIDI_PYTHON" - << 'EOF'
           import subprocess
           import json
           import os
@@ -105,11 +239,34 @@ jobs:
           assert req('initialize', {'protocolVersion': '2024-11-05'}, 1)['result']['serverInfo']['name'] == 'didi'
           tools = req('tools/list', {}, 2)['result']['tools']
           by_name = {tool['name']: tool for tool in tools}
-          assert len(tools) == 68
+          assert len(tools) == 78
+          legacy_names = {
+              'get_scene_hierarchy', 'capture_viewport', 'analyze_script_diagnostics',
+              'patch_script_symbols', 'create_visual_test_lab', 'query_project_resources',
+              'execute_test_session', 'mutate_scene_tree', 'instantiate_asset',
+              'inject_input_event'
+          }
+          assert len(legacy_names) == 10
+          assert len(set(by_name) - legacy_names) == 68
           assert by_name['scene_get_hierarchy']['_meta']['didi']['implemented'] is True
           assert by_name['script_attach_to_node']['_meta']['didi']['implemented'] is True
           assert by_name['script_attach_to_node']['_meta']['didi']['executionModes'] == ['live']
           assert by_name['signal_connect']['_meta']['didi']['implemented'] is False
+          assert by_name['runtime_list_sessions']['_meta']['didi']['executionModes'] == ['offline_fallback']
+          assert by_name['runtime_get_session']['_meta']['didi']['executionModes'] == ['offline_fallback']
+          assert by_name['runtime_read_logs']['_meta']['didi']['executionModes'] == ['live']
+          assert by_name['runtime_read_logs']['inputSchema']['properties']['cursor']['default'] == 0
+          assert by_name['runtime_read_logs']['inputSchema']['properties']['cursor']['minimum'] == 0
+          assert by_name['runtime_read_logs']['inputSchema']['properties']['limit']['maximum'] == 500
+          assert by_name['runtime_get_tree']['inputSchema']['properties']['root_path']['maxLength'] == 1024
+          assert by_name['eval_gdscript']['_meta']['didi']['executionModes'] == ['live']
+          assert by_name['eval_gdscript']['_meta']['didi']['implemented'] is True
+          assert by_name['eval_gdscript']['inputSchema']['properties']['expression']['maxLength'] == 2048
+          assert by_name['eval_gdscript']['inputSchema']['properties']['context_node']['maxLength'] == 1024
+          assert by_name['eval_gdscript']['inputSchema']['properties']['timeout_ms']['maximum'] == 5000
+          for name in ('runtime_inject_input', 'runtime_get_call_stack', 'runtime_read_profiler'):
+              assert by_name[name]['_meta']['didi']['implemented'] is False
+              assert by_name[name]['_meta']['didi']['executionModes'] == ['unimplemented']
 
           project = json.loads(req('resources/read', {'uri': 'godot://project/tree'}, 3)['result']['contents'][0]['text'])
           assert project['execution_mode'] == 'offline_fallback'
@@ -123,7 +280,11 @@ jobs:
           assert hierarchy['scene_tree']['path'].startswith('/root/')
           assert len(hierarchy['scene_tree']['children']) >= 1
 
+          logs = json.loads(req('resources/read', {'uri': 'godot://runtime/logs'}, 5)['result']['contents'][0]['text'])
+          assert logs['execution_mode'] == 'offline_fallback'
+          assert isinstance(logs['records'], list)
+
           proc.stdin.close()
           proc.wait()
-          print("✓ Fast CI MCP Verification Complete")
+          print("Fast CI MCP verification complete")
           EOF

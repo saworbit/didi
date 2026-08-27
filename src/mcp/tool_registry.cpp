@@ -1,8 +1,10 @@
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/mcp/project_tools.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/runtime/session_kind_policy.hpp"
 #include <algorithm>
 #include <unordered_set>
+#include <utility>
 
 namespace didi {
 namespace mcp {
@@ -21,7 +23,9 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "project_list_input_actions", "project_set_input_action", "project_remove_input_action",
         "project_get_setting", "project_set_setting", "scene_list_groups",
         "scene_add_to_group", "scene_remove_from_group", "scene_get_group_members",
-        "scene_create", "scene_open", "scene_close", "scene_pack_branch"
+        "scene_create", "scene_open", "scene_close", "scene_pack_branch",
+        "runtime_read_logs", "runtime_set_paused", "runtime_step", "runtime_stop",
+        "runtime_get_tree", "eval_gdscript"
     };
     static const std::unordered_set<std::string> offline = {
         "script_check_syntax", "analyze_script_diagnostics", "script_reflect_class",
@@ -29,7 +33,8 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "viewport_create_test_lab", "create_visual_test_lab", "resource_create",
         "resource_inspect", "project_list_resources", "query_project_resources",
         "project_get_uid_map", "runtime_launch",
-        "execute_test_session"
+        "execute_test_session", "runtime_list_sessions", "runtime_attach_session",
+        "runtime_detach_session", "runtime_get_session"
     };
 
     if (live_and_offline.count(name)) {
@@ -101,11 +106,189 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
 CallToolResult handleInjectInputEvent(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleRuntimeGetCallStack(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleRuntimeReadProfiler(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleRuntimeListSessions(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
+CallToolResult handleRuntimeAttachSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
+CallToolResult handleRuntimeDetachSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
+CallToolResult handleRuntimeGetSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
+CallToolResult handleRuntimeReadLogs(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleRuntimeSetPaused(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleRuntimeStep(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleRuntimeStop(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleRuntimeGetTree(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleEvalGdscript(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
 CallToolResult handleEditorUndo(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleEditorRedo(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleEditorSaveScene(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleEditorReloadProject(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+
+namespace {
+
+Error normalizeLiveRouteError(Error error) {
+    const auto transport = ipc::transportFailureState(error);
+    const bool explicit_quarantine = error.data.is_object() &&
+                                     error.data.value("route_quarantine", false);
+    if (!transport.has_value() && !explicit_quarantine) return error;
+    if (!error.data.is_object()) error.data = json::object();
+    if (transport.has_value()) {
+        error.data["outcome"] = transport->outcome_unknown ? "unknown_outcome" : "not_started";
+    } else if (!error.data.contains("outcome")) {
+        error.data["outcome"] = "unknown_outcome";
+    }
+    error.data["route_quarantine"] = true;
+    return error;
+}
+
+class LeaseDispatchClient : public ipc::IIpcClient {
+public:
+    explicit LeaseDispatchClient(std::shared_ptr<ipc::IIpcClient> source)
+        : m_source(std::move(source)),
+          m_sessions(std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(m_source)) {}
+
+    class Binding {
+    public:
+        Binding(LeaseDispatchClient* owner, std::optional<runtime::RuntimeRouteLease> lease)
+            : m_owner(owner) {
+            m_owner->m_bound[thisThreadKey(m_owner)].push_back({std::move(lease), std::nullopt});
+        }
+        Binding(const Binding&) = delete;
+        Binding& operator=(const Binding&) = delete;
+        Binding(Binding&& other) noexcept : m_owner(std::exchange(other.m_owner, nullptr)) {}
+        ~Binding() {
+            if (!m_owner) return;
+            auto found = m_owner->m_bound.find(thisThreadKey(m_owner));
+            if (found == m_owner->m_bound.end()) return;
+            found->second.pop_back();
+            if (found->second.empty()) m_owner->m_bound.erase(found);
+        }
+
+    private:
+        static const LeaseDispatchClient* thisThreadKey(const LeaseDispatchClient* owner) {
+            return owner;
+        }
+        LeaseDispatchClient* m_owner;
+    };
+
+    Binding bind(std::optional<runtime::RuntimeRouteLease> lease) {
+        return Binding(this, std::move(lease));
+    }
+
+    std::optional<Error> lastError() const {
+        const auto* state = current();
+        return state ? state->last_error : std::optional<Error>{};
+    }
+
+    bool connect(const std::string& endpoint, int timeout_ms) override {
+        return m_source && m_source->connect(endpoint, timeout_ms);
+    }
+    void disconnect() override {
+        if (auto* state = current()) {
+            if (state->lease.has_value()) {
+                (void)runtime::quarantineRuntimeRoute(m_source, *state->lease);
+            }
+            return;
+        }
+        if (m_source) {
+            m_source->disconnect();
+        }
+    }
+    bool isConnected() const override {
+        const auto* state = current();
+        // A bound call must reach sendRequest even if a later attach disconnected its old
+        // physical client; sendRequest then records a structured failure with this lease's
+        // provenance instead of letting handlers silently fall back or emit plain text.
+        return state ? state->lease.has_value() && static_cast<bool>(state->lease->client)
+                     : !m_sessions && m_source && m_source->isConnected();
+    }
+    Result<json> sendRequest(const std::string& method, const json& params,
+                             int timeout_ms) override {
+        auto* state = current();
+        auto result = state
+                          ? (state->lease.has_value()
+                                 ? state->lease->sendRequest(method, params, timeout_ms)
+                                 : Result<json>(Error::notConnected()))
+                          : (!m_sessions && m_source
+                                 ? m_source->sendRequest(method, params, timeout_ms)
+                                 : Result<json>(Error::notConnected()));
+        if (state && state->lease.has_value() && result.isErr()) {
+            auto error = normalizeLiveRouteError(result.error());
+            const bool quarantine = error.data.is_object() &&
+                                    error.data.value("route_quarantine", false);
+            if (quarantine) (void)runtime::quarantineRuntimeRoute(m_source, *state->lease);
+            state->last_error = error;
+            return error;
+        }
+        return result;
+    }
+
+    std::optional<runtime::RuntimeRouteLease> routeLease() {
+        const auto* state = current();
+        return state ? state->lease
+                     : runtime::acquireRuntimeRouteLease(m_source);
+    }
+    bool quarantineLease(const runtime::RuntimeRouteLease& lease) {
+        return runtime::quarantineRuntimeRoute(m_source, lease);
+    }
+
+private:
+    struct BoundState {
+        std::optional<runtime::RuntimeRouteLease> lease;
+        std::optional<Error> last_error;
+    };
+
+    BoundState* current() {
+        auto found = m_bound.find(this);
+        return found == m_bound.end() || found->second.empty() ? nullptr : &found->second.back();
+    }
+    const BoundState* current() const {
+        auto found = m_bound.find(this);
+        return found == m_bound.end() || found->second.empty() ? nullptr : &found->second.back();
+    }
+
+    std::shared_ptr<ipc::IIpcClient> m_source;
+    std::shared_ptr<runtime::IRuntimeSessionClient> m_sessions;
+    static thread_local std::unordered_map<const LeaseDispatchClient*, std::vector<BoundState>> m_bound;
+};
+
+thread_local std::unordered_map<const LeaseDispatchClient*, std::vector<LeaseDispatchClient::BoundState>>
+    LeaseDispatchClient::m_bound;
+
+class ManagedLeaseDispatchClient final : public LeaseDispatchClient,
+                                         public runtime::IRuntimeRouteLeaseProvider {
+public:
+    using LeaseDispatchClient::LeaseDispatchClient;
+
+    std::optional<runtime::RuntimeRouteLease> acquireRouteLease() override {
+        return routeLease();
+    }
+    bool quarantineRoute(const runtime::RuntimeRouteLease& lease) override {
+        return quarantineLease(lease);
+    }
+};
+
+std::shared_ptr<ipc::IIpcClient> makeLeaseDispatchClient(
+    const std::shared_ptr<ipc::IIpcClient>& source) {
+    if (!source) return {};
+    if (std::dynamic_pointer_cast<runtime::IRuntimeRouteLeaseProvider>(source)) {
+        return std::make_shared<ManagedLeaseDispatchClient>(source);
+    }
+    return std::make_shared<LeaseDispatchClient>(source);
+}
+
+CallToolResult structuredLiveToolError(const Error& error,
+                                       const std::optional<runtime::SessionDescriptor>& session) {
+    json data = error.data.is_object() ? error.data : json::object();
+    if (!error.data.is_null() && !error.data.is_object()) data["details"] = error.data;
+    auto result = CallToolResult::successJson({
+        {"execution_mode", "live"},
+        {"session", session.has_value() ? session->toJson() : json(nullptr)},
+        {"error", {{"code", error.code}, {"message", error.message}, {"data", std::move(data)}}}
+    });
+    result.isError = true;
+    return result;
+}
+
+} // namespace
 
 ToolRegistry& ToolRegistry::instance() {
     static ToolRegistry s_instance;
@@ -151,15 +334,61 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
     if (!tool->capability.implemented) {
         return CallToolResult::error("Tool '" + name + "' is unimplemented: " + tool->capability.reason);
     }
+    const bool supports_live =
+        std::find(tool->capability.modes.begin(), tool->capability.modes.end(), "live") !=
+        tool->capability.modes.end();
+    const bool supports_offline =
+        std::find(tool->capability.modes.begin(), tool->capability.modes.end(), "offline_fallback") !=
+        tool->capability.modes.end();
+    std::optional<runtime::RuntimeRouteLease> lease;
+    if (supports_live) {
+        const bool managed_route =
+            std::dynamic_pointer_cast<runtime::IRuntimeRouteLeaseProvider>(m_sourceIpcClient) != nullptr;
+        lease = runtime::acquireRuntimeRouteLease(m_sourceIpcClient);
+        const auto selected = lease.has_value()
+                                  ? lease->descriptor
+                                  : std::optional<runtime::SessionDescriptor>{};
+        if (managed_route && selected.has_value()) {
+            const auto policy = runtime::livePolicyForTool(name);
+            if (!runtime::allowsSessionKind(policy, selected->kind)) {
+                json allowed = policy == runtime::LiveSessionKindPolicy::editor_only
+                                   ? json::array({"editor"})
+                                   : json::array({"game"});
+                json envelope = {
+                    {"execution_mode", "live"},
+                    {"session", selected->toJson()},
+                    {"error", {{"code", 409},
+                               {"message", "Tool is unavailable for the selected session kind"},
+                               {"data", {{"tool", name},
+                                         {"selected_session_kind", selected->kind},
+                                         {"allowed_session_kinds", std::move(allowed)}}}}}
+                };
+                auto rejected = CallToolResult::successJson(envelope);
+                rejected.isError = true;
+                return rejected;
+            }
+        }
+        if (managed_route && !lease.has_value() && !supports_offline) {
+            return structuredLiveToolError(
+                Error::notConnected("No atomic runtime route is available for live dispatch"),
+                std::nullopt);
+        }
+    }
     try {
+        const auto dispatcher = std::dynamic_pointer_cast<LeaseDispatchClient>(m_ipcClient);
+        std::optional<LeaseDispatchClient::Binding> binding;
+        if (dispatcher) binding.emplace(dispatcher->bind(lease));
         auto result = tool->handler(arguments);
-        if (result.isError) return result;
+        if (result.isError) {
+            if (dispatcher) {
+                if (const auto error = dispatcher->lastError(); error.has_value()) {
+                    return structuredLiveToolError(*error, lease->descriptor);
+                }
+            }
+            return result;
+        }
 
-        const bool supports_live = std::find(tool->capability.modes.begin(), tool->capability.modes.end(), "live") !=
-                                   tool->capability.modes.end();
-        const bool supports_offline = std::find(tool->capability.modes.begin(), tool->capability.modes.end(), "offline_fallback") !=
-                                      tool->capability.modes.end();
-        const bool live = supports_live && m_ipcClient && m_ipcClient->isConnected();
+        const bool live = supports_live && lease.has_value();
         const std::string execution_mode = live ? "live" : (supports_offline ? "offline_fallback" : "");
 
         if (!execution_mode.empty()) {
@@ -169,6 +398,10 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
                     auto payload = json::parse(item.text);
                     if (!payload.is_object()) continue;
                     if (!payload.contains("execution_mode")) payload["execution_mode"] = execution_mode;
+                    if (live && payload.value("execution_mode", "") == "live" &&
+                        lease->descriptor.has_value() && !payload.contains("session")) {
+                        payload["session"] = lease->descriptor->toJson();
+                    }
                     item.text = payload.dump(2);
                 } catch (const json::exception&) {
                     // Human-readable text is allowed for errors and descriptions; only JSON payloads are attributed here.
@@ -183,11 +416,24 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
 }
 
 void ToolRegistry::setIpcClient(std::shared_ptr<ipc::IIpcClient> ipc_client) {
-    m_ipcClient = ipc_client;
+    m_sourceIpcClient = std::move(ipc_client);
+    m_runtimeSessionClient =
+        std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(m_sourceIpcClient);
+    m_ipcClient = makeLeaseDispatchClient(m_sourceIpcClient);
 }
 
 std::shared_ptr<ipc::IIpcClient> ToolRegistry::getIpcClient() const {
-    return m_ipcClient;
+    return m_sourceIpcClient;
+}
+
+void ToolRegistry::setRuntimeSessionClient(std::shared_ptr<runtime::IRuntimeSessionClient> session_client) {
+    m_runtimeSessionClient = std::move(session_client);
+    m_sourceIpcClient = m_runtimeSessionClient;
+    m_ipcClient = makeLeaseDispatchClient(m_sourceIpcClient);
+}
+
+std::shared_ptr<runtime::IRuntimeSessionClient> ToolRegistry::getRuntimeSessionClient() const {
+    return m_runtimeSessionClient;
 }
 
 void ToolRegistry::registerAllDefaultTools() {
@@ -242,6 +488,84 @@ void ToolRegistry::registerAllDefaultTools() {
         t.handler = [this](const json& args) { return handleSceneInstantiateNode(args, m_ipcClient); };
         registerTool(std::move(t));
     }
+
+    // ==========================================
+    // Phase 3: Runtime Session Management and Evaluation
+    // ==========================================
+    {
+        ToolDefinition t;
+        t.name = "runtime_list_sessions";
+        t.description = "Lists validated local Godot runtime sessions without opening a session.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"project_path", {{"type", "string"}}}
+        }}};
+        t.handler = [this](const json& args) { return handleRuntimeListSessions(args, m_runtimeSessionClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "runtime_attach_session";
+        t.description = "Attaches transactionally to a discovered Godot runtime session.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"session_id", {{"type", "string"}, {"description", "Exact lowercase 32-hex discovered session ID"},
+                            {"minLength", 32}, {"maxLength", 32},
+                            {"pattern", "^[0-9a-f]{32}$"}}}
+        }}, {"required", {"session_id"}}};
+        t.handler = [this](const json& args) { return handleRuntimeAttachSession(args, m_runtimeSessionClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "runtime_detach_session";
+        t.description = "Detaches from the active Godot runtime session.";
+        t.inputSchema = {{"type", "object"}};
+        t.handler = [this](const json& args) { return handleRuntimeDetachSession(args, m_runtimeSessionClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "runtime_get_session";
+        t.description = "Performs a fresh authenticated handshake and returns token-free authoritative session identity metadata.";
+        t.inputSchema = {{"type", "object"}};
+        t.handler = [this](const json& args) { return handleRuntimeGetSession(args, m_runtimeSessionClient); };
+        registerTool(std::move(t));
+    }
+    const auto register_live_runtime = [this](const char* name, const char* description, json schema,
+                                              std::function<CallToolResult(const json&, std::shared_ptr<ipc::IIpcClient>)> handler) {
+        ToolDefinition t;
+        t.name = name;
+        t.description = description;
+        t.inputSchema = std::move(schema);
+        t.handler = [this, handler = std::move(handler)](const json& args) { return handler(args, m_ipcClient); };
+        registerTool(std::move(t));
+    };
+    register_live_runtime("runtime_read_logs", "Reads incremental structured logs from the active runtime session.",
+        {{"type", "object"}, {"properties", {
+            {"cursor", {{"type", "integer"}, {"default", 0}, {"minimum", 0}}},
+            {"limit", {{"type", "integer"}, {"default", 100}, {"minimum", 1}, {"maximum", 500}}},
+            {"minimum_level", {{"type", "string"}, {"enum", {"debug", "info", "warning", "error"}}}}
+        }}}, handleRuntimeReadLogs);
+    register_live_runtime("runtime_set_paused", "Sets and verifies the active game session pause state.",
+        {{"type", "object"}, {"properties", {{"paused", {{"type", "boolean"}}}}}, {"required", {"paused"}}},
+        handleRuntimeSetPaused);
+    register_live_runtime("runtime_step", "Advances a paused game session by a bounded number of frames.",
+        {{"type", "object"}, {"properties", {{"frames", {{"type", "integer"}, {"default", 1}, {"minimum", 1}, {"maximum", 60}}}}}},
+        handleRuntimeStep);
+    register_live_runtime("runtime_stop", "Requests graceful shutdown of the active game session.",
+        {{"type", "object"}, {"properties", {{"exit_code", {{"type", "integer"}, {"default", 0}, {"minimum", 0}, {"maximum", 255}}}}}},
+        handleRuntimeStop);
+    register_live_runtime("runtime_get_tree", "Returns a UTF-8 field-bounded, 256 KiB tree from the active runtime session.",
+        {{"type", "object"}, {"properties", {
+            {"root_path", {{"type", "string"}, {"description", "Canonical /root NodePath; server enforces a 1024-byte UTF-8 cap"}, {"default", "/root"},
+                           {"minLength", 1}, {"maxLength", 1024}}},
+            {"max_depth", {{"type", "integer"}, {"default", 4}, {"minimum", 0}, {"maximum", 16}}}
+        }}}, handleRuntimeGetTree);
+    register_live_runtime("eval_gdscript", "Evaluates a bounded read-only GDScript expression in the active runtime session.",
+        {{"type", "object"}, {"properties", {
+            {"expression", {{"type", "string"}, {"description", "Read-only expression; server enforces a 2048-byte UTF-8 cap"}, {"minLength", 1}, {"maxLength", 2048}}},
+            {"context_node", {{"type", "string"}, {"description", "Optional in-subtree canonical NodePath; server enforces a 1024-byte UTF-8 cap"}, {"minLength", 1}, {"maxLength", 1024}}},
+            {"timeout_ms", {{"type", "integer"}, {"default", 1000}, {"minimum", 1}, {"maximum", 5000}}}
+        }}, {"required", {"expression"}}}, handleEvalGdscript);
     {
         ToolDefinition t;
         t.name = "scene_remove_node";

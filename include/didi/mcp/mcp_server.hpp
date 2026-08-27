@@ -9,6 +9,7 @@
 #include "didi/mcp/resource_registry.hpp"
 #include "didi/mcp/prompt_registry.hpp"
 #include "didi/common/ipc_channel.hpp"
+#include "didi/runtime/session_client.hpp"
 
 namespace didi {
 namespace mcp {
@@ -34,6 +35,7 @@ private:
     std::atomic<bool> m_running{false};
     bool m_initialized{false};
     std::shared_ptr<ipc::IIpcClient> m_ipcClient;
+    std::shared_ptr<runtime::IRuntimeSessionClient> m_runtimeSessionClient;
 };
 
 } // namespace mcp

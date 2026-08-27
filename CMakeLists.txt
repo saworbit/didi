@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(didi VERSION 1.2.0 LANGUAGES C CXX)
+project(didi VERSION 1.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -32,6 +32,11 @@ set(CORE_SOURCES
     src/mcp/tool_registry.cpp
     src/mcp/resource_registry.cpp
     src/mcp/prompt_registry.cpp
+    src/runtime/session_client.cpp
+    src/gdextension/session_host.cpp
+    src/gdextension/runtime_log.cpp
+    src/gdextension/runtime_request_router.cpp
+    src/gdextension/expression_sandbox.cpp
     src/offline/gdscript_diagnostics.cpp
     src/offline/resource_indexer.cpp
     src/offline/test_runner.cpp
@@ -52,6 +57,9 @@ find_package(Threads REQUIRED)
 add_library(didi_core STATIC ${CORE_SOURCES})
 set_target_properties(didi_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(didi_core PUBLIC Threads::Threads)
+if(WIN32)
+    target_link_libraries(didi_core PUBLIC bcrypt)
+endif()
 
 # 1. Standalone MCP Server Executable (didi.exe)
 add_executable(didi src/standalone/main.cpp)
@@ -62,6 +70,7 @@ set(GDEXT_SOURCES
     src/gdextension/gdextension_entry.cpp
     src/gdextension/editor_hook.cpp
     src/gdextension/godot_bridge.cpp
+    src/gdextension/runtime_bridge.cpp
     src/gdextension/viewport_renderer.cpp
     src/gdextension/visual_test_lab.cpp
     src/gdextension/gdextension_ipc.cpp
@@ -86,6 +95,10 @@ set(TEST_SOURCES
     tests/test_main.cpp
     tests/test_jsonrpc.cpp
     tests/test_ipc.cpp
+    tests/test_runtime_sessions.cpp
+    tests/test_runtime_routing.cpp
+    tests/test_runtime_logs.cpp
+    tests/test_expression_sandbox.cpp
     tests/test_tools.cpp
     tests/test_script_patch.cpp
     tests/test_resource_indexer.cpp

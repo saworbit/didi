@@ -57,32 +57,16 @@ didi/
 
 ## 🧪 Automated Test Suite
 
-Didi currently includes 23 native tests:
-1. `JsonRpc.ParseValid`: JSON-RPC 2.0 parsing and validation.
-2. `JsonRpc.ParseNotification`: Notification parsing.
-3. `JsonRpc.ResponseSerialization`: Success/error response serialization.
-4. `McpServer.Initialize`: MCP protocol lifecycle negotiation.
-5. `McpServer.ToolAvailability`: Dynamic live/offline/unavailable metadata.
-6. `IPC.Framing`: 4-byte little-endian framing validation.
-7. `IPC.ClientServerRoundtrip`: IPC duplex communication.
-8. `IPC.NoTimeoutRoundtrip`: Definitive transport wait for work already running in Godot.
-9. `Tools.DefaultRegistration`: Tool-schema registration.
-10. `Tools.HonestCapabilities`: Static capability classification and unimplemented rejection.
-11. `Tools.CaptureViewportWithIpc`: Live response/image propagation.
-12. `Tools.CaptureViewportOfflineAttribution`: Synthetic PNG provenance.
-13. `Tools.Base64Padding`: Strict RFC 4648 `=` padding.
-14. `Tools.IpcErrorPropagation`: IPC error serialization.
-15. `EditorHook.TimeoutState`: Pending/running/completed command-state transitions and single-response ownership.
-16. `Tools.ClassReflection`: Offline class-map behavior.
-17. `Tools.SymbolExtraction`: GDScript symbol extraction.
-18. `Resources.DefaultRegistration`: Dynamic MCP resources and offline result provenance.
-19. `Prompts.DefaultRegistration`: MCP prompt templates.
-20. `GDScript.DiagnosticsDeprecation`: GDScript deprecation rules.
-21. `GDScript.PatchFunction`: Function patching.
-22. `GDScript.PatchSignal`: Signal patching.
-23. `ResourceIndexer.TypeDetection`: Resource type and UID detection.
+The native runner's reported total is authoritative as the suite evolves. Coverage is organized by contract rather than duplicated here as a brittle test-name inventory:
 
-The Windows live integration harness copies the tracked fixture into `build/`, starts a real Godot editor, and sends 119 ordered MCP requests through the named pipe. It checks Phase 1 scene editing and viewport behavior plus Phase 2 scripts, groups, autoloads, nested settings, all supported InputEvent forms, runtime InputMap reload, forced persistence rollback, scene create/open/close/pack, resource ownership, overwrite guards, unsafe paths, and honest errors:
+- JSON-RPC/MCP lifecycle, registration counts, capability metadata, output redaction, and structured errors.
+- IPC framing, bounded transport waits, editor-hook state transitions, and single-response ownership.
+- Descriptor validation, PID/start identity, opened-handle TOCTOU defenses, host publication, retirement, and cleanup races.
+- Transactional attach, deterministic auto-selection, fresh identity handshakes, route supersession, kind-aware availability, deadlines, and quarantine.
+- Runtime log cursor/gap/filter behavior, UTF-8 and payload bounds, runtime-tree bounds, and expression-sandbox policy.
+- Tool/resource live and offline provenance, viewport/image encoding, GDScript diagnostics/patching/reflection, and resource indexing.
+
+The Windows live integration harness copies the tracked fixture into `build/`, starts real Godot processes, and preserves the 119 ordered Phase 1/2 MCP requests through the named pipe. Phase 3 adds concurrent editor/game discovery, authenticated routing, logs, bounded trees, pause/step/stop, strict evaluation, and cleanup sequences. The earlier baseline still checks scene editing and viewport behavior plus scripts, groups, autoloads, nested settings, all supported InputEvent forms, runtime InputMap reload, forced persistence rollback, scene create/open/close/pack, resource ownership, overwrite guards, unsafe paths, and honest errors:
 
 ```powershell
 .\tests\run_godot_integration.ps1 `
@@ -145,3 +129,30 @@ Route the method from `EditorHook::executeOnMainThread` into a bounded implement
 - Add native tests for capability metadata, offline behavior, and error propagation.
 - Add a real Godot integration case for live behavior and UndoRedo where relevant.
 - Update [Current Capability Matrix](CAPABILITIES.md) and [Tool Reference](TOOL_REFERENCE.md).
+
+## Phase 3 implementation map
+
+- `src/runtime/session_client.cpp`: descriptor discovery, opened-handle validation, cross-platform PID/process-start identity, 3-second transactional handshake, token insertion, and local route state.
+- `src/gdextension/session_host.cpp`: bind-before-publish editor/game endpoint lifecycle, private descriptor generation, authentication stripping, and safe no-replace descriptor retirement.
+- `src/gdextension/runtime_log.cpp`: bounded 2,000-record ring, UTF-8-safe 16 KiB messages, 64 KiB details, cursor gaps, filtering, and logger sink mirroring.
+- `src/gdextension/runtime_bridge.cpp`: SceneTree resolution, UTF-8 field limits, 10,000-node/256 KiB tree budgets, explicit truncation, pause verification, exact one-active-step state machine, shutdown cancellation, and stop requests.
+- `src/gdextension/expression_sandbox.cpp`: tokenizer/policy, receiver-aware call validation, ClassDB-prebound native scalar property reads, context confinement, cooperative deadlines, and bounded Variant-to-JSON conversion.
+
+The standalone router starts detached, then may auto-attach on first availability only to an unambiguous live canonical-project match: the sole session, or a unique editor among games. Preserve the tests that keep same-kind ambiguity detached, roll back failed handshakes, disable auto-selection after explicit attach/detach or quarantine, and make `runtime_get_session` revalidate the complete token-free identity. Keep local session management distinct from live engine calls. Never log or return descriptor tokens or full submitted expression source.
+
+## Phase 3 tests and release gate
+
+The v1.3.0 release gate runs the complete native suite; the runner's reported total remains authoritative as cases evolve. Focused suites cover descriptor identity/TOCTOU/cleanup, deterministic auto-selection and attach rollback, fresh route revalidation and supersession, route provenance/deadlines, log cursors/bounds, expression scanner policy, capability metadata, and pending-step state. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and covers discovery, attach, live cursor logs, UTF-8 and wide-tree response bounds, pause/resume/multi-frame step, stop, strict evaluation, malicious callback probes, cleanup, and source-fixture integrity.
+
+Run from a clean worktree:
+
+```powershell
+cmake --build build --config Release
+.\build\Release\didi_tests.exe
+.\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.5.1-stable_win64_console.exe
+.\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe
+```
+
+For expression-policy changes, add a failing native scanner test and a real editor/game integration probe before changing implementation. A new accepted Node operation must prove it cannot dispatch script callbacks, traverse outside the active subtree, allocate unbounded data before a check, leak source/token text, or turn the cooperative timeout into a hard-preemption claim.
+
+The CI MCP smoke must continue to assert exactly 68 canonical/78 total registrations, local metadata for the four session tools, live metadata for the six routed tools, cursor-shaped logs, and `implemented: false` for `runtime_inject_input`, `runtime_get_call_stack`, and `runtime_read_profiler`.

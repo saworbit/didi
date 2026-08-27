@@ -1,5 +1,7 @@
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/gdextension_api.hpp"
+#include "didi/gdextension/expression_sandbox.hpp"
+#include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/common/logger.hpp"
 #include <array>
 #include <algorithm>
@@ -960,7 +962,15 @@ GodotBridge& GodotBridge::instance() {
     return bridge;
 }
 
-json GodotBridge::execute(const std::string& method, const json& params) {
+json GodotBridge::execute(const std::string& method, const json& params,
+                          const std::string& session_kind) {
+    if (method == "runtime.evalGdscript") {
+        return executeExpression(params, session_kind);
+    }
+    if (method == "runtime.getTree" || method == "runtime.setPaused" ||
+        method == "runtime.stop") {
+        return executeRuntimeBridge(method, params, session_kind);
+    }
     auto editor_result = editorInterface();
     if (editor_result.isErr()) return errorJson(editor_result.error().code, editor_result.error().message);
     auto editor = editor_result.value();
@@ -2193,6 +2203,17 @@ Result<ViewportPixels> GodotBridge::captureEditorViewport(const std::string& cam
     output.rgba.resize(static_cast<size_t>(expected));
     std::memcpy(output.rgba.data(), first, static_cast<size_t>(expected));
     return output;
+}
+
+Result<std::string> resolveGodotProjectPath() {
+    auto settings = singleton("ProjectSettings");
+    if (settings.isErr()) return settings.error();
+    auto resource_root = makeString("res://");
+    if (resource_root.isErr()) return resource_root.error();
+    auto globalized = callObject(settings.value(), "ProjectSettings", "globalize_path", 3135753539LL,
+                                 {&resource_root.value()});
+    if (globalized.isErr()) return globalized.error();
+    return stringFromVariant(globalized.value(), GDEXTENSION_VARIANT_TYPE_STRING);
 }
 
 } // namespace godot
