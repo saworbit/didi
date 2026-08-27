@@ -6,6 +6,7 @@
 #include <fstream>
 #include <memory>
 #include <set>
+#include <utility>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -89,6 +90,33 @@ private:
     bool m_connected{false};
 };
 
+class FakeIpcServer final : public didi::ipc::IIpcServer {
+public:
+    explicit FakeIpcServer(bool start_result, std::function<void()> on_start = {})
+        : m_startResult(start_result), m_onStart(std::move(on_start)) {}
+
+    bool start(const std::string& endpoint) override {
+        ++start_calls;
+        started_endpoint = endpoint;
+        if (m_onStart) m_onStart();
+        running = m_startResult;
+        return m_startResult;
+    }
+    void stop() override { ++stop_calls; running = false; }
+    bool isRunning() const override { return running; }
+    void setHandler(didi::ipc::MessageHandler handler) override { m_handler = std::move(handler); }
+
+    int start_calls{0};
+    int stop_calls{0};
+    bool running{false};
+    std::string started_endpoint;
+
+private:
+    bool m_startResult;
+    std::function<void()> m_onStart;
+    didi::ipc::MessageHandler m_handler;
+};
+
 std::filesystem::path makeSessionDirectory() {
     const auto directory = std::filesystem::temp_directory_path() /
                            ("didi-runtime-session-test-" + std::to_string(currentProcessId()));
@@ -133,12 +161,16 @@ void test_session_host_prepares_private_unique_descriptor_and_authorizes_without
     ASSERT_TRUE(descriptor->endpoint.find(descriptor->session_id) != std::string::npos);
     ASSERT_TRUE(std::filesystem::is_empty(directory));
 
+    const auto missing_token = host.authorize({{"method", "session.handshake"}, {"params", didi::json::object()}});
+    ASSERT_TRUE(missing_token.isErr());
+    ASSERT_EQ(missing_token.error().code, 401);
+
     const auto denied = host.authorize({{"method", "session.handshake"},
                                         {"params", {{"_didi_session_token", "wrong"}}}});
     ASSERT_TRUE(denied.isErr());
     ASSERT_EQ(denied.error().code, 401);
 
-    const auto allowed = host.authorize({{"method", "runtime.getTree"},
+    const auto allowed = host.authorize({{"method", "session.handshake"},
                                          {"params", {{"_didi_session_token", descriptor->token}, {"depth", 2}}}});
     ASSERT_TRUE(allowed.isOk());
     ASSERT_TRUE(!allowed.value()["params"].contains("_didi_session_token"));
@@ -204,6 +236,78 @@ void test_session_host_fails_closed_when_descriptor_publication_becomes_unavaila
     host.stop();
     clearSessionDirectory();
     std::filesystem::remove(directory);
+}
+
+void test_session_host_stops_server_and_discards_descriptor_when_bind_fails() {
+    // Would fail if a failed bind left a runnable server or a discoverable descriptor behind.
+    const auto directory = makeSessionDirectory();
+    setSessionDirectory(directory);
+    didi::godot::SessionHost host;
+    FakeIpcServer server(false);
+
+    ASSERT_TRUE(host.prepare("editor", std::filesystem::current_path().string()).isOk());
+    const auto started = host.startServer(server);
+
+    ASSERT_TRUE(started.isErr());
+    ASSERT_EQ(server.start_calls, 1);
+    ASSERT_EQ(server.stop_calls, 1);
+    ASSERT_FALSE(server.isRunning());
+    ASSERT_FALSE(host.descriptor().has_value());
+    ASSERT_TRUE(std::filesystem::is_empty(directory));
+
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
+void test_session_host_stops_bound_server_when_publication_fails() {
+    // Would fail if a successfully bound server survived a failed descriptor publication.
+    const auto directory = makeSessionDirectory();
+    setSessionDirectory(directory);
+    didi::godot::SessionHost host;
+    FakeIpcServer server(true, [&] {
+        std::filesystem::remove_all(directory);
+        std::ofstream blocking_file(directory, std::ios::binary);
+        blocking_file << "not a directory";
+    });
+
+    ASSERT_TRUE(host.prepare("editor", std::filesystem::current_path().string()).isOk());
+    const auto started = host.startServer(server);
+
+    ASSERT_TRUE(started.isErr());
+    ASSERT_EQ(server.start_calls, 1);
+    ASSERT_EQ(server.stop_calls, 1);
+    ASSERT_FALSE(server.isRunning());
+    ASSERT_FALSE(host.descriptor().has_value());
+    clearSessionDirectory();
+    std::filesystem::remove(directory);
+}
+
+void test_session_host_cleanup_preserves_same_path_replacement() {
+    // Would fail if stop deleted a descriptor that another writer replaced at the host's original path.
+    const auto directory = makeSessionDirectory();
+    setSessionDirectory(directory);
+    didi::godot::SessionHost host;
+    ASSERT_TRUE(host.prepare("editor", std::filesystem::current_path().string()).isOk());
+    const auto descriptor = host.descriptor();
+    ASSERT_TRUE(descriptor.has_value());
+    ASSERT_TRUE(host.publish().isOk());
+
+    const auto replacement_path = directory / (descriptor->session_id + ".json");
+    auto replacement = validDescriptor(descriptor->session_id, descriptor->endpoint);
+    replacement["kind"] = descriptor->kind;
+    replacement["project_path"] = descriptor->project_path;
+    replacement["started_at_ms"] = descriptor->started_at_ms;
+    host.setBeforeCleanupRenameHookForTesting([&] {
+        writeDescriptor(directory, replacement_path.filename().string(), replacement);
+    });
+    host.stop();
+
+    ASSERT_TRUE(std::filesystem::exists(replacement_path));
+    std::ifstream input(replacement_path, std::ios::binary);
+    ASSERT_EQ(didi::json::parse(input)["token"], std::string(64, 'a'));
+    input.close();
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
 }
 
 void test_session_descriptor_rejects_wrong_token_length() {
@@ -331,6 +435,12 @@ struct RegisterRuntimeSessionTests {
                      test_session_host_publishes_atomically_and_removes_only_its_descriptor);
         registerTest("RuntimeSessions.HostFailsClosedWhenPublicationUnavailable",
                      test_session_host_fails_closed_when_descriptor_publication_becomes_unavailable);
+        registerTest("RuntimeSessions.HostStopsServerAndDiscardsDescriptorWhenBindFails",
+                     test_session_host_stops_server_and_discards_descriptor_when_bind_fails);
+        registerTest("RuntimeSessions.HostStopsBoundServerWhenPublicationFails",
+                     test_session_host_stops_bound_server_when_publication_fails);
+        registerTest("RuntimeSessions.HostCleanupPreservesSamePathReplacement",
+                     test_session_host_cleanup_preserves_same_path_replacement);
     }
 } g_registerRuntimeSessionTests;
 

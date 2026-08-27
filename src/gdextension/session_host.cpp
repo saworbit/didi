@@ -29,12 +29,13 @@ std::filesystem::path canonicalPath(const std::filesystem::path& path) {
     return ec ? path.lexically_normal() : resolved;
 }
 
-std::filesystem::path sessionDirectory() {
+Result<std::filesystem::path> sessionDirectory() {
     const char* configured = std::getenv("DIDI_SESSION_DIR");
     if (configured && *configured) return canonicalPath(configured);
     std::error_code ec;
     const auto temp = std::filesystem::temp_directory_path(ec);
-    return canonicalPath((ec ? std::filesystem::current_path() : temp) / "didi-sessions");
+    if (ec) return Error::internal("Unable to resolve the system temporary directory: " + ec.message());
+    return canonicalPath(temp / "didi-sessions");
 }
 
 uint64_t processId() {
@@ -96,22 +97,49 @@ std::string lowerHex(const std::vector<uint8_t>& bytes) {
 }
 
 bool secureEquals(const std::string& left, const std::string& right) {
-    if (left.size() != right.size()) return false;
     unsigned char difference = 0;
-    for (size_t index = 0; index < left.size(); ++index) {
-        difference |= static_cast<unsigned char>(left[index]) ^ static_cast<unsigned char>(right[index]);
+    constexpr size_t kTokenBytes = 64;
+    for (size_t index = 0; index < kTokenBytes; ++index) {
+        const auto left_byte = index < left.size() ? static_cast<unsigned char>(left[index]) : 0;
+        const auto right_byte = index < right.size() ? static_cast<unsigned char>(right[index]) : 0;
+        difference |= left_byte ^ right_byte;
     }
-    return difference == 0;
+    return difference == 0 && left.size() == kTokenBytes && right.size() == kTokenBytes;
+}
+
+Result<void> ensureDescriptorDirectory(const std::filesystem::path& directory) {
+#if defined(_WIN32)
+    std::error_code ec;
+    std::filesystem::create_directories(directory, ec);
+    if (ec) return Error::internal("Unable to create session descriptor directory: " + ec.message());
+#else
+    struct stat status {};
+    if (lstat(directory.c_str(), &status) != 0) {
+        if (errno != ENOENT || mkdir(directory.c_str(), S_IRWXU) != 0) {
+            return Error::internal("Unable to create secure session descriptor directory");
+        }
+    }
+    if (lstat(directory.c_str(), &status) != 0 || !S_ISDIR(status.st_mode) || S_ISLNK(status.st_mode)) {
+        return Error::internal("Session descriptor directory is not a real directory");
+    }
+    if (status.st_uid != geteuid()) {
+        return Error::internal("Session descriptor directory is not owned by the current user");
+    }
+    if (chmod(directory.c_str(), S_IRWXU) != 0) {
+        return Error::internal("Unable to restrict session descriptor directory permissions");
+    }
+    if (lstat(directory.c_str(), &status) != 0 || (status.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
+        return Error::internal("Session descriptor directory permissions are not owner-only");
+    }
+#endif
+    return Result<void>::ok();
 }
 
 Result<void> writeDescriptorAtomically(const std::filesystem::path& destination, const json& descriptor) {
     const auto directory = destination.parent_path();
+    auto secured = ensureDescriptorDirectory(directory);
+    if (secured.isErr()) return secured.error();
     std::error_code ec;
-    std::filesystem::create_directories(directory, ec);
-    if (ec) return Error::internal("Unable to create session descriptor directory: " + ec.message());
-#if !defined(_WIN32)
-    chmod(directory.c_str(), S_IRWXU);
-#endif
     const auto temporary = destination.string() + ".tmp";
     const auto contents = descriptor.dump();
 #if defined(_WIN32)
@@ -177,6 +205,16 @@ bool isOwnedDescriptor(const std::filesystem::path& path, const runtime::Session
     }
 }
 
+void restoreUnownedDescriptor(const std::filesystem::path& tombstone, const std::filesystem::path& destination) {
+#if defined(_WIN32)
+    MoveFileExA(tombstone.string().c_str(), destination.string().c_str(), MOVEFILE_WRITE_THROUGH);
+#else
+    if (link(tombstone.c_str(), destination.c_str()) == 0) {
+        unlink(tombstone.c_str());
+    }
+#endif
+}
+
 } // namespace
 
 Result<void> SessionHost::prepare(const std::string& kind, const std::string& project_path) {
@@ -199,15 +237,37 @@ Result<void> SessionHost::prepare(const std::string& kind, const std::string& pr
 #if defined(_WIN32)
     descriptor.endpoint = "\\\\.\\pipe\\godot_didi_" + std::to_string(descriptor.pid) + "_" + descriptor.session_id;
 #else
-    descriptor.endpoint = (std::filesystem::temp_directory_path() /
+    std::error_code temp_error;
+    const auto temp_directory = std::filesystem::temp_directory_path(temp_error);
+    if (temp_error) return Error::internal("Unable to resolve the system temporary directory for the IPC endpoint: " + temp_error.message());
+    descriptor.endpoint = (temp_directory /
                            ("godot_didi_" + std::to_string(descriptor.pid) + "_" + descriptor.session_id + ".sock")).string();
 #endif
     descriptor.started_at_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
     descriptor.protocol_version = "1.3";
-    m_descriptorPath = sessionDirectory() / (descriptor.session_id + ".json");
+    auto directory = sessionDirectory();
+    if (directory.isErr()) return directory.error();
+    m_descriptorPath = directory.value() / (descriptor.session_id + ".json");
     m_descriptor = std::move(descriptor);
     m_published = false;
+    return Result<void>::ok();
+}
+
+Result<void> SessionHost::startServer(ipc::IIpcServer& server) {
+    const auto prepared = descriptor();
+    if (!prepared.has_value()) return Error(409, "Session host is not prepared");
+    if (!server.start(prepared->endpoint)) {
+        server.stop();
+        stop();
+        return Error::notConnected("Unable to bind runtime IPC endpoint");
+    }
+    const auto published = publish();
+    if (published.isErr()) {
+        server.stop();
+        stop();
+        return published.error();
+    }
     return Result<void>::ok();
 }
 
@@ -243,12 +303,30 @@ Result<json> SessionHost::authorize(const json& request) const {
 void SessionHost::stop() {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_published && m_descriptor.has_value() && isOwnedDescriptor(m_descriptorPath, *m_descriptor)) {
+        if (m_beforeCleanupRenameHook) {
+            m_beforeCleanupRenameHook();
+        }
+        const auto tombstone = m_descriptorPath.string() + ".didi-delete-" + m_descriptor->session_id;
         std::error_code ec;
-        std::filesystem::remove(m_descriptorPath, ec);
+        if (!std::filesystem::exists(tombstone, ec) && !ec) {
+            std::filesystem::rename(m_descriptorPath, tombstone, ec);
+            if (!ec) {
+                if (isOwnedDescriptor(tombstone, *m_descriptor)) {
+                    std::filesystem::remove(tombstone, ec);
+                } else {
+                    restoreUnownedDescriptor(tombstone, m_descriptorPath);
+                }
+            }
+        }
     }
     m_published = false;
     m_descriptor.reset();
     m_descriptorPath.clear();
+}
+
+void SessionHost::setBeforeCleanupRenameHookForTesting(std::function<void()> hook) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_beforeCleanupRenameHook = std::move(hook);
 }
 
 } // namespace didi::godot

@@ -221,16 +221,39 @@ public:
         if (m_running.load()) return true;
 
         m_pipeName = resolvePipeName(pipe_name);
-        m_running.store(true);
         m_stopEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
+        if (!m_stopEvent) {
+            DIDI_LOG_ERROR("IPC_SERVER", "Unable to create named pipe stop event");
+            return false;
+        }
+        {
+            std::lock_guard<std::mutex> lock(m_startupMutex);
+            m_startupReady = false;
+            m_startupSucceeded = false;
+        }
+        m_running.store(true);
 
         m_thread = std::thread(&Win32IpcServer::serverLoop, this);
+        std::unique_lock<std::mutex> lock(m_startupMutex);
+        m_startupCv.wait(lock, [this] { return m_startupReady; });
+        const bool started = m_startupSucceeded;
+        lock.unlock();
+        if (!started) {
+            m_running.store(false);
+            if (m_thread.joinable()) {
+                m_thread.join();
+            }
+            CloseHandle(m_stopEvent);
+            m_stopEvent = NULL;
+            return false;
+        }
         DIDI_LOG_INFO("IPC_SERVER", "Named pipe server started on ", m_pipeName);
         return true;
     }
 
     void stop() override {
-        if (!m_running.exchange(false)) return;
+        const bool wasRunning = m_running.exchange(false);
+        if (!wasRunning && !m_thread.joinable()) return;
 
         if (m_stopEvent) {
             SetEvent(m_stopEvent);
@@ -262,6 +285,15 @@ public:
     }
 
 private:
+    void signalStartup(bool succeeded) {
+        std::lock_guard<std::mutex> lock(m_startupMutex);
+        if (!m_startupReady) {
+            m_startupSucceeded = succeeded;
+            m_startupReady = true;
+            m_startupCv.notify_all();
+        }
+    }
+
     bool readExactOverlapped(HANDLE pipe, void* buffer, DWORD bytesToRead, HANDLE hIoEvent) {
         uint8_t* ptr = static_cast<uint8_t*>(buffer);
         DWORD totalRead = 0;
@@ -357,6 +389,16 @@ private:
         }
 
         HANDLE hIoEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
+        if (!hIoEvent) {
+            m_running.store(false);
+            signalStartup(false);
+            if (pSD) {
+                LocalFree(pSD);
+            }
+            return;
+        }
+
+        bool firstPipeInstance = true;
 
         while (m_running.load()) {
             HANDLE pipe = CreateNamedPipeA(
@@ -371,9 +413,19 @@ private:
             );
 
             if (pipe == INVALID_HANDLE_VALUE) {
+                if (firstPipeInstance) {
+                    m_running.store(false);
+                    signalStartup(false);
+                    break;
+                }
                 if (!m_running.load()) break;
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
                 continue;
+            }
+
+            if (firstPipeInstance) {
+                firstPipeInstance = false;
+                signalStartup(true);
             }
 
             OVERLAPPED connectOv{};
@@ -487,6 +539,10 @@ private:
         if (pSD) {
             LocalFree(pSD);
         }
+
+        if (firstPipeInstance) {
+            signalStartup(false);
+        }
     }
 
     std::atomic<bool> m_running{false};
@@ -496,6 +552,10 @@ private:
     std::thread m_thread;
     MessageHandler m_handler;
     std::mutex m_mutex;
+    std::mutex m_startupMutex;
+    std::condition_variable m_startupCv;
+    bool m_startupReady{false};
+    bool m_startupSucceeded{false};
 };
 
 #else

@@ -79,16 +79,9 @@ bool GDExtensionIpc::start(const std::string& kind, const std::string& project_p
         return ticket.response.get();
     });
 
-    if (!m_server->start(descriptor->endpoint)) {
-        m_sessionHost.stop();
-        DIDI_LOG_ERROR("GDEXT_IPC", "Unable to bind runtime endpoint");
-        return false;
-    }
-    const auto published = m_sessionHost.publish();
-    if (published.isErr()) {
-        DIDI_LOG_ERROR("GDEXT_IPC", "Unable to publish runtime session: ", published.error().message);
-        m_server->stop();
-        m_sessionHost.stop();
+    const auto started = m_sessionHost.startServer(*m_server);
+    if (started.isErr()) {
+        DIDI_LOG_ERROR("GDEXT_IPC", "Unable to bind and publish runtime session: ", started.error().message);
         return false;
     }
     DIDI_LOG_INFO("GDEXT_IPC", "Published authenticated runtime session at ", descriptor->endpoint);
