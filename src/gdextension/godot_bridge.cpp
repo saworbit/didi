@@ -1440,6 +1440,208 @@ json GodotBridge::execute(const std::string& method, const json& params) {
                            {"undo_redo_registered", true}});
     }
 
+    if (method == "scene.create" || method == "scene.open" || method == "scene.close" ||
+        method == "scene.packBranch") {
+        if (method == "scene.close") {
+            auto root = editedSceneRoot(editor);
+            if (root.isErr()) return errorJson(root.error().code, root.error().message);
+            auto path_value = callObject(root.value(), "Node", "get_scene_file_path", 201670096LL);
+            if (path_value.isErr()) return errorJson(path_value.error().code, path_value.error().message);
+            auto path = stringFromVariant(path_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+            if (path.isErr()) return errorJson(path.error().code, path.error().message);
+            if (!params.value("discard_unsaved", false)) {
+                return errorJson(409, "Godot 4.5 cannot expose active-scene dirty state; pass discard_unsaved: true to close explicitly");
+            }
+            auto closed = callObject(editor, "EditorInterface", "close_scene", 166280745LL);
+            if (closed.isErr()) return errorJson(closed.error().code, closed.error().message);
+            auto code = scalarFromVariant<int64_t>(closed.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (code.isErr()) return errorJson(code.error().code, code.error().message);
+            if (code.value() != 0) return errorJson(500, "Godot close_scene failed with Error " + std::to_string(code.value()));
+            return liveResult({{"status", "success"}, {"closed", true}, {"scene_path", path.value()},
+                               {"discarded_unsaved", true}});
+        }
+
+        const std::string scene_path = params.value("scene_path", "");
+        auto valid_path = validateResPath(scene_path, ".tscn");
+        if (valid_path.isErr()) return errorJson(valid_path.error().code, valid_path.error().message);
+        auto loader = singleton("ResourceLoader");
+        if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
+        auto path = makeString(scene_path);
+        auto packed_hint = makeString("PackedScene");
+        if (path.isErr() || packed_hint.isErr()) return errorJson(500, "Failed to construct scene resource arguments");
+        auto exists_value = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                                       {&path.value(), &packed_hint.value()});
+        if (exists_value.isErr()) return errorJson(exists_value.error().code, exists_value.error().message);
+        auto target_exists = scalarFromVariant<GDExtensionBool>(exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (target_exists.isErr()) return errorJson(target_exists.error().code, target_exists.error().message);
+
+        auto open_and_verify = [&]() -> Result<void> {
+            auto inherited = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+            if (inherited.isErr()) return inherited.error();
+            auto opened = callObject(editor, "EditorInterface", "open_scene_from_path", 1168363258LL,
+                                     {&path.value(), &inherited.value()});
+            if (opened.isErr()) return opened.error();
+            auto opened_root = editedSceneRoot(editor);
+            if (opened_root.isErr()) return opened_root.error();
+            auto opened_path_value = callObject(opened_root.value(), "Node", "get_scene_file_path", 201670096LL);
+            if (opened_path_value.isErr()) return opened_path_value.error();
+            auto opened_path = stringFromVariant(opened_path_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+            if (opened_path.isErr()) return opened_path.error();
+            if (opened_path.value() != scene_path) {
+                return Error::internal("Godot did not activate the requested scene: " + scene_path);
+            }
+            return Result<void>::ok();
+        };
+
+        if (method == "scene.open") {
+            if (!target_exists.value()) return errorJson(404, "PackedScene not found: " + scene_path);
+            auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
+            if (cache_mode.isErr()) return errorJson(cache_mode.error().code, cache_mode.error().message);
+            auto resource = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                                       {&path.value(), &packed_hint.value(), &cache_mode.value()});
+            if (resource.isErr()) return errorJson(resource.error().code, resource.error().message);
+            auto packed = objectFromVariant(resource.value());
+            if (packed.isErr() || !packed.value()) return errorJson(422, "Resource is not a loadable PackedScene: " + scene_path);
+            auto class_name = makeString("PackedScene");
+            auto class_value = class_name.isOk()
+                ? callObject(packed.value(), "Object", "is_class", 3927539163LL, {&class_name.value()})
+                : Result<VariantValue>(class_name.error());
+            auto is_packed = class_value.isOk()
+                ? scalarFromVariant<GDExtensionBool>(class_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+                : Result<GDExtensionBool>(class_value.error());
+            if (is_packed.isErr() || !is_packed.value()) return errorJson(422, "Resource is not a PackedScene: " + scene_path);
+            auto opened = open_and_verify();
+            if (opened.isErr()) return errorJson(opened.error().code, opened.error().message);
+            return liveResult({{"status", "success"}, {"opened", true}, {"scene_path", scene_path}});
+        }
+
+        if (target_exists.value() && !params.value("overwrite", false)) {
+            return errorJson(409, "Scene target already exists; pass overwrite: true to replace it");
+        }
+
+        GDExtensionObjectPtr packed_root = nullptr;
+        if (method == "scene.create") {
+            const std::string root_type = params.value("root_type", "Node2D");
+            if (root_type != "Node2D" && root_type != "Node3D" && root_type != "Control") {
+                return errorJson(400, "root_type must be Node2D, Node3D, or Control");
+            }
+            const std::string root_name = params.value("root_name", "Root");
+            if (root_name.empty() || root_name.find('/') != std::string::npos || root_name.find('\\') != std::string::npos) {
+                return errorJson(400, "root_name must be a non-empty node name without path separators");
+            }
+            NativeName native_type(root_type);
+            packed_root = GodotApi::instance().classdb_construct_object(native_type.ptr());
+            if (!packed_root) return errorJson(500, "Godot could not construct scene root type: " + root_type);
+            auto name = makeStringName(root_name);
+            auto named = name.isOk()
+                ? callObject(packed_root, "Node", "set_name", 3304788590LL, {&name.value()})
+                : Result<VariantValue>(name.error());
+            if (named.isErr()) {
+                GodotApi::instance().object_destroy(packed_root);
+                return errorJson(named.error().code, named.error().message);
+            }
+        } else {
+            auto root = editedSceneRoot(editor);
+            if (root.isErr()) return errorJson(root.error().code, root.error().message);
+            auto target = resolveNode(root.value(), params.value("target_node", ""));
+            if (target.isErr()) return errorJson(target.error().code, target.error().message);
+            auto flags = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(15));
+            if (flags.isErr()) return errorJson(flags.error().code, flags.error().message);
+            auto duplicated = callObject(target.value(), "Node", "duplicate", 3511555459LL, {&flags.value()});
+            if (duplicated.isErr()) return errorJson(duplicated.error().code, duplicated.error().message);
+            auto duplicate_object = objectFromVariant(duplicated.value());
+            if (duplicate_object.isErr() || !duplicate_object.value()) return errorJson(500, "Godot failed to duplicate the branch");
+            packed_root = duplicate_object.value();
+            auto owner = makeObject(packed_root);
+            if (owner.isErr()) {
+                GodotApi::instance().object_destroy(packed_root);
+                return errorJson(owner.error().code, owner.error().message);
+            }
+            std::function<Result<void>(GDExtensionObjectPtr)> normalize_owner = [&](GDExtensionObjectPtr current) -> Result<void> {
+                auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+                if (include_internal.isErr()) return include_internal.error();
+                auto children = callObject(current, "Node", "get_children", 873284517LL, {&include_internal.value()});
+                if (children.isErr()) return children.error();
+                auto size_value = callVariant(children.value(), "size");
+                if (size_value.isErr()) return size_value.error();
+                auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                if (size.isErr()) return size.error();
+                for (int64_t i = 0; i < size.value(); ++i) {
+                    auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+                    if (index.isErr()) return index.error();
+                    auto child_value = callVariant(children.value(), "get", {&index.value()});
+                    if (child_value.isErr()) return child_value.error();
+                    auto child = objectFromVariant(child_value.value());
+                    if (child.isErr() || !child.value()) return Error::internal("Godot returned an invalid duplicate child");
+                    auto owned = callObject(child.value(), "Node", "set_owner", 1078189570LL, {&owner.value()});
+                    if (owned.isErr()) return owned.error();
+                    auto nested = normalize_owner(child.value());
+                    if (nested.isErr()) return nested;
+                }
+                return Result<void>::ok();
+            };
+            auto normalized = normalize_owner(packed_root);
+            if (normalized.isErr()) {
+                GodotApi::instance().object_destroy(packed_root);
+                return errorJson(normalized.error().code, normalized.error().message);
+            }
+        }
+
+        NativeName packed_scene_name("PackedScene");
+        auto packed_scene = GodotApi::instance().classdb_construct_object(packed_scene_name.ptr());
+        if (!packed_scene) {
+            GodotApi::instance().object_destroy(packed_root);
+            return errorJson(500, "Godot could not construct PackedScene");
+        }
+        auto root_value = makeObject(packed_root);
+        auto packed_value = makeObject(packed_scene);
+        if (root_value.isErr() || packed_value.isErr()) {
+            GodotApi::instance().object_destroy(packed_root);
+            return errorJson(500, "Failed to construct PackedScene arguments");
+        }
+        auto packed = callObject(packed_scene, "PackedScene", "pack", 2584678054LL, {&root_value.value()});
+        if (packed.isErr()) {
+            GodotApi::instance().object_destroy(packed_root);
+            return errorJson(packed.error().code, packed.error().message);
+        }
+        auto pack_code = scalarFromVariant<int64_t>(packed.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (pack_code.isErr() || pack_code.value() != 0) {
+            GodotApi::instance().object_destroy(packed_root);
+            return errorJson(500, "PackedScene.pack failed");
+        }
+        auto saver = singleton("ResourceSaver");
+        auto flags = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+        if (saver.isErr() || flags.isErr()) {
+            GodotApi::instance().object_destroy(packed_root);
+            return errorJson(500, "ResourceSaver is unavailable");
+        }
+        auto saved = callObject(saver.value(), "ResourceSaver", "save", 2983274697LL,
+                                {&packed_value.value(), &path.value(), &flags.value()});
+        GodotApi::instance().object_destroy(packed_root);
+        if (saved.isErr()) return errorJson(saved.error().code, saved.error().message);
+        auto save_code = scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (save_code.isErr()) return errorJson(save_code.error().code, save_code.error().message);
+        if (save_code.value() != 0) return errorJson(500, "ResourceSaver.save failed with Error " + std::to_string(save_code.value()));
+
+        if (method == "scene.create") {
+            if (target_exists.value()) {
+                auto replace_cache = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(4));
+                if (replace_cache.isErr()) return errorJson(replace_cache.error().code, replace_cache.error().message);
+                auto refreshed = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                                            {&path.value(), &packed_hint.value(), &replace_cache.value()});
+                if (refreshed.isErr()) return errorJson(refreshed.error().code, refreshed.error().message);
+                auto reloaded = callObject(editor, "EditorInterface", "reload_scene_from_path", 83702148LL,
+                                           {&path.value()});
+                if (reloaded.isErr()) return errorJson(reloaded.error().code, reloaded.error().message);
+            }
+            auto opened = open_and_verify();
+            if (opened.isErr()) return errorJson(opened.error().code, opened.error().message);
+            return liveResult({{"status", "success"}, {"saved", true}, {"opened", true}, {"scene_path", scene_path}});
+        }
+        return liveResult({{"status", "success"}, {"saved", true}, {"scene_path", scene_path},
+                           {"source_node", params.value("target_node", "")}});
+    }
+
     if (method == "editor.getState" || method == "scene.getHierarchy") {
         auto root_result = editedSceneRoot(editor);
         if (root_result.isErr()) return errorJson(root_result.error().code, root_result.error().message);

@@ -159,7 +159,23 @@ try {
         (Tool-Request 82 "project_list_input_actions" @{}),
         (Tool-Request 83 "project_set_input_action" @{ action = "bad_event"; events = @(@{ type = "touch" }) }),
         (Tool-Request 84 "project_set_input_action" @{ action = "bad_deadzone"; deadzone = 1.5; events = @() }),
-        (Tool-Request 85 "project_set_input_action" @{ action = "empty_key"; events = @(@{ type = "key" }) })
+        (Tool-Request 85 "project_set_input_action" @{ action = "empty_key"; events = @(@{ type = "key" }) }),
+        (Tool-Request 86 "scene_close" @{}),
+        (Tool-Request 87 "scene_pack_branch" @{ target_node = "/root/SmokeRoot/Container"; scene_path = "res://packed_branch.tscn" }),
+        (Tool-Request 88 "scene_pack_branch" @{ target_node = "/root/SmokeRoot/Container"; scene_path = "res://packed_branch.tscn" }),
+        (Tool-Request 89 "scene_open" @{ scene_path = "res://packed_branch.tscn" }),
+        (Tool-Request 90 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 2 }),
+        (Tool-Request 91 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 92 "scene_create" @{ scene_path = "res://created_phase2.tscn"; root_type = "Node2D"; root_name = "Created" }),
+        (Tool-Request 93 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 1 }),
+        (Tool-Request 94 "scene_create" @{ scene_path = "res://created_phase2.tscn"; root_type = "Control"; root_name = "Blocked" }),
+        (Tool-Request 95 "scene_open" @{ scene_path = "res://packed_branch.tscn" }),
+        (Tool-Request 96 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 97 "scene_open" @{ scene_path = "res://missing_scene.tscn" }),
+        (Tool-Request 98 "scene_create" @{ scene_path = "C:\\unsafe.tscn" }),
+        (Tool-Request 99 "scene_create" @{ scene_path = "res://created_phase2.tscn"; root_type = "Control"; root_name = "Replaced"; overwrite = $true }),
+        (Tool-Request 100 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 1 }),
+        (Tool-Request 101 "scene_close" @{ discard_unsaved = $true })
     )
 
     $rawResponses = $requests | & $didiExecutable
@@ -291,13 +307,32 @@ try {
     Assert-True $byId[84].result.isError "Out-of-range InputMap deadzone was accepted."
     Assert-True $byId[85].result.isError "Empty key event was accepted."
 
+    Assert-True $byId[86].result.isError "Scene close discarded unsaved edits without explicit permission."
+    Assert-True ((Tool-Payload $byId[87]).saved -eq $true) "Packed branch did not report a saved PackedScene."
+    Assert-True $byId[88].result.isError "Packed branch overwrote an existing scene without overwrite: true."
+    Assert-True ((Tool-Payload $byId[89]).opened -eq $true) "Packed branch could not be opened."
+    $packedHierarchy = Tool-Payload $byId[90]
+    Assert-True ($packedHierarchy.scene_tree.name -eq "Container") "Packed branch root was not preserved."
+    Assert-True (@($packedHierarchy.scene_tree.children.name) -contains "SpawnedCopy") "Packed branch lost its owned child."
+    Assert-True ((Tool-Payload $byId[91]).closed -eq $true) "Clean packed scene could not be closed."
+    Assert-True ((Tool-Payload $byId[92]).opened -eq $true) "New scene was not created and opened."
+    Assert-True ((Tool-Payload $byId[93]).scene_tree.name -eq "Created") "Created scene root was not observable."
+    Assert-True $byId[94].result.isError "Scene create overwrote an existing target without overwrite: true."
+    Assert-True ((Tool-Payload $byId[95]).opened -eq $true) "Existing PackedScene could not be reopened."
+    Assert-True ((Tool-Payload $byId[96]).closed -eq $true) "Reopened clean scene could not be closed."
+    Assert-True $byId[97].result.isError "Missing PackedScene returned fake open success."
+    Assert-True $byId[98].result.isError "Absolute filesystem scene path was accepted."
+    Assert-True ((Tool-Payload $byId[99]).opened -eq $true) "Explicit scene overwrite failed."
+    Assert-True ((Tool-Payload $byId[100]).scene_tree.name -eq "Replaced") "Explicit scene overwrite did not replace the root."
+    Assert-True ((Tool-Payload $byId[101]).closed -eq $true) "Clean replaced scene could not be closed."
+
     $engineErrors = @(
         Get-Content $stderrPath -ErrorAction SilentlyContinue |
             Where-Object { $_ -match 'UndoRedo history mismatch|Parameter "t" is null|\[ERROR' }
     )
     Assert-True ($engineErrors.Count -eq 0) "Godot reported bridge errors:`n$($engineErrors -join "`n")"
 
-    Write-Output "Godot integration passed: Phase 1 live editing plus isolated Phase 2 project-setting persistence and rejection paths."
+    Write-Output "Godot integration passed: Phase 1 live editing plus Phase 2 project wiring, typed InputMap, scene lifecycle, persistence, UndoRedo, and rejection paths."
 }
 finally {
     if ($null -ne $godot -and -not $godot.HasExited) {
