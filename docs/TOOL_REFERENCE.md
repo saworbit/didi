@@ -288,7 +288,7 @@ Phase 3 routes live operations to one authenticated Godot editor or game. The fo
 
 ### `runtime_list_sessions` — Local session management
 
-Scans direct `*.json` children of `<OS temp>/didi-sessions` (or the controlled `DIDI_SESSION_DIR` override), validates each descriptor through an opened regular-file handle, and optionally filters by canonical `project_path`. It returns token-free `sessions` plus bounded `diagnostics`; it does not connect.
+Scans direct `*.json` children of the platform registry: Windows `<OS temp>/didi-sessions`; POSIX `$XDG_RUNTIME_DIR/didi-sessions` when that variable is absolute and set, otherwise `<OS temp>/didi-sessions-<euid>`; or the controlled `DIDI_SESSION_DIR` override. A relative/invalid XDG value uses the UID-qualified fallback. It validates each descriptor through an opened regular-file handle and optionally filters by canonical `project_path`. It returns token-free `sessions` plus bounded `diagnostics`; it does not connect.
 
 Published private descriptors use this exact schema:
 
@@ -306,7 +306,7 @@ Published private descriptors use this exact schema:
 }
 ```
 
-On POSIX the endpoint is the OS temporary directory plus `godot_didi_<pid>_<session-id>.sock`. Session ID and token are cryptographically random lowercase hex values of 32 and 64 characters. PID plus process-start identity prevents PID reuse from reviving a stale descriptor. Malformed, symlink/reparse, oversized (>64 KiB), escaped, or unprovably stale descriptors are diagnosed rather than deleted. Orderly shutdown and proven-stale cleanup atomically retire an exact identity-matched descriptor to an unpredictable no-replace non-`.json` path, re-verify it, and normally delete it. A collision, replacement race, unavailable atomic operation, or retry exhaustion can retain an active file or tombstone rather than risk deleting another object; discovery ignores retained non-`.json` files.
+On POSIX the endpoint is the OS temporary directory plus `godot_didi_<pid>_<session-id>.sock`. Session ID and token are cryptographically random lowercase hex values of 32 and 64 characters. PID plus process-start identity prevents PID reuse from reviving a stale descriptor. Malformed, symlink/reparse, oversized (>64 KiB), escaped, or unprovably stale descriptors are diagnosed rather than deleted. Orderly shutdown and proven-stale cleanup atomically retire an exact identity-matched descriptor to an unpredictable no-replace non-`.json` path and re-verify it. Windows deletes the exact verified object through its open handle. POSIX normally retains the verified `.didi-retired-<session-id>-<32hex>` tombstone because no portable object-bound unlink exists; its active `.json` name is gone and discovery ignores it. A move collision/race or unavailable atomic operation retains the safer object/path rather than risk deleting another entry.
 
 ### `runtime_attach_session` — Local session management
 

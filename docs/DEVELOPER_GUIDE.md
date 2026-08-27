@@ -57,30 +57,14 @@ didi/
 
 ## 🧪 Automated Test Suite
 
-Didi currently includes 23 native tests:
-1. `JsonRpc.ParseValid`: JSON-RPC 2.0 parsing and validation.
-2. `JsonRpc.ParseNotification`: Notification parsing.
-3. `JsonRpc.ResponseSerialization`: Success/error response serialization.
-4. `McpServer.Initialize`: MCP protocol lifecycle negotiation.
-5. `McpServer.ToolAvailability`: Dynamic live/offline/unavailable metadata.
-6. `IPC.Framing`: 4-byte little-endian framing validation.
-7. `IPC.ClientServerRoundtrip`: IPC duplex communication.
-8. `IPC.NoTimeoutRoundtrip`: Definitive transport wait for work already running in Godot.
-9. `Tools.DefaultRegistration`: Tool-schema registration.
-10. `Tools.HonestCapabilities`: Static capability classification and unimplemented rejection.
-11. `Tools.CaptureViewportWithIpc`: Live response/image propagation.
-12. `Tools.CaptureViewportOfflineAttribution`: Synthetic PNG provenance.
-13. `Tools.Base64Padding`: Strict RFC 4648 `=` padding.
-14. `Tools.IpcErrorPropagation`: IPC error serialization.
-15. `EditorHook.TimeoutState`: Pending/running/completed command-state transitions and single-response ownership.
-16. `Tools.ClassReflection`: Offline class-map behavior.
-17. `Tools.SymbolExtraction`: GDScript symbol extraction.
-18. `Resources.DefaultRegistration`: Dynamic MCP resources and offline result provenance.
-19. `Prompts.DefaultRegistration`: MCP prompt templates.
-20. `GDScript.DiagnosticsDeprecation`: GDScript deprecation rules.
-21. `GDScript.PatchFunction`: Function patching.
-22. `GDScript.PatchSignal`: Signal patching.
-23. `ResourceIndexer.TypeDetection`: Resource type and UID detection.
+The native runner's reported total is authoritative as the suite evolves. Coverage is organized by contract rather than duplicated here as a brittle test-name inventory:
+
+- JSON-RPC/MCP lifecycle, registration counts, capability metadata, output redaction, and structured errors.
+- IPC framing, bounded transport waits, editor-hook state transitions, and single-response ownership.
+- Descriptor validation, PID/start identity, opened-handle TOCTOU defenses, host publication, retirement, and cleanup races.
+- Transactional attach, deterministic auto-selection, fresh identity handshakes, route supersession, kind-aware availability, deadlines, and quarantine.
+- Runtime log cursor/gap/filter behavior, UTF-8 and payload bounds, runtime-tree bounds, and expression-sandbox policy.
+- Tool/resource live and offline provenance, viewport/image encoding, GDScript diagnostics/patching/reflection, and resource indexing.
 
 The Windows live integration harness copies the tracked fixture into `build/`, starts real Godot processes, and preserves the 119 ordered Phase 1/2 MCP requests through the named pipe. Phase 3 adds concurrent editor/game discovery, authenticated routing, logs, bounded trees, pause/step/stop, strict evaluation, and cleanup sequences. The earlier baseline still checks scene editing and viewport behavior plus scripts, groups, autoloads, nested settings, all supported InputEvent forms, runtime InputMap reload, forced persistence rollback, scene create/open/close/pack, resource ownership, overwrite guards, unsafe paths, and honest errors:
 
@@ -158,7 +142,7 @@ The standalone router starts detached, then may auto-attach on first availabilit
 
 ## Phase 3 tests and release gate
 
-The v1.3.0 release gate contains 76 native tests; the runner's reported total remains authoritative as cases evolve. Focused suites cover descriptor identity/TOCTOU/cleanup, deterministic auto-selection and attach rollback, fresh route revalidation and supersession, route provenance/deadlines, log cursors/bounds, expression scanner policy, capability metadata, and pending-step state. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and covers discovery, attach, live cursor logs, UTF-8 and wide-tree response bounds, pause/resume/multi-frame step, stop, strict evaluation, malicious callback probes, cleanup, and source-fixture integrity.
+The v1.3.0 release gate runs the complete native suite; the runner's reported total remains authoritative as cases evolve. Focused suites cover descriptor identity/TOCTOU/cleanup, deterministic auto-selection and attach rollback, fresh route revalidation and supersession, route provenance/deadlines, log cursors/bounds, expression scanner policy, capability metadata, and pending-step state. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and covers discovery, attach, live cursor logs, UTF-8 and wide-tree response bounds, pause/resume/multi-frame step, stop, strict evaluation, malicious callback probes, cleanup, and source-fixture integrity.
 
 Run from a clean worktree:
 

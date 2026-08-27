@@ -8,19 +8,22 @@ Every tool and resource definition includes `_meta.didi`:
 
 ```json
 {
-  "executionModes": ["live", "offline_fallback"],
+  "executionModes": ["live"],
   "implemented": true,
-  "currentMode": "offline_fallback",
-  "liveAvailable": false,
-  "editorConnected": false
+  "currentMode": "live",
+  "liveAvailable": true,
+  "editorConnected": false,
+  "sessionKind": "game"
 }
 ```
 
 - `executionModes` lists supported execution paths.
 - `implemented` is false for names reserved only for protocol compatibility.
 - `currentMode` is `live`, `offline_fallback`, `unavailable`, or `unimplemented` for the current process.
-- `liveAvailable` means the tool has a live implementation and the Godot editor IPC connection is active.
-- `editorConnected` reports the connection independently of whether that particular tool supports live execution.
+- `sessionKind` is the selected route's `editor` or `game` kind and is omitted when no route is selected.
+- `editorConnected` is true only when the selected route is both connected and an editor; a connected game reports false.
+- `liveAvailable` is true only when a route is connected, the definition implements `live`, and the selected kind is allowed for that exact tool/resource. Logs, tree inspection, and evaluation allow editor or game; pause/step/stop allow only game; other live tools and resources are editor-only by default.
+- A connected wrong-kind route reports `currentMode: "unavailable"` and `liveAvailable: false`. For a tool that also has an offline fallback, this avoids advertising a path its connected-route handler will not take.
 
 Do not infer availability from a tool name or description. Do not call a tool when `implemented` is false. A live-only tool with `currentMode: "unavailable"` requires Godot 4.5+ with the Didi addon enabled.
 
@@ -85,7 +88,7 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 - Scene-file paths must be normalized `res://` paths ending in `.tscn`; script paths must be normalized `res://*.gd`. Existing resources require explicit replacement.
 - Godot 4.5 does not expose active-scene dirty state through GDExtension. `scene_close` therefore refuses by default and requires `discard_unsaved: true`; this conservative contract prevents silent loss.
 - Phase 3 descriptors use schema `1`, protocol `1.3`, a 32-lowercase-hex session ID, a 64-lowercase-hex token, PID, process-start identity, `editor`/`game` kind, canonical project path, and a process-unique endpoint. Discovery validates the file through an opened handle and does not delete malformed or unprovably stale entries.
-- The default registry is `<OS temporary directory>/didi-sessions`; `DIDI_SESSION_DIR` is a test/controlled-environment override whose permissions are the operator's responsibility. Shutdown and proven-stale cleanup retire an exact identity-matched descriptor to an unpredictable non-`.json` no-replace path, re-verify it, and normally delete it. Collision, replacement race, unavailable atomic operations, or retry exhaustion retain the file rather than overwrite or delete another object.
+- The Windows registry defaults to `<OS temporary directory>/didi-sessions`. POSIX uses `$XDG_RUNTIME_DIR/didi-sessions` when `XDG_RUNTIME_DIR` is absolute, otherwise `<OS temporary directory>/didi-sessions-<euid>`; a relative/invalid XDG value falls back rather than disabling discovery. `DIDI_SESSION_DIR` is a controlled override whose permissions are the operator's responsibility. Shutdown and proven-stale cleanup retire an exact identity-matched descriptor to an unpredictable no-replace path and re-verify it. Windows deletes that exact object through its open handle. POSIX intentionally retains the verified non-`.json` tombstone because no portable object-bound unlink exists; discovery ignores it. Move collisions/races and unavailable atomic operations retain the safer path rather than risk another object.
 - First availability auto-attaches only an unambiguous canonical-project match: a sole editor/game, or the unique editor among games. Same-kind ambiguity remains detached; explicit attach/detach or quarantine disables later auto-selection. Attach uses a 3,000 ms authenticated handshake and swaps routes only after it succeeds. A failed explicit attach preserves the previous healthy route. `runtime_get_session` performs a fresh handshake within the same bound and quarantines the failing route on transport, authentication, or identity failure; a concurrently superseding route is retained and the stale refresh returns `409`.
 - Runtime logs retain 2,000 records. Messages are capped at 16 KiB and `details` at 64 KiB. `cursor` means the next sequence to inspect; filtered records still advance `next_cursor`, and `dropped_before_cursor` reports a retention gap.
 - `runtime_step` accepts 1–60 frames, requires an already-paused game, allows one active step, advances exactly the requested callbacks, and verifies re-pause. Shutdown cancels a pending step. `runtime_stop` only confirms that quit was requested; disappearance from discovery confirms exit.

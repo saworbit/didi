@@ -4,7 +4,7 @@ Resources are read-only MCP context endpoints. Prompt templates return advisory 
 
 ## Resource capability metadata
 
-`resources/list` includes `_meta.didi` with the same fields documented for tools: `executionModes`, `implemented`, `currentMode`, `liveAvailable`, and `editorConnected`. See [Current Capability Matrix](CAPABILITIES.md).
+`resources/list` includes `_meta.didi` with the same fields documented for tools: `executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind`. Availability is kind-aware: runtime logs allow editor or game, editor state is editor-only, and project tree remains offline. See [Current Capability Matrix](CAPABILITIES.md).
 
 ## `godot://project/tree`
 

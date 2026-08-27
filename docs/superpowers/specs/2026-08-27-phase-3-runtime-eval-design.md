@@ -57,7 +57,7 @@ The extension starts its IPC service at Godot’s scene initialization level so 
 }
 ```
 
-Descriptors are written to a temporary sibling then atomically renamed. Paths, identifiers, types, token length, endpoint prefix, and protocol version are validated before use. A descriptor is stale only when process identity is provably gone; malformed or merely unverifiable descriptors are ignored and reported, not deleted. Orderly shutdown and proven-stale cleanup atomically retire an exact identity-matched descriptor, re-verify it, and normally delete it. Collision, replacement race, unavailable atomic operations, or retry exhaustion retain the object rather than risk another path.
+Descriptors are written to a temporary sibling then atomically renamed. Paths, identifiers, types, token length, endpoint prefix, and protocol version are validated before use. A descriptor is stale only when process identity is provably gone; malformed or merely unverifiable descriptors are ignored and reported, not deleted. Orderly shutdown and proven-stale cleanup atomically retire an exact identity-matched descriptor to an unpredictable no-replace path and re-verify it. Windows deletes the exact verified object through its open handle. POSIX intentionally retains the verified `.didi-retired-<session-id>-<32hex>` tombstone because there is no portable object-bound unlink; the active `.json` name is gone and discovery ignores it. A move collision/race or unavailable atomic operation retains the safer object/path.
 
 Every IPC request carries the token in an internal envelope. `session.handshake` verifies it and returns the authoritative session metadata. A token mismatch returns `401`; incompatible protocol versions return `409`. Default POSIX paths are owner-only; Windows grants the owning SID and local administrators. A `DIDI_SESSION_DIR` override is operator-managed. This is local attachment authentication, not a remote security boundary.
 
@@ -124,6 +124,8 @@ This narrowed vocabulary and provenance contract supersede the broader prelimina
 - Godot object access, evaluation, tree traversal, and runtime control occur only on the registered main-loop callback.
 - Attaching is transactional: a failed connection or handshake leaves the previous active session unchanged.
 - Detach and endpoint failure update tool/resource availability immediately.
+- The extension has a 15-second main-thread deadline. Pending work is atomically cancelled with `504`, `outcome: "not_started"`, and no quarantine. Started but unresolved work returns `504`, `outcome: "unknown_outcome"`, and `route_quarantine: true`; callers must not assume it did not run.
+- Live tools and the runtime-log resource have a finite 17-second outer transport deadline. Explicit unknown outcomes and transport timeouts quarantine only the exact route generation, never a concurrently selected replacement. No live route waits indefinitely for a definitive response.
 - A session mismatch, editor-only call against a game, stale descriptor, unsafe expression, unsupported result, and timeout each use distinct structured error codes and messages.
 - No runtime control action is registered with editor UndoRedo.
 - `runtime_step` owns a pending command until the requested frame count completes or shutdown cancels it; only one step may be active.
@@ -133,7 +135,7 @@ This narrowed vocabulary and provenance contract supersede the broader prelimina
 - Native tests cover descriptor validation, stale-session handling, atomic attach, token propagation, failed-handshake rollback, cursor filtering/gaps, registration counts, capability metadata, and structured errors.
 - TDD mutation checks prove the tests fail for a wrong token, unsafe callable, skipped cursor advancement, unverified pause state, and game/editor mode confusion.
 - The Godot 4.5.1 integration harness starts an editor session and a game session concurrently, discovers both, attaches to each, reads incremental logs, inspects both trees, pauses/resumes/steps the game, evaluates allowed expressions, rejects filesystem/process/mutation attempts, rejects oversized/deep results, detaches, reattaches, and requests game shutdown.
-- The source fixture remains byte-identical except compiled build artifacts; all session descriptors and sockets are cleaned up.
+- The source fixture remains byte-identical except compiled build artifacts; active session descriptors and sockets are cleaned up. Verified POSIX retirement tombstones may remain and must be ignored by discovery.
 - Release build, native tests, complete integration suite, MCP stdio smoke, documentation link check, and `git diff --check` must pass.
 - An independent red-team review must find no unresolved Critical or Important issue before integration.
 

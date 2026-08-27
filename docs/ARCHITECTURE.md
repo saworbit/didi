@@ -85,7 +85,8 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
 2. **Editor Undo/Redo Integration**: All modifications register transactions with Godot's `EditorUndoRedoManager`, allowing human developers to press `Ctrl+Z` in the editor to undo any AI-generated modification.
 3. **Timeout & Deadlock Protection**:
    - IPC client operations utilize recursive mutexes and non-blocking `PeekNamedPipe` polling with millisecond timeouts.
-   - A command that has not started within 15 seconds is atomically cancelled before it can mutate. Once main-thread execution has started, both the extension bridge and the outer MCP transport wait for the definitive result instead of returning an ambiguous timeout followed by a late mutation.
+   - The extension applies a 15-second main-thread deadline. A still-pending command is atomically cancelled and returns `504` with `outcome: "not_started"` and no quarantine. A started but unresolved command returns `504` with `outcome: "unknown_outcome"` and `route_quarantine: true`; it may still complete inside Godot, so clients must not blindly retry mutations.
+   - Public live tools and `godot://runtime/logs` apply a finite 17-second outer transport deadline. Explicit unknown-outcome responses and transport timeouts quarantine only the exact routed generation, preserving a concurrently selected replacement. No live path waits forever for a definitive response.
    - Filesystem reads, static GDScript parsing, and offline process tools stay in the standalone MCP process and never enter the Godot main-thread queue.
 4. **Restricted Security DACL**:
    - Windows Named Pipes use SDDL grants for the owning SID (`OW`) and local Administrators (`BA`); this is access-controlled but not strictly owner-only.
@@ -157,12 +158,12 @@ Each loaded Didi extension follows bind-before-publish startup:
 Godot editor/game process
   -> create 32-hex session ID + 64-hex token
   -> bind access-controlled process-unique endpoint
-  -> atomically publish schema-1 descriptor in <OS temp>/didi-sessions
+  -> atomically publish schema-1 descriptor in the platform session registry
   -> authenticate session.handshake and every routed request
   -> queue Godot-object work on the main-thread bridge
 ```
 
-Descriptors bind identity to PID plus process start time, preventing PID reuse from appearing live. Discovery reads only direct `*.json` regular files through validated handles, limits each file to 64 KiB, validates exact field/endpoint shapes, and reports malformed entries without deleting them. Clean shutdown and proven-stale cleanup retire only an exact identity-matched descriptor with an atomic no-replace move, re-verify it, and normally delete it. Collision, replacement race, unavailable atomic operations, or retry exhaustion retain the active file or non-`.json` tombstone rather than risk another object; discovery ignores retained tombstones.
+Descriptors bind identity to PID plus process start time, preventing PID reuse from appearing live. Windows uses `<OS temp>/didi-sessions`; POSIX uses `$XDG_RUNTIME_DIR/didi-sessions` when that variable is absolute and set, otherwise `<OS temp>/didi-sessions-<euid>`. Discovery reads only direct `*.json` regular files through validated handles, limits each file to 64 KiB, validates exact field/endpoint shapes, and reports malformed entries without deleting them. Clean shutdown and proven-stale cleanup retire only an exact identity-matched descriptor with an atomic no-replace move and re-verify it. Windows deletes the exact verified object through its open handle. POSIX lacks a portable object-bound unlink, so normal proof-safe cleanup retains the unpredictable `.didi-retired-<session-id>-<32hex>` tombstone; the active `.json` name is gone and discovery ignores it. A move collision/race or unavailable atomic operation retains the safer object/path rather than risk another entry.
 
 The standalone `RuntimeSessionClient` starts detached. On first availability it considers only live canonical-project matches: a sole session is selected, a unique editor is preferred over games, and editor or game same-kind ambiguity remains detached. Explicit attach performs a 3-second authenticated handshake before atomically replacing a previous route; explicit attach/detach or route quarantine disables later auto-selection. `runtime_get_session` performs a fresh bounded authoritative handshake and quarantines a route on transport, authentication, or identity failure. A concurrently superseding explicit route wins the race and is retained while the stale refresh returns `409`. These operations report `local_session_management`; public metadata never contains the token.
 

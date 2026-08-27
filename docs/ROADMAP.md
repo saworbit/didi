@@ -74,7 +74,7 @@ Godot 4.5 cannot report editor dirty state through GDExtension, so `scene_close`
 
 Phase 3 adds ten canonical tools and closes authenticated attach-to-running for concurrent editor and game processes:
 
-- Atomic schema-1 descriptors in `<OS temp>/didi-sessions`, process-unique same-user endpoints, PID plus process-start identity, private 64-hex tokens, and a finite 3-second protocol-1.3 handshake.
+- Atomic schema-1 descriptors in the per-user platform registry (Windows temp child; POSIX XDG runtime child or euid-suffixed temp fallback), process-unique same-user endpoints, PID plus process-start identity, private 64-hex tokens, and a finite 3-second protocol-1.3 handshake.
 - Deterministic same-project auto-selection for a sole session or unique editor, explicit transactional attach/detach, and fresh bounded `get` revalidation. Ambiguity remains detached, failed explicit attach preserves a healthy route, failed revalidation clears it, and public metadata never exposes tokens.
 - A 2,000-record structured Didi log ring with cursors, retention-gap disclosure, deterministic filtering, and bounded UTF-8 payloads.
 - Live runtime tree inspection capped at 10,000 nodes and 256 KiB with UTF-8-safe field truncation, plus verified pause, exact 1–60 frame stepping, single-pending-step enforcement, shutdown cancellation, and graceful stop request.

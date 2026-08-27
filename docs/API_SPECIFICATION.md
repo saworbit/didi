@@ -68,7 +68,7 @@ Didi listens on `stdin` and responds on `stdout`. Log output is strictly routed 
 
 ### Bridge error codes
 
-The internal extension envelope can use `400` (invalid argument), `401` (runtime token rejected), `404` (missing object/property/session), `408` (cooperative expression deadline exceeded), `409` (protocol/mode/state conflict), `413` (bounded payload exceeded), `415` (unsupported expression result), `422` (parse/execution rejection), `500` (Godot/bridge failure), `501` (unimplemented), `503` (not connected/ready), or `504` (cancelled before main-thread execution started). A command already running on Godot's main thread is allowed to return its definitive result instead of producing an unknown-outcome timeout. Public `tools/call` converts these failures into MCP content with `result.isError: true`; clients should use the returned text and structured error data rather than expecting a top-level JSON-RPC code.
+The internal extension envelope can use `400` (invalid argument), `401` (runtime token rejected), `404` (missing object/property/session), `408` (cooperative expression deadline exceeded), `409` (protocol/mode/state conflict), `413` (bounded payload exceeded), `415` (unsupported expression result), `422` (parse/execution rejection), `500` (Godot/bridge failure), `501` (unimplemented), `503` (not connected/ready), or `504` (deadline exceeded). At the extension's 15-second main-thread deadline, a still-pending command is atomically cancelled and returns `outcome: "not_started"` with `route_quarantine: false`; a started but unresolved command returns `outcome: "unknown_outcome"` with `route_quarantine: true`. Public live tools and the runtime-log resource use a finite 17-second outer transport deadline. An explicit quarantine response or transport timeout quarantines that exact route; clients must not blindly retry a mutation whose outcome is unknown. Public `tools/call` converts these failures into MCP content with `result.isError: true`; clients should use the returned text and structured error data rather than expecting a top-level JSON-RPC code.
 
 ---
 
@@ -94,13 +94,14 @@ Each tool and resource definition includes a namespaced `_meta.didi` object:
 {
   "executionModes": ["live"],
   "implemented": true,
-  "currentMode": "unavailable",
-  "liveAvailable": false,
-  "editorConnected": false
+  "currentMode": "live",
+  "liveAvailable": true,
+  "editorConnected": false,
+  "sessionKind": "game"
 }
 ```
 
-`executionModes` and `implemented` describe the registration. `currentMode`, `liveAvailable`, and `editorConnected` are evaluated when the list request is handled. `currentMode` is one of `live`, `offline_fallback`, `unavailable`, or `unimplemented`. A non-empty `reason` is included for unimplemented definitions.
+`executionModes` and `implemented` describe the registration. `currentMode`, `liveAvailable`, `editorConnected`, and optional `sessionKind` are evaluated when the list request is handled. `sessionKind` identifies the selected `editor`/`game` route. `editorConnected` is true only for a connected editor route. `liveAvailable` additionally requires that the exact tool/resource allow the selected kind: runtime logs/tree/evaluation allow both kinds, pause/step/stop are game-only, and other live definitions are editor-only by default. A connected wrong-kind definition reports `currentMode: "unavailable"`; otherwise `currentMode` is `live`, `offline_fallback`, `unavailable`, or `unimplemented`. A non-empty `reason` is included for unimplemented definitions.
 
 Tool execution failures use MCP `result.isError: true` with explanatory text. JSON-RPC top-level errors remain reserved for malformed requests, unknown JSON-RPC methods, and other protocol-level failures.
 
@@ -108,7 +109,7 @@ Tool execution failures use MCP `result.isError: true` with explanatory text. JS
 
 ## 3. Internal IPC Protocol (Named Pipes & UNIX Sockets)
 
-- **Session descriptor directory**: `<OS temporary directory>/didi-sessions` (controlled override: `DIDI_SESSION_DIR`; override access controls are operator-managed)
+- **Session descriptor directory**: Windows `<OS temporary directory>/didi-sessions`; POSIX `$XDG_RUNTIME_DIR/didi-sessions` when `XDG_RUNTIME_DIR` is absolute and set, otherwise `<OS temporary directory>/didi-sessions-<euid>` (controlled override: `DIDI_SESSION_DIR`; override access controls are operator-managed)
 - **Pipe Name (Windows)**: `\\.\pipe\godot_didi_<pid>_<32-hex-session-id>`
 - **Security Descriptor (Windows)**: SDDL `D:(A;;GA;;;BA)(A;;GA;;;OW)` (local administrators and the owning SID; not strictly owner-only)
 - **Socket Path (POSIX)**: `<OS temp>/godot_didi_<pid>_<32-hex-session-id>.sock`, with owner-only permissions
@@ -151,7 +152,7 @@ See [Current Capability Matrix](CAPABILITIES.md) for the public tool mapping.
 
 ### Session descriptor and authentication envelope
 
-The extension binds its endpoint first, then atomically publishes one schema-`1` JSON descriptor containing `session_id`, private `token`, `pid`, `kind`, canonical `project_path`, `endpoint`, process `started_at_ms`, and protocol version `1.3`. Discovery accepts only direct regular-file `*.json` children no larger than 64 KiB, exact endpoint shapes, exact field sets, and a live PID whose process-start identity matches. Public forms omit `token`. Orderly shutdown and proven-stale cleanup retire only an exact identity-matched object to an unpredictable no-replace path, re-verify it, and normally delete it; collision/race/unavailable-operation cases retain the object rather than risk another path.
+The extension binds its endpoint first, then atomically publishes one schema-`1` JSON descriptor containing `session_id`, private `token`, `pid`, `kind`, canonical `project_path`, `endpoint`, process `started_at_ms`, and protocol version `1.3`. Discovery accepts only direct regular-file `*.json` children no larger than 64 KiB, exact endpoint shapes, exact field sets, and a live PID whose process-start identity matches. Public forms omit `token`. Orderly shutdown and proven-stale cleanup retire only an exact identity-matched object to an unpredictable no-replace path and re-verify it. Windows then deletes that exact verified object through its open handle. POSIX intentionally retains the verified `.didi-retired-<session-id>-<32hex>` tombstone because no portable object-bound unlink exists; the active `.json` name is gone and discovery ignores the tombstone. A move collision/race or unavailable atomic operation retains the safer object/path rather than risk another entry.
 
 Every routed live request copies public parameters and adds `_didi_session_token` internally. The extension compares all 64 token bytes in constant work, strips the field, then dispatches the command. `session.handshake` must complete within 3,000 ms and echo matching session/protocol identity before a candidate route replaces the current route. Failed attach is transactional.
 

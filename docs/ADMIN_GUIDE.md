@@ -51,7 +51,7 @@ Administrators can configure Didi globally or per-service using standard environ
 | `DIDI_PROJECT_ROOT` | Directory path | Current directory | Root folder of the target Godot project (e.g. `D:/my_game`) |
 | `DIDI_LOG_LEVEL` | `DEBUG`, `INFO`, `WARN`, `ERROR`, `NONE` | `INFO` | Stderr logging verbosity |
 | `DIDI_PIPE_NAME` | Pipe / Socket Path | Default | Override Named Pipe / UNIX domain socket path |
-| `DIDI_SESSION_DIR` | Directory path | `<OS temp>/didi-sessions` | Controlled test/deployment override for the descriptor registry; Didi validates paths/handles but the operator must provision access controls appropriate to the host. |
+| `DIDI_SESSION_DIR` | Directory path | Windows: `<OS temp>/didi-sessions`; POSIX: `$XDG_RUNTIME_DIR/didi-sessions`, otherwise `<OS temp>/didi-sessions-<euid>` | Controlled test/deployment override for the descriptor registry; Didi validates paths/handles but the operator must provision access controls appropriate to the host. |
 
 `DIDI_PIPE_NAME` remains available for legacy/direct IPC configuration. Phase 3 session routing uses process-unique descriptor endpoints instead. Do not share `DIDI_SESSION_DIR` across OS users.
 
@@ -109,5 +109,5 @@ The live `godot://runtime/logs`/`runtime_read_logs` ring retains 2,000 structure
 | Tool is listed but returns `unimplemented` | The name is reserved in the protocol surface but has no trustworthy execution path. | Check `_meta.didi.implemented` and use only implemented tools from [Current Capability Matrix](CAPABILITIES.md). |
 | Session is listed as stale | PID exited or process-start identity no longer matches (including PID reuse). | Start/reload the intended Godot process; do not edit descriptor identity fields. |
 | Attach times out or returns `401`/`409` | Endpoint unavailable, token mismatch, or protocol/identity handshake mismatch. | Leave the existing route intact, re-list sessions, and attach the new descriptor. Never copy tokens into logs or MCP requests. |
-| Retired `.didi-retired-*` files remain | Safe no-replace cleanup encountered a collision, replacement race, unavailable atomic operation, or retry exhaustion and retained a non-`.json` tombstone. | Discovery ignores them. Remove only after all relevant Didi processes are stopped and identity, ownership, and path are verified. |
+| Retired `.didi-retired-*` files remain | On POSIX this is the normal fail-safe result after exact no-replace retirement and identity/ownership verification because there is no portable object-bound unlink. On Windows it indicates a collision/race or another proof-safe cleanup failure. | Discovery ignores non-`.json` tombstones. Do not require an empty POSIX registry after shutdown; remove a tombstone manually only after all relevant Didi processes are stopped and identity, ownership, and path are verified. |
 | Expected `print()` text is absent from runtime logs | The Phase 3 ring records Didi events, not arbitrary process stdout. | Launch a bounded child with `runtime_launch`, or inspect Godot's own debugger/log output. |

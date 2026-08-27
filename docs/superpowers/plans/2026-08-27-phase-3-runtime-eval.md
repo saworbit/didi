@@ -380,7 +380,7 @@ Pressure-test malformed descriptors, symlink/reparse escapes, PID reuse metadata
 
 - [ ] **Step 4: Run the complete verification slice**
 
-Run Release build, all native tests, full Godot integration, and `git diff --check`. Confirm the descriptor directory is empty after cleanup and no Godot bridge errors appear in stdout/stderr.
+Run Release build, all native tests, full Godot integration, and `git diff --check`. Confirm no active `.json` descriptor or socket remains after cleanup and no Godot bridge errors appear in stdout/stderr. On POSIX, allow verified unpredictable non-`.json` retirement tombstones because proof-safe cleanup intentionally avoids a final name-based unlink.
 
 - [ ] **Step 5: Commit**
 

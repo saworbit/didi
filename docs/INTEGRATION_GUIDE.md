@@ -30,7 +30,7 @@ This guide walks through configuring Didi with popular AI coding assistants and 
 2. Open your project in the **Godot Editor**.
 3. Navigate to **Project $\rightarrow$ Project Settings $\rightarrow$ Plugins**.
 4. Check the **Enable** box next to **Didi Native MCP Bridge**.
-5. The GDExtension starts a process-unique token-authenticated endpoint and atomically publishes its private descriptor under `<OS temp>/didi-sessions`; POSIX defaults are owner-only, while Windows grants the owning SID and local administrators.
+5. The GDExtension starts a process-unique token-authenticated endpoint and atomically publishes its private descriptor under the platform registry: Windows `<OS temp>/didi-sessions`; POSIX `$XDG_RUNTIME_DIR/didi-sessions` when set and absolute, otherwise `<OS temp>/didi-sessions-<euid>`. POSIX defaults are owner-only, while Windows grants the owning SID and local administrators.
 
 ---
 
@@ -114,7 +114,7 @@ Add to your `mcp_config.json`:
 | `GODOT_BIN` | auto-detected | Explicit path to the Godot binary (e.g. `C:\Godot\Godot_v4.7.2-stable_win64_console.exe`) |
 | `GODOT_PATH` | auto-detected | Fallback path to the Godot installation directory |
 | `DIDI_LOG_LEVEL` | `INFO` | Logging verbosity: `DEBUG`, `INFO`, `WARN`, `ERROR`, `NONE` |
-| `DIDI_SESSION_DIR` | `<OS temp>/didi-sessions` | Controlled descriptor-registry override; both Didi components must run under compatible local accounts, and the operator owns override-directory access controls. |
+| `DIDI_SESSION_DIR` | Platform registry described above | Controlled descriptor-registry override; both Didi components must run under compatible local accounts, and the operator owns override-directory access controls. |
 
 ---
 
