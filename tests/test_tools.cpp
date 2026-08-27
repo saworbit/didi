@@ -19,12 +19,53 @@ public:
     }
 };
 
+class LocalSessionClient final : public didi::runtime::IRuntimeSessionClient {
+public:
+    bool connect(const std::string&, int) override { return false; }
+    void disconnect() override {}
+    bool isConnected() const override { return true; }
+    didi::Result<didi::json> sendRequest(const std::string&, const didi::json&, int) override {
+        return didi::Error::internal("A local session query must not issue a live handshake");
+    }
+    didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
+        return didi::json::object();
+    }
+    didi::Result<didi::json> attachSession(const std::string&) override {
+        return didi::Error::internal("attach should not be called by this test");
+    }
+    didi::Result<didi::json> detachSession() override { return didi::json::object(); }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override {
+        return didi::runtime::SessionDescriptor{
+            1, "0123456789abcdef0123456789abcdef", std::string(64, 'a'), 1,
+            "editor", "C:/project", "\\\\.\\pipe\\godot_didi_1", 1, "1.3"};
+    }
+};
+
 static void test_mcp_server_preserves_injected_ipc_client() {
     didi::mcp::McpServer server;
     auto injected = std::make_shared<DisconnectedIpcClient>();
     server.setIpcClient(injected);
     ASSERT_EQ(server.getIpcClient(), injected);
     ASSERT_EQ(didi::mcp::ToolRegistry::instance().getIpcClient(), injected);
+}
+
+static void test_runtime_get_session_is_local_and_attach_rejects_non_string_id() {
+    auto& reg = didi::mcp::ToolRegistry::instance();
+    auto local = std::make_shared<LocalSessionClient>();
+    reg.setRuntimeSessionClient(local);
+    reg.registerAllDefaultTools();
+
+    auto current = reg.callTool("runtime_get_session", didi::json::object());
+    ASSERT_TRUE(!current.isError);
+    const auto current_json = didi::json::parse(current.content[0].text);
+    ASSERT_EQ(current_json["execution_mode"], "local_session_management");
+    ASSERT_EQ(current_json["session"]["session_id"], "0123456789abcdef0123456789abcdef");
+    ASSERT_TRUE(!current_json["session"].contains("token"));
+
+    auto invalid_attach = reg.callTool("runtime_attach_session", {{"session_id", 42}});
+    ASSERT_TRUE(invalid_attach.isError);
+    ASSERT_TRUE(invalid_attach.content[0].text.find("session_id must be a string") != std::string::npos);
+    reg.setIpcClient(nullptr);
 }
 
 static void test_tool_registry_default_tools() {
@@ -420,6 +461,7 @@ struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.DefaultRegistration", test_tool_registry_default_tools);
         registerTest("McpServer.PreservesInjectedIpcClient", test_mcp_server_preserves_injected_ipc_client);
+        registerTest("Tools.RuntimeSessionLocalAndValidated", test_runtime_get_session_is_local_and_attach_rejects_non_string_id);
         registerTest("Tools.HonestCapabilities", test_tool_capabilities_are_honest);
         registerTest("Tools.CaptureViewportWithIpc", test_tool_capture_viewport_with_ipc);
         registerTest("Tools.CaptureViewportOfflineAttribution", test_tool_capture_viewport_offline_is_attributed);

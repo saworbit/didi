@@ -112,6 +112,11 @@ std::vector<DiscoveredSession> discoverSessions(json& diagnostics) {
             diagnostics.push_back({{"path", path.string()}, {"error", "Descriptor must not be a symlink or reparse point"}});
             continue;
         }
+        if (!entry.is_regular_file(ec) || ec) {
+            diagnostics.push_back({{"path", path.string()}, {"error", "Descriptor must be a regular file"}});
+            ec.clear();
+            continue;
+        }
         const auto canonical_file = canonicalPath(path);
         if (canonical_file.parent_path() != canonical_directory) {
             diagnostics.push_back({{"path", path.string()}, {"error", "Descriptor escaped descriptor directory"}});
@@ -220,10 +225,14 @@ public:
             candidate->disconnect();
             return handshake.error();
         }
-        if (handshake.value().contains("session_id") &&
-            handshake.value()["session_id"] != found->descriptor.session_id) {
+        const auto& response = handshake.value();
+        if (!response.is_object() || !response.contains("status") || !response["status"].is_string() ||
+            response["status"] != "ok" || !response.contains("session_id") ||
+            !response["session_id"].is_string() || response["session_id"] != found->descriptor.session_id ||
+            !response.contains("protocol_version") || !response["protocol_version"].is_string() ||
+            response["protocol_version"] != "1.3") {
             candidate->disconnect();
-            return Error(409, "Runtime session handshake did not match the descriptor");
+            return Error(409, "Runtime session handshake was not accepted by the descriptor contract");
         }
 
         std::shared_ptr<ipc::IIpcClient> previous;

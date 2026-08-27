@@ -43,7 +43,10 @@ CallToolResult handleRuntimeListSessions(const json& args, std::shared_ptr<runti
 
 CallToolResult handleRuntimeAttachSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions) {
     if (!sessions) return CallToolResult::error("Runtime session management is unavailable.");
-    const auto session_id = args.value("session_id", "");
+    if (!args.contains("session_id") || !args["session_id"].is_string()) {
+        return CallToolResult::error("session_id must be a string.");
+    }
+    const auto session_id = args["session_id"].get<std::string>();
     if (session_id.empty()) return CallToolResult::error("session_id is required.");
     auto result = sessions->attachSession(session_id);
     return result.isOk() ? localSessionSuccess(result.value()) : sessionError(result.error());
@@ -59,9 +62,7 @@ CallToolResult handleRuntimeGetSession(const json&, std::shared_ptr<runtime::IRu
     if (!sessions) return CallToolResult::error("Runtime session management is unavailable.");
     const auto active = sessions->activeSession();
     if (!active.has_value()) return CallToolResult::error("No runtime session is attached.");
-    auto state = sessions->sendRequest("session.handshake", {{"protocol_version", "1.3"}}, ipc::kWaitForDefinitiveResponse);
-    if (state.isErr()) return sessionError(state.error());
-    return localSessionSuccess({{"session", active->toJson()}, {"state", state.value()}});
+    return localSessionSuccess({{"session", active->toJson()}, {"connected", sessions->isConnected()}});
 }
 
 CallToolResult handleRuntimeReadLogs(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

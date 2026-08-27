@@ -58,7 +58,26 @@ public:
             if (params.value("_didi_session_token", "") != std::string(64, 'a')) {
                 return didi::Error(401, "token rejected");
             }
-            return didi::json{{"status", "ok"}};
+            if (m_endpoint.find("missing-handshake") != std::string::npos) return didi::json::object();
+            if (m_endpoint.find("nonobject-handshake") != std::string::npos) return didi::json::array();
+            if (m_endpoint.find("bad-status") != std::string::npos) {
+                return didi::json{{"status", "rejected"},
+                                  {"session_id", "0123456789abcdef0123456789abcdef"},
+                                  {"protocol_version", "1.3"}};
+            }
+            if (m_endpoint.find("bad-session") != std::string::npos) {
+                return didi::json{{"status", "ok"},
+                                  {"session_id", "fedcba9876543210fedcba9876543210"},
+                                  {"protocol_version", "1.3"}};
+            }
+            if (m_endpoint.find("bad-protocol") != std::string::npos) {
+                return didi::json{{"status", "ok"},
+                                  {"session_id", "0123456789abcdef0123456789abcdef"},
+                                  {"protocol_version", "1.2"}};
+            }
+            return didi::json{{"status", "ok"},
+                              {"session_id", "0123456789abcdef0123456789abcdef"},
+                              {"protocol_version", "1.3"}};
         }
         return didi::json{{"endpoint", m_endpoint}, {"token", params.value("_didi_session_token", "")}};
     }
@@ -127,12 +146,80 @@ void test_session_attach_keeps_existing_route_when_candidate_handshake_fails() {
     std::filesystem::remove_all(directory);
 }
 
+void test_session_attach_rejects_semantically_invalid_handshakes_without_replacing_route() {
+    const auto directory = makeSessionDirectory();
+    const auto healthy_id = "0123456789abcdef0123456789abcdef";
+    const std::vector<std::pair<std::string, std::string>> invalid_sessions = {
+        {"11111111111111111111111111111111", "missing-handshake"},
+        {"22222222222222222222222222222222", "nonobject-handshake"},
+        {"33333333333333333333333333333333", "bad-status"},
+        {"44444444444444444444444444444444", "bad-session"},
+        {"55555555555555555555555555555555", "bad-protocol"}
+    };
+    writeDescriptor(directory, "healthy.json", validDescriptor(healthy_id,
+                    "\\\\.\\pipe\\godot_didi_1234_healthy"));
+    for (const auto& [session_id, handshake_kind] : invalid_sessions) {
+        writeDescriptor(directory, handshake_kind + ".json", validDescriptor(session_id,
+                        "\\\\.\\pipe\\godot_didi_1234_" + handshake_kind));
+    }
+
+#if defined(_WIN32)
+    _putenv_s("DIDI_SESSION_DIR", directory.string().c_str());
+#else
+    setenv("DIDI_SESSION_DIR", directory.string().c_str(), 1);
+#endif
+    auto client = didi::runtime::createRuntimeSessionClient(
+        std::filesystem::current_path().string(), [] { return std::make_unique<FakeIpcClient>(); });
+
+    ASSERT_TRUE(client->attachSession(healthy_id).isOk());
+    for (const auto& [session_id, handshake_kind] : invalid_sessions) {
+        ASSERT_TRUE(client->attachSession(session_id).isErr());
+        ASSERT_TRUE(client->activeSession().has_value());
+        ASSERT_EQ(client->activeSession()->session_id, healthy_id);
+        auto routed = client->sendRequest("runtime.getTree", didi::json::object());
+        ASSERT_TRUE(routed.isOk());
+        ASSERT_TRUE(routed.value()["endpoint"].get<std::string>().find("healthy") != std::string::npos);
+    }
+
+#if defined(_WIN32)
+    _putenv_s("DIDI_SESSION_DIR", "");
+#else
+    unsetenv("DIDI_SESSION_DIR");
+#endif
+    std::filesystem::remove_all(directory);
+}
+
+void test_session_discovery_rejects_non_regular_json_entries() {
+    const auto directory = makeSessionDirectory();
+    std::filesystem::create_directories(directory / "not-a-file.json");
+#if defined(_WIN32)
+    _putenv_s("DIDI_SESSION_DIR", directory.string().c_str());
+#else
+    setenv("DIDI_SESSION_DIR", directory.string().c_str(), 1);
+#endif
+    auto client = didi::runtime::createRuntimeSessionClient(std::filesystem::current_path().string());
+    const auto listed = client->listSessions(std::nullopt);
+    ASSERT_TRUE(listed.isOk());
+    ASSERT_EQ(listed.value()["sessions"].size(), 0u);
+    ASSERT_EQ(listed.value()["diagnostics"][0]["error"], "Descriptor must be a regular file");
+#if defined(_WIN32)
+    _putenv_s("DIDI_SESSION_DIR", "");
+#else
+    unsetenv("DIDI_SESSION_DIR");
+#endif
+    std::filesystem::remove_all(directory);
+}
+
 struct RegisterRuntimeSessionTests {
     RegisterRuntimeSessionTests() {
         registerTest("RuntimeSessions.DescriptorRejectsWrongTokenLength",
                      test_session_descriptor_rejects_wrong_token_length);
         registerTest("RuntimeSessions.FailedAttachRetainsHealthyRoute",
                      test_session_attach_keeps_existing_route_when_candidate_handshake_fails);
+        registerTest("RuntimeSessions.InvalidHandshakeRetainsHealthyRoute",
+                     test_session_attach_rejects_semantically_invalid_handshakes_without_replacing_route);
+        registerTest("RuntimeSessions.RejectsNonRegularDescriptorEntries",
+                     test_session_discovery_rejects_non_regular_json_entries);
     }
 } g_registerRuntimeSessionTests;
 
