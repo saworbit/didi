@@ -11,7 +11,7 @@ namespace mcp {
 
 inline const char* kProtocolVersion = "2024-11-05";
 inline const char* kServerName = "didi";
-inline const char* kServerVersion = "1.2.0";
+inline const char* kServerVersion = "1.3.0";
 
 struct ContentItem {
     std::string type; // "text" or "image" or "resource"

@@ -21,7 +21,9 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "project_list_input_actions", "project_set_input_action", "project_remove_input_action",
         "project_get_setting", "project_set_setting", "scene_list_groups",
         "scene_add_to_group", "scene_remove_from_group", "scene_get_group_members",
-        "scene_create", "scene_open", "scene_close", "scene_pack_branch"
+        "scene_create", "scene_open", "scene_close", "scene_pack_branch",
+        "runtime_read_logs", "runtime_set_paused", "runtime_step", "runtime_stop",
+        "runtime_get_tree", "eval_gdscript"
     };
     static const std::unordered_set<std::string> offline = {
         "script_check_syntax", "analyze_script_diagnostics", "script_reflect_class",
@@ -29,7 +31,8 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "viewport_create_test_lab", "create_visual_test_lab", "resource_create",
         "resource_inspect", "project_list_resources", "query_project_resources",
         "project_get_uid_map", "runtime_launch",
-        "execute_test_session"
+        "execute_test_session", "runtime_list_sessions", "runtime_attach_session",
+        "runtime_detach_session", "runtime_get_session"
     };
 
     if (live_and_offline.count(name)) {
@@ -101,6 +104,16 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
 CallToolResult handleInjectInputEvent(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleRuntimeGetCallStack(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleRuntimeReadProfiler(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleRuntimeListSessions(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
+CallToolResult handleRuntimeAttachSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
+CallToolResult handleRuntimeDetachSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
+CallToolResult handleRuntimeGetSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
+CallToolResult handleRuntimeReadLogs(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleRuntimeSetPaused(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleRuntimeStep(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleRuntimeStop(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleRuntimeGetTree(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleEvalGdscript(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
 CallToolResult handleEditorUndo(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleEditorRedo(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -184,10 +197,20 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
 
 void ToolRegistry::setIpcClient(std::shared_ptr<ipc::IIpcClient> ipc_client) {
     m_ipcClient = ipc_client;
+    m_runtimeSessionClient = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(m_ipcClient);
 }
 
 std::shared_ptr<ipc::IIpcClient> ToolRegistry::getIpcClient() const {
     return m_ipcClient;
+}
+
+void ToolRegistry::setRuntimeSessionClient(std::shared_ptr<runtime::IRuntimeSessionClient> session_client) {
+    m_runtimeSessionClient = std::move(session_client);
+    m_ipcClient = m_runtimeSessionClient;
+}
+
+std::shared_ptr<runtime::IRuntimeSessionClient> ToolRegistry::getRuntimeSessionClient() const {
+    return m_runtimeSessionClient;
 }
 
 void ToolRegistry::registerAllDefaultTools() {
@@ -242,6 +265,80 @@ void ToolRegistry::registerAllDefaultTools() {
         t.handler = [this](const json& args) { return handleSceneInstantiateNode(args, m_ipcClient); };
         registerTool(std::move(t));
     }
+
+    // ==========================================
+    // Phase 3: Runtime Session Management and Evaluation
+    // ==========================================
+    {
+        ToolDefinition t;
+        t.name = "runtime_list_sessions";
+        t.description = "Lists validated local Godot runtime sessions without opening a session.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"project_path", {{"type", "string"}}}
+        }}};
+        t.handler = [this](const json& args) { return handleRuntimeListSessions(args, m_runtimeSessionClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "runtime_attach_session";
+        t.description = "Attaches transactionally to a discovered Godot runtime session.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"session_id", {{"type", "string"}}}
+        }}, {"required", {"session_id"}}};
+        t.handler = [this](const json& args) { return handleRuntimeAttachSession(args, m_runtimeSessionClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "runtime_detach_session";
+        t.description = "Detaches from the active Godot runtime session.";
+        t.inputSchema = {{"type", "object"}};
+        t.handler = [this](const json& args) { return handleRuntimeDetachSession(args, m_runtimeSessionClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "runtime_get_session";
+        t.description = "Returns the selected runtime session and a fresh authenticated state.";
+        t.inputSchema = {{"type", "object"}};
+        t.handler = [this](const json& args) { return handleRuntimeGetSession(args, m_runtimeSessionClient); };
+        registerTool(std::move(t));
+    }
+    const auto register_live_runtime = [this](const char* name, const char* description, json schema,
+                                              std::function<CallToolResult(const json&, std::shared_ptr<ipc::IIpcClient>)> handler) {
+        ToolDefinition t;
+        t.name = name;
+        t.description = description;
+        t.inputSchema = std::move(schema);
+        t.handler = [this, handler = std::move(handler)](const json& args) { return handler(args, m_ipcClient); };
+        registerTool(std::move(t));
+    };
+    register_live_runtime("runtime_read_logs", "Reads incremental structured logs from the active runtime session.",
+        {{"type", "object"}, {"properties", {
+            {"cursor", {{"type", "integer"}, {"default", 0}}},
+            {"limit", {{"type", "integer"}, {"default", 100}, {"minimum", 1}, {"maximum", 500}}},
+            {"minimum_level", {{"type", "string"}, {"enum", {"debug", "info", "warning", "error"}}}}
+        }}}, handleRuntimeReadLogs);
+    register_live_runtime("runtime_set_paused", "Sets and verifies the active game session pause state.",
+        {{"type", "object"}, {"properties", {{"paused", {{"type", "boolean"}}}}}, {"required", {"paused"}}},
+        handleRuntimeSetPaused);
+    register_live_runtime("runtime_step", "Advances a paused game session by a bounded number of frames.",
+        {{"type", "object"}, {"properties", {{"frames", {{"type", "integer"}, {"default", 1}, {"minimum", 1}, {"maximum", 60}}}}}},
+        handleRuntimeStep);
+    register_live_runtime("runtime_stop", "Requests graceful shutdown of the active game session.",
+        {{"type", "object"}, {"properties", {{"exit_code", {{"type", "integer"}, {"default", 0}, {"minimum", 0}, {"maximum", 255}}}}}},
+        handleRuntimeStop);
+    register_live_runtime("runtime_get_tree", "Returns a bounded tree from the active runtime session.",
+        {{"type", "object"}, {"properties", {
+            {"root_path", {{"type", "string"}, {"default", "/root"}}},
+            {"max_depth", {{"type", "integer"}, {"default", 4}, {"minimum", 0}, {"maximum", 16}}}
+        }}}, handleRuntimeGetTree);
+    register_live_runtime("eval_gdscript", "Evaluates a bounded read-only GDScript expression in the active runtime session.",
+        {{"type", "object"}, {"properties", {
+            {"expression", {{"type", "string"}}}, {"context_node", {{"type", "string"}}},
+            {"timeout_ms", {{"type", "integer"}, {"default", 1000}, {"minimum", 1}, {"maximum", 5000}}}
+        }}, {"required", {"expression"}}}, handleEvalGdscript);
     {
         ToolDefinition t;
         t.name = "scene_remove_node";

@@ -1,6 +1,7 @@
 #include "didi/mcp/mcp_server.hpp"
 #include "didi/common/logger.hpp"
 #include <algorithm>
+#include <filesystem>
 
 #if defined(_WIN32)
 #include <io.h>
@@ -25,7 +26,8 @@ static void addCurrentAvailability(json& definition, const ExecutionCapability& 
 }
 
 McpServer::McpServer() {
-    m_ipcClient = ipc::createIpcClient();
+    m_runtimeSessionClient = runtime::createRuntimeSessionClient(std::filesystem::current_path().string());
+    m_ipcClient = m_runtimeSessionClient;
     initializeRegistries();
 }
 
@@ -35,6 +37,7 @@ McpServer::~McpServer() {
 
 void McpServer::initializeRegistries() {
     ToolRegistry::instance().setIpcClient(m_ipcClient);
+    ToolRegistry::instance().setRuntimeSessionClient(m_runtimeSessionClient);
     ToolRegistry::instance().registerAllDefaultTools();
 
     ResourceRegistry::instance().setIpcClient(m_ipcClient);
@@ -45,7 +48,11 @@ void McpServer::initializeRegistries() {
 
 void McpServer::setIpcClient(std::shared_ptr<ipc::IIpcClient> ipc_client) {
     m_ipcClient = ipc_client;
+    m_runtimeSessionClient = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(m_ipcClient);
     ToolRegistry::instance().setIpcClient(m_ipcClient);
+    if (m_runtimeSessionClient) {
+        ToolRegistry::instance().setRuntimeSessionClient(m_runtimeSessionClient);
+    }
     ResourceRegistry::instance().setIpcClient(m_ipcClient);
 }
 
@@ -215,15 +222,7 @@ void McpServer::runStdio() {
     m_running.store(true);
     DIDI_LOG_INFO("MCP_SERVER", "Starting Didi MCP server over stdio...");
 
-    // Try background initial connection to Godot GDExtension Named Pipe
-    if (m_ipcClient) {
-        std::string pipe_name = ipc::resolvePipeName();
-        if (m_ipcClient->connect(pipe_name, 500)) {
-            DIDI_LOG_INFO("MCP_SERVER", "Connected to active Godot Editor GDExtension IPC pipe");
-        } else {
-            DIDI_LOG_INFO("MCP_SERVER", "Godot Editor IPC pipe not detected; running with offline fallback engine");
-        }
-    }
+    DIDI_LOG_INFO("MCP_SERVER", "Runtime session router ready; use runtime_list_sessions to discover local Godot sessions");
 
     std::string line;
     while (m_running.load() && std::getline(std::cin, line)) {

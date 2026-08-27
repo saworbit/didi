@@ -32,6 +32,7 @@ set(CORE_SOURCES
     src/mcp/tool_registry.cpp
     src/mcp/resource_registry.cpp
     src/mcp/prompt_registry.cpp
+    src/runtime/session_client.cpp
     src/offline/gdscript_diagnostics.cpp
     src/offline/resource_indexer.cpp
     src/offline/test_runner.cpp
@@ -86,6 +87,7 @@ set(TEST_SOURCES
     tests/test_main.cpp
     tests/test_jsonrpc.cpp
     tests/test_ipc.cpp
+    tests/test_runtime_sessions.cpp
     tests/test_tools.cpp
     tests/test_script_patch.cpp
     tests/test_resource_indexer.cpp

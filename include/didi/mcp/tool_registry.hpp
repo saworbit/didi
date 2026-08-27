@@ -6,6 +6,7 @@
 #include <memory>
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/common/ipc_channel.hpp"
+#include "didi/runtime/session_client.hpp"
 
 namespace didi {
 namespace mcp {
@@ -21,6 +22,8 @@ public:
 
     void setIpcClient(std::shared_ptr<ipc::IIpcClient> ipc_client);
     std::shared_ptr<ipc::IIpcClient> getIpcClient() const;
+    void setRuntimeSessionClient(std::shared_ptr<runtime::IRuntimeSessionClient> session_client);
+    std::shared_ptr<runtime::IRuntimeSessionClient> getRuntimeSessionClient() const;
 
     void registerAllDefaultTools();
 
@@ -28,6 +31,7 @@ private:
     ToolRegistry() = default;
     std::unordered_map<std::string, ToolDefinition> m_tools;
     std::shared_ptr<ipc::IIpcClient> m_ipcClient;
+    std::shared_ptr<runtime::IRuntimeSessionClient> m_runtimeSessionClient;
 };
 
 } // namespace mcp

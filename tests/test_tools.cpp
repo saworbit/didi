@@ -1,6 +1,7 @@
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/mcp/resource_registry.hpp"
 #include "didi/mcp/prompt_registry.hpp"
+#include "didi/mcp/mcp_server.hpp"
 #include "didi/gdextension/editor_hook.hpp"
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
@@ -8,12 +9,30 @@
 
 void registerTest(const std::string& name, std::function<void()> fn);
 
+class DisconnectedIpcClient final : public didi::ipc::IIpcClient {
+public:
+    bool connect(const std::string&, int) override { return false; }
+    void disconnect() override {}
+    bool isConnected() const override { return false; }
+    didi::Result<didi::json> sendRequest(const std::string&, const didi::json&, int) override {
+        return didi::Error::notConnected();
+    }
+};
+
+static void test_mcp_server_preserves_injected_ipc_client() {
+    didi::mcp::McpServer server;
+    auto injected = std::make_shared<DisconnectedIpcClient>();
+    server.setIpcClient(injected);
+    ASSERT_EQ(server.getIpcClient(), injected);
+    ASSERT_EQ(didi::mcp::ToolRegistry::instance().getIpcClient(), injected);
+}
+
 static void test_tool_registry_default_tools() {
     auto& reg = didi::mcp::ToolRegistry::instance();
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 68u);
+    ASSERT_EQ(tools.size(), 78u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -90,6 +109,14 @@ static void test_tool_registry_default_tools() {
     ASSERT_TRUE(reg.getTool("capture_viewport") != nullptr);
     ASSERT_TRUE(reg.getTool("get_scene_hierarchy") != nullptr);
     ASSERT_TRUE(reg.getTool("mutate_scene_tree") != nullptr);
+
+    for (const auto* name : {
+        "runtime_list_sessions", "runtime_attach_session", "runtime_detach_session",
+        "runtime_get_session", "runtime_read_logs", "runtime_set_paused",
+        "runtime_step", "runtime_stop", "runtime_get_tree", "eval_gdscript"
+    }) {
+        ASSERT_TRUE(reg.getTool(name) != nullptr);
+    }
 }
 
 static void test_tool_capabilities_are_honest() {
@@ -101,18 +128,24 @@ static void test_tool_capabilities_are_honest() {
     const auto* signal_connect = reg.getTool("signal_connect");
     const auto* syntax = reg.getTool("script_check_syntax");
     const auto* attach_script = reg.getTool("script_attach_to_node");
+    const auto* list_sessions = reg.getTool("runtime_list_sessions");
+    const auto* read_logs = reg.getTool("runtime_read_logs");
 
     ASSERT_TRUE(hierarchy != nullptr);
     ASSERT_TRUE(instantiate != nullptr);
     ASSERT_TRUE(signal_connect != nullptr);
     ASSERT_TRUE(syntax != nullptr);
     ASSERT_TRUE(attach_script != nullptr);
+    ASSERT_TRUE(list_sessions != nullptr);
+    ASSERT_TRUE(read_logs != nullptr);
 
     auto hierarchy_json = hierarchy->toJson();
     auto instantiate_json = instantiate->toJson();
     auto signal_json = signal_connect->toJson();
     auto syntax_json = syntax->toJson();
     auto attach_script_json = attach_script->toJson();
+    auto list_sessions_json = list_sessions->toJson();
+    auto read_logs_json = read_logs->toJson();
 
     ASSERT_EQ(hierarchy_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"live", "offline_fallback"}));
@@ -128,6 +161,12 @@ static void test_tool_capabilities_are_honest() {
     ASSERT_EQ(attach_script_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"live"}));
     ASSERT_EQ(attach_script_json["_meta"]["didi"]["implemented"], true);
+    ASSERT_EQ(list_sessions_json["_meta"]["didi"]["executionModes"],
+              didi::json::array({"offline_fallback"}));
+    ASSERT_EQ(list_sessions_json["_meta"]["didi"]["implemented"], true);
+    ASSERT_EQ(read_logs_json["_meta"]["didi"]["executionModes"],
+              didi::json::array({"live"}));
+    ASSERT_EQ(read_logs_json["_meta"]["didi"]["implemented"], true);
 
     reg.setIpcClient(nullptr);
     auto unavailable = reg.callTool("signal_list_connections", {{"target_node", "/root"}});
@@ -380,6 +419,7 @@ static void test_symbol_extraction() {
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.DefaultRegistration", test_tool_registry_default_tools);
+        registerTest("McpServer.PreservesInjectedIpcClient", test_mcp_server_preserves_injected_ipc_client);
         registerTest("Tools.HonestCapabilities", test_tool_capabilities_are_honest);
         registerTest("Tools.CaptureViewportWithIpc", test_tool_capture_viewport_with_ipc);
         registerTest("Tools.CaptureViewportOfflineAttribution", test_tool_capture_viewport_offline_is_attributed);

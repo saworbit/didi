@@ -27,6 +27,8 @@ public:
     virtual Result<json> sendRequest(const std::string& method, const json& params = json::object(), int timeout_ms = 10000) = 0;
 };
 
+using IpcClientFactory = std::function<std::unique_ptr<IIpcClient>()>;
+
 class IIpcServer {
 public:
     virtual ~IIpcServer() = default;
