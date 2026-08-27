@@ -4,6 +4,7 @@
 #include <array>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <functional>
 #include <cstring>
@@ -467,6 +468,193 @@ Result<void> validateIdentifier(const std::string& value, const std::string& lab
         }
     }
     return Result<void>::ok();
+}
+
+Result<void> validateActionName(const std::string& action) {
+    if (action.empty() || action.size() > 128) return Error::invalidArgument("action must be a non-empty name");
+    for (unsigned char character : action) {
+        if (std::iscntrl(character) || std::isspace(character)) {
+            return Error::invalidArgument("action may not contain whitespace or control characters");
+        }
+    }
+    return Result<void>::ok();
+}
+
+bool hasOnlyKeys(const json& value, std::initializer_list<const char*> allowed) {
+    for (auto it = value.begin(); it != value.end(); ++it) {
+        bool found = false;
+        for (const auto* key : allowed) {
+            if (it.key() == key) { found = true; break; }
+        }
+        if (!found) return false;
+    }
+    return true;
+}
+
+Result<VariantValue> makeInputEvent(const json& descriptor) {
+    if (!descriptor.is_object() || !descriptor.contains("type") || !descriptor["type"].is_string()) {
+        return Error::invalidArgument("Each input event must be an object with a string type");
+    }
+    const std::string type = descriptor["type"].get<std::string>();
+    const char* class_name = nullptr;
+    if (type == "key") {
+        if (!hasOnlyKeys(descriptor, {"type", "keycode", "physical_keycode", "unicode", "shift", "alt", "ctrl", "meta", "device"})) {
+            return Error::invalidArgument("Key event contains an unknown property");
+        }
+        class_name = "InputEventKey";
+    } else if (type == "mouse_button") {
+        if (!hasOnlyKeys(descriptor, {"type", "button_index", "device"})) return Error::invalidArgument("Mouse-button event contains an unknown property");
+        class_name = "InputEventMouseButton";
+    } else if (type == "joypad_button") {
+        if (!hasOnlyKeys(descriptor, {"type", "button_index", "device"})) return Error::invalidArgument("Joypad-button event contains an unknown property");
+        class_name = "InputEventJoypadButton";
+    } else if (type == "joypad_motion") {
+        if (!hasOnlyKeys(descriptor, {"type", "axis", "axis_value", "device"})) return Error::invalidArgument("Joypad-motion event contains an unknown property");
+        class_name = "InputEventJoypadMotion";
+    } else {
+        return Error::invalidArgument("Unsupported input event type: " + type);
+    }
+
+    NativeName native_class(class_name);
+    auto object = GodotApi::instance().classdb_construct_object(native_class.ptr());
+    if (!object) return Error::internal("Godot could not construct " + std::string(class_name));
+    auto fail = [&](const Error& error) -> Result<VariantValue> {
+        GodotApi::instance().object_destroy(object);
+        return error;
+    };
+    auto set_int = [&](const char* owner, const char* method, int64_t hash, int64_t number) -> Result<void> {
+        auto value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, number);
+        if (value.isErr()) return value.error();
+        auto result = callObject(object, owner, method, hash, {&value.value()});
+        return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
+    };
+    auto set_bool = [&](const char* method, bool enabled) -> Result<void> {
+        auto value = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(enabled));
+        if (value.isErr()) return value.error();
+        auto result = callObject(object, "InputEventWithModifiers", method, 2586408642LL, {&value.value()});
+        return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
+    };
+
+    if (descriptor.contains("device")) {
+        if (!descriptor["device"].is_number_integer() || descriptor["device"].get<int64_t>() < -1) {
+            return fail(Error::invalidArgument("Input event device must be an integer >= -1"));
+        }
+        auto set = set_int("InputEvent", "set_device", 1286410249LL, descriptor["device"].get<int64_t>());
+        if (set.isErr()) return fail(set.error());
+    }
+    if (type == "key") {
+        bool has_identity = false;
+        for (const auto* key : {"keycode", "physical_keycode", "unicode"}) {
+            if (!descriptor.contains(key)) continue;
+            if (!descriptor[key].is_number_integer() || descriptor[key].get<int64_t>() <= 0) {
+                return fail(Error::invalidArgument(std::string(key) + " must be a positive integer"));
+            }
+            const int64_t hash = std::string(key) == "unicode" ? 1286410249LL : 888074362LL;
+            auto set = set_int("InputEventKey", (std::string("set_") + key).c_str(), hash, descriptor[key].get<int64_t>());
+            if (set.isErr()) return fail(set.error());
+            has_identity = true;
+        }
+        if (!has_identity) return fail(Error::invalidArgument("Key event requires keycode, physical_keycode, or unicode"));
+        for (const auto* modifier : {"shift", "alt", "ctrl", "meta"}) {
+            if (!descriptor.contains(modifier)) continue;
+            if (!descriptor[modifier].is_boolean()) return fail(Error::invalidArgument(std::string(modifier) + " must be boolean"));
+            auto set = set_bool((std::string("set_") + modifier + "_pressed").c_str(), descriptor[modifier].get<bool>());
+            if (set.isErr()) return fail(set.error());
+        }
+    } else if (type == "mouse_button" || type == "joypad_button") {
+        if (!descriptor.contains("button_index") || !descriptor["button_index"].is_number_integer()) {
+            return fail(Error::invalidArgument("button_index is required and must be an integer"));
+        }
+        const int64_t button = descriptor["button_index"].get<int64_t>();
+        const int64_t maximum = type == "mouse_button" ? 9 : 127;
+        if (button < (type == "mouse_button" ? 1 : 0) || button > maximum) {
+            return fail(Error::invalidArgument("button_index is outside the supported range"));
+        }
+        auto set = set_int(class_name, "set_button_index", type == "mouse_button" ? 3624991109LL : 1466368136LL, button);
+        if (set.isErr()) return fail(set.error());
+    } else {
+        if (!descriptor.contains("axis") || !descriptor["axis"].is_number_integer() ||
+            descriptor["axis"].get<int64_t>() < 0 || descriptor["axis"].get<int64_t>() > 9) {
+            return fail(Error::invalidArgument("axis is required and must be in 0..9"));
+        }
+        if (!descriptor.contains("axis_value") || !descriptor["axis_value"].is_number() ||
+            !std::isfinite(descriptor["axis_value"].get<double>()) ||
+            descriptor["axis_value"].get<double>() < -1.0 || descriptor["axis_value"].get<double>() > 1.0) {
+            return fail(Error::invalidArgument("axis_value is required and must be finite within -1.0..1.0"));
+        }
+        auto axis = set_int(class_name, "set_axis", 1332685170LL, descriptor["axis"].get<int64_t>());
+        if (axis.isErr()) return fail(axis.error());
+        auto axis_value = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, descriptor["axis_value"].get<double>());
+        if (axis_value.isErr()) return fail(axis_value.error());
+        auto set = callObject(object, class_name, "set_axis_value", 373806689LL, {&axis_value.value()});
+        if (set.isErr()) return fail(set.error());
+    }
+    auto result = makeObject(object);
+    if (result.isErr()) return fail(result.error());
+    return result;
+}
+
+Result<json> inputEventToJson(VariantValue& event_value) {
+    auto event = objectFromVariant(event_value);
+    if (event.isErr() || !event.value()) return Error::invalidArgument("InputMap contains a null input event");
+    auto is_class = [&](const char* name) -> Result<bool> {
+        auto class_name = makeString(name);
+        if (class_name.isErr()) return class_name.error();
+        auto result = callObject(event.value(), "Object", "is_class", 3927539163LL, {&class_name.value()});
+        if (result.isErr()) return result.error();
+        auto value = scalarFromVariant<GDExtensionBool>(result.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        return value.isOk() ? Result<bool>(value.value() != 0) : Result<bool>(value.error());
+    };
+    auto get_int = [&](const char* owner, const char* method, int64_t hash) -> Result<int64_t> {
+        auto result = callObject(event.value(), owner, method, hash);
+        if (result.isErr()) return result.error();
+        return scalarFromVariant<int64_t>(result.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    };
+    auto device = get_int("InputEvent", "get_device", 3905245786LL);
+    if (device.isErr()) return device.error();
+    json output = {{"device", device.value()}};
+
+    auto key = is_class("InputEventKey");
+    auto mouse = is_class("InputEventMouseButton");
+    auto joy_button = is_class("InputEventJoypadButton");
+    auto joy_motion = is_class("InputEventJoypadMotion");
+    if (key.isErr() || mouse.isErr() || joy_button.isErr() || joy_motion.isErr()) return Error::internal("Failed to identify InputEvent type");
+    if (key.value()) {
+        output["type"] = "key";
+        for (const auto& field : std::array<std::pair<const char*, int64_t>, 3>{{
+                 {"keycode", 1585896689LL}, {"physical_keycode", 1585896689LL}, {"unicode", 3905245786LL}}}) {
+            auto value = get_int("InputEventKey", (std::string("get_") + field.first).c_str(), field.second);
+            if (value.isErr()) return value.error();
+            output[field.first] = value.value();
+        }
+        for (const auto* modifier : {"shift", "alt", "ctrl", "meta"}) {
+            auto value = callObject(event.value(), "InputEventWithModifiers",
+                                    (std::string("is_") + modifier + "_pressed").c_str(), 36873697LL);
+            if (value.isErr()) return value.error();
+            auto enabled = scalarFromVariant<GDExtensionBool>(value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (enabled.isErr()) return enabled.error();
+            output[modifier] = enabled.value() != 0;
+        }
+    } else if (mouse.value() || joy_button.value()) {
+        output["type"] = mouse.value() ? "mouse_button" : "joypad_button";
+        auto button = get_int(mouse.value() ? "InputEventMouseButton" : "InputEventJoypadButton", "get_button_index",
+                              mouse.value() ? 1132662608LL : 595588182LL);
+        if (button.isErr()) return button.error();
+        output["button_index"] = button.value();
+    } else if (joy_motion.value()) {
+        output["type"] = "joypad_motion";
+        auto axis = get_int("InputEventJoypadMotion", "get_axis", 4019121683LL);
+        auto axis_value_variant = callObject(event.value(), "InputEventJoypadMotion", "get_axis_value", 1740695150LL);
+        if (axis.isErr()) return axis.error();
+        if (axis_value_variant.isErr()) return axis_value_variant.error();
+        auto axis_value = scalarFromVariant<double>(axis_value_variant.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+        if (axis_value.isErr()) return axis_value.error();
+        output["axis"] = axis.value();
+        output["axis_value"] = axis_value.value();
+    } else {
+        return Error::invalidArgument("InputMap contains an unsupported InputEvent class");
+    }
+    return output;
 }
 
 Result<void> validateResPath(const std::string& path, const std::string& expected_suffix) {
@@ -934,6 +1122,150 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         }
         return liveResult({{"status", "success"}, {"name", autoload_name}, {"path", resource_path},
                            {"singleton", autoload_singleton}, {"removed", removing}, {"persisted", true}});
+    }
+
+    if (method == "project.listInputActions" || method == "project.setInputAction" ||
+        method == "project.removeInputAction") {
+        auto project_settings = singleton("ProjectSettings");
+        if (project_settings.isErr()) return errorJson(project_settings.error().code, project_settings.error().message);
+
+        if (method == "project.listInputActions") {
+            auto properties = callObject(project_settings.value(), "Object", "get_property_list", 3995934104LL);
+            if (properties.isErr()) return errorJson(properties.error().code, properties.error().message);
+            auto size_value = callVariant(properties.value(), "size");
+            if (size_value.isErr()) return errorJson(size_value.error().code, size_value.error().message);
+            auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (size.isErr()) return errorJson(size.error().code, size.error().message);
+            auto name_key = makeString("name");
+            auto deadzone_key = makeString("deadzone");
+            auto events_key = makeString("events");
+            if (name_key.isErr() || deadzone_key.isErr() || events_key.isErr()) return errorJson(500, "Failed to construct InputMap keys");
+            std::vector<json> actions;
+            for (int64_t i = 0; i < size.value(); ++i) {
+                auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+                if (index.isErr()) return errorJson(index.error().code, index.error().message);
+                auto descriptor = callVariant(properties.value(), "get", {&index.value()});
+                if (descriptor.isErr()) return errorJson(descriptor.error().code, descriptor.error().message);
+                auto property_name_value = callVariant(descriptor.value(), "get", {&name_key.value()});
+                if (property_name_value.isErr()) return errorJson(property_name_value.error().code, property_name_value.error().message);
+                auto property_type = GodotApi::instance().variant_get_type(property_name_value.value().ptr());
+                if (property_type != GDEXTENSION_VARIANT_TYPE_STRING && property_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) continue;
+                auto property_name = stringFromVariant(property_name_value.value(), property_type);
+                if (property_name.isErr()) return errorJson(property_name.error().code, property_name.error().message);
+                if (!strings::startsWith(property_name.value(), "input/") || property_name.value().size() <= 6) continue;
+                auto setting_name = makeStringName(property_name.value());
+                VariantValue default_value;
+                if (setting_name.isErr()) return errorJson(setting_name.error().code, setting_name.error().message);
+                auto setting = callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
+                                          {&setting_name.value(), &default_value});
+                if (setting.isErr()) return errorJson(setting.error().code, setting.error().message);
+                if (GodotApi::instance().variant_get_type(setting.value().ptr()) != GDEXTENSION_VARIANT_TYPE_DICTIONARY) {
+                    return errorJson(422, "InputMap setting is not a Dictionary: " + property_name.value());
+                }
+                auto deadzone_value = callVariant(setting.value(), "get", {&deadzone_key.value()});
+                auto events_value = callVariant(setting.value(), "get", {&events_key.value()});
+                if (deadzone_value.isErr() || events_value.isErr()) return errorJson(422, "InputMap setting is missing deadzone or events");
+                auto deadzone = scalarFromVariant<double>(deadzone_value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+                if (deadzone.isErr()) return errorJson(deadzone.error().code, deadzone.error().message);
+                auto event_count_value = callVariant(events_value.value(), "size");
+                if (event_count_value.isErr()) return errorJson(event_count_value.error().code, event_count_value.error().message);
+                auto event_count = scalarFromVariant<int64_t>(event_count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                if (event_count.isErr()) return errorJson(event_count.error().code, event_count.error().message);
+                json events = json::array();
+                for (int64_t event_index = 0; event_index < event_count.value(); ++event_index) {
+                    auto native_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, event_index);
+                    if (native_index.isErr()) return errorJson(native_index.error().code, native_index.error().message);
+                    auto event = callVariant(events_value.value(), "get", {&native_index.value()});
+                    if (event.isErr()) return errorJson(event.error().code, event.error().message);
+                    auto normalized = inputEventToJson(event.value());
+                    if (normalized.isErr()) return errorJson(normalized.error().code, normalized.error().message);
+                    events.push_back(normalized.value());
+                }
+                actions.push_back({{"action", property_name.value().substr(6)}, {"deadzone", deadzone.value()}, {"events", events}});
+            }
+            std::sort(actions.begin(), actions.end(), [](const json& left, const json& right) {
+                return left["action"].get<std::string>() < right["action"].get<std::string>();
+            });
+            return liveResult({{"status", "success"}, {"actions", actions}});
+        }
+
+        const std::string action = params.value("action", "");
+        auto valid_action = validateActionName(action);
+        if (valid_action.isErr()) return errorJson(valid_action.error().code, valid_action.error().message);
+        const std::string setting_path = "input/" + action;
+        auto setting_name = makeStringName(setting_path);
+        if (setting_name.isErr()) return errorJson(setting_name.error().code, setting_name.error().message);
+        auto exists_value = callObject(project_settings.value(), "ProjectSettings", "has_setting", 3927539163LL,
+                                       {&setting_name.value()});
+        if (exists_value.isErr()) return errorJson(exists_value.error().code, exists_value.error().message);
+        auto exists = scalarFromVariant<GDExtensionBool>(exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (exists.isErr()) return errorJson(exists.error().code, exists.error().message);
+        const bool removing = method == "project.removeInputAction";
+        if (removing && !exists.value()) return errorJson(404, "Input action not found: " + action);
+        if (!removing && exists.value() && !params.value("replace", false)) {
+            return errorJson(409, "Input action already exists; pass replace: true to update it");
+        }
+
+        VariantValue default_value;
+        auto previous = exists.value()
+            ? callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
+                         {&setting_name.value(), &default_value})
+            : Result<VariantValue>(VariantValue{});
+        if (previous.isErr()) return errorJson(previous.error().code, previous.error().message);
+        Result<VariantValue> replacement(VariantValue{});
+        double deadzone = 0.2;
+        size_t event_count = 0;
+        if (!removing) {
+            deadzone = params.value("deadzone", 0.2);
+            if (!std::isfinite(deadzone) || deadzone < 0.0 || deadzone > 1.0) {
+                return errorJson(400, "deadzone must be finite and within 0.0..1.0");
+            }
+            json event_descriptors = params.value("events", json::array());
+            if (!event_descriptors.is_array()) return errorJson(400, "events must be an array");
+            auto dictionary = makeJsonVariant(json::object());
+            auto events = makeJsonVariant(json::array());
+            auto deadzone_key = makeString("deadzone");
+            auto events_key = makeString("events");
+            auto deadzone_value = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, deadzone);
+            if (dictionary.isErr() || events.isErr() || deadzone_key.isErr() || events_key.isErr() || deadzone_value.isErr()) {
+                return errorJson(500, "Failed to construct InputMap setting containers");
+            }
+            for (const auto& descriptor : event_descriptors) {
+                auto event = makeInputEvent(descriptor);
+                if (event.isErr()) return errorJson(event.error().code, event.error().message);
+                auto appended = callVariant(events.value(), "append", {&event.value()});
+                if (appended.isErr()) return errorJson(appended.error().code, appended.error().message);
+            }
+            auto set_deadzone = callVariant(dictionary.value(), "set", {&deadzone_key.value(), &deadzone_value.value()});
+            auto set_events = callVariant(dictionary.value(), "set", {&events_key.value(), &events.value()});
+            if (set_deadzone.isErr() || set_events.isErr()) return errorJson(500, "Failed to construct InputMap setting");
+            event_count = event_descriptors.size();
+            replacement = std::move(dictionary.value());
+        }
+
+        auto input_map = singleton("InputMap");
+        if (input_map.isErr()) return errorJson(input_map.error().code, input_map.error().message);
+        auto reload_bind = requireMethodBind("InputMap", "load_from_project_settings", 3218959716LL);
+        if (reload_bind.isErr()) return errorJson(reload_bind.error().code, reload_bind.error().message);
+        auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
+                                  {&setting_name.value(), &replacement.value()});
+        if (applied.isErr()) return errorJson(applied.error().code, applied.error().message);
+        auto saved = callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
+        auto save_code = saved.isOk()
+            ? scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT)
+            : Result<int64_t>(saved.error());
+        if (save_code.isErr() || save_code.value() != 0) {
+            auto rollback = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
+                                       {&setting_name.value(), &previous.value()});
+            if (rollback.isOk()) callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
+            callObject(input_map.value(), "InputMap", "load_from_project_settings", 3218959716LL);
+            return errorJson(500, "ProjectSettings.save failed; InputMap mutation was rolled back");
+        }
+        auto reloaded = callObject(input_map.value(), "InputMap", "load_from_project_settings", 3218959716LL);
+        if (reloaded.isErr()) return errorJson(reloaded.error().code, reloaded.error().message);
+        return liveResult({{"status", "success"}, {"action", action}, {"deadzone", deadzone},
+                           {"event_count", event_count}, {"removed", removing}, {"persisted", true},
+                           {"runtime_reloaded", true}});
     }
 
     if (method == "script.attachToNode" || method == "script.detachFromNode") {

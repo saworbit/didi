@@ -143,7 +143,23 @@ try {
         (Tool-Request 71 "project_list_autoloads" @{}),
         (Tool-Request 72 "project_remove_autoload" @{ name = "PhaseTwo" }),
         (Tool-Request 73 "project_set_autoload" @{ name = "not-valid"; path = "res://subject.gd" }),
-        (Tool-Request 74 "project_set_autoload" @{ name = "Missing"; path = "res://missing.gd" })
+        (Tool-Request 74 "project_set_autoload" @{ name = "Missing"; path = "res://missing.gd" }),
+        (Tool-Request 75 "project_list_input_actions" @{}),
+        (Tool-Request 76 "project_set_input_action" @{ action = "phase_two_jump"; deadzone = 0.35; events = @(
+            @{ type = "key"; keycode = 32; shift = $true },
+            @{ type = "mouse_button"; button_index = 1; device = 2 },
+            @{ type = "joypad_button"; button_index = 0; device = 1 },
+            @{ type = "joypad_motion"; axis = 0; axis_value = -0.75; device = 3 }
+        ) }),
+        (Tool-Request 77 "project_list_input_actions" @{}),
+        (Tool-Request 78 "project_set_input_action" @{ action = "phase_two_jump"; events = @() }),
+        (Tool-Request 79 "project_set_input_action" @{ action = "phase_two_jump"; deadzone = 0.1; events = @(); replace = $true }),
+        (Tool-Request 80 "project_list_input_actions" @{}),
+        (Tool-Request 81 "project_remove_input_action" @{ action = "phase_two_jump" }),
+        (Tool-Request 82 "project_list_input_actions" @{}),
+        (Tool-Request 83 "project_set_input_action" @{ action = "bad_event"; events = @(@{ type = "touch" }) }),
+        (Tool-Request 84 "project_set_input_action" @{ action = "bad_deadzone"; deadzone = 1.5; events = @() }),
+        (Tool-Request 85 "project_set_input_action" @{ action = "empty_key"; events = @(@{ type = "key" }) })
     )
 
     $rawResponses = $requests | & $didiExecutable
@@ -259,6 +275,21 @@ try {
     Assert-True $byId[72].result.isError "Removing a missing autoload returned fake success."
     Assert-True $byId[73].result.isError "Invalid autoload identifier was accepted."
     Assert-True $byId[74].result.isError "Missing autoload resource was accepted."
+
+    Assert-True (-not (@((Tool-Payload $byId[75]).actions.action) -contains "phase_two_jump")) "Disposable fixture unexpectedly began with the Phase 2 input action."
+    $inputAction = @((Tool-Payload $byId[77]).actions | Where-Object action -eq "phase_two_jump")[0]
+    Assert-True ($inputAction.action -eq "phase_two_jump" -and $inputAction.deadzone -eq 0.35) "Input action metadata did not persist."
+    Assert-True (@($inputAction.events).Count -eq 4) "Input action did not persist every supported event shape."
+    Assert-True ($inputAction.events[0].type -eq "key" -and $inputAction.events[0].shift -eq $true) "Key event was not normalized correctly."
+    Assert-True ($inputAction.events[3].type -eq "joypad_motion" -and $inputAction.events[3].axis_value -eq -0.75) "Joypad motion event was not normalized correctly."
+    Assert-True $byId[78].result.isError "Existing input action was overwritten without replace: true."
+    $replacedInputAction = @((Tool-Payload $byId[80]).actions | Where-Object action -eq "phase_two_jump")[0]
+    Assert-True (@($replacedInputAction.events).Count -eq 0) "Explicit input action replacement did not persist."
+    Assert-True ((Tool-Payload $byId[81]).removed -eq $true) "Input action removal did not report success."
+    Assert-True (-not (@((Tool-Payload $byId[82]).actions.action) -contains "phase_two_jump")) "Removed input action remained persisted."
+    Assert-True $byId[83].result.isError "Unknown input event type was accepted."
+    Assert-True $byId[84].result.isError "Out-of-range InputMap deadzone was accepted."
+    Assert-True $byId[85].result.isError "Empty key event was accepted."
 
     $engineErrors = @(
         Get-Content $stderrPath -ErrorAction SilentlyContinue |
