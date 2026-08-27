@@ -2195,5 +2195,16 @@ Result<ViewportPixels> GodotBridge::captureEditorViewport(const std::string& cam
     return output;
 }
 
+Result<std::string> resolveGodotProjectPath() {
+    auto settings = singleton("ProjectSettings");
+    if (settings.isErr()) return settings.error();
+    auto resource_root = makeString("res://");
+    if (resource_root.isErr()) return resource_root.error();
+    auto globalized = callObject(settings.value(), "ProjectSettings", "globalize_path", 3135753539LL,
+                                 {&resource_root.value()});
+    if (globalized.isErr()) return globalized.error();
+    return stringFromVariant(globalized.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+}
+
 } // namespace godot
 } // namespace didi

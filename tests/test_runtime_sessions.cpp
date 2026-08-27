@@ -1,9 +1,11 @@
 #include "didi/runtime/session_client.hpp"
+#include "didi/gdextension/session_host.hpp"
 
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <set>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -99,6 +101,109 @@ void writeDescriptor(const std::filesystem::path& directory, const std::string& 
                      const didi::json& descriptor) {
     std::ofstream output(directory / name, std::ios::binary);
     output << descriptor.dump();
+}
+
+void setSessionDirectory(const std::filesystem::path& directory) {
+#if defined(_WIN32)
+    _putenv_s("DIDI_SESSION_DIR", directory.string().c_str());
+#else
+    setenv("DIDI_SESSION_DIR", directory.string().c_str(), 1);
+#endif
+}
+
+void clearSessionDirectory() {
+#if defined(_WIN32)
+    _putenv_s("DIDI_SESSION_DIR", "");
+#else
+    unsetenv("DIDI_SESSION_DIR");
+#endif
+}
+
+void test_session_host_prepares_private_unique_descriptor_and_authorizes_without_token_forwarding() {
+    // Would fail if prepare published early, generated a fixed endpoint, accepted a bad token, or forwarded the token.
+    const auto directory = makeSessionDirectory();
+    setSessionDirectory(directory);
+
+    didi::godot::SessionHost host;
+    ASSERT_TRUE(host.prepare("editor", std::filesystem::current_path().string()).isOk());
+    const auto descriptor = host.descriptor();
+    ASSERT_TRUE(descriptor.has_value());
+    ASSERT_EQ(descriptor->pid, currentProcessId());
+    ASSERT_TRUE(descriptor->endpoint.find(std::to_string(descriptor->pid)) != std::string::npos);
+    ASSERT_TRUE(descriptor->endpoint.find(descriptor->session_id) != std::string::npos);
+    ASSERT_TRUE(std::filesystem::is_empty(directory));
+
+    const auto denied = host.authorize({{"method", "session.handshake"},
+                                        {"params", {{"_didi_session_token", "wrong"}}}});
+    ASSERT_TRUE(denied.isErr());
+    ASSERT_EQ(denied.error().code, 401);
+
+    const auto allowed = host.authorize({{"method", "runtime.getTree"},
+                                         {"params", {{"_didi_session_token", descriptor->token}, {"depth", 2}}}});
+    ASSERT_TRUE(allowed.isOk());
+    ASSERT_TRUE(!allowed.value()["params"].contains("_didi_session_token"));
+    ASSERT_EQ(allowed.value()["params"]["depth"], 2);
+
+    host.stop();
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
+void test_session_host_publishes_atomically_and_removes_only_its_descriptor() {
+    // Would fail if publication left a partial file, used permissive POSIX permissions, or stop removed another host's descriptor.
+    const auto directory = makeSessionDirectory();
+    setSessionDirectory(directory);
+
+    didi::godot::SessionHost first;
+    didi::godot::SessionHost second;
+    ASSERT_TRUE(first.prepare("editor", std::filesystem::current_path().string()).isOk());
+    ASSERT_TRUE(second.prepare("game", std::filesystem::current_path().string()).isOk());
+    ASSERT_TRUE(first.publish().isOk());
+    ASSERT_TRUE(second.publish().isOk());
+
+    std::set<std::string> descriptor_names;
+    for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+        ASSERT_EQ(entry.path().extension(), ".json");
+        descriptor_names.insert(entry.path().filename().string());
+#if !defined(_WIN32)
+        const auto permissions = entry.status().permissions();
+        ASSERT_TRUE((permissions & (std::filesystem::perms::group_all | std::filesystem::perms::others_all)) ==
+                    std::filesystem::perms::none);
+#endif
+        std::ifstream input(entry.path(), std::ios::binary);
+        ASSERT_TRUE(didi::runtime::SessionDescriptor::fromJson(didi::json::parse(input)).isOk());
+    }
+    ASSERT_EQ(descriptor_names.size(), 2u);
+
+    first.stop();
+    ASSERT_EQ(std::distance(std::filesystem::directory_iterator(directory), std::filesystem::directory_iterator()), 1);
+    second.stop();
+    ASSERT_TRUE(std::filesystem::is_empty(directory));
+
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
+void test_session_host_fails_closed_when_descriptor_publication_becomes_unavailable() {
+    // Would fail if publication reported success after its destination became unavailable.
+    const auto directory = makeSessionDirectory();
+    setSessionDirectory(directory);
+
+    didi::godot::SessionHost host;
+    ASSERT_TRUE(host.prepare("editor", std::filesystem::current_path().string()).isOk());
+    const auto descriptor = host.descriptor();
+    ASSERT_TRUE(descriptor.has_value());
+    std::filesystem::remove_all(directory);
+    std::ofstream blocking_file(directory, std::ios::binary);
+    blocking_file << "not a directory";
+    blocking_file.close();
+
+    ASSERT_TRUE(host.publish().isErr());
+    ASSERT_FALSE(std::filesystem::exists(directory / (descriptor->session_id + ".json")));
+
+    host.stop();
+    clearSessionDirectory();
+    std::filesystem::remove(directory);
 }
 
 void test_session_descriptor_rejects_wrong_token_length() {
@@ -220,6 +325,12 @@ struct RegisterRuntimeSessionTests {
                      test_session_attach_rejects_semantically_invalid_handshakes_without_replacing_route);
         registerTest("RuntimeSessions.RejectsNonRegularDescriptorEntries",
                      test_session_discovery_rejects_non_regular_json_entries);
+        registerTest("RuntimeSessions.HostPreparesAndAuthorizesWithoutForwardingToken",
+                     test_session_host_prepares_private_unique_descriptor_and_authorizes_without_token_forwarding);
+        registerTest("RuntimeSessions.HostPublishesAtomicallyAndRemovesOnlyOwnedDescriptor",
+                     test_session_host_publishes_atomically_and_removes_only_its_descriptor);
+        registerTest("RuntimeSessions.HostFailsClosedWhenPublicationUnavailable",
+                     test_session_host_fails_closed_when_descriptor_publication_becomes_unavailable);
     }
 } g_registerRuntimeSessionTests;
 

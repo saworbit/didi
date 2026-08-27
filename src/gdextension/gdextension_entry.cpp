@@ -1,8 +1,13 @@
 #include "didi/gdextension/gdextension_interface.h"
 #include "didi/gdextension/gdextension_api.hpp"
 #include "didi/gdextension/gdextension_ipc.hpp"
+#include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/editor_hook.hpp"
 #include "didi/common/logger.hpp"
+
+#include <array>
+#include <cstddef>
+#include <filesystem>
 
 #if defined(_WIN32)
 #define GDE_EXPORT __declspec(dllexport)
@@ -12,6 +17,61 @@
 
 namespace didi {
 namespace godot {
+
+namespace {
+
+class NativeName {
+public:
+    explicit NativeName(const char* value) {
+        auto& api = GodotApi::instance();
+        if (api.string_name_new_with_utf8_chars) {
+            api.string_name_new_with_utf8_chars(m_storage.data(), value);
+            m_initialized = true;
+        }
+    }
+    ~NativeName() {
+        if (m_initialized) {
+            auto destructor = GodotApi::instance().variant_get_ptr_destructor(GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+            if (destructor) destructor(m_storage.data());
+        }
+    }
+    const void* ptr() const { return m_storage.data(); }
+    bool valid() const { return m_initialized; }
+
+private:
+    alignas(16) std::array<std::byte, 64> m_storage{};
+    bool m_initialized{false};
+};
+
+bool engineIsEditorHint() {
+    auto& api = GodotApi::instance();
+    NativeName engine_name("Engine");
+    NativeName method_name("is_editor_hint");
+    if (!engine_name.valid() || !method_name.valid() || !api.global_get_singleton ||
+        !api.classdb_get_method_bind || !api.object_method_bind_ptrcall) {
+        DIDI_LOG_ERROR("GDEXTENSION", "Engine.is_editor_hint API is unavailable; classifying session as game");
+        return false;
+    }
+    const auto engine = api.global_get_singleton(engine_name.ptr());
+    const auto bind = api.classdb_get_method_bind(engine_name.ptr(), method_name.ptr(), 36873697LL);
+    if (!engine || !bind) {
+        DIDI_LOG_ERROR("GDEXTENSION", "Engine.is_editor_hint binding is unavailable; classifying session as game");
+        return false;
+    }
+    GDExtensionBool editor_hint = 0;
+    api.object_method_bind_ptrcall(bind, engine, nullptr, &editor_hint);
+    return editor_hint != 0;
+}
+
+std::string fallbackCanonicalProjectPath() {
+    std::error_code ec;
+    const auto current = std::filesystem::current_path(ec);
+    if (ec) return {};
+    const auto canonical = std::filesystem::weakly_canonical(current, ec);
+    return (ec ? current.lexically_normal() : canonical).string();
+}
+
+} // namespace
 
 static void didi_main_loop_frame() {
     EditorHook::instance().processQueue();
@@ -23,10 +83,20 @@ static void didi_main_loop_shutdown() {
 }
 
 static void initialize_didi_module(void *userdata, GDExtensionInitializationLevel p_level) {
-    if (p_level == GDEXTENSION_INITIALIZATION_EDITOR) {
-        DIDI_LOG_INFO("GDEXTENSION", "Initializing Didi GDExtension module for Godot Editor");
+    (void)userdata;
+    if (p_level == GDEXTENSION_INITIALIZATION_SCENE) {
+        const auto kind = engineIsEditorHint() ? "editor" : "game";
+        const auto resolved_project = resolveGodotProjectPath();
+        const auto project_path = resolved_project.isOk() ? resolved_project.value() : fallbackCanonicalProjectPath();
+        if (resolved_project.isErr()) {
+            DIDI_LOG_WARN("GDEXTENSION", "Unable to resolve res:// for runtime session; using canonical process path: ",
+                          resolved_project.error().message);
+        }
+        DIDI_LOG_INFO("GDEXTENSION", "Initializing Didi GDExtension runtime session for Godot ", kind);
         if (GodotApi::instance().isLiveReady() && !GDExtensionIpc::instance().isRunning()) {
-            GDExtensionIpc::instance().start();
+            if (!GDExtensionIpc::instance().start(kind, project_path)) {
+                DIDI_LOG_ERROR("GDEXTENSION", "Unable to start authenticated runtime IPC session");
+            }
         } else if (!GodotApi::instance().isLiveReady()) {
             DIDI_LOG_ERROR("GDEXTENSION", "Main-loop callback unavailable; refusing to start live IPC");
         }
@@ -34,7 +104,8 @@ static void initialize_didi_module(void *userdata, GDExtensionInitializationLeve
 }
 
 static void deinitialize_didi_module(void *userdata, GDExtensionInitializationLevel p_level) {
-    if (p_level == GDEXTENSION_INITIALIZATION_EDITOR) {
+    (void)userdata;
+    if (p_level == GDEXTENSION_INITIALIZATION_SCENE) {
         DIDI_LOG_INFO("GDEXTENSION", "Deinitializing Didi GDExtension module");
         GodotApi::instance().markMainLoopStopped();
         EditorHook::instance().cancelPendingCommands("Godot editor extension is shutting down");

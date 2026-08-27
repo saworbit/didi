@@ -66,11 +66,26 @@ try {
     }
     Assert-True $ready "Godot editor did not start Didi IPC and open the smoke scene within $StartupTimeoutSeconds seconds."
 
+    $discoveryRequests = @(
+        (@{ jsonrpc = "2.0"; id = 901; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 902 "runtime_list_sessions" @{})
+    )
+    $rawDiscoveryResponses = $discoveryRequests | & $didiExecutable
+    $discoveryResponses = @($rawDiscoveryResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
+    Assert-True ($LASTEXITCODE -eq 0) "Didi discovery process exited with $LASTEXITCODE."
+    $discoveryById = @{}
+    foreach ($response in $discoveryResponses) { $discoveryById[[int]$response.id] = $response }
+    $discoveredSessions = @(Tool-Payload $discoveryById[902]).sessions
+    $editorSession = @($discoveredSessions | Where-Object { $_.kind -eq "editor" -and $_.alive })[0]
+    Assert-True ($null -ne $editorSession) "Runtime discovery did not return a live editor session."
+    Assert-True ($editorSession.endpoint -match "godot_didi_") "Discovered editor endpoint is not process-unique."
+
     $tooDeep = @{ leaf = "value" }
     foreach ($level in 1..18) { $tooDeep = @{ nested = $tooDeep } }
 
     $requests = @(
         (@{ jsonrpc = "2.0"; id = 1; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 900 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 2 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 2 }),
         (Tool-Request 3 "scene_get_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "process_priority" }),
         (Tool-Request 4 "scene_set_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "process_priority"; value = 12 }),
@@ -196,6 +211,9 @@ try {
 
     $byId = @{}
     foreach ($response in $responses) { $byId[[int]$response.id] = $response }
+    $attached = Tool-Payload $byId[900]
+    Assert-True ($attached.handshake.status -eq "ok") "Runtime attach did not complete the authenticated handshake."
+    Assert-True ($attached.session.session_id -eq $editorSession.session_id) "Runtime attach selected the wrong editor session."
 
     $hierarchy = Tool-Payload $byId[2]
     Assert-True ($hierarchy.execution_mode -eq "live") "Hierarchy was not attributed to live execution."
@@ -367,6 +385,7 @@ try {
     try {
         $failureRequests = @(
             (@{ jsonrpc = "2.0"; id = 200; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+            (Tool-Request 199 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
             (Tool-Request 201 "project_set_setting" @{ setting = "didi_phase2/rollback_probe"; value = @{ changed = $true } }),
             (Tool-Request 202 "project_get_setting" @{ setting = "didi_phase2/rollback_probe" }),
             (Tool-Request 203 "project_set_autoload" @{ name = "RollbackProbe"; path = "res://subject.gd" }),

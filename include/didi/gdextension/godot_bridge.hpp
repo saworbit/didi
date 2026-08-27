@@ -26,5 +26,7 @@ private:
     GodotBridge() = default;
 };
 
+Result<std::string> resolveGodotProjectPath();
+
 } // namespace godot
 } // namespace didi
