@@ -53,6 +53,7 @@ $gameEngineStartedAtMs = 0
 $shutdownGameEngineStartedAtMs = 0
 $editorSessionToken = ""
 $gameSessionToken = ""
+$shutdownGameSessionToken = ""
 $editorSessionId = ""
 $gameSessionId = ""
 $shutdownGameSessionId = ""
@@ -99,12 +100,44 @@ function Exact-ProcessAlive([uint64]$EnginePid, [int64]$EngineStartedAtMs) {
     return [Math]::Abs((Process-StartedAtMs $process) - $EngineStartedAtMs) -le 1
 }
 
+function Invoke-IdentityBoundProcessAction($VerifiedProcess, [int64]$ExpectedStartedAtMs,
+                                           [scriptblock]$Action,
+                                           [scriptblock]$AfterIdentityVerified = {}) {
+    $safeHandle = $VerifiedProcess.SafeHandle
+    $handlePinned = $false
+    $safeHandle.DangerousAddRef([ref]$handlePinned)
+    try {
+        $actualStartedAtMs = Process-StartedAtMs $VerifiedProcess
+        Assert-True ([Math]::Abs($actualStartedAtMs - $ExpectedStartedAtMs) -le 1) "Refusing to act on reused process PID $($VerifiedProcess.Id) (expected start $ExpectedStartedAtMs, found $actualStartedAtMs)."
+        if ($AfterIdentityVerified) {
+            & $AfterIdentityVerified $VerifiedProcess $safeHandle | Out-Null
+        }
+        return & $Action $VerifiedProcess
+    }
+    finally {
+        if ($handlePinned) { $safeHandle.DangerousRelease() }
+    }
+}
+
+function Stop-VerifiedProcessObject($VerifiedProcess, [int64]$ExpectedStartedAtMs,
+                                    [scriptblock]$AfterIdentityVerified = {}) {
+    Invoke-IdentityBoundProcessAction $VerifiedProcess $ExpectedStartedAtMs {
+        param($heldProcess)
+        if (-not $heldProcess.HasExited) {
+            $heldProcess.Kill()
+            $heldProcess.WaitForExit(5000) | Out-Null
+        }
+    } $AfterIdentityVerified | Out-Null
+}
+
 function Request-ExactProcessClose([uint64]$EnginePid, [int64]$EngineStartedAtMs, [int]$TimeoutSeconds) {
     $process = Get-Process -Id $EnginePid -ErrorAction SilentlyContinue
     if ($null -eq $process) { return $true }
-    $actualStartedAtMs = Process-StartedAtMs $process
-    Assert-True ([Math]::Abs($actualStartedAtMs - $EngineStartedAtMs) -le 1) "Refusing to close reused engine PID $EnginePid (expected start $EngineStartedAtMs, found $actualStartedAtMs)."
-    Assert-True $process.CloseMainWindow() "Exact editor process $EnginePid did not accept a graceful close request."
+    $accepted = Invoke-IdentityBoundProcessAction $process $EngineStartedAtMs {
+        param($heldProcess)
+        $heldProcess.CloseMainWindow()
+    }
+    Assert-True $accepted "Exact editor process $EnginePid did not accept a graceful close request."
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     while ([DateTime]::UtcNow -lt $deadline -and
            (Exact-ProcessAlive $EnginePid $EngineStartedAtMs)) {
@@ -118,17 +151,44 @@ function Stop-RuntimeProcess($Launcher, [uint64]$EnginePid, [int64]$EngineStarte
         Assert-True ($EngineStartedAtMs -gt 0) "Refusing to stop engine PID $EnginePid without its process-start identity."
         $engine = Get-Process -Id $EnginePid -ErrorAction SilentlyContinue
         if ($null -ne $engine) {
-            $actualStartedAtMs = Process-StartedAtMs $engine
-            Assert-True ([Math]::Abs($actualStartedAtMs - $EngineStartedAtMs) -le 1) "Refusing to stop reused engine PID $EnginePid (expected start $EngineStartedAtMs, found $actualStartedAtMs)."
-            Stop-Process -Id $EnginePid -ErrorAction SilentlyContinue
-            $engine.WaitForExit(5000) | Out-Null
+            Stop-VerifiedProcessObject $engine $EngineStartedAtMs
         }
     }
     if ($null -ne $Launcher -and -not $Launcher.HasExited -and $Launcher.Id -ne $EnginePid) {
-        Stop-Process -Id $Launcher.Id -ErrorAction SilentlyContinue
-        $Launcher.WaitForExit(5000) | Out-Null
+        Stop-VerifiedProcessObject $Launcher (Process-StartedAtMs $Launcher)
     }
 }
+
+function Assert-IdentityBoundTerminationMutation() {
+    $pwshExecutable = (Get-Process -Id $PID).Path
+    $verified = Start-Process -FilePath $pwshExecutable `
+        -ArgumentList @("-NoLogo", "-NoProfile", "-Command", "Start-Sleep -Seconds 30") `
+        -PassThru -WindowStyle Hidden
+    $replacement = Start-Process -FilePath $pwshExecutable `
+        -ArgumentList @("-NoLogo", "-NoProfile", "-Command", "Start-Sleep -Seconds 30") `
+        -PassThru -WindowStyle Hidden
+    $observation = [PSCustomObject]@{ Held = $null; Lookup = $verified }
+    try {
+        $verifiedStart = Process-StartedAtMs $verified
+        Stop-VerifiedProcessObject $verified $verifiedStart {
+            param($heldProcess, $heldHandle)
+            $observation.Held = $heldProcess
+            $observation.Lookup = $replacement
+        }
+        Assert-True ([Object]::ReferenceEquals($observation.Held, $verified)) "Identity-bound terminator discarded the verified process object."
+        Assert-True $verified.HasExited "Identity-bound terminator did not stop the verified process."
+        Assert-True (-not $replacement.HasExited) "A replacement process was stopped after the verified target changed."
+    }
+    finally {
+        if ($null -ne $replacement -and -not $replacement.HasExited) {
+            Stop-VerifiedProcessObject $replacement (Process-StartedAtMs $replacement)
+        }
+        if ($null -ne $verified) { $verified.Dispose() }
+        if ($null -ne $replacement) { $replacement.Dispose() }
+    }
+}
+
+Assert-IdentityBoundTerminationMutation
 
 $malformedDescriptorPath = Join-Path $sessionDirectory "malformed.json"
 $oversizedDescriptorPath = Join-Path $sessionDirectory "oversized.json"
@@ -860,6 +920,9 @@ try {
     $shutdownGameEnginePid = [uint64]$shutdownSession.pid
     $shutdownGameEngineStartedAtMs = [int64]$shutdownSession.started_at_ms
     $shutdownGameSessionId = [string]$shutdownSession.session_id
+    $shutdownDescriptor = Get-Content -LiteralPath (Join-Path $sessionDirectory ($shutdownSession.session_id + ".json")) -Raw | ConvertFrom-Json
+    $shutdownGameSessionToken = [string]$shutdownDescriptor.token
+    Assert-True ($shutdownGameSessionToken -match '^[0-9a-f]{64}$') "Shutdown-game descriptor token did not meet the private protocol shape."
 
     $pauseForShutdownRequests = @(
         (@{ jsonrpc = "2.0"; id = 430; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
@@ -958,6 +1021,7 @@ try {
     $completePublicTranscript = (@($responseTranscript) + @($logTranscript)) -join "`n"
     Assert-True ($completePublicTranscript -notmatch [regex]::Escape($editorSessionToken)) "Editor session token leaked into a response or complete engine/process log transcript."
     Assert-True ($completePublicTranscript -notmatch [regex]::Escape($gameSessionToken)) "Game session token leaked into a response or complete engine/process log transcript."
+    Assert-True ($completePublicTranscript -notmatch [regex]::Escape($shutdownGameSessionToken)) "Shutdown-game session token leaked into a response or complete engine/process log transcript."
 
     $unexpectedSourceArtifacts = @(Get-ChildItem -LiteralPath $sourceFixtureRoot -Force -Recurse | Where-Object {
         $_.Name -like "*.didi-retired-*" -or

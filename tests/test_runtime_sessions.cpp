@@ -38,6 +38,23 @@ uint64_t currentProcessId() {
 #endif
 }
 
+size_t currentOpenHandleCount() {
+#if defined(_WIN32)
+    DWORD count = 0;
+    ASSERT_TRUE(GetProcessHandleCount(GetCurrentProcess(), &count) != 0);
+    return static_cast<size_t>(count);
+#elif defined(__linux__)
+    size_t count = 0;
+    for (const auto& entry : std::filesystem::directory_iterator("/proc/self/fd")) {
+        (void)entry;
+        ++count;
+    }
+    return count;
+#else
+    return 0;
+#endif
+}
+
 std::pair<int64_t, int64_t> currentProcessStartIdentity() {
 #if defined(_WIN32)
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
@@ -713,6 +730,36 @@ void test_session_discovery_reads_the_validated_descriptor_object() {
     std::filesystem::remove_all(directory);
 }
 
+void test_session_discovery_closes_validated_handle_when_hook_throws() {
+#if defined(_WIN32) || defined(__linux__)
+    // Break caught: exceptions after descriptor validation leaked the native handle/FD.
+    const auto directory = makeSessionDirectory();
+    const auto session_id = std::string("99999999999999999999999999999999");
+    writeDescriptor(directory, "throw.json", validDescriptor(session_id, endpointFor(session_id)));
+    setSessionDirectory(directory);
+    auto client = didi::runtime::createRuntimeSessionClient(
+        std::filesystem::current_path().string(),
+        [] { return std::make_unique<FakeIpcClient>(); },
+        [](const std::filesystem::path&) { throw std::runtime_error("injected descriptor hook failure"); });
+
+    const auto before = currentOpenHandleCount();
+    for (int attempt = 0; attempt < 32; ++attempt) {
+        bool threw = false;
+        try {
+            (void)client->listSessions(std::nullopt);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        ASSERT_TRUE(threw);
+    }
+    const auto after = currentOpenHandleCount();
+    ASSERT_TRUE(after <= before + 2);
+
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+#endif
+}
+
 struct RegisterRuntimeSessionTests {
     RegisterRuntimeSessionTests() {
         registerTest("RuntimeSessions.DescriptorRejectsWrongTokenLength",
@@ -727,6 +774,8 @@ struct RegisterRuntimeSessionTests {
                      test_session_discovery_does_not_treat_reused_pid_metadata_as_live);
         registerTest("RuntimeSessions.ReadsValidatedDescriptorObject",
                      test_session_discovery_reads_the_validated_descriptor_object);
+        registerTest("RuntimeSessions.ClosesValidatedHandleOnException",
+                     test_session_discovery_closes_validated_handle_when_hook_throws);
         registerTest("RuntimeSessions.HostPreparesAndAuthorizesWithoutForwardingToken",
                      test_session_host_prepares_private_unique_descriptor_and_authorizes_without_token_forwarding);
         registerTest("RuntimeSessions.HostPublishesAtomicallyAndRemovesOnlyOwnedDescriptor",

@@ -140,3 +140,42 @@ The bounded minor findings were also closed:
 - Every pending-step reset path releases the production gate under `m_stepMutex`: resume failure, successful frame completion, and shutdown cancellation.
 - The harness preserves the primary failure if forced failure cleanup leaves an active descriptor, while successful runs require no active descriptor and an empty directory after strict tombstone cleanup.
 - No test/build scratch directory is retained or committed.
+
+## Review-fix pass 2
+
+Status: DONE
+
+### Remaining Important finding
+
+The cleanup harness no longer verifies one PID lookup and terminates through another. `Invoke-IdentityBoundProcessAction` obtains and pins the verified `System.Diagnostics.Process.SafeHandle` with `DangerousAddRef`, compares the expected process-start identity while that exact handle is held, and invokes `Kill()` or `CloseMainWindow()` on the same associated `Process` object before releasing the handle. `Stop-Process -Id` was removed from both engine and launcher cleanup paths.
+
+The focused mutation seam starts an owned target and replacement process. Its post-verification callback substitutes the replacement lookup candidate, then the identity-bound terminator stops the already-held target object. The regression requires the target to exit, the replacement to remain alive, and the action to receive the exact verified object. The replacement is then cleaned up through the same identity-bound helper.
+
+The handle behavior was also checked against the exact runtime executing the harness: PowerShell 7.6.4 loads `System.Diagnostics.Process` 10.0.10 (`f7d90799ce4ef09a0bb257852a57248d2a8fb8dd`). In that source, `SafeHandle` calls `GetOrOpenProcessHandle`, which stores the long-lived native handle and sets `_haveProcessHandle`; `Kill()` then calls `GetProcessHandle`, whose `_haveProcessHandle` branch returns a non-owning wrapper around that stored native handle before `TerminateProcess`. It therefore does not reopen the PID after verification. `DangerousAddRef` keeps the stored handle valid through the action.
+
+### Bounded minors
+
+- Descriptor native resources now use non-copyable RAII guards immediately after `CreateFileW`, `open`, and `openat`. Every validation return, a throwing `DescriptorOpenedHook`, and a throwing string allocation therefore closes the Windows handle or POSIX FD. `RuntimeSessions.ClosesValidatedHandleOnException` injects 32 throwing callbacks and requires the process handle/FD count to remain bounded.
+- The shutdown-cancellation game descriptor token is now read, shape-validated, and checked alongside the editor and primary-game tokens across the final response transcript and all process/engine logs.
+- A fully injected `EditorHook` bridge unit test was not added: `EditorHook` and the concrete runtime bridge are compiled only into the GDExtension shared-library target, while native tests link `didi_core`; directly instantiating the singleton also requires live Godot API state. Expanding the test target or exporting a test-only GDExtension API would exceed this scoped cleanup round and conflict with concurrent CMake work. The production gate has a direct native acquire/reject/release regression, while successful completion, resume/re-pause observation, re-use across sequential steps, and shutdown cancellation remain exercised on both real engines. Resume-failure cleanup is covered by the guarded production branch but remains without a purpose-built injected Godot bridge.
+
+### RED and GREEN evidence
+
+- RED inspection/mutation: cleanup called `Stop-Process -Id` after start-time verification, permitting a fresh PID resolution. The mutation seam models replacement of that lookup candidate.
+- GREEN focused seam: held target exited and substituted replacement remained alive.
+- RED inspection: descriptor handles/FDs were manually closed after a callback and allocation that can throw.
+- GREEN native exception regression: 32 injected callback exceptions left the process handle/FD count bounded.
+- Release build: passed.
+- Complete native suite after the concurrent release-documentation changes stabilized: **58 passed, 0 failed, 58 total**.
+- Runtime-session focused tests: passed, including validated-object TOCTOU and exception-path RAII.
+- Godot 4.5.1 full integration: passed with identity-bound cleanup mutation probe and all three tokens scanned.
+- Godot 4.7.2 full integration: passed with the same matrix.
+- PowerShell parser: passed.
+- Successful integration cleanup: zero active descriptors and zero remaining Godot processes.
+
+### Review-fix pass 2 files
+
+- `src/runtime/session_client.cpp`
+- `tests/run_godot_integration.ps1`
+- `tests/test_runtime_sessions.cpp`
+- `.superpowers/sdd/2026-08-27-phase-3-runtime-eval/task-6-report.md`

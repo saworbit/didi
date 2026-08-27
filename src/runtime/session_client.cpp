@@ -116,6 +116,36 @@ namespace {
 constexpr uintmax_t kMaxDescriptorBytes = 64 * 1024;
 constexpr int kSessionHandshakeTimeoutMs = 3000;
 
+#if defined(_WIN32)
+class ScopedNativeHandle {
+public:
+    explicit ScopedNativeHandle(HANDLE handle) : m_handle(handle) {}
+    ~ScopedNativeHandle() {
+        if (m_handle != INVALID_HANDLE_VALUE) CloseHandle(m_handle);
+    }
+    ScopedNativeHandle(const ScopedNativeHandle&) = delete;
+    ScopedNativeHandle& operator=(const ScopedNativeHandle&) = delete;
+    HANDLE get() const { return m_handle; }
+
+private:
+    HANDLE m_handle{INVALID_HANDLE_VALUE};
+};
+#else
+class ScopedNativeHandle {
+public:
+    explicit ScopedNativeHandle(int descriptor) : m_descriptor(descriptor) {}
+    ~ScopedNativeHandle() {
+        if (m_descriptor >= 0) close(m_descriptor);
+    }
+    ScopedNativeHandle(const ScopedNativeHandle&) = delete;
+    ScopedNativeHandle& operator=(const ScopedNativeHandle&) = delete;
+    int get() const { return m_descriptor; }
+
+private:
+    int m_descriptor{-1};
+};
+#endif
+
 bool isLowerHex(const std::string& value, size_t length) {
     return value.size() == length && std::all_of(value.begin(), value.end(), [](unsigned char c) {
         return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
@@ -171,33 +201,29 @@ Result<std::string> readDescriptorFromValidatedHandle(
     const std::filesystem::path& path,
     const DescriptorOpenedHook& opened_hook) {
 #if defined(_WIN32)
-    HANDLE handle = CreateFileW(
+    ScopedNativeHandle handle(CreateFileW(
         path.wstring().c_str(), GENERIC_READ,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
-    if (handle == INVALID_HANDLE_VALUE) return Error::notFound("Descriptor is not readable");
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr));
+    if (handle.get() == INVALID_HANDLE_VALUE) return Error::notFound("Descriptor is not readable");
 
     FILE_ATTRIBUTE_TAG_INFO attributes{};
-    if (!GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &attributes,
+    if (!GetFileInformationByHandleEx(handle.get(), FileAttributeTagInfo, &attributes,
                                       sizeof(attributes))) {
-        CloseHandle(handle);
         return Error::notFound("Descriptor is not readable");
     }
     if ((attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-        CloseHandle(handle);
         return Error::invalidArgument("Descriptor must not be a symlink or reparse point");
     }
     if ((attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ||
-        GetFileType(handle) != FILE_TYPE_DISK) {
-        CloseHandle(handle);
+        GetFileType(handle.get()) != FILE_TYPE_DISK) {
         return Error::invalidArgument("Descriptor must be a regular file");
     }
 
     std::wstring final_path(32768, L'\0');
     const DWORD final_length = GetFinalPathNameByHandleW(
-        handle, final_path.data(), static_cast<DWORD>(final_path.size()), FILE_NAME_NORMALIZED);
+        handle.get(), final_path.data(), static_cast<DWORD>(final_path.size()), FILE_NAME_NORMALIZED);
     if (final_length == 0 || final_length >= final_path.size()) {
-        CloseHandle(handle);
         return Error::invalidArgument("Descriptor final path is unverifiable");
     }
     final_path.resize(final_length);
@@ -207,14 +233,12 @@ Result<std::string> readDescriptorFromValidatedHandle(
     const bool same_parent = std::filesystem::equivalent(
         std::filesystem::path(final_path).parent_path(), directory, equivalent_error);
     if (equivalent_error || !same_parent) {
-        CloseHandle(handle);
         return Error::invalidArgument("Descriptor escaped descriptor directory");
     }
 
     LARGE_INTEGER size{};
-    if (!GetFileSizeEx(handle, &size) || size.QuadPart < 0 ||
+    if (!GetFileSizeEx(handle.get(), &size) || size.QuadPart < 0 ||
         static_cast<uint64_t>(size.QuadPart) > kMaxDescriptorBytes) {
-        CloseHandle(handle);
         return Error::invalidArgument("Descriptor exceeds 64 KiB limit");
     }
     if (opened_hook) opened_hook(path);
@@ -222,21 +246,19 @@ Result<std::string> readDescriptorFromValidatedHandle(
     std::string contents(static_cast<size_t>(size.QuadPart), '\0');
     DWORD bytes_read = 0;
     const bool read_ok = contents.empty() ||
-                         ReadFile(handle, contents.data(), static_cast<DWORD>(contents.size()),
+                         ReadFile(handle.get(), contents.data(), static_cast<DWORD>(contents.size()),
                                   &bytes_read, nullptr);
-    CloseHandle(handle);
     if (!read_ok || bytes_read != contents.size()) {
         return Error::internal("Descriptor read failed");
     }
     return contents;
 #else
-    const int directory_fd = open(directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (directory_fd < 0) return Error::notFound("Session descriptor directory is not readable");
-    const int descriptor_fd = openat(directory_fd, path.filename().c_str(),
-                                     O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    ScopedNativeHandle directory_fd(open(directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+    if (directory_fd.get() < 0) return Error::notFound("Session descriptor directory is not readable");
+    ScopedNativeHandle descriptor_fd(openat(directory_fd.get(), path.filename().c_str(),
+                                            O_RDONLY | O_NOFOLLOW | O_CLOEXEC));
     const int open_error = errno;
-    close(directory_fd);
-    if (descriptor_fd < 0) {
+    if (descriptor_fd.get() < 0) {
         if (open_error == ELOOP) {
             return Error::invalidArgument("Descriptor must not be a symlink or reparse point");
         }
@@ -244,16 +266,13 @@ Result<std::string> readDescriptorFromValidatedHandle(
     }
 
     struct stat info{};
-    if (fstat(descriptor_fd, &info) != 0) {
-        close(descriptor_fd);
+    if (fstat(descriptor_fd.get(), &info) != 0) {
         return Error::notFound("Descriptor is not readable");
     }
     if (!S_ISREG(info.st_mode)) {
-        close(descriptor_fd);
         return Error::invalidArgument("Descriptor must be a regular file");
     }
     if (info.st_size < 0 || static_cast<uint64_t>(info.st_size) > kMaxDescriptorBytes) {
-        close(descriptor_fd);
         return Error::invalidArgument("Descriptor exceeds 64 KiB limit");
     }
     if (opened_hook) opened_hook(path);
@@ -261,15 +280,13 @@ Result<std::string> readDescriptorFromValidatedHandle(
     std::string contents(static_cast<size_t>(info.st_size), '\0');
     size_t offset = 0;
     while (offset < contents.size()) {
-        const auto count = read(descriptor_fd, contents.data() + offset, contents.size() - offset);
+        const auto count = read(descriptor_fd.get(), contents.data() + offset, contents.size() - offset);
         if (count < 0 && errno == EINTR) continue;
         if (count <= 0) {
-            close(descriptor_fd);
             return Error::internal("Descriptor read failed");
         }
         offset += static_cast<size_t>(count);
     }
-    close(descriptor_fd);
     return contents;
 #endif
 }
