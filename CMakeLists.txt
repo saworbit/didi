@@ -26,6 +26,8 @@ set(CORE_SOURCES
     src/common/logger.cpp
     src/common/base64.cpp
     src/common/png.cpp
+    src/common/image_diff.cpp
+    src/common/capture_cache.cpp
     src/common/ipc_channel_win32.cpp
     src/mcp/jsonrpc.cpp
     src/mcp/mcp_server.cpp
@@ -104,6 +106,7 @@ set(TEST_SOURCES
     tests/test_script_patch.cpp
     tests/test_resource_indexer.cpp
     tests/test_project_search.cpp
+    tests/test_image_diff.cpp
 )
 
 add_executable(didi_tests ${TEST_SOURCES})

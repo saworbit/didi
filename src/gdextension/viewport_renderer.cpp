@@ -4,10 +4,28 @@
 #include "didi/common/base64.hpp"
 #include "didi/common/png.hpp"
 #include "didi/common/logger.hpp"
+#include <algorithm>
 #include <cmath>
+#include <random>
 
 namespace didi {
 namespace godot {
+
+namespace {
+
+std::string makeCaptureId() {
+    static constexpr char digits[] = "0123456789abcdef";
+    std::random_device entropy;
+    std::string result(32, '0');
+    for (size_t i = 0; i < 16; ++i) {
+        const auto byte = static_cast<uint8_t>(entropy());
+        result[i * 2] = digits[byte >> 4u];
+        result[i * 2 + 1] = digits[byte & 0x0Fu];
+    }
+    return result;
+}
+
+} // namespace
 
 ViewportRenderer& ViewportRenderer::instance() {
     static ViewportRenderer s_instance;
@@ -33,8 +51,15 @@ json ViewportRenderer::captureViewport(const json& params) {
     if (b64_png.empty()) {
         return {{"error", {{"code", 500}, {"message", "Failed to encode captured viewport pixels"}}}};
     }
+    const auto capture_id = makeCaptureId();
+    auto cached = m_captureCache.store(capture_id,
+                                       image::RgbaImage{pixels.width, pixels.height, pixels.rgba});
+    if (cached.isErr()) {
+        return {{"error", {{"code", cached.error().code}, {"message", cached.error().message}}}};
+    }
 
     return {
+        {"capture_id", capture_id},
         {"camera_identifier", cam_id},
         {"resolution", {{"width", pixels.width}, {"height", pixels.height}}},
         {"format", "image/png"},
