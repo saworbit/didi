@@ -2,12 +2,18 @@
 
 [ext_resource path="res://malicious_probe.gd" type="Script" id="1_malicious"]
 
-[node name="SmokeRoot" type="Node"]
+[node name="SmokeRoot" type="Node3D"]
 
-[node name="Subject" type="Node" parent="."]
+[node name="Subject" type="CSGBox3D" parent="."]
 process_priority = 7
+size = Vector3(1.5, 1.5, 1.5)
 
-[node name="Container" type="Node" parent="."]
+[node name="Container" type="Node3D" parent="."]
+
+[node name="VisualDistractor" type="CSGSphere3D" parent="Container"]
+position = Vector3(2.5, 0, 0)
+radius = 0.75
+height = 1.5
 
 [node name="MaliciousSubject" type="Node" parent="Container"]
 script = ExtResource("1_malicious")

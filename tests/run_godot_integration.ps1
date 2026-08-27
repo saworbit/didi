@@ -720,6 +720,62 @@ try {
     Assert-True ($captureMetadata.resolution.width -eq $pngWidth) "Viewport metadata width did not match PNG IHDR width."
     Assert-True ($captureMetadata.resolution.height -eq $pngHeight) "Viewport metadata height did not match PNG IHDR height."
 
+    # Re-open the canonical fixture and obtain a baseline whose process-local cache ID is
+    # consumed by a subsequent MCP process while the same editor extension remains alive.
+    $phase4BaselineRequests = @(
+        (@{ jsonrpc = "2.0"; id = 400; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 401 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 402 "scene_open" @{ scene_path = "res://main.tscn" }),
+        (Tool-Request 403 "viewport_capture_frame" @{ camera_identifier = "active_editor_view" }),
+        (Tool-Request 404 "project_search_text" @{ query = "DIDI_PHASE4_SEARCH_PROBE"; search_path = "res://tests/godot_smoke"; extensions = @(".gd"); max_results = 10 }),
+        (Tool-Request 405 "project_search_symbols" @{ query = "phase_four_probe"; search_path = "res://tests/godot_smoke"; extensions = @(".gd"); match = "exact"; kinds = @("function"); max_results = 10 })
+    )
+    $rawPhase4BaselineResponses = $phase4BaselineRequests | & $didiExecutable
+    $phase4BaselineResponses = @($rawPhase4BaselineResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
+    Assert-True ($LASTEXITCODE -eq 0) "Phase 4 baseline MCP process exited with $LASTEXITCODE."
+    $phase4BaselineById = @{}
+    foreach ($response in $phase4BaselineResponses) { $phase4BaselineById[[int]$response.id] = $response }
+    Assert-True ((Tool-Payload $phase4BaselineById[402]).opened -eq $true) "Phase 4 fixture scene could not be reopened."
+    $phase4Baseline = Tool-Payload $phase4BaselineById[403]
+    Assert-True ($phase4Baseline.capture_id -match '^[0-9a-f]{32}$') "Live baseline capture did not return a bounded process-local ID."
+    $textSearch = Tool-Payload $phase4BaselineById[404]
+    Assert-True ($textSearch.execution_mode -eq "offline_fallback" -and @($textSearch.matches).Count -eq 2) "Bounded project text search did not find the fixture probe."
+    Assert-True ($textSearch.matches[0].path -eq "res://tests/godot_smoke/subject.gd") "Project text search leaked a non-resource result path."
+    $symbolSearch = Tool-Payload $phase4BaselineById[405]
+    Assert-True ($symbolSearch.lexical -eq $true -and @($symbolSearch.matches).Count -eq 1) "Lexical symbol search did not find exactly one fixture function."
+    Assert-True ($symbolSearch.matches[0].name -eq "phase_four_probe" -and $symbolSearch.matches[0].kind -eq "function") "Symbol search returned the wrong declaration."
+
+    $phase4Requests = @(
+        (@{ jsonrpc = "2.0"; id = 410; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 411 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 412 "viewport_capture_frame" @{ camera_identifier = "active_editor_view"; node_isolation_path = "/root/SmokeRoot/Subject"; isolation_background = "original" }),
+        (Tool-Request 413 "scene_get_property" @{ target_node = "/root/SmokeRoot/Container"; property_name = "visible" }),
+        (Tool-Request 414 "asset_reimport" @{ paths = @("res://reimport_probe.svg"); timeout_ms = 10000 }),
+        (Tool-Request 415 "scene_set_property" @{ target_node = "/root/SmokeRoot/Container"; property_name = "visible"; value = $false }),
+        (Tool-Request 416 "viewport_diff_capture" @{ baseline_capture_id = $phase4Baseline.capture_id; camera_identifier = "active_editor_view"; threshold = 0 }),
+        (Tool-Request 417 "editor_undo" @{}),
+        (Tool-Request 418 "viewport_diff_capture" @{ baseline_capture_id = $phase4Baseline.capture_id; camera_identifier = "active_editor_view"; threshold = 0 }),
+        (Tool-Request 419 "scene_get_property" @{ target_node = "/root/SmokeRoot/Container"; property_name = "visible" })
+    )
+    $rawPhase4Responses = $phase4Requests | & $didiExecutable
+    $phase4Responses = @($rawPhase4Responses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
+    Assert-True ($LASTEXITCODE -eq 0) "Phase 4 verification MCP process exited with $LASTEXITCODE."
+    $phase4ById = @{}
+    foreach ($response in $phase4Responses) { $phase4ById[[int]$response.id] = $response }
+    $isolated = Tool-Payload $phase4ById[412]
+    Assert-True ($isolated.isolated -eq $true -and $isolated.state_restored -eq $true) "Isolated capture did not confirm reversible state restoration."
+    Assert-True ($isolated.node_isolation_path -eq "/root/SmokeRoot/Subject" -and $isolated.temporarily_hidden_count -ge 1) "Isolated capture did not canonicalize the target or hide unrelated visual branches."
+    Assert-True ((Tool-Payload $phase4ById[413]).value -eq $true) "Isolation left an unrelated visual branch hidden."
+    $reimport = Tool-Payload $phase4ById[414]
+    Assert-True ($reimport.accepted_count -eq 1 -and $reimport.idle -eq $true) "Editor-backed asset reimport did not reach a stable idle state."
+    $changedDiff = Tool-Payload $phase4ById[416]
+    Assert-True ($changedDiff.changed_pixels -gt 0 -and $null -ne $changedDiff.bounding_box) "Visual mutation did not produce a bounded non-empty pixel diff."
+    Assert-True ($changedDiff.comparison_capture_id -match '^[0-9a-f]{32}$') "Viewport diff did not retain the fresh comparison capture."
+    Assert-True (@($phase4ById[416].result.content | Where-Object type -eq "image").Count -eq 1) "Viewport diff did not return exactly one PNG content item."
+    $restoredDiff = Tool-Payload $phase4ById[418]
+    Assert-True ($restoredDiff.identical -eq $true -and $restoredDiff.changed_pixels -eq 0) "Undo did not restore an exact baseline viewport at threshold zero."
+    Assert-True ((Tool-Payload $phase4ById[419]).value -eq $true) "Visual mutation undo did not restore scene visibility."
+
     Assert-True $byId[20].result.isError "Unimplemented signal tool returned fake success."
     Assert-True ($byId[20].result.content[0].text -match "no trustworthy execution path") "Unimplemented tool error is not actionable."
     Assert-True $byId[21].result.isError "Missing node lookup returned fake success."
@@ -1013,6 +1069,8 @@ try {
         @($rawGameDiscovery)
         @($rawRuntimeResponses)
         @($rawResponses)
+        @($rawPhase4BaselineResponses)
+        @($rawPhase4Responses)
         @($rawNextLogResponses)
         @($rawStopResponses)
         @($rawCleanupResponses)
@@ -1037,7 +1095,7 @@ try {
     })
     Assert-True ($unexpectedSourceArtifacts.Count -eq 0) "Integration generated artifacts in the checked-in source fixture."
     $integrationSucceeded = $true
-    Write-Output "Godot integration passed: Phase 1/2 editor workflows plus concurrent Phase 3 game tree and execution control."
+    Write-Output "Godot integration passed: Phase 1-4 editor/runtime workflows, bounded search/reimport, and reversible live visual diff."
 }
 catch {
     $primaryFailureMessage = $_.Exception.Message
