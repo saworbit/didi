@@ -8,6 +8,7 @@
 #include <sstream>
 #include <chrono>
 #include <iomanip>
+#include <functional>
 
 namespace didi {
 
@@ -21,12 +22,15 @@ enum class LogLevel {
 
 class Logger {
 public:
+    using LogSink = std::function<void(LogLevel, std::string_view, std::string_view)>;
+
     static Logger& instance();
 
     void setLevel(LogLevel level);
     LogLevel getLevel() const;
 
     void log(LogLevel level, std::string_view tag, std::string_view message);
+    void setSink(LogSink sink);
 
     template <typename... Args>
     void debug(std::string_view tag, Args&&... args) {
@@ -54,7 +58,6 @@ private:
 
     template <typename... Args>
     void logFormat(LogLevel level, std::string_view tag, Args&&... args) {
-        if (level < m_level.load(std::memory_order_relaxed)) return;
         std::ostringstream ss;
         (ss << ... << args);
         log(level, tag, ss.str());
@@ -62,6 +65,7 @@ private:
 
     std::atomic<LogLevel> m_level{LogLevel::Info};
     mutable std::mutex m_mutex;
+    LogSink m_sink;
 };
 
 #define DIDI_LOG_DEBUG(tag, ...) ::didi::Logger::instance().debug(tag, __VA_ARGS__)

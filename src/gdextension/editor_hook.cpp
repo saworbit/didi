@@ -27,10 +27,26 @@ EditorHook& EditorHook::instance() {
 }
 
 EditorHook::EditorHook() {
-    // Queue is pumped by Godot's registered main-loop frame callback.
+    std::weak_ptr<RuntimeLogRing> logs = m_runtimeLogs;
+    Logger::instance().setSink([logs](LogLevel level, std::string_view source, std::string_view message) {
+        const auto ring = logs.lock();
+        if (!ring) return;
+        const char* name = "info";
+        switch (level) {
+            case LogLevel::Debug: name = "debug"; break;
+            case LogLevel::Info: name = "info"; break;
+            case LogLevel::Warn: name = "warning"; break;
+            case LogLevel::Error: name = "error"; break;
+            case LogLevel::None: return;
+        }
+        ring->append(name, source, message);
+    });
+    DIDI_LOG_INFO("EDITOR_HOOK", "Runtime log stream initialized");
 }
 
-EditorHook::~EditorHook() = default;
+EditorHook::~EditorHook() {
+    Logger::instance().setSink({});
+}
 
 CommandTicket EditorHook::postCommand(const std::string& method, const json& params) {
     auto prom = std::make_shared<std::promise<json>>();
@@ -78,7 +94,7 @@ void EditorHook::processQueue() {
             cmd.control->markCompleted();
             fulfillCommand(cmd.response_promise, cmd.control, std::move(result));
         } catch (const std::exception& e) {
-            DIDI_LOG_ERROR("EDITOR_HOOK", "Exception executing command '", cmd.method, "': ", e.what());
+            DIDI_LOG_ERROR("EDITOR_HOOK", "Exception executing command: ", cmd.method);
             cmd.control->markCompleted();
             fulfillCommand(cmd.response_promise, cmd.control,
                            {{"error", {{"code", 500}, {"message", e.what()}}}});
@@ -125,7 +141,39 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         return ViewportRenderer::instance().captureViewport(params);
     }
     if (method == "runtime.getLogs") {
-        return {{"execution_mode", "live"}, {"logs", getRecentLogs()}};
+        uint64_t cursor = 0;
+        size_t limit = 100;
+        std::string minimum_level = "debug";
+        if (!params.is_object()) {
+            return {{"error", {{"code", 400}, {"message", "Invalid runtime log request: params must be an object"}}}};
+        }
+        if (params.contains("cursor")) {
+            const auto& value = params["cursor"];
+            if ((!value.is_number_integer() && !value.is_number_unsigned()) ||
+                (value.is_number_integer() && value.get<int64_t>() < 0)) {
+                return {{"error", {{"code", 400}, {"message", "Invalid runtime log request: cursor must be a non-negative integer"}}}};
+            }
+            cursor = value.get<uint64_t>();
+        }
+        if (params.contains("limit")) {
+            const auto& value = params["limit"];
+            if ((!value.is_number_integer() && !value.is_number_unsigned()) ||
+                (value.is_number_integer() && value.get<int64_t>() < 1) ||
+                value.get<uint64_t>() > 500) {
+                return {{"error", {{"code", 400}, {"message", "Invalid runtime log request: limit must be an integer from 1 to 500"}}}};
+            }
+            limit = static_cast<size_t>(value.get<uint64_t>());
+        }
+        if (params.contains("minimum_level")) {
+            if (!params["minimum_level"].is_string() ||
+                !RuntimeLogRing::isValidLevel(params["minimum_level"].get<std::string>())) {
+                return {{"error", {{"code", 400}, {"message", "Invalid runtime log request: minimum_level must be debug, info, warning, or error"}}}};
+            }
+            minimum_level = params["minimum_level"].get<std::string>();
+        }
+        auto page = m_runtimeLogs->read(cursor, limit, minimum_level);
+        page["execution_mode"] = "live";
+        return page;
     }
 
     static const std::unordered_set<std::string> offline_only = {
@@ -153,26 +201,8 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
     return {{"error", {{"code", 404}, {"message", "Unknown method: " + method}}}};
 }
 
-void EditorHook::addLogMessage(const std::string& level, const std::string& message) {
-    std::lock_guard<std::mutex> lock(m_logMutex);
-    m_logBuffer.push_back({
-        {"level", level},
-        {"message", message},
-        {"timestamp", ""}
-    });
-    if (m_logBuffer.size() > 500) {
-        m_logBuffer.erase(m_logBuffer.begin());
-    }
-}
-
-json EditorHook::getRecentLogs(size_t max_count) {
-    std::lock_guard<std::mutex> lock(m_logMutex);
-    json logs = json::array();
-    size_t start = (m_logBuffer.size() > max_count) ? (m_logBuffer.size() - max_count) : 0;
-    for (size_t i = start; i < m_logBuffer.size(); ++i) {
-        logs.push_back(m_logBuffer[i]);
-    }
-    return logs;
+RuntimeLogRing& EditorHook::runtimeLogs() {
+    return *m_runtimeLogs;
 }
 
 } // namespace godot

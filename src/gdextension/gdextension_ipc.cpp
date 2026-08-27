@@ -21,6 +21,9 @@ GDExtensionIpc::~GDExtensionIpc() {
 bool GDExtensionIpc::start(const std::string& kind, const std::string& project_path) {
     if (!m_server || m_server->isRunning()) return false;
 
+    // Establish the logger mirror before lifecycle events are emitted.
+    EditorHook::instance();
+
     const auto prepared = m_sessionHost.prepare(kind, project_path);
     if (prepared.isErr()) {
         DIDI_LOG_ERROR("GDEXT_IPC", "Unable to prepare runtime session: ", prepared.error().message);
@@ -47,6 +50,7 @@ bool GDExtensionIpc::start(const std::string& kind, const std::string& project_p
         json params = sanitized.value("params", json::object());
 
         if (method == "session.handshake") {
+            DIDI_LOG_INFO("GDEXT_IPC", "Authenticated runtime session handshake completed");
             return {{"status", "ok"},
                     {"session_id", session->session_id},
                     {"protocol_version", session->protocol_version},
@@ -55,14 +59,24 @@ bool GDExtensionIpc::start(const std::string& kind, const std::string& project_p
                     {"pid", session->pid}};
         }
 
-        DIDI_LOG_DEBUG("GDEXT_IPC", "Handling request: ", method);
+        DIDI_LOG_INFO("GDEXT_IPC", "Live command started: ", method);
 
         // Forward to EditorHook to execute safely on Godot's Main Thread
         auto ticket = EditorHook::instance().postCommand(method, params);
 
         auto status = ticket.response.wait_for(std::chrono::seconds(15));
         if (status == std::future_status::ready) {
-            return ticket.response.get();
+            auto response = ticket.response.get();
+            if (response.contains("error")) {
+                EditorHook::instance().runtimeLogs().append("error", "GDEXT_IPC", "Live command failed",
+                                                            {{"method", method}, {"code", response["error"].value("code", 500)}});
+            } else {
+                DIDI_LOG_INFO("GDEXT_IPC", "Live command completed: ", method);
+            }
+            if (method == "runtime.getLogs" && !response.contains("error")) {
+                response["session"] = session->toJson();
+            }
+            return response;
         }
 
         if (ticket.control && ticket.control->tryCancelPending()) {
@@ -76,7 +90,17 @@ bool GDExtensionIpc::start(const std::string& kind, const std::string& project_p
 
         DIDI_LOG_WARN("GDEXT_IPC", "Command exceeded timeout after execution started; waiting for definitive result: ", method);
         ticket.response.wait();
-        return ticket.response.get();
+        auto response = ticket.response.get();
+        if (response.contains("error")) {
+            EditorHook::instance().runtimeLogs().append("error", "GDEXT_IPC", "Live command failed",
+                                                        {{"method", method}, {"code", response["error"].value("code", 500)}});
+        } else {
+            DIDI_LOG_INFO("GDEXT_IPC", "Live command completed: ", method);
+        }
+        if (method == "runtime.getLogs" && !response.contains("error")) {
+            response["session"] = session->toJson();
+        }
+        return response;
     });
 
     const auto started = m_sessionHost.startServer(*m_server);
@@ -89,6 +113,7 @@ bool GDExtensionIpc::start(const std::string& kind, const std::string& project_p
 }
 
 void GDExtensionIpc::stop() {
+    DIDI_LOG_INFO("GDEXT_IPC", "Runtime session shutdown requested");
     EditorHook::instance().cancelPendingCommands("Godot runtime session is shutting down");
     if (m_server && m_server->isRunning()) {
         m_server->stop();

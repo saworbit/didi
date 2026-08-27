@@ -68,6 +68,26 @@ static void test_runtime_get_session_is_local_and_attach_rejects_non_string_id()
     reg.setIpcClient(nullptr);
 }
 
+static void test_runtime_read_logs_rejects_invalid_cursor_limit_and_level() {
+    // Break caught: malformed polling inputs reach a live session instead of producing a local validation error.
+    auto& reg = didi::mcp::ToolRegistry::instance();
+    reg.registerAllDefaultTools();
+    reg.setIpcClient(std::make_shared<DisconnectedIpcClient>());
+
+    for (const auto& args : {
+        didi::json{{"cursor", -1}},
+        didi::json{{"limit", 0}},
+        didi::json{{"limit", 501}},
+        didi::json{{"minimum_level", "fatal"}},
+        didi::json{{"minimum_level", 3}}
+    }) {
+        const auto result = reg.callTool("runtime_read_logs", args);
+        ASSERT_TRUE(result.isError);
+        ASSERT_TRUE(result.content[0].text.find("Invalid runtime log request") != std::string::npos);
+    }
+    reg.setIpcClient(nullptr);
+}
+
 static void test_tool_registry_default_tools() {
     auto& reg = didi::mcp::ToolRegistry::instance();
     reg.registerAllDefaultTools();
@@ -318,6 +338,10 @@ static void test_tool_capture_viewport_with_ipc() {
     ASSERT_EQ(result.content[1].mimeType, "image/png");
     ASSERT_TRUE(!result.content[1].data.empty());
 
+    const auto live_logs = reg.callTool("runtime_read_logs", {{"cursor", 0}, {"limit", 1}});
+    ASSERT_TRUE(live_logs.isError);
+    ASSERT_TRUE(live_logs.content[0].text.find("simulated live log failure") != std::string::npos);
+
     auto reflected = reg.callTool("script_reflect_class", {{"class_name", "CharacterBody3D"}});
     ASSERT_TRUE(!reflected.isError);
     auto reflected_json = didi::json::parse(reflected.content[0].text);
@@ -333,9 +357,26 @@ static void test_tool_capture_viewport_with_ipc() {
     ASSERT_TRUE(project_tree_json.contains("total_resources"));
 
     auto runtime_logs = resources.readResource("godot://runtime/logs");
-    ASSERT_TRUE(runtime_logs.isOk());
-    auto runtime_logs_json = didi::json::parse(runtime_logs.value());
-    ASSERT_EQ(runtime_logs_json["execution_mode"], "offline_fallback");
+    ASSERT_TRUE(runtime_logs.isErr());
+    ASSERT_EQ(runtime_logs.error().code, 500);
+    ASSERT_TRUE(runtime_logs.error().message.find("simulated live log failure") != std::string::npos);
+
+    didi::mcp::McpServer mcp_server;
+    mcp_server.setIpcClient(client);
+    didi::mcp::JsonRpcRequest initialize_request;
+    initialize_request.id = 6;
+    initialize_request.method = "initialize";
+    initialize_request.params = didi::json::object();
+    ASSERT_TRUE(!mcp_server.handleRequest(initialize_request).error.has_value());
+    didi::mcp::JsonRpcRequest resource_request;
+    resource_request.id = 7;
+    resource_request.method = "resources/read";
+    resource_request.params = {{"uri", "godot://runtime/logs"}};
+    const auto resource_response = mcp_server.handleRequest(resource_request);
+    ASSERT_TRUE(resource_response.error.has_value());
+    ASSERT_EQ(resource_response.error->code, 500);
+    ASSERT_EQ(resource_response.error->data["execution_mode"], "live");
+    ASSERT_EQ(resource_response.error->data["error"]["code"], 500);
 
     auto attach = reg.callTool("script_attach_to_node", {
         {"target_node", "/root/SmokeRoot/Subject"},
@@ -462,6 +503,7 @@ struct RegisterToolTests {
         registerTest("Tools.DefaultRegistration", test_tool_registry_default_tools);
         registerTest("McpServer.PreservesInjectedIpcClient", test_mcp_server_preserves_injected_ipc_client);
         registerTest("Tools.RuntimeSessionLocalAndValidated", test_runtime_get_session_is_local_and_attach_rejects_non_string_id);
+        registerTest("Tools.RuntimeReadLogsInputValidation", test_runtime_read_logs_rejects_invalid_cursor_limit_and_level);
         registerTest("Tools.HonestCapabilities", test_tool_capabilities_are_honest);
         registerTest("Tools.CaptureViewportWithIpc", test_tool_capture_viewport_with_ipc);
         registerTest("Tools.CaptureViewportOfflineAttribution", test_tool_capture_viewport_offline_is_attributed);

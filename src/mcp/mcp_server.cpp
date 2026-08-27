@@ -168,7 +168,8 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         }
         auto read_res = ResourceRegistry::instance().readResource(uri);
         if (read_res.isErr()) {
-            return JsonRpcResponse::makeError(req.id, read_res.error().code, read_res.error().message);
+            return JsonRpcResponse::makeError(req.id, read_res.error().code, read_res.error().message,
+                                              read_res.error().data);
         }
         auto r_def = ResourceRegistry::instance().getResource(uri);
         std::string mime = r_def ? r_def->mimeType : "text/plain";

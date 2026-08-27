@@ -9,6 +9,35 @@ namespace mcp {
 
 namespace {
 
+std::optional<std::string> validateRuntimeLogRequest(const json& args) {
+    if (!args.is_object()) return "params must be an object";
+    if (args.contains("cursor")) {
+        const auto& cursor = args["cursor"];
+        if ((!cursor.is_number_integer() && !cursor.is_number_unsigned()) ||
+            (cursor.is_number_integer() && cursor.get<int64_t>() < 0)) {
+            return "cursor must be a non-negative integer";
+        }
+    }
+    if (args.contains("limit")) {
+        const auto& limit = args["limit"];
+        if ((!limit.is_number_integer() && !limit.is_number_unsigned()) ||
+            (limit.is_number_integer() && limit.get<int64_t>() < 1) ||
+            limit.get<uint64_t>() > 500) {
+            return "limit must be an integer from 1 to 500";
+        }
+    }
+    if (args.contains("minimum_level")) {
+        if (!args["minimum_level"].is_string()) {
+            return "minimum_level must be debug, info, warning, or error";
+        }
+        const auto level = args["minimum_level"].get<std::string>();
+        if (level != "debug" && level != "info" && level != "warning" && level != "error") {
+            return "minimum_level must be debug, info, warning, or error";
+        }
+    }
+    return std::nullopt;
+}
+
 CallToolResult sessionError(const Error& error) {
     return CallToolResult::error(error.message);
 }
@@ -66,7 +95,10 @@ CallToolResult handleRuntimeGetSession(const json&, std::shared_ptr<runtime::IRu
 }
 
 CallToolResult handleRuntimeReadLogs(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    return forwardLiveRuntime("runtime.readLogs", args, ipc);
+    if (const auto error = validateRuntimeLogRequest(args); error.has_value()) {
+        return CallToolResult::error("Invalid runtime log request: " + *error);
+    }
+    return forwardLiveRuntime("runtime.getLogs", args, ipc);
 }
 
 CallToolResult handleRuntimeSetPaused(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

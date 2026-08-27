@@ -30,6 +30,13 @@ LogLevel Logger::getLevel() const {
 }
 
 void Logger::log(LogLevel level, std::string_view tag, std::string_view message) {
+    LogSink sink;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        sink = m_sink;
+    }
+    if (sink) sink(level, tag, message);
+
     if (level < m_level.load(std::memory_order_relaxed)) return;
 
     auto now = std::chrono::system_clock::now();
@@ -58,6 +65,11 @@ void Logger::log(LogLevel level, std::string_view tag, std::string_view message)
               << "." << std::setfill('0') << std::setw(3) << ms.count() << "] "
               << "[" << level_str << "] [" << tag << "]\033[0m "
               << message << std::endl;
+}
+
+void Logger::setSink(LogSink sink) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_sink = std::move(sink);
 }
 
 } // namespace didi

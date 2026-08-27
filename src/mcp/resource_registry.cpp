@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <chrono>
 
 namespace didi {
 namespace mcp {
@@ -108,7 +109,7 @@ void ResourceRegistry::registerAllDefaultResources() {
     ResourceDefinition runtime_logs;
     runtime_logs.uri = "godot://runtime/logs";
     runtime_logs.name = "Godot Runtime Engine Logs";
-    runtime_logs.description = "Didi extension-side log ring when connected, or a minimal server-status payload offline; not a full Godot debugger stream.";
+    runtime_logs.description = "Incremental, sequence-cursored Didi runtime log records when connected, or one explicit standalone-status record offline; not a full Godot debugger stream.";
     runtime_logs.mimeType = "application/json";
     runtime_logs.readHandler = [this]() -> Result<std::string> {
         if (m_ipcClient && m_ipcClient->isConnected()) {
@@ -116,13 +117,21 @@ void ResourceRegistry::registerAllDefaultResources() {
             if (res.isOk()) {
                 return res.value().dump(2);
             }
+            return Error(res.error().code, "Failed to retrieve live runtime logs: " + res.error().message,
+                         {{"execution_mode", "live"},
+                          {"error", {{"code", res.error().code}, {"message", res.error().message}}}});
         }
-        // Check for local engine logs if available
+        const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
         json logs = {
             {"execution_mode", "offline_fallback"},
-            {"logs", json::array({
-                {{"level", "INFO"}, {"message", "Didi MCP server active."}}
-            })}
+            {"records", json::array({
+                {{"sequence", 1}, {"timestamp_ms", now}, {"level", "info"},
+                 {"source", "standalone"}, {"message", "Didi MCP server active; no runtime session is attached."}}
+            })},
+            {"next_cursor", 2},
+            {"oldest_cursor", 1},
+            {"dropped_before_cursor", false}
         };
         return logs.dump(2);
     };

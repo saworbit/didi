@@ -2,6 +2,7 @@
 
 #include "didi/common/types.hpp"
 #include "didi/common/json.hpp"
+#include "didi/gdextension/runtime_log.hpp"
 #include <queue>
 #include <mutex>
 #include <future>
@@ -66,9 +67,7 @@ public:
     void processQueue();
     void cancelPendingCommands(const std::string& reason);
 
-    // Log interceptor ring buffer
-    void addLogMessage(const std::string& level, const std::string& message);
-    json getRecentLogs(size_t max_count = 100);
+    RuntimeLogRing& runtimeLogs();
 
 private:
     EditorHook();
@@ -79,8 +78,7 @@ private:
     std::queue<EngineCommand> m_commandQueue;
     std::mutex m_queueMutex;
 
-    std::vector<json> m_logBuffer;
-    std::mutex m_logMutex;
+    std::shared_ptr<RuntimeLogRing> m_runtimeLogs{std::make_shared<RuntimeLogRing>()};
 };
 
 } // namespace godot
