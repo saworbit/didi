@@ -14,7 +14,11 @@
 #include <cerrno>
 #include <fcntl.h>
 #if defined(__linux__)
+#include <linux/fs.h>
 #include <sys/random.h>
+#include <sys/syscall.h>
+#elif defined(__APPLE__)
+#include <sys/attr.h>
 #endif
 #include <sys/stat.h>
 #include <unistd.h>
@@ -205,13 +209,36 @@ bool isOwnedDescriptor(const std::filesystem::path& path, const runtime::Session
     }
 }
 
-void restoreUnownedDescriptor(const std::filesystem::path& tombstone, const std::filesystem::path& destination) {
+enum class NoReplaceMoveResult {
+    moved,
+    destination_exists,
+    failed,
+};
+
+NoReplaceMoveResult moveNoReplace(const std::filesystem::path& source, const std::filesystem::path& destination) {
 #if defined(_WIN32)
-    MoveFileExA(tombstone.string().c_str(), destination.string().c_str(), MOVEFILE_WRITE_THROUGH);
-#else
-    if (link(tombstone.c_str(), destination.c_str()) == 0) {
-        unlink(tombstone.c_str());
+    if (MoveFileExA(source.string().c_str(), destination.string().c_str(), MOVEFILE_WRITE_THROUGH)) {
+        return NoReplaceMoveResult::moved;
     }
+    const auto error = GetLastError();
+    return (error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS)
+        ? NoReplaceMoveResult::destination_exists
+        : NoReplaceMoveResult::failed;
+#elif defined(__linux__)
+    if (syscall(SYS_renameat2, AT_FDCWD, source.c_str(), AT_FDCWD, destination.c_str(), RENAME_NOREPLACE) == 0) {
+        return NoReplaceMoveResult::moved;
+    }
+    return errno == EEXIST ? NoReplaceMoveResult::destination_exists : NoReplaceMoveResult::failed;
+#elif defined(__APPLE__)
+    if (renamex_np(source.c_str(), destination.c_str(), RENAME_EXCL) == 0) {
+        return NoReplaceMoveResult::moved;
+    }
+    return errno == EEXIST ? NoReplaceMoveResult::destination_exists : NoReplaceMoveResult::failed;
+#else
+    // No portable POSIX no-replace rename exists. Retain the discoverable file rather than risk deletion.
+    (void)source;
+    (void)destination;
+    return NoReplaceMoveResult::failed;
 #endif
 }
 
@@ -303,20 +330,28 @@ Result<json> SessionHost::authorize(const json& request) const {
 void SessionHost::stop() {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_published && m_descriptor.has_value() && isOwnedDescriptor(m_descriptorPath, *m_descriptor)) {
-        if (m_beforeCleanupRenameHook) {
-            m_beforeCleanupRenameHook();
-        }
-        const auto tombstone = m_descriptorPath.string() + ".didi-delete-" + m_descriptor->session_id;
-        std::error_code ec;
-        if (!std::filesystem::exists(tombstone, ec) && !ec) {
-            std::filesystem::rename(m_descriptorPath, tombstone, ec);
-            if (!ec) {
-                if (isOwnedDescriptor(tombstone, *m_descriptor)) {
-                    std::filesystem::remove(tombstone, ec);
-                } else {
-                    restoreUnownedDescriptor(tombstone, m_descriptorPath);
-                }
+        constexpr size_t kRetirementAttempts = 8;
+        for (size_t attempt = 0; attempt < kRetirementAttempts; ++attempt) {
+            const auto nonce = secureRandom(16);
+            if (nonce.isErr()) break;
+            const auto retiredPath = m_descriptorPath.string() + ".didi-retired-" +
+                                     m_descriptor->session_id + "-" + lowerHex(nonce.value());
+            if (m_beforeRetirementHook) {
+                m_beforeRetirementHook(retiredPath);
             }
+            const auto moved = moveNoReplace(m_descriptorPath, retiredPath);
+            if (moved == NoReplaceMoveResult::destination_exists) continue;
+            if (moved != NoReplaceMoveResult::moved) break;
+
+            const bool ownsRetired = isOwnedDescriptor(retiredPath, *m_descriptor);
+            if (m_afterRetiredVerificationHook) {
+                m_afterRetiredVerificationHook(retiredPath);
+            }
+            if (!ownsRetired) {
+                // Restore only if the active descriptor pathname remains vacant; otherwise retain the retired file.
+                (void)moveNoReplace(retiredPath, m_descriptorPath);
+            }
+            break;
         }
     }
     m_published = false;
@@ -324,9 +359,14 @@ void SessionHost::stop() {
     m_descriptorPath.clear();
 }
 
-void SessionHost::setBeforeCleanupRenameHookForTesting(std::function<void()> hook) {
+void SessionHost::setBeforeRetirementHookForTesting(std::function<void(const std::filesystem::path&)> hook) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_beforeCleanupRenameHook = std::move(hook);
+    m_beforeRetirementHook = std::move(hook);
+}
+
+void SessionHost::setAfterRetiredVerificationHookForTesting(std::function<void(const std::filesystem::path&)> hook) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_afterRetiredVerificationHook = std::move(hook);
 }
 
 } // namespace didi::godot

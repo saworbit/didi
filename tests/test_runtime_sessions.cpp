@@ -207,10 +207,18 @@ void test_session_host_publishes_atomically_and_removes_only_its_descriptor() {
     }
     ASSERT_EQ(descriptor_names.size(), 2u);
 
+    const auto active_descriptor_count = [&] {
+        size_t count = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+            if (entry.path().extension() == ".json") ++count;
+        }
+        return count;
+    };
     first.stop();
-    ASSERT_EQ(std::distance(std::filesystem::directory_iterator(directory), std::filesystem::directory_iterator()), 1);
+    ASSERT_EQ(active_descriptor_count(), 1u);
     second.stop();
-    ASSERT_TRUE(std::filesystem::is_empty(directory));
+    ASSERT_EQ(active_descriptor_count(), 0u);
+    ASSERT_EQ(std::distance(std::filesystem::directory_iterator(directory), std::filesystem::directory_iterator()), 2);
 
     clearSessionDirectory();
     std::filesystem::remove_all(directory);
@@ -297,7 +305,7 @@ void test_session_host_cleanup_preserves_same_path_replacement() {
     replacement["kind"] = descriptor->kind;
     replacement["project_path"] = descriptor->project_path;
     replacement["started_at_ms"] = descriptor->started_at_ms;
-    host.setBeforeCleanupRenameHookForTesting([&] {
+    host.setBeforeRetirementHookForTesting([&](const std::filesystem::path&) {
         writeDescriptor(directory, replacement_path.filename().string(), replacement);
     });
     host.stop();
@@ -306,6 +314,101 @@ void test_session_host_cleanup_preserves_same_path_replacement() {
     std::ifstream input(replacement_path, std::ios::binary);
     ASSERT_EQ(didi::json::parse(input)["token"], std::string(64, 'a'));
     input.close();
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
+void test_session_host_retirement_collision_preserves_selected_destination() {
+    // Would fail if retirement overwrote a file created after its destination was selected.
+    const auto directory = makeSessionDirectory();
+    setSessionDirectory(directory);
+    didi::godot::SessionHost host;
+    ASSERT_TRUE(host.prepare("editor", std::filesystem::current_path().string()).isOk());
+    const auto descriptor = host.descriptor();
+    ASSERT_TRUE(descriptor.has_value());
+    ASSERT_TRUE(host.publish().isOk());
+
+    std::filesystem::path collision_path;
+    std::filesystem::path retired_path;
+    bool collision_created = false;
+    auto collision = validDescriptor(descriptor->session_id, descriptor->endpoint);
+    collision["kind"] = descriptor->kind;
+    collision["project_path"] = descriptor->project_path;
+    collision["started_at_ms"] = descriptor->started_at_ms;
+    host.setBeforeRetirementHookForTesting([&](const std::filesystem::path& selected) {
+        if (!collision_created) {
+            collision_created = true;
+            collision_path = selected;
+            writeDescriptor(directory, selected.filename().string(), collision);
+        }
+    });
+    host.setAfterRetiredVerificationHookForTesting([&](const std::filesystem::path& verified) {
+        retired_path = verified;
+    });
+    host.stop();
+
+    ASSERT_TRUE(std::filesystem::exists(collision_path));
+    std::ifstream collision_input(collision_path, std::ios::binary);
+    ASSERT_EQ(didi::json::parse(collision_input)["token"], std::string(64, 'a'));
+    collision_input.close();
+    ASSERT_TRUE(std::filesystem::exists(retired_path));
+    ASSERT_TRUE(retired_path != collision_path);
+    ASSERT_FALSE(std::filesystem::exists(directory / (descriptor->session_id + ".json")));
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
+void test_session_host_retained_file_survives_replacement_after_verification() {
+    // Would fail if cleanup deleted or overwrote the retired pathname after ownership verification.
+    const auto directory = makeSessionDirectory();
+    setSessionDirectory(directory);
+    didi::godot::SessionHost host;
+    ASSERT_TRUE(host.prepare("editor", std::filesystem::current_path().string()).isOk());
+    const auto descriptor = host.descriptor();
+    ASSERT_TRUE(descriptor.has_value());
+    ASSERT_TRUE(host.publish().isOk());
+
+    std::filesystem::path retired_path;
+    auto replacement = validDescriptor(descriptor->session_id, descriptor->endpoint);
+    replacement["kind"] = descriptor->kind;
+    replacement["project_path"] = descriptor->project_path;
+    replacement["started_at_ms"] = descriptor->started_at_ms;
+    host.setAfterRetiredVerificationHookForTesting([&](const std::filesystem::path& verified) {
+        retired_path = verified;
+        writeDescriptor(directory, verified.filename().string(), replacement);
+    });
+    host.stop();
+
+    ASSERT_FALSE(std::filesystem::exists(directory / (descriptor->session_id + ".json")));
+    ASSERT_TRUE(std::filesystem::exists(retired_path));
+    std::ifstream replacement_input(retired_path, std::ios::binary);
+    ASSERT_EQ(didi::json::parse(replacement_input)["token"], std::string(64, 'a'));
+    replacement_input.close();
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
+void test_runtime_session_discovery_ignores_retained_retirement_files() {
+    // Would fail if retained non-.json retirement files appeared as discoverable sessions.
+    const auto directory = makeSessionDirectory();
+    setSessionDirectory(directory);
+    didi::godot::SessionHost host;
+    ASSERT_TRUE(host.prepare("editor", std::filesystem::current_path().string()).isOk());
+    ASSERT_TRUE(host.publish().isOk());
+    std::filesystem::path retired_path;
+    host.setAfterRetiredVerificationHookForTesting([&](const std::filesystem::path& verified) {
+        retired_path = verified;
+    });
+    host.stop();
+
+    ASSERT_TRUE(std::filesystem::exists(retired_path));
+    auto client = didi::runtime::createRuntimeSessionClient(
+        std::filesystem::current_path().string(), [] { return std::make_unique<FakeIpcClient>(); });
+    const auto listed = client->listSessions(std::nullopt);
+    ASSERT_TRUE(listed.isOk());
+    ASSERT_TRUE(listed.value()["sessions"].empty());
+    ASSERT_TRUE(listed.value()["diagnostics"].empty());
+
     clearSessionDirectory();
     std::filesystem::remove_all(directory);
 }
@@ -441,6 +544,12 @@ struct RegisterRuntimeSessionTests {
                      test_session_host_stops_bound_server_when_publication_fails);
         registerTest("RuntimeSessions.HostCleanupPreservesSamePathReplacement",
                      test_session_host_cleanup_preserves_same_path_replacement);
+        registerTest("RuntimeSessions.HostRetirementCollisionPreservesSelectedDestination",
+                     test_session_host_retirement_collision_preserves_selected_destination);
+        registerTest("RuntimeSessions.HostRetainedFileSurvivesReplacementAfterVerification",
+                     test_session_host_retained_file_survives_replacement_after_verification);
+        registerTest("RuntimeSessions.DiscoveryIgnoresRetainedRetirementFiles",
+                     test_runtime_session_discovery_ignores_retained_retirement_files);
     }
 } g_registerRuntimeSessionTests;
 

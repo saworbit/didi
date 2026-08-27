@@ -23,14 +23,16 @@ public:
     Result<json> authorize(const json& request) const;
     void stop();
 
-    // Test seam for proving cleanup never deletes a descriptor replaced after ownership verification.
-    void setBeforeCleanupRenameHookForTesting(std::function<void()> hook);
+    // Test seams for retirement races; production callers leave these unset.
+    void setBeforeRetirementHookForTesting(std::function<void(const std::filesystem::path&)> hook);
+    void setAfterRetiredVerificationHookForTesting(std::function<void(const std::filesystem::path&)> hook);
 
 private:
     std::filesystem::path m_descriptorPath;
     std::optional<runtime::SessionDescriptor> m_descriptor;
     bool m_published{false};
-    std::function<void()> m_beforeCleanupRenameHook;
+    std::function<void(const std::filesystem::path&)> m_beforeRetirementHook;
+    std::function<void(const std::filesystem::path&)> m_afterRetiredVerificationHook;
     mutable std::mutex m_mutex;
 };
 
