@@ -9,6 +9,10 @@ Makefile
 *.cmake
 !CMakeLists.txt
 
+# Python Test & Validation Caches
+__pycache__/
+*.py[cod]
+
 # Compiled Binaries & Libraries
 *.exe
 *.dll

@@ -175,6 +175,13 @@ def _read_required(root: Path, relative_path: str, errors: list[str]) -> str | N
         return None
 
 
+def _include_markdown(root: Path, path: Path) -> bool:
+    relative_parts = path.relative_to(root).parts
+    return not any(part in {".git", ".worktrees", ".superpowers"} for part in relative_parts) and not any(
+        part.startswith("build") for part in relative_parts
+    )
+
+
 def validate_repository(root: Path) -> list[str]:
     root = root.resolve()
     errors: list[str] = []
@@ -239,8 +246,7 @@ def validate_repository(root: Path) -> list[str]:
     markdown = sorted(
         path
         for path in root.rglob("*.md")
-        if not any(part in {".git", ".worktrees", ".superpowers"} for part in path.parts)
-        and not any(part.startswith("build") for part in path.relative_to(root).parts)
+        if _include_markdown(root, path)
     )
     errors.extend(validate_markdown_links(root, markdown))
     return errors
@@ -262,8 +268,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     markdown_count = sum(
         1
         for path in arguments.root.rglob("*.md")
-        if not any(part in {".git", ".worktrees", ".superpowers"} for part in path.parts)
-        and not any(part.startswith("build") for part in path.relative_to(arguments.root).parts)
+        if _include_markdown(arguments.root, path)
     )
     print(f"Documentation contract valid ({markdown_count} Markdown files, version sources aligned)")
     return 0

@@ -181,6 +181,16 @@ Second section.
 
         self.assertTrue(any("missing anchor" in error for error in errors), errors)
 
+    def test_validates_links_when_repository_parent_is_a_hidden_worktree(self):
+        self.root = self.root / ".worktrees" / "documentation-branch"
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        self.write("README.md", readme + "\n[Missing](docs/NOPE.md)\n")
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(any("missing target" in error for error in errors), errors)
+
 
 if __name__ == "__main__":
     unittest.main()
