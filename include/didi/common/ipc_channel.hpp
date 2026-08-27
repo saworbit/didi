@@ -6,6 +6,7 @@
 #include <memory>
 #include <chrono>
 #include <atomic>
+#include <optional>
 #include "types.hpp"
 #include "protocol.hpp"
 
@@ -15,6 +16,37 @@ namespace ipc {
 inline constexpr int kWaitForDefinitiveResponse = -1;
 
 using MessageHandler = std::function<json(const json& request)>;
+
+struct TransportFailureState {
+    bool request_started{false};
+    bool outcome_unknown{false};
+    bool timed_out{false};
+};
+
+inline Error transportFailure(std::string message, TransportFailureState state) {
+    if (!state.request_started) state.outcome_unknown = false;
+    return Error(
+        state.timed_out ? 504 : 502, std::move(message),
+        {{"transport", {{"request_started", state.request_started},
+                         {"outcome_unknown", state.outcome_unknown},
+                         {"timed_out", state.timed_out}}}});
+}
+
+inline std::optional<TransportFailureState> transportFailureState(const Error& error) {
+    if (!error.data.is_object() || !error.data.contains("transport") ||
+        !error.data["transport"].is_object()) {
+        return std::nullopt;
+    }
+    const auto& state = error.data["transport"];
+    if (!state.contains("request_started") || !state["request_started"].is_boolean() ||
+        !state.contains("outcome_unknown") || !state["outcome_unknown"].is_boolean() ||
+        !state.contains("timed_out") || !state["timed_out"].is_boolean()) {
+        return std::nullopt;
+    }
+    return TransportFailureState{state["request_started"].get<bool>(),
+                                 state["outcome_unknown"].get<bool>(),
+                                 state["timed_out"].get<bool>()};
+}
 
 class IIpcClient {
 public:

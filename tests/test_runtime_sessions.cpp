@@ -323,7 +323,16 @@ void test_session_host_publishes_atomically_and_removes_only_its_descriptor() {
     ASSERT_EQ(active_descriptor_count(), 1u);
     second.stop();
     ASSERT_EQ(active_descriptor_count(), 0u);
+#if defined(_WIN32)
     ASSERT_TRUE(std::filesystem::is_empty(directory));
+#else
+    size_t retained_tombstones = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+        ASSERT_TRUE(entry.path().filename().string().find(".didi-retired-") != std::string::npos);
+        ++retained_tombstones;
+    }
+    ASSERT_EQ(retained_tombstones, 2u);
+#endif
 
     clearSessionDirectory();
     std::filesystem::remove_all(directory);
@@ -456,7 +465,11 @@ void test_session_host_retirement_collision_preserves_selected_destination() {
     std::ifstream collision_input(collision_path, std::ios::binary);
     ASSERT_EQ(didi::json::parse(collision_input)["token"], std::string(64, 'a'));
     collision_input.close();
+#if defined(_WIN32)
     ASSERT_FALSE(std::filesystem::exists(retired_path));
+#else
+    ASSERT_TRUE(std::filesystem::exists(retired_path));
+#endif
     ASSERT_TRUE(retired_path != collision_path);
     ASSERT_FALSE(std::filesystem::exists(directory / (descriptor->session_id + ".json")));
     clearSessionDirectory();
@@ -774,6 +787,51 @@ void test_session_registry_uid_qualifies_temporary_fallback() {
     ASSERT_EQ(resolved.value().filename(), "didi-sessions-" + std::to_string(geteuid()));
 }
 
+void test_session_registry_relative_xdg_falls_back_to_uid_temporary() {
+    // Break caught: a malformed relative XDG path disables discovery instead of using the secure fallback.
+    clearSessionDirectory();
+    setenv("XDG_RUNTIME_DIR", "relative/runtime", 1);
+    const auto resolved = didi::runtime::resolveSessionDescriptorDirectory();
+    unsetenv("XDG_RUNTIME_DIR");
+    ASSERT_TRUE(resolved.isOk());
+    ASSERT_EQ(resolved.value().filename(), "didi-sessions-" + std::to_string(geteuid()));
+    ASSERT_TRUE(resolved.value().is_absolute());
+}
+
+void test_posix_retirement_retains_final_path_replacement() {
+    // Break caught: fstatat followed by unlinkat can delete a replacement in the final name race.
+    const auto directory = makeSessionDirectory();
+    setSessionDirectory(directory);
+    didi::godot::SessionHost host;
+    ASSERT_TRUE(host.prepare("editor", std::filesystem::current_path().string()).isOk());
+    const auto descriptor = host.descriptor();
+    ASSERT_TRUE(descriptor.has_value());
+    ASSERT_TRUE(host.publish().isOk());
+
+    std::filesystem::path tombstone;
+    std::filesystem::path verified_original;
+    auto replacement = descriptor->toJson(true);
+    replacement["token"] = std::string(64, 'b');
+    const auto outcome = didi::runtime::retireOwnedSessionDescriptor(
+        directory / (descriptor->session_id + ".json"), *descriptor, {}, {},
+        [&](const std::filesystem::path& final_path) {
+            tombstone = final_path;
+            verified_original = directory / "verified-original.retained";
+            std::filesystem::rename(final_path, verified_original);
+            writeDescriptor(directory, final_path.filename().string(), replacement);
+        });
+
+    ASSERT_EQ(outcome, didi::runtime::DescriptorRetirementOutcome::retained_collision_or_race);
+    ASSERT_TRUE(std::filesystem::exists(verified_original));
+    ASSERT_TRUE(std::filesystem::exists(tombstone));
+    std::ifstream replacement_input(tombstone, std::ios::binary);
+    ASSERT_EQ(didi::json::parse(replacement_input)["token"], std::string(64, 'b'));
+    replacement_input.close();
+    host.stop();
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
 void test_session_discovery_rejects_permissive_registry_directory() {
     // Break caught: discovery trusts a registry directory writable/readable by another user.
     const auto directory = makeSessionDirectory();
@@ -910,6 +968,10 @@ struct RegisterRuntimeSessionTests {
                      test_session_registry_prefers_xdg_runtime_directory);
         registerTest("RuntimeSessions.RegistryFallbackIsUidQualified",
                      test_session_registry_uid_qualifies_temporary_fallback);
+        registerTest("RuntimeSessions.RelativeXdgFallsBackToUidTemporary",
+                     test_session_registry_relative_xdg_falls_back_to_uid_temporary);
+        registerTest("RuntimeSessions.PosixRetirementRetainsFinalPathReplacement",
+                     test_posix_retirement_retains_final_path_replacement);
         registerTest("RuntimeSessions.RejectsPermissiveRegistryDirectory",
                      test_session_discovery_rejects_permissive_registry_directory);
         registerTest("RuntimeSessions.RejectsPermissiveDescriptorFile",

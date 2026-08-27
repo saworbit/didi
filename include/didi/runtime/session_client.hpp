@@ -45,7 +45,8 @@ DescriptorRetirementOutcome retireOwnedSessionDescriptor(
     const std::filesystem::path& path,
     const SessionDescriptor& descriptor,
     const std::function<void(const std::filesystem::path&)>& before_move = {},
-    const std::function<void(const std::filesystem::path&)>& after_verification = {});
+    const std::function<void(const std::filesystem::path&)>& after_verification = {},
+    const std::function<void(const std::filesystem::path&)>& before_final_delete = {});
 
 class IRuntimeSessionClient : public ipc::IIpcClient {
 public:

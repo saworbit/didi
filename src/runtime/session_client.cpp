@@ -57,10 +57,7 @@ Result<std::filesystem::path> resolveSessionDescriptorDirectory() {
     const char* xdg_runtime = std::getenv("XDG_RUNTIME_DIR");
     if (xdg_runtime && *xdg_runtime) {
         const std::filesystem::path root(xdg_runtime);
-        if (!root.is_absolute()) {
-            return Error::invalidArgument("XDG_RUNTIME_DIR must be an absolute path");
-        }
-        return root.lexically_normal() / "didi-sessions";
+        if (root.is_absolute()) return root.lexically_normal() / "didi-sessions";
     }
 #endif
     const auto temporary = std::filesystem::temp_directory_path(error);
@@ -429,44 +426,66 @@ Result<std::string> retirementNonce() {
     return encoded;
 }
 
-bool deleteOwnedDescriptorIfSame(const std::filesystem::path& path,
-                                 const SessionDescriptor& descriptor,
-                                 const DescriptorFileIdentity& expected_identity) {
+enum class OwnedDescriptorDeleteResult {
+    deleted,
+    identity_race,
+    unavailable,
+};
+
+OwnedDescriptorDeleteResult deleteOwnedDescriptorIfSame(
+    const std::filesystem::path& path,
+    const SessionDescriptor& descriptor,
+    const DescriptorFileIdentity& expected_identity,
+    const std::function<void(const std::filesystem::path&)>& before_final_delete) {
 #if defined(_WIN32)
     ScopedNativeHandle handle(CreateFileW(
         path.wstring().c_str(), GENERIC_READ | DELETE,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
         FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
-    if (handle.get() == INVALID_HANDLE_VALUE) return false;
+    if (handle.get() == INVALID_HANDLE_VALUE) return OwnedDescriptorDeleteResult::unavailable;
     const auto snapshot = readSecureDescriptorHandle(handle.get());
     if (snapshot.isErr() || !(snapshot.value().second == expected_identity) ||
         !descriptorMatchesOwner(snapshot.value().first, descriptor)) {
-        return false;
+        return OwnedDescriptorDeleteResult::identity_race;
     }
+    if (before_final_delete) before_final_delete(path);
     FILE_DISPOSITION_INFO disposition{};
     disposition.DeleteFile = TRUE;
     return SetFileInformationByHandle(handle.get(), FileDispositionInfo, &disposition,
-                                      sizeof(disposition)) != 0;
+                                      sizeof(disposition)) != 0
+               ? OwnedDescriptorDeleteResult::deleted
+               : OwnedDescriptorDeleteResult::unavailable;
 #else
     ScopedNativeHandle directory_fd(open(path.parent_path().c_str(),
                                          O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
-    if (directory_fd.get() < 0) return false;
+    if (directory_fd.get() < 0) return OwnedDescriptorDeleteResult::unavailable;
     ScopedNativeHandle handle(openat(directory_fd.get(), path.filename().c_str(),
                                      O_RDONLY | O_NOFOLLOW | O_CLOEXEC));
-    if (handle.get() < 0) return false;
+    if (handle.get() < 0) return OwnedDescriptorDeleteResult::unavailable;
     const auto snapshot = readSecureDescriptorFd(handle.get());
     if (snapshot.isErr() || !(snapshot.value().second == expected_identity) ||
         !descriptorMatchesOwner(snapshot.value().first, descriptor)) {
-        return false;
+        return OwnedDescriptorDeleteResult::identity_race;
     }
     struct stat path_info{};
     if (fstatat(directory_fd.get(), path.filename().c_str(), &path_info,
                 AT_SYMLINK_NOFOLLOW) != 0 ||
         DescriptorFileIdentity{static_cast<uint64_t>(path_info.st_dev),
                                static_cast<uint64_t>(path_info.st_ino)} != expected_identity) {
-        return false;
+        return OwnedDescriptorDeleteResult::identity_race;
     }
-    return unlinkat(directory_fd.get(), path.filename().c_str(), 0) == 0;
+    if (before_final_delete) before_final_delete(path);
+    // POSIX has no portable unlink primitive bound to this verified open file.
+    // Re-checking a pathname and then calling unlinkat would still leave a final
+    // substitution window, so retain the non-discoverable tombstone fail-safe.
+    struct stat final_path_info{};
+    if (fstatat(directory_fd.get(), path.filename().c_str(), &final_path_info,
+                AT_SYMLINK_NOFOLLOW) != 0 ||
+        DescriptorFileIdentity{static_cast<uint64_t>(final_path_info.st_dev),
+                               static_cast<uint64_t>(final_path_info.st_ino)} != expected_identity) {
+        return OwnedDescriptorDeleteResult::identity_race;
+    }
+    return OwnedDescriptorDeleteResult::unavailable;
 #endif
 }
 
@@ -674,7 +693,9 @@ std::vector<DiscoveredSession> discoverSessions(json& diagnostics,
                 const auto retired = retireOwnedSessionDescriptor(path, descriptor);
                 if (retired != DescriptorRetirementOutcome::deleted) {
                     diagnostics.push_back({{"path", path.string()},
-                                           {"error", "Proven-stale descriptor was retained after a cleanup collision or race"}});
+                                           {"error", retired == DescriptorRetirementOutcome::retained_unavailable
+                                                         ? "Proven-stale descriptor tombstone was retained because identity-bound deletion is unavailable"
+                                                         : "Proven-stale descriptor was retained after a cleanup collision or race"}});
                 }
                 continue;
             }
@@ -930,7 +951,8 @@ DescriptorRetirementOutcome retireOwnedSessionDescriptor(
     const std::filesystem::path& path,
     const SessionDescriptor& descriptor,
     const std::function<void(const std::filesystem::path&)>& before_move,
-    const std::function<void(const std::filesystem::path&)>& after_verification) {
+    const std::function<void(const std::filesystem::path&)>& after_verification,
+    const std::function<void(const std::filesystem::path&)>& before_final_delete) {
     const auto active_snapshot = inspectOwnedDescriptor(path, descriptor);
     if (active_snapshot.isErr()) {
         return DescriptorRetirementOutcome::retained_collision_or_race;
@@ -955,11 +977,14 @@ DescriptorRetirementOutcome retireOwnedSessionDescriptor(
             return DescriptorRetirementOutcome::retained_collision_or_race;
         }
         if (after_verification) after_verification(retired_path);
-        if (deleteOwnedDescriptorIfSame(retired_path, descriptor,
-                                        active_snapshot.value().identity)) {
+        const auto deleted = deleteOwnedDescriptorIfSame(
+            retired_path, descriptor, active_snapshot.value().identity, before_final_delete);
+        if (deleted == OwnedDescriptorDeleteResult::deleted) {
             return DescriptorRetirementOutcome::deleted;
         }
-        return DescriptorRetirementOutcome::retained_collision_or_race;
+        return deleted == OwnedDescriptorDeleteResult::identity_race
+                   ? DescriptorRetirementOutcome::retained_collision_or_race
+                   : DescriptorRetirementOutcome::retained_unavailable;
     }
     return DescriptorRetirementOutcome::retained_collision_or_race;
 }

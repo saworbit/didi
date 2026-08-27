@@ -9,7 +9,9 @@
 #include <string>
 #include <vector>
 
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <windows.h>
+#else
 #include <cerrno>
 #include <csignal>
 #include <fcntl.h>
@@ -24,8 +26,71 @@
 
 void registerTest(const std::string& name, std::function<void()> fn);
 
-#if !defined(_WIN32)
 namespace {
+
+bool hasTransportState(const didi::Error& error,
+                       bool request_started,
+                       bool outcome_unknown,
+                       bool timed_out) {
+    const auto state = didi::ipc::transportFailureState(error);
+    return state.has_value() && state->request_started == request_started &&
+           state->outcome_unknown == outcome_unknown && state->timed_out == timed_out;
+}
+
+#if defined(_WIN32)
+
+std::string rawPipeName(const std::string& suffix) {
+    static std::atomic<uint64_t> sequence{0};
+    return "\\\\.\\pipe\\godot_didi_raw_" + std::to_string(GetCurrentProcessId()) + "_" +
+           std::to_string(++sequence) + "_" + suffix;
+}
+
+HANDLE createRawPipe(const std::string& name, DWORD buffer_bytes = 4096) {
+    return CreateNamedPipeA(name.c_str(), PIPE_ACCESS_DUPLEX,
+                            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1,
+                            buffer_bytes, buffer_bytes, 0, nullptr);
+}
+
+bool rawConnectPipe(HANDLE pipe) {
+    return ConnectNamedPipe(pipe, nullptr) != 0 || GetLastError() == ERROR_PIPE_CONNECTED;
+}
+
+bool rawReadExact(HANDLE pipe, void* buffer, size_t length) {
+    auto* bytes = static_cast<uint8_t*>(buffer);
+    size_t offset = 0;
+    while (offset < length) {
+        DWORD count = 0;
+        const auto chunk = static_cast<DWORD>(std::min<size_t>(length - offset, MAXDWORD));
+        if (!ReadFile(pipe, bytes + offset, chunk, &count, nullptr) || count == 0) return false;
+        offset += count;
+    }
+    return true;
+}
+
+bool rawWriteExact(HANDLE pipe, const void* buffer, size_t length) {
+    const auto* bytes = static_cast<const uint8_t*>(buffer);
+    size_t offset = 0;
+    while (offset < length) {
+        DWORD count = 0;
+        const auto chunk = static_cast<DWORD>(std::min<size_t>(length - offset, MAXDWORD));
+        if (!WriteFile(pipe, bytes + offset, chunk, &count, nullptr) || count == 0) return false;
+        offset += count;
+    }
+    return true;
+}
+
+bool rawReadFrame(HANDLE pipe) {
+    std::array<uint8_t, 4> header{};
+    if (!rawReadExact(pipe, header.data(), header.size())) return false;
+    const uint32_t length = static_cast<uint32_t>(header[0]) |
+                            (static_cast<uint32_t>(header[1]) << 8) |
+                            (static_cast<uint32_t>(header[2]) << 16) |
+                            (static_cast<uint32_t>(header[3]) << 24);
+    std::vector<uint8_t> payload(length);
+    return length > 0 && rawReadExact(pipe, payload.data(), payload.size());
+}
+
+#else
 
 std::string rawSocketPath(const std::string& suffix) {
     return (std::filesystem::temp_directory_path() /
@@ -91,8 +156,9 @@ std::vector<uint8_t> rawSuccessFrame() {
 
 void noRestartSignalHandler(int) {}
 
-} // namespace
 #endif
+
+} // namespace
 
 static void test_ipc_framing() {
     didi::json msg = {{"test", 123}, {"str", "hello world"}};
@@ -161,6 +227,192 @@ static void test_ipc_negative_timeout_waits_for_definitive_response() {
     client->disconnect();
     server->stop();
 }
+
+#if defined(_WIN32)
+static void test_win32_client_write_obeys_end_to_end_deadline() {
+    // Break caught: the synchronous request write can block before the response timeout starts.
+    const auto name = rawPipeName("stalled-reader");
+    const HANDLE pipe = createRawPipe(name);
+    ASSERT_TRUE(pipe != INVALID_HANDLE_VALUE);
+    std::thread peer([pipe] {
+        if (rawConnectPipe(pipe)) std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        CloseHandle(pipe);
+    });
+
+    auto client = didi::ipc::createIpcClient();
+    const bool connected = client->connect(name, 1000);
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = client->sendRequest(
+        "runtime.step", {{"padding", std::string(8 * 1024 * 1024, 'x')}}, 100);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+    const bool still_connected = client->isConnected();
+    client->disconnect();
+    peer.join();
+
+    ASSERT_TRUE(connected);
+    ASSERT_TRUE(result.isErr());
+    ASSERT_TRUE(elapsed < std::chrono::milliseconds(300));
+    ASSERT_TRUE(hasTransportState(result.error(), false, false, true));
+    ASSERT_TRUE(!still_connected);
+}
+
+static void test_win32_client_accepts_fragmented_response_header() {
+    const auto name = rawPipeName("fragmented-header");
+    const HANDLE pipe = createRawPipe(name);
+    ASSERT_TRUE(pipe != INVALID_HANDLE_VALUE);
+    std::thread peer([pipe] {
+        if (rawConnectPipe(pipe) && rawReadFrame(pipe)) {
+            const auto frame = didi::ipc::frameMessage(
+                didi::json{{"id", "1"}, {"result", {{"status", "ok"}}}});
+            for (size_t index = 0; index < 4; ++index) {
+                if (!rawWriteExact(pipe, frame.data() + index, 1)) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            (void)rawWriteExact(pipe, frame.data() + 4, frame.size() - 4);
+        }
+        CloseHandle(pipe);
+    });
+
+    auto client = didi::ipc::createIpcClient();
+    const bool connected = client->connect(name, 1000);
+    const auto result = client->sendRequest("session.handshake", {}, 1000);
+    client->disconnect();
+    peer.join();
+    ASSERT_TRUE(connected);
+    ASSERT_TRUE(result.isOk());
+    ASSERT_EQ(result.value()["status"], "ok");
+}
+
+static void test_win32_client_trickle_timeout_is_structured_and_quarantines() {
+    const auto name = rawPipeName("slow-trickle");
+    const HANDLE pipe = createRawPipe(name);
+    ASSERT_TRUE(pipe != INVALID_HANDLE_VALUE);
+    std::thread peer([pipe] {
+        if (rawConnectPipe(pipe) && rawReadFrame(pipe)) {
+            const std::array<uint8_t, 4> header{8, 0, 0, 0};
+            (void)rawWriteExact(pipe, header.data(), header.size());
+            for (uint8_t byte = 0; byte < 8; ++byte) {
+                if (!rawWriteExact(pipe, &byte, 1)) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(40));
+            }
+        }
+        CloseHandle(pipe);
+    });
+
+    auto client = didi::ipc::createIpcClient();
+    const bool connected = client->connect(name, 1000);
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = client->sendRequest("runtime.step", {}, 100);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+    const bool still_connected = client->isConnected();
+    client->disconnect();
+    peer.join();
+    ASSERT_TRUE(connected);
+    ASSERT_TRUE(result.isErr());
+    ASSERT_TRUE(elapsed < std::chrono::milliseconds(220));
+    ASSERT_TRUE(hasTransportState(result.error(), true, true, true));
+    ASSERT_TRUE(!still_connected);
+}
+
+static void test_win32_handshake_cap_rejects_before_payload_read() {
+    const auto name = rawPipeName("handshake-cap");
+    const HANDLE pipe = createRawPipe(name);
+    ASSERT_TRUE(pipe != INVALID_HANDLE_VALUE);
+    std::thread peer([pipe] {
+        if (rawConnectPipe(pipe) && rawReadFrame(pipe)) {
+            const uint32_t advertised = 256 * 1024;
+            const std::array<uint8_t, 4> header{
+                static_cast<uint8_t>(advertised), static_cast<uint8_t>(advertised >> 8),
+                static_cast<uint8_t>(advertised >> 16), static_cast<uint8_t>(advertised >> 24)};
+            (void)rawWriteExact(pipe, header.data(), header.size());
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        }
+        CloseHandle(pipe);
+    });
+
+    auto client = didi::ipc::createIpcClient();
+    const bool connected = client->connect(name, 1000);
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = client->sendRequest("session.handshake", {}, 250);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+    const bool still_connected = client->isConnected();
+    client->disconnect();
+    peer.join();
+    ASSERT_TRUE(connected);
+    ASSERT_TRUE(result.isErr());
+    ASSERT_TRUE(elapsed < std::chrono::milliseconds(180));
+    ASSERT_TRUE(hasTransportState(result.error(), true, true, false));
+    ASSERT_TRUE(!still_connected);
+}
+
+static void test_win32_post_accept_failure_is_structured_and_quarantines() {
+    const auto name = rawPipeName("post-accept-close");
+    const HANDLE pipe = createRawPipe(name);
+    ASSERT_TRUE(pipe != INVALID_HANDLE_VALUE);
+    std::thread peer([pipe] {
+        (void)rawConnectPipe(pipe);
+        CloseHandle(pipe);
+    });
+
+    auto client = didi::ipc::createIpcClient();
+    const bool connected = client->connect(name, 1000);
+    const auto result = client->sendRequest("runtime.step", {}, 500);
+    const bool still_connected = client->isConnected();
+    client->disconnect();
+    peer.join();
+    ASSERT_TRUE(connected);
+    ASSERT_TRUE(result.isErr());
+    ASSERT_TRUE(result.error().data.is_object());
+    ASSERT_TRUE(result.error().data.contains("transport"));
+    ASSERT_TRUE(!still_connected);
+}
+
+static void test_win32_malformed_response_is_structured_and_quarantines() {
+    const auto name = rawPipeName("malformed-response");
+    const HANDLE pipe = createRawPipe(name);
+    ASSERT_TRUE(pipe != INVALID_HANDLE_VALUE);
+    std::thread peer([pipe] {
+        if (rawConnectPipe(pipe) && rawReadFrame(pipe)) {
+            const std::array<uint8_t, 5> malformed{1, 0, 0, 0, '{'};
+            (void)rawWriteExact(pipe, malformed.data(), malformed.size());
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        CloseHandle(pipe);
+    });
+
+    auto client = didi::ipc::createIpcClient();
+    const bool connected = client->connect(name, 1000);
+    const auto result = client->sendRequest("runtime.step", {}, 500);
+    const bool still_connected = client->isConnected();
+    client->disconnect();
+    peer.join();
+    ASSERT_TRUE(connected);
+    ASSERT_TRUE(result.isErr());
+    ASSERT_TRUE(hasTransportState(result.error(), true, true, false));
+    ASSERT_TRUE(!still_connected);
+}
+
+static void test_win32_server_drops_slow_partial_frame() {
+    const auto name = rawPipeName("server-frame-deadline");
+    auto server = didi::ipc::createIpcServer();
+    ASSERT_TRUE(server->start(name));
+    const HANDLE pipe = CreateFileA(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                                    OPEN_EXISTING, 0, nullptr);
+    ASSERT_TRUE(pipe != INVALID_HANDLE_VALUE);
+    const uint8_t first_header_byte = 8;
+    DWORD written = 0;
+    ASSERT_TRUE(WriteFile(pipe, &first_header_byte, 1, &written, nullptr) && written == 1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    DWORD available = 0;
+    const bool connection_alive = PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr) != 0;
+    CloseHandle(pipe);
+    server->stop();
+    ASSERT_TRUE(!connection_alive);
+}
+#endif
 
 #if !defined(_WIN32)
 static void test_posix_client_accepts_fragmented_response_header() {
@@ -308,7 +560,15 @@ struct RegisterIpcTests {
         registerTest("IPC.Framing", test_ipc_framing);
         registerTest("IPC.ClientServerRoundtrip", test_ipc_client_server_roundtrip);
         registerTest("IPC.NoTimeoutRoundtrip", test_ipc_negative_timeout_waits_for_definitive_response);
-#if !defined(_WIN32)
+#if defined(_WIN32)
+        registerTest("IPC.Win32WriteDeadline", test_win32_client_write_obeys_end_to_end_deadline);
+        registerTest("IPC.Win32FragmentedHeader", test_win32_client_accepts_fragmented_response_header);
+        registerTest("IPC.Win32TrickleState", test_win32_client_trickle_timeout_is_structured_and_quarantines);
+        registerTest("IPC.Win32HandshakeCap", test_win32_handshake_cap_rejects_before_payload_read);
+        registerTest("IPC.Win32PostAcceptFailure", test_win32_post_accept_failure_is_structured_and_quarantines);
+        registerTest("IPC.Win32MalformedResponse", test_win32_malformed_response_is_structured_and_quarantines);
+        registerTest("IPC.Win32ServerFrameDeadline", test_win32_server_drops_slow_partial_frame);
+#else
         registerTest("IPC.PosixFragmentedHeader", test_posix_client_accepts_fragmented_response_header);
         registerTest("IPC.PosixSingleDeadline", test_posix_client_uses_one_deadline_for_slow_trickle);
         registerTest("IPC.PosixHandshakeResponseCap", test_posix_handshake_rejects_large_response_before_allocation);
