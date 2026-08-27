@@ -17,11 +17,12 @@ public:
     static constexpr size_t kMaxMessageBytes = 16 * 1024;
     static constexpr size_t kMaxDetailsBytes = 64 * 1024;
 
-    explicit RuntimeLogRing(size_t capacity = kDefaultCapacity);
+    explicit RuntimeLogRing(size_t capacity = kDefaultCapacity, uint64_t first_sequence = 1);
 
-    void append(std::string_view level, std::string_view source, std::string_view message,
-                const json& details = json());
-    json read(uint64_t cursor, size_t limit, std::string_view minimum_level) const;
+    // Read records always carry `details` as either null (absent) or an object.
+    Result<uint64_t> append(std::string_view level, std::string_view source, std::string_view message,
+                            const json& details = json());
+    Result<json> read(uint64_t cursor, size_t limit, std::string_view minimum_level) const;
 
     static bool isValidLevel(std::string_view level);
 
@@ -40,6 +41,7 @@ private:
 
     size_t m_capacity;
     uint64_t m_nextSequence{1};
+    bool m_exhausted{false};
     std::deque<Record> m_records;
     mutable std::mutex m_mutex;
 };

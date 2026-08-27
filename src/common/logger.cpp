@@ -4,6 +4,16 @@
 
 namespace didi {
 
+namespace {
+thread_local bool g_dispatchingSink = false;
+
+class SinkDispatchGuard {
+public:
+    SinkDispatchGuard() { g_dispatchingSink = true; }
+    ~SinkDispatchGuard() { g_dispatchingSink = false; }
+};
+} // namespace
+
 Logger& Logger::instance() {
     static Logger s_instance;
     return s_instance;
@@ -35,7 +45,10 @@ void Logger::log(LogLevel level, std::string_view tag, std::string_view message)
         std::lock_guard<std::mutex> lock(m_mutex);
         sink = m_sink;
     }
-    if (sink) sink(level, tag, message);
+    if (sink && !g_dispatchingSink) {
+        SinkDispatchGuard guard;
+        sink(level, tag, message);
+    }
 
     if (level < m_level.load(std::memory_order_relaxed)) return;
 

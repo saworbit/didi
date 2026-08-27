@@ -1,5 +1,6 @@
 #include "didi/mcp/resource_registry.hpp"
 #include "didi/offline/resource_indexer.hpp"
+#include "didi/runtime/session_client.hpp"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -120,6 +121,12 @@ void ResourceRegistry::registerAllDefaultResources() {
             return Error(res.error().code, "Failed to retrieve live runtime logs: " + res.error().message,
                          {{"execution_mode", "live"},
                           {"error", {{"code", res.error().code}, {"message", res.error().message}}}});
+        }
+        const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(m_ipcClient);
+        if (sessions && sessions->activeSession().has_value()) {
+            return Error(503, "Selected runtime session is disconnected while reading live runtime logs",
+                         {{"execution_mode", "live"},
+                          {"error", {{"code", 503}, {"message", "Selected runtime session is disconnected"}}}});
         }
         const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();

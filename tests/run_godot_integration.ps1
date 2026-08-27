@@ -2,6 +2,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$GodotExecutable,
     [string]$Configuration = "Release",
+    [string]$McpExecutable = "",
     [int]$StartupTimeoutSeconds = 30
 )
 
@@ -11,6 +12,9 @@ $sourceFixtureRoot = Join-Path $PSScriptRoot "godot_smoke"
 $buildRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot "build"))
 $fixtureRoot = [IO.Path]::GetFullPath((Join-Path $buildRoot "godot_phase2_smoke"))
 $didiExecutable = Join-Path $repoRoot "build\$Configuration\didi.exe"
+if ($McpExecutable) {
+    $didiExecutable = [IO.Path]::GetFullPath($McpExecutable)
+}
 $stdoutPath = Join-Path $repoRoot "build\godot_integration.out"
 $stderrPath = Join-Path $repoRoot "build\godot_integration.err"
 
@@ -201,7 +205,8 @@ try {
         (Tool-Request 109 "scene_pack_branch" @{ target_node = "/root/SmokeRoot/Subject"; scene_path = "res://transient_probe.tscn" }),
         (Tool-Request 110 "scene_remove_from_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two_transient" }),
         (Tool-Request 111 "scene_close" @{ discard_unsaved = $true }),
-        (Tool-Request 112 "scene_create" @{ scene_path = "res:////escape.tscn" })
+        (Tool-Request 112 "scene_create" @{ scene_path = "res:////escape.tscn" }),
+        (Tool-Request 113 "runtime_read_logs" @{ cursor = 0; limit = 5; minimum_level = "debug" })
     )
 
     $rawResponses = $requests | & $didiExecutable
@@ -368,6 +373,27 @@ try {
     Assert-True ((Tool-Payload $byId[111]).closed -eq $true) "Smoke scene cleanup failed."
     Assert-True $byId[112].result.isError "Non-normalized res:// scene path was accepted."
     Assert-True ($byId[112].result.content[0].text -match "normalized") "Non-normalized path error was not actionable."
+
+    $firstLogPage = Tool-Payload $byId[113]
+    Assert-True ($firstLogPage.execution_mode -eq "live") "First runtime log read was not live."
+    Assert-True (@($firstLogPage.records).Count -gt 0) "First runtime log read returned no extension records."
+    Assert-True ($firstLogPage.next_cursor -gt $firstLogPage.records[-1].sequence) "First runtime log cursor did not advance."
+
+    $nextLogRequests = @(
+        (@{ jsonrpc = "2.0"; id = 120; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 121 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 122 "runtime_read_logs" @{ cursor = [uint64]$firstLogPage.next_cursor; limit = 5; minimum_level = "debug" })
+    )
+    $rawNextLogResponses = $nextLogRequests | & $didiExecutable
+    $nextLogResponses = @($rawNextLogResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
+    Assert-True ($LASTEXITCODE -eq 0) "Sequential log MCP process exited with $LASTEXITCODE."
+    $nextLogById = @{}
+    foreach ($response in $nextLogResponses) { $nextLogById[[int]$response.id] = $response }
+    $secondLogPage = Tool-Payload $nextLogById[122]
+    Assert-True ($secondLogPage.next_cursor -ge $firstLogPage.next_cursor) "Second runtime log cursor moved backwards."
+    foreach ($record in @($secondLogPage.records)) {
+        Assert-True ($record.sequence -ge $firstLogPage.next_cursor) "Sequential runtime log reads repeated sequence $($record.sequence)."
+    }
 
     $engineErrors = @(
         Get-Content $stderrPath -ErrorAction SilentlyContinue |

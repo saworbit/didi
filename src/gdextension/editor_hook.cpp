@@ -171,7 +171,11 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
             }
             minimum_level = params["minimum_level"].get<std::string>();
         }
-        auto page = m_runtimeLogs->read(cursor, limit, minimum_level);
+        const auto page_result = m_runtimeLogs->read(cursor, limit, minimum_level);
+        if (page_result.isErr()) {
+            return {{"error", {{"code", page_result.error().code}, {"message", page_result.error().message}}}};
+        }
+        auto page = page_result.value();
         page["execution_mode"] = "live";
         return page;
     }

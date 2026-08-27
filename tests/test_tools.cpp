@@ -41,6 +41,23 @@ public:
     }
 };
 
+class AttachedDisconnectedRuntimeClient final : public didi::runtime::IRuntimeSessionClient {
+public:
+    bool connect(const std::string&, int) override { return false; }
+    void disconnect() override {}
+    bool isConnected() const override { return false; }
+    didi::Result<didi::json> sendRequest(const std::string&, const didi::json&, int) override {
+        return didi::Error::notConnected("Selected runtime transport is disconnected");
+    }
+    didi::Result<didi::json> listSessions(const std::optional<std::string>&) override { return didi::json::array(); }
+    didi::Result<didi::json> attachSession(const std::string&) override { return didi::Error::notConnected(); }
+    didi::Result<didi::json> detachSession() override { return didi::json::object(); }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override {
+        return didi::runtime::SessionDescriptor{1, "abcdefabcdefabcdefabcdefabcdefab", std::string(64, 'b'),
+            99, "editor", "C:/project", "\\\\.\\pipe\\godot_didi_99", 1, "1.3"};
+    }
+};
+
 static void test_mcp_server_preserves_injected_ipc_client() {
     didi::mcp::McpServer server;
     auto injected = std::make_shared<DisconnectedIpcClient>();
@@ -86,6 +103,19 @@ static void test_runtime_read_logs_rejects_invalid_cursor_limit_and_level() {
         ASSERT_TRUE(result.content[0].text.find("Invalid runtime log request") != std::string::npos);
     }
     reg.setIpcClient(nullptr);
+}
+
+static void test_runtime_log_resource_reports_selected_disconnected_session_as_live_error() {
+    // Break caught: a selected but disconnected runtime session is misreported as an offline fallback.
+    auto& resources = didi::mcp::ResourceRegistry::instance();
+    resources.registerAllDefaultResources();
+    resources.setIpcClient(std::make_shared<AttachedDisconnectedRuntimeClient>());
+    const auto result = resources.readResource("godot://runtime/logs");
+    ASSERT_TRUE(result.isErr());
+    ASSERT_EQ(result.error().code, 503);
+    ASSERT_EQ(result.error().data["execution_mode"], "live");
+    ASSERT_EQ(result.error().data["error"]["code"], 503);
+    resources.setIpcClient(nullptr);
 }
 
 static void test_tool_registry_default_tools() {
@@ -504,6 +534,7 @@ struct RegisterToolTests {
         registerTest("McpServer.PreservesInjectedIpcClient", test_mcp_server_preserves_injected_ipc_client);
         registerTest("Tools.RuntimeSessionLocalAndValidated", test_runtime_get_session_is_local_and_attach_rejects_non_string_id);
         registerTest("Tools.RuntimeReadLogsInputValidation", test_runtime_read_logs_rejects_invalid_cursor_limit_and_level);
+        registerTest("Resources.SelectedDisconnectedRuntime", test_runtime_log_resource_reports_selected_disconnected_session_as_live_error);
         registerTest("Tools.HonestCapabilities", test_tool_capabilities_are_honest);
         registerTest("Tools.CaptureViewportWithIpc", test_tool_capture_viewport_with_ipc);
         registerTest("Tools.CaptureViewportOfflineAttribution", test_tool_capture_viewport_offline_is_attributed);
