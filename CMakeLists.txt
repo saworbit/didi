@@ -40,6 +40,7 @@ set(CORE_SOURCES
     src/tools/script_tools.cpp
     src/tools/runtime_tools.cpp
     src/tools/asset_tools.cpp
+    src/tools/project_tools.cpp
     src/tools/signal_tools.cpp
     src/tools/physics_nav_tools.cpp
     src/tools/tilemap_grid_tools.cpp

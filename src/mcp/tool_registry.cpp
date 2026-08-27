@@ -1,4 +1,5 @@
 #include "didi/mcp/tool_registry.hpp"
+#include "didi/mcp/project_tools.hpp"
 #include "didi/common/logger.hpp"
 #include <algorithm>
 #include <unordered_set>
@@ -15,7 +16,12 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "scene_instantiate_node", "scene_remove_node", "scene_reparent_node",
         "scene_set_property", "scene_get_property", "scene_duplicate_node",
         "editor_undo", "editor_redo", "editor_save_scene",
-        "editor_reload_project"
+        "editor_reload_project", "script_attach_to_node", "script_detach_from_node",
+        "project_list_autoloads", "project_set_autoload", "project_remove_autoload",
+        "project_list_input_actions", "project_set_input_action", "project_remove_input_action",
+        "project_get_setting", "project_set_setting", "scene_list_groups",
+        "scene_add_to_group", "scene_remove_from_group", "scene_get_group_members",
+        "scene_create", "scene_open", "scene_close", "scene_pack_branch"
     };
     static const std::unordered_set<std::string> offline = {
         "script_check_syntax", "analyze_script_diagnostics", "script_reflect_class",
@@ -53,6 +59,14 @@ CallToolResult handleSceneSetProperty(const json& args, std::shared_ptr<ipc::IIp
 CallToolResult handleSceneGetProperty(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleSceneDuplicateNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleMutateSceneTree(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleSceneListGroups(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleSceneAddToGroup(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleSceneRemoveFromGroup(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleSceneGetGroupMembers(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleSceneCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleSceneOpen(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleSceneClose(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleScenePackBranch(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
 CallToolResult handleSignalListConnections(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleSignalConnect(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -63,6 +77,8 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
 CallToolResult handleScriptReflectClass(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleScriptGetSymbols(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleScriptAttachToNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleScriptDetachFromNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
 CallToolResult handlePhysicsRaycastQuery(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handlePhysicsSimulateStep(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -175,6 +191,15 @@ std::shared_ptr<ipc::IIpcClient> ToolRegistry::getIpcClient() const {
 }
 
 void ToolRegistry::registerAllDefaultTools() {
+    auto register_phase_two = [this](const char* name, const char* description,
+                                     json schema, std::function<CallToolResult(const json&)> handler) {
+        ToolDefinition tool;
+        tool.name = name;
+        tool.description = description;
+        tool.inputSchema = std::move(schema);
+        tool.handler = std::move(handler);
+        registerTool(std::move(tool));
+    };
     // ==========================================
     // Domain 1: Scene Tree & Node Manipulation
     // ==========================================
@@ -849,6 +874,117 @@ void ToolRegistry::registerAllDefaultTools() {
         t.handler = [this](const json& args) { return handleEditorReloadProject(args, m_ipcClient); };
         registerTool(std::move(t));
     }
+
+    // ==========================================
+    // Phase 2: Project Wiring
+    // ==========================================
+    register_phase_two(
+        "script_attach_to_node", "Attaches an existing Script resource to a live node through UndoRedo.",
+        {{"type", "object"}, {"properties", {
+            {"target_node", {{"type", "string"}}}, {"script_path", {{"type", "string"}}}
+        }}, {"required", {"target_node", "script_path"}}},
+        [this](const json& args) { return handleScriptAttachToNode(args, m_ipcClient); });
+    register_phase_two(
+        "script_detach_from_node", "Detaches the current Script resource from a live node through UndoRedo.",
+        {{"type", "object"}, {"properties", {{"target_node", {{"type", "string"}}}}},
+         {"required", {"target_node"}}},
+        [this](const json& args) { return handleScriptDetachFromNode(args, m_ipcClient); });
+
+    register_phase_two(
+        "project_list_autoloads", "Lists persisted project autoload entries.",
+        {{"type", "object"}, {"properties", json::object()}},
+        [this](const json& args) { return handleProjectListAutoloads(args, m_ipcClient); });
+    register_phase_two(
+        "project_set_autoload", "Creates or explicitly replaces a persisted project autoload.",
+        {{"type", "object"}, {"properties", {
+            {"name", {{"type", "string"}}}, {"path", {{"type", "string"}}},
+            {"singleton", {{"type", "boolean"}, {"default", true}}},
+            {"replace", {{"type", "boolean"}, {"default", false}}}
+        }}, {"required", {"name", "path"}}},
+        [this](const json& args) { return handleProjectSetAutoload(args, m_ipcClient); });
+    register_phase_two(
+        "project_remove_autoload", "Removes an existing persisted project autoload.",
+        {{"type", "object"}, {"properties", {{"name", {{"type", "string"}}}}}, {"required", {"name"}}},
+        [this](const json& args) { return handleProjectRemoveAutoload(args, m_ipcClient); });
+
+    register_phase_two(
+        "project_list_input_actions", "Lists persisted project InputMap actions and supported events.",
+        {{"type", "object"}, {"properties", json::object()}},
+        [this](const json& args) { return handleProjectListInputActions(args, m_ipcClient); });
+    register_phase_two(
+        "project_set_input_action", "Creates or explicitly replaces a persisted InputMap action.",
+        {{"type", "object"}, {"properties", {
+            {"action", {{"type", "string"}}},
+            {"deadzone", {{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}, {"default", 0.2}}},
+            {"events", {{"type", "array"}, {"items", {{"type", "object"}}}}},
+            {"replace", {{"type", "boolean"}, {"default", false}}}
+        }}, {"required", {"action"}}},
+        [this](const json& args) { return handleProjectSetInputAction(args, m_ipcClient); });
+    register_phase_two(
+        "project_remove_input_action", "Removes an existing persisted InputMap action.",
+        {{"type", "object"}, {"properties", {{"action", {{"type", "string"}}}}}, {"required", {"action"}}},
+        [this](const json& args) { return handleProjectRemoveInputAction(args, m_ipcClient); });
+
+    register_phase_two(
+        "project_get_setting", "Reads an existing ProjectSettings value as bounded JSON.",
+        {{"type", "object"}, {"properties", {{"setting", {{"type", "string"}}}}}, {"required", {"setting"}}},
+        [this](const json& args) { return handleProjectGetSetting(args, m_ipcClient); });
+    register_phase_two(
+        "project_set_setting", "Persists or explicitly removes a ProjectSettings value.",
+        {{"type", "object"}, {"properties", {
+            {"setting", {{"type", "string"}}}, {"value", json::object()},
+            {"remove", {{"type", "boolean"}, {"default", false}}}
+        }}, {"required", {"setting"}}},
+        [this](const json& args) { return handleProjectSetSetting(args, m_ipcClient); });
+
+    register_phase_two(
+        "scene_list_groups", "Lists the groups assigned to a live edited-scene node.",
+        {{"type", "object"}, {"properties", {{"target_node", {{"type", "string"}}}}}, {"required", {"target_node"}}},
+        [this](const json& args) { return handleSceneListGroups(args, m_ipcClient); });
+    register_phase_two(
+        "scene_add_to_group", "Adds a live node to a group through UndoRedo.",
+        {{"type", "object"}, {"properties", {
+            {"target_node", {{"type", "string"}}}, {"group", {{"type", "string"}}},
+            {"persistent", {{"type", "boolean"}, {"default", true}}}
+        }}, {"required", {"target_node", "group"}}},
+        [this](const json& args) { return handleSceneAddToGroup(args, m_ipcClient); });
+    register_phase_two(
+        "scene_remove_from_group", "Removes a live node from a group through UndoRedo.",
+        {{"type", "object"}, {"properties", {
+            {"target_node", {{"type", "string"}}}, {"group", {{"type", "string"}}}
+        }}, {"required", {"target_node", "group"}}},
+        [this](const json& args) { return handleSceneRemoveFromGroup(args, m_ipcClient); });
+    register_phase_two(
+        "scene_get_group_members", "Returns edited-scene-confined members of a group.",
+        {{"type", "object"}, {"properties", {{"group", {{"type", "string"}}}}}, {"required", {"group"}}},
+        [this](const json& args) { return handleSceneGetGroupMembers(args, m_ipcClient); });
+
+    register_phase_two(
+        "scene_create", "Creates, saves, and opens an empty Node2D, Node3D, or Control scene.",
+        {{"type", "object"}, {"properties", {
+            {"scene_path", {{"type", "string"}}},
+            {"root_type", {{"type", "string"}, {"enum", {"Node2D", "Node3D", "Control"}}, {"default", "Node2D"}}},
+            {"root_name", {{"type", "string"}, {"default", "Root"}}},
+            {"overwrite", {{"type", "boolean"}, {"default", false}}}
+        }}, {"required", {"scene_path"}}},
+        [this](const json& args) { return handleSceneCreate(args, m_ipcClient); });
+    register_phase_two(
+        "scene_open", "Opens or switches to an existing PackedScene in the editor.",
+        {{"type", "object"}, {"properties", {{"scene_path", {{"type", "string"}}}}}, {"required", {"scene_path"}}},
+        [this](const json& args) { return handleSceneOpen(args, m_ipcClient); });
+    register_phase_two(
+        "scene_close", "Safely closes the active scene, refusing unsaved changes by default.",
+        {{"type", "object"}, {"properties", {
+            {"discard_unsaved", {{"type", "boolean"}, {"default", false}}}
+        }}},
+        [this](const json& args) { return handleSceneClose(args, m_ipcClient); });
+    register_phase_two(
+        "scene_pack_branch", "Packs a duplicated live branch into a reusable PackedScene resource.",
+        {{"type", "object"}, {"properties", {
+            {"target_node", {{"type", "string"}}}, {"scene_path", {{"type", "string"}}},
+            {"overwrite", {{"type", "boolean"}, {"default", false}}}
+        }}, {"required", {"target_node", "scene_path"}}},
+        [this](const json& args) { return handleScenePackBranch(args, m_ipcClient); });
 }
 
 } // namespace mcp
