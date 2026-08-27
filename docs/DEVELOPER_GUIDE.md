@@ -156,3 +156,16 @@ cmake --build build --config Release
 For expression-policy changes, add a failing native scanner test and a real editor/game integration probe before changing implementation. A new accepted Node operation must prove it cannot dispatch script callbacks, traverse outside the active subtree, allocate unbounded data before a check, leak source/token text, or turn the cooperative timeout into a hard-preemption claim.
 
 The CI MCP smoke must continue to assert exactly 68 canonical/78 total registrations, local metadata for the four session tools, live metadata for the six routed tools, cursor-shaped logs, and `implemented: false` for `runtime_inject_input`, `runtime_get_call_stack`, and `runtime_read_profiler`.
+
+## Documentation and release gate
+
+Run the dependency-free documentation contract checks for any documentation, version, registration, capability, or release change:
+
+```powershell
+python -m unittest tests.test_documentation_validator -v
+python tools/validate_documentation.py
+```
+
+The validator derives the release from `CMakeLists.txt` and checks the MCP server header, standalone version output, addon manifest, README, capability matrix, changelog, and security policy for alignment. It also locks the documented 68 canonical/10 legacy/78 total surface, the 50 implemented/18 unimplemented split in the designated release references, and all relative Markdown targets and anchors.
+
+When the release changes, update these files in one change: `CMakeLists.txt`, `include/didi/mcp/mcp_protocol.hpp`, `src/standalone/main.cpp`, `addons/didi/plugin.cfg`, `README.md`, `CHANGELOG.md`, `docs/CAPABILITIES.md`, and `SECURITY.md`. When the tool surface or capability modes change, also update runtime discovery tests, `docs/TOOL_REFERENCE.md`, `docs/ROADMAP.md`, `docs/LLM_INSTRUCTIONS.md`, and the relevant quickstart/integration examples. Historical specs and plans record their original decisions and should not be rewritten as current release documentation.

@@ -28,11 +28,22 @@ Thank you for your interest in contributing to **Didi** (`godot-mcp-native`)!
 
 3. **Run the Test Suite**:
    ```bash
+   # Windows multi-config build
    ./build/Release/didi_tests.exe
+
+   # Linux/macOS single-config build
+   ./build/didi_tests
    ```
    *Make sure all tests pass before opening a Pull Request.*
 
    On Windows, changes to the live bridge must also pass `tests/run_godot_integration.ps1` against a supported Godot 4.5+ editor build.
+
+4. **Validate Documentation**:
+   ```bash
+   python -m unittest tests.test_documentation_validator -v
+   python tools/validate_documentation.py
+   ```
+   Run these checks for documentation, version, tool-surface, capability, or release changes.
 
 ---
 
@@ -44,6 +55,12 @@ Thank you for your interest in contributing to **Didi** (`godot-mcp-native`)!
 - **New Tools**: Must include schema definition in `ToolRegistry`, unit tests in `tests/`, and documentation in `docs/TOOL_REFERENCE.md`.
 - **Capability Honesty**: Classify every new name as `live`, `offline_fallback`, both, or `unimplemented`; never merge a success stub.
 - **Live Tools**: Add a real Godot integration case and keep all Godot object access on the registered main-loop callback.
+
+### Documentation and release contract
+
+- Version changes must update `CMakeLists.txt`, `include/didi/mcp/mcp_protocol.hpp`, `src/standalone/main.cpp`, `addons/didi/plugin.cfg`, `README.md`, `CHANGELOG.md`, `docs/CAPABILITIES.md`, and `SECURITY.md` together.
+- Tool registration or capability changes must update the MCP discovery tests, [Tool Reference](docs/TOOL_REFERENCE.md), [Capability Matrix](docs/CAPABILITIES.md), [Roadmap](docs/ROADMAP.md), [LLM Instructions](docs/LLM_INSTRUCTIONS.md), and relevant setup/integration examples.
+- Current-facing documentation must describe executable behavior. Preserve `docs/superpowers/specs/` and `docs/superpowers/plans/` as historical decision records unless a link is broken.
 
 ---
 

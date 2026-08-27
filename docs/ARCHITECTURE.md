@@ -12,8 +12,8 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
 
 ### The C++ & GDExtension Solution
 - **Native In-Process Access**: The extension uses Godot's GDExtension C interface to call `EditorInterface`, edited-scene nodes, `EditorUndoRedoManager`, and editor viewport textures for the supported live surface.
-- **Dual Execution Topology**: The codebase builds both a standalone MCP stdio executable (`didi.exe`) and an in-engine shared library (`didi_extension.dll`), connected via high-throughput OS Named Pipes.
-- **Deterministic Lifetime & Zero External Runtime**: Single compiled binary with zero Node.js, npm, or Python runtime dependencies.
+- **Dual Execution Topology**: The codebase builds both a standalone MCP stdio executable (`didi.exe` on Windows, `didi` on POSIX) and an in-engine extension library (`didi_extension.dll`, `libdidi_extension.so`, or `libdidi_extension.dylib`), connected through a local named pipe or Unix-domain socket.
+- **Deterministic Lifetime & Zero External Runtime**: Native compiled artifacts with zero Node.js, npm, or Python runtime dependencies.
 
 ---
 
@@ -27,7 +27,7 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
                                │  Standard MCP Protocol (stdio / JSON-RPC 2.0)
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│             Didi (C++ MCP Core Engine - didi.exe)           │
+│        Didi (C++ MCP Core Engine - didi / didi.exe)         │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2024-11-05 standard)       │
 │  - Registry (68 canonical tools + 10 legacy names)          │
 │  - Dynamic Resources (godot://project/tree, editor/state)   │
@@ -37,7 +37,7 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
                                │  Process-unique authenticated local IPC endpoint
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│            Godot 4.5+ Process (didi_extension.dll)          │
+│        Godot 4.5+ Process (Didi extension library)          │
 │  ┌───────────────────────┬───────────────────────────────┐  │
 │  │ EditorInterface Hook  │ Editor ViewportTexture        │  │
 │  │ (Main-thread Dispatch)│ (RGBA8 → PNG capture)         │  │
@@ -55,10 +55,10 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
 Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-safe** for concurrent mutations. Didi solves this with a multi-layered queue dispatcher:
 
 ```
-[MCP Client Thread (didi.exe)]
-       │ (JSON-RPC request via Named Pipe)
+[MCP Client Thread (didi / didi.exe)]
+       │ (JSON-RPC request via local IPC)
        ▼
-[IPC Server Thread (didi_extension.dll)]
+[IPC Server Thread (Didi extension library)]
        │ Enqueue EngineCommand + std::promise<json>
        ▼
 [Command Queue (Thread-Safe FIFO)]
@@ -77,14 +77,14 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
 [std::promise::set_value()]
        │ Unblocks IPC Server Thread
        ▼
-[Named Pipe Response $\rightarrow$ MCP Client $\rightarrow$ LLM Output]
+[Local IPC Response $\rightarrow$ MCP Client $\rightarrow$ LLM Output]
 ```
 
 ### Key Safety Guarantees:
 1. **Main-Thread Godot Calls**: Supported live scene and viewport operations run only after the native main-loop callback drains the synchronized queue.
 2. **Editor Undo/Redo Integration**: All modifications register transactions with Godot's `EditorUndoRedoManager`, allowing human developers to press `Ctrl+Z` in the editor to undo any AI-generated modification.
 3. **Timeout & Deadlock Protection**:
-   - IPC client operations utilize recursive mutexes and non-blocking `PeekNamedPipe` polling with millisecond timeouts.
+   - IPC client operations use recursive mutexes and platform-specific readiness checks with millisecond deadlines: `PeekNamedPipe` on Windows and `poll` on POSIX.
    - The extension applies a 15-second main-thread deadline. A still-pending command is atomically cancelled and returns `504` with `outcome: "not_started"` and no quarantine. A started but unresolved command returns `504` with `outcome: "unknown_outcome"` and `route_quarantine: true`; it may still complete inside Godot, so clients must not blindly retry mutations.
    - Public live tools and `godot://runtime/logs` apply a finite 17-second outer transport deadline. Explicit unknown-outcome responses and transport timeouts quarantine only the exact routed generation, preserving a concurrently selected replacement. No live path waits forever for a definitive response.
    - Filesystem reads, static GDScript parsing, and offline process tools stay in the standalone MCP process and never enter the Godot main-thread queue.

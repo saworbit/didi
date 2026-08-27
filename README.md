@@ -10,7 +10,9 @@
 > 
 > *Didi keeps the bridge native, local, and explicit about what it can actually execute.*
 
-**Didi** (`godot-mcp-native`) is a high-performance, native [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for **Godot 4.5+**, engineered in **C++20** as a unified binary (`didi.exe`) and in-engine GDExtension module (`didi_extension.dll`).
+**Didi** (`godot-mcp-native`) is a high-performance, native [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for **Godot 4.5+**, engineered in **C++20** as a standalone executable (`didi.exe` on Windows, `didi` on POSIX) and an in-engine GDExtension library for the target platform.
+
+The current documented release is **1.3.0**.
 
 ---
 
@@ -28,6 +30,7 @@
 | 🛡️ [**Administrator & Operations Guide**](docs/ADMIN_GUIDE.md) | **DevOps / Admins** | Security DACL hardening, CI/CD headless execution, observability, and troubleshooting. |
 | 👩‍💻 [**Developer & Extension Guide**](docs/DEVELOPER_GUIDE.md) | **Contributors** | How to build from source, write tests, and add custom MCP tools. |
 | 📡 [**API & Wire Protocol Specification**](docs/API_SPECIFICATION.md) | **Integrators** | JSON-RPC 2.0 transport and binary frame specifications. |
+| 🔐 [**Security Policy**](SECURITY.md) | **Users / Operators** | Supported release line, local attachment boundary, and private reporting guidance. |
 | 📝 [**Changelog**](CHANGELOG.md) | **All** | Version history and notable changes. |
 
 ---
@@ -55,7 +58,7 @@
                                │  Standard MCP Protocol (stdio / JSON-RPC 2.0)
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│             Didi (C++ MCP Core Engine - didi.exe)           │
+│        Didi (C++ MCP Core Engine - didi / didi.exe)         │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2024-11-05 standard)       │
 │  - Registry (68 canonical tools + 10 legacy names)          │
 │  - Dynamic Resources (godot://project/tree, editor/state)   │
@@ -65,7 +68,7 @@
                                │  Authenticated process-unique local IPC endpoint
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│            Godot 4.5+ Process (didi_extension.dll)          │
+│        Godot 4.5+ Process (Didi extension library)          │
 │  ┌───────────────────────┬───────────────────────────────┐  │
 │  │ EditorInterface Hook  │ Editor ViewportTexture        │  │
 │  │ (Main-thread Dispatch)│ (RGBA8 → PNG capture)         │  │
