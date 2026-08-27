@@ -26,10 +26,10 @@
 - Create: `tests/test_documentation_validator.py`
 
 **Interfaces:**
-- Consumes: repository root containing `CMakeLists.txt`, version-bearing source files, Markdown, and `SECURITY.md`.
+- Consumes: repository root containing `LICENSE`, `CMakeLists.txt`, version-bearing source files, Markdown, and `SECURITY.md`.
 - Produces: `validate_repository(root: pathlib.Path) -> list[str]` and a CLI that returns `0` with a validation summary or `1` with one error per line.
 
-- [ ] **Step 1: Write failing validator tests**
+- [x] **Step 1: Write failing validator tests**
 
 Create `tests/test_documentation_validator.py` with `unittest` cases that import `tools/validate_documentation.py` and prove:
 
@@ -54,9 +54,9 @@ def test_valid_repository_has_no_errors(self):
     self.assertEqual(validate_repository(self.make_valid_repository()), [])
 ```
 
-The fixture must create every required version source and current reference page explicitly in a temporary directory. It must include duplicate-heading anchor coverage (`heading`, `heading-1`) and ignore external URLs, pure in-page links after validating them against the source file, and fenced-code pseudo-links.
+The fixture must create the repository license, every required version source, and every current reference page explicitly in a temporary directory. It must include duplicate-heading anchor coverage (`heading`, `heading-1`) and ignore external URLs, pure in-page links after validating them against the source file, and fenced-code pseudo-links.
 
-- [ ] **Step 2: Run the new tests and verify RED**
+- [x] **Step 2: Run the new tests and verify RED**
 
 Run:
 
@@ -66,7 +66,7 @@ python -m unittest tests.test_documentation_validator -v
 
 Expected: import/file failure because `tools/validate_documentation.py` does not exist.
 
-- [ ] **Step 3: Implement the minimal validator**
+- [x] **Step 3: Implement the minimal validator**
 
 Create `tools/validate_documentation.py` with:
 
@@ -90,7 +90,7 @@ Read UTF-8 with `errors="strict"`. Derive `1.3.0` from `project(didi VERSION ...
 
 Check the five registration facts only in `README.md`, `docs/CAPABILITIES.md`, `docs/TOOL_REFERENCE.md`, and `CHANGELOG.md`, using each page's designated phrasing rather than requiring every synonym in every file. Validate relative `.md` links and fragments after removing fenced code blocks and inline code spans. GitHub-style anchors lowercase text, remove punctuation other than spaces/hyphens, translate spaces to hyphens, and suffix duplicates with `-1`, `-2`, and so on.
 
-- [ ] **Step 4: Run validator tests and verify GREEN**
+- [x] **Step 4: Run validator tests and verify GREEN**
 
 Run:
 
@@ -100,7 +100,7 @@ python -m unittest tests.test_documentation_validator -v
 
 Expected: all cases pass with zero failures.
 
-- [ ] **Step 5: Commit the validator**
+- [x] **Step 5: Commit the validator**
 
 ```powershell
 git add tools/validate_documentation.py tests/test_documentation_validator.py
@@ -124,7 +124,7 @@ git -c user.name="Shane Wall" -c user.email="shane.wall@gmail.com" commit -m "te
 - Consumes: Phase 3 runtime/discovery contracts and validator expectations from Task 1.
 - Produces: one consistent current documentation set for users, operators, integrators, agents, contributors, and security reporters.
 
-- [ ] **Step 1: Run the validator against the uncorrected repository and verify RED**
+- [x] **Step 1: Run the validator against the uncorrected repository and verify RED**
 
 Run:
 
@@ -134,15 +134,15 @@ python tools/validate_documentation.py
 
 Expected: failures for the stale `SECURITY.md` support table and missing current-version documentation contract.
 
-- [ ] **Step 2: Update security and release identity**
+- [x] **Step 2: Update security and release identity**
 
 Change `SECURITY.md` so `1.3.x` is the only supported line and `1.2.x`/`<=1.1.x` are unsupported. Add concise local-attachment threat-model, token/descriptor secrecy, `DIDI_SESSION_DIR`, and safe-reporting guidance. Add a current-release sentence and Security link to `README.md`.
 
-- [ ] **Step 3: Make architecture terminology platform-neutral**
+- [x] **Step 3: Make architecture terminology platform-neutral**
 
 In `README.md` and `docs/ARCHITECTURE.md`, describe `didi`/`didi.exe`, the platform extension library, and `named pipe / Unix-domain socket` consistently. Preserve exact endpoint and ACL details in the transport/security sections.
 
-- [ ] **Step 4: Add contributor documentation gates**
+- [x] **Step 4: Add contributor documentation gates**
 
 Add to `CONTRIBUTING.md` and `docs/DEVELOPER_GUIDE.md`:
 
@@ -153,11 +153,11 @@ python tools/validate_documentation.py
 
 List the exact version-bearing files and current-reference pages that must change together. Require runtime discovery tests for tool-count or capability changes.
 
-- [ ] **Step 5: Record the follow-up without rewriting history**
+- [x] **Step 5: Record the follow-up without rewriting history**
 
 Under `CHANGELOG.md` `Unreleased`, add a `Changed` entry describing the corrected `1.3.x` support policy, platform-neutral guides, and automated drift validation. Do not alter the historical `1.3.0` release bullets except to fix a demonstrably false statement.
 
-- [ ] **Step 6: Run the validator and verify GREEN**
+- [x] **Step 6: Run the validator and verify GREEN**
 
 Run:
 
@@ -168,7 +168,7 @@ python -m unittest tests.test_documentation_validator -v
 
 Expected: both commands exit `0` with no validation errors.
 
-- [ ] **Step 7: Commit current documentation**
+- [x] **Step 7: Commit current documentation**
 
 ```powershell
 git add SECURITY.md README.md docs/ARCHITECTURE.md CONTRIBUTING.md docs/DEVELOPER_GUIDE.md CHANGELOG.md
@@ -187,7 +187,7 @@ git -c user.name="Shane Wall" -c user.email="shane.wall@gmail.com" commit -m "do
 - Consumes: `tools/validate_documentation.py` CLI from Task 1.
 - Produces: fast CI enforcement on documentation and version/tool-surface source changes.
 
-- [ ] **Step 1: Expand workflow path triggers**
+- [x] **Step 1: Expand workflow path triggers**
 
 Keep `docs/**` and `*.md`, then add:
 
@@ -201,7 +201,7 @@ Keep `docs/**` and `*.md`, then add:
       - 'addons/didi/plugin.cfg'
 ```
 
-- [ ] **Step 2: Replace file-existence-only validation with executable checks**
+- [x] **Step 2: Replace file-existence-only validation with executable checks**
 
 After checkout, run:
 
@@ -212,7 +212,7 @@ After checkout, run:
           python tools/validate_documentation.py
 ```
 
-- [ ] **Step 3: Parse workflow YAML and rerun all documentation checks**
+- [x] **Step 3: Parse workflow YAML and rerun all documentation checks**
 
 Run:
 
@@ -225,7 +225,7 @@ git diff --check
 
 If PyYAML is unavailable, use the workspace-provided Python dependency runtime; do not add a project dependency.
 
-- [ ] **Step 4: Run runtime regression verification**
+- [x] **Step 4: Run runtime regression verification**
 
 Run the Release native suite and confirm exactly 100 tests pass:
 
@@ -236,13 +236,13 @@ cmake --build build --config Release
 
 Use a sanitized child environment if Windows injects both `Path` and `PATH` into MSBuild.
 
-- [ ] **Step 5: Mark this plan's checkboxes complete and commit CI wiring**
+- [x] **Step 5: Mark this plan's checkboxes complete and commit CI wiring**
 
 ```powershell
 git add .github/workflows/lint.yml docs/superpowers/plans/2026-08-28-phase-3-documentation-reconciliation.md
 git -c user.name="Shane Wall" -c user.email="shane.wall@gmail.com" commit -m "ci: enforce documentation release contract"
 ```
 
-- [ ] **Step 6: Review final branch against the design**
+- [x] **Step 6: Review final branch against the design**
 
 Compare `origin/main..HEAD`, confirm every design requirement maps to a changed file or an audited accurate page, scan for unfinished markers, verify every commit author, and ensure `git status --short` is empty.

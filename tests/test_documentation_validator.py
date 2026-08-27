@@ -27,6 +27,7 @@ class DocumentationValidatorTests(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
 
     def make_valid_repository(self) -> Path:
+        self.write("LICENSE", "MIT License\n")
         self.write("CMakeLists.txt", "project(didi VERSION 1.3.0 LANGUAGES C CXX)\n")
         self.write(
             "include/didi/mcp/mcp_protocol.hpp",
@@ -139,6 +140,14 @@ Second section.
             any("addons/didi/plugin.cfg" in error and "1.3.0" in error for error in errors),
             errors,
         )
+
+    def test_reports_missing_license(self):
+        root = self.make_valid_repository()
+        (root / "LICENSE").unlink()
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(any("LICENSE: required file is missing" in error for error in errors), errors)
 
     def test_rejects_stale_supported_minor(self):
         root = self.make_valid_repository()

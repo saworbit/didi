@@ -6,11 +6,27 @@ on:
     paths:
       - 'docs/**'
       - '*.md'
+      - '.github/workflows/lint.yml'
+      - 'tools/validate_documentation.py'
+      - 'tests/test_documentation_validator.py'
+      - 'CMakeLists.txt'
+      - 'include/didi/mcp/mcp_protocol.hpp'
+      - 'src/standalone/main.cpp'
+      - 'src/mcp/tool_registry.cpp'
+      - 'addons/didi/plugin.cfg'
   pull_request:
     branches: [ main, master ]
     paths:
       - 'docs/**'
       - '*.md'
+      - '.github/workflows/lint.yml'
+      - 'tools/validate_documentation.py'
+      - 'tests/test_documentation_validator.py'
+      - 'CMakeLists.txt'
+      - 'include/didi/mcp/mcp_protocol.hpp'
+      - 'src/standalone/main.cpp'
+      - 'src/mcp/tool_registry.cpp'
+      - 'addons/didi/plugin.cfg'
   workflow_dispatch:
 
 concurrency:
@@ -27,14 +43,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Verify Documentation Files
+      - name: Validate Documentation Contract
         run: |
-          test -f README.md
-          test -f CHANGELOG.md
-          test -f LICENSE
-          test -f docs/ARCHITECTURE.md
-          test -f docs/TOOL_REFERENCE.md
-          test -f docs/QUICKSTART.md
-          test -f docs/LLM_INSTRUCTIONS.md
-          test -f docs/ADMIN_GUIDE.md
-          echo "All critical documentation files verified."
+          python -m unittest tests.test_documentation_validator -v
+          python tools/validate_documentation.py

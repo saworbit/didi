@@ -1,7 +1,7 @@
 # Phase 3 Documentation Reconciliation Design
 
-**Date:** 2026-08-28  
-**Status:** Approved  
+**Date:** 2026-08-28
+**Status:** Approved
 **Scope:** Current-facing project documentation and its automated drift checks
 
 ## Objective
@@ -43,7 +43,7 @@ When prose conflicts with executable discovery or tests, the prose changes. Hist
 
 A dependency-free Python validator will run in the fast documentation workflow and locally. It will:
 
-- require the critical current-facing Markdown files;
+- require the critical current-facing Markdown files and the repository license;
 - derive the project version from `CMakeLists.txt` and require the MCP protocol header, standalone version output, addon plugin manifest, README, capability matrix, changelog, and security policy to agree;
 - require the current supported minor line and reject an older line marked supported;
 - require the authoritative Phase 3 registration facts (`68` canonical, `10` legacy, `78` total, `50` implemented, `18` unimplemented) in their designated current-reference documents;

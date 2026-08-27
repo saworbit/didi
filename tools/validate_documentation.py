@@ -12,6 +12,7 @@ from urllib.parse import unquote, urlparse
 
 
 REQUIRED_DOCUMENTS = (
+    "LICENSE",
     "README.md",
     "CHANGELOG.md",
     "CONTRIBUTING.md",
