@@ -4,6 +4,8 @@
 #include "didi/mcp/mcp_server.hpp"
 #include "didi/gdextension/editor_hook.hpp"
 
+#include <unordered_set>
+
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
 #define ASSERT_EQ(a, b) ASSERT_TRUE((a) == (b))
 
@@ -124,6 +126,18 @@ static void test_tool_registry_default_tools() {
     auto tools = reg.listTools();
 
     ASSERT_EQ(tools.size(), 78u);
+    const std::unordered_set<std::string> legacy_names = {
+        "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
+        "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
+        "execute_test_session", "mutate_scene_tree", "instantiate_asset",
+        "inject_input_event"
+    };
+    size_t canonical_count = 0;
+    for (const auto& tool : tools) {
+        if (legacy_names.count(tool.name) == 0) ++canonical_count;
+    }
+    ASSERT_EQ(legacy_names.size(), 10u);
+    ASSERT_EQ(canonical_count, 68u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -220,7 +234,12 @@ static void test_tool_capabilities_are_honest() {
     const auto* syntax = reg.getTool("script_check_syntax");
     const auto* attach_script = reg.getTool("script_attach_to_node");
     const auto* list_sessions = reg.getTool("runtime_list_sessions");
+    const auto* get_session = reg.getTool("runtime_get_session");
     const auto* read_logs = reg.getTool("runtime_read_logs");
+    const auto* evaluate = reg.getTool("eval_gdscript");
+    const auto* inject_input = reg.getTool("runtime_inject_input");
+    const auto* call_stack = reg.getTool("runtime_get_call_stack");
+    const auto* profiler = reg.getTool("runtime_read_profiler");
 
     ASSERT_TRUE(hierarchy != nullptr);
     ASSERT_TRUE(instantiate != nullptr);
@@ -228,7 +247,12 @@ static void test_tool_capabilities_are_honest() {
     ASSERT_TRUE(syntax != nullptr);
     ASSERT_TRUE(attach_script != nullptr);
     ASSERT_TRUE(list_sessions != nullptr);
+    ASSERT_TRUE(get_session != nullptr);
     ASSERT_TRUE(read_logs != nullptr);
+    ASSERT_TRUE(evaluate != nullptr);
+    ASSERT_TRUE(inject_input != nullptr);
+    ASSERT_TRUE(call_stack != nullptr);
+    ASSERT_TRUE(profiler != nullptr);
 
     auto hierarchy_json = hierarchy->toJson();
     auto instantiate_json = instantiate->toJson();
@@ -236,7 +260,12 @@ static void test_tool_capabilities_are_honest() {
     auto syntax_json = syntax->toJson();
     auto attach_script_json = attach_script->toJson();
     auto list_sessions_json = list_sessions->toJson();
+    auto get_session_json = get_session->toJson();
     auto read_logs_json = read_logs->toJson();
+    auto evaluate_json = evaluate->toJson();
+    auto inject_input_json = inject_input->toJson();
+    auto call_stack_json = call_stack->toJson();
+    auto profiler_json = profiler->toJson();
 
     ASSERT_EQ(hierarchy_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"live", "offline_fallback"}));
@@ -255,9 +284,24 @@ static void test_tool_capabilities_are_honest() {
     ASSERT_EQ(list_sessions_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"offline_fallback"}));
     ASSERT_EQ(list_sessions_json["_meta"]["didi"]["implemented"], true);
+    ASSERT_EQ(get_session_json["_meta"]["didi"]["executionModes"],
+              didi::json::array({"offline_fallback"}));
+    ASSERT_EQ(get_session_json["description"],
+              "Returns token-free local metadata for the selected runtime session.");
     ASSERT_EQ(read_logs_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"live"}));
     ASSERT_EQ(read_logs_json["_meta"]["didi"]["implemented"], true);
+    ASSERT_EQ(read_logs_json["inputSchema"]["properties"]["cursor"]["default"], 0);
+    ASSERT_EQ(read_logs_json["inputSchema"]["properties"]["limit"]["maximum"], 500);
+    ASSERT_EQ(evaluate_json["_meta"]["didi"]["executionModes"],
+              didi::json::array({"live"}));
+    ASSERT_EQ(evaluate_json["_meta"]["didi"]["implemented"], true);
+    ASSERT_EQ(evaluate_json["inputSchema"]["properties"]["timeout_ms"]["maximum"], 5000);
+    for (const auto& reserved : {inject_input_json, call_stack_json, profiler_json}) {
+        ASSERT_EQ(reserved["_meta"]["didi"]["executionModes"],
+                  didi::json::array({"unimplemented"}));
+        ASSERT_EQ(reserved["_meta"]["didi"]["implemented"], false);
+    }
 
     reg.setIpcClient(nullptr);
     auto unavailable = reg.callTool("signal_list_connections", {{"target_node", "/root"}});

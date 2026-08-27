@@ -117,3 +117,29 @@ Once connected, ask your AI assistant any of the following:
 - 🚀 **Runtime Test**: *"Run `res://scenes/main.tscn` headlessly and report any engine errors or warnings."* (`runtime_launch`)
 
 Signal wiring, physics/navigation queries, TileMap/GridMap editing, runtime input injection, call stacks, and profiler telemetry are registered but unimplemented in the current build. An MCP client should not call them when `implemented` is false.
+
+## 🔗 Step 6: Attach to a running editor or game
+
+Phase 3 starts detached; v1.3.0 never guesses which local process you intended. With the addon enabled in one or more editor/game processes:
+
+1. Call `runtime_list_sessions` with your canonical `project_path`.
+2. Choose the token-free descriptor whose `kind` is `editor` or `game` as intended.
+3. Call `runtime_attach_session` with its 32-hex `session_id`. The private token stays in the owner-only descriptor and internal handshake.
+4. Confirm `runtime_get_session` reports `execution_mode: "local_session_management"` and the intended `kind`.
+5. Use `runtime_get_tree` or poll `runtime_read_logs` with the returned `next_cursor`.
+
+For a paused game, call `runtime_set_paused` with `true`, then `runtime_step` with `frames` from 1–60. The step resolves only after exact advancement and re-pause verification. `runtime_stop` requests quit; poll discovery until the session disappears before claiming it exited.
+
+A safe evaluation example is:
+
+```json
+{
+  "expression": "node.get('process_priority')",
+  "context_node": "/root/RuntimeRoot",
+  "timeout_ms": 1000
+}
+```
+
+`eval_gdscript` is a strict read-only expression subset, not arbitrary GDScript. It rejects traversal, dynamic/indexed access, callbacks, mutation, statements, and unsafe APIs; timeout checks are cooperative rather than preemptive. See [Tool Reference](TOOL_REFERENCE.md#eval_gdscript--live) before generating expressions.
+
+The structured runtime ring does not capture arbitrary Godot/external `print()` output. Continue using `runtime_launch` when you need bounded child stdout/stderr returned after process exit.

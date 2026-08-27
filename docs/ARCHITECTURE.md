@@ -29,12 +29,12 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
 ┌─────────────────────────────────────────────────────────────┐
 │             Didi (C++ MCP Core Engine - didi.exe)           │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2024-11-05 standard)       │
-│  - Registry (58 canonical tools + 10 legacy names)          │
+│  - Registry (68 canonical tools + 10 legacy names)          │
 │  - Dynamic Resources (godot://project/tree, editor/state)   │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
 │  - Offline file/process tools and capability metadata       │
 └──────────────────────────────┬──────────────────────────────┘
-                               │  Fast Local Named Pipe (\\.\pipe\godot_didi_ipc)
+                               │  Process-unique authenticated local IPC endpoint
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
 │            Godot 4.5+ Process (didi_extension.dll)          │
@@ -89,13 +89,13 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
    - Filesystem reads, static GDScript parsing, and offline process tools stay in the standalone MCP process and never enter the Godot main-thread queue.
 4. **Restricted Security DACL**:
    - Windows Named Pipes are provisioned with an SDDL security descriptor restricting read/write access exclusively to the Current User (`OW`) and Administrators (`BA`).
-   - GDExtension IPC initialization is restricted to `GDEXTENSION_INITIALIZATION_EDITOR` only, ensuring standalone exported games never expose an open pipe.
+   - Phase 3 initializes the session host at `GDEXTENSION_INITIALIZATION_SCENE` in both editor and game processes. Each endpoint is same-user-only, process-unique, and token-authenticated; it is a local attachment boundary, not remote authentication.
 
 ---
 
 ## 4. IPC Wire Protocol & Framing
 
-Didi uses an optimized, low-overhead framing protocol over local Named Pipes (`\\.\pipe\godot_didi_ipc` on Windows, UNIX domain sockets on POSIX):
+Didi uses an optimized, low-overhead framing protocol over process-unique local Named Pipes (`\\.\pipe\godot_didi_<pid>_<session-id>` on Windows) or UNIX domain sockets in the OS temporary directory:
 
 ```
 ┌─────────────────────────┬────────────────────────────────────────────┐
@@ -146,3 +146,28 @@ When the Godot Editor is not open, Didi automatically switches to its built-in o
 - **`viewport_create_test_lab`**: Writes a basic standalone sandbox `.tscn` with lights and cameras.
 
 The exact live/offline/unimplemented split is documented in [Current Capability Matrix](CAPABILITIES.md).
+
+---
+
+## 7. Phase 3 session router and runtime bridge
+
+Each loaded Didi extension follows bind-before-publish startup:
+
+```text
+Godot editor/game process
+  -> create 32-hex session ID + 64-hex token
+  -> bind same-user process-unique endpoint
+  -> atomically publish schema-1 descriptor in <OS temp>/didi-sessions
+  -> authenticate session.handshake and every routed request
+  -> queue Godot-object work on the main-thread bridge
+```
+
+Descriptors bind identity to PID plus process start time, preventing PID reuse from appearing live. Discovery reads only direct `*.json` regular files through validated handles, limits each file to 64 KiB, validates exact field/endpoint shapes, and reports malformed entries without deleting them. Clean shutdown retires only the exact owned descriptor with an atomic no-replace move; a collision may retain an owner-only non-`.json` tombstone, which discovery ignores.
+
+The standalone `RuntimeSessionClient` starts detached in v1.3.0. `runtime_list_sessions` and the attach/detach/get operations execute locally and report `local_session_management`; an explicit attach performs a 3-second authenticated handshake before atomically replacing a previous route. Public metadata never contains the token.
+
+The runtime bridge resolves `Engine.get_main_loop()` as `SceneTree`, supports both editor and game tree inspection, and labels every response with `session_kind`. Pause, frame step, and stop are game controls. A step holds one pending main-thread command across exactly 1–60 callbacks and resolves only after re-pause verification or shutdown cancellation.
+
+The 2,000-record sequence ring is structured Didi telemetry. Cursor reads advance across filtered records and disclose retention gaps. It is not a hook for arbitrary Godot/external `print()` output; offline `runtime_launch` remains the bounded child stdout/stderr capture path.
+
+`eval_gdscript` scans a deliberately small expression grammar before Godot parses with `const_calls_only=true`. Exact native scalar `node.get(<literal>)` reads are ClassDB-resolved and prebound so project script getters cannot execute. Object traversal, dynamic/indexed property access, callbacks, reflection, mutation, and unbounded live operations are rejected. Conversion enforces depth 16, 4,096 container elements, finite numbers, in-subtree Nodes, and a 256 KiB full-response bound. The timeout is cooperative rather than thread-preemptive, so the accepted call surface remains conservative.

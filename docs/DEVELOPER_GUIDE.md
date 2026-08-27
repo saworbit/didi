@@ -145,3 +145,30 @@ Route the method from `EditorHook::executeOnMainThread` into a bounded implement
 - Add native tests for capability metadata, offline behavior, and error propagation.
 - Add a real Godot integration case for live behavior and UndoRedo where relevant.
 - Update [Current Capability Matrix](CAPABILITIES.md) and [Tool Reference](TOOL_REFERENCE.md).
+
+## Phase 3 implementation map
+
+- `src/runtime/session_client.cpp`: descriptor discovery, opened-handle validation, cross-platform PID/process-start identity, 3-second transactional handshake, token insertion, and local route state.
+- `src/gdextension/session_host.cpp`: bind-before-publish editor/game endpoint lifecycle, private descriptor generation, authentication stripping, and safe no-replace descriptor retirement.
+- `src/gdextension/runtime_log.cpp`: bounded 2,000-record ring, UTF-8-safe 16 KiB messages, 64 KiB details, cursor gaps, filtering, and logger sink mirroring.
+- `src/gdextension/runtime_bridge.cpp`: SceneTree resolution, 10,000-node bounded tree, pause verification, exact one-active-step state machine, shutdown cancellation, and stop requests.
+- `src/gdextension/expression_sandbox.cpp`: tokenizer/policy, receiver-aware call validation, ClassDB-prebound native scalar property reads, context confinement, cooperative deadlines, and bounded Variant-to-JSON conversion.
+
+The standalone router starts detached; keep local session management distinct from live engine calls. Never add implicit auto-attach without a separate design and tests for ambiguity. Never log or return descriptor tokens or full submitted expression source.
+
+## Phase 3 tests and release gate
+
+The v1.3.0 baseline reports 58 native tests; the runner's final count is authoritative as tests evolve. Focused native suites cover descriptor identity/TOCTOU/cleanup, attach rollback, log cursors/bounds, expression scanner policy, capability metadata, and pending-step state. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and covers discovery, attach, logs, tree, pause/resume/multi-frame step, stop, strict evaluation, malicious callback probes, cleanup, and source-fixture integrity.
+
+Run from a clean worktree:
+
+```powershell
+cmake --build build --config Release
+.\build\Release\didi_tests.exe
+.\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.5.1-stable_win64_console.exe
+.\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe
+```
+
+For expression-policy changes, add a failing native scanner test and a real editor/game integration probe before changing implementation. A new accepted Node operation must prove it cannot dispatch script callbacks, traverse outside the active subtree, allocate unbounded data before a check, leak source/token text, or turn the cooperative timeout into a hard-preemption claim.
+
+The CI MCP smoke must continue to assert exactly 68 canonical/78 total registrations, local metadata for the four session tools, live metadata for the six routed tools, cursor-shaped logs, and `implemented: false` for `runtime_inject_input`, `runtime_get_call_stack`, and `runtime_read_profiler`.

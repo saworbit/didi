@@ -300,7 +300,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "runtime_get_session";
-        t.description = "Returns the selected runtime session and a fresh authenticated state.";
+        t.description = "Returns token-free local metadata for the selected runtime session.";
         t.inputSchema = {{"type", "object"}};
         t.handler = [this](const json& args) { return handleRuntimeGetSession(args, m_runtimeSessionClient); };
         registerTool(std::move(t));

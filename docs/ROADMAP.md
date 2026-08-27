@@ -1,7 +1,7 @@
 # Didi Strategic Roadmap & Technical Build Order 🗺️
 
 > **Core Philosophy**:
-> The 58-tool canonical surface includes the completed Phase 1 live substrate and Phase 2 project wiring. The next capability is implementing remaining operations honestly, without success stubs.
+> The 68-tool canonical surface includes completed Phases 1–3: live editor substrate, project wiring, and authenticated editor/game runtime sessions. The next capability is Phase 4 verification/search work, implemented honestly without success stubs.
 
 ---
 
@@ -14,8 +14,8 @@
 │ Phase 1: Substrate      │ Phase 2: Project Wiring │ Phase 3: In-Engine Eval & Runtime  │
 │  - Main-thread pump     │  - attach_script        │  - eval_gdscript                   │
 │  - Real SceneTree/Undo  │  - Autoloads / InputMap │  - Runtime stream & attach         │
-│  - Real Viewport Blit   │  - ProjectSettings      │  - First-class scene file ops      │
-│  - Honest tool caps     │  - Group management     │  - UI hit-testing                  │
+│  - Real Viewport Blit   │  - ProjectSettings      │  - Pause / step / stop / tree      │
+│  - Honest tool caps     │  - Group management     │  - Strict read-only expressions    │
 ├─────────────────────────┼─────────────────────────┼────────────────────────────────────┤
 │ Phase 4: Verification   │ Phase 5: Deep Domains   │ Phase 6: Enterprise Safety         │
 │  - Symbol/Text Search   │  - C# & Shaders         │  - Per-project pipe isolation      │
@@ -70,39 +70,23 @@ Godot 4.5 cannot report editor dirty state through GDExtension, so `scene_close`
 
 ---
 
-## 🚀 Capabilities to Add (After Live Hooks Work)
+## ✅ Phase 3: Runtime Sessions and Read-Only Evaluation (COMPLETE — 2026-08-27)
+
+Phase 3 adds ten canonical tools and closes authenticated attach-to-running for concurrent editor and game processes:
+
+- Atomic schema-1 descriptors in `<OS temp>/didi-sessions`, process-unique same-user endpoints, PID plus process-start identity, private 64-hex tokens, and a finite 3-second protocol-1.3 handshake.
+- Explicit transactional attach/detach/get management. v1.3.0 starts detached; failed attach preserves a healthy route and public metadata never exposes tokens.
+- A 2,000-record structured Didi log ring with cursors, retention-gap disclosure, deterministic filtering, and bounded UTF-8 payloads.
+- Live runtime tree inspection capped at 10,000 nodes plus verified pause, exact 1–60 frame stepping, single-pending-step enforcement, shutdown cancellation, and graceful stop request.
+- `eval_gdscript` as a strict read-only expression subset with receiver-aware calls, native scalar ClassDB property prebinding, in-subtree context/results, result depth/element/size bounds, and cooperative (not preemptive) timeout checks.
+
+The structured ring does not intercept arbitrary external `print()` output. `runtime_launch` remains the bounded child stdout/stderr capture path. Input injection, call stacks, and profiler telemetry remain registered but unimplemented.
+
+---
+
+## 🚀 Remaining Capabilities After Phase 3
 
 These are missing capabilities that an AI agent actually requires to complete full development cycles and ship Godot changes.
-
-### 1. Script Attachment and Project Wiring
-The current suite can patch a `.gd` file and spawn a node, but cannot complete the usual "Add a Player" loop:
-- **`attach_script` / `detach_script`**: Dynamically attach or detach a GDScript/C# script on a target `NodePath`.
-- **Autoload Management**: List, add, remove, and update project-wide Singletons / Autoloads.
-- **Input Map Configuration**: List, register, and modify action bindings and input events (`InputMap`).
-- **Project Settings**: Get and set project configurations (`application/run/main_scene`, physics layers, rendering modes, display sizes).
-- **Group Management**: Add/remove nodes from groups and query group members.
-
-### 2. Scene File Operations as First-Class Tools
-Hierarchy mutation without file operations leaves unsaved editor state:
-- **Create Empty Scene**: Create a new `Node2D`, `Node3D`, or `Control` root and set it as the active edited scene.
-- **Scene Lifecycle**: Open, close, and switch the active edited scene in the editor tab bar.
-- **Pack Branch to Scene**: Pack any existing branch into a reusable `.tscn` (`PackedScene`).
-- **Scene Dependency Graph (`get_scene_dependencies`)**: Query dependency hierarchy and instanced sub-scene trees.
-- **Atomic Batch Scene Operations**: Execute compound actions in a single `EditorUndoRedoManager` transaction (e.g. *Add Node + Attach Script + Set Properties + Connect Signal*).
-
-### 3. Runtime Attach and Observation
-`runtime_launch` starts a process; agents also need to interact with a running game or editor:
-- **Attach to Running Game/Editor**: Named pipe session handshake with already-running instances.
-- **Live Stream Stdout/Stderr/Errors**: Subscribe to `godot://runtime/logs` with real-time change notifications.
-- **Execution Control**: Stop, pause, resume, and step running game scenes.
-- **In-Game Node Inspection**: Query and inspect nodes on the live running game tree, not only the editor tree.
-- **UI Hit-Testing**: List `Control` bounding rects and simulate clicks/typing by `NodePath` (`get_ui_elements`, `click_element`).
-
-### 4. In-Engine GDScript Execution
-The highest-leverage single tool once live hooks are established:
-- **`eval_gdscript` / `run_script`**: Evaluates GDScript expressions or ephemeral scripts on a `RefCounted` with `SceneTree` access, returning a JSON-coerced `Variant`.
-- **Enables One-Off Agent Queries**: Find nodes by predicate, dump export vars, and inspect state without requiring a new dedicated MCP tool for every Godot API.
-- **Sandboxed Security**: Confined strictly to project root, enforced timeout (5s), and restricted `OS.execute`.
 
 ### 5. Search and Indexing That Agents Can Trust
 Beyond a basic recursive directory walk:
@@ -159,13 +143,13 @@ Beyond a basic recursive directory walk:
 | :--- | :--- | :--- |
 | **Phase 1 (DONE)** | **Live Pump + Real SceneTree / UndoRedo + Honest Errors** | Verified on Godot 4.5.1, 4.6.2, and 4.7.2. |
 | **Phase 2 (DONE)** | **Attach Script, Autoloads, InputMap, Project Settings, Groups, Scene Lifecycle** | Verified through real Godot persistence, UndoRedo, resource packing, and adversarial rejection paths. |
-| **Phase 3 (NEXT)** | **`eval_gdscript`, Runtime Log Stream, Attach-to-Running** | Replaces dozens of one-off tools with dynamic, sandboxed engine execution. |
-| **Phase 4 (THEN)** | **Symbol Search, Asset Reimport, Viewport Diffing & Isolation** | Closes the autonomous verification and feedback loop for AI agents. |
+| **Phase 3 (DONE)** | **`eval_gdscript`, Runtime Log Stream, Attach-to-Running** | Verified authenticated concurrent editor/game routing, bounded controls/logs/tree, and a strict read-only expression subset. |
+| **Phase 4 (NEXT)** | **Symbol Search, Asset Reimport, Viewport Diffing & Isolation** | Closes the autonomous verification and feedback loop for AI agents. |
 | **Phase 5 (LATER)** | **C# / Shaders, Project Export, GridMap MeshLibrary, UI Hit-Testing** | Provides deep domain depth across all Godot engine subsystems. |
 
 ---
 
-## 📋 The 58-Tool Canonical Surface
+## 📋 The 68-Tool Canonical Surface
 
 This is the planned protocol surface, not a claim that every row executes today. See [Current Capability Matrix](CAPABILITIES.md) for per-tool status.
 
@@ -181,3 +165,4 @@ This is the planned protocol surface, not a claim that every row executes today.
 | **8. Runtime & Debug (4)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Process launch implemented; input/debug/profiler tools unimplemented. |
 | **9. Editor Lifecycle (4)**| `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Implemented live; reload requests a filesystem source scan. |
 | **10. Phase 2 Project Wiring (18)** | Script attach/detach; autoloads; InputMap; project settings; groups; scene create/open/close/pack | Implemented live. Project writes persist with rollback; node writes use UndoRedo; resource writes require safe paths and explicit overwrite. |
+| **11. Phase 3 Runtime Sessions (10)** | Session list/attach/detach/get; logs; pause/step/stop/tree; `eval_gdscript` | Implemented. Four tools execute as local session management; six require an explicitly attached live editor/game. Evaluation is read-only and expression-only. |

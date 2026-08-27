@@ -19,7 +19,7 @@ This guide covers deployment, security controls, system configuration, monitorin
 ## 🔒 Security & Access Control
 
 ### 1. Named Pipe Security Descriptor (Windows)
-Didi provisions its IPC pipe (`\\.\pipe\godot_didi_ipc`) with an explicit SDDL Discretionary Access Control List (DACL):
+Didi provisions each process-unique session pipe (`\\.\pipe\godot_didi_<pid>_<session-id>`) with an explicit SDDL Discretionary Access Control List (DACL):
 ```
 D:(A;;GA;;;BA)(A;;GA;;;OW)
 ```
@@ -28,14 +28,15 @@ D:(A;;GA;;;BA)(A;;GA;;;OW)
 
 World access is not granted. POSIX sockets are created with mode `0600`.
 
-### 2. Standalone Export Game Isolation
-To prevent security exposure in production game builds:
-- The GDExtension module checks the initialization level and **only activates the IPC server when `p_level == GDEXTENSION_INITIALIZATION_EDITOR`**.
-- Exported release and debug game binaries will **never** open an IPC listening pipe or expose editor introspection hooks.
+### 2. Editor and Game Session Exposure
+
+Phase 3 starts the session host at scene initialization in both editor and game processes so local tooling can attach to a running game. Treat the addon as a development component: exclude `addons/didi` and its extension library from production exports unless a same-user local attachment endpoint is explicitly acceptable. The pipe/socket is current-user-only and token-authenticated, but it is not a remote or hostile-host security boundary.
 
 ### 3. Buffer & Payload Overflow Protection
 - **Content-Length & Pipe Frame Cap**: Enforced at `128 MB` maximum payload size to prevent memory exhaustion attacks.
 - **Viewport Bounds**: Live captures reject non-positive dimensions and dimensions above `8192`; offline preview dimensions are clamped to `16`–`1024`.
+- **Session descriptors**: Exact schema/field/endpoint validation, 64 KiB file cap, opened-handle regular-file checks, PID plus process-start identity, and a 3-second handshake prevent stale/PID-reuse and path-substitution attachment.
+- **Expression bounds**: 2,048-byte source, 1,024-byte context, depth 16, 4,096 container elements, 256 KiB response, and a strict receiver-aware read-only grammar. Timeouts are cooperative rather than native-thread preemption.
 
 ---
 
@@ -50,8 +51,9 @@ Administrators can configure Didi globally or per-service using standard environ
 | `DIDI_PROJECT_ROOT` | Directory path | Current directory | Root folder of the target Godot project (e.g. `D:/my_game`) |
 | `DIDI_LOG_LEVEL` | `DEBUG`, `INFO`, `WARN`, `ERROR`, `NONE` | `INFO` | Stderr logging verbosity |
 | `DIDI_PIPE_NAME` | Pipe / Socket Path | Default | Override Named Pipe / UNIX domain socket path |
+| `DIDI_SESSION_DIR` | Directory path | `<OS temp>/didi-sessions` | Controlled test/deployment override for the descriptor registry; keep it owner-only. |
 
-`DIDI_PIPE_NAME` must be present in both the standalone server and Godot editor environments. Use a distinct value per simultaneously open project; the default name is otherwise shared.
+`DIDI_PIPE_NAME` remains available for legacy/direct IPC configuration. Phase 3 session routing uses process-unique descriptor endpoints instead. Do not share `DIDI_SESSION_DIR` across OS users.
 
 ---
 
@@ -92,6 +94,8 @@ jobs:
   - `WARN`: Recoverable parser errors, unexpected tool arguments, or degraded fallbacks.
   - `ERROR`: Subprocess failures, pipe broken errors, and script compiler errors.
 
+The live `godot://runtime/logs`/`runtime_read_logs` ring retains 2,000 structured Didi records with 16 KiB messages and 64 KiB details. Poll with `next_cursor`; alert on `dropped_before_cursor`. The ring deliberately does not intercept arbitrary Godot or external-process `print()` output. Use `runtime_launch` for bounded child stdout/stderr capture.
+
 ---
 
 ## 🛠️ Troubleshooting & Diagnostics Matrix
@@ -103,3 +107,7 @@ jobs:
 | `Content-Length header parse error` | Malformed framing sent by a non-standard MCP client. | Check MCP client configuration to ensure clean UTF-8 framing without trailing garbage bytes. |
 | `Timeout waiting for response length` | Godot Editor is suspended in a script breakpoint. | Resume execution in Godot Debugger or restart the editor session. |
 | Tool is listed but returns `unimplemented` | The name is reserved in the protocol surface but has no trustworthy execution path. | Check `_meta.didi.implemented` and use only implemented tools from [Current Capability Matrix](CAPABILITIES.md). |
+| Session is listed as stale | PID exited or process-start identity no longer matches (including PID reuse). | Start/reload the intended Godot process; do not edit descriptor identity fields. |
+| Attach times out or returns `401`/`409` | Endpoint unavailable, token mismatch, or protocol/identity handshake mismatch. | Leave the existing route intact, re-list sessions, and attach the new descriptor. Never copy tokens into logs or MCP requests. |
+| Retired `.didi-retired-*` files remain | Safe no-replace cleanup encountered a collision/race and retained an owner-only non-`.json` tombstone. | Discovery ignores them. Remove only after all Didi processes for that user are stopped and ownership/path are verified. |
+| Expected `print()` text is absent from runtime logs | The Phase 3 ring records Didi events, not arbitrary process stdout. | Launch a bounded child with `runtime_launch`, or inspect Godot's own debugger/log output. |

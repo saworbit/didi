@@ -68,7 +68,7 @@ Didi listens on `stdin` and responds on `stdout`. Log output is strictly routed 
 
 ### Bridge error codes
 
-The internal extension envelope can use `400` (invalid argument), `404` (missing editor object/property), `409` (no undo/redo action or wrong execution process), `500` (Godot/bridge failure), `501` (unimplemented), `503` (not connected/ready), or `504` (cancelled before main-thread execution started). A command already running on Godot's main thread is allowed to return its definitive result instead of producing an unknown-outcome timeout. Public `tools/call` converts these failures into MCP content with `result.isError: true`; clients should use the returned text rather than expecting a top-level JSON-RPC code.
+The internal extension envelope can use `400` (invalid argument), `401` (runtime token rejected), `404` (missing object/property/session), `408` (cooperative expression deadline exceeded), `409` (protocol/mode/state conflict), `413` (bounded payload exceeded), `415` (unsupported expression result), `422` (parse/execution rejection), `500` (Godot/bridge failure), `501` (unimplemented), `503` (not connected/ready), or `504` (cancelled before main-thread execution started). A command already running on Godot's main thread is allowed to return its definitive result instead of producing an unknown-outcome timeout. Public `tools/call` converts these failures into MCP content with `result.isError: true`; clients should use the returned text and structured error data rather than expecting a top-level JSON-RPC code.
 
 ---
 
@@ -108,9 +108,10 @@ Tool execution failures use MCP `result.isError: true` with explanatory text. JS
 
 ## 3. Internal IPC Protocol (Named Pipes & UNIX Sockets)
 
-- **Pipe Name (Windows)**: `\\.\pipe\godot_didi_ipc`
+- **Session descriptor directory**: `<OS temporary directory>/didi-sessions` (controlled override: `DIDI_SESSION_DIR`)
+- **Pipe Name (Windows)**: `\\.\pipe\godot_didi_<pid>_<32-hex-session-id>`
 - **Security Descriptor (Windows)**: SDDL `D:(A;;GA;;;BA)(A;;GA;;;OW)`
-- **Socket Path (POSIX)**: `/tmp/godot_didi_ipc.sock`
+- **Socket Path (POSIX)**: `<OS temp>/godot_didi_<pid>_<32-hex-session-id>.sock`, with owner-only permissions
 
 ### Frame Format:
 ```
@@ -119,6 +120,8 @@ Offset 4..N:  char payload_bytes[payload_length] (UTF-8 JSON string)
 ```
 
 ### Implemented internal methods
+
+- `session.handshake`
 
 - `editor.getState`
 - `scene.getHierarchy`, `scene.instantiateNode`, `scene.removeNode`, `scene.reparentNode`, `scene.setProperty`, `scene.getProperty`, `scene.duplicateNode`
@@ -130,7 +133,8 @@ Offset 4..N:  char payload_bytes[payload_length] (UTF-8 JSON string)
 - `scene.create`, `scene.open`, `scene.close`, `scene.packBranch`
 - `editor.undo`, `editor.redo`, `editor.saveScene`, `editor.reloadProject`
 - `vision.captureViewport`
-- `runtime.getLogs`
+- `runtime.getLogs`, `runtime.getTree`, `runtime.setPaused`, `runtime.step`, `runtime.stop`
+- `runtime.evalExpression`
 
 These scene/editor/viewport/log methods execute through the extension's main-thread bridge. Public asset queries, script diagnostics/reflection, and visual-test-lab generation are standalone filesystem/parser handlers and are never routed through extension IPC. If an offline-only helper name is sent to the extension directly, it returns `409`; other reserved internal names return a structured `501` envelope:
 
@@ -144,3 +148,33 @@ These scene/editor/viewport/log methods execute through the extension's main-thr
 ```
 
 See [Current Capability Matrix](CAPABILITIES.md) for the public tool mapping.
+
+### Session descriptor and authentication envelope
+
+The extension binds its endpoint first, then atomically publishes one schema-`1` JSON descriptor containing `session_id`, private `token`, `pid`, `kind`, canonical `project_path`, `endpoint`, process `started_at_ms`, and protocol version `1.3`. Discovery accepts only direct regular-file `*.json` children no larger than 64 KiB, exact endpoint shapes, exact field sets, and a live PID whose process-start identity matches. Public forms omit `token`.
+
+Every routed live request copies public parameters and adds `_didi_session_token` internally. The extension compares all 64 token bytes in constant work, strips the field, then dispatches the command. `session.handshake` must complete within 3,000 ms and echo matching session/protocol identity before a candidate route replaces the current route. Failed attach is transactional.
+
+```json
+{
+  "method": "runtime.getLogs",
+  "params": {
+    "cursor": 43,
+    "limit": 100,
+    "minimum_level": "warning",
+    "_didi_session_token": "<private 64-hex token>"
+  }
+}
+```
+
+The token must never be placed in MCP requests, responses, logs, diagnostics, or copied documentation examples with a real value.
+
+### Cursor log response
+
+`runtime.getLogs` returns `records`, `oldest_cursor`, `next_cursor`, and `dropped_before_cursor`. Each record has `sequence`, `timestamp_ms`, `level`, `source`, `message`, and `details` (object or null). Filtering does not freeze the cursor: `next_cursor` advances across all inspected records. The 2,000-record ring caps messages at 16 KiB and details at 64 KiB.
+
+The ring is Didi-owned structured telemetry only. It does not intercept arbitrary Godot/external-process `print()` output; the offline `runtime_launch` tool is the bounded stdout/stderr capture path.
+
+### Expression response and timeout semantics
+
+`runtime.evalExpression` accepts the public `eval_gdscript` fields and returns a token-free result with `context_node`, bounded `value`, `value_type`, `elapsed_ms`, `timeout_ms`, `read_only`, `sandbox_profile`, `execution_mode`, and `session_kind`. It intentionally does not echo expression source. The 1–5,000 ms deadline is checked cooperatively around parse, execution, and conversion; it cannot preempt a native call already in progress. See [Tool Reference](TOOL_REFERENCE.md#eval_gdscript--live) for the exact accepted grammar and receiver allowlist.

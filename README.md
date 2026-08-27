@@ -21,8 +21,8 @@
 | 🚀 [**Quickstart Guide**](docs/QUICKSTART.md) | **Developers / Humans** | 5-minute step-by-step setup for Godot, Cursor, Claude, and VS Code. |
 | 🤖 [**LLM Agent Instructions**](docs/LLM_INSTRUCTIONS.md) | **AI Assistants / LLMs** | Dedicated system prompt & decision tree for Claude, Cursor, Windsurf, Antigravity. |
 | ✅ [**Current Capability Matrix**](docs/CAPABILITIES.md) | **Everyone** | Authoritative live, offline, unavailable, and unimplemented behavior. |
-| 🗺️ [**Roadmap & 58-Tool Surface**](docs/ROADMAP.md) | **Developers / Contributors** | Completed phases and technical build order. |
-| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 58 canonical tools plus 10 legacy names. |
+| 🗺️ [**Roadmap & 68-Tool Surface**](docs/ROADMAP.md) | **Developers / Contributors** | Completed phases and technical build order. |
+| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 68 canonical tools plus 10 legacy names. |
 | 🏛️ [**Architecture & System Topology**](docs/ARCHITECTURE.md) | **Engineers / Architects** | Deep-dive into C++20 design, dual execution topology, threading safety, and named-pipe IPC. |
 | 📦 [**Dynamic Resources & Prompts**](docs/RESOURCES_AND_PROMPTS.md) | **Developers / LLMs** | Technical specs for `godot://...` resources and prompt workflows. |
 | 🛡️ [**Administrator & Operations Guide**](docs/ADMIN_GUIDE.md) | **DevOps / Admins** | Security DACL hardening, CI/CD headless execution, observability, and troubleshooting. |
@@ -57,12 +57,12 @@
 ┌─────────────────────────────────────────────────────────────┐
 │             Didi (C++ MCP Core Engine - didi.exe)           │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2024-11-05 standard)       │
-│  - Registry (58 canonical tools + 10 legacy names)          │
+│  - Registry (68 canonical tools + 10 legacy names)          │
 │  - Dynamic Resources (godot://project/tree, editor/state)   │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
 │  - Offline Fallback Engine (GDScript AST, .tscn parser)     │
 └──────────────────────────────┬──────────────────────────────┘
-                               │  Fast Local Named Pipe (\\.\pipe\godot_didi_ipc)
+                               │  Authenticated process-unique local IPC endpoint
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
 │            Godot 4.5+ Process (didi_extension.dll)          │
@@ -78,9 +78,9 @@
 
 ---
 
-## 🛠️ Protocol Surface (58 Canonical Tools)
+## 🛠️ Protocol Surface (68 Canonical Tools)
 
-The 58 canonical names are the stable protocol surface, with 10 additional legacy registrations. Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, and `liveAvailable` from `tools/list`. Phase 2 adds script attachment, autoloads, typed InputMap settings, general project settings, scene groups, and scene-file lifecycle operations to the Phase 1 live substrate.
+The 68 canonical names are the stable protocol surface, with 10 additional legacy registrations (78 total). Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, and `liveAvailable` from `tools/list`. Phase 3 adds explicit local editor/game session discovery and attachment, structured cursor logs, runtime control/tree inspection, and bounded read-only expression evaluation.
 
 | Domain | Key Tools | Current execution |
 | :--- | :--- | :--- |
@@ -94,6 +94,15 @@ The 58 canonical names are the stable protocol surface, with 10 additional legac
 | **8. Runtime & Debug (4)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Process launch is implemented offline; input, call stack, and profiler tools are unimplemented. |
 | **9. Editor Lifecycle (4)** | `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Implemented live. Reload requests a resource-filesystem rescan. |
 | **10. Project Wiring (18)** | Script attach/detach; autoload, InputMap, and setting management; groups; scene create/open/close/pack | Implemented live with UndoRedo, ProjectSettings persistence, typed events, overwrite guards, and normalized `res://` paths. |
+| **11. Runtime Sessions (10)** | `runtime_list_sessions`, attach/detach/get, logs, pause/step/stop/tree, `eval_gdscript` | Four local session-management tools plus six live tools. Attachment is explicit and authenticated; evaluation is a strict read-only expression subset, not arbitrary GDScript. |
+
+### Phase 3 runtime contract
+
+Didi publishes one private descriptor per loaded editor or game process under the OS temporary directory's `didi-sessions` child (override only for controlled tests with `DIDI_SESSION_DIR`). Start the MCP server with the same canonical project root, call `runtime_list_sessions`, then explicitly call `runtime_attach_session`; v1.3.0 does not auto-attach. Public responses never include the 64-hex authentication token. Descriptor schema `1` / protocol `1.3` binds a 32-hex session ID to PID plus process start time so PID reuse is not treated as the same engine.
+
+`runtime_read_logs` polls the bounded 2,000-record Didi ring with a cursor. This structured ring records Didi lifecycle, command, control, and evaluation events; it does **not** intercept arbitrary `print()` output from Godot or another external process. Use `runtime_launch` when you need bounded child-process stdout/stderr captured after that process exits.
+
+`eval_gdscript` accepts one expression (1–2048 UTF-8 bytes), an optional in-subtree `context_node`, and `timeout_ms` from 1–5000. It rejects statements, assignment, dynamic/indexed access, traversal, arbitrary dispatch, and mutation. Its timeout checks are cooperative, not preemptive; the grammar and receiver allowlist are deliberately small enough to bound accepted work. See the [Tool Reference](docs/TOOL_REFERENCE.md#11-phase-3-runtime-sessions) for the exact allowed calls and result limits.
 
 ---
 

@@ -30,7 +30,7 @@ This guide walks through configuring Didi with popular AI coding assistants and 
 2. Open your project in the **Godot Editor**.
 3. Navigate to **Project $\rightarrow$ Project Settings $\rightarrow$ Plugins**.
 4. Check the **Enable** box next to **Didi Native MCP Bridge**.
-5. The GDExtension starts local IPC on `\\.\pipe\godot_didi_ipc` (Windows) or `/tmp/godot_didi_ipc.sock` (POSIX).
+5. The GDExtension starts a process-unique same-user endpoint and atomically publishes its private descriptor under `<OS temp>/didi-sessions`.
 
 ---
 
@@ -114,13 +114,14 @@ Add to your `mcp_config.json`:
 | `GODOT_BIN` | auto-detected | Explicit path to the Godot binary (e.g. `C:\Godot\Godot_v4.7.2-stable_win64_console.exe`) |
 | `GODOT_PATH` | auto-detected | Fallback path to the Godot installation directory |
 | `DIDI_LOG_LEVEL` | `INFO` | Logging verbosity: `DEBUG`, `INFO`, `WARN`, `ERROR`, `NONE` |
+| `DIDI_SESSION_DIR` | `<OS temp>/didi-sessions` | Controlled descriptor-registry override; both Didi components must run as the same OS user. |
 
 ---
 
 ## 4. Troubleshooting & FAQ
 
 ### Q: Does Didi require Godot Editor to be open at all times?
-**A:** No. File-based tools such as `script_check_syntax`, `project_list_resources`, and `runtime_launch` remain available in `offline_fallback` mode. Scene mutations, Phase 2 project wiring, and editor lifecycle tools require the editor connection.
+**A:** No. File-based tools such as `script_check_syntax`, `project_list_resources`, and `runtime_launch` remain available in `offline_fallback` mode. Scene mutations, Phase 2 project wiring, and editor lifecycle tools require a live editor; Phase 3 runtime tools require an explicitly attached editor or game session.
 
 ### Q: Why does `scene_close` require `discard_unsaved: true` even for a scene I believe is clean?
 **A:** Godot 4.5 does not expose active-scene dirty state through GDExtension. Didi refuses the default call rather than risk discarding work. Pass `discard_unsaved: true` only when closing without a save prompt is intentional.
@@ -135,6 +136,27 @@ Add to your `mcp_config.json`:
 **A:** Didi retains the full protocol surface for compatibility. Inspect `_meta.didi` from `tools/list`; only call entries with `implemented: true`, and require `currentMode: "live"` for live-only tools. See [Current Capability Matrix](CAPABILITIES.md).
 
 ### Q: Is there any network port conflict?
-**A:** Didi uses a local Windows named pipe (`\\.\pipe\godot_didi_ipc`) or POSIX Unix-domain socket instead of a TCP port, so it does not allocate a network port or require a firewall rule.
+**A:** Didi uses process-unique local Windows named pipes (`\\.\pipe\godot_didi_<pid>_<session-id>`) or POSIX Unix-domain sockets instead of TCP, so it does not allocate a network port or require a firewall rule.
 
-The default pipe name is shared by local Didi instances. Use the same `--pipe-name`/`DIDI_PIPE_NAME` value for the standalone server and editor process when isolating projects.
+Phase 3 discovers endpoints from owner-only descriptors and authenticates each request. `--pipe-name`/`DIDI_PIPE_NAME` remains a legacy/direct IPC override and is not required for process-unique session routing.
+
+---
+
+## 5. Phase 3 client integration sequence
+
+`tools/list` returns 68 canonical tools and 10 legacy registrations. Integrators should treat the four session-management tools as local operations even though their discovery metadata uses the existing `offline_fallback` capability label:
+
+1. Start Didi with `--project <canonical-project-root>`.
+2. Call `runtime_list_sessions` and choose an exact `session_id` and `kind`.
+3. Call `runtime_attach_session`. A 3-second token-authenticated handshake completes before the selected route changes; failed attach preserves the old route.
+4. Call `runtime_get_session` to read token-free local selection metadata. It does not issue a new handshake.
+5. Route live operations and verify `session_kind` (`editor` versus `game`) in every response.
+6. Call `runtime_detach_session` before changing projects or choosing another process.
+
+For logs, begin with `{ "cursor": 0, "limit": 100 }` and persist `next_cursor`. Treat `dropped_before_cursor` as a retention gap; a severity filter never changes cursor advancement. Records contain `sequence`, timestamp, level, source, message, and `details`. They are structured Didi events, not arbitrary Godot/external stdout. Use `runtime_launch` for bounded child stdout/stderr.
+
+For games, pause before step, allow only one in-flight `runtime_step`, and do not equate `runtime_stop` success with confirmed process exit. Editor sessions support tree/log/evaluation observation but reject game-only step/stop behavior.
+
+For evaluation, send only expressions supported by the [exact receiver allowlist](TOOL_REFERENCE.md#eval_gdscript--live). The submitted source is intentionally absent from successful responses and operational logs. Context and returned Nodes must remain inside the active editor/game subtree. The timeout is cooperative, not preemptive.
+
+Runtime input injection, call stacks, and profiler telemetry remain unimplemented and must not be feature-detected by name alone; check `_meta.didi.implemented`.

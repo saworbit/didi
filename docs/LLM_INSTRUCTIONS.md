@@ -92,6 +92,21 @@ For API details outside that limited map, inspect the project or use official Go
 
 Use `runtime_launch` to start a separate Godot process, optionally headless, and inspect captured output. This does not attach to a running game. Runtime input injection, call stacks, and profiler telemetry are unimplemented.
 
+### Observe or control an already-running session
+
+Didi v1.3.0 starts detached and exposes 68 canonical tools plus 10 legacy registrations. Never assume the only discovered process is selected:
+
+1. Call `runtime_list_sessions`, preferably with the canonical project path.
+2. Choose the intended `editor` or `game` descriptor and explicitly call `runtime_attach_session`.
+3. Verify the token-free local selection with `runtime_get_session`; it is a local metadata read, not a new handshake.
+4. Keep editor edited-state and game runtime-state separate by checking `session_kind` on every live result.
+
+Poll `runtime_read_logs` from cursor `0`, then pass its `next_cursor` on every later call. A true `dropped_before_cursor` means retained history was lost. Filtering still advances the cursor. Never claim the Didi ring contains arbitrary `print()` output: it contains structured Didi events only. Use `runtime_launch` for bounded child stdout/stderr.
+
+Only game sessions accept pause/step/stop. Pause and verify before stepping; `frames` is 1–60, only one step may be pending, and success means the game re-paused after exact callbacks. A successful stop is a quit request, not proof of process exit.
+
+Treat `eval_gdscript` as a small read-only expression language. Prefer literals, arithmetic/boolean comparisons, direct scalar `node.get('<native-property>')`, `node.get_child_count()`, `node.get_path()`, `node.get_class()`, string/class/group/method/meta predicates, bounded literal-container queries, and numeric constructors/functions. Do not generate traversal, property/index syntax, chained calls, metadata values, callbacks, reflection, mutation, statements, `str(object)`, file/process/network APIs, or unsafe singletons. Source is 1–2048 UTF-8 bytes; context remains in the active subtree; timeout is 1–5000 ms and cooperative, not preemptive; result depth is 16 and the full response is 256 KiB.
+
 ## Unimplemented domains
 
 Do not call these names while `implemented` is false:

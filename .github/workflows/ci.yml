@@ -8,6 +8,9 @@ on:
       - 'include/**'
       - 'tests/**'
       - 'addons/**'
+      - 'docs/**/*.md'
+      - 'README.md'
+      - 'CHANGELOG.md'
       - 'CMakeLists.txt'
       - '.github/workflows/ci.yml'
   pull_request:
@@ -17,6 +20,9 @@ on:
       - 'include/**'
       - 'tests/**'
       - 'addons/**'
+      - 'docs/**/*.md'
+      - 'README.md'
+      - 'CHANGELOG.md'
       - 'CMakeLists.txt'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
@@ -86,6 +92,35 @@ jobs:
             ./build/didi_tests
           fi
 
+      - name: Validate Internal Markdown Links
+        shell: bash
+        run: |
+          python3 - << 'EOF' || python - << 'EOF'
+          import pathlib
+          import re
+          import sys
+          from urllib.parse import unquote
+
+          failures = []
+          markdown = [pathlib.Path('README.md'), pathlib.Path('CHANGELOG.md')]
+          markdown.extend(pathlib.Path('docs').rglob('*.md'))
+          link_pattern = re.compile(r'!?\[[^\]]*\]\(([^)]+)\)')
+          for source in markdown:
+              text = source.read_text(encoding='utf-8')
+              text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
+              for raw in link_pattern.findall(text):
+                  target = raw.strip().split()[0].strip('<>')
+                  if not target or target.startswith(('#', 'http://', 'https://', 'mailto:')):
+                      continue
+                  file_part = unquote(target.split('#', 1)[0])
+                  if file_part and not (source.parent / file_part).resolve().exists():
+                      failures.append(f'{source}: missing {target}')
+          if failures:
+              print('\n'.join(failures), file=sys.stderr)
+              raise SystemExit(1)
+          print(f'Validated internal links in {len(markdown)} Markdown files')
+          EOF
+
       - name: Run End-to-End MCP Integration Test
         shell: bash
         run: |
@@ -105,11 +140,30 @@ jobs:
           assert req('initialize', {'protocolVersion': '2024-11-05'}, 1)['result']['serverInfo']['name'] == 'didi'
           tools = req('tools/list', {}, 2)['result']['tools']
           by_name = {tool['name']: tool for tool in tools}
-          assert len(tools) == 68
+          assert len(tools) == 78
+          legacy_names = {
+              'get_scene_hierarchy', 'capture_viewport', 'analyze_script_diagnostics',
+              'patch_script_symbols', 'create_visual_test_lab', 'query_project_resources',
+              'execute_test_session', 'mutate_scene_tree', 'instantiate_asset',
+              'inject_input_event'
+          }
+          assert len(legacy_names) == 10
+          assert len(set(by_name) - legacy_names) == 68
           assert by_name['scene_get_hierarchy']['_meta']['didi']['implemented'] is True
           assert by_name['script_attach_to_node']['_meta']['didi']['implemented'] is True
           assert by_name['script_attach_to_node']['_meta']['didi']['executionModes'] == ['live']
           assert by_name['signal_connect']['_meta']['didi']['implemented'] is False
+          assert by_name['runtime_list_sessions']['_meta']['didi']['executionModes'] == ['offline_fallback']
+          assert by_name['runtime_get_session']['_meta']['didi']['executionModes'] == ['offline_fallback']
+          assert by_name['runtime_read_logs']['_meta']['didi']['executionModes'] == ['live']
+          assert by_name['runtime_read_logs']['inputSchema']['properties']['cursor']['default'] == 0
+          assert by_name['runtime_read_logs']['inputSchema']['properties']['limit']['maximum'] == 500
+          assert by_name['eval_gdscript']['_meta']['didi']['executionModes'] == ['live']
+          assert by_name['eval_gdscript']['_meta']['didi']['implemented'] is True
+          assert by_name['eval_gdscript']['inputSchema']['properties']['timeout_ms']['maximum'] == 5000
+          for name in ('runtime_inject_input', 'runtime_get_call_stack', 'runtime_read_profiler'):
+              assert by_name[name]['_meta']['didi']['implemented'] is False
+              assert by_name[name]['_meta']['didi']['executionModes'] == ['unimplemented']
 
           project = json.loads(req('resources/read', {'uri': 'godot://project/tree'}, 3)['result']['contents'][0]['text'])
           assert project['execution_mode'] == 'offline_fallback'
@@ -122,6 +176,13 @@ jobs:
           assert hierarchy['execution_mode'] == 'offline_fallback'
           assert hierarchy['scene_tree']['path'].startswith('/root/')
           assert len(hierarchy['scene_tree']['children']) >= 1
+
+          logs = json.loads(req('resources/read', {'uri': 'godot://runtime/logs'}, 5)['result']['contents'][0]['text'])
+          assert logs['execution_mode'] == 'offline_fallback'
+          assert logs['oldest_cursor'] == 1
+          assert logs['next_cursor'] >= logs['oldest_cursor']
+          assert logs['dropped_before_cursor'] is False
+          assert isinstance(logs['records'], list)
 
           proc.stdin.close()
           proc.wait()
