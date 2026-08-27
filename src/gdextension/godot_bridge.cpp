@@ -3,6 +3,7 @@
 #include "didi/common/logger.hpp"
 #include <array>
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <functional>
 #include <cstring>
@@ -455,6 +456,19 @@ Result<void> validateGroupName(const std::string& group) {
     return Result<void>::ok();
 }
 
+Result<void> validateIdentifier(const std::string& value, const std::string& label) {
+    if (value.empty() || value.size() > 128 ||
+        !(std::isalpha(static_cast<unsigned char>(value.front())) || value.front() == '_')) {
+        return Error::invalidArgument(label + " must be a valid identifier");
+    }
+    for (unsigned char character : value) {
+        if (!std::isalnum(character) && character != '_') {
+            return Error::invalidArgument(label + " must be a valid identifier");
+        }
+    }
+    return Result<void>::ok();
+}
+
 Result<void> validateResPath(const std::string& path, const std::string& expected_suffix) {
     if (!strings::startsWith(path, "res://") || path.find("..") != std::string::npos ||
         path.find('\\') != std::string::npos ||
@@ -808,6 +822,118 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         }
         return liveResult({{"status", "success"}, {"setting", setting}, {"persisted", true},
                            {"removed", remove}});
+    }
+
+    if (method == "project.listAutoloads" || method == "project.setAutoload" ||
+        method == "project.removeAutoload") {
+        auto project_settings = singleton("ProjectSettings");
+        if (project_settings.isErr()) return errorJson(project_settings.error().code, project_settings.error().message);
+
+        if (method == "project.listAutoloads") {
+            auto properties = callObject(project_settings.value(), "Object", "get_property_list", 3995934104LL);
+            if (properties.isErr()) return errorJson(properties.error().code, properties.error().message);
+            auto size_value = callVariant(properties.value(), "size");
+            if (size_value.isErr()) return errorJson(size_value.error().code, size_value.error().message);
+            auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (size.isErr()) return errorJson(size.error().code, size.error().message);
+            auto name_key = makeString("name");
+            if (name_key.isErr()) return errorJson(name_key.error().code, name_key.error().message);
+            std::vector<json> entries;
+            for (int64_t i = 0; i < size.value(); ++i) {
+                auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+                if (index.isErr()) return errorJson(index.error().code, index.error().message);
+                auto descriptor = callVariant(properties.value(), "get", {&index.value()});
+                if (descriptor.isErr()) return errorJson(descriptor.error().code, descriptor.error().message);
+                auto property_name_value = callVariant(descriptor.value(), "get", {&name_key.value()});
+                if (property_name_value.isErr()) return errorJson(property_name_value.error().code, property_name_value.error().message);
+                auto property_type = GodotApi::instance().variant_get_type(property_name_value.value().ptr());
+                if (property_type != GDEXTENSION_VARIANT_TYPE_STRING && property_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) continue;
+                auto property_name = stringFromVariant(property_name_value.value(), property_type);
+                if (property_name.isErr()) return errorJson(property_name.error().code, property_name.error().message);
+                if (!strings::startsWith(property_name.value(), "autoload/") || property_name.value().size() <= 9) continue;
+                auto setting_name = makeStringName(property_name.value());
+                VariantValue default_value;
+                if (setting_name.isErr()) return errorJson(setting_name.error().code, setting_name.error().message);
+                auto setting = callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
+                                          {&setting_name.value(), &default_value});
+                if (setting.isErr()) return errorJson(setting.error().code, setting.error().message);
+                auto setting_type = GodotApi::instance().variant_get_type(setting.value().ptr());
+                auto encoded = stringFromVariant(setting.value(), setting_type);
+                if (encoded.isErr()) return errorJson(encoded.error().code, encoded.error().message);
+                const bool autoload_singleton = strings::startsWith(encoded.value(), "*");
+                entries.push_back({{"name", property_name.value().substr(9)},
+                                   {"path", autoload_singleton ? encoded.value().substr(1) : encoded.value()},
+                                   {"singleton", autoload_singleton}});
+            }
+            std::sort(entries.begin(), entries.end(), [](const json& left, const json& right) {
+                return left["name"].get<std::string>() < right["name"].get<std::string>();
+            });
+            return liveResult({{"status", "success"}, {"autoloads", entries}});
+        }
+
+        const std::string autoload_name = params.value("name", "");
+        auto valid_name = validateIdentifier(autoload_name, "autoload name");
+        if (valid_name.isErr()) return errorJson(valid_name.error().code, valid_name.error().message);
+        const std::string setting_path = "autoload/" + autoload_name;
+        auto setting_name = makeStringName(setting_path);
+        if (setting_name.isErr()) return errorJson(setting_name.error().code, setting_name.error().message);
+        auto exists_value = callObject(project_settings.value(), "ProjectSettings", "has_setting", 3927539163LL,
+                                       {&setting_name.value()});
+        if (exists_value.isErr()) return errorJson(exists_value.error().code, exists_value.error().message);
+        auto exists = scalarFromVariant<GDExtensionBool>(exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (exists.isErr()) return errorJson(exists.error().code, exists.error().message);
+        const bool removing = method == "project.removeAutoload";
+        if (removing && !exists.value()) return errorJson(404, "Autoload not found: " + autoload_name);
+        if (!removing && exists.value() && !params.value("replace", false)) {
+            return errorJson(409, "Autoload already exists; pass replace: true to update it");
+        }
+
+        VariantValue default_value;
+        auto previous = exists.value()
+            ? callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
+                         {&setting_name.value(), &default_value})
+            : Result<VariantValue>(VariantValue{});
+        if (previous.isErr()) return errorJson(previous.error().code, previous.error().message);
+        Result<VariantValue> replacement(VariantValue{});
+        std::string resource_path;
+        bool autoload_singleton = true;
+        if (!removing) {
+            resource_path = params.value("path", "");
+            auto valid_path = strings::endsWith(resource_path, ".gd")
+                ? validateResPath(resource_path, ".gd")
+                : validateResPath(resource_path, ".tscn");
+            if (valid_path.isErr()) return errorJson(valid_path.error().code, valid_path.error().message);
+            auto loader = singleton("ResourceLoader");
+            if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
+            auto path = makeString(resource_path);
+            auto hint = makeString("");
+            if (path.isErr() || hint.isErr()) return errorJson(500, "Failed to construct resource existence arguments");
+            auto resource_exists_value = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                                                    {&path.value(), &hint.value()});
+            if (resource_exists_value.isErr()) return errorJson(resource_exists_value.error().code, resource_exists_value.error().message);
+            auto resource_exists = scalarFromVariant<GDExtensionBool>(resource_exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (resource_exists.isErr()) return errorJson(resource_exists.error().code, resource_exists.error().message);
+            if (!resource_exists.value()) return errorJson(404, "Autoload resource not found: " + resource_path);
+            autoload_singleton = params.value("singleton", true);
+            replacement = makeString((autoload_singleton ? "*" : "") + resource_path);
+            if (replacement.isErr()) return errorJson(replacement.error().code, replacement.error().message);
+        }
+
+        auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
+                                  {&setting_name.value(), &replacement.value()});
+        if (applied.isErr()) return errorJson(applied.error().code, applied.error().message);
+        auto saved = callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
+        auto save_code = saved.isOk()
+            ? scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT)
+            : Result<int64_t>(saved.error());
+        if (save_code.isErr() || save_code.value() != 0) {
+            auto rollback = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
+                                       {&setting_name.value(), &previous.value()});
+            if (rollback.isOk()) callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
+            return errorJson(500, "ProjectSettings.save failed; autoload mutation was rolled back");
+        }
+        return liveResult({{"status", "success"}, {"name", autoload_name}, {"path", resource_path},
+                           {"singleton", autoload_singleton}, {"removed", removing}, {"persisted", true}});
     }
 
     if (method == "script.attachToNode" || method == "script.detachFromNode") {

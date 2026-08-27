@@ -132,7 +132,18 @@ try {
         (Tool-Request 60 "scene_get_group_members" @{ group = "phase_two" }),
         (Tool-Request 61 "editor_undo" @{}),
         (Tool-Request 62 "scene_get_group_members" @{ group = "phase_two" }),
-        (Tool-Request 63 "scene_add_to_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two"; persistent = $true })
+        (Tool-Request 63 "scene_add_to_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two"; persistent = $true }),
+        (Tool-Request 64 "project_list_autoloads" @{}),
+        (Tool-Request 65 "project_set_autoload" @{ name = "PhaseTwo"; path = "res://subject.gd"; singleton = $true }),
+        (Tool-Request 66 "project_list_autoloads" @{}),
+        (Tool-Request 67 "project_set_autoload" @{ name = "PhaseTwo"; path = "res://subject.gd"; singleton = $true }),
+        (Tool-Request 68 "project_set_autoload" @{ name = "PhaseTwo"; path = "res://subject.gd"; singleton = $false; replace = $true }),
+        (Tool-Request 69 "project_list_autoloads" @{}),
+        (Tool-Request 70 "project_remove_autoload" @{ name = "PhaseTwo" }),
+        (Tool-Request 71 "project_list_autoloads" @{}),
+        (Tool-Request 72 "project_remove_autoload" @{ name = "PhaseTwo" }),
+        (Tool-Request 73 "project_set_autoload" @{ name = "not-valid"; path = "res://subject.gd" }),
+        (Tool-Request 74 "project_set_autoload" @{ name = "Missing"; path = "res://missing.gd" })
     )
 
     $rawResponses = $requests | & $didiExecutable
@@ -237,6 +248,17 @@ try {
     Assert-True (@((Tool-Payload $byId[60]).members).Count -eq 0) "Removed group membership remained visible."
     Assert-True (@((Tool-Payload $byId[62]).members) -contains "/root/SmokeRoot/Subject") "Group removal undo did not restore membership."
     Assert-True $byId[63].result.isError "Duplicate group membership returned fake success."
+
+    Assert-True (@((Tool-Payload $byId[64]).autoloads).Count -eq 0) "Disposable fixture unexpectedly began with autoloads."
+    $autoload = @((Tool-Payload $byId[66]).autoloads)[0]
+    Assert-True ($autoload.name -eq "PhaseTwo" -and $autoload.path -eq "res://subject.gd" -and $autoload.singleton -eq $true) "Autoload did not persist in canonical form."
+    Assert-True $byId[67].result.isError "Existing autoload was overwritten without replace: true."
+    Assert-True (@((Tool-Payload $byId[69]).autoloads)[0].singleton -eq $false) "Explicit autoload replacement did not persist singleton=false."
+    Assert-True ((Tool-Payload $byId[70]).removed -eq $true) "Autoload removal did not report success."
+    Assert-True (@((Tool-Payload $byId[71]).autoloads).Count -eq 0) "Removed autoload remained persisted."
+    Assert-True $byId[72].result.isError "Removing a missing autoload returned fake success."
+    Assert-True $byId[73].result.isError "Invalid autoload identifier was accepted."
+    Assert-True $byId[74].result.isError "Missing autoload resource was accepted."
 
     $engineErrors = @(
         Get-Content $stderrPath -ErrorAction SilentlyContinue |
