@@ -271,7 +271,8 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "project.removeInputAction", "project.getSetting", "project.setSetting",
         "scene.listGroups", "scene.addToGroup", "scene.removeFromGroup",
         "scene.getGroupMembers", "scene.create", "scene.open", "scene.close",
-        "scene.packBranch", "runtime.getTree", "runtime.setPaused", "runtime.stop"
+        "scene.packBranch", "runtime.getTree", "runtime.setPaused", "runtime.stop",
+        "runtime.evalGdscript"
     };
     if (live_bridge_methods.count(method)) {
         if (m_sessionKind == "game" && method.rfind("runtime.", 0) != 0) {

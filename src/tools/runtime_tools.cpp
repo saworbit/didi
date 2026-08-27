@@ -1,6 +1,7 @@
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/gdextension/expression_sandbox.hpp"
 #include "didi/offline/test_runner.hpp"
 #include "didi/runtime/session_client.hpp"
 
@@ -66,6 +67,32 @@ std::optional<std::string> validateRuntimePath(const std::string& path) {
         const auto segment = path.substr(start, end == std::string::npos ? std::string::npos : end - start);
         if (segment.empty() || segment == "." || segment == ".." || segment.front() == '%') {
             return "root_path may not contain empty, '.', '..', or unique-name alias segments";
+        }
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> validateExpressionContextPath(const std::string& path) {
+    if (path.empty() || path.size() > 1024 || path.find('\0') != std::string::npos) {
+        return "context_node must be a non-empty path of at most 1024 bytes";
+    }
+    if (path != "/root" && path.rfind("/root/", 0) != 0) {
+        return "context_node must be a canonical absolute path beneath /root";
+    }
+    if (path.back() == '/' || path.find("//") != std::string::npos ||
+        path.find('\\') != std::string::npos || path.find(':') != std::string::npos) {
+        return "context_node must be a canonical absolute NodePath";
+    }
+    size_t start = 1;
+    while (start <= path.size()) {
+        const auto end = path.find('/', start);
+        const auto segment = path.substr(start, end == std::string::npos
+                                                   ? std::string::npos
+                                                   : end - start);
+        if (segment.empty() || segment == "." || segment == ".." || segment.front() == '%') {
+            return "context_node may not contain aliases or relative segments";
         }
         if (end == std::string::npos) break;
         start = end + 1;
@@ -178,6 +205,26 @@ CallToolResult handleRuntimeGetTree(const json& args, std::shared_ptr<ipc::IIpcC
 }
 
 CallToolResult handleEvalGdscript(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!args.is_object() || !args.contains("expression") || !args["expression"].is_string()) {
+        return CallToolResult::error("Invalid expression request: expression is required and must be a string.");
+    }
+    const auto policy = godot::ExpressionPolicy::validate(args["expression"].get<std::string>());
+    if (policy.isErr()) {
+        return CallToolResult::error("Invalid expression request: " + policy.error().message + ".");
+    }
+    if (args.contains("context_node")) {
+        if (!args["context_node"].is_string()) {
+            return CallToolResult::error("Invalid expression request: context_node must be a string.");
+        }
+        if (const auto error = validateExpressionContextPath(
+                args["context_node"].get<std::string>()); error.has_value()) {
+            return CallToolResult::error("Invalid expression request: " + *error + ".");
+        }
+    }
+    if (args.contains("timeout_ms") && !integerInRange(args["timeout_ms"], 1, 5000)) {
+        return CallToolResult::error(
+            "Invalid expression request: timeout_ms must be an integer from 1 to 5000.");
+    }
     return forwardLiveRuntime("runtime.evalGdscript", args, ipc);
 }
 

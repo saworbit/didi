@@ -1,15 +1,10 @@
+@tool
 extends Node
 
-var frame_counter: int = 0
-@onready var frame_counter_node: Node = $FrameCounter_0
-
-func _ready() -> void:
-	set_meta("frame_counter", 0)
-
-func _process(_delta: float) -> void:
-	frame_counter += 1
-	set_meta("frame_counter", frame_counter)
-	frame_counter_node.name = "FrameCounter_%d" % frame_counter
+var dangerous_property: int:
+	get:
+		_mark_unsafe_callback()
+		return 42
 
 func _mark_unsafe_callback() -> void:
 	process_physics_priority += 1
@@ -26,4 +21,4 @@ func _get(property: StringName) -> Variant:
 
 func _to_string() -> String:
 	_mark_unsafe_callback()
-	return "unsafe-runtime-probe"
+	return "unsafe-editor-probe"

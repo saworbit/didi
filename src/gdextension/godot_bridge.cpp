@@ -1,5 +1,6 @@
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/gdextension_api.hpp"
+#include "didi/gdextension/expression_sandbox.hpp"
 #include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/common/logger.hpp"
 #include <array>
@@ -963,6 +964,9 @@ GodotBridge& GodotBridge::instance() {
 
 json GodotBridge::execute(const std::string& method, const json& params,
                           const std::string& session_kind) {
+    if (method == "runtime.evalGdscript") {
+        return executeExpression(params, session_kind);
+    }
     if (method == "runtime.getTree" || method == "runtime.setPaused" ||
         method == "runtime.stop") {
         return executeRuntimeBridge(method, params, session_kind);
