@@ -8,17 +8,11 @@ namespace didi {
 namespace mcp {
 
 CallToolResult handleQueryProjectResources(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    (void)ipc;
     std::string search_path = args.value("search_path", "res://");
     std::string type_filter = args.value("type_filter", "");
     std::string fuzzy_query = args.value("fuzzy_query", "");
     bool include_uid = args.value("include_uid", true);
-
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("asset.query", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
-    }
 
     offline::ResourceIndexer indexer;
     indexer.scan(".");

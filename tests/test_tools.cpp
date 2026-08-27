@@ -1,6 +1,7 @@
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/mcp/resource_registry.hpp"
 #include "didi/mcp/prompt_registry.hpp"
+#include "didi/gdextension/editor_hook.hpp"
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
 #define ASSERT_EQ(a, b) ASSERT_TRUE((a) == (b))
@@ -131,6 +132,14 @@ static void test_resource_registry() {
               didi::json::array({"offline_fallback"}));
     ASSERT_EQ(editor_state["_meta"]["didi"]["executionModes"],
               didi::json::array({"live", "offline_fallback"}));
+
+    reg.setIpcClient(nullptr);
+    for (const auto& uri : {"godot://project/tree", "godot://editor/state", "godot://runtime/logs"}) {
+        auto payload = reg.readResource(uri);
+        ASSERT_TRUE(payload.isOk());
+        auto parsed = didi::json::parse(payload.value());
+        ASSERT_EQ(parsed["execution_mode"], "offline_fallback");
+    }
 }
 
 static void test_prompt_registry() {
@@ -172,8 +181,15 @@ static void test_tool_capture_viewport_with_ipc() {
             return {
                 {"camera_identifier", "active_editor_view"},
                 {"image_base64", "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="},
-                {"description", "Mock Viewport Render"}
+                {"description", "Mock Viewport Render"},
+                {"execution_mode", "live"},
+                {"is_live_frame", true},
+                {"source", "godot_editor_viewport_texture"},
+                {"resolution", {{"width", 1}, {"height", 1}}}
             };
+        }
+        if (method == "runtime.getLogs") {
+            return {{"error", {{"code", 500}, {"message", "simulated live log failure"}}}};
         }
         return {{"status", "ok"}};
     });
@@ -189,9 +205,35 @@ static void test_tool_capture_viewport_with_ipc() {
     auto result = reg.callTool("capture_viewport", {{"camera_identifier", "active_editor_view"}});
     ASSERT_TRUE(!result.isError);
     ASSERT_EQ(result.content.size(), 2);
+    ASSERT_EQ(result.content[0].type, "text");
+    auto metadata = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(metadata["execution_mode"], "live");
+    ASSERT_EQ(metadata["is_live_frame"], true);
+    ASSERT_EQ(metadata["source"], "godot_editor_viewport_texture");
+    ASSERT_EQ(metadata["resolution"]["width"], 1);
+    ASSERT_EQ(metadata["resolution"]["height"], 1);
     ASSERT_EQ(result.content[1].type, "image");
     ASSERT_EQ(result.content[1].mimeType, "image/png");
     ASSERT_TRUE(!result.content[1].data.empty());
+
+    auto reflected = reg.callTool("script_reflect_class", {{"class_name", "CharacterBody3D"}});
+    ASSERT_TRUE(!reflected.isError);
+    auto reflected_json = didi::json::parse(reflected.content[0].text);
+    ASSERT_EQ(reflected_json["class_name"], "CharacterBody3D");
+    ASSERT_EQ(reflected_json["execution_mode"], "offline_fallback");
+
+    auto& resources = didi::mcp::ResourceRegistry::instance();
+    resources.setIpcClient(client);
+    auto project_tree = resources.readResource("godot://project/tree");
+    ASSERT_TRUE(project_tree.isOk());
+    auto project_tree_json = didi::json::parse(project_tree.value());
+    ASSERT_EQ(project_tree_json["execution_mode"], "offline_fallback");
+    ASSERT_TRUE(project_tree_json.contains("total_resources"));
+
+    auto runtime_logs = resources.readResource("godot://runtime/logs");
+    ASSERT_TRUE(runtime_logs.isOk());
+    auto runtime_logs_json = didi::json::parse(runtime_logs.value());
+    ASSERT_EQ(runtime_logs_json["execution_mode"], "offline_fallback");
 
     client->disconnect();
     server->stop();
@@ -262,6 +304,23 @@ static void test_ipc_error_propagation() {
     server->stop();
 }
 
+static void test_running_editor_command_cannot_be_cancelled_as_pending() {
+    didi::godot::CommandControl control;
+    ASSERT_EQ(control.state(), didi::godot::CommandState::Pending);
+    ASSERT_TRUE(control.tryStart());
+    ASSERT_EQ(control.state(), didi::godot::CommandState::Running);
+    ASSERT_TRUE(!control.tryCancelPending());
+    control.markCompleted();
+    ASSERT_EQ(control.state(), didi::godot::CommandState::Completed);
+
+    didi::godot::CommandControl pending;
+    ASSERT_TRUE(pending.tryCancelPending());
+    ASSERT_EQ(pending.state(), didi::godot::CommandState::Cancelled);
+    ASSERT_TRUE(!pending.tryStart());
+    ASSERT_TRUE(pending.tryClaimResponse());
+    ASSERT_TRUE(!pending.tryClaimResponse());
+}
+
 static void test_class_reflection() {
     auto& reg = didi::mcp::ToolRegistry::instance();
     auto res = reg.callTool("script_reflect_class", {{"class_name", "CharacterBody3D"}});
@@ -269,6 +328,7 @@ static void test_class_reflection() {
     ASSERT_TRUE(!res.content.empty());
     didi::json parsed = didi::json::parse(res.content[0].text);
     ASSERT_EQ(parsed["class_name"], "CharacterBody3D");
+    ASSERT_EQ(parsed["execution_mode"], "offline_fallback");
     ASSERT_EQ(parsed["inherits"], "PhysicsBody3D");
     ASSERT_TRUE(parsed["methods"].contains("move_and_slide"));
 }
@@ -296,6 +356,7 @@ struct RegisterToolTests {
         registerTest("Tools.CaptureViewportOfflineAttribution", test_tool_capture_viewport_offline_is_attributed);
         registerTest("Tools.Base64Padding", test_base64_rfc4648_padding);
         registerTest("Tools.IpcErrorPropagation", test_ipc_error_propagation);
+        registerTest("EditorHook.TimeoutState", test_running_editor_command_cannot_be_cancelled_as_pending);
         registerTest("Tools.ClassReflection", test_class_reflection);
         registerTest("Tools.SymbolExtraction", test_symbol_extraction);
         registerTest("Resources.DefaultRegistration", test_resource_registry);

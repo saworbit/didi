@@ -52,9 +52,34 @@ static void test_ipc_client_server_roundtrip() {
     server->stop();
 }
 
+static void test_ipc_negative_timeout_waits_for_definitive_response() {
+#if defined(_WIN32)
+    std::string test_pipe = "\\\\.\\pipe\\godot_didi_ipc_no_timeout_test";
+#else
+    std::string test_pipe = "/tmp/godot_didi_ipc_no_timeout_test.sock";
+#endif
+
+    auto server = didi::ipc::createIpcServer();
+    server->setHandler([](const didi::json&) -> didi::json {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        return {{"status", "completed"}};
+    });
+    ASSERT_TRUE(server->start(test_pipe));
+
+    auto client = didi::ipc::createIpcClient();
+    ASSERT_TRUE(client->connect(test_pipe, 2000));
+    auto result = client->sendRequest("test.delayed", {}, -1);
+    ASSERT_TRUE(result.isOk());
+    ASSERT_EQ(result.value()["status"], "completed");
+
+    client->disconnect();
+    server->stop();
+}
+
 struct RegisterIpcTests {
     RegisterIpcTests() {
         registerTest("IPC.Framing", test_ipc_framing);
         registerTest("IPC.ClientServerRoundtrip", test_ipc_client_server_roundtrip);
+        registerTest("IPC.NoTimeoutRoundtrip", test_ipc_negative_timeout_waits_for_definitive_response);
     }
 } g_registerIpcTests;

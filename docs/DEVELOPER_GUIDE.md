@@ -57,7 +57,7 @@ didi/
 
 ## 🧪 Automated Test Suite
 
-Didi currently includes 21 native tests:
+Didi currently includes 23 native tests:
 1. `JsonRpc.ParseValid`: JSON-RPC 2.0 parsing and validation.
 2. `JsonRpc.ParseNotification`: Notification parsing.
 3. `JsonRpc.ResponseSerialization`: Success/error response serialization.
@@ -65,22 +65,24 @@ Didi currently includes 21 native tests:
 5. `McpServer.ToolAvailability`: Dynamic live/offline/unavailable metadata.
 6. `IPC.Framing`: 4-byte little-endian framing validation.
 7. `IPC.ClientServerRoundtrip`: IPC duplex communication.
-8. `Tools.DefaultRegistration`: Tool-schema registration.
-9. `Tools.HonestCapabilities`: Static capability classification and unimplemented rejection.
-10. `Tools.CaptureViewportWithIpc`: Live response/image propagation.
-11. `Tools.CaptureViewportOfflineAttribution`: Synthetic PNG provenance.
-12. `Tools.Base64Padding`: Strict RFC 4648 `=` padding.
-13. `Tools.IpcErrorPropagation`: IPC error serialization.
-14. `Tools.ClassReflection`: Offline class-map behavior.
-15. `Tools.SymbolExtraction`: GDScript symbol extraction.
-16. `Resources.DefaultRegistration`: Dynamic MCP resources.
-17. `Prompts.DefaultRegistration`: MCP prompt templates.
-18. `GDScript.DiagnosticsDeprecation`: GDScript deprecation rules.
-19. `GDScript.PatchFunction`: Function patching.
-20. `GDScript.PatchSignal`: Signal patching.
-21. `ResourceIndexer.TypeDetection`: Resource type and UID detection.
+8. `IPC.NoTimeoutRoundtrip`: Definitive transport wait for work already running in Godot.
+9. `Tools.DefaultRegistration`: Tool-schema registration.
+10. `Tools.HonestCapabilities`: Static capability classification and unimplemented rejection.
+11. `Tools.CaptureViewportWithIpc`: Live response/image propagation.
+12. `Tools.CaptureViewportOfflineAttribution`: Synthetic PNG provenance.
+13. `Tools.Base64Padding`: Strict RFC 4648 `=` padding.
+14. `Tools.IpcErrorPropagation`: IPC error serialization.
+15. `EditorHook.TimeoutState`: Pending/running/completed command-state transitions and single-response ownership.
+16. `Tools.ClassReflection`: Offline class-map behavior.
+17. `Tools.SymbolExtraction`: GDScript symbol extraction.
+18. `Resources.DefaultRegistration`: Dynamic MCP resources and offline result provenance.
+19. `Prompts.DefaultRegistration`: MCP prompt templates.
+20. `GDScript.DiagnosticsDeprecation`: GDScript deprecation rules.
+21. `GDScript.PatchFunction`: Function patching.
+22. `GDScript.PatchSignal`: Signal patching.
+23. `ResourceIndexer.TypeDetection`: Resource type and UID detection.
 
-The Windows live integration harness starts a real Godot editor, sends MCP requests through the named pipe, and checks hierarchy, property validation, UndoRedo mutations, viewport PNG data, and honest errors:
+The Windows live integration harness starts a real Godot editor, sends MCP requests through the named pipe, and checks absolute nested hierarchy paths, edited-scene containment and root protection, node-type/property validation, UndoRedo lifetime and sibling-order restoration, live viewport provenance plus PNG dimensions, and honest errors:
 
 ```powershell
 .\tests\run_godot_integration.ps1 `

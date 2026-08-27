@@ -19,10 +19,15 @@ Historical entries describe the surface advertised by those releases. For the ex
 ### Fixed & Hardened
 - Removed the non-functional GDScript singleton pump and all live-success stubs.
 - Prevented timed-out queued commands from mutating the editor later and bounded main-thread work to 64 commands per frame.
+- Made timeout cancellation state-aware: pending commands cancel atomically, while already-running main-thread work returns a definitive result.
+- Made live MCP transport calls use the same definitive-response contract, eliminating the outer timeout race.
 - Made cross-thread bridge readiness atomic and resolved pending IPC promises during editor shutdown.
-- Kept scene mutations in the edited scene's UndoRedo history and preserved node lifetimes across undo/redo.
-- Rejected unknown or type-incompatible scalar properties and restored exact sibling order after remove undo.
-- Labeled synthesized viewport output as `offline_fallback`; only real GPU-backed captures report `is_live_frame: true`.
+- Kept scene mutations in the edited scene's UndoRedo history, used undo-side references for removed nodes, and preserved node lifetimes across history pruning.
+- Rejected unknown or type-incompatible scalar properties and restored exact sibling order after remove and reparent undo.
+- Confined node resolution and mutations to the edited scene subtree, protected its root, rejected cyclic reparenting, and rejected non-`Node` ClassDB objects before UndoRedo registration.
+- Preserved live viewport provenance and dimensions at the public MCP boundary; only real GPU-backed captures report `is_live_frame: true`.
+- Centralized result-level execution provenance and kept offline-only filesystem/parser work out of Godot's main-thread command queue.
+- Updated pull-request CI assertions to cover the complete 50-tool surface, dynamic execution modes, resources, and canonical scene hierarchy output.
 - Raised the minimum supported Godot version to 4.5, where the required native main-loop callback API is available.
 - Reconciled README, quickstart, capability, tool, protocol, architecture, operations, LLM, resource/prompt, developer, roadmap, contribution, and security documentation with the verified implementation.
 

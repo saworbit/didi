@@ -99,7 +99,7 @@ public:
                 return Error::internal("IPC pipe broken while waiting for response length");
             }
 
-            if (std::chrono::steady_clock::now() - start_wait > timeout_dur) {
+            if (timeout_ms >= 0 && std::chrono::steady_clock::now() - start_wait > timeout_dur) {
                 CloseHandle(m_pipe);
                 m_pipe = INVALID_HANDLE_VALUE;
                 return Error::internal("Timeout waiting for response length from IPC pipe");
@@ -139,7 +139,7 @@ public:
                 return Error::internal("IPC pipe broken while reading response payload");
             }
 
-            if (std::chrono::steady_clock::now() - start_wait > timeout_dur) {
+            if (timeout_ms >= 0 && std::chrono::steady_clock::now() - start_wait > timeout_dur) {
                 CloseHandle(m_pipe);
                 m_pipe = INVALID_HANDLE_VALUE;
                 return Error::internal("Timeout waiting for response payload from IPC pipe");

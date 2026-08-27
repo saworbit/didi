@@ -1,5 +1,6 @@
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/common/logger.hpp"
+#include <algorithm>
 #include <unordered_set>
 
 namespace didi {
@@ -135,7 +136,30 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
         return CallToolResult::error("Tool '" + name + "' is unimplemented: " + tool->capability.reason);
     }
     try {
-        return tool->handler(arguments);
+        auto result = tool->handler(arguments);
+        if (result.isError) return result;
+
+        const bool supports_live = std::find(tool->capability.modes.begin(), tool->capability.modes.end(), "live") !=
+                                   tool->capability.modes.end();
+        const bool supports_offline = std::find(tool->capability.modes.begin(), tool->capability.modes.end(), "offline_fallback") !=
+                                      tool->capability.modes.end();
+        const bool live = supports_live && m_ipcClient && m_ipcClient->isConnected();
+        const std::string execution_mode = live ? "live" : (supports_offline ? "offline_fallback" : "");
+
+        if (!execution_mode.empty()) {
+            for (auto& item : result.content) {
+                if (item.type != "text") continue;
+                try {
+                    auto payload = json::parse(item.text);
+                    if (!payload.is_object()) continue;
+                    if (!payload.contains("execution_mode")) payload["execution_mode"] = execution_mode;
+                    item.text = payload.dump(2);
+                } catch (const json::exception&) {
+                    // Human-readable text is allowed for errors and descriptions; only JSON payloads are attributed here.
+                }
+            }
+        }
+        return result;
     } catch (const std::exception& e) {
         DIDI_LOG_ERROR("TOOL_EXEC", "Exception calling tool '", name, "': ", e.what());
         return CallToolResult::error("Internal error executing tool: " + std::string(e.what()));

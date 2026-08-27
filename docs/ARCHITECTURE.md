@@ -69,8 +69,8 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
 [Godot Main Thread / Engine Context]
        │
        ├─► Execute Scene Mutation / Traversal with UndoRedo
-       ├─► Render Off-screen SubViewport & encode PNG
-       ├─► Intercept Engine Logs / Run GDScript parser
+       ├─► Capture active editor viewport texture & encode PNG
+       ├─► Read the extension's bounded log ring
        │
        ▼
 [std::promise::set_value()]
@@ -84,7 +84,8 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
 2. **Editor Undo/Redo Integration**: All modifications register transactions with Godot's `EditorUndoRedoManager`, allowing human developers to press `Ctrl+Z` in the editor to undo any AI-generated modification.
 3. **Timeout & Deadlock Protection**:
    - IPC client operations utilize recursive mutexes and non-blocking `PeekNamedPipe` polling with millisecond timeouts.
-   - GDExtension command executions enforce a strict timeout, cancel queued work before it can mutate late, and serialize failures as top-level JSON-RPC errors.
+   - A command that has not started within 15 seconds is atomically cancelled before it can mutate. Once main-thread execution has started, both the extension bridge and the outer MCP transport wait for the definitive result instead of returning an ambiguous timeout followed by a late mutation.
+   - Filesystem reads, static GDScript parsing, and offline process tools stay in the standalone MCP process and never enter the Godot main-thread queue.
 4. **Restricted Security DACL**:
    - Windows Named Pipes are provisioned with an SDDL security descriptor restricting read/write access exclusively to the Current User (`OW`) and Administrators (`BA`).
    - GDExtension IPC initialization is restricted to `GDEXTENSION_INITIALIZATION_EDITOR` only, ensuring standalone exported games never expose an open pipe.

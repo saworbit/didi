@@ -33,11 +33,20 @@ bool GDExtensionIpc::start() {
         auto status = ticket.response.wait_for(std::chrono::seconds(15));
         if (status == std::future_status::ready) {
             return ticket.response.get();
-        } else {
-            ticket.cancelled->store(true);
-            DIDI_LOG_ERROR("GDEXT_IPC", "Command timed out on main thread: ", method);
-            return {{"error", {{"code", 504}, {"message", "Main thread command execution timed out"}}}};
         }
+
+        if (ticket.control && ticket.control->tryCancelPending()) {
+            if (ticket.response_promise && ticket.control->tryClaimResponse()) {
+                ticket.response_promise->set_value(
+                    {{"error", {{"code", 504}, {"message", "Main thread command timed out before execution"}}}});
+            }
+            DIDI_LOG_ERROR("GDEXT_IPC", "Command timed out on main thread: ", method);
+            return ticket.response.get();
+        }
+
+        DIDI_LOG_WARN("GDEXT_IPC", "Command exceeded timeout after execution started; waiting for definitive result: ", method);
+        ticket.response.wait();
+        return ticket.response.get();
     });
 
     return m_server->start(ipc::resolvePipeName());

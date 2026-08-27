@@ -12,13 +12,13 @@ namespace mcp {
 
 CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("vision.captureViewport", args, 15000);
+        auto res = ipc->sendRequest("vision.captureViewport", args, ::didi::ipc::kWaitForDefinitiveResponse);
         if (res.isOk()) {
             json result_data = res.value();
             std::string b64 = result_data.value("image_base64", "");
-            std::string desc = result_data.value("description", "Viewport capture from Godot rendering pipeline");
             if (!b64.empty()) {
-                return CallToolResult::successImage(b64, desc);
+                result_data.erase("image_base64");
+                return CallToolResult::successImage(std::move(b64), result_data.dump(2));
             }
             return CallToolResult::successJson(result_data);
         }
@@ -68,24 +68,11 @@ CallToolResult handleViewportSetCameraTransform(const json& args, std::shared_pt
 }
 
 CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    (void)ipc;
     std::string target_path = args.value("target_resource_path", "");
     std::string env = args.value("environment", "studio_neutral");
     bool ortho = args.value("orthographic", false);
     json rig = args.value("camera_rig", json::array({"front", "top", "isometric"}));
-
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("vision.createVisualTestLab", args, 15000);
-        if (res.isOk()) {
-            json result_data = res.value();
-            if (result_data.contains("image_base64") && !result_data["image_base64"].get<std::string>().empty()) {
-                std::string b64 = result_data["image_base64"].get<std::string>();
-                result_data.erase("image_base64");
-                return CallToolResult::successImage(b64, "Visual Test Lab created for " + target_path + "\n" + result_data.dump(2));
-            }
-            return CallToolResult::successJson(result_data);
-        }
-        return CallToolResult::error("Failed to create visual test lab via GDExtension: " + res.error().message);
-    }
 
     // Offline generator: Create an isolated visual testbed scene (.tscn) on disk!
     std::string lab_scene_path = "res://addons/didi/test_lab_sandbox.tscn";

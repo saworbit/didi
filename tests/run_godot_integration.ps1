@@ -86,7 +86,22 @@ try {
         (Tool-Request 25 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/SmokeRoot"; name = "InvalidSpawn"; properties = @{ phase_one_typo = 1 } }),
         (Tool-Request 26 "scene_remove_node" @{ target_node = "/root/SmokeRoot/Subject" }),
         (Tool-Request 27 "editor_undo" @{}),
-        (Tool-Request 28 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 2 })
+        (Tool-Request 28 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 2 }),
+        (Tool-Request 29 "scene_get_hierarchy" @{ root_path = "/root/SmokeRoot/Container"; max_depth = 1 }),
+        (Tool-Request 30 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/Subject"; new_parent_path = "/root/SmokeRoot/Container"; keep_global_transform = $true }),
+        (Tool-Request 31 "editor_undo" @{}),
+        (Tool-Request 32 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 2 }),
+        (Tool-Request 33 "scene_get_hierarchy" @{ root_path = "Container"; max_depth = 1 }),
+        (Tool-Request 34 "scene_get_hierarchy" @{ root_path = ".."; max_depth = 0 }),
+        (Tool-Request 35 "scene_get_hierarchy" @{ root_path = "../.."; max_depth = 0 }),
+        (Tool-Request 36 "scene_instantiate_node" @{ node_type = "Resource"; parent_path = "/root"; name = "InvalidNonNode" }),
+        (Tool-Request 37 "scene_remove_node" @{ target_node = "/root" }),
+        (Tool-Request 38 "scene_duplicate_node" @{ target_node = "/root" }),
+        (Tool-Request 39 "scene_reparent_node" @{ target_node = "/root"; new_parent_path = "/root/SmokeRoot/Container" }),
+        (Tool-Request 40 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/SpawnedCopy"; new_parent_path = "/root/SmokeRoot/Container" }),
+        (Tool-Request 41 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/Container"; new_parent_path = "/root/SmokeRoot/Container/SpawnedCopy" }),
+        (Tool-Request 42 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/Subject"; new_parent_path = "/root/SmokeRoot/Subject" }),
+        (Tool-Request 43 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 3 })
     )
 
     $rawResponses = $requests | & $didiExecutable
@@ -99,8 +114,8 @@ try {
 
     $hierarchy = Tool-Payload $byId[2]
     Assert-True ($hierarchy.execution_mode -eq "live") "Hierarchy was not attributed to live execution."
-    Assert-True ($hierarchy.scene_tree.path -eq "/root/SmokeRoot") "Hierarchy root path is not editor-independent."
-    Assert-True ($hierarchy.scene_tree.children[0].path -eq "/root/SmokeRoot/Subject") "Hierarchy child path is not editor-independent."
+    Assert-True ($hierarchy.scene_tree.path -eq "/root/SmokeRoot") "Hierarchy root path is not editor-independent: $($hierarchy.scene_tree.path)"
+    Assert-True ($hierarchy.scene_tree.children[0].path -eq "/root/SmokeRoot/Subject") "Hierarchy child path is not editor-independent: $($hierarchy.scene_tree.children[0].path)"
 
     Assert-True ((Tool-Payload $byId[3]).value -eq 7) "Fixture property did not start at 7."
     Assert-True ((Tool-Payload $byId[4]).undo_redo_registered) "Property mutation did not report a real UndoRedo transaction."
@@ -122,9 +137,20 @@ try {
     $capture = $byId[19].result
     Assert-True (-not $capture.isError) "Live viewport capture failed: $($capture.content[0].text)"
     $image = @($capture.content | Where-Object type -eq "image")
+    $captureMetadataContent = @($capture.content | Where-Object type -eq "text")
+    Assert-True ($captureMetadataContent.Count -eq 1) "Viewport capture did not return exactly one metadata payload."
+    $captureMetadata = $captureMetadataContent[0].text | ConvertFrom-Json -Depth 20
+    Assert-True ($captureMetadata.execution_mode -eq "live") "Viewport capture metadata did not identify live execution."
+    Assert-True ($captureMetadata.is_live_frame -eq $true) "Viewport capture metadata did not identify a live frame."
+    Assert-True ($captureMetadata.source -eq "godot_editor_viewport_texture") "Viewport capture source was not the editor viewport texture."
     Assert-True ($image.Count -eq 1) "Viewport capture did not return exactly one image."
     Assert-True ($image[0].mimeType -eq "image/png") "Viewport capture MIME type is not PNG."
     Assert-True ($image[0].data.StartsWith("iVBORw0K")) "Viewport capture does not contain a PNG signature."
+    $pngBytes = [Convert]::FromBase64String($image[0].data)
+    $pngWidth = [System.Net.IPAddress]::NetworkToHostOrder([BitConverter]::ToInt32($pngBytes, 16))
+    $pngHeight = [System.Net.IPAddress]::NetworkToHostOrder([BitConverter]::ToInt32($pngBytes, 20))
+    Assert-True ($captureMetadata.resolution.width -eq $pngWidth) "Viewport metadata width did not match PNG IHDR width."
+    Assert-True ($captureMetadata.resolution.height -eq $pngHeight) "Viewport metadata height did not match PNG IHDR height."
 
     Assert-True $byId[20].result.isError "Unimplemented signal tool returned fake success."
     Assert-True ($byId[20].result.content[0].text -match "no trustworthy execution path") "Unimplemented tool error is not actionable."
@@ -136,6 +162,25 @@ try {
     $restoredOrder = @((Tool-Payload $byId[28]).scene_tree.children.name)
     Assert-True ($restoredOrder[0] -eq "Subject") "Remove undo did not restore the node's original sibling index: $($restoredOrder -join ', ')"
     Assert-True ($restoredOrder -notcontains "InvalidSpawn") "Rejected instantiation leaked a node into the edited scene."
+    $nestedHierarchy = Tool-Payload $byId[29]
+    Assert-True ($nestedHierarchy.scene_tree.path -eq "/root/SmokeRoot/Container") "Nested hierarchy root lost its absolute logical path: $($nestedHierarchy.scene_tree.path)"
+    $reparentUndoOrder = @((Tool-Payload $byId[32]).scene_tree.children.name)
+    Assert-True ($reparentUndoOrder[0] -eq "Subject") "Reparent undo did not restore the original sibling index: $($reparentUndoOrder -join ', ')"
+    $relativeHierarchy = Tool-Payload $byId[33]
+    Assert-True ($relativeHierarchy.scene_tree.path -eq "/root/SmokeRoot/Container") "Relative hierarchy root was not canonicalized: $($relativeHierarchy.scene_tree.path)"
+    Assert-True $byId[34].result.isError "A parent-relative hierarchy path escaped the edited scene."
+    Assert-True $byId[35].result.isError "A multi-level parent-relative hierarchy path escaped the edited scene."
+    Assert-True $byId[36].result.isError "A non-Node ClassDB object was accepted as a scene node."
+    Assert-True $byId[37].result.isError "The edited scene root was accepted for removal."
+    Assert-True $byId[38].result.isError "The edited scene root was accepted for duplication."
+    Assert-True $byId[39].result.isError "The edited scene root was accepted for reparenting."
+    Assert-True (-not $byId[40].result.isError) "Cycle-test setup could not place SpawnedCopy under Container."
+    Assert-True $byId[41].result.isError "An ancestor node was accepted for reparenting beneath its descendant."
+    Assert-True $byId[42].result.isError "A node was accepted as its own new parent."
+    $cycleHierarchy = Tool-Payload $byId[43]
+    $cycleContainer = @($cycleHierarchy.scene_tree.children | Where-Object name -eq "Container")[0]
+    Assert-True (@($cycleContainer.children.name) -contains "SpawnedCopy") "Rejected cyclic reparenting changed the hierarchy."
+    Assert-True (@($cycleHierarchy.scene_tree.children.name) -contains "Subject") "Rejected self-reparenting changed the hierarchy."
 
     $engineErrors = @(
         Get-Content $stderrPath -ErrorAction SilentlyContinue |

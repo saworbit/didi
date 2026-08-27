@@ -66,9 +66,10 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 - Live hierarchy output contains names, classes, logical paths, and children. Bulk properties, scripts, and signals are listed in `omitted_fields` rather than fabricated.
 - Property get/set supports JSON null, boolean, signed integer, real, and string values. Unknown properties, incompatible JSON types, and non-scalar Godot Variants are rejected.
 - `scene_instantiate_node` creates built-in ClassDB node types only. `scene_path`/`PackedScene` instantiation is not implemented.
-- Scene mutations are registered with the edited scene's `EditorUndoRedoManager`. Removal undo restores the original sibling index.
+- Scene mutations are registered with the edited scene's `EditorUndoRedoManager`. Removed nodes use undo-side lifetime references, and removal/reparent undo restores the original sibling index.
 - Live viewport capture supports the active 3D editor viewport and the 2D editor viewport identifiers `editor_2d` or `active_editor_view_2d`. It captures the viewport's actual dimensions; requested resize, camera-node selection, debug flags, and node isolation are not implemented.
 - Offline viewport output is a synthetic grid preview with `execution_mode: "offline_fallback"` and `is_live_frame: false`.
+- Successful JSON results and resources identify their actual `execution_mode`. Offline-only script, resource, project, test-lab, and runtime handlers execute in the standalone process even while an editor is connected.
 - `script_check_syntax` combines lightweight diagnostics with a Godot `--headless --check-only` run only when a file path is supplied and a Godot executable is available. `source_text`-only checks do not invoke Godot.
 - `script_reflect_class` uses a small built-in offline class map, not live Godot ClassDB reflection.
 - `resource_create` writes textual `.tres` content for scalar, array, and Vector2/Vector3-shaped JSON values. It does not instantiate and validate arbitrary Resource classes in Godot.

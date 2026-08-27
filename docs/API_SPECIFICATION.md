@@ -68,7 +68,7 @@ Didi listens on `stdin` and responds on `stdout`. Log output is strictly routed 
 
 ### Bridge error codes
 
-The internal extension envelope can use `400` (invalid argument), `404` (missing editor object/property), `409` (no undo/redo action), `500` (Godot/bridge failure), `501` (unimplemented), `503` (not connected/ready), or `504` (main-thread timeout). Public `tools/call` converts these failures into MCP content with `result.isError: true`; clients should use the returned text rather than expecting a top-level JSON-RPC code.
+The internal extension envelope can use `400` (invalid argument), `404` (missing editor object/property), `409` (no undo/redo action or wrong execution process), `500` (Godot/bridge failure), `501` (unimplemented), `503` (not connected/ready), or `504` (cancelled before main-thread execution started). A command already running on Godot's main thread is allowed to return its definitive result instead of producing an unknown-outcome timeout. Public `tools/call` converts these failures into MCP content with `result.isError: true`; clients should use the returned text rather than expecting a top-level JSON-RPC code.
 
 ---
 
@@ -124,12 +124,9 @@ Offset 4..N:  char payload_bytes[payload_length] (UTF-8 JSON string)
 - `scene.getHierarchy`, `scene.instantiateNode`, `scene.removeNode`, `scene.reparentNode`, `scene.setProperty`, `scene.getProperty`, `scene.duplicateNode`
 - `editor.undo`, `editor.redo`, `editor.saveScene`, `editor.reloadProject`
 - `vision.captureViewport`
-- `asset.query`
-- `script.diagnostics`, `script.checkSyntax`, `script.reflectClass`
-- `vision.createVisualTestLab`
 - `runtime.getLogs`
 
-Scene/editor/viewport methods execute on the Godot main thread. The asset, script, and visual-lab helpers use file-based implementations even when routed through the extension. Other registered internal names return a structured `501` envelope:
+These scene/editor/viewport/log methods execute through the extension's main-thread bridge. Public asset queries, script diagnostics/reflection, and visual-test-lab generation are standalone filesystem/parser handlers and are never routed through extension IPC. If an offline-only helper name is sent to the extension directly, it returns `409`; other reserved internal names return a structured `501` envelope:
 
 ```json
 {

@@ -242,6 +242,20 @@ Result<VariantValue> callObject(GDExtensionObjectPtr object, const char* class_n
     return std::move(result);
 }
 
+Result<void> requireMethodBind(const char* class_name, const char* method_name, int64_t hash) {
+    auto& api = GodotApi::instance();
+    NativeName klass(class_name);
+    NativeName method(method_name);
+    if (!klass.valid() || !method.valid()) {
+        return Error::internal("Failed to construct Godot method identifiers");
+    }
+    if (!api.classdb_get_method_bind(klass.ptr(), method.ptr(), hash)) {
+        return Error::internal(std::string("Godot method binding unavailable: ") +
+                               class_name + "." + method_name);
+    }
+    return Result<void>::ok();
+}
+
 Result<VariantValue> callVariant(VariantValue& target, const std::string& method_name,
                                  const std::vector<const VariantValue*>& arguments = {}) {
     auto& api = GodotApi::instance();
@@ -367,8 +381,40 @@ Result<GDExtensionObjectPtr> editedSceneRoot(GDExtensionObjectPtr editor) {
 
 Result<std::string> nodeString(GDExtensionObjectPtr node, const char* method, int64_t hash);
 
+Result<std::string> relativePathWithinEditedRoot(GDExtensionObjectPtr root,
+                                                 GDExtensionObjectPtr target) {
+    if (root == target) return std::string(".");
+    auto target_value = makeObject(target);
+    auto use_unique_path = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
+                                      static_cast<GDExtensionBool>(0));
+    if (target_value.isErr()) return target_value.error();
+    if (use_unique_path.isErr()) return use_unique_path.error();
+    auto relative = callObject(root, "Node", "get_path_to", 498846349LL,
+                               {&target_value.value(), &use_unique_path.value()});
+    if (relative.isErr()) return relative.error();
+    auto path = stringFromVariant(relative.value(), GDEXTENSION_VARIANT_TYPE_NODE_PATH);
+    if (path.isErr()) return path.error();
+    if (path.value() == ".." || strings::startsWith(path.value(), "../") ||
+        strings::startsWith(path.value(), "/")) {
+        return Error::invalidArgument("Scene node path escapes the edited scene root");
+    }
+    return path.value();
+}
+
 Result<GDExtensionObjectPtr> resolveNode(GDExtensionObjectPtr root, const std::string& path) {
     if (path.empty() || path == "/root" || path == ".") return root;
+    size_t segment_start = 0;
+    while (segment_start <= path.size()) {
+        const size_t segment_end = path.find('/', segment_start);
+        const std::string segment = path.substr(
+            segment_start,
+            segment_end == std::string::npos ? std::string::npos : segment_end - segment_start);
+        if (segment == "..") {
+            return Error::invalidArgument("Parent-relative '..' paths are not allowed in the edited scene");
+        }
+        if (segment_end == std::string::npos) break;
+        segment_start = segment_end + 1;
+    }
     std::string relative = path;
     if (strings::startsWith(relative, "/root/")) relative = relative.substr(6);
     auto root_name = nodeString(root, "get_name", 2002593661LL);
@@ -384,6 +430,8 @@ Result<GDExtensionObjectPtr> resolveNode(GDExtensionObjectPtr root, const std::s
     auto object = objectFromVariant(result.value());
     if (object.isErr()) return object.error();
     if (!object.value()) return Error::notFound("Scene node not found: " + path);
+    auto within_root = relativePathWithinEditedRoot(root, object.value());
+    if (within_root.isErr()) return within_root.error();
     return object.value();
 }
 
@@ -392,6 +440,19 @@ Result<std::string> nodeString(GDExtensionObjectPtr node, const char* method, in
     if (result.isErr()) return result.error();
     auto type = GodotApi::instance().variant_get_type(result.value().ptr());
     return stringFromVariant(result.value(), type);
+}
+
+Result<std::string> logicalPathFromEditedRoot(GDExtensionObjectPtr root,
+                                               GDExtensionObjectPtr target) {
+    auto root_name = nodeString(root, "get_name", 2002593661LL);
+    if (root_name.isErr()) return root_name.error();
+    const std::string logical_root = "/root/" + root_name.value();
+    if (root == target) return logical_root;
+
+    auto relative_path = relativePathWithinEditedRoot(root, target);
+    if (relative_path.isErr()) return relative_path.error();
+    if (relative_path.value().empty() || relative_path.value() == ".") return logical_root;
+    return logical_root + "/" + relative_path.value();
 }
 
 Result<bool> objectHasProperty(GDExtensionObjectPtr object, const std::string& property) {
@@ -468,6 +529,46 @@ Result<GDExtensionObjectPtr> undoManager(GDExtensionObjectPtr editor) {
     return manager.value();
 }
 
+Result<void> preflightUndoManagerBindings() {
+    static const std::array<std::pair<const char*, int64_t>, 8> required = {{
+        {"create_action", 796197507LL},
+        {"commit_action", 3216645846LL},
+        {"add_do_method", 1517810467LL},
+        {"add_undo_method", 1517810467LL},
+        {"add_do_property", 1017172818LL},
+        {"add_undo_property", 1017172818LL},
+        {"add_do_reference", 3975164845LL},
+        {"add_undo_reference", 3975164845LL}
+    }};
+    for (const auto& [method, hash] : required) {
+        auto available = requireMethodBind("EditorUndoRedoManager", method, hash);
+        if (available.isErr()) return available;
+    }
+    return Result<void>::ok();
+}
+
+Result<void> preflightNodeTransactionBindings() {
+    static const std::array<std::pair<const char*, int64_t>, 6> required = {{
+        {"add_child", 3863233950LL},
+        {"remove_child", 1078189570LL},
+        {"set_owner", 1078189570LL},
+        {"move_child", 3315886247LL},
+        {"reparent", 3685795103LL},
+        {"is_ancestor_of", 3093956946LL}
+    }};
+    for (const auto& [method, hash] : required) {
+        auto available = requireMethodBind("Node", method, hash);
+        if (available.isErr()) return available;
+    }
+    return Result<void>::ok();
+}
+
+Result<void> preflightNodeUndoTransaction() {
+    auto manager = preflightUndoManagerBindings();
+    if (manager.isErr()) return manager;
+    return preflightNodeTransactionBindings();
+}
+
 Result<void> createAction(GDExtensionObjectPtr manager, const std::string& name,
                           GDExtensionObjectPtr context_object) {
     auto action_name = makeString(name);
@@ -498,10 +599,11 @@ Result<void> managerMethod(GDExtensionObjectPtr manager, const char* operation,
     return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
 }
 
-Result<void> managerReference(GDExtensionObjectPtr manager, GDExtensionObjectPtr object) {
+Result<void> managerReference(GDExtensionObjectPtr manager, const char* operation,
+                              GDExtensionObjectPtr object) {
     auto object_value = makeObject(object);
     if (object_value.isErr()) return object_value.error();
-    auto result = callObject(manager, "EditorUndoRedoManager", "add_do_reference", 3975164845LL, {&object_value.value()});
+    auto result = callObject(manager, "EditorUndoRedoManager", operation, 3975164845LL, {&object_value.value()});
     return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
 }
 
@@ -541,10 +643,13 @@ json GodotBridge::execute(const std::string& method, const json& params) {
             return liveResult({{"status", "online"}, {"editor_connected", true},
                                {"active_scene_root", root_path.value()}});
         }
-        auto target = resolveNode(root, params.value("root_path", "/root"));
+        const std::string requested_root = params.value("root_path", "/root");
+        auto target = resolveNode(root, requested_root);
         if (target.isErr()) return errorJson(target.error().code, target.error().message);
         int max_depth = std::clamp(params.value("max_depth", 10), 0, 64);
-        auto hierarchy = buildHierarchy(target.value(), 0, max_depth);
+        auto logical_root = logicalPathFromEditedRoot(root, target.value());
+        if (logical_root.isErr()) return errorJson(logical_root.error().code, logical_root.error().message);
+        auto hierarchy = buildHierarchy(target.value(), 0, max_depth, logical_root.value());
         if (hierarchy.isErr()) return errorJson(hierarchy.error().code, hierarchy.error().message);
         json omitted = json::array();
         if (params.value("include_properties", true)) omitted.push_back("bulk_properties");
@@ -584,10 +689,12 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         if (new_value.isErr()) return errorJson(new_value.error().code, new_value.error().message);
         auto manager = undoManager(editor);
         if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
-        auto action = createAction(manager.value(), "Didi: set " + property, node.value());
-        if (action.isErr()) return errorJson(action.error().code, action.error().message);
         auto object_value = makeObject(node.value());
         if (object_value.isErr()) return errorJson(object_value.error().code, object_value.error().message);
+        auto preflight = preflightUndoManagerBindings();
+        if (preflight.isErr()) return errorJson(preflight.error().code, preflight.error().message);
+        auto action = createAction(manager.value(), "Didi: set " + property, node.value());
+        if (action.isErr()) return errorJson(action.error().code, action.error().message);
         auto do_property = callObject(manager.value(), "EditorUndoRedoManager", "add_do_property", 1017172818LL,
                                       {&object_value.value(), &property_name.value(), &new_value.value()});
         auto undo_property = callObject(manager.value(), "EditorUndoRedoManager", "add_undo_property", 1017172818LL,
@@ -613,6 +720,19 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         NativeName type_name(node_type);
         auto node = GodotApi::instance().classdb_construct_object(type_name.ptr());
         if (!node) return errorJson(400, "Godot ClassDB could not instantiate node type: " + node_type);
+        auto node_class = makeString("Node");
+        auto is_node_variant = node_class.isOk()
+            ? callObject(node, "Object", "is_class", 3927539163LL, {&node_class.value()})
+            : Result<VariantValue>(node_class.error());
+        auto is_node = is_node_variant.isOk()
+            ? scalarFromVariant<GDExtensionBool>(is_node_variant.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+            : Result<GDExtensionBool>(is_node_variant.error());
+        if (is_node.isErr() || !is_node.value()) {
+            GodotApi::instance().object_destroy(node);
+            return is_node.isErr()
+                ? errorJson(is_node.error().code, is_node.error().message)
+                : errorJson(400, "Godot ClassDB type does not inherit Node: " + node_type);
+        }
         if (!params.value("name", "").empty()) {
             auto name = makeStringName(params.value("name", ""));
             auto named = name.isOk() ? callObject(node, "Node", "set_name", 3304788590LL, {&name.value()})
@@ -665,14 +785,28 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         }
         auto manager = undoManager(editor);
         if (manager.isErr()) { GodotApi::instance().object_destroy(node); return errorJson(manager.error().code, manager.error().message); }
-        auto action = createAction(manager.value(), "Didi: instantiate " + node_type, root.value());
-        if (action.isErr()) { GodotApi::instance().object_destroy(node); return errorJson(action.error().code, action.error().message); }
         auto child = makeObject(node);
         auto readable = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(1));
         auto internal = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
         auto owner = makeObject(root.value());
-        if (child.isErr() || readable.isErr() || internal.isErr() || owner.isErr()) return errorJson(500, "Failed to construct node transaction arguments");
-        auto keep = managerReference(manager.value(), node);
+        if (child.isErr() || readable.isErr() || internal.isErr() || owner.isErr()) {
+            GodotApi::instance().object_destroy(node);
+            return errorJson(500, "Failed to construct node transaction arguments");
+        }
+        auto logical_parent = logicalPathFromEditedRoot(root.value(), parent.value());
+        if (logical_parent.isErr()) {
+            GodotApi::instance().object_destroy(node);
+            return errorJson(logical_parent.error().code, logical_parent.error().message);
+        }
+        const std::string logical_name = params.value("name", "").empty() ? node_type : params.value("name", "");
+        auto preflight = preflightNodeUndoTransaction();
+        if (preflight.isErr()) {
+            GodotApi::instance().object_destroy(node);
+            return errorJson(preflight.error().code, preflight.error().message);
+        }
+        auto action = createAction(manager.value(), "Didi: instantiate " + node_type, root.value());
+        if (action.isErr()) { GodotApi::instance().object_destroy(node); return errorJson(action.error().code, action.error().message); }
+        auto keep = managerReference(manager.value(), "add_do_reference", node);
         auto add = managerMethod(manager.value(), "add_do_method", parent.value(), "add_child",
                                  {&child.value(), &readable.value(), &internal.value()});
         auto own = managerMethod(manager.value(), "add_do_method", node, "set_owner", {&owner.value()});
@@ -680,13 +814,8 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         if (keep.isErr() || add.isErr() || own.isErr() || remove.isErr()) return errorJson(500, "Failed to register instantiate UndoRedo transaction");
         auto committed = commitAction(manager.value());
         if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
-        const std::string requested_parent = params.value("parent_path", "/root");
-        auto root_name = nodeString(root.value(), "get_name", 2002593661LL);
-        if (root_name.isErr()) return errorJson(root_name.error().code, root_name.error().message);
-        const std::string logical_parent = requested_parent == "/root" ? "/root/" + root_name.value() : requested_parent;
-        const std::string logical_name = params.value("name", "").empty() ? node_type : params.value("name", "");
         return liveResult({{"status", "success"}, {"action", "instantiate_node"},
-                           {"node_type", node_type}, {"node_path", logical_parent + "/" + logical_name},
+                           {"node_type", node_type}, {"node_path", logical_parent.value() + "/" + logical_name},
                            {"undo_redo_registered", true}});
     }
 
@@ -695,6 +824,7 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         if (root.isErr()) return errorJson(root.error().code, root.error().message);
         auto node = resolveNode(root.value(), params.value("target_node", ""));
         if (node.isErr()) return errorJson(node.error().code, node.error().message);
+        if (node.value() == root.value()) return errorJson(400, "Cannot mutate the edited scene root");
         auto parent_variant = callObject(node.value(), "Node", "get_parent", 3160264692LL);
         if (parent_variant.isErr()) return errorJson(parent_variant.error().code, parent_variant.error().message);
         auto parent = objectFromVariant(parent_variant.value());
@@ -711,8 +841,10 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         if (child.isErr() || readable.isErr() || internal.isErr()) return errorJson(500, "Failed to construct scene transaction arguments");
 
         if (method == "scene.removeNode") {
+            auto preflight = preflightNodeUndoTransaction();
+            if (preflight.isErr()) return errorJson(preflight.error().code, preflight.error().message);
             auto action = createAction(manager.value(), "Didi: remove node", root.value());
-            auto keep = managerReference(manager.value(), node.value());
+            auto keep = managerReference(manager.value(), "add_undo_reference", node.value());
             auto remove = managerMethod(manager.value(), "add_do_method", parent.value(), "remove_child", {&child.value()});
             auto restore = managerMethod(manager.value(), "add_undo_method", parent.value(), "add_child",
                                          {&child.value(), &readable.value(), &internal.value()});
@@ -729,7 +861,9 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         if (method == "scene.reparentNode") {
             auto new_parent = resolveNode(root.value(), params.value("new_parent_path", ""));
             if (new_parent.isErr()) return errorJson(new_parent.error().code, new_parent.error().message);
-            auto action = createAction(manager.value(), "Didi: reparent node", root.value());
+            if (new_parent.value() == node.value()) {
+                return errorJson(400, "Cannot reparent a node to itself");
+            }
             auto new_parent_value = makeObject(new_parent.value());
             auto old_parent_value = makeObject(parent.value());
             auto keep_global = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
@@ -737,11 +871,31 @@ json GodotBridge::execute(const std::string& method, const json& params) {
             if (new_parent_value.isErr() || old_parent_value.isErr() || keep_global.isErr()) {
                 return errorJson(500, "Failed to construct reparent transaction arguments");
             }
+            auto descendant_check = callObject(node.value(), "Node", "is_ancestor_of", 3093956946LL,
+                                               {&new_parent_value.value()});
+            if (descendant_check.isErr()) {
+                return errorJson(descendant_check.error().code, descendant_check.error().message);
+            }
+            auto new_parent_is_descendant = scalarFromVariant<GDExtensionBool>(
+                descendant_check.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (new_parent_is_descendant.isErr()) {
+                return errorJson(new_parent_is_descendant.error().code,
+                                 new_parent_is_descendant.error().message);
+            }
+            if (new_parent_is_descendant.value()) {
+                return errorJson(400, "Cannot reparent a node beneath one of its descendants");
+            }
+            auto preflight = preflightNodeUndoTransaction();
+            if (preflight.isErr()) return errorJson(preflight.error().code, preflight.error().message);
+            auto action = createAction(manager.value(), "Didi: reparent node", root.value());
+            if (action.isErr()) return errorJson(action.error().code, action.error().message);
             auto move = managerMethod(manager.value(), "add_do_method", node.value(), "reparent",
                                       {&new_parent_value.value(), &keep_global.value()});
             auto restore = managerMethod(manager.value(), "add_undo_method", node.value(), "reparent",
                                          {&old_parent_value.value(), &keep_global.value()});
-            if (action.isErr() || move.isErr() || restore.isErr()) {
+            auto restore_index = managerMethod(manager.value(), "add_undo_method", parent.value(), "move_child",
+                                               {&child.value(), &old_index.value()});
+            if (action.isErr() || move.isErr() || restore.isErr() || restore_index.isErr()) {
                 return errorJson(500, "Failed to register reparent UndoRedo transaction");
             }
             auto committed = commitAction(manager.value());
@@ -750,34 +904,62 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         }
 
         auto flags = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(15));
+        if (flags.isErr()) return errorJson(flags.error().code, flags.error().message);
         auto duplicated = callObject(node.value(), "Node", "duplicate", 3511555459LL, {&flags.value()});
         if (duplicated.isErr()) return errorJson(duplicated.error().code, duplicated.error().message);
         auto duplicate_node = objectFromVariant(duplicated.value());
         if (duplicate_node.isErr() || !duplicate_node.value()) return errorJson(500, "Godot failed to duplicate node");
         auto source_name = nodeString(node.value(), "get_name", 2002593661LL);
-        if (source_name.isErr()) return errorJson(source_name.error().code, source_name.error().message);
+        if (source_name.isErr()) {
+            GodotApi::instance().object_destroy(duplicate_node.value());
+            return errorJson(source_name.error().code, source_name.error().message);
+        }
         auto copy_name = makeStringName(source_name.value() + "Copy");
-        if (copy_name.isErr()) return errorJson(copy_name.error().code, copy_name.error().message);
+        if (copy_name.isErr()) {
+            GodotApi::instance().object_destroy(duplicate_node.value());
+            return errorJson(copy_name.error().code, copy_name.error().message);
+        }
         auto named = callObject(duplicate_node.value(), "Node", "set_name", 3304788590LL, {&copy_name.value()});
-        if (named.isErr()) return errorJson(named.error().code, named.error().message);
+        if (named.isErr()) {
+            GodotApi::instance().object_destroy(duplicate_node.value());
+            return errorJson(named.error().code, named.error().message);
+        }
+        auto duplicate_name = nodeString(duplicate_node.value(), "get_name", 2002593661LL);
+        if (duplicate_name.isErr()) {
+            GodotApi::instance().object_destroy(duplicate_node.value());
+            return errorJson(duplicate_name.error().code, duplicate_name.error().message);
+        }
+        auto logical_parent = logicalPathFromEditedRoot(root.value(), parent.value());
+        if (logical_parent.isErr()) {
+            GodotApi::instance().object_destroy(duplicate_node.value());
+            return errorJson(logical_parent.error().code, logical_parent.error().message);
+        }
         auto duplicate_value = makeObject(duplicate_node.value());
         auto owner = makeObject(root.value());
+        if (duplicate_value.isErr() || owner.isErr()) {
+            GodotApi::instance().object_destroy(duplicate_node.value());
+            return errorJson(500, "Failed to construct duplicate transaction arguments");
+        }
+        auto preflight = preflightNodeUndoTransaction();
+        if (preflight.isErr()) {
+            GodotApi::instance().object_destroy(duplicate_node.value());
+            return errorJson(preflight.error().code, preflight.error().message);
+        }
         auto action = createAction(manager.value(), "Didi: duplicate node", root.value());
-        auto keep = managerReference(manager.value(), duplicate_node.value());
+        if (action.isErr()) {
+            GodotApi::instance().object_destroy(duplicate_node.value());
+            return errorJson(action.error().code, action.error().message);
+        }
+        auto keep = managerReference(manager.value(), "add_do_reference", duplicate_node.value());
         auto add = managerMethod(manager.value(), "add_do_method", parent.value(), "add_child",
                                  {&duplicate_value.value(), &readable.value(), &internal.value()});
         auto own = managerMethod(manager.value(), "add_do_method", duplicate_node.value(), "set_owner", {&owner.value()});
         auto remove = managerMethod(manager.value(), "add_undo_method", parent.value(), "remove_child", {&duplicate_value.value()});
-        if (action.isErr() || keep.isErr() || add.isErr() || own.isErr() || remove.isErr()) return errorJson(500, "Failed to register duplicate UndoRedo transaction");
+        if (keep.isErr() || add.isErr() || own.isErr() || remove.isErr()) return errorJson(500, "Failed to register duplicate UndoRedo transaction");
         auto committed = commitAction(manager.value());
         if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
-        auto duplicate_name = nodeString(duplicate_node.value(), "get_name", 2002593661LL);
-        if (duplicate_name.isErr()) return errorJson(duplicate_name.error().code, duplicate_name.error().message);
-        const std::string target_path = params.value("target_node", "");
-        const size_t separator = target_path.find_last_of('/');
-        const std::string logical_parent = separator == std::string::npos ? "/root" : target_path.substr(0, separator);
         return liveResult({{"status", "success"}, {"action", "duplicate_node"},
-                           {"duplicated_node", logical_parent + "/" + duplicate_name.value()},
+                           {"duplicated_node", logical_parent.value() + "/" + duplicate_name.value()},
                            {"undo_redo_registered", true}});
     }
 

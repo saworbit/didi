@@ -36,7 +36,7 @@ static std::string findProjectMainScene() {
 
 CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("scene.getHierarchy", args);
+        auto res = ipc->sendRequest("scene.getHierarchy", args, ::didi::ipc::kWaitForDefinitiveResponse);
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
@@ -224,7 +224,7 @@ CallToolResult handleSceneInstantiateNode(const json& args, std::shared_ptr<ipc:
     std::string name = args.value("name", "");
 
     if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("scene.instantiateNode", args);
+        auto res = ipc->sendRequest("scene.instantiateNode", args, ::didi::ipc::kWaitForDefinitiveResponse);
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
@@ -241,7 +241,7 @@ CallToolResult handleSceneRemoveNode(const json& args, std::shared_ptr<ipc::IIpc
     }
 
     if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("scene.removeNode", args);
+        auto res = ipc->sendRequest("scene.removeNode", args, ::didi::ipc::kWaitForDefinitiveResponse);
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
@@ -262,7 +262,7 @@ CallToolResult handleSceneReparentNode(const json& args, std::shared_ptr<ipc::II
     }
 
     if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("scene.reparentNode", args);
+        auto res = ipc->sendRequest("scene.reparentNode", args, ::didi::ipc::kWaitForDefinitiveResponse);
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
@@ -281,7 +281,7 @@ CallToolResult handleSceneSetProperty(const json& args, std::shared_ptr<ipc::IIp
     }
 
     if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("scene.setProperty", args);
+        auto res = ipc->sendRequest("scene.setProperty", args, ::didi::ipc::kWaitForDefinitiveResponse);
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
@@ -300,7 +300,7 @@ CallToolResult handleSceneGetProperty(const json& args, std::shared_ptr<ipc::IIp
     }
 
     if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("scene.getProperty", args);
+        auto res = ipc->sendRequest("scene.getProperty", args, ::didi::ipc::kWaitForDefinitiveResponse);
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
@@ -317,7 +317,7 @@ CallToolResult handleSceneDuplicateNode(const json& args, std::shared_ptr<ipc::I
     }
 
     if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("scene.duplicateNode", args);
+        auto res = ipc->sendRequest("scene.duplicateNode", args, ::didi::ipc::kWaitForDefinitiveResponse);
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
