@@ -38,6 +38,41 @@ std::optional<std::string> validateRuntimeLogRequest(const json& args) {
     return std::nullopt;
 }
 
+bool integerInRange(const json& value, int64_t minimum, int64_t maximum) {
+    if (!value.is_number_integer() && !value.is_number_unsigned()) return false;
+    if (value.is_number_integer()) {
+        const auto number = value.get<int64_t>();
+        return number >= minimum && number <= maximum;
+    }
+    const auto number = value.get<uint64_t>();
+    return number >= static_cast<uint64_t>(minimum) &&
+           number <= static_cast<uint64_t>(maximum);
+}
+
+std::optional<std::string> validateRuntimePath(const std::string& path) {
+    if (path.empty() || path.size() > 1024 || path.find('\0') != std::string::npos) {
+        return "root_path must be a non-empty UTF-8 path of at most 1024 bytes";
+    }
+    if (path != "/root" && path.rfind("/root/", 0) != 0) {
+        return "root_path must be a canonical absolute path beneath /root";
+    }
+    if (path.back() == '/' || path.find("//") != std::string::npos ||
+        path.find('\\') != std::string::npos || path.find(':') != std::string::npos) {
+        return "root_path must be a canonical absolute NodePath";
+    }
+    size_t start = 1;
+    while (start <= path.size()) {
+        const auto end = path.find('/', start);
+        const auto segment = path.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (segment.empty() || segment == "." || segment == ".." || segment.front() == '%') {
+            return "root_path may not contain empty, '.', '..', or unique-name alias segments";
+        }
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return std::nullopt;
+}
+
 CallToolResult sessionError(const Error& error) {
     return CallToolResult::error(error.message);
 }
@@ -102,18 +137,43 @@ CallToolResult handleRuntimeReadLogs(const json& args, std::shared_ptr<ipc::IIpc
 }
 
 CallToolResult handleRuntimeSetPaused(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!args.is_object() || !args.contains("paused") || !args["paused"].is_boolean()) {
+        return CallToolResult::error("Invalid runtime pause request: paused must be a boolean.");
+    }
     return forwardLiveRuntime("runtime.setPaused", args, ipc);
 }
 
 CallToolResult handleRuntimeStep(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!args.is_object() ||
+        (args.contains("frames") && !integerInRange(args["frames"], 1, 60))) {
+        return CallToolResult::error("Invalid runtime step request: frames must be an integer from 1 to 60.");
+    }
     return forwardLiveRuntime("runtime.step", args, ipc);
 }
 
 CallToolResult handleRuntimeStop(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!args.is_object() ||
+        (args.contains("exit_code") && !integerInRange(args["exit_code"], 0, 255))) {
+        return CallToolResult::error("Invalid runtime stop request: exit_code must be an integer from 0 to 255.");
+    }
     return forwardLiveRuntime("runtime.stop", args, ipc);
 }
 
 CallToolResult handleRuntimeGetTree(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!args.is_object()) {
+        return CallToolResult::error("Invalid runtime tree request: params must be an object.");
+    }
+    if (args.contains("root_path")) {
+        if (!args["root_path"].is_string()) {
+            return CallToolResult::error("Invalid runtime tree request: root_path must be a string.");
+        }
+        if (const auto error = validateRuntimePath(args["root_path"].get<std::string>()); error.has_value()) {
+            return CallToolResult::error("Invalid runtime tree request: " + *error + ".");
+        }
+    }
+    if (args.contains("max_depth") && !integerInRange(args["max_depth"], 0, 16)) {
+        return CallToolResult::error("Invalid runtime tree request: max_depth must be an integer from 0 to 16.");
+    }
     return forwardLiveRuntime("runtime.getTree", args, ipc);
 }
 

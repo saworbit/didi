@@ -21,8 +21,9 @@ GDExtensionIpc::~GDExtensionIpc() {
 bool GDExtensionIpc::start(const std::string& kind, const std::string& project_path) {
     if (!m_server || m_server->isRunning()) return false;
 
-    // Establish the logger mirror before lifecycle events are emitted.
+    // Establish the logger mirror and immutable session classification before lifecycle events are emitted.
     EditorHook::instance();
+    EditorHook::instance().setSessionKind(kind);
 
     const auto prepared = m_sessionHost.prepare(kind, project_path);
     if (prepared.isErr()) {

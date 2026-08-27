@@ -68,6 +68,7 @@ set(GDEXT_SOURCES
     src/gdextension/gdextension_entry.cpp
     src/gdextension/editor_hook.cpp
     src/gdextension/godot_bridge.cpp
+    src/gdextension/runtime_bridge.cpp
     src/gdextension/viewport_renderer.cpp
     src/gdextension/visual_test_lab.cpp
     src/gdextension/gdextension_ipc.cpp

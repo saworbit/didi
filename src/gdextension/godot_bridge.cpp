@@ -1,5 +1,6 @@
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/gdextension_api.hpp"
+#include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/common/logger.hpp"
 #include <array>
 #include <algorithm>
@@ -960,7 +961,12 @@ GodotBridge& GodotBridge::instance() {
     return bridge;
 }
 
-json GodotBridge::execute(const std::string& method, const json& params) {
+json GodotBridge::execute(const std::string& method, const json& params,
+                          const std::string& session_kind) {
+    if (method == "runtime.getTree" || method == "runtime.setPaused" ||
+        method == "runtime.stop") {
+        return executeRuntimeBridge(method, params, session_kind);
+    }
     auto editor_result = editorInterface();
     if (editor_result.isErr()) return errorJson(editor_result.error().code, editor_result.error().message);
     auto editor = editor_result.value();

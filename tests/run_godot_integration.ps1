@@ -17,6 +17,8 @@ if ($McpExecutable) {
 }
 $stdoutPath = Join-Path $repoRoot "build\godot_integration.out"
 $stderrPath = Join-Path $repoRoot "build\godot_integration.err"
+$gameStdoutPath = Join-Path $repoRoot "build\godot_game_integration.out"
+$gameStderrPath = Join-Path $repoRoot "build\godot_game_integration.err"
 
 if (-not (Test-Path -LiteralPath $GodotExecutable)) {
     throw "Godot executable not found: $GodotExecutable"
@@ -31,8 +33,9 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
 Copy-Item -LiteralPath $sourceFixtureRoot -Destination $fixtureRoot -Recurse
 
-Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $stdoutPath, $stderrPath, $gameStdoutPath, $gameStderrPath -Force -ErrorAction SilentlyContinue
 $godot = $null
+$game = $null
 
 function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
@@ -51,6 +54,23 @@ function Tool-Payload($Response) {
     Assert-True (-not $Response.result.isError) "Tool request $($Response.id) failed: $($Response.result.content[0].text)"
     return $Response.result.content[0].text | ConvertFrom-Json -Depth 100
 }
+
+function Runtime-FrameCounter($TreePayload) {
+    $counterNode = @($TreePayload.scene_tree.children | Where-Object { $_.name -match '^FrameCounter_(\d+)$' })[0]
+    Assert-True ($null -ne $counterNode) "Runtime tree did not expose the frame counter node."
+    return [int]([regex]::Match($counterNode.name, '^FrameCounter_(\d+)$').Groups[1].Value)
+}
+
+$prelaunchRequests = @(
+    (@{ jsonrpc = "2.0"; id = 880; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+    (Tool-Request 881 "runtime_list_sessions" @{ project_path = $fixtureRoot })
+)
+$rawPrelaunchResponses = $prelaunchRequests | & $didiExecutable
+$prelaunchResponses = @($rawPrelaunchResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
+Assert-True ($LASTEXITCODE -eq 0) "Didi prelaunch discovery process exited with $LASTEXITCODE."
+$prelaunchById = @{}
+foreach ($response in $prelaunchResponses) { $prelaunchById[[int]$response.id] = $response }
+$preexistingSessionIds = @((Tool-Payload $prelaunchById[881]).sessions.session_id)
 
 try {
     $godot = Start-Process -FilePath $GodotExecutable `
@@ -72,7 +92,7 @@ try {
 
     $discoveryRequests = @(
         (@{ jsonrpc = "2.0"; id = 901; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
-        (Tool-Request 902 "runtime_list_sessions" @{})
+        (Tool-Request 902 "runtime_list_sessions" @{ project_path = $fixtureRoot })
     )
     $rawDiscoveryResponses = $discoveryRequests | & $didiExecutable
     $discoveryResponses = @($rawDiscoveryResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
@@ -80,9 +100,95 @@ try {
     $discoveryById = @{}
     foreach ($response in $discoveryResponses) { $discoveryById[[int]$response.id] = $response }
     $discoveredSessions = @(Tool-Payload $discoveryById[902]).sessions
-    $editorSession = @($discoveredSessions | Where-Object { $_.kind -eq "editor" -and $_.alive })[0]
+    $editorSession = @($discoveredSessions | Where-Object {
+        $_.kind -eq "editor" -and $_.alive -and $_.project_path -ieq $fixtureRoot -and
+        $preexistingSessionIds -notcontains $_.session_id
+    })[0]
     Assert-True ($null -ne $editorSession) "Runtime discovery did not return a live editor session."
     Assert-True ($editorSession.endpoint -match "godot_didi_") "Discovered editor endpoint is not process-unique."
+
+    $game = Start-Process -FilePath $GodotExecutable `
+        -ArgumentList @("--headless", "--path", $fixtureRoot, "res://runtime_main.tscn") `
+        -PassThru -WindowStyle Hidden `
+        -RedirectStandardOutput $gameStdoutPath -RedirectStandardError $gameStderrPath
+
+    $gameSession = $null
+    $gameDeadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $gameDeadline -and -not $game.HasExited) {
+        $gameDiscoveryRequests = @(
+            (@{ jsonrpc = "2.0"; id = 291; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+            (Tool-Request 292 "runtime_list_sessions" @{ project_path = $fixtureRoot })
+        )
+        $rawGameDiscovery = $gameDiscoveryRequests | & $didiExecutable
+        $gameDiscoveryResponses = @($rawGameDiscovery | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
+        if ($LASTEXITCODE -eq 0) {
+            $gameDiscoveryById = @{}
+            foreach ($response in $gameDiscoveryResponses) { $gameDiscoveryById[[int]$response.id] = $response }
+            if ($gameDiscoveryById.ContainsKey(292) -and -not $gameDiscoveryById[292].result.isError) {
+                $sessions = @(Tool-Payload $gameDiscoveryById[292]).sessions
+                $gameSession = @($sessions | Where-Object {
+                    $_.kind -eq "game" -and $_.alive -and $_.project_path -ieq $fixtureRoot -and
+                    $preexistingSessionIds -notcontains $_.session_id -and
+                    $_.session_id -ne $editorSession.session_id
+                })[0]
+                if ($null -ne $gameSession) { break }
+            }
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    Assert-True ($null -ne $gameSession) "Runtime discovery did not return a live game session."
+    Assert-True ($gameSession.session_id -ne $editorSession.session_id) "Editor and game reused a session ID."
+    Assert-True ($gameSession.endpoint -ne $editorSession.endpoint) "Editor and game reused an IPC endpoint."
+
+    $runtimeRequests = @(
+        (@{ jsonrpc = "2.0"; id = 300; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 301 "runtime_attach_session" @{ session_id = $gameSession.session_id }),
+        (Tool-Request 302 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 2 }),
+        (Tool-Request 303 "runtime_set_paused" @{ paused = $true }),
+        (Tool-Request 304 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 2 }),
+        (Tool-Request 305 "runtime_step" @{ frames = 1 }),
+        (Tool-Request 306 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 2 }),
+        (Tool-Request 307 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 17 }),
+        (Tool-Request 308 "runtime_get_tree" @{ root_path = ".."; max_depth = 1 }),
+        (Tool-Request 309 "runtime_set_paused" @{ paused = $false }),
+        (Tool-Request 310 "runtime_step" @{ frames = 1 }),
+        (Tool-Request 311 "runtime_set_paused" @{ paused = $true }),
+        (Tool-Request 312 "runtime_step" @{ frames = 0 }),
+        (Tool-Request 313 "runtime_step" @{ frames = 61 }),
+        (Tool-Request 314 "runtime_stop" @{ exit_code = 256 }),
+        (Tool-Request 315 "scene_set_property" @{ target_node = "/root/RuntimeRoot"; property_name = "process_priority"; value = 12 }),
+        (Tool-Request 316 "runtime_set_paused" @{ paused = $false }),
+        (Tool-Request 317 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 318 "runtime_step" @{ frames = 1 }),
+        (Tool-Request 319 "runtime_list_sessions" @{ project_path = $fixtureRoot }),
+        (Tool-Request 320 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot:frame_counter"; max_depth = 1 }),
+        (Tool-Request 321 "runtime_get_tree" @{ root_path = "/root/%RuntimeRoot"; max_depth = 1 })
+    )
+    $rawRuntimeResponses = $runtimeRequests | & $didiExecutable
+    $runtimeResponses = @($rawRuntimeResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
+    Assert-True ($LASTEXITCODE -eq 0) "Didi runtime-control process exited with $LASTEXITCODE."
+    Assert-True ($runtimeResponses.Count -eq $runtimeRequests.Count) "Runtime-control response count mismatch."
+    $runtimeById = @{}
+    foreach ($response in $runtimeResponses) { $runtimeById[[int]$response.id] = $response }
+
+    $runtimeTree = Tool-Payload $runtimeById[302]
+    Assert-True ($runtimeTree.scene_tree.path -eq "/root/RuntimeRoot") "Runtime tree root was not canonical."
+    Assert-True ($runtimeTree.scene_tree.child_count -eq 2) "Runtime tree did not report child_count."
+    Assert-True ($runtimeTree.node_count -eq 4 -and -not $runtimeTree.truncated) "Runtime tree bounds metadata was incorrect."
+    Assert-True ((Tool-Payload $runtimeById[303]).paused -eq $true) "Game pause was not verified."
+    $beforeStep = Runtime-FrameCounter (Tool-Payload $runtimeById[304])
+    $step = Tool-Payload $runtimeById[305]
+    $afterStepTree = Tool-Payload $runtimeById[306]
+    $afterStep = Runtime-FrameCounter $afterStepTree
+    Assert-True ($afterStep -eq ($beforeStep + 1)) "One-frame step advanced from $beforeStep to $afterStep."
+    Assert-True ($step.frames -eq 1 -and $step.paused -eq $true -and $afterStepTree.paused -eq $true) "Step did not finish re-paused."
+    foreach ($rejectedId in 307, 308, 310, 312, 313, 314, 315, 318, 320, 321) {
+        Assert-True ([bool]$runtimeById[$rejectedId].result.isError) "Runtime rejection $rejectedId returned fake success."
+    }
+    Assert-True ((Tool-Payload $runtimeById[316]).paused -eq $false) "Game resume was not verified."
+    Assert-True ((Tool-Payload $runtimeById[317]).session.session_id -eq $editorSession.session_id) "Could not reattach to the editor."
+    $stillLiveGame = @((Tool-Payload $runtimeById[319]).sessions | Where-Object { $_.session_id -eq $gameSession.session_id -and $_.alive })[0]
+    Assert-True ($null -ne $stillLiveGame) "Reattaching to the editor terminated the game session."
 
     $tooDeep = @{ leaf = "value" }
     foreach ($level in 1..18) { $tooDeep = @{ nested = $tooDeep } }
@@ -395,9 +501,39 @@ try {
         Assert-True ($record.sequence -ge $firstLogPage.next_cursor) "Sequential runtime log reads repeated sequence $($record.sequence)."
     }
 
+    $stopRequests = @(
+        (@{ jsonrpc = "2.0"; id = 330; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 331 "runtime_attach_session" @{ session_id = $gameSession.session_id }),
+        (Tool-Request 332 "runtime_stop" @{ exit_code = 0 })
+    )
+    $rawStopResponses = $stopRequests | & $didiExecutable
+    $stopResponses = @($rawStopResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
+    Assert-True ($LASTEXITCODE -eq 0) "Didi runtime-stop process exited with $LASTEXITCODE."
+    $stopById = @{}
+    foreach ($response in $stopResponses) { $stopById[[int]$response.id] = $response }
+    Assert-True ((Tool-Payload $stopById[332]).shutdown_requested -eq $true) "Runtime stop did not report a shutdown request."
+
+    $stopDeadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $stopDeadline -and -not $game.HasExited) { Start-Sleep -Milliseconds 100 }
+    Assert-True $game.HasExited "Runtime stop did not terminate the game process."
+
+    $cleanupRequests = @(
+        (@{ jsonrpc = "2.0"; id = 340; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 341 "runtime_list_sessions" @{ project_path = $fixtureRoot })
+    )
+    $rawCleanupResponses = $cleanupRequests | & $didiExecutable
+    $cleanupResponses = @($rawCleanupResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
+    $cleanupById = @{}
+    foreach ($response in $cleanupResponses) { $cleanupById[[int]$response.id] = $response }
+    $remainingSessions = @(Tool-Payload $cleanupById[341]).sessions
+    Assert-True (-not (@($remainingSessions.session_id) -contains $gameSession.session_id)) "Stopped game descriptor was not cleaned up."
+    Assert-True (@($remainingSessions | Where-Object { $_.session_id -eq $editorSession.session_id -and $_.alive }).Count -eq 1) "Editor did not remain live after stopping the game."
+
     $engineErrors = @(
         Get-Content $stderrPath -ErrorAction SilentlyContinue |
             Where-Object { $_ -match 'UndoRedo history mismatch|Parameter "t" is null|\[ERROR' }
+        Get-Content $gameStderrPath -ErrorAction SilentlyContinue |
+            Where-Object { $_ -match "Can't retrieve singleton 'EditorInterface' outside of editor|\[ERROR" }
     )
     Assert-True ($engineErrors.Count -eq 0) "Godot reported bridge errors:`n$($engineErrors -join "`n")"
 
@@ -437,9 +573,12 @@ try {
         Move-Item -LiteralPath $projectBackupPath -Destination $projectConfigPath
     }
 
-    Write-Output "Godot integration passed: Phase 1 live editing plus Phase 2 project wiring, typed InputMap, scene lifecycle, persistence, UndoRedo, and rejection paths."
+    Write-Output "Godot integration passed: Phase 1/2 editor workflows plus concurrent Phase 3 game tree and execution control."
 }
 finally {
+    if ($null -ne $game -and -not $game.HasExited) {
+        Stop-Process -Id $game.Id
+    }
     if ($null -ne $godot -and -not $godot.HasExited) {
         Stop-Process -Id $godot.Id
     }

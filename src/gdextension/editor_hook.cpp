@@ -2,6 +2,7 @@
 #include "didi/gdextension/viewport_renderer.hpp"
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/gdextension_api.hpp"
+#include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/types.hpp"
 #include <unordered_set>
@@ -72,6 +73,10 @@ CommandTicket EditorHook::postCommand(const std::string& method, const json& par
     return {std::move(fut), std::move(prom), std::move(control)};
 }
 
+void EditorHook::setSessionKind(const std::string& session_kind) {
+    m_sessionKind = session_kind;
+}
+
 void EditorHook::processQueue() {
     std::vector<EngineCommand> commands;
     {
@@ -90,6 +95,36 @@ void EditorHook::processQueue() {
             continue;
         }
         try {
+            if (cmd.method == "runtime.step") {
+                if (!cmd.params.is_object() ||
+                    (cmd.params.contains("frames") &&
+                     !cmd.params["frames"].is_number_integer() &&
+                     !cmd.params["frames"].is_number_unsigned())) {
+                    cmd.control->markCompleted();
+                    fulfillCommand(cmd.response_promise, cmd.control,
+                                   {{"error", {{"code", 400},
+                                                {"message", "frames must be an integer from 1 to 60"}}}});
+                    continue;
+                }
+                int frames = 1;
+                if (cmd.params.contains("frames")) {
+                    if ((cmd.params["frames"].is_number_integer() &&
+                         (cmd.params["frames"].get<int64_t>() < 1 ||
+                          cmd.params["frames"].get<int64_t>() > 60)) ||
+                        (cmd.params["frames"].is_number_unsigned() &&
+                         (cmd.params["frames"].get<uint64_t>() < 1 ||
+                          cmd.params["frames"].get<uint64_t>() > 60))) {
+                        cmd.control->markCompleted();
+                        fulfillCommand(cmd.response_promise, cmd.control,
+                                       {{"error", {{"code", 400},
+                                                    {"message", "frames must be an integer from 1 to 60"}}}});
+                        continue;
+                    }
+                    frames = static_cast<int>(cmd.params["frames"].get<uint64_t>());
+                }
+                scheduleRuntimeStep(frames, cmd.response_promise, cmd.control);
+                continue;
+            }
             json result = executeOnMainThread(cmd.method, cmd.params);
             cmd.control->markCompleted();
             fulfillCommand(cmd.response_promise, cmd.control, std::move(result));
@@ -100,6 +135,98 @@ void EditorHook::processQueue() {
                            {{"error", {{"code", 500}, {"message", e.what()}}}});
         }
     }
+    processRuntimeStepFrame();
+}
+
+void EditorHook::scheduleRuntimeStep(
+    int frames,
+    const std::shared_ptr<std::promise<json>>& promise,
+    const std::shared_ptr<CommandControl>& control) {
+    if (m_sessionKind != "game") {
+        control->markCompleted();
+        fulfillCommand(promise, control,
+                       {{"error", {{"code", 409},
+                                    {"message", "Frame stepping is available only for game sessions"}}}});
+        return;
+    }
+
+    auto state = executeRuntimeBridge("runtime.getTree",
+                                      {{"root_path", "/root"}, {"max_depth", 0}},
+                                      m_sessionKind);
+    if (state.contains("error")) {
+        control->markCompleted();
+        fulfillCommand(promise, control, std::move(state));
+        return;
+    }
+    if (!state.value("paused", false)) {
+        control->markCompleted();
+        fulfillCommand(promise, control,
+                       {{"error", {{"code", 409},
+                                    {"message", "Frame stepping requires a paused game session"}}}});
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_stepMutex);
+        if (m_pendingRuntimeStep.has_value()) {
+            control->markCompleted();
+            fulfillCommand(promise, control,
+                           {{"error", {{"code", 409},
+                                        {"message", "A runtime frame step is already active"}}}});
+            return;
+        }
+        m_pendingRuntimeStep = PendingRuntimeStep{
+            frames, frames, true, promise, control
+        };
+    }
+
+    auto resumed = executeRuntimeBridge("runtime.setPaused", {{"paused", false}}, m_sessionKind);
+    if (resumed.contains("error")) {
+        {
+            std::lock_guard<std::mutex> lock(m_stepMutex);
+            if (m_pendingRuntimeStep.has_value() &&
+                m_pendingRuntimeStep->control == control) {
+                m_pendingRuntimeStep.reset();
+            }
+        }
+        control->markCompleted();
+        fulfillCommand(promise, control, std::move(resumed));
+        return;
+    }
+    DIDI_LOG_INFO("EDITOR_HOOK", "Scheduled runtime frame step for ", frames, " frame(s)");
+}
+
+void EditorHook::processRuntimeStepFrame() {
+    std::optional<PendingRuntimeStep> completed;
+    {
+        std::lock_guard<std::mutex> lock(m_stepMutex);
+        if (!m_pendingRuntimeStep.has_value()) return;
+        if (m_pendingRuntimeStep->awaiting_next_callback) {
+            m_pendingRuntimeStep->awaiting_next_callback = false;
+            return;
+        }
+        --m_pendingRuntimeStep->remaining_frames;
+        if (m_pendingRuntimeStep->remaining_frames > 0) return;
+        completed = std::move(m_pendingRuntimeStep);
+        m_pendingRuntimeStep.reset();
+    }
+
+    auto paused = executeRuntimeBridge("runtime.setPaused", {{"paused", true}}, m_sessionKind);
+    if (paused.contains("error") || !paused.value("paused", false)) {
+        completed->control->markCompleted();
+        if (!paused.contains("error")) {
+            paused = {{"error", {{"code", 500},
+                                  {"message", "Godot did not re-pause after the runtime frame step"}}}};
+        }
+        fulfillCommand(completed->response_promise, completed->control, std::move(paused));
+        return;
+    }
+
+    completed->control->markCompleted();
+    fulfillCommand(completed->response_promise, completed->control,
+                   {{"status", "success"}, {"frames", completed->requested_frames},
+                    {"paused", true}, {"execution_mode", "live"},
+                    {"is_live_engine", true}, {"session_kind", m_sessionKind}});
 }
 
 void EditorHook::cancelPendingCommands(const std::string& reason) {
@@ -116,6 +243,19 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
                            {{"error", {{"code", 503}, {"message", reason}}}});
         }
     }
+    std::optional<PendingRuntimeStep> active_step;
+    {
+        std::lock_guard<std::mutex> lock(m_stepMutex);
+        if (m_pendingRuntimeStep.has_value()) {
+            active_step = std::move(m_pendingRuntimeStep);
+            m_pendingRuntimeStep.reset();
+        }
+    }
+    if (active_step.has_value() && active_step->control &&
+        active_step->control->tryCancelRunning()) {
+        fulfillCommand(active_step->response_promise, active_step->control,
+                       {{"error", {{"code", 503}, {"message", reason}}}});
+    }
 }
 
 json EditorHook::executeOnMainThread(const std::string& method, const json& params) {
@@ -131,10 +271,14 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "project.removeInputAction", "project.getSetting", "project.setSetting",
         "scene.listGroups", "scene.addToGroup", "scene.removeFromGroup",
         "scene.getGroupMembers", "scene.create", "scene.open", "scene.close",
-        "scene.packBranch"
+        "scene.packBranch", "runtime.getTree", "runtime.setPaused", "runtime.stop"
     };
     if (live_bridge_methods.count(method)) {
-        return GodotBridge::instance().execute(method, params);
+        if (m_sessionKind == "game" && method.rfind("runtime.", 0) != 0) {
+            return {{"error", {{"code", 409},
+                                {"message", "Editor-only method is unavailable in a game session: " + method}}}};
+        }
+        return GodotBridge::instance().execute(method, params, m_sessionKind);
     }
 
     if (method == "vision.captureViewport") {

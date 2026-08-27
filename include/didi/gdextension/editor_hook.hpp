@@ -31,6 +31,11 @@ public:
         return m_state.compare_exchange_strong(expected, CommandState::Cancelled);
     }
 
+    bool tryCancelRunning() {
+        CommandState expected = CommandState::Running;
+        return m_state.compare_exchange_strong(expected, CommandState::Cancelled);
+    }
+
     void markCompleted() { m_state.store(CommandState::Completed); }
     CommandState state() const { return m_state.load(); }
 
@@ -62,6 +67,11 @@ public:
     static EditorHook& instance();
 
     CommandTicket postCommand(const std::string& method, const json& params = json::object());
+    void setSessionKind(const std::string& session_kind);
+
+    void scheduleRuntimeStep(int frames,
+                             const std::shared_ptr<std::promise<json>>& promise,
+                             const std::shared_ptr<CommandControl>& control);
 
     // Pumping queue
     void processQueue();
@@ -74,9 +84,21 @@ private:
     ~EditorHook();
 
     json executeOnMainThread(const std::string& method, const json& params);
+    void processRuntimeStepFrame();
+
+    struct PendingRuntimeStep {
+        int requested_frames{0};
+        int remaining_frames{0};
+        bool awaiting_next_callback{true};
+        std::shared_ptr<std::promise<json>> response_promise;
+        std::shared_ptr<CommandControl> control;
+    };
 
     std::queue<EngineCommand> m_commandQueue;
     std::mutex m_queueMutex;
+    std::mutex m_stepMutex;
+    std::optional<PendingRuntimeStep> m_pendingRuntimeStep;
+    std::string m_sessionKind{"editor"};
 
     std::shared_ptr<RuntimeLogRing> m_runtimeLogs{std::make_shared<RuntimeLogRing>()};
 };
