@@ -185,7 +185,11 @@ Result<VariantValue> makeJsonVariant(const json& value, int depth = 0) {
         }
         return makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(number));
     }
-    if (value.is_number_float()) return makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, value.get<double>());
+    if (value.is_number_float()) {
+        const double number = value.get<double>();
+        if (!std::isfinite(number)) return Error::invalidArgument("JSON real must be finite");
+        return makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, number);
+    }
     if (value.is_string()) return makeString(value.get<std::string>());
     if (value.is_array() || value.is_object()) {
         const auto type = value.is_array() ? GDEXTENSION_VARIANT_TYPE_ARRAY : GDEXTENSION_VARIANT_TYPE_DICTIONARY;
@@ -666,6 +670,26 @@ Result<void> validateResPath(const std::string& path, const std::string& expecte
     return Result<void>::ok();
 }
 
+Result<void> validateScriptPath(const std::string& path) {
+    if (!strings::endsWith(path, ".gd") && !strings::endsWith(path, ".cs")) {
+        return Error::invalidArgument("script_path must end in .gd or .cs");
+    }
+    return validateResPath(path, strings::endsWith(path, ".gd") ? ".gd" : ".cs");
+}
+
+Result<void> restoreProjectSetting(GDExtensionObjectPtr project_settings, VariantValue& name,
+                                   VariantValue& previous) {
+    auto restored = callObject(project_settings, "ProjectSettings", "set_setting", 402577236LL,
+                               {&name, &previous});
+    if (restored.isErr()) return restored.error();
+    auto saved = callObject(project_settings, "ProjectSettings", "save", 166280745LL);
+    if (saved.isErr()) return saved.error();
+    auto code = scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (code.isErr()) return code.error();
+    if (code.value() != 0) return Error::internal("Rollback ProjectSettings.save failed with Error " + std::to_string(code.value()));
+    return Result<void>::ok();
+}
+
 Result<GDExtensionObjectPtr> editorInterface() {
     auto& api = GodotApi::instance();
     if (!api.isLiveReady()) return Error::notConnected("Godot main-loop bridge is not ready");
@@ -994,11 +1018,7 @@ json GodotBridge::execute(const std::string& method, const json& params) {
             ? scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT)
             : Result<int64_t>(saved.error());
         if (save_code.isErr() || save_code.value() != 0) {
-            auto rollback = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
-                                       {&name.value(), &previous.value()});
-            auto rollback_save = rollback.isOk()
-                ? callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL)
-                : Result<VariantValue>(rollback.error());
+            auto rollback_save = restoreProjectSetting(project_settings.value(), name.value(), previous.value());
             const std::string detail = save_code.isErr()
                 ? save_code.error().message
                 : "Godot Error " + std::to_string(save_code.value());
@@ -1087,8 +1107,8 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         bool autoload_singleton = true;
         if (!removing) {
             resource_path = params.value("path", "");
-            auto valid_path = strings::endsWith(resource_path, ".gd")
-                ? validateResPath(resource_path, ".gd")
+            auto valid_path = strings::endsWith(resource_path, ".gd") || strings::endsWith(resource_path, ".cs")
+                ? validateScriptPath(resource_path)
                 : validateResPath(resource_path, ".tscn");
             if (valid_path.isErr()) return errorJson(valid_path.error().code, valid_path.error().message);
             auto loader = singleton("ResourceLoader");
@@ -1115,9 +1135,8 @@ json GodotBridge::execute(const std::string& method, const json& params) {
             ? scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT)
             : Result<int64_t>(saved.error());
         if (save_code.isErr() || save_code.value() != 0) {
-            auto rollback = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
-                                       {&setting_name.value(), &previous.value()});
-            if (rollback.isOk()) callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
+            auto rollback = restoreProjectSetting(project_settings.value(), setting_name.value(), previous.value());
+            if (rollback.isErr()) return errorJson(500, "Autoload save failed and rollback failed: " + rollback.error().message);
             return errorJson(500, "ProjectSettings.save failed; autoload mutation was rolled back");
         }
         return liveResult({{"status", "success"}, {"name", autoload_name}, {"path", resource_path},
@@ -1255,10 +1274,9 @@ json GodotBridge::execute(const std::string& method, const json& params) {
             ? scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT)
             : Result<int64_t>(saved.error());
         if (save_code.isErr() || save_code.value() != 0) {
-            auto rollback = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
-                                       {&setting_name.value(), &previous.value()});
-            if (rollback.isOk()) callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
+            auto rollback = restoreProjectSetting(project_settings.value(), setting_name.value(), previous.value());
             callObject(input_map.value(), "InputMap", "load_from_project_settings", 3218959716LL);
+            if (rollback.isErr()) return errorJson(500, "InputMap save failed and rollback failed: " + rollback.error().message);
             return errorJson(500, "ProjectSettings.save failed; InputMap mutation was rolled back");
         }
         auto reloaded = callObject(input_map.value(), "InputMap", "load_from_project_settings", 3218959716LL);
@@ -1288,7 +1306,7 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         const bool attaching = method == "script.attachToNode";
         if (attaching) {
             script_path = params.value("script_path", "");
-            auto valid_path = validateResPath(script_path, ".gd");
+            auto valid_path = validateScriptPath(script_path);
             if (valid_path.isErr()) return errorJson(valid_path.error().code, valid_path.error().message);
             if (old_object) return errorJson(409, "Target node already has a script; detach it before attaching another");
             auto loader = singleton("ResourceLoader");

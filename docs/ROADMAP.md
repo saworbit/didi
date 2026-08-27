@@ -1,7 +1,7 @@
 # Didi Strategic Roadmap & Technical Build Order 🗺️
 
 > **Core Philosophy**:
-> The 40-tool canonical surface is already specified. The next capability is not more MCP names — it is implementing the reserved tools honestly, then filling the operational gaps AI agents encounter when attempting to build and ship Godot games.
+> The 58-tool canonical surface includes the completed Phase 1 live substrate and Phase 2 project wiring. The next capability is implementing remaining operations honestly, without success stubs.
 
 ---
 
@@ -53,6 +53,20 @@ Before adding any additional tool endpoints, live engine integration must be gen
 - The end-to-end integration suite passes on Godot 4.5.1, 4.6.2, and 4.7.2.
 
 Phase 1 deliberately does not implement the remaining registered domains. Their protocol definitions remain discoverable with `executionModes: ["unimplemented"]` and `implemented: false` until later phases supply trustworthy execution.
+
+---
+
+## ✅ Phase 2: Project Wiring (COMPLETE — 2026-08-27)
+
+Phase 2 completes the normal create, wire, persist, and reopen loop:
+
+- Script resources attach and detach from live nodes through UndoRedo.
+- Autoloads, nested project settings, and typed InputMap actions persist through `ProjectSettings.save()` with rollback on failure.
+- Scene groups list, query, add, and remove membership within the edited-scene subtree; mutations use UndoRedo.
+- Scenes can be created, opened, explicitly closed, and packed from owned node branches through Godot resource APIs.
+- Integration runs in a disposable project copy and covers 105 ordered live requests, overwrite guards, unsafe paths, duplicates, malformed values, persistence, runtime reload, and cleanup.
+
+Godot 4.5 cannot report editor dirty state through GDExtension, so `scene_close` deliberately requires `discard_unsaved: true`. This is a conservative data-loss guard, not a success stub.
 
 ---
 
@@ -144,14 +158,14 @@ Beyond a basic recursive directory walk:
 | Phase | Milestone / Capability | Strategic Rationale |
 | :--- | :--- | :--- |
 | **Phase 1 (DONE)** | **Live Pump + Real SceneTree / UndoRedo + Honest Errors** | Verified on Godot 4.5.1, 4.6.2, and 4.7.2. |
-| **Phase 2 (NEXT)** | **Attach Script, Autoloads, Project Settings, Create/Open/Pack Scene** | Completes the fundamental "Create & Wire a Node" game dev loop beyond Phase 1's active-scene save. |
-| **Phase 3 (THEN)** | **`eval_gdscript`, Runtime Log Stream, Attach-to-Running** | Replaces dozens of one-off tools with dynamic, sandboxed engine execution. |
+| **Phase 2 (DONE)** | **Attach Script, Autoloads, InputMap, Project Settings, Groups, Scene Lifecycle** | Verified through real Godot persistence, UndoRedo, resource packing, and adversarial rejection paths. |
+| **Phase 3 (NEXT)** | **`eval_gdscript`, Runtime Log Stream, Attach-to-Running** | Replaces dozens of one-off tools with dynamic, sandboxed engine execution. |
 | **Phase 4 (THEN)** | **Symbol Search, Asset Reimport, Viewport Diffing & Isolation** | Closes the autonomous verification and feedback loop for AI agents. |
 | **Phase 5 (LATER)** | **C# / Shaders, Project Export, GridMap MeshLibrary, UI Hit-Testing** | Provides deep domain depth across all Godot engine subsystems. |
 
 ---
 
-## 📋 The 40-Tool Canonical Surface
+## 📋 The 58-Tool Canonical Surface
 
 This is the planned protocol surface, not a claim that every row executes today. See [Current Capability Matrix](CAPABILITIES.md) for per-tool status.
 
@@ -166,3 +180,4 @@ This is the planned protocol surface, not a claim that every row executes today.
 | **7. Resources & UIDs (4)**| `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map` | Implemented offline/file-based. |
 | **8. Runtime & Debug (4)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Process launch implemented; input/debug/profiler tools unimplemented. |
 | **9. Editor Lifecycle (4)**| `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Implemented live; reload requests a filesystem source scan. |
+| **10. Phase 2 Project Wiring (18)** | Script attach/detach; autoloads; InputMap; project settings; groups; scene create/open/close/pack | Implemented live. Project writes persist with rollback; node writes use UndoRedo; resource writes require safe paths and explicit overwrite. |

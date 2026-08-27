@@ -44,6 +44,24 @@ Property values are limited to JSON null, boolean, signed integer, real, and str
 
 Do not use `scene_path` for PackedScene instantiation; it is not implemented. Do not use the legacy `mutate_scene_tree` or `instantiate_asset` names.
 
+### Wire scripts, groups, and project configuration
+
+- Attach and detach existing GDScript resources with `script_attach_to_node` and `script_detach_from_node`; both are UndoRedo-backed.
+- Use `scene_add_to_group`, `scene_remove_from_group`, `scene_list_groups`, and `scene_get_group_members` for edited-scene-confined groups.
+- Use typed autoload and InputMap tools for `autoload/*` and `input/*`; never route those namespaces through `project_set_setting`.
+- Treat `replace: true`, `overwrite: true`, and `discard_unsaved: true` as explicit destructive intent. Do not add them speculatively.
+- Input events must use the documented key, mouse-button, joypad-button, or joypad-motion shapes.
+
+Project-wide mutations are persisted immediately. Re-read the corresponding list/get tool after each write.
+
+### Create, pack, open, and close scenes
+
+- Use `scene_create` for empty Node2D, Node3D, or Control scenes.
+- Use `scene_pack_branch` to serialize an owned duplicate of a live branch without detaching the source.
+- Use `scene_open` and verify with `scene_get_hierarchy`.
+- On Godot 4.5, `scene_close` always requires explicit `discard_unsaved: true` because the engine does not expose dirty state to GDExtension. Ask for or infer this intent only when discarding is genuinely authorized.
+- Use only normalized `res://*.tscn` paths; never send filesystem paths or `..` segments.
+
 ### Inspect a viewport
 
 Use `viewport_capture_frame`.
@@ -91,7 +109,7 @@ If a task requires one of these capabilities, state the limitation and use ordin
 For a supported live change:
 
 1. Inspect the target hierarchy/property.
-2. Apply one focused mutation.
+2. Apply one focused mutation or one typed project-setting write.
 3. Re-read the affected hierarchy/property.
 4. Capture the active viewport when visual evidence matters.
 5. Undo and verify restoration when testing transaction behavior.

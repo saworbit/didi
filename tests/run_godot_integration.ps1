@@ -175,7 +175,11 @@ try {
         (Tool-Request 98 "scene_create" @{ scene_path = "C:\\unsafe.tscn" }),
         (Tool-Request 99 "scene_create" @{ scene_path = "res://created_phase2.tscn"; root_type = "Control"; root_name = "Replaced"; overwrite = $true }),
         (Tool-Request 100 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 1 }),
-        (Tool-Request 101 "scene_close" @{ discard_unsaved = $true })
+        (Tool-Request 101 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 102 "scene_open" @{ scene_path = "res://main.tscn" }),
+        (Tool-Request 103 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/Subject"; script_path = "res://missing.gd" }),
+        (Tool-Request 104 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/Subject"; script_path = "res://main.tscn" }),
+        (Tool-Request 105 "scene_close" @{ discard_unsaved = $true })
     )
 
     $rawResponses = $requests | & $didiExecutable
@@ -325,6 +329,10 @@ try {
     Assert-True ((Tool-Payload $byId[99]).opened -eq $true) "Explicit scene overwrite failed."
     Assert-True ((Tool-Payload $byId[100]).scene_tree.name -eq "Replaced") "Explicit scene overwrite did not replace the root."
     Assert-True ((Tool-Payload $byId[101]).closed -eq $true) "Clean replaced scene could not be closed."
+    Assert-True ((Tool-Payload $byId[102]).opened -eq $true) "Smoke scene could not be reopened for script rejection checks."
+    Assert-True $byId[103].result.isError "Missing script resource was accepted."
+    Assert-True $byId[104].result.isError "Non-script scene resource was accepted for script attachment."
+    Assert-True ((Tool-Payload $byId[105]).closed -eq $true) "Smoke scene cleanup failed."
 
     $engineErrors = @(
         Get-Content $stderrPath -ErrorAction SilentlyContinue |

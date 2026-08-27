@@ -103,7 +103,7 @@ Add/remove operations use UndoRedo and verify preconditions before action creati
   - required: `scene_path`; validates an existing `PackedScene` and opens or switches to it.
 - `scene_close`
   - optional: `discard_unsaved` (default `false`).
-  - refuses to close an unsaved active scene unless discard is explicit; reports the closed path.
+  - on Godot 4.5, refuses every default close because dirty state is not exposed through GDExtension; `discard_unsaved: true` is required and reports the closed path.
 - `scene_pack_branch`
   - required: `target_node`, `scene_path`; optional: `overwrite` (default `false`).
   - duplicates the branch, normalizes duplicate ownership to its root, packs and saves it, then destroys the temporary duplicate.
@@ -114,13 +114,7 @@ All scene paths must be normalized `res://` paths ending in `.tscn`. Parent-rela
 
 `ToolRegistry` owns schemas and capability metadata. Thin handlers in `project_tools.cpp`, `scene_tools.cpp`, and `script_tools.cpp` forward live calls with `kWaitForDefinitiveResponse`; they do not fabricate fallback results.
 
-`EditorHook` admits the new internal method names and rejects them while the main-loop bridge is unavailable. `GodotBridge` delegates Phase 2 work to focused helpers:
-
-- `godot_variant.cpp`: JSON/Variant, Array, Dictionary, and InputEvent conversion;
-- `project_wiring_bridge.cpp`: ProjectSettings, autoload, and InputMap operations;
-- `scene_wiring_bridge.cpp`: script, group, and scene-file operations.
-
-The existing bridge retains editor/root lookup, node confinement, ABI call helpers, and UndoRedo helpers. Shared bridge internals move into a private header only where necessary; public headers expose no raw Godot ownership details.
+`EditorHook` admits the new internal method names and rejects them while the main-loop bridge is unavailable. `GodotBridge` retains Phase 2 JSON/Variant conversion, ProjectSettings, InputMap, script, group, and scene-file helpers in its private translation unit. This keeps raw GDExtension ownership wrappers and method-bind details out of public headers; future extraction can split the file without changing public or IPC contracts.
 
 ## Persistence and Error Semantics
 

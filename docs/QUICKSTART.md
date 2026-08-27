@@ -112,6 +112,8 @@ Once connected, ask your AI assistant any of the following:
 - 🐛 **Syntax & Error Check**: *"Check `res://scripts/player.gd` for syntax errors or deprecations."* (`script_check_syntax`)
 - 📸 **Visual Capture**: *"Capture a PNG of the active viewport and check the player positioning."* (`viewport_capture_frame`)
 - 🧪 **Sandbox Lab**: *"Generate a visual test lab with neutral lighting to inspect `res://models/hero.glb`."* (`viewport_create_test_lab`)
+- 🔌 **Project Wiring**: *"Attach `res://player.gd`, add the Player to the controllable group, and bind a typed jump action."* (`script_attach_to_node`, `scene_add_to_group`, `project_set_input_action`)
+- 🗂️ **Scene Lifecycle**: *"Pack the Player branch to `res://actors/player.tscn`, reopen it, and verify the hierarchy."* (`scene_pack_branch`, `scene_open`, `scene_get_hierarchy`)
 - 🚀 **Runtime Test**: *"Run `res://scenes/main.tscn` headlessly and report any engine errors or warnings."* (`runtime_launch`)
 
 Signal wiring, physics/navigation queries, TileMap/GridMap editing, runtime input injection, call stacks, and profiler telemetry are registered but unimplemented in the current build. An MCP client should not call them when `implemented` is false.

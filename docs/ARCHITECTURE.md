@@ -29,7 +29,7 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
 ┌─────────────────────────────────────────────────────────────┐
 │             Didi (C++ MCP Core Engine - didi.exe)           │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2024-11-05 standard)       │
-│  - Registry (40 canonical tools + 10 legacy names)          │
+│  - Registry (58 canonical tools + 10 legacy names)          │
 │  - Dynamic Resources (godot://project/tree, editor/state)   │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
 │  - Offline file/process tools and capability metadata       │
@@ -69,6 +69,7 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
 [Godot Main Thread / Engine Context]
        │
        ├─► Execute Scene Mutation / Traversal with UndoRedo
+       ├─► Persist ProjectSettings, InputMap, and PackedScenes
        ├─► Capture active editor viewport texture & encode PNG
        ├─► Read the extension's bounded log ring
        │

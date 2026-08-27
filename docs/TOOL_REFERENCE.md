@@ -1,6 +1,6 @@
 # Didi MCP Tool Reference
 
-Didi exposes 40 canonical tool names across nine domains plus 10 legacy names. This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 58 canonical tool names plus 10 legacy names. This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
@@ -224,3 +224,60 @@ All four tools are live-only:
 - `editor_redo`: Redoes the active edited scene's next action.
 - `editor_save_scene`: Calls `EditorInterface.save_scene` for the active scene.
 - `editor_reload_project`: Requests an `EditorFileSystem.scan_sources` rescan; it is not a full editor restart.
+
+## 10. Phase 2 project wiring
+
+All Phase 2 tools are live-only and execute on Godot's main thread. They do not perform disconnected text edits.
+
+### Scripts
+
+- `script_attach_to_node`: requires `target_node` and a normalized existing `script_path` ending in `.gd`. It loads a real `Script`, rejects nodes that already have one, and attaches it through UndoRedo.
+- `script_detach_from_node`: requires `target_node`, rejects nodes without a script, and detaches through UndoRedo.
+
+### Autoloads
+
+- `project_list_autoloads`: returns sorted `{name, path, singleton}` entries.
+- `project_set_autoload`: requires identifier `name` and existing `res://` script or scene `path`; `singleton` defaults to `true`. Existing entries require `replace: true`.
+- `project_remove_autoload`: requires `name` and rejects missing entries.
+
+Mutations use Godot's `autoload/<name>` representation, call `ProjectSettings.save()`, and restore the previous value if saving fails.
+
+### InputMap
+
+- `project_list_input_actions`: returns sorted `{action, deadzone, events}` entries, including editor defaults exposed by Godot.
+- `project_set_input_action`: requires `action`; `deadzone` defaults to `0.2`, `events` to an empty array, and existing actions require `replace: true`.
+- `project_remove_input_action`: requires `action` and rejects missing entries.
+
+Supported event descriptors are closed objects:
+
+```json
+{ "type": "key", "keycode": 32, "shift": true }
+{ "type": "mouse_button", "button_index": 1, "device": 0 }
+{ "type": "joypad_button", "button_index": 0, "device": 0 }
+{ "type": "joypad_motion", "axis": 0, "axis_value": -1.0, "device": 0 }
+```
+
+Key events may use `keycode`, `physical_keycode`, or `unicode` and optional `shift`, `alt`, `ctrl`, and `meta`. Writes construct real `InputEvent` resources, persist them, and call `InputMap.load_from_project_settings()`.
+
+### General project settings
+
+- `project_get_setting`: requires slash-delimited `setting`; missing settings and unsupported Godot Variant types are errors.
+- `project_set_setting`: requires `setting` and either `value` or `remove: true`, but not both. Values support JSON null, booleans, signed integers, finite reals, strings, arrays, and string-keyed dictionaries up to 16 levels. Writes to `autoload/*` and `input/*` are rejected in favor of typed tools.
+
+### Scene groups
+
+- `scene_list_groups`: requires `target_node` and returns sorted group names.
+- `scene_add_to_group`: requires `target_node` and `group`; `persistent` defaults to `true`. Duplicate membership is an error.
+- `scene_remove_from_group`: requires existing membership.
+- `scene_get_group_members`: requires `group` and returns canonical node paths confined to the active edited scene.
+
+Group mutations use UndoRedo.
+
+### Scene files
+
+- `scene_create`: requires normalized `scene_path` ending in `.tscn`; accepts `root_type` (`Node2D`, `Node3D`, or `Control`), `root_name`, and `overwrite`. It saves and verifies the active scene.
+- `scene_open`: validates and opens an existing `PackedScene`, then verifies its active resource path.
+- `scene_close`: refuses unless `discard_unsaved: true` on Godot 4.5 because that API version cannot expose dirty-state status safely.
+- `scene_pack_branch`: requires `target_node` and `scene_path`; duplicates the branch, normalizes descendant ownership, packs it, and protects existing targets unless `overwrite: true`.
+
+Scene paths reject absolute filesystem paths, backslashes, and parent-relative segments.
