@@ -166,7 +166,7 @@ try {
         (Tool-Request 314 "runtime_stop" @{ exit_code = 256 }),
         (Tool-Request 315 "scene_set_property" @{ target_node = "/root/RuntimeRoot"; property_name = "process_priority"; value = 12 }),
         (Tool-Request 316 "runtime_set_paused" @{ paused = $false }),
-        (Tool-Request 322 "eval_gdscript" @{ expression = "node.get_meta('frame_counter')" }),
+        (Tool-Request 322 "eval_gdscript" @{ expression = "node.get_path()" }),
         (Tool-Request 323 "eval_gdscript" @{ expression = "node.get_child_count()"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 324 "eval_gdscript" @{ expression = "[1, 2, 3]"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 325 "eval_gdscript" @{ expression = "{'answer': 42, 'ok': true}"; context_node = "/root/RuntimeRoot" }),
@@ -193,6 +193,19 @@ try {
         (Tool-Request 345 "eval_gdscript" @{ expression = "node.get_child(0).get('name')"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 348 "eval_gdscript" @{ expression = "node.dynamic_property"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 349 "eval_gdscript" @{ expression = "node['dynamic_property']"; context_node = "/root/RuntimeRoot" }),
+        (Tool-Request 350 "eval_gdscript" @{ expression = "'dynamic_property' in node"; context_node = "/root/RuntimeRoot" }),
+        (Tool-Request 351 "eval_gdscript" @{ expression = "node.get_node('/root')"; context_node = "/root/RuntimeRoot" }),
+        (Tool-Request 352 "eval_gdscript" @{ expression = "node.get_node('..')"; context_node = "/root/RuntimeRoot" }),
+        (Tool-Request 353 "eval_gdscript" @{ expression = "node.get_node_or_null('/root')"; context_node = "/root/RuntimeRoot" }),
+        (Tool-Request 354 "eval_gdscript" @{ expression = "node.has_node('/root')"; context_node = "/root/RuntimeRoot" }),
+        (Tool-Request 355 "eval_gdscript" @{ expression = "node.get_meta('detached_node')"; context_node = "/root/RuntimeRoot" }),
+        (Tool-Request 356 "eval_gdscript" @{ expression = "node.get_meta('huge_metadata')"; context_node = "/root/RuntimeRoot" }),
+        (Tool-Request 357 "eval_gdscript" @{ expression = "node.get_children()"; context_node = "/root/RuntimeRoot/RuntimeChild/Nested" }),
+        (Tool-Request 358 "eval_gdscript" @{ expression = "node.get_path()"; context_node = "/root/RuntimeRoot/RuntimeChild/Nested" }),
+        (Tool-Request 359 "eval_gdscript" @{ expression = "node.get_child_count()"; context_node = "/root/RuntimeRoot/RuntimeChild/Nested" }),
+        (Tool-Request 360 "eval_gdscript" @{ expression = "node"; context_node = "/root/RuntimeRoot/RuntimeChild/Nested" }),
+        (Tool-Request 361 "eval_gdscript" @{ expression = "node.get_node('/root').get_child_count()"; context_node = "/root/RuntimeRoot" }),
+        (Tool-Request 362 "eval_gdscript" @{ expression = "node.get_node('..').get_path()"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 346 "eval_gdscript" @{ expression = "node.get('process_physics_priority')"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 317 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 318 "runtime_step" @{ frames = 1 }),
@@ -210,7 +223,7 @@ try {
     $runtimeTree = Tool-Payload $runtimeById[302]
     Assert-True ($runtimeTree.scene_tree.path -eq "/root/RuntimeRoot") "Runtime tree root was not canonical."
     Assert-True ($runtimeTree.scene_tree.child_count -eq 2) "Runtime tree did not report child_count."
-    Assert-True ($runtimeTree.node_count -eq 4 -and -not $runtimeTree.truncated) "Runtime tree bounds metadata was incorrect."
+    Assert-True ($runtimeTree.node_count -eq 4 -and $runtimeTree.truncated) "Runtime tree bounds metadata did not report the deliberately large truncated subtree."
     Assert-True ((Tool-Payload $runtimeById[303]).paused -eq $true) "Game pause was not verified."
     $beforeStep = Runtime-FrameCounter (Tool-Payload $runtimeById[304])
     $step = Tool-Payload $runtimeById[305]
@@ -222,17 +235,20 @@ try {
         Assert-True ([bool]$runtimeById[$rejectedId].result.isError) "Runtime rejection $rejectedId returned fake success."
     }
     Assert-True ((Tool-Payload $runtimeById[316]).paused -eq $false) "Game resume was not verified."
-    $gameFrameEval = Tool-Payload $runtimeById[322]
-    Assert-True ($gameFrameEval.value -ge $afterStep) "Game expression did not observe the live frame counter."
-    Assert-True ($gameFrameEval.context_node -eq "/root/RuntimeRoot" -and $gameFrameEval.session_kind -eq "game") "Game expression default context or provenance was incorrect."
+    $gamePathEval = Tool-Payload $runtimeById[322]
+    Assert-True ($gamePathEval.value -eq "/root/RuntimeRoot") "Game expression did not return the bounded context path."
+    Assert-True ($gamePathEval.context_node -eq "/root/RuntimeRoot" -and $gamePathEval.session_kind -eq "game") "Game expression default context or provenance was incorrect."
     Assert-True ((Tool-Payload $runtimeById[323]).value -eq 2) "Game expression child count was incorrect."
     Assert-True (@((Tool-Payload $runtimeById[324]).value).Count -eq 3) "Game expression array was not preserved."
     Assert-True ((Tool-Payload $runtimeById[325]).value.answer -eq 42) "Game expression dictionary was not preserved."
     $gameVector = Tool-Payload $runtimeById[326]
     Assert-True ($gameVector.value.type -eq "Vector2" -and $gameVector.value.x -eq 3 -and $gameVector.value.y -eq 4) "Game Vector2 conversion was incorrect."
     Assert-True ($gameVector.read_only -eq $true -and $gameVector.sandbox_profile -eq "expression_const_v1" -and $gameVector.execution_mode -eq "live") "Game expression provenance was incomplete."
-    foreach ($rejectedId in 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 340, 341, 342, 343, 344, 345, 348, 349) {
+    foreach ($rejectedId in 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 340, 341, 342, 343, 344, 345, 348, 349, 350, 351, 352, 353, 354, 355, 356, 357, 361, 362) {
         Assert-True ([bool]$runtimeById[$rejectedId].result.isError) "Game expression rejection $rejectedId returned fake success."
+    }
+    foreach ($policyRejectedId in 350, 351, 352, 353, 354, 355, 356, 357, 361, 362) {
+        Assert-True ($runtimeById[$policyRejectedId].result.content[0].text -match "Invalid expression request") "Game policy rejection $policyRejectedId reached the engine."
     }
     Assert-True ($runtimeById[331].result.content[0].text -match "nesting depth") "Deep game result failed for the wrong reason."
     Assert-True ($runtimeById[332].result.content[0].text -match "256 KiB") "Oversized game result failed for the wrong reason."
@@ -240,7 +256,13 @@ try {
     Assert-True ($runtimeById[334].result.content[0].text -match "unsupported non-Node Object") "Unsupported game Object did not fail as a typed result."
     Assert-True ($runtimeById[340].result.content[0].text -match "non-finite") "Non-finite vector components did not fail as a typed result."
     Assert-True ((Tool-Payload $runtimeById[346]).value -eq (Tool-Payload $runtimeById[347]).value) "Rejected game expressions executed a scripted getter or string callback."
-    Assert-True ((Tool-Payload $runtimeById[339]).value -eq "didi_secret_expression_42") "Harmless string expression was not evaluated."
+    $gameSecret = Tool-Payload $runtimeById[339]
+    Assert-True ($gameSecret.value -eq "didi_secret_expression_42") "Harmless string expression was not evaluated."
+    Assert-True ($null -eq $gameSecret.PSObject.Properties["expression"]) "Game expression source escaped in response provenance."
+    Assert-True ((Tool-Payload $runtimeById[358]).value -eq "/root/RuntimeRoot/RuntimeChild/Nested") "Safe game path scalar was rejected or incorrect."
+    Assert-True ((Tool-Payload $runtimeById[359]).value -eq 1024) "Safe game child-count scalar did not inspect the large scene in constant space."
+    $gameNodeSummary = Tool-Payload $runtimeById[360]
+    Assert-True ($gameNodeSummary.value.type -eq "Node" -and $gameNodeSummary.value.path -eq "/root/RuntimeRoot/RuntimeChild/Nested") "In-scope game Node summary failed ancestry confinement."
     Assert-True ((Tool-Payload $runtimeById[317]).session.session_id -eq $editorSession.session_id) "Could not reattach to the editor."
     $stillLiveGame = @((Tool-Payload $runtimeById[319]).sessions | Where-Object { $_.session_id -eq $gameSession.session_id -and $_.alive })[0]
     Assert-True ($null -ne $stillLiveGame) "Reattaching to the editor terminated the game session."
@@ -257,7 +279,7 @@ try {
         (Tool-Request 133 "eval_gdscript" @{ expression = "{'answer': 42, 'ok': true}" }),
         (Tool-Request 134 "eval_gdscript" @{ expression = "Vector2(3, 4)" }),
         (Tool-Request 135 "eval_gdscript" @{ expression = "node.get('name')" }),
-        (Tool-Request 136 "eval_gdscript" @{ expression = "node.get_child(0)" }),
+        (Tool-Request 136 "eval_gdscript" @{ expression = "node"; context_node = "/root/SmokeRoot/Subject" }),
         (Tool-Request 137 "eval_gdscript" @{ expression = "tree" }),
         (Tool-Request 138 "eval_gdscript" @{ expression = "node.set('process_priority', 99)"; context_node = "/root/SmokeRoot/Subject" }),
         (Tool-Request 139 "eval_gdscript" @{ expression = "node.call('queue_free')"; context_node = "/root/SmokeRoot/Subject" }),
@@ -279,6 +301,18 @@ try {
         (Tool-Request 154 "eval_gdscript" @{ expression = "node.get('dynamic_property')"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
         (Tool-Request 157 "eval_gdscript" @{ expression = "node.dangerous_property"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
         (Tool-Request 158 "eval_gdscript" @{ expression = "node['dynamic_property']"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
+        (Tool-Request 159 "eval_gdscript" @{ expression = "'dynamic_property' in node"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
+        (Tool-Request 160 "eval_gdscript" @{ expression = "node.get_node('/root')"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
+        (Tool-Request 161 "eval_gdscript" @{ expression = "node.get_node('..')"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
+        (Tool-Request 162 "eval_gdscript" @{ expression = "node.get_node_or_null('/root')"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
+        (Tool-Request 163 "eval_gdscript" @{ expression = "node.has_node('/root')"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
+        (Tool-Request 164 "eval_gdscript" @{ expression = "node.get_meta('detached_node')"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
+        (Tool-Request 165 "eval_gdscript" @{ expression = "node.get_meta('huge_metadata')"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
+        (Tool-Request 166 "eval_gdscript" @{ expression = "node.get_children()"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
+        (Tool-Request 167 "eval_gdscript" @{ expression = "node.get_path()"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
+        (Tool-Request 168 "eval_gdscript" @{ expression = "node.get_child_count()"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
+        (Tool-Request 169 "eval_gdscript" @{ expression = "node.get_node('/root').get_child_count()"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
+        (Tool-Request 170 "eval_gdscript" @{ expression = "node.get_node('..').get_path()"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
         (Tool-Request 155 "eval_gdscript" @{ expression = "node.get('process_physics_priority')"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
         (Tool-Request 2 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 2 }),
         (Tool-Request 3 "scene_get_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "process_priority" }),
@@ -430,9 +464,15 @@ try {
     Assert-True ($byId[144].result.content[0].text -match "256 KiB") "Oversized editor result failed for the wrong reason."
     $secretEval = Tool-Payload $byId[150]
     Assert-True ($secretEval.value -eq "didi_secret_expression_42" -and $secretEval.read_only -eq $true -and $secretEval.sandbox_profile -eq "expression_const_v1") "Editor string expression or provenance was incorrect."
-    foreach ($rejectedId in 151, 152, 153, 154, 157, 158) {
+    Assert-True ($null -eq $secretEval.PSObject.Properties["expression"]) "Editor expression source escaped in response provenance."
+    foreach ($rejectedId in 151, 152, 153, 154, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 169, 170) {
         Assert-True ([bool]$byId[$rejectedId].result.isError) "Editor callback rejection $rejectedId returned fake success."
     }
+    foreach ($policyRejectedId in 159, 160, 161, 162, 163, 164, 165, 166, 169, 170) {
+        Assert-True ($byId[$policyRejectedId].result.content[0].text -match "Invalid expression request") "Editor policy rejection $policyRejectedId reached the engine."
+    }
+    Assert-True ((Tool-Payload $byId[167]).value -match "SmokeRoot/Container/MaliciousSubject$") "Safe editor path scalar was rejected or incorrect."
+    Assert-True ((Tool-Payload $byId[168]).value -eq 1024) "Safe editor child-count scalar did not inspect the large scene in constant space."
     Assert-True ((Tool-Payload $byId[155]).value -eq (Tool-Payload $byId[156]).value) "Rejected editor expressions executed a scripted getter or string callback."
 
     $hierarchy = Tool-Payload $byId[2]

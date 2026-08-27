@@ -273,3 +273,197 @@ PowerShell parser: OK
   each process a unique build-local `--log-file`; both engine versions pass.
 - No unresolved correctness or security concern remains within the Task 5
   contract. Broader adversarial/stress coverage remains assigned to Task 6.
+
+## Fix round 1: conservative read-only boundary
+
+### Status
+
+The post-implementation security review found two Critical, three Important,
+and one Minor issue in the first Task 5 commit. This fix round addresses every
+finding by shrinking the executable vocabulary and making output handling and
+conversion bounds apply before potentially large host allocations.
+
+`in` is now forbidden outright. Object-returning traversal, metadata access,
+live container enumeration, unrestricted chaining, and method calls on
+unproven receivers are rejected before IPC forwarding and again in the engine.
+The remaining direct Node methods are exact native scalar queries with literal
+arguments: `get_child_count`, `get_path`, `get_class`, `is_class`,
+`is_in_group`, `has_method`, and `has_meta`. `node.get(<literal>)` remains a
+host-rewritten ClassDB-proven native property read; it never executes
+`Object.get`. String/Array/Dictionary methods require a source-local literal
+receiver, and global constructors/math accept source-local numeric arguments
+only.
+
+### RED evidence
+
+Tests were added before the policy and logging corrections. The native suite
+then reported:
+
+```text
+[  FAILED  ] McpServer.OutputLoggingRedactsBodies
+[  FAILED  ] ExpressionSandbox.DocumentedVocabulary
+Results: 51 passed, 2 failed, 53 total.
+```
+
+The logger test drives the real standalone `runStdio` path, places a secret
+only in the serialized response value, and captures the configured Logger sink
+and stderr. This distinguishes required JSON-RPC stdout from diagnostic leaks.
+
+The first Godot 4.5.1 run against the unchanged extension reached the new live
+malicious Object containment case and failed as intended:
+
+```text
+Game expression rejection 350 returned fake success.
+```
+
+Both editor and game fixtures now include scripted `_get`, property getters,
+and `_to_string` callbacks, a detached Node held in metadata, a 300,000-byte
+metadata String, and 1,024 live children. Pre/post native scalar property reads
+prove that containment, traversal, metadata, live enumeration, member/index,
+and implicit-conversion attempts are rejected without script side effects.
+Explicit `/root` and `..` traversal expressions include chained scalar escape
+attempts through `get_child_count()` and `get_path()`.
+
+### Security corrections
+
+- `in` is a forbidden identifier, so Godot Object containment cannot dispatch
+  script `_get`.
+- Receiver classification is structural over scanner tokens. Unknown method
+  receivers, arbitrary chains, Object-returning traversal, `get_meta`,
+  `get_children`, signal/group/property enumeration, and live `find`/`count`
+  paths are rejected. A self-review regression additionally rejects global
+  helpers or constructors fed by `node`, `tree`, or nested live calls.
+- Returned Nodes are always summarized relative to the active scope root for
+  editor and game sessions. Empty, absolute, `..`-escaping, non-canonical, and
+  oversized paths fail instead of escaping as metadata.
+- Successful responses no longer echo expression source. Standalone JSON-RPC
+  response and notification logs contain only kind and serialized byte count;
+  full result bodies are not copied to the Logger sink or stderr.
+- Dictionary size is queried and capped at 4,096 entries before `keys()`.
+  String/StringName/NodePath UTF-8 length is queried in Godot before allocating
+  a C++ copy. Native property strings, class names, root names, context paths,
+  dictionary keys, and Node summary paths/classes all receive explicit byte
+  bounds based on the remaining result budget.
+- Recursive conversion checks the cooperative deadline at entry and after
+  string, key-array, typed JSON, and Node-summary work. The final response is
+  dumped for size, the deadline is checked after that dump, and `elapsed_ms` is
+  measured only afterward.
+- `Expression.execute` still receives `const_calls_only=true`; Expression RAII
+  ownership and main-thread execution are unchanged.
+
+The timeout remains deliberately documented as cooperative: Godot's raw
+`Expression.execute` call is synchronous and cannot be preempted through this
+ABI. The executable vocabulary is therefore restricted to bounded literals,
+prebounded scalar/vector/color inputs, and exact native scalar Node queries.
+
+### Fix-round mutation evidence
+
+Three fix-specific mutations were applied one at a time, rebuilt, observed to
+fail, and restored:
+
+1. Removing `in` from the forbidden set:
+
+   ```text
+   [  FAILED  ] ExpressionSandbox.DocumentedVocabulary
+   Results: 52 passed, 1 failed, 53 total.
+   ```
+
+2. Re-admitting `get_node`, `get_node_or_null`, and `has_node` as direct Node
+   methods:
+
+   ```text
+   [  FAILED  ] ExpressionSandbox.DocumentedVocabulary
+   Results: 52 passed, 1 failed, 53 total.
+   ```
+
+3. Restoring full serialized response logging at `MCP_OUT`:
+
+   ```text
+   [  FAILED  ] McpServer.OutputLoggingRedactsBodies
+   Results: 52 passed, 1 failed, 53 total.
+   ```
+
+The earlier `set`-allowlist and `const_calls_only=false` mutations remain valid
+and were not affected by this narrower policy.
+
+### Final GREEN evidence
+
+Release build with the inherited Windows environment normalized to one `Path`
+entry:
+
+```powershell
+cmake --build build --config Release
+```
+
+```text
+didi_core.vcxproj -> build\Release\didi_core.lib
+didi.vcxproj -> build\Release\didi.exe
+didi_extension.vcxproj -> build\Release\didi_extension.dll
+didi_tests.vcxproj -> build\Release\didi_tests.exe
+```
+
+Native suite:
+
+```powershell
+.\build\Release\didi_tests.exe
+```
+
+```text
+Results: 53 passed, 0 failed, 53 total.
+```
+
+Godot 4.5.1 and 4.7.2 integrations, rerun after the final scalar traversal
+regressions were added:
+
+```powershell
+.\tests\run_godot_integration.ps1 -GodotExecutable 'C:\Godot\Godot_v4.5.1-stable_win64_console.exe' -Configuration Release
+.\tests\run_godot_integration.ps1 -GodotExecutable 'C:\Godot\Godot_v4.7.2-stable_win64_console.exe' -Configuration Release
+```
+
+Both reported:
+
+```text
+Godot integration passed: Phase 1/2 editor workflows plus concurrent Phase 3 game tree and execution control.
+```
+
+PowerShell parser validation and `git diff --check` also passed. The sole
+`diff --check` diagnostic is Git's informational LF-to-CRLF working-copy
+warning for the existing PowerShell file policy, not a whitespace error.
+
+### Files changed in fix round 1
+
+- `src/gdextension/expression_sandbox.cpp`
+- `src/mcp/mcp_server.cpp`
+- `tests/test_expression_sandbox.cpp`
+- `tests/test_jsonrpc.cpp`
+- `tests/run_godot_integration.ps1`
+- `tests/godot_smoke/runtime_probe.gd`
+- `tests/godot_smoke/malicious_probe.gd`
+
+### Self-review and concerns
+
+- The native vocabulary tables are independent literals rather than being
+  generated from production sets. Live assertions distinguish host-policy
+  rejection from an engine-side failure, proving dangerous cases never reach
+  `Expression.parse` or execute.
+- Source-local receiver checks conservatively reject unknown/nested receivers.
+  Literal `repeat` remains syntax-restricted and statically capped; it is not a
+  general callable.
+- ClassDB property prebinding remains limited to native ClassDB-defined
+  scalar/vector/color/string-like types. Script/dynamic properties, Objects,
+  containers, Callable/Signal, escaped names, and unbounded strings fail before
+  Expression execution.
+- Safe `get_child_count` and `get_path` cases run successfully against the
+  deliberately large in-scope fixtures, while traversal and enumeration are
+  rejected before execution.
+- No raw ABI or plan-contract blocker was encountered. The unavoidable caveat
+  is cooperative rather than preemptive timeout enforcement for the synchronous
+  Godot Expression ABI; the conservative grammar is part of that safety bound.
+
+Final independent security re-review reported no unresolved Critical or
+Important finding. It confirmed that the prior Minor oversized-engine-string
+finding is resolved by the length-before-copy checks. Its only non-blocking
+caveats are the documented cooperative timeout model and the necessary trust in
+Godot core/ClassDB-native property getters; a separately loaded hostile native
+GDExtension already has process authority and is outside this expression
+sandbox's isolation boundary.

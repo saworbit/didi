@@ -66,7 +66,7 @@ void McpServer::stop() {
 
 void McpServer::sendResponse(const JsonRpcResponse& resp) {
     std::string out = resp.serialize();
-    DIDI_LOG_DEBUG("MCP_OUT", out);
+    DIDI_LOG_DEBUG("MCP_OUT", "JSON-RPC response bytes=", out.size());
     std::cout << out << "\n";
     std::cout.flush();
 }
@@ -78,7 +78,7 @@ void McpServer::sendNotification(const std::string& method, const json& params) 
         {"params", params}
     };
     std::string out = notif.dump();
-    DIDI_LOG_DEBUG("MCP_NOTIF", out);
+    DIDI_LOG_DEBUG("MCP_NOTIF", "JSON-RPC notification bytes=", out.size());
     std::cout << out << "\n";
     std::cout.flush();
 }

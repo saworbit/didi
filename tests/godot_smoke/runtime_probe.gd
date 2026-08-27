@@ -2,9 +2,22 @@ extends Node
 
 var frame_counter: int = 0
 @onready var frame_counter_node: Node = $FrameCounter_0
+var detached_probe: Node
 
 func _ready() -> void:
 	set_meta("frame_counter", 0)
+	set_meta("huge_metadata", "x".repeat(300000))
+	detached_probe = Node.new()
+	detached_probe.name = "DetachedRuntimeProbe"
+	set_meta("detached_node", detached_probe)
+	for index in 1024:
+		var child := Node.new()
+		child.name = "LargeRuntimeChild_%d" % index
+		$RuntimeChild/Nested.add_child(child)
+
+func _exit_tree() -> void:
+	if is_instance_valid(detached_probe):
+		detached_probe.free()
 
 func _process(_delta: float) -> void:
 	frame_counter += 1

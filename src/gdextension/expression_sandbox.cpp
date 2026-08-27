@@ -21,6 +21,9 @@ constexpr size_t kOpaqueBytes = 64;
 constexpr size_t kMaxSourceBytes = 2048;
 constexpr size_t kMaxContextPathBytes = 1024;
 constexpr size_t kMaxResultBytes = 256 * 1024;
+constexpr size_t kMaxContainerElements = 4096;
+constexpr size_t kMaxClassNameBytes = 256;
+constexpr size_t kResponseTimingReserve = 64;
 constexpr int kMaxResultDepth = 16;
 using Opaque = std::array<std::byte, kOpaqueBytes>;
 
@@ -247,13 +250,9 @@ Result<std::vector<Token>> scanExpression(std::string_view source) {
     return tokens;
 }
 
-const std::unordered_set<std::string>& allowedCallables() {
+const std::unordered_set<std::string>& allowedGlobalCallables() {
     static const std::unordered_set<std::string> values = {
-        "get", "get_node", "get_node_or_null", "has_node", "get_child", "get_child_count",
-        "get_children", "get_path", "get_class", "is_class", "is_in_group", "get_groups",
-        "has_method", "has_meta", "get_meta", "get_signal_list", "size",
-        "is_empty", "keys", "values", "has", "find", "count", "repeat", "min", "max", "abs",
-        "clamp", "snapped", "Vector2", "Vector3", "Color"
+        "min", "max", "abs", "clamp", "snapped", "Vector2", "Vector3", "Color"
     };
     return values;
 }
@@ -269,10 +268,107 @@ const std::unordered_set<std::string>& forbiddenIdentifiers() {
         "emit_signal", "queue_free", "free", "quit", "change_scene", "change_scene_to_file",
         "change_scene_to_packed", "reload_current_scene", "add_child", "remove_child", "reparent",
         "set_owner", "set_script", "get_script", "get_source_code", "connect", "disconnect",
-        "while", "for", "match", "func", "class", "class_name", "extends", "signal", "var", "const",
+        "while", "for", "in", "match", "func", "class", "class_name", "extends", "signal", "var", "const",
         "enum", "return", "break", "continue", "pass", "await", "yield", "assert", "static", "lambda"
     };
     return values;
+}
+
+enum class ReceiverKind {
+    None,
+    Node,
+    StringLiteral,
+    ArrayLiteral,
+    DictionaryLiteral
+};
+
+bool isLiteralIdentifier(const Token& token) {
+    return token.kind == TokenKind::Identifier &&
+           (token.text == "true" || token.text == "false" || token.text == "null");
+}
+
+bool isSourceLocalContainer(const std::vector<Token>& tokens, size_t receiver_end,
+                            const std::string& opening, const std::string& closing) {
+    int depth = 0;
+    size_t opening_index = receiver_end;
+    for (size_t index = receiver_end + 1; index-- > 0;) {
+        if (tokens[index].text == closing) {
+            ++depth;
+        } else if (tokens[index].text == opening) {
+            if (--depth == 0) {
+                opening_index = index;
+                break;
+            }
+        }
+        if (index == 0) break;
+    }
+    if (opening_index == receiver_end || tokens[opening_index].text != opening) return false;
+    for (size_t index = opening_index + 1; index < receiver_end; ++index) {
+        const auto& token = tokens[index];
+        if (token.kind == TokenKind::String || token.kind == TokenKind::Number ||
+            isLiteralIdentifier(token) || token.text == "," || token.text == ":" ||
+            token.text == "[" || token.text == "]" || token.text == "{" ||
+            token.text == "}" || token.text == "-") {
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
+ReceiverKind receiverKind(const std::vector<Token>& tokens, size_t call_index) {
+    if (call_index < 2 || tokens[call_index - 1].text != ".") return ReceiverKind::None;
+    const size_t receiver_end = call_index - 2;
+    const auto& receiver = tokens[receiver_end];
+    if (receiver.kind == TokenKind::Identifier && receiver.text == "node") {
+        return ReceiverKind::Node;
+    }
+    if (receiver.kind == TokenKind::String) return ReceiverKind::StringLiteral;
+    if (receiver.text == "]" &&
+        isSourceLocalContainer(tokens, receiver_end, "[", "]")) {
+        return ReceiverKind::ArrayLiteral;
+    }
+    if (receiver.text == "}" &&
+        isSourceLocalContainer(tokens, receiver_end, "{", "}")) {
+        return ReceiverKind::DictionaryLiteral;
+    }
+    return ReceiverKind::None;
+}
+
+bool hasNoArguments(const std::vector<Token>& tokens, size_t call_index) {
+    return call_index + 2 < tokens.size() && tokens[call_index + 2].text == ")";
+}
+
+bool hasOneStringLiteralArgument(const std::vector<Token>& tokens, size_t call_index) {
+    return call_index + 3 < tokens.size() &&
+           tokens[call_index + 2].kind == TokenKind::String &&
+           tokens[call_index + 3].text == ")";
+}
+
+bool hasOneScalarLiteralArgument(const std::vector<Token>& tokens, size_t call_index) {
+    return call_index + 3 < tokens.size() &&
+           (tokens[call_index + 2].kind == TokenKind::String ||
+            tokens[call_index + 2].kind == TokenKind::Number ||
+            isLiteralIdentifier(tokens[call_index + 2])) &&
+           tokens[call_index + 3].text == ")";
+}
+
+bool hasOnlySourceLocalNumericArguments(const std::vector<Token>& tokens,
+                                        size_t call_index) {
+    for (size_t index = call_index + 2; index < tokens.size(); ++index) {
+        const auto& token = tokens[index];
+        if (token.text == ")") return true;
+        if (token.kind == TokenKind::Number || token.text == "," || token.text == "-") {
+            continue;
+        }
+        if (token.kind == TokenKind::Identifier &&
+            (token.text == "INF" || token.text == "NAN" ||
+             token.text == "PI" || token.text == "TAU")) {
+            continue;
+        }
+        return false;
+    }
+    return false;
 }
 
 Result<void> validateTokens(const std::vector<Token>& tokens) {
@@ -308,34 +404,48 @@ Result<void> validateTokens(const std::vector<Token>& tokens) {
             return Error::invalidArgument("Expression contains a reserved sandbox identifier");
         }
         if (token.kind == TokenKind::Identifier && index + 1 < tokens.size() &&
-            tokens[index + 1].text == "(" && allowedCallables().count(token.text) == 0) {
-            return Error::invalidArgument("Expression calls a function outside the read-only allowlist");
-        }
-        if (token.kind == TokenKind::Identifier && token.text == "get" &&
-            index + 1 < tokens.size() && tokens[index + 1].text == "(") {
-            const bool direct_node_receiver = index >= 2 && tokens[index - 1].text == "." &&
-                                              tokens[index - 2].kind == TokenKind::Identifier &&
-                                              tokens[index - 2].text == "node" &&
-                                              (index == 2 || tokens[index - 3].text != ".");
-            const bool single_literal_argument = index + 3 < tokens.size() &&
-                                                 tokens[index + 2].kind == TokenKind::String &&
-                                                 tokens[index + 3].text == ")";
-            if (!direct_node_receiver || !single_literal_argument) {
-                return Error::invalidArgument(
-                    "get is restricted to direct node.get(<string literal>) property reads");
+            tokens[index + 1].text == "(") {
+            const auto receiver = receiverKind(tokens, index);
+            if (receiver == ReceiverKind::None) {
+                const bool has_method_receiver = index > 0 && tokens[index - 1].text == ".";
+                if (has_method_receiver || allowedGlobalCallables().count(token.text) == 0 ||
+                    !hasOnlySourceLocalNumericArguments(tokens, index)) {
+                    return Error::invalidArgument(
+                        "Global calls require source-local numeric arguments and no receiver");
+                }
+                continue;
             }
-        }
-        if (token.kind == TokenKind::Identifier && token.text == "repeat" &&
-            index + 1 < tokens.size() && tokens[index + 1].text == "(") {
-            const bool literal_receiver = index >= 2 && tokens[index - 1].text == "." &&
-                                          tokens[index - 2].kind == TokenKind::String;
-            const bool single_number_argument = index + 3 < tokens.size() &&
-                                                tokens[index + 2].kind == TokenKind::Number &&
-                                                tokens[index + 3].text == ")";
-            if (!literal_receiver || !single_number_argument) {
+            if (receiver == ReceiverKind::Node) {
+                if (token.text == "get") {
+                    if (!hasOneStringLiteralArgument(tokens, index)) {
+                        return Error::invalidArgument(
+                            "get is restricted to direct node.get(<string literal>) property reads");
+                    }
+                    continue;
+                }
+                static const std::unordered_set<std::string> zero_argument_methods = {
+                    "get_child_count", "get_path", "get_class"
+                };
+                static const std::unordered_set<std::string> string_argument_methods = {
+                    "is_class", "is_in_group", "has_method", "has_meta"
+                };
+                if ((zero_argument_methods.count(token.text) != 0 &&
+                     hasNoArguments(tokens, index)) ||
+                    (string_argument_methods.count(token.text) != 0 &&
+                     hasOneStringLiteralArgument(tokens, index))) {
+                    continue;
+                }
                 return Error::invalidArgument(
-                    "repeat is restricted to a bounded string literal and integer literal");
+                    "Only exact direct constant-space native scalar Node calls are permitted");
             }
+            if (receiver == ReceiverKind::StringLiteral && token.text == "repeat") {
+                const bool single_number_argument = index + 3 < tokens.size() &&
+                                                    tokens[index + 2].kind == TokenKind::Number &&
+                                                    tokens[index + 3].text == ")";
+                if (!single_number_argument) {
+                    return Error::invalidArgument(
+                        "repeat is restricted to a bounded string literal and integer literal");
+                }
             uint64_t repeat_count = 0;
             for (const auto character : tokens[index + 2].text) {
                 if (character < '0' || character > '9' ||
@@ -349,6 +459,39 @@ Result<void> validateTokens(const std::vector<Token>& tokens) {
                 (literal_bytes != 0 && repeat_count > (512 * 1024) / literal_bytes)) {
                 return Error::invalidArgument("repeat output is limited to 512 KiB");
             }
+                continue;
+            }
+            if (receiver == ReceiverKind::StringLiteral &&
+                ((token.text == "size" || token.text == "is_empty") &&
+                 hasNoArguments(tokens, index))) {
+                continue;
+            }
+            if (receiver == ReceiverKind::StringLiteral &&
+                (token.text == "find" || token.text == "count") &&
+                hasOneStringLiteralArgument(tokens, index)) {
+                continue;
+            }
+            if (receiver == ReceiverKind::ArrayLiteral &&
+                ((token.text == "size" || token.text == "is_empty") &&
+                 hasNoArguments(tokens, index))) {
+                continue;
+            }
+            if (receiver == ReceiverKind::ArrayLiteral &&
+                (token.text == "find" || token.text == "count" || token.text == "has") &&
+                hasOneScalarLiteralArgument(tokens, index)) {
+                continue;
+            }
+            if (receiver == ReceiverKind::DictionaryLiteral &&
+                ((token.text == "size" || token.text == "is_empty") &&
+                 hasNoArguments(tokens, index))) {
+                continue;
+            }
+            if (receiver == ReceiverKind::DictionaryLiteral && token.text == "has" &&
+                hasOneStringLiteralArgument(tokens, index)) {
+                continue;
+            }
+            return Error::invalidArgument(
+                "Method calls require an exact direct Node receiver or a source-local literal receiver");
         }
         if (token.text == "(" && index > 0) {
             const auto& previous = tokens[index - 1];
@@ -643,6 +786,32 @@ Result<std::string> stringFromVariant(
     return nativeStringToUtf8(text.ptr(), max_bytes);
 }
 
+Result<size_t> stringVariantUtf8Length(VariantValue& value,
+                                       GDExtensionVariantType type) {
+    auto& api = GodotApi::instance();
+    auto to_native = api.get_variant_to_type_constructor(type);
+    if (!to_native) return Error::internal("Missing Godot string conversion");
+    NativeValue native(type);
+    to_native(native.ptr(), value.ptr());
+    native.markInitialized();
+    if (type == GDEXTENSION_VARIANT_TYPE_STRING) {
+        const auto length = api.string_to_utf8_chars(native.ptr(), nullptr, 0);
+        if (length < 0) return Error::internal("Godot String UTF-8 length query failed");
+        return static_cast<size_t>(length);
+    }
+    const int constructor_index = type == GDEXTENSION_VARIANT_TYPE_STRING_NAME ? 2 : 3;
+    auto string_constructor = api.variant_get_ptr_constructor(GDEXTENSION_VARIANT_TYPE_STRING,
+                                                               constructor_index);
+    if (!string_constructor) return Error::internal("Missing Godot string-like conversion");
+    NativeValue text(GDEXTENSION_VARIANT_TYPE_STRING);
+    const void* arguments[] = {native.ptr()};
+    string_constructor(text.ptr(), arguments);
+    text.markInitialized();
+    const auto length = api.string_to_utf8_chars(text.ptr(), nullptr, 0);
+    if (length < 0) return Error::internal("Godot String UTF-8 length query failed");
+    return static_cast<size_t>(length);
+}
+
 Result<GDExtensionObjectPtr> singleton(const std::string& name) {
     NativeName native_name(name);
     if (!native_name.valid() || !GodotApi::instance().global_get_singleton) {
@@ -674,10 +843,11 @@ Result<GDExtensionObjectPtr> activeSceneTree() {
 
 Result<std::string> nodeString(GDExtensionObjectPtr node, const char* owner,
                                const char* method, int64_t hash,
-                               GDExtensionVariantType expected_type) {
+                               GDExtensionVariantType expected_type,
+                               size_t max_bytes = std::numeric_limits<size_t>::max()) {
     auto result = callObject(node, owner, method, hash);
     if (result.isErr()) return result.error();
-    return stringFromVariant(result.value(), expected_type);
+    return stringFromVariant(result.value(), expected_type, max_bytes);
 }
 
 bool isSafePreboundPropertyType(GDExtensionVariantType type) {
@@ -713,7 +883,8 @@ Result<void> prepareNativePropertyReads(const std::string& source,
     auto class_db = singleton("ClassDB");
     if (class_db.isErr()) return class_db.error();
     auto class_text = nodeString(context_node, "Object", "get_class", 201670096LL,
-                                 GDEXTENSION_VARIANT_TYPE_STRING);
+                                 GDEXTENSION_VARIANT_TYPE_STRING,
+                                 kMaxClassNameBytes);
     if (class_text.isErr()) return class_text.error();
     auto class_name = makeStringName(class_text.value());
     auto object_value = makeObject(context_node);
@@ -731,7 +902,8 @@ Result<void> prepareNativePropertyReads(const std::string& source,
                                        {&class_name.value(), &property_name.value()});
         if (getter_value.isErr()) return getter_value.error();
         auto getter = stringFromVariant(getter_value.value(),
-                                        GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+                                        GDEXTENSION_VARIANT_TYPE_STRING_NAME,
+                                        kMaxClassNameBytes);
         if (getter.isErr()) return getter.error();
         if (getter.value().empty()) {
             return Error(403,
@@ -745,6 +917,16 @@ Result<void> prepareNativePropertyReads(const std::string& source,
         if (!isSafePreboundPropertyType(type)) {
             return Error(415,
                          "node.get native property has an unsupported prebound type");
+        }
+        if (type == GDEXTENSION_VARIANT_TYPE_STRING ||
+            type == GDEXTENSION_VARIANT_TYPE_STRING_NAME ||
+            type == GDEXTENSION_VARIANT_TYPE_NODE_PATH) {
+            auto length = stringVariantUtf8Length(property_value.value(), type);
+            if (length.isErr()) return length.error();
+            if (length.value() > (kMaxResultBytes - 2) / 6) {
+                return Error(413,
+                             "node.get native string property exceeds the bounded result budget");
+            }
         }
         input_names.push_back("__didi_property_" + std::to_string(index));
         input_values.push_back(std::move(property_value.value()));
@@ -849,9 +1031,12 @@ Result<ExpressionContext> resolveContext(const json& params, const std::string& 
         context_root = root.value();
         scope_root = root.value();
         auto root_name = nodeString(root.value(), "Node", "get_name", 2002593661LL,
-                                    GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+                                    GDEXTENSION_VARIANT_TYPE_STRING_NAME,
+                                    kMaxContextPathBytes - 6);
         if (root_name.isErr()) return root_name.error();
         scope_root_path = "/root/" + root_name.value();
+        auto valid_scope = validateContextPath(scope_root_path);
+        if (valid_scope.isErr()) return valid_scope.error();
     } else {
         auto current_value = callObject(tree.value(), "SceneTree", "get_current_scene", 3160264692LL);
         if (current_value.isErr()) return current_value.error();
@@ -886,8 +1071,11 @@ Result<ExpressionContext> resolveContext(const json& params, const std::string& 
         canonical_path = scope_root_path;
     } else {
         auto native_path = nodeString(context_node, "Node", "get_path", 4075236667LL,
-                                      GDEXTENSION_VARIANT_TYPE_NODE_PATH);
+                                      GDEXTENSION_VARIANT_TYPE_NODE_PATH,
+                                      kMaxContextPathBytes);
         if (native_path.isErr()) return native_path.error();
+        auto valid_path = validateContextPath(native_path.value());
+        if (valid_path.isErr()) return valid_path.error();
         canonical_path = native_path.value();
     }
     return ExpressionContext{tree.value(), context_node, canonical_path,
@@ -896,10 +1084,6 @@ Result<ExpressionContext> resolveContext(const json& params, const std::string& 
 
 Result<std::string> resultNodePath(GDExtensionObjectPtr node,
                                    const ExpressionContext& context) {
-    if (context.scope_root_path == "/root") {
-        return nodeString(node, "Node", "get_path", 4075236667LL,
-                          GDEXTENSION_VARIANT_TYPE_NODE_PATH);
-    }
     if (node == context.scope_root) return context.scope_root_path;
     auto target_value = makeObject(node);
     auto use_unique_path = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
@@ -909,17 +1093,31 @@ Result<std::string> resultNodePath(GDExtensionObjectPtr node,
     auto relative_value = callObject(context.scope_root, "Node", "get_path_to", 498846349LL,
                                      {&target_value.value(), &use_unique_path.value()});
     if (relative_value.isErr()) return relative_value.error();
-    auto relative = stringFromVariant(relative_value.value(), GDEXTENSION_VARIANT_TYPE_NODE_PATH);
+    auto relative = stringFromVariant(relative_value.value(),
+                                      GDEXTENSION_VARIANT_TYPE_NODE_PATH,
+                                      kMaxContextPathBytes);
     if (relative.isErr()) return relative.error();
     if (relative.value() == ".." || relative.value().rfind("../", 0) == 0 ||
         relative.value().empty() || relative.value().front() == '/') {
-        return Error(415, "Expression returned a Node outside the active edited-scene subtree");
+        return Error(415, "Expression returned a Node outside the active session subtree");
     }
-    return context.scope_root_path + "/" + relative.value();
+    if (relative.value().size() > kMaxContextPathBytes -
+                                    std::min(context.scope_root_path.size() + 1,
+                                             kMaxContextPathBytes)) {
+        return Error(413, "Expression Node path exceeds the 1024-byte context limit");
+    }
+    const auto path = context.scope_root_path + "/" + relative.value();
+    auto valid_path = validateContextPath(path);
+    if (valid_path.isErr()) return Error(415, "Expression returned a non-canonical Node path");
+    return path;
 }
 
 struct ConversionBudget {
     size_t bytes{0};
+
+    size_t remaining() const {
+        return kMaxResultBytes - std::min(bytes, kMaxResultBytes);
+    }
 
     Result<void> add(size_t amount) {
         if (amount > kMaxResultBytes - std::min(bytes, kMaxResultBytes)) {
@@ -1001,7 +1199,9 @@ Result<ConvertedValue> convertVariant(VariantValue& value, ConversionBudget& bud
     if (type == GDEXTENSION_VARIANT_TYPE_STRING ||
         type == GDEXTENSION_VARIANT_TYPE_STRING_NAME ||
         type == GDEXTENSION_VARIANT_TYPE_NODE_PATH) {
-        auto result = stringFromVariant(value, type, kMaxResultBytes);
+        const size_t remaining = budget.remaining();
+        const size_t max_string_bytes = remaining > 2 ? (remaining - 2) / 6 : 0;
+        auto result = stringFromVariant(value, type, max_string_bytes);
         if (result.isErr()) return result.error();
         within_timeout = requireWithinTimeout(started, timeout_ms);
         if (within_timeout.isErr()) return within_timeout.error();
@@ -1047,6 +1247,8 @@ Result<ConvertedValue> convertVariant(VariantValue& value, ConversionBudget& bud
         }
         auto bounded = budget.add(output.dump().size());
         if (bounded.isErr()) return bounded.error();
+        within_timeout = requireWithinTimeout(started, timeout_ms);
+        if (within_timeout.isErr()) return within_timeout.error();
         return ConvertedValue{std::move(output), variantTypeName(type)};
     }
     if (type == GDEXTENSION_VARIANT_TYPE_ARRAY) {
@@ -1054,7 +1256,8 @@ Result<ConvertedValue> convertVariant(VariantValue& value, ConversionBudget& bud
         if (size_value.isErr()) return size_value.error();
         auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
         if (size.isErr()) return size.error();
-        if (size.value() < 0 || static_cast<uint64_t>(size.value()) > kMaxResultBytes) {
+        if (size.value() < 0 ||
+            static_cast<uint64_t>(size.value()) > kMaxContainerElements) {
             return Error(413, "Expression array exceeds the serialized result limit");
         }
         auto bounded = budget.add(2 + static_cast<size_t>(size.value()));
@@ -1073,17 +1276,22 @@ Result<ConvertedValue> convertVariant(VariantValue& value, ConversionBudget& bud
         return ConvertedValue{std::move(output), variantTypeName(type)};
     }
     if (type == GDEXTENSION_VARIANT_TYPE_DICTIONARY) {
-        auto keys = callVariant(value, "keys");
-        if (keys.isErr()) return keys.error();
-        auto size_value = callVariant(keys.value(), "size");
+        auto size_value = callVariant(value, "size");
         if (size_value.isErr()) return size_value.error();
         auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
         if (size.isErr()) return size.error();
-        if (size.value() < 0 || static_cast<uint64_t>(size.value()) > kMaxResultBytes) {
+        if (size.value() < 0 ||
+            static_cast<uint64_t>(size.value()) > kMaxContainerElements) {
             return Error(413, "Expression dictionary exceeds the serialized result limit");
         }
         auto bounded = budget.add(2 + static_cast<size_t>(size.value()));
         if (bounded.isErr()) return bounded.error();
+        within_timeout = requireWithinTimeout(started, timeout_ms);
+        if (within_timeout.isErr()) return within_timeout.error();
+        auto keys = callVariant(value, "keys");
+        if (keys.isErr()) return keys.error();
+        within_timeout = requireWithinTimeout(started, timeout_ms);
+        if (within_timeout.isErr()) return within_timeout.error();
         json output = json::object();
         for (int64_t index = 0; index < size.value(); ++index) {
             auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
@@ -1095,7 +1303,9 @@ Result<ConvertedValue> convertVariant(VariantValue& value, ConversionBudget& bud
                 key_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
                 return Error(415, "Expression dictionary contains a non-string key");
             }
-            auto key_text = stringFromVariant(key.value(), key_type, kMaxResultBytes);
+            const size_t remaining = budget.remaining();
+            const size_t max_key_bytes = remaining > 3 ? (remaining - 3) / 6 : 0;
+            auto key_text = stringFromVariant(key.value(), key_type, max_key_bytes);
             if (key_text.isErr()) return key_text.error();
             within_timeout = requireWithinTimeout(started, timeout_ms);
             if (within_timeout.isErr()) return within_timeout.error();
@@ -1129,9 +1339,10 @@ Result<ConvertedValue> convertVariant(VariantValue& value, ConversionBudget& bud
         if (is_node.value() == 0) {
             return Error(415, "Expression returned an unsupported non-Node Object");
         }
-        auto class_name = nodeString(object.value(), "Object", "get_class", 201670096LL,
-                                     GDEXTENSION_VARIANT_TYPE_STRING);
         auto path = resultNodePath(object.value(), context);
+        auto class_name = nodeString(object.value(), "Object", "get_class", 201670096LL,
+                                     GDEXTENSION_VARIANT_TYPE_STRING,
+                                     kMaxClassNameBytes);
         auto instance_value = callObject(object.value(), "Object", "get_instance_id", 3905245786LL);
         if (class_name.isErr()) return class_name.error();
         if (path.isErr()) return path.error();
@@ -1142,6 +1353,8 @@ Result<ConvertedValue> convertVariant(VariantValue& value, ConversionBudget& bud
                        {"path", path.value()}, {"instance_id", instance_id.value()}};
         auto bounded = budget.add(output.dump().size());
         if (bounded.isErr()) return bounded.error();
+        within_timeout = requireWithinTimeout(started, timeout_ms);
+        if (within_timeout.isErr()) return within_timeout.error();
         return ConvertedValue{std::move(output), "Node"};
     }
     return Error(415, "Expression returned unsupported Variant type " + std::to_string(type));
@@ -1330,13 +1543,10 @@ json executeExpression(const json& params, const std::string& session_kind) {
     within_timeout = requireWithinTimeout(started, timeout_ms);
     if (within_timeout.isErr()) return errorJson(within_timeout.error().code,
                                                   within_timeout.error().message);
-    const auto elapsed_ms = elapsedMilliseconds(started);
     json response = {
-        {"expression", source},
         {"context_node", context.value().canonical_path},
         {"value", std::move(converted.value().value)},
         {"value_type", converted.value().type},
-        {"elapsed_ms", elapsed_ms},
         {"timeout_ms", timeout_ms},
         {"read_only", true},
         {"sandbox_profile", "expression_const_v1"},
@@ -1344,9 +1554,14 @@ json executeExpression(const json& params, const std::string& session_kind) {
         {"is_live_engine", true},
         {"session_kind", session_kind}
     };
-    if (response.dump().size() > kMaxResultBytes) {
+    const auto response_size_without_timing = response.dump().size();
+    if (response_size_without_timing > kMaxResultBytes - kResponseTimingReserve) {
         return errorJson(413, "Expression response exceeds the 256 KiB serialized limit");
     }
+    within_timeout = requireWithinTimeout(started, timeout_ms);
+    if (within_timeout.isErr()) return errorJson(within_timeout.error().code,
+                                                  within_timeout.error().message);
+    response["elapsed_ms"] = elapsedMilliseconds(started);
     return response;
 }
 

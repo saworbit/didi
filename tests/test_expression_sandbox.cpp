@@ -27,7 +27,14 @@ void test_expression_policy_accepts_only_the_documented_read_only_vocabulary() {
         "while true: pass", "node.get_script().get_source_code()", "str(node)",
         "'%s' % node", "node.get_property_list()", "node.get_child(0).get('name')",
         "{'a': 1}.get('a')", "node.dangerous_property", "node['dangerous_property']",
-        "node.get_child(0).dangerous_property"
+        "node.get_child(0).dangerous_property", "'dynamic_property' in node",
+        "node.get_node('/root')", "node.get_node_or_null('..')", "node.has_node('/root')",
+        "node.get_node('/root').get_child_count()", "node.get_node('..').get_path()",
+        "node.get_child(0)", "node.get_children()", "node.get_meta('huge_metadata')",
+        "node.get_signal_list()", "node.get_groups()", "node.get_child_count().size()",
+        "node.get_path().size()", "node.find(1)", "{'a': 1}.keys().size()",
+        "[node].find(node)", "tree.min(1)", "node.get_child_count().min(1)",
+        "min(node, 1)", "Vector2(node.get_child_count(), 1)"
     }) {
         ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(source).isErr());
     }
@@ -83,8 +90,10 @@ void test_expression_policy_accepts_read_only_containers_math_and_unicode_string
     for (const auto& source : {
         R"({"label": "caf\u00e9", "values": [1, 2, 3]})",
         "Vector2(1, 2)", "Vector3(1, 2, 3)", "Color(1, 0.5, 0.25, 1)",
-        "node.has_node('Container') and node.get_child_count() >= 0",
-        "[1, 2, 3].find(2) == 1", "{'a': 1}.keys().size()", "'x'.repeat(3)"
+        "node.get_child_count() >= 0", "node.get_path()", "node.get_class()",
+        "node.is_class('Node')", "node.is_in_group('group')", "node.has_method('get_path')",
+        "node.has_meta('key')", "[1, 2, 3].find(2) == 1", "[1, 2, 3].size()",
+        "{'a': 1}.has('a')", "'abc'.size()", "'x'.repeat(3)"
     }) {
         ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(source).isOk());
     }
