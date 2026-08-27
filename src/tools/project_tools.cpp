@@ -51,11 +51,15 @@ Result<offline::SearchOptions> parseSearchOptions(const json& args) {
         options.whole_word = args["whole_word"].get<bool>();
     }
     if (args.contains("max_results")) {
-        if (!args["max_results"].is_number_integer() ||
-            args["max_results"].get<int64_t>() < 1 || args["max_results"].get<int64_t>() > 500) {
+        const auto& value = args["max_results"];
+        const bool valid = value.is_number_unsigned()
+            ? value.get<uint64_t>() >= 1u && value.get<uint64_t>() <= 500u
+            : value.is_number_integer() && value.get<int64_t>() >= 1 &&
+              value.get<int64_t>() <= 500;
+        if (!valid) {
             return Error::invalidArgument("max_results must be an integer from 1 to 500");
         }
-        options.max_results = static_cast<size_t>(args["max_results"].get<int64_t>());
+        options.max_results = static_cast<size_t>(value.get<uint64_t>());
     }
     return options;
 }

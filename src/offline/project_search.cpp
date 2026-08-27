@@ -225,13 +225,32 @@ Result<std::vector<FileRecord>> collectFiles(const fs::path& root,
     return files;
 }
 
-std::string maskGdscriptLine(std::string_view line) {
+struct GdscriptMaskState {
+    char triple_quote{'\0'};
+};
+
+std::string maskGdscriptLine(std::string_view line, GdscriptMaskState& state) {
     std::string masked(line);
     bool single = false;
     bool double_quote = false;
     bool escaped = false;
     for (size_t i = 0; i < masked.size(); ++i) {
-        const char c = masked[i];
+        const char c = line[i];
+        if (state.triple_quote != '\0') {
+            masked[i] = ' ';
+            if (c == '\\' && i + 1 < line.size()) {
+                masked[i + 1] = ' ';
+                ++i;
+                continue;
+            }
+            if (c == state.triple_quote && i + 2 < line.size() &&
+                line[i + 1] == c && line[i + 2] == c) {
+                masked[i + 1] = masked[i + 2] = ' ';
+                state.triple_quote = '\0';
+                i += 2;
+            }
+            continue;
+        }
         if (escaped) {
             masked[i] = ' ';
             escaped = false;
@@ -240,6 +259,13 @@ std::string maskGdscriptLine(std::string_view line) {
         if ((single || double_quote) && c == '\\') {
             masked[i] = ' ';
             escaped = true;
+            continue;
+        }
+        if (!single && !double_quote && (c == '\'' || c == '"') &&
+            i + 2 < line.size() && line[i + 1] == c && line[i + 2] == c) {
+            masked[i] = masked[i + 1] = masked[i + 2] = ' ';
+            state.triple_quote = c;
+            i += 2;
             continue;
         }
         if (!double_quote && c == '\'') {
@@ -261,21 +287,53 @@ std::string maskGdscriptLine(std::string_view line) {
     return masked;
 }
 
-std::string maskCSharpLine(std::string_view line, bool& block_comment) {
+struct CSharpMaskState {
+    bool block_comment{false};
+    bool verbatim_string{false};
+    size_t raw_quote_count{0};
+};
+
+std::string maskCSharpLine(std::string_view line, CSharpMaskState& state) {
     std::string masked(line);
     bool string_literal = false;
     bool char_literal = false;
     bool escaped = false;
     for (size_t i = 0; i < masked.size(); ++i) {
-        if (block_comment) {
+        if (state.block_comment) {
             masked[i] = ' ';
             if (i + 1 < masked.size() && line[i] == '*' && line[i + 1] == '/') {
                 masked[i + 1] = ' ';
-                block_comment = false;
+                state.block_comment = false;
                 ++i;
             }
             continue;
         }
+
+        if (state.raw_quote_count > 0) {
+            masked[i] = ' ';
+            if (line[i] != '"') continue;
+            size_t quote_count = 1;
+            while (i + quote_count < line.size() && line[i + quote_count] == '"') {
+                masked[i + quote_count] = ' ';
+                ++quote_count;
+            }
+            if (quote_count >= state.raw_quote_count) state.raw_quote_count = 0;
+            i += quote_count - 1;
+            continue;
+        }
+
+        if (state.verbatim_string) {
+            masked[i] = ' ';
+            if (line[i] != '"') continue;
+            if (i + 1 < line.size() && line[i + 1] == '"') {
+                masked[i + 1] = ' ';
+                ++i;
+            } else {
+                state.verbatim_string = false;
+            }
+            continue;
+        }
+
         const char c = line[i];
         if (escaped) {
             masked[i] = ' ';
@@ -286,6 +344,17 @@ std::string maskCSharpLine(std::string_view line, bool& block_comment) {
             masked[i] = ' ';
             escaped = true;
             continue;
+        }
+        if (!char_literal && !string_literal && c == '"') {
+            size_t quote_count = 1;
+            while (i + quote_count < line.size() && line[i + quote_count] == '"') ++quote_count;
+            if (quote_count >= 3) {
+                std::fill(masked.begin() + static_cast<std::ptrdiff_t>(i),
+                          masked.begin() + static_cast<std::ptrdiff_t>(i + quote_count), ' ');
+                state.raw_quote_count = quote_count;
+                i += quote_count - 1;
+                continue;
+            }
         }
         if (!char_literal && c == '"') {
             string_literal = !string_literal;
@@ -301,13 +370,25 @@ std::string maskCSharpLine(std::string_view line, bool& block_comment) {
             masked[i] = ' ';
             continue;
         }
+        if (c == '@' && i + 1 < line.size() && line[i + 1] == '"') {
+            masked[i] = masked[i + 1] = ' ';
+            state.verbatim_string = true;
+            ++i;
+            continue;
+        }
+        if (c == '@' && i + 2 < line.size() && line[i + 1] == '$' && line[i + 2] == '"') {
+            masked[i] = masked[i + 1] = masked[i + 2] = ' ';
+            state.verbatim_string = true;
+            i += 2;
+            continue;
+        }
         if (i + 1 < masked.size() && c == '/' && line[i + 1] == '/') {
             std::fill(masked.begin() + static_cast<std::ptrdiff_t>(i), masked.end(), ' ');
             break;
         }
         if (i + 1 < masked.size() && c == '/' && line[i + 1] == '*') {
             masked[i] = masked[i + 1] = ' ';
-            block_comment = true;
+            state.block_comment = true;
             ++i;
         }
     }
@@ -525,13 +606,14 @@ Result<SearchResponse> ProjectSearch::searchSymbols(const SymbolSearchOptions& o
         std::istringstream input(contents.value());
         std::string line;
         size_t line_number = 0;
-        bool csharp_block_comment = false;
+        GdscriptMaskState gdscript_state;
+        CSharpMaskState csharp_state;
         while (std::getline(input, line)) {
             ++line_number;
             if (!line.empty() && line.back() == '\r') line.pop_back();
             const auto declaration = gdscript
-                ? gdscriptDeclaration(maskGdscriptLine(line))
-                : csharpDeclaration(maskCSharpLine(line, csharp_block_comment));
+                ? gdscriptDeclaration(maskGdscriptLine(line, gdscript_state))
+                : csharpDeclaration(maskCSharpLine(line, csharp_state));
             if (!declaration || !allowedKind(declaration->second, options.kinds) ||
                 !symbolMatches(declaration->first, options)) continue;
             const auto offset = line.find(declaration->first);

@@ -32,15 +32,19 @@ CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpc
         auto res = ipc->sendRequest("vision.captureViewport", args, ::didi::ipc::kWaitForDefinitiveResponse);
         if (res.isOk()) {
             json result_data = res.value();
-            std::string b64 = result_data.value("image_base64", "");
-            if (!b64.empty()) {
-                if (!result_data.contains("capture_id") || !isCaptureId(result_data["capture_id"])) {
-                    return CallToolResult::error("Live viewport capture returned a missing or malformed capture_id.");
-                }
-                result_data.erase("image_base64");
-                return CallToolResult::successImage(std::move(b64), result_data.dump(2));
+            if (!result_data.is_object()) {
+                return CallToolResult::error("Live viewport capture returned a malformed response.");
             }
-            return CallToolResult::successJson(result_data);
+            if (!result_data.contains("image_base64") || !result_data["image_base64"].is_string()) {
+                return CallToolResult::error("Live viewport capture returned a missing or malformed PNG image.");
+            }
+            std::string b64 = result_data["image_base64"].get<std::string>();
+            if (b64.empty()) return CallToolResult::error("Live viewport capture returned no PNG image.");
+            if (!result_data.contains("capture_id") || !isCaptureId(result_data["capture_id"])) {
+                return CallToolResult::error("Live viewport capture returned a missing or malformed capture_id.");
+            }
+            result_data.erase("image_base64");
+            return CallToolResult::successImage(std::move(b64), result_data.dump(2));
         }
         return CallToolResult::error("Failed to capture viewport via Godot GDExtension: " + res.error().message);
     }
@@ -123,7 +127,13 @@ CallToolResult handleViewportDiffCapture(const json& args, std::shared_ptr<ipc::
         return CallToolResult::error("Failed to diff viewport via Godot GDExtension: " + res.error().message);
     }
     json result_data = res.value();
-    const std::string b64 = result_data.value("image_base64", "");
+    if (!result_data.is_object()) {
+        return CallToolResult::error("Live viewport diff returned a malformed response.");
+    }
+    if (!result_data.contains("image_base64") || !result_data["image_base64"].is_string()) {
+        return CallToolResult::error("Live viewport diff returned a missing or malformed PNG image.");
+    }
+    const std::string b64 = result_data["image_base64"].get<std::string>();
     if (b64.empty()) {
         return CallToolResult::error("Live viewport diff returned no PNG image.");
     }

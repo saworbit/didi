@@ -29,7 +29,7 @@ public:
     bool isConnected() const override { return true; }
     didi::Result<didi::json> sendRequest(const std::string& method, const didi::json&, int) override {
         if (method == "vision.captureViewport") {
-            return didi::json{{"image_base64", "png-without-id"}};
+            return didi::json{{"image_base64", 42}};
         }
         if (method == "vision.diffViewport") {
             return didi::json{{"image_base64", "png-without-comparison-id"}};
@@ -272,6 +272,7 @@ static void test_project_search_public_validation_and_schema() {
     for (const auto& args : {
         didi::json::object(), didi::json{{"query", ""}}, didi::json{{"query", 7}},
         didi::json{{"query", "Player"}, {"max_results", 0}},
+        didi::json{{"query", "Player"}, {"max_results", UINT64_MAX}},
         didi::json{{"query", "Player"}, {"extensions", didi::json::array({".md"})}}
     }) {
         ASSERT_TRUE(reg.callTool("project_search_text", args).isError);

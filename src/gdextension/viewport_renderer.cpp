@@ -26,6 +26,14 @@ std::string makeCaptureId() {
     return result;
 }
 
+Result<std::string> makeUniqueCaptureId(CaptureCache& cache) {
+    for (int attempt = 0; attempt < 32; ++attempt) {
+        auto candidate = makeCaptureId();
+        if (!cache.find(candidate).has_value()) return candidate;
+    }
+    return Error::internal("Unable to allocate a unique live capture ID");
+}
+
 json rendererError(const Error& error) {
     return {{"error", {{"code", error.code}, {"message", error.message}}}};
 }
@@ -126,12 +134,13 @@ json ViewportRenderer::captureViewport(const json& params) {
         auto& pixels = frame.value().pixels;
         std::string b64_png = encodeImageToPngBase64(pixels.rgba.data(), pixels.width, pixels.height);
         if (b64_png.empty()) return rendererError(Error::internal("Failed to encode captured viewport pixels"));
-        const auto capture_id = makeCaptureId();
-        auto cached = m_captureCache.store(capture_id, pixels);
+        auto capture_id = makeUniqueCaptureId(m_captureCache);
+        if (capture_id.isErr()) return rendererError(capture_id.error());
+        auto cached = m_captureCache.store(capture_id.value(), pixels);
         if (cached.isErr()) return rendererError(cached.error());
 
         json result = std::move(frame.value().metadata);
-        result["capture_id"] = capture_id;
+        result["capture_id"] = capture_id.value();
         result["format"] = "image/png";
         result["image_base64"] = std::move(b64_png);
         result["description"] = "Live Godot editor viewport frame from '" +
@@ -179,14 +188,15 @@ json ViewportRenderer::diffViewport(const json& params) {
         auto b64_png = encodeImageToPngBase64(diff.value().diff_rgba.data(),
                                               diff.value().width, diff.value().height);
         if (b64_png.empty()) return rendererError(Error::internal("Failed to encode viewport diff pixels"));
-        const auto comparison_id = makeCaptureId();
-        auto cached = m_captureCache.store(comparison_id, frame.value().pixels);
+        auto comparison_id = makeUniqueCaptureId(m_captureCache);
+        if (comparison_id.isErr()) return rendererError(comparison_id.error());
+        auto cached = m_captureCache.store(comparison_id.value(), frame.value().pixels);
         if (cached.isErr()) return rendererError(cached.error());
 
         json result = diff.value().toJson();
         result.update(frame.value().metadata);
         result["baseline_capture_id"] = baseline_id;
-        result["comparison_capture_id"] = comparison_id;
+        result["comparison_capture_id"] = comparison_id.value();
         result["threshold"] = threshold;
         result["format"] = "image/png";
         result["image_base64"] = std::move(b64_png);

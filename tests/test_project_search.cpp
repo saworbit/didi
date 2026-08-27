@@ -126,6 +126,65 @@ void test_csharp_symbols_ignore_comments_and_strings() {
     ASSERT_TRUE(fake_result.value().matches.empty());
 }
 
+void test_csharp_symbols_ignore_multiline_strings() {
+    // Break caught: declarations embedded in multiline verbatim/raw strings leak into symbol results.
+    SearchFixture fixture;
+    fixture.write("scripts/Multiline.cs",
+                  "public class RealContainer {\n"
+                  "  private string verbatim = @\"first line\n"
+                  "public void FakeVerbatim() {}\n"
+                  "last line\";\n"
+                  "  private string raw = \"\"\"\n"
+                  "public void FakeRaw() {}\n"
+                  "\"\"\";\n"
+                  "  public void RealMethod() {}\n"
+                  "}\n");
+    didi::offline::ProjectSearch search(fixture.root());
+
+    didi::offline::SymbolSearchOptions fakes;
+    fakes.query = "Fake";
+    const auto fake_result = search.searchSymbols(fakes);
+    ASSERT_TRUE(fake_result.isOk());
+    ASSERT_TRUE(fake_result.value().matches.empty());
+
+    didi::offline::SymbolSearchOptions real;
+    real.query = "Real";
+    const auto real_result = search.searchSymbols(real);
+    ASSERT_TRUE(real_result.isOk());
+    ASSERT_EQ(real_result.value().matches.size(), 2u);
+    ASSERT_EQ(real_result.value().matches[0].name, "RealContainer");
+    ASSERT_EQ(real_result.value().matches[1].name, "RealMethod");
+}
+
+void test_gdscript_symbols_ignore_multiline_strings() {
+    // Break caught: declarations embedded in GDScript triple-quoted strings leak into symbol results.
+    SearchFixture fixture;
+    fixture.write("scripts/multiline.gd",
+                  "class_name RealScript\n"
+                  "var documentation = \"\"\"first line\n"
+                  "func fake_double():\n"
+                  "last line\"\"\"\n"
+                  "var notes = '''first line\n"
+                  "signal fake_single\n"
+                  "last line'''\n"
+                  "func real_method():\n"
+                  "\tpass\n");
+    didi::offline::ProjectSearch search(fixture.root());
+
+    didi::offline::SymbolSearchOptions fakes;
+    fakes.query = "fake";
+    const auto fake_result = search.searchSymbols(fakes);
+    ASSERT_TRUE(fake_result.isOk());
+    ASSERT_TRUE(fake_result.value().matches.empty());
+
+    didi::offline::SymbolSearchOptions real;
+    real.query = "real";
+    real.case_sensitive = false;
+    const auto real_result = search.searchSymbols(real);
+    ASSERT_TRUE(real_result.isOk());
+    ASSERT_EQ(real_result.value().matches.size(), 2u);
+}
+
 void test_binary_file_is_diagnostic_not_match() {
     // Break caught: a NUL-bearing binary file leaks arbitrary bytes into search results.
     SearchFixture fixture;
@@ -163,6 +222,8 @@ struct RegisterProjectSearchTests {
         registerTest("ProjectSearch.TextAndGdscriptSymbols", test_text_and_gdscript_symbols);
         registerTest("ProjectSearch.RejectsEscapeAndInvalidLimits", test_rejects_escape_and_invalid_limits);
         registerTest("ProjectSearch.CSharpSymbolsIgnoreCommentsAndStrings", test_csharp_symbols_ignore_comments_and_strings);
+        registerTest("ProjectSearch.CSharpSymbolsIgnoreMultilineStrings", test_csharp_symbols_ignore_multiline_strings);
+        registerTest("ProjectSearch.GdscriptSymbolsIgnoreMultilineStrings", test_gdscript_symbols_ignore_multiline_strings);
         registerTest("ProjectSearch.BinaryFileIsDiagnosticNotMatch", test_binary_file_is_diagnostic_not_match);
         registerTest("ProjectSearch.ResultOrderAndWholeWordBoundary", test_result_order_and_whole_word_boundary);
     }

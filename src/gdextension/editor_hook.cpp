@@ -215,11 +215,20 @@ void EditorHook::scheduleAssetReimport(
 void EditorHook::processAssetReimportFrame() {
     std::optional<PendingAssetReimport> completed;
     json response;
+    std::shared_ptr<CommandControl> observed_control;
     {
         std::lock_guard<std::recursive_mutex> lock(m_reimportMutex);
         if (!m_pendingAssetReimport.has_value()) return;
-        const auto now = std::chrono::steady_clock::now();
-        auto scanning = GodotBridge::instance().isEditorFilesystemScanning();
+        observed_control = m_pendingAssetReimport->control;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    auto scanning = GodotBridge::instance().isEditorFilesystemScanning();
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_reimportMutex);
+        if (!m_pendingAssetReimport.has_value() ||
+            m_pendingAssetReimport->control != observed_control) {
+            return;
+        }
         if (scanning.isErr()) {
             completed = std::move(m_pendingAssetReimport);
             m_pendingAssetReimport.reset();
