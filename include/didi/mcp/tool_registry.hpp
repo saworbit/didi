@@ -30,6 +30,7 @@ public:
 private:
     ToolRegistry() = default;
     std::unordered_map<std::string, ToolDefinition> m_tools;
+    std::shared_ptr<ipc::IIpcClient> m_sourceIpcClient;
     std::shared_ptr<ipc::IIpcClient> m_ipcClient;
     std::shared_ptr<runtime::IRuntimeSessionClient> m_runtimeSessionClient;
 };

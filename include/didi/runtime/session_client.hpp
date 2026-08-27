@@ -35,6 +35,15 @@ struct SessionDescriptor {
     static Result<SessionDescriptor> fromJson(const json& value);
 };
 
+struct RuntimeRouteLease {
+    std::shared_ptr<ipc::IIpcClient> client;
+    std::optional<SessionDescriptor> descriptor;
+    uint64_t generation{0};
+
+    Result<json> sendRequest(const std::string& method, const json& params,
+                             int timeout_ms = 5000) const;
+};
+
 enum class DescriptorRetirementOutcome {
     deleted,
     retained_collision_or_race,
@@ -57,7 +66,14 @@ public:
         return Error::notConnected("Fresh runtime session state is unavailable");
     }
     virtual std::optional<SessionDescriptor> activeSession() const = 0;
+    virtual std::optional<RuntimeRouteLease> acquireRouteLease() { return std::nullopt; }
+    virtual bool quarantineRoute(const RuntimeRouteLease&) { return false; }
 };
+
+std::optional<RuntimeRouteLease> acquireRuntimeRouteLease(
+    const std::shared_ptr<ipc::IIpcClient>& router);
+bool quarantineRuntimeRoute(const std::shared_ptr<ipc::IIpcClient>& router,
+                            const RuntimeRouteLease& lease);
 
 std::shared_ptr<IRuntimeSessionClient> createRuntimeSessionClient(
     const std::string& project_root,

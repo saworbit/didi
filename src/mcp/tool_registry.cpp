@@ -1,8 +1,10 @@
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/mcp/project_tools.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/runtime/session_kind_policy.hpp"
 #include <algorithm>
 #include <unordered_set>
+#include <utility>
 
 namespace didi {
 namespace mcp {
@@ -120,6 +122,176 @@ CallToolResult handleEditorRedo(const json& args, std::shared_ptr<ipc::IIpcClien
 CallToolResult handleEditorSaveScene(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleEditorReloadProject(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
+namespace {
+
+Error normalizeLiveRouteError(Error error) {
+    const auto transport = ipc::transportFailureState(error);
+    const bool explicit_quarantine = error.data.is_object() &&
+                                     error.data.value("route_quarantine", false);
+    if (!transport.has_value() && !explicit_quarantine) return error;
+    if (!error.data.is_object()) error.data = json::object();
+    if (transport.has_value()) {
+        error.data["outcome"] = transport->outcome_unknown ? "unknown_outcome" : "not_started";
+    } else if (!error.data.contains("outcome")) {
+        error.data["outcome"] = "unknown_outcome";
+    }
+    error.data["route_quarantine"] = true;
+    return error;
+}
+
+class LeaseDispatchClient final : public runtime::IRuntimeSessionClient {
+public:
+    explicit LeaseDispatchClient(std::shared_ptr<ipc::IIpcClient> source)
+        : m_source(std::move(source)),
+          m_sessions(std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(m_source)) {}
+
+    class Binding {
+    public:
+        Binding(LeaseDispatchClient* owner, std::optional<runtime::RuntimeRouteLease> lease)
+            : m_owner(owner) {
+            m_owner->m_bound[thisThreadKey(m_owner)].push_back({std::move(lease), std::nullopt});
+        }
+        Binding(const Binding&) = delete;
+        Binding& operator=(const Binding&) = delete;
+        Binding(Binding&& other) noexcept : m_owner(std::exchange(other.m_owner, nullptr)) {}
+        ~Binding() {
+            if (!m_owner) return;
+            auto found = m_owner->m_bound.find(thisThreadKey(m_owner));
+            if (found == m_owner->m_bound.end()) return;
+            found->second.pop_back();
+            if (found->second.empty()) m_owner->m_bound.erase(found);
+        }
+
+    private:
+        static const LeaseDispatchClient* thisThreadKey(const LeaseDispatchClient* owner) {
+            return owner;
+        }
+        LeaseDispatchClient* m_owner;
+    };
+
+    Binding bind(std::optional<runtime::RuntimeRouteLease> lease) {
+        return Binding(this, std::move(lease));
+    }
+
+    std::optional<Error> lastError() const {
+        const auto* state = current();
+        return state ? state->last_error : std::optional<Error>{};
+    }
+
+    bool connect(const std::string& endpoint, int timeout_ms) override {
+        return m_source && m_source->connect(endpoint, timeout_ms);
+    }
+    void disconnect() override {
+        if (auto* state = current()) {
+            if (state->lease.has_value()) {
+                (void)runtime::quarantineRuntimeRoute(m_source, *state->lease);
+            }
+            return;
+        }
+        if (m_source) {
+            m_source->disconnect();
+        }
+    }
+    bool isConnected() const override {
+        const auto* state = current();
+        // A bound call must reach sendRequest even if a later attach disconnected its old
+        // physical client; sendRequest then records a structured failure with this lease's
+        // provenance instead of letting handlers silently fall back or emit plain text.
+        return state ? state->lease.has_value() && static_cast<bool>(state->lease->client)
+                     : !m_sessions && m_source && m_source->isConnected();
+    }
+    Result<json> sendRequest(const std::string& method, const json& params,
+                             int timeout_ms) override {
+        auto* state = current();
+        auto result = state
+                          ? (state->lease.has_value()
+                                 ? state->lease->sendRequest(method, params, timeout_ms)
+                                 : Result<json>(Error::notConnected()))
+                          : (!m_sessions && m_source
+                                 ? m_source->sendRequest(method, params, timeout_ms)
+                                 : Result<json>(Error::notConnected()));
+        if (state && state->lease.has_value() && result.isErr()) {
+            auto error = normalizeLiveRouteError(result.error());
+            const bool quarantine = error.data.is_object() &&
+                                    error.data.value("route_quarantine", false);
+            if (quarantine) (void)runtime::quarantineRuntimeRoute(m_source, *state->lease);
+            state->last_error = error;
+            return error;
+        }
+        return result;
+    }
+
+    Result<json> listSessions(const std::optional<std::string>& project_path) override {
+        return m_sessions ? m_sessions->listSessions(project_path)
+                          : Result<json>(Error::notConnected("Runtime session routing is unavailable"));
+    }
+    Result<json> attachSession(const std::string& session_id) override {
+        return m_sessions ? m_sessions->attachSession(session_id)
+                          : Result<json>(Error::notConnected("Runtime session routing is unavailable"));
+    }
+    Result<json> detachSession() override {
+        return m_sessions ? m_sessions->detachSession()
+                          : Result<json>(Error::notConnected("Runtime session routing is unavailable"));
+    }
+    Result<json> refreshSession() override {
+        return m_sessions ? m_sessions->refreshSession()
+                          : Result<json>(Error::notConnected("Runtime session routing is unavailable"));
+    }
+    std::optional<runtime::SessionDescriptor> activeSession() const override {
+        const auto* state = current();
+        return state ? (state->lease.has_value()
+                            ? state->lease->descriptor
+                            : std::optional<runtime::SessionDescriptor>{})
+                     : (m_sessions ? m_sessions->activeSession()
+                                   : std::optional<runtime::SessionDescriptor>{});
+    }
+    std::optional<runtime::RuntimeRouteLease> acquireRouteLease() override {
+        const auto* state = current();
+        return state ? state->lease
+                     : runtime::acquireRuntimeRouteLease(m_source);
+    }
+    bool quarantineRoute(const runtime::RuntimeRouteLease& lease) override {
+        return runtime::quarantineRuntimeRoute(m_source, lease);
+    }
+
+private:
+    struct BoundState {
+        std::optional<runtime::RuntimeRouteLease> lease;
+        std::optional<Error> last_error;
+    };
+
+    BoundState* current() {
+        auto found = m_bound.find(this);
+        return found == m_bound.end() || found->second.empty() ? nullptr : &found->second.back();
+    }
+    const BoundState* current() const {
+        auto found = m_bound.find(this);
+        return found == m_bound.end() || found->second.empty() ? nullptr : &found->second.back();
+    }
+
+    std::shared_ptr<ipc::IIpcClient> m_source;
+    std::shared_ptr<runtime::IRuntimeSessionClient> m_sessions;
+    static thread_local std::unordered_map<const LeaseDispatchClient*, std::vector<BoundState>> m_bound;
+};
+
+thread_local std::unordered_map<const LeaseDispatchClient*, std::vector<LeaseDispatchClient::BoundState>>
+    LeaseDispatchClient::m_bound;
+
+CallToolResult structuredLiveToolError(const Error& error,
+                                       const std::optional<runtime::SessionDescriptor>& session) {
+    json data = error.data.is_object() ? error.data : json::object();
+    if (!error.data.is_null() && !error.data.is_object()) data["details"] = error.data;
+    auto result = CallToolResult::successJson({
+        {"execution_mode", "live"},
+        {"session", session.has_value() ? session->toJson() : json(nullptr)},
+        {"error", {{"code", error.code}, {"message", error.message}, {"data", std::move(data)}}}
+    });
+    result.isError = true;
+    return result;
+}
+
+} // namespace
+
 ToolRegistry& ToolRegistry::instance() {
     static ToolRegistry s_instance;
     return s_instance;
@@ -164,15 +336,59 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
     if (!tool->capability.implemented) {
         return CallToolResult::error("Tool '" + name + "' is unimplemented: " + tool->capability.reason);
     }
+    const bool supports_live =
+        std::find(tool->capability.modes.begin(), tool->capability.modes.end(), "live") !=
+        tool->capability.modes.end();
+    const bool supports_offline =
+        std::find(tool->capability.modes.begin(), tool->capability.modes.end(), "offline_fallback") !=
+        tool->capability.modes.end();
+    std::optional<runtime::RuntimeRouteLease> lease;
+    if (supports_live) {
+        lease = runtime::acquireRuntimeRouteLease(m_sourceIpcClient);
+        const auto selected = lease.has_value()
+                                  ? lease->descriptor
+                                  : std::optional<runtime::SessionDescriptor>{};
+        if (m_runtimeSessionClient && selected.has_value()) {
+            const auto policy = runtime::livePolicyForTool(name);
+            if (!runtime::allowsSessionKind(policy, selected->kind)) {
+                json allowed = policy == runtime::LiveSessionKindPolicy::editor_only
+                                   ? json::array({"editor"})
+                                   : json::array({"game"});
+                json envelope = {
+                    {"execution_mode", "live"},
+                    {"session", selected->toJson()},
+                    {"error", {{"code", 409},
+                               {"message", "Tool is unavailable for the selected session kind"},
+                               {"data", {{"tool", name},
+                                         {"selected_session_kind", selected->kind},
+                                         {"allowed_session_kinds", std::move(allowed)}}}}}
+                };
+                auto rejected = CallToolResult::successJson(envelope);
+                rejected.isError = true;
+                return rejected;
+            }
+        }
+        if (m_runtimeSessionClient && !lease.has_value() && !supports_offline) {
+            return structuredLiveToolError(
+                Error::notConnected("No atomic runtime route is available for live dispatch"),
+                std::nullopt);
+        }
+    }
     try {
+        const auto dispatcher = std::dynamic_pointer_cast<LeaseDispatchClient>(m_ipcClient);
+        std::optional<LeaseDispatchClient::Binding> binding;
+        if (dispatcher) binding.emplace(dispatcher->bind(lease));
         auto result = tool->handler(arguments);
-        if (result.isError) return result;
+        if (result.isError) {
+            if (dispatcher) {
+                if (const auto error = dispatcher->lastError(); error.has_value()) {
+                    return structuredLiveToolError(*error, lease->descriptor);
+                }
+            }
+            return result;
+        }
 
-        const bool supports_live = std::find(tool->capability.modes.begin(), tool->capability.modes.end(), "live") !=
-                                   tool->capability.modes.end();
-        const bool supports_offline = std::find(tool->capability.modes.begin(), tool->capability.modes.end(), "offline_fallback") !=
-                                      tool->capability.modes.end();
-        const bool live = supports_live && m_ipcClient && m_ipcClient->isConnected();
+        const bool live = supports_live && lease.has_value();
         const std::string execution_mode = live ? "live" : (supports_offline ? "offline_fallback" : "");
 
         if (!execution_mode.empty()) {
@@ -182,6 +398,10 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
                     auto payload = json::parse(item.text);
                     if (!payload.is_object()) continue;
                     if (!payload.contains("execution_mode")) payload["execution_mode"] = execution_mode;
+                    if (live && payload.value("execution_mode", "") == "live" &&
+                        lease->descriptor.has_value() && !payload.contains("session")) {
+                        payload["session"] = lease->descriptor->toJson();
+                    }
                     item.text = payload.dump(2);
                 } catch (const json::exception&) {
                     // Human-readable text is allowed for errors and descriptions; only JSON payloads are attributed here.
@@ -196,17 +416,24 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
 }
 
 void ToolRegistry::setIpcClient(std::shared_ptr<ipc::IIpcClient> ipc_client) {
-    m_ipcClient = ipc_client;
-    m_runtimeSessionClient = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(m_ipcClient);
+    m_sourceIpcClient = std::move(ipc_client);
+    m_runtimeSessionClient =
+        std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(m_sourceIpcClient);
+    m_ipcClient = m_sourceIpcClient
+                      ? std::make_shared<LeaseDispatchClient>(m_sourceIpcClient)
+                      : std::shared_ptr<ipc::IIpcClient>{};
 }
 
 std::shared_ptr<ipc::IIpcClient> ToolRegistry::getIpcClient() const {
-    return m_ipcClient;
+    return m_sourceIpcClient;
 }
 
 void ToolRegistry::setRuntimeSessionClient(std::shared_ptr<runtime::IRuntimeSessionClient> session_client) {
     m_runtimeSessionClient = std::move(session_client);
-    m_ipcClient = m_runtimeSessionClient;
+    m_sourceIpcClient = m_runtimeSessionClient;
+    m_ipcClient = m_sourceIpcClient
+                      ? std::make_shared<LeaseDispatchClient>(m_sourceIpcClient)
+                      : std::shared_ptr<ipc::IIpcClient>{};
 }
 
 std::shared_ptr<runtime::IRuntimeSessionClient> ToolRegistry::getRuntimeSessionClient() const {

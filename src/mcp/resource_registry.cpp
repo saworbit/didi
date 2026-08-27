@@ -17,14 +17,6 @@ std::optional<runtime::SessionDescriptor> selectedSession(
     return sessions ? sessions->activeSession() : std::optional<runtime::SessionDescriptor>{};
 }
 
-bool editorRouteAvailable(const std::shared_ptr<ipc::IIpcClient>& ipc_client) {
-    if (!ipc_client || !ipc_client->isConnected()) return false;
-    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc_client);
-    if (!sessions) return true; // Legacy injected/fixed-pipe routes are editor routes.
-    const auto selected = sessions->activeSession();
-    return selected.has_value() && selected->kind == "editor";
-}
-
 json liveResourcePayload(json payload, const std::optional<runtime::SessionDescriptor>& session) {
     if (!payload.is_object()) payload = {{"result", std::move(payload)}};
     payload["execution_mode"] = "live";
@@ -42,6 +34,24 @@ Error liveResourceError(const Error& error,
                   {"session", session.has_value() ? session->toJson() : json(nullptr)},
                   {"error", {{"code", error.code}, {"message", error.message},
                              {"data", std::move(engine_data)}}}});
+}
+
+bool conditionallyQuarantineLease(Error& error,
+                                  const std::shared_ptr<ipc::IIpcClient>& router,
+                                  const runtime::RuntimeRouteLease& lease) {
+    const auto transport = ipc::transportFailureState(error);
+    const bool explicit_quarantine = error.data.is_object() &&
+                                     error.data.value("route_quarantine", false);
+    if (!transport.has_value() && !explicit_quarantine) return false;
+    if (!error.data.is_object()) error.data = json::object();
+    if (transport.has_value()) {
+        error.data["outcome"] = transport->outcome_unknown ? "unknown_outcome" : "not_started";
+    } else if (!error.data.contains("outcome")) {
+        error.data["outcome"] = "unknown_outcome";
+    }
+    error.data["route_quarantine"] = true;
+    (void)runtime::quarantineRuntimeRoute(router, lease);
+    return true;
 }
 
 } // namespace
@@ -126,13 +136,17 @@ void ResourceRegistry::registerAllDefaultResources() {
     editor_state.description = "Connection state and active edited-scene root when live, or an explicit offline status.";
     editor_state.mimeType = "application/json";
     editor_state.readHandler = [this]() -> Result<std::string> {
-        if (editorRouteAvailable(m_ipcClient)) {
-            const auto session = selectedSession(m_ipcClient);
-            auto res = m_ipcClient->sendRequest("editor.getState", {}, ipc::kWaitForDefinitiveResponse);
+        const auto lease = runtime::acquireRuntimeRouteLease(m_ipcClient);
+        if (lease.has_value() &&
+            (!lease->descriptor.has_value() || lease->descriptor->kind == "editor")) {
+            const auto session = lease->descriptor;
+            auto res = lease->sendRequest("editor.getState", {}, ipc::kWaitForDefinitiveResponse);
             if (res.isOk()) {
                 return liveResourcePayload(res.value(), session).dump(2);
             }
-            return liveResourceError(res.error(), session,
+            auto error = res.error();
+            (void)conditionallyQuarantineLease(error, m_ipcClient, *lease);
+            return liveResourceError(error, session,
                                      "Failed to retrieve editor state: ");
         }
         json offline_state = {
@@ -152,16 +166,18 @@ void ResourceRegistry::registerAllDefaultResources() {
     runtime_logs.description = "Incremental, sequence-cursored Didi runtime log records when connected, or one explicit standalone-status record offline; not a full Godot debugger stream.";
     runtime_logs.mimeType = "application/json";
     runtime_logs.readHandler = [this]() -> Result<std::string> {
-        if (m_ipcClient && m_ipcClient->isConnected()) {
-            const auto session = selectedSession(m_ipcClient);
+        const auto lease = runtime::acquireRuntimeRouteLease(m_ipcClient);
+        if (lease.has_value()) {
+            const auto session = lease->descriptor;
             constexpr int kEndToEndLiveDeadlineMs = 17000;
-            auto res = m_ipcClient->sendRequest("runtime.getLogs", {}, kEndToEndLiveDeadlineMs);
+            auto res = lease->sendRequest("runtime.getLogs", {}, kEndToEndLiveDeadlineMs);
             if (res.isOk()) {
                 return liveResourcePayload(res.value(), session).dump(2);
             }
             auto error = res.error();
             const bool explicit_quarantine = error.data.is_object() &&
                 error.data.value("route_quarantine", false);
+            const auto transport = ipc::transportFailureState(error);
             const bool known_transport_timeout = error.code == 500 &&
                 (error.message.rfind("Timeout waiting for response", 0) == 0 ||
                  error.message.rfind("Failed or timed out reading response", 0) == 0 ||
@@ -169,14 +185,20 @@ void ResourceRegistry::registerAllDefaultResources() {
             const bool transport_deadline =
                 (error.code == 504 || known_transport_timeout) &&
                 (!error.data.is_object() || !error.data.contains("outcome"));
-            if (explicit_quarantine || transport_deadline) {
-                if (transport_deadline) error.code = 504;
+            if (explicit_quarantine || transport.has_value() || transport_deadline) {
+                if (transport_deadline && !transport.has_value()) error.code = 504;
                 if (!error.data.is_object()) error.data = json::object();
-                error.data["outcome"] = "unknown_outcome";
+                if (transport.has_value()) {
+                    error.data["outcome"] = transport->outcome_unknown
+                                                  ? "unknown_outcome"
+                                                  : "not_started";
+                } else {
+                    error.data["outcome"] = "unknown_outcome";
+                }
                 error.data["route_quarantine"] = true;
                 const auto wrapped = liveResourceError(
                     error, session, "Failed to retrieve live runtime logs: ");
-                m_ipcClient->disconnect();
+                (void)runtime::quarantineRuntimeRoute(m_ipcClient, *lease);
                 return wrapped;
             }
             return liveResourceError(error, session,

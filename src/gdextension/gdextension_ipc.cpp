@@ -59,6 +59,13 @@ bool GDExtensionIpc::start(const std::string& kind, const std::string& project_p
             return response;
         }
 
+        if (auto rejected = rejectDisallowedSessionMethod(method, *session);
+            rejected.has_value()) {
+            DIDI_LOG_WARN("GDEXT_IPC", "Rejected method for ", session->kind,
+                          " session before main-thread dispatch: ", method);
+            return std::move(*rejected);
+        }
+
         DIDI_LOG_INFO("GDEXT_IPC", "Live command started: ", method);
 
         // Forward to EditorHook to execute safely on Godot's Main Thread

@@ -1,5 +1,6 @@
 #include "didi/mcp/mcp_server.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/runtime/session_kind_policy.hpp"
 #include <algorithm>
 #include <filesystem>
 
@@ -17,15 +18,7 @@ static bool liveAllowedFor(const std::string& identifier, bool resource,
         if (identifier == "godot://runtime/logs") return session_kind == "editor" || session_kind == "game";
         return session_kind == "editor";
     }
-    if (identifier == "runtime_set_paused" || identifier == "runtime_step" ||
-        identifier == "runtime_stop") {
-        return session_kind == "game";
-    }
-    if (identifier == "runtime_read_logs" || identifier == "runtime_get_tree" ||
-        identifier == "eval_gdscript") {
-        return session_kind == "editor" || session_kind == "game";
-    }
-    return session_kind == "editor";
+    return runtime::allowsSessionKind(runtime::livePolicyForTool(identifier), session_kind);
 }
 
 static void addCurrentAvailability(json& definition, const ExecutionCapability& capability,

@@ -147,23 +147,24 @@ CallToolResult localSessionSuccess(json payload) {
 
 CallToolResult forwardLiveRuntime(const std::string& method, const json& args,
                                   const std::shared_ptr<ipc::IIpcClient>& ipc) {
-    if (!ipc || !ipc->isConnected()) {
+    const auto lease = runtime::acquireRuntimeRouteLease(ipc);
+    if (!lease.has_value()) {
         return liveError(Error::notConnected("No runtime session is attached"),
                          activeSessionFor(ipc));
     }
-    // isConnected() may perform first-use auto-attachment. Snapshot only after it completes.
-    const auto session = activeSessionFor(ipc);
+    const auto session = lease->descriptor;
     if ((method == "runtime.setPaused" || method == "runtime.step" || method == "runtime.stop") &&
         (!session.has_value() || session->kind != "game")) {
         return liveError(Error(409, "Runtime control is available only for game sessions",
                                {{"allowed_session_kinds", json::array({"game"})}}), session);
     }
     constexpr int kEndToEndLiveDeadlineMs = 17000;
-    auto result = ipc->sendRequest(method, args, kEndToEndLiveDeadlineMs);
+    auto result = lease->sendRequest(method, args, kEndToEndLiveDeadlineMs);
     if (result.isErr()) {
         auto error = result.error();
         const bool explicit_quarantine = error.data.is_object() &&
             error.data.value("route_quarantine", false);
+        const auto transport = ipc::transportFailureState(error);
         const bool known_transport_timeout = error.code == 500 &&
             (error.message.rfind("Timeout waiting for response", 0) == 0 ||
              error.message.rfind("Failed or timed out reading response", 0) == 0 ||
@@ -171,12 +172,18 @@ CallToolResult forwardLiveRuntime(const std::string& method, const json& args,
         const bool transport_deadline =
             (error.code == 504 || known_transport_timeout) &&
             (!error.data.is_object() || !error.data.contains("outcome"));
-        if (explicit_quarantine || transport_deadline) {
-            if (transport_deadline) error.code = 504;
+        if (explicit_quarantine || transport.has_value() || transport_deadline) {
+            if (transport_deadline && !transport.has_value()) error.code = 504;
             if (!error.data.is_object()) error.data = json::object();
-            error.data["outcome"] = "unknown_outcome";
+            if (transport.has_value()) {
+                error.data["outcome"] = transport->outcome_unknown
+                                              ? "unknown_outcome"
+                                              : "not_started";
+            } else {
+                error.data["outcome"] = "unknown_outcome";
+            }
             error.data["route_quarantine"] = true;
-            ipc->disconnect();
+            (void)runtime::quarantineRuntimeRoute(ipc, *lease);
         }
         return liveError(error, session);
     }

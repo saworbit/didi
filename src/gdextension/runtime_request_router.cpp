@@ -1,6 +1,7 @@
 #include "didi/gdextension/runtime_request_router.hpp"
 
 #include "didi/common/logger.hpp"
+#include "didi/runtime/session_kind_policy.hpp"
 
 namespace didi::godot {
 namespace {
@@ -50,6 +51,22 @@ json handleSessionHandshake(const json& params, const runtime::SessionDescriptor
     auto response = session.toJson();
     response["status"] = "ok";
     return response;
+}
+
+std::optional<json> rejectDisallowedSessionMethod(
+    const std::string& method, const runtime::SessionDescriptor& session) {
+    const auto policy = runtime::livePolicyForMethod(method);
+    if (runtime::allowsSessionKind(policy, session.kind)) return std::nullopt;
+    json allowed = policy == runtime::LiveSessionKindPolicy::editor_only
+                       ? json::array({"editor"})
+                       : json::array({"game"});
+    return decorateRuntimeResponse(
+        {{"error", {{"code", 409},
+                    {"message", "Live method is unavailable for the selected session kind"},
+                    {"data", {{"method", method},
+                              {"selected_session_kind", session.kind},
+                              {"allowed_session_kinds", std::move(allowed)}}}}}},
+        session);
 }
 
 json awaitRuntimeCommand(CommandTicket ticket, const std::string& method,
