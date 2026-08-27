@@ -117,6 +117,9 @@ private:
     bool m_initialized{false};
 };
 
+Result<VariantValue> callVariant(VariantValue& target, const std::string& method_name,
+                                 const std::vector<const VariantValue*>& arguments = {});
+
 Result<VariantValue> variantFromNative(GDExtensionVariantType type, void* native) {
     auto ctor = GodotApi::instance().get_variant_from_type_constructor(type);
     if (!ctor) return Error::internal("Missing Variant constructor for type " + std::to_string(type));
@@ -168,7 +171,8 @@ Result<VariantValue> makeObject(GDExtensionObjectPtr object) {
     return variantFromNative(GDEXTENSION_VARIANT_TYPE_OBJECT, &object);
 }
 
-Result<VariantValue> makeJsonVariant(const json& value) {
+Result<VariantValue> makeJsonVariant(const json& value, int depth = 0) {
+    if (depth > 16) return Error::invalidArgument("JSON nesting exceeds the Phase 2 limit of 16 levels");
     if (value.is_null()) return VariantValue{};
     if (value.is_boolean()) return makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(value.get<bool>()));
     if (value.is_number_integer()) return makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(value.get<int64_t>()));
@@ -181,7 +185,35 @@ Result<VariantValue> makeJsonVariant(const json& value) {
     }
     if (value.is_number_float()) return makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, value.get<double>());
     if (value.is_string()) return makeString(value.get<std::string>());
-    return Error::invalidArgument("Phase 1 property values support only null, boolean, integer, real, and string JSON values");
+    if (value.is_array() || value.is_object()) {
+        const auto type = value.is_array() ? GDEXTENSION_VARIANT_TYPE_ARRAY : GDEXTENSION_VARIANT_TYPE_DICTIONARY;
+        auto ctor = GodotApi::instance().variant_get_ptr_constructor(type, 0);
+        if (!ctor) return Error::internal("Godot container constructor is unavailable");
+        NativeValue native(type);
+        ctor(native.ptr(), nullptr);
+        native.markInitialized();
+        auto container = variantFromNative(type, native.ptr());
+        if (container.isErr()) return container.error();
+        if (value.is_array()) {
+            for (const auto& element : value) {
+                auto item = makeJsonVariant(element, depth + 1);
+                if (item.isErr()) return item.error();
+                auto appended = callVariant(container.value(), "append", {&item.value()});
+                if (appended.isErr()) return appended.error();
+            }
+        } else {
+            for (auto it = value.begin(); it != value.end(); ++it) {
+                auto key = makeString(it.key());
+                auto item = makeJsonVariant(it.value(), depth + 1);
+                if (key.isErr()) return key.error();
+                if (item.isErr()) return item.error();
+                auto assigned = callVariant(container.value(), "set", {&key.value(), &item.value()});
+                if (assigned.isErr()) return assigned.error();
+            }
+        }
+        return std::move(container.value());
+    }
+    return Error::invalidArgument("JSON value cannot be converted to a supported Godot Variant");
 }
 
 Result<void> validateJsonForPropertyType(const json& value, GDExtensionVariantType type) {
@@ -257,7 +289,7 @@ Result<void> requireMethodBind(const char* class_name, const char* method_name, 
 }
 
 Result<VariantValue> callVariant(VariantValue& target, const std::string& method_name,
-                                 const std::vector<const VariantValue*>& arguments = {}) {
+                                 const std::vector<const VariantValue*>& arguments) {
     auto& api = GodotApi::instance();
     NativeName method(method_name);
     if (!method.valid() || !api.variant_call) return Error::internal("Variant call API is unavailable");
@@ -316,7 +348,7 @@ Result<std::string> stringFromVariant(VariantValue& value, GDExtensionVariantTyp
 }
 
 Result<json> variantToJson(VariantValue& value, int depth = 0) {
-    if (depth > 32) return Error::invalidArgument("Godot Variant nesting exceeds 32 levels");
+    if (depth > 16) return Error::invalidArgument("Godot Variant nesting exceeds the Phase 2 limit of 16 levels");
     auto& api = GodotApi::instance();
     auto type = api.variant_get_type(value.ptr());
     switch (type) {
@@ -356,9 +388,63 @@ Result<json> variantToJson(VariantValue& value, int depth = 0) {
             }
             return output;
         }
+        case GDEXTENSION_VARIANT_TYPE_DICTIONARY: {
+            auto keys = callVariant(value, "keys");
+            if (keys.isErr()) return keys.error();
+            auto size_result = callVariant(keys.value(), "size");
+            if (size_result.isErr()) return size_result.error();
+            auto size = scalarFromVariant<int64_t>(size_result.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (size.isErr()) return size.error();
+            json output = json::object();
+            for (int64_t i = 0; i < size.value(); ++i) {
+                auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+                if (index.isErr()) return index.error();
+                auto key = callVariant(keys.value(), "get", {&index.value()});
+                if (key.isErr()) return key.error();
+                auto key_type = GodotApi::instance().variant_get_type(key.value().ptr());
+                if (key_type != GDEXTENSION_VARIANT_TYPE_STRING && key_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+                    return Error::invalidArgument("Godot Dictionary contains a non-string key");
+                }
+                auto key_text = stringFromVariant(key.value(), key_type);
+                if (key_text.isErr()) return key_text.error();
+                auto item = callVariant(value, "get", {&key.value()});
+                if (item.isErr()) return item.error();
+                auto converted = variantToJson(item.value(), depth + 1);
+                if (converted.isErr()) return converted.error();
+                output[key_text.value()] = converted.value();
+            }
+            return output;
+        }
         default:
-            return Error::invalidArgument("Godot Variant type " + std::to_string(type) + " is not JSON-coercible in Phase 1");
+            return Error::invalidArgument("Godot Variant type " + std::to_string(type) + " is not JSON-coercible");
     }
+}
+
+Result<GDExtensionObjectPtr> singleton(const std::string& name) {
+    auto& api = GodotApi::instance();
+    NativeName native_name(name);
+    if (!native_name.valid()) return Error::internal("Failed to construct singleton name: " + name);
+    auto object = api.global_get_singleton(native_name.ptr());
+    if (!object) return Error::notConnected("Godot singleton is unavailable: " + name);
+    return object;
+}
+
+Result<void> validateSettingName(const std::string& setting) {
+    if (setting.empty() || setting.front() == '/' || setting.back() == '/' ||
+        setting.find('/') == std::string::npos || setting.find("//") != std::string::npos ||
+        setting.find('\\') != std::string::npos) {
+        return Error::invalidArgument("setting must be a non-empty slash-delimited ProjectSettings name");
+    }
+    return Result<void>::ok();
+}
+
+Result<void> validateGenericSettingName(const std::string& setting) {
+    auto valid = validateSettingName(setting);
+    if (valid.isErr()) return valid;
+    if (strings::startsWith(setting, "autoload/") || strings::startsWith(setting, "input/")) {
+        return Error::invalidArgument("Use the typed autoload or InputMap tools for this setting namespace");
+    }
+    return Result<void>::ok();
 }
 
 Result<GDExtensionObjectPtr> editorInterface() {
@@ -632,6 +718,80 @@ json GodotBridge::execute(const std::string& method, const json& params) {
     auto editor_result = editorInterface();
     if (editor_result.isErr()) return errorJson(editor_result.error().code, editor_result.error().message);
     auto editor = editor_result.value();
+
+    if (method == "project.getSetting" || method == "project.setSetting") {
+        const std::string setting = params.value("setting", "");
+        auto valid_name = method == "project.setSetting"
+            ? validateGenericSettingName(setting)
+            : validateSettingName(setting);
+        if (valid_name.isErr()) return errorJson(valid_name.error().code, valid_name.error().message);
+
+        auto project_settings = singleton("ProjectSettings");
+        if (project_settings.isErr()) {
+            return errorJson(project_settings.error().code, project_settings.error().message);
+        }
+        auto name = makeStringName(setting);
+        if (name.isErr()) return errorJson(name.error().code, name.error().message);
+        auto exists_value = callObject(project_settings.value(), "ProjectSettings", "has_setting", 3927539163LL,
+                                       {&name.value()});
+        if (exists_value.isErr()) return errorJson(exists_value.error().code, exists_value.error().message);
+        auto exists = scalarFromVariant<GDExtensionBool>(exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (exists.isErr()) return errorJson(exists.error().code, exists.error().message);
+
+        if (method == "project.getSetting") {
+            if (!exists.value()) return errorJson(404, "Project setting not found: " + setting);
+            VariantValue default_value;
+            auto current = callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
+                                      {&name.value(), &default_value});
+            if (current.isErr()) return errorJson(current.error().code, current.error().message);
+            auto value = variantToJson(current.value());
+            if (value.isErr()) return errorJson(value.error().code, value.error().message);
+            return liveResult({{"status", "success"}, {"setting", setting}, {"value", value.value()}});
+        }
+
+        const bool remove = params.value("remove", false);
+        if (remove && params.contains("value")) {
+            return errorJson(400, "Specify either value or remove: true, not both");
+        }
+        if (!remove && !params.contains("value")) {
+            return errorJson(400, "value is required unless remove is true");
+        }
+        if (remove && !exists.value()) return errorJson(404, "Project setting not found: " + setting);
+
+        VariantValue default_value;
+        auto previous = exists.value()
+            ? callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
+                         {&name.value(), &default_value})
+            : Result<VariantValue>(VariantValue{});
+        if (previous.isErr()) return errorJson(previous.error().code, previous.error().message);
+        auto replacement = remove ? Result<VariantValue>(VariantValue{}) : makeJsonVariant(params["value"]);
+        if (replacement.isErr()) return errorJson(replacement.error().code, replacement.error().message);
+
+        auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
+                                  {&name.value(), &replacement.value()});
+        if (applied.isErr()) return errorJson(applied.error().code, applied.error().message);
+        auto saved = callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
+        auto save_code = saved.isOk()
+            ? scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT)
+            : Result<int64_t>(saved.error());
+        if (save_code.isErr() || save_code.value() != 0) {
+            auto rollback = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
+                                       {&name.value(), &previous.value()});
+            auto rollback_save = rollback.isOk()
+                ? callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL)
+                : Result<VariantValue>(rollback.error());
+            const std::string detail = save_code.isErr()
+                ? save_code.error().message
+                : "Godot Error " + std::to_string(save_code.value());
+            if (rollback_save.isErr()) {
+                return errorJson(500, "ProjectSettings.save failed (" + detail + ") and rollback failed: " +
+                                      rollback_save.error().message);
+            }
+            return errorJson(500, "ProjectSettings.save failed; mutation was rolled back (" + detail + ")");
+        }
+        return liveResult({{"status", "success"}, {"setting", setting}, {"persisted", true},
+                           {"removed", remove}});
+    }
 
     if (method == "editor.getState" || method == "scene.getHierarchy") {
         auto root_result = editedSceneRoot(editor);

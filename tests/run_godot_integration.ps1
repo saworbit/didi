@@ -7,7 +7,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$fixtureRoot = Join-Path $PSScriptRoot "godot_smoke"
+$sourceFixtureRoot = Join-Path $PSScriptRoot "godot_smoke"
+$buildRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot "build"))
+$fixtureRoot = [IO.Path]::GetFullPath((Join-Path $buildRoot "godot_phase2_smoke"))
 $didiExecutable = Join-Path $repoRoot "build\$Configuration\didi.exe"
 $stdoutPath = Join-Path $repoRoot "build\godot_integration.out"
 $stderrPath = Join-Path $repoRoot "build\godot_integration.err"
@@ -18,6 +20,12 @@ if (-not (Test-Path -LiteralPath $GodotExecutable)) {
 if (-not (Test-Path -LiteralPath $didiExecutable)) {
     throw "Didi executable not found: $didiExecutable"
 }
+if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to recreate an integration fixture outside the build directory: $fixtureRoot"
+}
+
+Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
+Copy-Item -LiteralPath $sourceFixtureRoot -Destination $fixtureRoot -Recurse
 
 Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
 $godot = $null
@@ -32,7 +40,7 @@ function Tool-Request([int]$Id, [string]$Name, [hashtable]$Arguments) {
         id = $Id
         method = "tools/call"
         params = @{ name = $Name; arguments = $Arguments }
-    } | ConvertTo-Json -Compress -Depth 20
+    } | ConvertTo-Json -Compress -Depth 100
 }
 
 function Tool-Payload($Response) {
@@ -57,6 +65,9 @@ try {
         Start-Sleep -Milliseconds 250
     }
     Assert-True $ready "Godot editor did not start Didi IPC and open the smoke scene within $StartupTimeoutSeconds seconds."
+
+    $tooDeep = @{ leaf = "value" }
+    foreach ($level in 1..18) { $tooDeep = @{ nested = $tooDeep } }
 
     $requests = @(
         (@{ jsonrpc = "2.0"; id = 1; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
@@ -101,7 +112,14 @@ try {
         (Tool-Request 40 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/SpawnedCopy"; new_parent_path = "/root/SmokeRoot/Container" }),
         (Tool-Request 41 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/Container"; new_parent_path = "/root/SmokeRoot/Container/SpawnedCopy" }),
         (Tool-Request 42 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/Subject"; new_parent_path = "/root/SmokeRoot/Subject" }),
-        (Tool-Request 43 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 3 })
+        (Tool-Request 43 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 3 }),
+        (Tool-Request 44 "project_set_setting" @{ setting = "didi_phase2/nested"; value = @{ enabled = $true; count = 3; names = @("alpha", "beta"); nested = @{ ratio = 0.5 } } }),
+        (Tool-Request 45 "project_get_setting" @{ setting = "didi_phase2/nested" }),
+        (Tool-Request 46 "project_set_setting" @{ setting = "didi_phase2/nested"; remove = $true }),
+        (Tool-Request 47 "project_get_setting" @{ setting = "didi_phase2/nested" }),
+        (Tool-Request 48 "project_set_setting" @{ setting = "autoload/Blocked"; value = "res://blocked.gd" }),
+        (Tool-Request 49 "project_set_setting" @{ setting = "input/blocked"; value = @{ deadzone = 0.2; events = @() } }),
+        (Tool-Request 50 "project_set_setting" @{ setting = "didi_phase2/too_deep"; value = $tooDeep })
     )
 
     $rawResponses = $requests | & $didiExecutable
@@ -182,13 +200,25 @@ try {
     Assert-True (@($cycleContainer.children.name) -contains "SpawnedCopy") "Rejected cyclic reparenting changed the hierarchy."
     Assert-True (@($cycleHierarchy.scene_tree.children.name) -contains "Subject") "Rejected self-reparenting changed the hierarchy."
 
+    $settingWrite = Tool-Payload $byId[44]
+    Assert-True ($settingWrite.persisted -eq $true) "Project setting write did not confirm persistence."
+    $settingRead = Tool-Payload $byId[45]
+    Assert-True ($settingRead.value.enabled -eq $true) "Nested project setting lost its boolean value."
+    Assert-True ($settingRead.value.names[1] -eq "beta") "Nested project setting lost its array value."
+    Assert-True ($settingRead.value.nested.ratio -eq 0.5) "Nested project setting lost its dictionary value."
+    Assert-True ((Tool-Payload $byId[46]).removed -eq $true) "Project setting removal did not report success."
+    Assert-True $byId[47].result.isError "Missing project setting returned fake success."
+    Assert-True $byId[48].result.isError "Generic project settings tool wrote into the autoload namespace."
+    Assert-True $byId[49].result.isError "Generic project settings tool wrote into the InputMap namespace."
+    Assert-True $byId[50].result.isError "Excessively nested project setting was accepted."
+
     $engineErrors = @(
         Get-Content $stderrPath -ErrorAction SilentlyContinue |
             Where-Object { $_ -match 'UndoRedo history mismatch|Parameter "t" is null|\[ERROR' }
     )
     Assert-True ($engineErrors.Count -eq 0) "Godot reported bridge errors:`n$($engineErrors -join "`n")"
 
-    Write-Output "Godot Phase 1 integration passed: live hierarchy, scalar properties, all node mutations with UndoRedo, viewport PNG, and honest errors."
+    Write-Output "Godot integration passed: Phase 1 live editing plus isolated Phase 2 project-setting persistence and rejection paths."
 }
 finally {
     if ($null -ne $godot -and -not $godot.HasExited) {
