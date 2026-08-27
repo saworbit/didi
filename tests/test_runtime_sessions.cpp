@@ -160,7 +160,15 @@ public:
             if (m_endpoint.find("11111111111111111111111111111111") != std::string::npos) return didi::json::object();
             if (m_endpoint.find("22222222222222222222222222222222") != std::string::npos) return didi::json::array();
             const auto separator = m_endpoint.find_last_of('_');
-            const auto session_id = separator == std::string::npos ? std::string{} : m_endpoint.substr(separator + 1);
+            auto session_id = separator == std::string::npos ? std::string{} : m_endpoint.substr(separator + 1);
+#if !defined(_WIN32)
+            constexpr auto socket_suffix = ".sock";
+            const auto suffix_size = std::char_traits<char>::length(socket_suffix);
+            if (session_id.size() >= suffix_size &&
+                session_id.compare(session_id.size() - suffix_size, suffix_size, socket_suffix) == 0) {
+                session_id.resize(session_id.size() - suffix_size);
+            }
+#endif
             auto response = validDescriptor(session_id, m_endpoint);
             response.erase("token");
             response["status"] = "ok";
@@ -594,7 +602,7 @@ void test_session_descriptor_rejects_wrong_token_length() {
 #if !defined(_WIN32)
     auto wrong_socket_parent = valid;
     wrong_socket_parent["endpoint"] =
-        (std::filesystem::temp_directory_path().parent_path() /
+        (std::filesystem::temp_directory_path() / "wrong-parent" /
          ("godot_didi_" + std::to_string(currentProcessId()) + "_" + session_id + ".sock")).string();
     ASSERT_TRUE(didi::runtime::SessionDescriptor::fromJson(wrong_socket_parent).isErr());
 #endif
