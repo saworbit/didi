@@ -447,6 +447,23 @@ Result<void> validateGenericSettingName(const std::string& setting) {
     return Result<void>::ok();
 }
 
+Result<void> validateGroupName(const std::string& group) {
+    if (group.empty() || group.size() > 128 || group.find('/') != std::string::npos ||
+        group.find('\\') != std::string::npos) {
+        return Error::invalidArgument("group must be a non-empty name without path separators");
+    }
+    return Result<void>::ok();
+}
+
+Result<void> validateResPath(const std::string& path, const std::string& expected_suffix) {
+    if (!strings::startsWith(path, "res://") || path.find("..") != std::string::npos ||
+        path.find('\\') != std::string::npos ||
+        (!expected_suffix.empty() && !strings::endsWith(path, expected_suffix))) {
+        return Error::invalidArgument("path must be a normalized res:// path ending in " + expected_suffix);
+    }
+    return Result<void>::ok();
+}
+
 Result<GDExtensionObjectPtr> editorInterface() {
     auto& api = GodotApi::instance();
     if (!api.isLiveReady()) return Error::notConnected("Godot main-loop bridge is not ready");
@@ -791,6 +808,178 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         }
         return liveResult({{"status", "success"}, {"setting", setting}, {"persisted", true},
                            {"removed", remove}});
+    }
+
+    if (method == "script.attachToNode" || method == "script.detachFromNode") {
+        auto root = editedSceneRoot(editor);
+        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        auto node = resolveNode(root.value(), params.value("target_node", ""));
+        if (node.isErr()) return errorJson(node.error().code, node.error().message);
+        auto old_script = callObject(node.value(), "Object", "get_script", 1214101251LL);
+        if (old_script.isErr()) return errorJson(old_script.error().code, old_script.error().message);
+        auto old_type = GodotApi::instance().variant_get_type(old_script.value().ptr());
+        GDExtensionObjectPtr old_object = nullptr;
+        if (old_type == GDEXTENSION_VARIANT_TYPE_OBJECT) {
+            auto converted = objectFromVariant(old_script.value());
+            if (converted.isErr()) return errorJson(converted.error().code, converted.error().message);
+            old_object = converted.value();
+        }
+
+        VariantValue new_script;
+        std::string script_path;
+        const bool attaching = method == "script.attachToNode";
+        if (attaching) {
+            script_path = params.value("script_path", "");
+            auto valid_path = validateResPath(script_path, ".gd");
+            if (valid_path.isErr()) return errorJson(valid_path.error().code, valid_path.error().message);
+            if (old_object) return errorJson(409, "Target node already has a script; detach it before attaching another");
+            auto loader = singleton("ResourceLoader");
+            if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
+            auto path = makeString(script_path);
+            auto hint = makeString("Script");
+            auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
+            if (path.isErr() || hint.isErr() || cache_mode.isErr()) return errorJson(500, "Failed to construct script load arguments");
+            auto loaded = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                                     {&path.value(), &hint.value(), &cache_mode.value()});
+            if (loaded.isErr()) return errorJson(loaded.error().code, loaded.error().message);
+            auto resource = objectFromVariant(loaded.value());
+            if (resource.isErr() || !resource.value()) return errorJson(404, "Script resource not found: " + script_path);
+            auto class_name = makeString("Script");
+            auto is_script_value = class_name.isOk()
+                ? callObject(resource.value(), "Object", "is_class", 3927539163LL, {&class_name.value()})
+                : Result<VariantValue>(class_name.error());
+            auto is_script = is_script_value.isOk()
+                ? scalarFromVariant<GDExtensionBool>(is_script_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+                : Result<GDExtensionBool>(is_script_value.error());
+            if (is_script.isErr() || !is_script.value()) return errorJson(400, "Resource is not a Script: " + script_path);
+            new_script = std::move(loaded.value());
+        } else if (!old_object) {
+            return errorJson(409, "Target node has no script to detach");
+        }
+
+        auto manager = undoManager(editor);
+        if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+        auto preflight = preflightUndoManagerBindings();
+        auto method_bind = requireMethodBind("Object", "set_script", 1114965689LL);
+        if (preflight.isErr()) return errorJson(preflight.error().code, preflight.error().message);
+        if (method_bind.isErr()) return errorJson(method_bind.error().code, method_bind.error().message);
+        auto action = createAction(manager.value(), attaching ? "Didi: attach script" : "Didi: detach script", root.value());
+        if (action.isErr()) return errorJson(action.error().code, action.error().message);
+        auto apply = managerMethod(manager.value(), "add_do_method", node.value(), "set_script", {&new_script});
+        auto revert = managerMethod(manager.value(), "add_undo_method", node.value(), "set_script", {&old_script.value()});
+        if (apply.isErr() || revert.isErr()) return errorJson(500, "Failed to register script UndoRedo transaction");
+        auto committed = commitAction(manager.value());
+        if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+        return liveResult({{"status", "success"}, {"target_node", params.value("target_node", "")},
+                           {"script_path", script_path}, {"attached", attaching}, {"detached", !attaching},
+                           {"undo_redo_registered", true}});
+    }
+
+    if (method == "scene.listGroups" || method == "scene.addToGroup" ||
+        method == "scene.removeFromGroup" || method == "scene.getGroupMembers") {
+        const std::string group = params.value("group", "");
+        if (method != "scene.listGroups") {
+            auto valid_group = validateGroupName(group);
+            if (valid_group.isErr()) return errorJson(valid_group.error().code, valid_group.error().message);
+        }
+        auto root = editedSceneRoot(editor);
+        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+
+        if (method == "scene.getGroupMembers") {
+            auto group_name = makeStringName(group);
+            if (group_name.isErr()) return errorJson(group_name.error().code, group_name.error().message);
+            json members = json::array();
+            std::function<Result<void>(GDExtensionObjectPtr)> visit = [&](GDExtensionObjectPtr current) -> Result<void> {
+                auto member_value = callObject(current, "Node", "is_in_group", 2619796661LL, {&group_name.value()});
+                if (member_value.isErr()) return member_value.error();
+                auto member = scalarFromVariant<GDExtensionBool>(member_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                if (member.isErr()) return member.error();
+                if (member.value()) {
+                    auto path = logicalPathFromEditedRoot(root.value(), current);
+                    if (path.isErr()) return path.error();
+                    members.push_back(path.value());
+                }
+                auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+                if (include_internal.isErr()) return include_internal.error();
+                auto children = callObject(current, "Node", "get_children", 873284517LL, {&include_internal.value()});
+                if (children.isErr()) return children.error();
+                auto size_value = callVariant(children.value(), "size");
+                if (size_value.isErr()) return size_value.error();
+                auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                if (size.isErr()) return size.error();
+                for (int64_t i = 0; i < size.value(); ++i) {
+                    auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+                    if (index.isErr()) return index.error();
+                    auto child_value = callVariant(children.value(), "get", {&index.value()});
+                    if (child_value.isErr()) return child_value.error();
+                    auto child = objectFromVariant(child_value.value());
+                    if (child.isErr() || !child.value()) return Error::internal("Godot returned an invalid child node");
+                    auto nested = visit(child.value());
+                    if (nested.isErr()) return nested;
+                }
+                return Result<void>::ok();
+            };
+            auto visited = visit(root.value());
+            if (visited.isErr()) return errorJson(visited.error().code, visited.error().message);
+            std::sort(members.begin(), members.end());
+            return liveResult({{"status", "success"}, {"group", group}, {"members", members}});
+        }
+
+        auto node = resolveNode(root.value(), params.value("target_node", ""));
+        if (node.isErr()) return errorJson(node.error().code, node.error().message);
+        if (method == "scene.listGroups") {
+            auto groups_value = callObject(node.value(), "Node", "get_groups", 3995934104LL);
+            if (groups_value.isErr()) return errorJson(groups_value.error().code, groups_value.error().message);
+            auto size_value = callVariant(groups_value.value(), "size");
+            if (size_value.isErr()) return errorJson(size_value.error().code, size_value.error().message);
+            auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (size.isErr()) return errorJson(size.error().code, size.error().message);
+            std::vector<std::string> groups;
+            for (int64_t i = 0; i < size.value(); ++i) {
+                auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+                if (index.isErr()) return errorJson(index.error().code, index.error().message);
+                auto item = callVariant(groups_value.value(), "get", {&index.value()});
+                if (item.isErr()) return errorJson(item.error().code, item.error().message);
+                auto type = GodotApi::instance().variant_get_type(item.value().ptr());
+                auto text = stringFromVariant(item.value(), type);
+                if (text.isErr()) return errorJson(text.error().code, text.error().message);
+                groups.push_back(text.value());
+            }
+            std::sort(groups.begin(), groups.end());
+            return liveResult({{"status", "success"}, {"target_node", params.value("target_node", "")},
+                               {"groups", groups}});
+        }
+
+        auto group_name = makeStringName(group);
+        if (group_name.isErr()) return errorJson(group_name.error().code, group_name.error().message);
+        auto membership_value = callObject(node.value(), "Node", "is_in_group", 2619796661LL, {&group_name.value()});
+        if (membership_value.isErr()) return errorJson(membership_value.error().code, membership_value.error().message);
+        auto membership = scalarFromVariant<GDExtensionBool>(membership_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (membership.isErr()) return errorJson(membership.error().code, membership.error().message);
+        const bool adding = method == "scene.addToGroup";
+        if (adding && membership.value()) return errorJson(409, "Target node is already in group: " + group);
+        if (!adding && !membership.value()) return errorJson(404, "Target node is not in group: " + group);
+        auto persistent = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
+                                     static_cast<GDExtensionBool>(adding ? params.value("persistent", true) : true));
+        if (persistent.isErr()) return errorJson(persistent.error().code, persistent.error().message);
+        auto manager = undoManager(editor);
+        if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+        auto preflight = preflightUndoManagerBindings();
+        if (preflight.isErr()) return errorJson(preflight.error().code, preflight.error().message);
+        auto action = createAction(manager.value(), adding ? "Didi: add node to group" : "Didi: remove node from group", root.value());
+        if (action.isErr()) return errorJson(action.error().code, action.error().message);
+        auto apply = adding
+            ? managerMethod(manager.value(), "add_do_method", node.value(), "add_to_group", {&group_name.value(), &persistent.value()})
+            : managerMethod(manager.value(), "add_do_method", node.value(), "remove_from_group", {&group_name.value()});
+        auto revert = adding
+            ? managerMethod(manager.value(), "add_undo_method", node.value(), "remove_from_group", {&group_name.value()})
+            : managerMethod(manager.value(), "add_undo_method", node.value(), "add_to_group", {&group_name.value(), &persistent.value()});
+        if (apply.isErr() || revert.isErr()) return errorJson(500, "Failed to register group UndoRedo transaction");
+        auto committed = commitAction(manager.value());
+        if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+        return liveResult({{"status", "success"}, {"target_node", params.value("target_node", "")},
+                           {"group", group}, {"added", adding}, {"removed", !adding},
+                           {"undo_redo_registered", true}});
     }
 
     if (method == "editor.getState" || method == "scene.getHierarchy") {

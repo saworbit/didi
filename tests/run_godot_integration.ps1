@@ -119,7 +119,20 @@ try {
         (Tool-Request 47 "project_get_setting" @{ setting = "didi_phase2/nested" }),
         (Tool-Request 48 "project_set_setting" @{ setting = "autoload/Blocked"; value = "res://blocked.gd" }),
         (Tool-Request 49 "project_set_setting" @{ setting = "input/blocked"; value = @{ deadzone = 0.2; events = @() } }),
-        (Tool-Request 50 "project_set_setting" @{ setting = "didi_phase2/too_deep"; value = $tooDeep })
+        (Tool-Request 50 "project_set_setting" @{ setting = "didi_phase2/too_deep"; value = $tooDeep }),
+        (Tool-Request 51 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/Subject"; script_path = "res://subject.gd" }),
+        (Tool-Request 52 "script_detach_from_node" @{ target_node = "/root/SmokeRoot/Subject" }),
+        (Tool-Request 53 "editor_undo" @{}),
+        (Tool-Request 54 "editor_redo" @{}),
+        (Tool-Request 55 "script_detach_from_node" @{ target_node = "/root/SmokeRoot/Subject" }),
+        (Tool-Request 56 "scene_add_to_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two"; persistent = $true }),
+        (Tool-Request 57 "scene_list_groups" @{ target_node = "/root/SmokeRoot/Subject" }),
+        (Tool-Request 58 "scene_get_group_members" @{ group = "phase_two" }),
+        (Tool-Request 59 "scene_remove_from_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two" }),
+        (Tool-Request 60 "scene_get_group_members" @{ group = "phase_two" }),
+        (Tool-Request 61 "editor_undo" @{}),
+        (Tool-Request 62 "scene_get_group_members" @{ group = "phase_two" }),
+        (Tool-Request 63 "scene_add_to_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two"; persistent = $true })
     )
 
     $rawResponses = $requests | & $didiExecutable
@@ -211,6 +224,19 @@ try {
     Assert-True $byId[48].result.isError "Generic project settings tool wrote into the autoload namespace."
     Assert-True $byId[49].result.isError "Generic project settings tool wrote into the InputMap namespace."
     Assert-True $byId[50].result.isError "Excessively nested project setting was accepted."
+
+    Assert-True ((Tool-Payload $byId[51]).undo_redo_registered) "Script attachment bypassed UndoRedo."
+    Assert-True ((Tool-Payload $byId[52]).detached -eq $true) "Script detachment was not observed."
+    Assert-True (-not $byId[53].result.isError) "Script detach could not be undone."
+    Assert-True (-not $byId[54].result.isError) "Script detach could not be redone."
+    Assert-True $byId[55].result.isError "Detaching a node without a script returned fake success."
+
+    Assert-True ((Tool-Payload $byId[56]).undo_redo_registered) "Group addition bypassed UndoRedo."
+    Assert-True (@((Tool-Payload $byId[57]).groups) -contains "phase_two") "Added group was not listed."
+    Assert-True (@((Tool-Payload $byId[58]).members) -contains "/root/SmokeRoot/Subject") "Group member query missed the edited-scene node."
+    Assert-True (@((Tool-Payload $byId[60]).members).Count -eq 0) "Removed group membership remained visible."
+    Assert-True (@((Tool-Payload $byId[62]).members) -contains "/root/SmokeRoot/Subject") "Group removal undo did not restore membership."
+    Assert-True $byId[63].result.isError "Duplicate group membership returned fake success."
 
     $engineErrors = @(
         Get-Content $stderrPath -ErrorAction SilentlyContinue |
