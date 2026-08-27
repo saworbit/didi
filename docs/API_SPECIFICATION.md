@@ -56,7 +56,8 @@ Didi listens on `stdin` and responds on `stdout`. Log output is strictly routed 
 }
 ```
 
-### Error Code Reference:
+### JSON-RPC error codes
+
 | Code | Constant | Description |
 | :--- | :--- | :--- |
 | `-32700` | `ParseError` | Invalid JSON received by the server |
@@ -64,9 +65,10 @@ Didi listens on `stdin` and responds on `stdout`. Log output is strictly routed 
 | `-32601` | `MethodNotFound` | Requested method does not exist |
 | `-32602` | `InvalidParams` | Method parameters are invalid or malformed |
 | `-32603` | `InternalError` | Internal engine or server exception |
-| `501` | `NotImplemented` | Requested engine handler is not registered |
-| `503` | `NotConnected` | Godot Editor GDExtension IPC pipe is offline |
-| `504` | `Timeout` | Engine command execution on main thread timed out |
+
+### Bridge error codes
+
+The internal extension envelope can use `400` (invalid argument), `404` (missing editor object/property), `409` (no undo/redo action or wrong execution process), `500` (Godot/bridge failure), `501` (unimplemented), `503` (not connected/ready), or `504` (cancelled before main-thread execution started). A command already running on Godot's main thread is allowed to return its definitive result instead of producing an unknown-outcome timeout. Public `tools/call` converts these failures into MCP content with `result.isError: true`; clients should use the returned text rather than expecting a top-level JSON-RPC code.
 
 ---
 
@@ -77,19 +79,37 @@ Didi listens on `stdin` and responds on `stdout`. Log output is strictly routed 
 | `initialize` | Client $\rightarrow$ Server | Initializes session; negotiates protocol version and server capabilities |
 | `notifications/initialized` | Client $\rightarrow$ Server | Notification acknowledging initialization |
 | `ping` | Client $\rightarrow$ Server | Liveness check; returns `{}` |
-| `tools/list` | Client $\rightarrow$ Server | Lists all registered tools with JSON input schemas |
+| `tools/list` | Client $\rightarrow$ Server | Lists all registered tools with JSON input schemas and Didi capability metadata |
 | `tools/call` | Client $\rightarrow$ Server | Executes a tool by name with arguments |
 | `resources/list` | Client $\rightarrow$ Server | Lists all available static and dynamic resources |
 | `resources/read` | Client $\rightarrow$ Server | Retrieves contents of a specific resource URI (`godot://...`) |
 | `prompts/list` | Client $\rightarrow$ Server | Lists all registered prompt templates |
 | `prompts/get` | Client $\rightarrow$ Server | Evaluates a prompt template with provided arguments |
 
+### Didi capability extension
+
+Each tool and resource definition includes a namespaced `_meta.didi` object:
+
+```json
+{
+  "executionModes": ["live"],
+  "implemented": true,
+  "currentMode": "unavailable",
+  "liveAvailable": false,
+  "editorConnected": false
+}
+```
+
+`executionModes` and `implemented` describe the registration. `currentMode`, `liveAvailable`, and `editorConnected` are evaluated when the list request is handled. `currentMode` is one of `live`, `offline_fallback`, `unavailable`, or `unimplemented`. A non-empty `reason` is included for unimplemented definitions.
+
+Tool execution failures use MCP `result.isError: true` with explanatory text. JSON-RPC top-level errors remain reserved for malformed requests, unknown JSON-RPC methods, and other protocol-level failures.
+
 ---
 
 ## 3. Internal IPC Protocol (Named Pipes & UNIX Sockets)
 
 - **Pipe Name (Windows)**: `\\.\pipe\godot_didi_ipc`
-- **Security Descriptor (Windows)**: SDDL `D:(A;;GRGW;;;WD)(A;;GA;;;BA)(A;;GA;;;OW)`
+- **Security Descriptor (Windows)**: SDDL `D:(A;;GA;;;BA)(A;;GA;;;OW)`
 - **Socket Path (POSIX)**: `/tmp/godot_didi_ipc.sock`
 
 ### Frame Format:
@@ -98,12 +118,23 @@ Offset 0..3:  uint32_t payload_length (Little-Endian, Max 128 MB)
 Offset 4..N:  char payload_bytes[payload_length] (UTF-8 JSON string)
 ```
 
-### Supported Internal Methods:
-- `editor.getState`: Retrieves open scene, selection, and undo stack depth.
-- `scene.getHierarchy`: Traverses active SceneTree or parses `.tscn` file hierarchy.
-- `scene.mutate`: Executes node additions, modifications, reparenting with `EditorUndoRedoManager`.
-- `vision.captureViewport`: Captures off-screen camera viewport to PNG Base64 with RFC 4648 padding.
-- `vision.createVisualTestLab`: Builds multi-camera sandbox environment.
-- `script.diagnostics`: Validates GDScript buffer / AST rules.
-- `runtime.injectInput`: Emulates input events into `Input::parse_input_event`.
-- `runtime.getLogs`: Reads recent engine log ring buffer.
+### Implemented internal methods
+
+- `editor.getState`
+- `scene.getHierarchy`, `scene.instantiateNode`, `scene.removeNode`, `scene.reparentNode`, `scene.setProperty`, `scene.getProperty`, `scene.duplicateNode`
+- `editor.undo`, `editor.redo`, `editor.saveScene`, `editor.reloadProject`
+- `vision.captureViewport`
+- `runtime.getLogs`
+
+These scene/editor/viewport/log methods execute through the extension's main-thread bridge. Public asset queries, script diagnostics/reflection, and visual-test-lab generation are standalone filesystem/parser handlers and are never routed through extension IPC. If an offline-only helper name is sent to the extension directly, it returns `409`; other reserved internal names return a structured `501` envelope:
+
+```json
+{
+  "error": {
+    "code": 501,
+    "message": "Method is registered for compatibility but has no trustworthy live implementation: ..."
+  }
+}
+```
+
+See [Current Capability Matrix](CAPABILITIES.md) for the public tool mapping.

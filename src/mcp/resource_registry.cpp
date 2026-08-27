@@ -1,5 +1,6 @@
 #include "didi/mcp/resource_registry.hpp"
 #include "didi/offline/resource_indexer.hpp"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
@@ -12,6 +13,11 @@ ResourceRegistry& ResourceRegistry::instance() {
 }
 
 void ResourceRegistry::registerResource(ResourceDefinition res) {
+    if (res.uri == "godot://editor/state" || res.uri == "godot://runtime/logs") {
+        res.capability = {{"live", "offline_fallback"}, true, {}};
+    } else if (res.uri == "godot://project/tree") {
+        res.capability = {{"offline_fallback"}, true, {}};
+    }
     m_resources[res.uri] = std::move(res);
 }
 
@@ -37,7 +43,22 @@ Result<std::string> ResourceRegistry::readResource(const std::string& uri) {
     if (!res) {
         return Error::notFound("Resource not found: " + uri);
     }
-    return res->readHandler();
+    auto result = res->readHandler();
+    if (result.isErr()) return result;
+
+    try {
+        auto payload = json::parse(result.value());
+        if (payload.is_object() && !payload.contains("execution_mode")) {
+            const bool supports_live = std::find(res->capability.modes.begin(), res->capability.modes.end(), "live") !=
+                                       res->capability.modes.end();
+            const bool live = supports_live && m_ipcClient && m_ipcClient->isConnected();
+            payload["execution_mode"] = live ? "live" : "offline_fallback";
+            return payload.dump(2);
+        }
+    } catch (const json::exception&) {
+        return result;
+    }
+    return result;
 }
 
 void ResourceRegistry::setIpcClient(std::shared_ptr<ipc::IIpcClient> ipc_client) {
@@ -49,18 +70,12 @@ void ResourceRegistry::registerAllDefaultResources() {
     ResourceDefinition proj_tree;
     proj_tree.uri = "godot://project/tree";
     proj_tree.name = "Godot Project Resource Tree";
-    proj_tree.description = "Complete recursive layout of res:// including scene dependencies and UID maps.";
+    proj_tree.description = "Offline filesystem/resource index rooted at the standalone server's project working directory.";
     proj_tree.mimeType = "application/json";
     proj_tree.readHandler = [this]() -> Result<std::string> {
-        if (m_ipcClient && m_ipcClient->isConnected()) {
-            auto res = m_ipcClient->sendRequest("asset.query", {{"search_path", "res://"}});
-            if (res.isOk()) {
-                return res.value().dump(2);
-            }
-        }
-        // Fallback to offline indexer
         offline::ResourceIndexer indexer;
         auto tree = indexer.buildProjectTree(".");
+        tree["execution_mode"] = "offline_fallback";
         return tree.dump(2);
     };
     registerResource(std::move(proj_tree));
@@ -69,11 +84,11 @@ void ResourceRegistry::registerAllDefaultResources() {
     ResourceDefinition editor_state;
     editor_state.uri = "godot://editor/state";
     editor_state.name = "Godot Editor State";
-    editor_state.description = "Currently selected scene, selected nodes, active camera position, and Undo/Redo stack depth.";
+    editor_state.description = "Connection state and active edited-scene root when live, or an explicit offline status.";
     editor_state.mimeType = "application/json";
     editor_state.readHandler = [this]() -> Result<std::string> {
         if (m_ipcClient && m_ipcClient->isConnected()) {
-            auto res = m_ipcClient->sendRequest("editor.getState");
+            auto res = m_ipcClient->sendRequest("editor.getState", {}, ipc::kWaitForDefinitiveResponse);
             if (res.isOk()) {
                 return res.value().dump(2);
             }
@@ -82,6 +97,7 @@ void ResourceRegistry::registerAllDefaultResources() {
         json offline_state = {
             {"status", "offline"},
             {"editor_connected", false},
+            {"execution_mode", "offline_fallback"},
             {"message", "Godot Editor GDExtension is not actively running. Start Godot Editor with the Didi plugin to inspect live state."}
         };
         return offline_state.dump(2);
@@ -92,17 +108,18 @@ void ResourceRegistry::registerAllDefaultResources() {
     ResourceDefinition runtime_logs;
     runtime_logs.uri = "godot://runtime/logs";
     runtime_logs.name = "Godot Runtime Engine Logs";
-    runtime_logs.description = "Real-time stream of engine logs, shader compile warnings, and debugger stack frames.";
+    runtime_logs.description = "Didi extension-side log ring when connected, or a minimal server-status payload offline; not a full Godot debugger stream.";
     runtime_logs.mimeType = "application/json";
     runtime_logs.readHandler = [this]() -> Result<std::string> {
         if (m_ipcClient && m_ipcClient->isConnected()) {
-            auto res = m_ipcClient->sendRequest("runtime.getLogs");
+            auto res = m_ipcClient->sendRequest("runtime.getLogs", {}, ipc::kWaitForDefinitiveResponse);
             if (res.isOk()) {
                 return res.value().dump(2);
             }
         }
         // Check for local engine logs if available
         json logs = {
+            {"execution_mode", "offline_fallback"},
             {"logs", json::array({
                 {{"level", "INFO"}, {"message", "Didi MCP server active."}}
             })}

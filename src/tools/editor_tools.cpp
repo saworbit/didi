@@ -7,7 +7,7 @@ namespace mcp {
 
 CallToolResult handleEditorUndo(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("editor.undo", args);
+        auto res = ipc->sendRequest("editor.undo", args, ::didi::ipc::kWaitForDefinitiveResponse);
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
@@ -18,7 +18,7 @@ CallToolResult handleEditorUndo(const json& args, std::shared_ptr<ipc::IIpcClien
 
 CallToolResult handleEditorRedo(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("editor.redo", args);
+        auto res = ipc->sendRequest("editor.redo", args, ::didi::ipc::kWaitForDefinitiveResponse);
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
@@ -29,7 +29,7 @@ CallToolResult handleEditorRedo(const json& args, std::shared_ptr<ipc::IIpcClien
 
 CallToolResult handleEditorSaveScene(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("editor.saveScene", args);
+        auto res = ipc->sendRequest("editor.saveScene", args, ::didi::ipc::kWaitForDefinitiveResponse);
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
@@ -40,7 +40,7 @@ CallToolResult handleEditorSaveScene(const json& args, std::shared_ptr<ipc::IIpc
 
 CallToolResult handleEditorReloadProject(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("editor.reloadProject", args);
+        auto res = ipc->sendRequest("editor.reloadProject", args, ::didi::ipc::kWaitForDefinitiveResponse);
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }

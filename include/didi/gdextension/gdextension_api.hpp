@@ -7,6 +7,7 @@
 #include <vector>
 #include <unordered_map>
 #include <functional>
+#include <atomic>
 
 namespace didi {
 namespace godot {
@@ -33,20 +34,40 @@ public:
             object_method_bind_call = (GDExtensionInterfaceObjectMethodBindCall)p_get_proc_address("object_method_bind_call");
             object_method_bind_ptrcall = (GDExtensionInterfaceObjectMethodBindPtrcall)p_get_proc_address("object_method_bind_ptrcall");
             global_get_singleton = (GDExtensionInterfaceGlobalGetSingleton)p_get_proc_address("global_get_singleton");
+            object_destroy = (GDExtensionInterfaceObjectDestroy)p_get_proc_address("object_destroy");
+            classdb_construct_object = (GDExtensionInterfaceClassdbConstructObject2)p_get_proc_address("classdb_construct_object2");
             mem_alloc = (GDExtensionInterfaceMemAlloc)p_get_proc_address("mem_alloc");
             mem_free = (GDExtensionInterfaceMemFree)p_get_proc_address("mem_free");
             print_warning = (GDExtensionInterfacePrintWarning)p_get_proc_address("print_warning");
             print_error = (GDExtensionInterfacePrintError)p_get_proc_address("print_error");
             variant_destroy = (GDExtensionInterfaceVariantDestroy)p_get_proc_address("variant_destroy");
+            variant_new_nil = (GDExtensionInterfaceVariantNewNil)p_get_proc_address("variant_new_nil");
             variant_new_copy = (GDExtensionInterfaceVariantNewCopy)p_get_proc_address("variant_new_copy");
+            variant_call = (GDExtensionInterfaceVariantCall)p_get_proc_address("variant_call");
+            get_variant_from_type_constructor = (GDExtensionInterfaceGetVariantFromTypeConstructor)p_get_proc_address("get_variant_from_type_constructor");
+            get_variant_to_type_constructor = (GDExtensionInterfaceGetVariantToTypeConstructor)p_get_proc_address("get_variant_to_type_constructor");
+            variant_get_ptr_constructor = (GDExtensionInterfaceVariantGetPtrConstructor)p_get_proc_address("variant_get_ptr_constructor");
             variant_get_ptr_destructor = (GDExtensionInterfaceVariantGetPtrDestructor)p_get_proc_address("variant_get_ptr_destructor");
             variant_get_type = (GDExtensionInterfaceVariantGetType)p_get_proc_address("variant_get_type");
+            packed_byte_array_operator_index_const = (GDExtensionInterfacePackedByteArrayOperatorIndexConst)p_get_proc_address("packed_byte_array_operator_index_const");
+            register_main_loop_callbacks = (GDExtensionInterfaceRegisterMainLoopCallbacks)p_get_proc_address("register_main_loop_callbacks");
         }
 
-        m_initialized = true;
+        m_initialized = p_get_proc_address != nullptr && m_library != nullptr;
     }
 
     bool isInitialized() const { return m_initialized; }
+    bool isMainLoopRegistered() const { return m_mainLoopRegistered.load(); }
+    bool isLiveReady() const { return m_initialized && m_mainLoopRegistered.load(); }
+    bool registerMainLoop(const GDExtensionMainLoopCallbacks& callbacks) {
+        if (!m_initialized || !register_main_loop_callbacks) {
+            return false;
+        }
+        register_main_loop_callbacks(m_library, &callbacks);
+        m_mainLoopRegistered.store(true);
+        return true;
+    }
+    void markMainLoopStopped() { m_mainLoopRegistered.store(false); }
     GDExtensionClassLibraryPtr getLibrary() const { return m_library; }
     GDExtensionInterfaceGetProcAddress getProcAddress() const { return m_getProcAddress; }
 
@@ -58,18 +79,28 @@ public:
     GDExtensionInterfaceObjectMethodBindCall object_method_bind_call{nullptr};
     GDExtensionInterfaceObjectMethodBindPtrcall object_method_bind_ptrcall{nullptr};
     GDExtensionInterfaceGlobalGetSingleton global_get_singleton{nullptr};
+    GDExtensionInterfaceObjectDestroy object_destroy{nullptr};
+    GDExtensionInterfaceClassdbConstructObject2 classdb_construct_object{nullptr};
     GDExtensionInterfaceMemAlloc mem_alloc{nullptr};
     GDExtensionInterfaceMemFree mem_free{nullptr};
     GDExtensionInterfacePrintWarning print_warning{nullptr};
     GDExtensionInterfacePrintError print_error{nullptr};
     GDExtensionInterfaceVariantDestroy variant_destroy{nullptr};
+    GDExtensionInterfaceVariantNewNil variant_new_nil{nullptr};
     GDExtensionInterfaceVariantNewCopy variant_new_copy{nullptr};
+    GDExtensionInterfaceVariantCall variant_call{nullptr};
+    GDExtensionInterfaceGetVariantFromTypeConstructor get_variant_from_type_constructor{nullptr};
+    GDExtensionInterfaceGetVariantToTypeConstructor get_variant_to_type_constructor{nullptr};
+    GDExtensionInterfaceVariantGetPtrConstructor variant_get_ptr_constructor{nullptr};
     GDExtensionInterfaceVariantGetPtrDestructor variant_get_ptr_destructor{nullptr};
     GDExtensionInterfaceVariantGetType variant_get_type{nullptr};
+    GDExtensionInterfacePackedByteArrayOperatorIndexConst packed_byte_array_operator_index_const{nullptr};
+    GDExtensionInterfaceRegisterMainLoopCallbacks register_main_loop_callbacks{nullptr};
 
 private:
     GodotApi() = default;
     bool m_initialized{false};
+    std::atomic<bool> m_mainLoopRegistered{false};
     GDExtensionInterfaceGetProcAddress m_getProcAddress{nullptr};
     GDExtensionClassLibraryPtr m_library{nullptr};
 };

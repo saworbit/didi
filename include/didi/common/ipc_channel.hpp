@@ -12,6 +12,8 @@
 namespace didi {
 namespace ipc {
 
+inline constexpr int kWaitForDefinitiveResponse = -1;
+
 using MessageHandler = std::function<json(const json& request)>;
 
 class IIpcClient {
@@ -20,6 +22,8 @@ public:
     virtual bool connect(const std::string& pipe_name = kDefaultPipeName, int timeout_ms = 2000) = 0;
     virtual void disconnect() = 0;
     virtual bool isConnected() const = 0;
+    // A negative timeout waits for the extension's definitive response. Live main-thread
+    // operations use this so the extension owns pending-vs-running timeout semantics.
     virtual Result<json> sendRequest(const std::string& method, const json& params = json::object(), int timeout_ms = 10000) = 0;
 };
 

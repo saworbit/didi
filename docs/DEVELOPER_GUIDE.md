@@ -9,8 +9,8 @@ This guide explains how to build, test, and extend Didi (`godot-mcp-native`).
 ### Windows (MSVC)
 - Visual Studio 2022 / Build Tools with C++20 support
 - CMake 3.20+
-- Python 3.10+ (for test automation scripts)
-- Godot 4.x
+- Godot 4.5+
+- PowerShell 7+ for the Windows live integration harness
 
 ```powershell
 # Generate CMake solution
@@ -35,49 +35,67 @@ cmake --build build -j$(nproc)
 ## 📂 Source Code Layout
 
 ```
-d:\didi\
+didi/
 ├── include/didi/
-│   ├── common/           # Result<T>, Error, Logger, Base64, JSON, STB, IPC channels
+│   ├── common/           # Result<T>, Error, Logger, Base64/PNG, JSON, STB, IPC channels
 │   ├── mcp/              # JSON-RPC 2.0, MCP server, tool/resource/prompt registries
 │   ├── offline/          # GDScript diagnostics, resource indexer, test runner
-│   └── gdextension/      # GDExtension interface, editor hooks, viewport renderer
+│   └── gdextension/      # GDExtension interface, editor queue, Godot bridge, viewport renderer
 ├── src/
 │   ├── common/           # Platform IPC (Win32 Named Pipes, POSIX sockets)
 │   ├── mcp/              # MCP protocol handlers
 │   ├── offline/          # AST analysis, file indexing, headless subprocess runner
-│   ├── tools/            # Implementation of all 10 domain tools
+│   ├── tools/            # Public tool handlers across nine domains
 │   ├── gdextension/      # In-engine GDExtension module & renderer
 │   └── standalone/       # main.cpp entry point for didi.exe
-├── tests/                # Automated unit test suite (didi_tests.exe)
+├── tests/                # Native suite plus real Godot smoke fixture/harness
 ├── addons/didi/          # Godot addon manifest and extension DLL
 └── demo/                 # Reference Godot 4 test project
 ```
 
 ---
 
-## 🧪 Automated Test Suite (16 Tests)
+## 🧪 Automated Test Suite
 
-Didi includes 16 automated tests covering:
+Didi currently includes 23 native tests:
 1. `JsonRpc.ParseValid`: JSON-RPC 2.0 parsing and validation.
 2. `JsonRpc.ParseNotification`: Notification parsing.
 3. `JsonRpc.ResponseSerialization`: Success/error response serialization.
 4. `McpServer.Initialize`: MCP protocol lifecycle negotiation.
-5. `IPC.Framing`: 4-byte little-endian framing validation.
-6. `IPC.ClientServerRoundtrip`: IPC duplex communication.
-7. `Tools.DefaultRegistration`: Verification of all 10 tool schemas.
-8. `Tools.CaptureViewportWithIpc`: Live viewport capture and Base64 PNG encoding.
-9. `Tools.Base64Padding`: Strict RFC 4648 `=` padding tests.
-10. `Tools.IpcErrorPropagation`: IPC error serialization and status reporting.
-11. `Resources.DefaultRegistration`: Dynamic MCP resources (`godot://...`).
-12. `Prompts.DefaultRegistration`: MCP prompt templates.
-13. `GDScript.DiagnosticsDeprecation`: GDScript 2.0 deprecation linter rules.
-14. `GDScript.PatchFunction`: AST symbol patching for functions.
-15. `GDScript.PatchSignal`: AST symbol patching for signals.
-16. `ResourceIndexer.TypeDetection`: Resource type & UID detection.
+5. `McpServer.ToolAvailability`: Dynamic live/offline/unavailable metadata.
+6. `IPC.Framing`: 4-byte little-endian framing validation.
+7. `IPC.ClientServerRoundtrip`: IPC duplex communication.
+8. `IPC.NoTimeoutRoundtrip`: Definitive transport wait for work already running in Godot.
+9. `Tools.DefaultRegistration`: Tool-schema registration.
+10. `Tools.HonestCapabilities`: Static capability classification and unimplemented rejection.
+11. `Tools.CaptureViewportWithIpc`: Live response/image propagation.
+12. `Tools.CaptureViewportOfflineAttribution`: Synthetic PNG provenance.
+13. `Tools.Base64Padding`: Strict RFC 4648 `=` padding.
+14. `Tools.IpcErrorPropagation`: IPC error serialization.
+15. `EditorHook.TimeoutState`: Pending/running/completed command-state transitions and single-response ownership.
+16. `Tools.ClassReflection`: Offline class-map behavior.
+17. `Tools.SymbolExtraction`: GDScript symbol extraction.
+18. `Resources.DefaultRegistration`: Dynamic MCP resources and offline result provenance.
+19. `Prompts.DefaultRegistration`: MCP prompt templates.
+20. `GDScript.DiagnosticsDeprecation`: GDScript deprecation rules.
+21. `GDScript.PatchFunction`: Function patching.
+22. `GDScript.PatchSignal`: Signal patching.
+23. `ResourceIndexer.TypeDetection`: Resource type and UID detection.
+
+The Windows live integration harness starts a real Godot editor, sends MCP requests through the named pipe, and checks absolute nested hierarchy paths, edited-scene containment and root protection, node-type/property validation, UndoRedo lifetime and sibling-order restoration, live viewport provenance plus PNG dimensions, and honest errors:
+
+```powershell
+.\tests\run_godot_integration.ps1 `
+  -GodotExecutable C:\Godot\Godot_v4.5.1-stable_win64_console.exe
+```
+
+The Phase 1 verification matrix has also been run against Godot 4.6.2 and 4.7.2.
 
 ---
 
 ## ➕ Adding a New MCP Tool
+
+Do not register a success stub. A new name must either have a tested execution path or be classified as `unimplemented` and rejected.
 
 To add a new tool (e.g. `export_mesh_glb`):
 
@@ -100,7 +118,11 @@ export_tool.handler = [this](const json& args) {
 registerTool(std::move(export_tool));
 ```
 
-### 2. Implement the Tool Handler in `src/tools/`
+### 2. Classify its execution modes
+
+Update `capabilityForTool` in `src/mcp/tool_registry.cpp`. Choose only modes backed by tests: `live`, `offline_fallback`, both, or `unimplemented`.
+
+### 3. Implement the Tool Handler in `src/tools/`
 ```cpp
 CallToolResult handleExportMesh(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (ipc && ipc->isConnected()) {
@@ -114,14 +136,12 @@ CallToolResult handleExportMesh(const json& args, std::shared_ptr<ipc::IIpcClien
 }
 ```
 
-### 3. Add Engine Dispatch in `src/gdextension/editor_hook.cpp`
-```cpp
-json EditorHook::executeOnMainThread(const std::string& method, const json& params) {
-    // ...
-    if (method == "mesh.export") {
-        // Execute on Godot's main thread
-        return {{"status", "exported"}, {"path", params["output_path"]}};
-    }
-    // ...
-}
-```
+### 4. Add live engine dispatch when applicable
+
+Route the method from `EditorHook::executeOnMainThread` into a bounded implementation that performs real Godot calls on the main thread. Return a structured error whenever a required object, method bind, or engine operation is unavailable. Never return success metadata before the operation completes.
+
+### 5. Test and document
+
+- Add native tests for capability metadata, offline behavior, and error propagation.
+- Add a real Godot integration case for live behavior and UndoRedo where relevant.
+- Update [Current Capability Matrix](CAPABILITIES.md) and [Tool Reference](TOOL_REFERENCE.md).

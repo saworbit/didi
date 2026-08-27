@@ -1,5 +1,6 @@
 #include "didi/mcp/mcp_server.hpp"
 #include "didi/common/logger.hpp"
+#include <algorithm>
 
 #if defined(_WIN32)
 #include <io.h>
@@ -8,6 +9,20 @@
 
 namespace didi {
 namespace mcp {
+
+static void addCurrentAvailability(json& definition, const ExecutionCapability& capability,
+                                   bool editor_connected) {
+    const auto has_mode = [&](const std::string& mode) {
+        return std::find(capability.modes.begin(), capability.modes.end(), mode) != capability.modes.end();
+    };
+    std::string current_mode = "unavailable";
+    if (!capability.implemented) current_mode = "unimplemented";
+    else if (editor_connected && has_mode("live")) current_mode = "live";
+    else if (has_mode("offline_fallback")) current_mode = "offline_fallback";
+    definition["_meta"]["didi"]["currentMode"] = current_mode;
+    definition["_meta"]["didi"]["liveAvailable"] = editor_connected && has_mode("live");
+    definition["_meta"]["didi"]["editorConnected"] = editor_connected;
+}
 
 McpServer::McpServer() {
     m_ipcClient = ipc::createIpcClient();
@@ -99,8 +114,11 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     if (req.method == "tools/list") {
         auto tools = ToolRegistry::instance().listTools();
         json tool_list = json::array();
+        const bool editor_connected = m_ipcClient && m_ipcClient->isConnected();
         for (const auto& t : tools) {
-            tool_list.push_back(t.toJson());
+            json definition = t.toJson();
+            addCurrentAvailability(definition, t.capability, editor_connected);
+            tool_list.push_back(std::move(definition));
         }
         return JsonRpcResponse::makeSuccess(req.id, {{"tools", tool_list}});
     }
@@ -124,8 +142,11 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     if (req.method == "resources/list") {
         auto resources = ResourceRegistry::instance().listResources();
         json res_list = json::array();
+        const bool editor_connected = m_ipcClient && m_ipcClient->isConnected();
         for (const auto& r : resources) {
-            res_list.push_back(r.toJson());
+            json definition = r.toJson();
+            addCurrentAvailability(definition, r.capability, editor_connected);
+            res_list.push_back(std::move(definition));
         }
         return JsonRpcResponse::makeSuccess(req.id, {{"resources", res_list}});
     }

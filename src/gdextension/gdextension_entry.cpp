@@ -13,11 +13,22 @@
 namespace didi {
 namespace godot {
 
+static void didi_main_loop_frame() {
+    EditorHook::instance().processQueue();
+}
+
+static void didi_main_loop_shutdown() {
+    GodotApi::instance().markMainLoopStopped();
+    EditorHook::instance().cancelPendingCommands("Godot main loop is shutting down");
+}
+
 static void initialize_didi_module(void *userdata, GDExtensionInitializationLevel p_level) {
     if (p_level == GDEXTENSION_INITIALIZATION_EDITOR) {
         DIDI_LOG_INFO("GDEXTENSION", "Initializing Didi GDExtension module for Godot Editor");
-        if (!GDExtensionIpc::instance().isRunning()) {
+        if (GodotApi::instance().isLiveReady() && !GDExtensionIpc::instance().isRunning()) {
             GDExtensionIpc::instance().start();
+        } else if (!GodotApi::instance().isLiveReady()) {
+            DIDI_LOG_ERROR("GDEXTENSION", "Main-loop callback unavailable; refusing to start live IPC");
         }
     }
 }
@@ -25,6 +36,8 @@ static void initialize_didi_module(void *userdata, GDExtensionInitializationLeve
 static void deinitialize_didi_module(void *userdata, GDExtensionInitializationLevel p_level) {
     if (p_level == GDEXTENSION_INITIALIZATION_EDITOR) {
         DIDI_LOG_INFO("GDEXTENSION", "Deinitializing Didi GDExtension module");
+        GodotApi::instance().markMainLoopStopped();
+        EditorHook::instance().cancelPendingCommands("Godot editor extension is shutting down");
         if (GDExtensionIpc::instance().isRunning()) {
             GDExtensionIpc::instance().stop();
         }
@@ -36,14 +49,17 @@ static void deinitialize_didi_module(void *userdata, GDExtensionInitializationLe
 
 extern "C" {
 
-GDE_EXPORT void didi_pump_queue() {
-    didi::godot::EditorHook::instance().processQueue();
-}
-
 GDE_EXPORT GDExtensionBool didi_library_init(GDExtensionInterfaceGetProcAddress p_get_proc_address,
                                             GDExtensionClassLibraryPtr p_library,
                                             GDExtensionInitialization *r_initialization) {
     didi::godot::GodotApi::instance().init(p_get_proc_address, p_library, r_initialization);
+
+    GDExtensionMainLoopCallbacks main_loop_callbacks{};
+    main_loop_callbacks.frame_func = didi::godot::didi_main_loop_frame;
+    main_loop_callbacks.shutdown_func = didi::godot::didi_main_loop_shutdown;
+    if (!didi::godot::GodotApi::instance().registerMainLoop(main_loop_callbacks)) {
+        DIDI_LOG_ERROR("GDEXTENSION", "Godot 4.5+ register_main_loop_callbacks API is required for live execution");
+    }
 
     r_initialization->initialize = didi::godot::initialize_didi_module;
     r_initialization->deinitialize = didi::godot::deinitialize_didi_module;

@@ -1,6 +1,6 @@
 # Didi 5-Minute Quickstart Guide 🚀
 
-Get **Didi** (`godot-mcp-native`) running with your Godot 4 project and your favorite AI assistant in under 5 minutes.
+Get **Didi** (`godot-mcp-native`) running with Godot 4.5+ and an MCP client.
 
 ---
 
@@ -16,9 +16,11 @@ cd didi
 cmake -B build -S .
 cmake --build build --config Release
 ```
-This produces:
+On Windows this produces:
 - `build/Release/didi.exe` (MCP Server binary)
 - `addons/didi/bin/didi_extension.dll` (GDExtension module)
+
+Linux and macOS builds use the platform-specific executable and shared-library names declared in `addons/didi/didi.gdextension`.
 
 ---
 
@@ -93,14 +95,23 @@ Add to your VS Code MCP settings:
 
 ---
 
-## ✨ Step 4: Try Your First Prompts!
+## ✅ Step 4: Confirm Availability
+
+Ask the MCP client to list Didi's tools and inspect `_meta.didi`. Live tools should report `currentMode: "live"` when the matching Godot project is open with the addon enabled. If the editor is closed, live-only tools report `unavailable`; file-based tools report `offline_fallback`.
+
+See [Current Capability Matrix](CAPABILITIES.md) for the complete snapshot.
+
+## ✨ Step 5: Try Your First Prompts
 
 Once connected, ask your AI assistant any of the following:
 
-- 🔍 **Scene Inspection**: *"Inspect my scene hierarchy and tell me what nodes have scripts attached."* (`scene_get_hierarchy`)
-- ⚡ **Signal Wiring**: *"List all signals on Player and connect 'health_depleted' to GameOverUI."* (`signal_list_connections`, `signal_connect`)
-- 📖 **Class Reflection**: *"What methods and properties does CharacterBody3D have in Godot 4?"* (`script_reflect_class`)
+- 🔍 **Scene Inspection**: *"Inspect the live scene hierarchy and summarize the node names and classes."* (`scene_get_hierarchy`)
+- 🧱 **Scene Mutation**: *"Create a Node named SpawnPoint under the edited scene root, then verify it exists."* (`scene_instantiate_node`, `scene_get_hierarchy`)
+- 🎚️ **Scalar Property**: *"Read the Player process priority, set it to 10, and verify the change."* (`scene_get_property`, `scene_set_property`)
+- 📖 **Limited Class Reference**: *"Check Didi's offline reference entry for CharacterBody3D."* (`script_reflect_class`)
 - 🐛 **Syntax & Error Check**: *"Check `res://scripts/player.gd` for syntax errors or deprecations."* (`script_check_syntax`)
 - 📸 **Visual Capture**: *"Capture a PNG of the active viewport and check the player positioning."* (`viewport_capture_frame`)
 - 🧪 **Sandbox Lab**: *"Generate a visual test lab with neutral lighting to inspect `res://models/hero.glb`."* (`viewport_create_test_lab`)
 - 🚀 **Runtime Test**: *"Run `res://scenes/main.tscn` headlessly and report any engine errors or warnings."* (`runtime_launch`)
+
+Signal wiring, physics/navigation queries, TileMap/GridMap editing, runtime input injection, call stacks, and profiler telemetry are registered but unimplemented in the current build. An MCP client should not call them when `implemented` is false.

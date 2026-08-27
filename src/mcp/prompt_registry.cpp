@@ -41,7 +41,7 @@ void PromptRegistry::registerAllDefaultPrompts() {
     // 1. godot_debug_visual_anomaly
     PromptDefinition debug_visual;
     debug_visual.name = "godot_debug_visual_anomaly";
-    debug_visual.description = "Directs the model to inspect node transforms, spawn a visual test lab, capture multi-angle screenshots, verify mesh/skeleton alignments, and suggest coordinate fixes.";
+    debug_visual.description = "Capability-aware visual inspection workflow using only currently implemented hierarchy, viewport, file, and focused scene/property tools.";
     debug_visual.arguments = {
         {"target_resource_path", "Path to target resource or scene (e.g. 'res://models/character.glb')", true},
         {"symptom_description", "Description of observed visual anomaly or glitch", false}
@@ -51,17 +51,17 @@ void PromptRegistry::registerAllDefaultPrompts() {
         std::string symptom = args.value("symptom_description", "Inspect for visual or transform anomalies");
 
         std::string prompt_text =
-            "You are tasked with diagnosing and fixing a visual or spatial anomaly in Godot 4.x for resource: " + res_path + "\n"
+            "You are diagnosing a visual or spatial anomaly in Godot 4.5+ for resource: " + res_path + "\n"
             "Reported Issue: " + symptom + "\n\n"
-            "Recommended Diagnostic Workflow:\n"
-            "1. Call `create_visual_test_lab` with target_resource_path='" + res_path + "' to spawn an isolated visual testbed.\n"
-            "2. Call `capture_viewport` across camera angles ('lab_camera_front', 'lab_camera_left', 'lab_camera_top') to inspect alignment, normals, and lighting.\n"
-            "3. Inspect node transforms and bone orientations using `get_scene_hierarchy`.\n"
-            "4. Formulate precise coordinate, shader, or hierarchy fixes using `mutate_scene_tree` or `patch_script_symbols`.\n"
-            "5. Re-verify the fixed state by capturing new viewport screenshots.";
+            "Capability-aware workflow:\n"
+            "1. Inspect `tools/list` and do not call entries with `implemented: false`; require live mode for editor state.\n"
+            "2. Use `project_list_resources` and `scene_get_hierarchy` to locate the asset and understand either live or parsed state.\n"
+            "3. If useful, call `viewport_create_test_lab` to write a sandbox scene, then explicitly open or run that scene before drawing conclusions.\n"
+            "4. Use `viewport_capture_frame` for the active editor viewport and verify `is_live_frame` before treating pixels as live evidence.\n"
+            "5. Apply only supported focused `scene_*` scalar/node changes or `script_patch_method`, re-read the affected state, and report any unsupported camera, debug-draw, shader, or composite-property step.";
 
         json result = {
-            {"description", "Debug visual anomaly workflow for Godot 4.x"},
+            {"description", "Capability-aware visual anomaly workflow for Godot 4.5+"},
             {"messages", json::array({
                 {
                     {"role", "user"},
@@ -76,7 +76,7 @@ void PromptRegistry::registerAllDefaultPrompts() {
     // 2. godot_generate_gameplay_slice
     PromptDefinition generate_slice;
     generate_slice.name = "godot_generate_gameplay_slice";
-    generate_slice.description = "Directs the model to inspect existing project resources, generate a character/mechanic scene tree, attach typed GDScript, bind signals, and verify through an automated test run.";
+    generate_slice.description = "Capability-aware gameplay-slice workflow using implemented file, focused scene, diagnostics, and separate-process test tools.";
     generate_slice.arguments = {
         {"feature_name", "Name of gameplay mechanic/slice (e.g. 'PlayerController', 'InventorySystem')", true},
         {"requirements", "Gameplay mechanics and technical requirements", true}
@@ -86,18 +86,18 @@ void PromptRegistry::registerAllDefaultPrompts() {
         std::string reqs = args.value("requirements", "Implement core mechanics");
 
         std::string prompt_text =
-            "You are creating a complete, production-ready Godot 4.x gameplay slice: " + feature + "\n"
+            "You are implementing the supported portion of a Godot 4.5+ gameplay slice: " + feature + "\n"
             "Requirements:\n" + reqs + "\n\n"
-            "Standard Construction Workflow:\n"
-            "1. Call `query_project_resources` to index available meshes, textures, sounds, and scripts.\n"
-            "2. Call `get_scene_hierarchy` to understand the existing scene structure.\n"
-            "3. Use `mutate_scene_tree` to construct necessary nodes (CharacterBody2D/3D, CollisionShape, Area, etc.).\n"
-            "4. Write typed, robust GDScript and validate compilation diagnostics via `analyze_script_diagnostics`.\n"
-            "5. Run the feature in a headless test session using `execute_test_session` and check engine stdout/stderr.\n"
-            "6. Use `inject_input_event` if needed to verify runtime response to input actions.";
+            "Capability-aware workflow:\n"
+            "1. Inspect `tools/list`; do not call entries with `implemented: false`, and require live mode for editor mutations.\n"
+            "2. Use `project_list_resources` and `scene_get_hierarchy` to understand existing files and scene structure.\n"
+            "3. When live, construct built-in nodes with focused `scene_instantiate_node`, `scene_set_property`, and other implemented `scene_*` tools.\n"
+            "4. Edit project scripts through the normal workspace or `script_patch_method`, then run `script_check_syntax`.\n"
+            "5. Use `runtime_launch` for a separate-process test and inspect captured stdout/stderr.\n"
+            "6. Explicitly report unimplemented script attachment, signal wiring, input injection, or runtime introspection instead of claiming those steps succeeded.";
 
         json result = {
-            {"description", "Generate gameplay slice workflow for Godot 4.x"},
+            {"description", "Capability-aware gameplay slice workflow for Godot 4.5+"},
             {"messages", json::array({
                 {
                     {"role", "user"},

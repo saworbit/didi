@@ -1,0 +1,8 @@
+[gd_scene format=3]
+
+[node name="SmokeRoot" type="Node"]
+
+[node name="Subject" type="Node" parent="."]
+process_priority = 7
+
+[node name="Container" type="Node" parent="."]

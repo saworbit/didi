@@ -10,18 +10,12 @@ namespace didi {
 namespace mcp {
 
 CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    (void)ipc;
     std::string file_path = args.value("file_path", "");
     std::string source_text = args.value("source_text", "");
 
     if (file_path.empty() && source_text.empty()) {
         return CallToolResult::error("Parameter 'file_path' or 'source_text' is required.");
-    }
-
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("script.checkSyntax", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
     }
 
     // Run offline analysis
@@ -44,16 +38,10 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
 }
 
 CallToolResult handleScriptReflectClass(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    (void)ipc;
     std::string class_name = args.value("class_name", "");
     if (class_name.empty()) {
         return CallToolResult::error("Parameter 'class_name' is required.");
-    }
-
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("script.reflectClass", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
     }
 
     // Run offline class reflection
@@ -62,6 +50,7 @@ CallToolResult handleScriptReflectClass(const json& args, std::shared_ptr<ipc::I
 }
 
 CallToolResult handleScriptGetSymbols(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    (void)ipc;
     std::string file_path = args.value("file_path", "");
     std::string source_text = args.value("source_text", "");
 
@@ -90,6 +79,7 @@ CallToolResult handleScriptGetSymbols(const json& args, std::shared_ptr<ipc::IIp
 }
 
 CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    (void)ipc;
     std::string file_path = args.value("file_path", "");
     std::string symbol_name = args.value("method_name", args.value("symbol_name", ""));
     std::string new_definition = args.value("new_definition", "");
@@ -158,11 +148,6 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
     for (const auto& d : diags) {
         if (d.severity == "error") has_error = true;
         diag_arr.push_back(d.toJson());
-    }
-
-    // If Godot is connected, notify editor to reload script cache
-    if (ipc && ipc->isConnected()) {
-        ipc->sendRequest("script.patchSymbols", args);
     }
 
     json result = {

@@ -77,7 +77,7 @@ jobs:
       - name: Compile Targets in Parallel
         run: cmake --build build --config Release --parallel
 
-      - name: Run Unit Tests (16 Tests)
+      - name: Run Unit Tests
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
@@ -103,9 +103,23 @@ jobs:
               return json.loads(proc.stdout.readline())
 
           assert req('initialize', {'protocolVersion': '2024-11-05'}, 1)['result']['serverInfo']['name'] == 'didi'
-          assert len(req('tools/list', {}, 2)['result']['tools']) == 10
-          assert json.loads(req('resources/read', {'uri': 'godot://project/tree'}, 3)['result']['contents'][0]['text'])['total_resources'] > 0
-          assert len(json.loads(req('tools/call', {'name': 'get_scene_hierarchy', 'arguments': {'root_path': 'res://scenes/main.tscn'}}, 4)['result']['content'][0]['text'])['nodes']) >= 4
+          tools = req('tools/list', {}, 2)['result']['tools']
+          by_name = {tool['name']: tool for tool in tools}
+          assert len(tools) == 50
+          assert by_name['scene_get_hierarchy']['_meta']['didi']['implemented'] is True
+          assert by_name['signal_connect']['_meta']['didi']['implemented'] is False
+
+          project = json.loads(req('resources/read', {'uri': 'godot://project/tree'}, 3)['result']['contents'][0]['text'])
+          assert project['execution_mode'] == 'offline_fallback'
+          assert project['total_resources'] > 0
+
+          hierarchy = json.loads(req('tools/call', {
+              'name': 'get_scene_hierarchy',
+              'arguments': {'root_path': 'res://scenes/main.tscn'}
+          }, 4)['result']['content'][0]['text'])
+          assert hierarchy['execution_mode'] == 'offline_fallback'
+          assert hierarchy['scene_tree']['path'].startswith('/root/')
+          assert len(hierarchy['scene_tree']['children']) >= 1
 
           proc.stdin.close()
           proc.wait()

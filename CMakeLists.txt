@@ -25,6 +25,7 @@ endif()
 set(CORE_SOURCES
     src/common/logger.cpp
     src/common/base64.cpp
+    src/common/png.cpp
     src/common/ipc_channel_win32.cpp
     src/mcp/jsonrpc.cpp
     src/mcp/mcp_server.cpp
@@ -59,6 +60,7 @@ target_link_libraries(didi PRIVATE didi_core)
 set(GDEXT_SOURCES
     src/gdextension/gdextension_entry.cpp
     src/gdextension/editor_hook.cpp
+    src/gdextension/godot_bridge.cpp
     src/gdextension/viewport_renderer.cpp
     src/gdextension/visual_test_lab.cpp
     src/gdextension/gdextension_ipc.cpp
@@ -73,6 +75,8 @@ add_custom_command(TARGET didi_extension POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:didi_extension>" "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/bin/"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/demo/addons/didi/bin"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:didi_extension>" "${CMAKE_CURRENT_SOURCE_DIR}/demo/addons/didi/bin/"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/tests/godot_smoke/addons/didi/bin"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:didi_extension>" "${CMAKE_CURRENT_SOURCE_DIR}/tests/godot_smoke/addons/didi/bin/"
     COMMENT "Copying didi_extension library to addon directories..."
 )
 

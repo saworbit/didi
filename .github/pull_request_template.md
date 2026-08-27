@@ -13,5 +13,5 @@
 ## Checklist
 - [ ] My code adheres to the project's coding style guidelines (C++20, 4 spaces).
 - [ ] I have added automated tests in `tests/` covering new functionality.
-- [ ] All 14+ unit tests pass (`./build/Release/didi_tests.exe` or `ctest`).
+- [ ] All native unit tests pass (`./build/Release/didi_tests.exe` or `ctest`).
 - [ ] I have updated relevant documentation in `docs/` and `README.md`.

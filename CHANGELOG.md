@@ -5,12 +5,38 @@ All notable changes to **Didi** (`godot-mcp-native`) will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+Historical entries describe the surface advertised by those releases. For the executable status of each current registration, use [docs/CAPABILITIES.md](docs/CAPABILITIES.md) or runtime `tools/list` metadata.
+
+---
+
+## [Unreleased]
+
+### Added
+- **Phase 1 live engine substrate** for Godot 4.5+: native main-loop dispatch, real edited `SceneTree` traversal, scalar property access, UndoRedo-backed node mutations, editor undo/redo/save/rescan, and real editor viewport PNG capture.
+- **Honest capability discovery**: every `tools/list` and `resources/list` entry now reports `_meta.didi.executionModes`, `implemented`, and an explanatory `reason` when unavailable. Dynamic metadata also reports the current live/offline state.
+- **Cross-version integration harness** covering Godot 4.5.1, 4.6.2, and 4.7.2.
+
+### Fixed & Hardened
+- Removed the non-functional GDScript singleton pump and all live-success stubs.
+- Prevented timed-out queued commands from mutating the editor later and bounded main-thread work to 64 commands per frame.
+- Made timeout cancellation state-aware: pending commands cancel atomically, while already-running main-thread work returns a definitive result.
+- Made live MCP transport calls use the same definitive-response contract, eliminating the outer timeout race.
+- Made cross-thread bridge readiness atomic and resolved pending IPC promises during editor shutdown.
+- Kept scene mutations in the edited scene's UndoRedo history, used undo-side references for removed nodes, and preserved node lifetimes across history pruning.
+- Rejected unknown or type-incompatible scalar properties and restored exact sibling order after remove and reparent undo.
+- Confined node resolution and mutations to the edited scene subtree, protected its root, rejected cyclic reparenting, and rejected non-`Node` ClassDB objects before UndoRedo registration.
+- Preserved live viewport provenance and dimensions at the public MCP boundary; only real GPU-backed captures report `is_live_frame: true`.
+- Centralized result-level execution provenance and kept offline-only filesystem/parser work out of Godot's main-thread command queue.
+- Updated pull-request CI assertions to cover the complete 50-tool surface, dynamic execution modes, resources, and canonical scene hierarchy output.
+- Raised the minimum supported Godot version to 4.5, where the required native main-loop callback API is available.
+- Reconciled README, quickstart, capability, tool, protocol, architecture, operations, LLM, resource/prompt, developer, roadmap, contribution, and security documentation with the verified implementation.
+
 ---
 
 ## [1.1.0] - 2026-08-26
 
 ### Added
-- **Exhaustive 36-Tool Suite across 9 Functional Domains**:
+- **Exhaustive 40-Tool Canonical Surface across 9 Functional Domains**:
   - *Domain 1 (Scene Tree & Nodes)*: `scene_get_hierarchy`, `scene_instantiate_node`, `scene_remove_node`, `scene_reparent_node`, `scene_set_property`, `scene_get_property`, `scene_duplicate_node`.
   - *Domain 2 (Signals & Events)*: `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`.
   - *Domain 3 (Scripting & Reflection)*: `script_check_syntax`, `script_reflect_class` (built-in Godot 4 class reflection), `script_get_symbols` (AST parser), `script_patch_method`.
@@ -21,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - *Domain 8 (Execution, Input & Debug)*: `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler`.
   - *Domain 9 (Editor Lifecycle & Undo/Redo)*: `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project`.
 - **Roadmap Specification**: Added `docs/ROADMAP.md` documenting the full 9-domain matrix and architectural vision.
-- **Backwards Compatibility**: Preserved all 10 legacy v1.0 tool names (`capture_viewport`, `get_scene_hierarchy`, etc.) as aliases.
+- **Backwards Compatibility**: Preserved all 10 legacy v1.0 names (`capture_viewport`, `get_scene_hierarchy`, etc.) as registered compatibility surface.
 - **Enhanced Error Reading**: Structured error capture for GDScript compiler errors, runtime crashes, and engine log buffers.
 
 ### Fixed & Hardened
@@ -47,10 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - *Scripting & Code*: `analyze_script_diagnostics` (GDScript 2.0 static linter + headless compiler validator), `patch_script_symbols` (safe regex-escaped symbol replacer).
   - *Runtime & Debug*: `execute_test_session` (headless engine subprocess runner with timeout enforcement and structured log capture), `inject_input_event`.
   - *Asset Pipeline*: `query_project_resources` (UID & `res://` dependency scanner with deny-list pruning), `instantiate_asset`.
-- **Dynamic MCP Resources**:
-  - `godot://project/tree`: Complete `res://` project file layout with UID references.
-  - `godot://editor/state`: Active edited scene, selected nodes, camera transforms, and undo stack depth.
-  - `godot://runtime/logs`: Real-time engine log buffer.
+- **Dynamic MCP Resources**: Registered `godot://project/tree`, `godot://editor/state`, and `godot://runtime/logs` URIs.
 - **Turnkey Prompt Templates**:
   - `godot_debug_visual_anomaly`: Guided 5-step visual inspection and correction loop.
   - `godot_generate_gameplay_slice`: End-to-end mechanic construction and validation workflow.

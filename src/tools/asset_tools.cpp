@@ -8,17 +8,11 @@ namespace didi {
 namespace mcp {
 
 CallToolResult handleQueryProjectResources(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    (void)ipc;
     std::string search_path = args.value("search_path", "res://");
     std::string type_filter = args.value("type_filter", "");
     std::string fuzzy_query = args.value("fuzzy_query", "");
     bool include_uid = args.value("include_uid", true);
-
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("asset.query", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
-    }
 
     offline::ResourceIndexer indexer;
     indexer.scan(".");
@@ -45,14 +39,6 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
 
     if (save_path.empty()) {
         return CallToolResult::error("Parameter 'save_path' is required (e.g. res://materials/wood.tres).");
-    }
-
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("resource.create", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
-        return CallToolResult::error("Failed to create resource in Godot: " + res.error().message);
     }
 
     // Offline generator for common .tres resources
@@ -144,13 +130,6 @@ CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpc
     std::string resource_path = args.value("resource_path", "");
     if (resource_path.empty()) {
         return CallToolResult::error("Parameter 'resource_path' is required.");
-    }
-
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("resource.inspect", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
     }
 
     offline::ResourceIndexer indexer;
