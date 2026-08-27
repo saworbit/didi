@@ -11,6 +11,10 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
+### Changed
+
+- Reconciled current Phase 3 documentation, corrected security support to the current `1.3.x` line, made cross-platform executable/library and local-IPC terminology explicit, and added automated version, release-fact, support-policy, and Markdown-link drift validation.
+
 ## [1.3.0] - 2026-08-27
 
 ### Added
