@@ -178,7 +178,7 @@ The final review checks registry counts, execution-mode metadata, editor/game ro
 
 - Native tests cover search validation/traversal/extraction/bounds, public schemas and counts, live lease dispatch, capture-cache behavior, diff arithmetic/encoding, and state-guard restoration using small engine-independent helpers.
 - TDD mutation checks prove tests fail for path containment removal, comment/string symbol leakage, missing two-frame idle confirmation, state restoration omission, dimension-check removal, threshold off-by-one, capture-cache overgrowth, and dishonest offline capture IDs.
-- The Godot 4.5.1 integration harness searches project fixtures, reimports a copied PNG fixture, observes the editor return to idle, captures the unisolated scene, captures an isolated subject, verifies scene visibility afterward, mutates a visual property, obtains a diff with a non-empty bounding box, restores the property, and obtains an identical capture at the selected threshold.
+- The Godot 4.5.1 integration harness searches project fixtures, reimports a copied SVG fixture, observes the editor return to idle, captures the unisolated scene, captures an isolated subject, verifies scene visibility afterward, mutates a visual property, obtains a diff with a non-empty bounding box, restores the property, and obtains an identical capture at the selected threshold.
 - The fixture remains byte-identical except ignored Godot/build artifacts. Session descriptors and sockets are cleaned up.
 - Release build, all native tests, complete Godot integration, MCP stdio smoke, documentation validator/link checks, and `git diff --check` pass from a clean tree.
 - An independent adversarial code review finds no unresolved Critical or Important issue.
