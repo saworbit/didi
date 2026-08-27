@@ -82,7 +82,7 @@ Didi currently includes 23 native tests:
 22. `GDScript.PatchSignal`: Signal patching.
 23. `ResourceIndexer.TypeDetection`: Resource type and UID detection.
 
-The Windows live integration harness copies the tracked fixture into `build/`, starts a real Godot editor, and sends 106 ordered MCP requests through the named pipe. It checks Phase 1 scene editing and viewport behavior plus Phase 2 scripts, groups, autoloads, nested settings, all supported InputEvent forms, runtime InputMap reload, scene create/open/close/pack, resource ownership, overwrite guards, unsafe paths, and honest errors:
+The Windows live integration harness copies the tracked fixture into `build/`, starts a real Godot editor, and sends 119 ordered MCP requests through the named pipe. It checks Phase 1 scene editing and viewport behavior plus Phase 2 scripts, groups, autoloads, nested settings, all supported InputEvent forms, runtime InputMap reload, forced persistence rollback, scene create/open/close/pack, resource ownership, overwrite guards, unsafe paths, and honest errors:
 
 ```powershell
 .\tests\run_godot_integration.ps1 `

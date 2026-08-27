@@ -17,7 +17,7 @@ Historical entries describe the surface advertised by those releases. For the ex
 - **Phase 1 live engine substrate** for Godot 4.5+: native main-loop dispatch, real edited `SceneTree` traversal, scalar property access, UndoRedo-backed node mutations, editor undo/redo/save/rescan, and real editor viewport PNG capture.
 - **Phase 2 project wiring** with 18 new canonical live tools for script attachment, autoloads, typed InputMap events, bounded project settings, scene groups, and scene create/open/close/branch packing.
 - **Atomic project persistence** through `ProjectSettings.save()` with snapshot rollback and live `InputMap` reload.
-- **Disposable 106-request Godot integration fixture** covering Phase 1 and Phase 2 success, undo/redo, persistence, resource ownership, overwrite, malformed input, and unsafe-path cases.
+- **Disposable 119-request Godot integration fixture** covering Phase 1 and Phase 2 success, undo/redo, persistence failure and rollback, resource ownership, overwrite, malformed input, and unsafe-path cases.
 - **Honest capability discovery**: every `tools/list` and `resources/list` entry now reports `_meta.didi.executionModes`, `implemented`, and an explanatory `reason` when unavailable. Dynamic metadata also reports the current live/offline state.
 - **Cross-version integration harness** covering Godot 4.5.1, 4.6.2, and 4.7.2.
 

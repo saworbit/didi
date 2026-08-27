@@ -64,7 +64,7 @@ Phase 2 completes the normal create, wire, persist, and reopen loop:
 - Autoloads, nested project settings, and typed InputMap actions persist through `ProjectSettings.save()` with rollback on failure.
 - Scene groups list, query, add, and remove membership within the edited-scene subtree; mutations use UndoRedo.
 - Scenes can be created, opened, explicitly closed, and packed from owned node branches through Godot resource APIs.
-- Integration runs in a disposable project copy and covers 106 ordered live requests, overwrite guards, unsafe paths, duplicates, malformed values, persistence, runtime reload, and cleanup.
+- Integration runs in a disposable project copy and covers 119 ordered live requests, overwrite guards, unsafe paths, duplicates, malformed values, forced persistence failure and rollback, runtime reload, and cleanup.
 
 Godot 4.5 cannot report editor dirty state through GDExtension, so `scene_close` deliberately requires `discard_unsaved: true`. This is a conservative data-loss guard, not a success stub.
 

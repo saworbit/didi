@@ -1305,6 +1305,7 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         }
 
         VariantValue new_script;
+        GDExtensionObjectPtr requested_script_object = nullptr;
         std::string script_path;
         const bool attaching = method == "script.attachToNode";
         if (attaching) {
@@ -1331,6 +1332,23 @@ json GodotBridge::execute(const std::string& method, const json& params) {
                 ? scalarFromVariant<GDExtensionBool>(is_script_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
                 : Result<GDExtensionBool>(is_script_value.error());
             if (is_script.isErr() || !is_script.value()) return errorJson(400, "Resource is not a Script: " + script_path);
+            auto base_type_value = callObject(resource.value(), "Script", "get_instance_base_type", 2002593661LL);
+            if (base_type_value.isErr()) return errorJson(base_type_value.error().code, base_type_value.error().message);
+            auto base_type = stringFromVariant(base_type_value.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+            if (base_type.isErr()) return errorJson(base_type.error().code, base_type.error().message);
+            auto base_class = makeString(base_type.value());
+            auto compatible_value = base_class.isOk()
+                ? callObject(node.value(), "Object", "is_class", 3927539163LL, {&base_class.value()})
+                : Result<VariantValue>(base_class.error());
+            auto compatible = compatible_value.isOk()
+                ? scalarFromVariant<GDExtensionBool>(compatible_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+                : Result<GDExtensionBool>(compatible_value.error());
+            if (compatible.isErr()) return errorJson(compatible.error().code, compatible.error().message);
+            if (!compatible.value()) {
+                return errorJson(422, "Script base type " + base_type.value() +
+                                      " is incompatible with the target node");
+            }
+            requested_script_object = resource.value();
             new_script = std::move(loaded.value());
         } else if (!old_object) {
             return errorJson(409, "Target node has no script to detach");
@@ -1349,6 +1367,20 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         if (apply.isErr() || revert.isErr()) return errorJson(500, "Failed to register script UndoRedo transaction");
         auto committed = commitAction(manager.value());
         if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+        auto observed_script = callObject(node.value(), "Object", "get_script", 1214101251LL);
+        if (observed_script.isErr()) return errorJson(observed_script.error().code, observed_script.error().message);
+        auto observed_type = GodotApi::instance().variant_get_type(observed_script.value().ptr());
+        GDExtensionObjectPtr observed_object = nullptr;
+        if (observed_type == GDEXTENSION_VARIANT_TYPE_OBJECT) {
+            auto converted = objectFromVariant(observed_script.value());
+            if (converted.isErr()) return errorJson(converted.error().code, converted.error().message);
+            observed_object = converted.value();
+        }
+        if ((attaching && observed_object != requested_script_object) || (!attaching && observed_object)) {
+            return errorJson(422, attaching
+                ? "Godot rejected the script assignment; its native base may be incompatible with the target node"
+                : "Godot did not detach the target node's script");
+        }
         return liveResult({{"status", "success"}, {"target_node", params.value("target_node", "")},
                            {"script_path", script_path}, {"attached", attaching}, {"detached", !attaching},
                            {"undo_redo_registered", true}});
@@ -1438,8 +1470,60 @@ json GodotBridge::execute(const std::string& method, const json& params) {
         const bool adding = method == "scene.addToGroup";
         if (adding && membership.value()) return errorJson(409, "Target node is already in group: " + group);
         if (!adding && !membership.value()) return errorJson(404, "Target node is not in group: " + group);
+        bool original_persistent = params.value("persistent", true);
+        if (!adding) {
+            NativeName packed_scene_name("PackedScene");
+            auto packed_scene = GodotApi::instance().classdb_construct_object(packed_scene_name.ptr());
+            if (!packed_scene) return errorJson(500, "Godot could not inspect group persistence");
+            auto packed_scene_value = makeObject(packed_scene);
+            auto root_value = makeObject(root.value());
+            if (packed_scene_value.isErr() || root_value.isErr()) return errorJson(500, "Failed to inspect group persistence");
+            auto packed = callObject(packed_scene, "PackedScene", "pack", 2584678054LL, {&root_value.value()});
+            if (packed.isErr()) return errorJson(packed.error().code, packed.error().message);
+            auto pack_code = scalarFromVariant<int64_t>(packed.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (pack_code.isErr() || pack_code.value() != 0) return errorJson(500, "Failed to snapshot scene groups");
+            auto state_value = callObject(packed_scene, "PackedScene", "get_state", 3479783971LL);
+            if (state_value.isErr()) return errorJson(state_value.error().code, state_value.error().message);
+            auto state = objectFromVariant(state_value.value());
+            if (state.isErr() || !state.value()) return errorJson(500, "PackedScene returned no SceneState");
+            auto count_value = callObject(state.value(), "SceneState", "get_node_count", 3905245786LL);
+            if (count_value.isErr()) return errorJson(count_value.error().code, count_value.error().message);
+            auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (count.isErr()) return errorJson(count.error().code, count.error().message);
+            auto relative_path = relativePathWithinEditedRoot(root.value(), node.value());
+            if (relative_path.isErr()) return errorJson(relative_path.error().code, relative_path.error().message);
+            original_persistent = false;
+            for (int64_t i = 0; i < count.value(); ++i) {
+                auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+                auto for_parent = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+                if (index.isErr() || for_parent.isErr()) return errorJson(500, "Failed to inspect SceneState node path");
+                auto state_path_value = callObject(state.value(), "SceneState", "get_node_path", 2272487792LL,
+                                                   {&index.value(), &for_parent.value()});
+                if (state_path_value.isErr()) return errorJson(state_path_value.error().code, state_path_value.error().message);
+                auto state_path = stringFromVariant(state_path_value.value(), GDEXTENSION_VARIANT_TYPE_NODE_PATH);
+                if (state_path.isErr()) return errorJson(state_path.error().code, state_path.error().message);
+                if (state_path.value() != relative_path.value()) continue;
+                auto groups = callObject(state.value(), "SceneState", "get_node_groups", 647634434LL, {&index.value()});
+                if (groups.isErr()) return errorJson(groups.error().code, groups.error().message);
+                auto group_count_value = callVariant(groups.value(), "size");
+                if (group_count_value.isErr()) return errorJson(group_count_value.error().code, group_count_value.error().message);
+                auto group_count = scalarFromVariant<int64_t>(group_count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                if (group_count.isErr()) return errorJson(group_count.error().code, group_count.error().message);
+                for (int64_t group_index = 0; group_index < group_count.value(); ++group_index) {
+                    auto native_group_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, group_index);
+                    if (native_group_index.isErr()) return errorJson(native_group_index.error().code, native_group_index.error().message);
+                    auto stored_group_value = callVariant(groups.value(), "get", {&native_group_index.value()});
+                    if (stored_group_value.isErr()) return errorJson(stored_group_value.error().code, stored_group_value.error().message);
+                    auto stored_group = stringFromVariant(stored_group_value.value(),
+                        GodotApi::instance().variant_get_type(stored_group_value.value().ptr()));
+                    if (stored_group.isErr()) return errorJson(stored_group.error().code, stored_group.error().message);
+                    if (stored_group.value() == group) original_persistent = true;
+                }
+                break;
+            }
+        }
         auto persistent = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
-                                     static_cast<GDExtensionBool>(adding ? params.value("persistent", true) : true));
+                                     static_cast<GDExtensionBool>(original_persistent));
         if (persistent.isErr()) return errorJson(persistent.error().code, persistent.error().message);
         auto manager = undoManager(editor);
         if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
