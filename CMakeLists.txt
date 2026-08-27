@@ -39,6 +39,7 @@ set(CORE_SOURCES
     src/gdextension/expression_sandbox.cpp
     src/offline/gdscript_diagnostics.cpp
     src/offline/resource_indexer.cpp
+    src/offline/project_search.cpp
     src/offline/test_runner.cpp
     src/tools/visual_tools.cpp
     src/tools/scene_tools.cpp
@@ -102,6 +103,7 @@ set(TEST_SOURCES
     tests/test_tools.cpp
     tests/test_script_patch.cpp
     tests/test_resource_indexer.cpp
+    tests/test_project_search.cpp
 )
 
 add_executable(didi_tests ${TEST_SOURCES})
