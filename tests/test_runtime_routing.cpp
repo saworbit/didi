@@ -203,6 +203,31 @@ public:
     int disconnects{0};
 };
 
+class NoSelectedSessionFake final : public didi::runtime::IRuntimeSessionClient {
+public:
+    bool connect(const std::string&, int) override { return false; }
+    void disconnect() override { ++disconnects; }
+    bool isConnected() const override { return false; }
+    didi::Result<didi::json> sendRequest(const std::string&, const didi::json&, int) override {
+        ++requests;
+        return didi::Error::notConnected();
+    }
+    didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
+        return didi::json{{"sessions", didi::json::array()},
+                          {"diagnostics", didi::json::array()}};
+    }
+    didi::Result<didi::json> attachSession(const std::string&) override {
+        return didi::Error::notFound("Session not found");
+    }
+    didi::Result<didi::json> detachSession() override { return didi::json::object(); }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override {
+        return std::nullopt;
+    }
+
+    int requests{0};
+    int disconnects{0};
+};
+
 class DescriptorlessSessionFake final : public didi::runtime::IRuntimeSessionClient,
                                         public std::enable_shared_from_this<DescriptorlessSessionFake> {
 public:
@@ -656,7 +681,7 @@ void test_availability_is_selected_session_kind_aware_for_tools_and_resources() 
     game->connected = false;
     const auto dead_tools = byToolName(inspect(game, "tools/list"));
     ASSERT_EQ(dead_tools["runtime_read_logs"]["currentMode"], "unavailable");
-    ASSERT_EQ(dead_tools["scene_get_hierarchy"]["currentMode"], "offline_fallback");
+    ASSERT_EQ(dead_tools["scene_get_hierarchy"]["currentMode"], "unavailable");
     ASSERT_EQ(dead_tools["runtime_read_logs"]["editorConnected"], false);
 }
 
@@ -1173,6 +1198,61 @@ void test_descriptorless_provider_routes_are_unauthenticated_and_unavailable() {
     ASSERT_EQ(route->requests, 0);
 }
 
+void test_no_selected_session_manager_keeps_offline_resource_contract() {
+    // CI break caught: an idle legitimate session manager was treated as an unauthenticated route.
+    didi::mcp::McpServer server;
+    auto sessions = std::make_shared<NoSelectedSessionFake>();
+    server.setIpcClient(sessions);
+
+    didi::mcp::JsonRpcRequest initialize;
+    initialize.id = 40;
+    initialize.method = "initialize";
+    initialize.params = didi::json::object();
+    ASSERT_FALSE(server.handleRequest(initialize).error.has_value());
+
+    didi::mcp::JsonRpcRequest list;
+    list.id = 41;
+    list.method = "resources/list";
+    list.params = didi::json::object();
+    const auto listed = server.handleRequest(list);
+    ASSERT_FALSE(listed.error.has_value());
+    didi::json metadata = didi::json::object();
+    for (const auto& definition : listed.result["resources"]) {
+        metadata[definition["uri"].get<std::string>()] = definition["_meta"]["didi"];
+    }
+    for (const auto& uri : {"godot://editor/state", "godot://runtime/logs"}) {
+        ASSERT_EQ(metadata[uri]["currentMode"], "offline_fallback");
+        ASSERT_EQ(metadata[uri]["liveAvailable"], false);
+        ASSERT_EQ(metadata[uri]["editorConnected"], false);
+        ASSERT_FALSE(metadata[uri].contains("sessionKind"));
+    }
+
+    const auto read = [&](const std::string& uri, int id) {
+        didi::mcp::JsonRpcRequest request;
+        request.id = id;
+        request.method = "resources/read";
+        request.params = {{"uri", uri}};
+        const auto response = server.handleRequest(request);
+        ASSERT_FALSE(response.error.has_value());
+        return didi::json::parse(
+            response.result["contents"][0]["text"].get<std::string>());
+    };
+    const auto editor = read("godot://editor/state", 42);
+    ASSERT_EQ(editor["execution_mode"], "offline_fallback");
+    ASSERT_EQ(editor["status"], "offline");
+    ASSERT_EQ(editor["editor_connected"], false);
+
+    const auto logs = read("godot://runtime/logs", 43);
+    ASSERT_EQ(logs["execution_mode"], "offline_fallback");
+    ASSERT_TRUE(logs["records"].is_array());
+    ASSERT_EQ(logs["records"].size(), 1u);
+    ASSERT_EQ(logs["next_cursor"], 2);
+    ASSERT_EQ(logs["oldest_cursor"], 1);
+    ASSERT_EQ(logs["dropped_before_cursor"], false);
+    ASSERT_EQ(sessions->requests, 0);
+    ASSERT_EQ(sessions->disconnects, 0);
+}
+
 void test_nested_offline_call_cannot_inherit_outer_route_lease() {
     // Break caught: nested no-lease calls saw the outer ToolRegistry TLS lease frame.
     auto& registry = didi::mcp::ToolRegistry::instance();
@@ -1343,6 +1423,8 @@ struct RegisterRuntimeRoutingTests {
                      test_provider_only_routes_are_kind_gated_and_fail_closed);
         registerTest("RuntimeRouting.DescriptorlessProviderFailsClosed",
                      test_descriptorless_provider_routes_are_unauthenticated_and_unavailable);
+        registerTest("RuntimeRouting.NoSelectedSessionUsesOfflineResources",
+                     test_no_selected_session_manager_keeps_offline_resource_contract);
         registerTest("RuntimeRouting.NestedDispatchIsolation",
                      test_nested_offline_call_cannot_inherit_outer_route_lease);
         registerTest("RuntimeRouting.WrongKindExtensionDispatch",

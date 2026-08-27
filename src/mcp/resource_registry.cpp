@@ -23,8 +23,14 @@ std::optional<runtime::SessionDescriptor> selectedSession(
     return selected;
 }
 
-bool isManagedRuntimeRoute(const std::shared_ptr<ipc::IIpcClient>& ipc_client) {
-    return std::dynamic_pointer_cast<runtime::IRuntimeRouteLeaseProvider>(ipc_client) != nullptr;
+bool managedRouteMustFailClosed(const std::shared_ptr<ipc::IIpcClient>& ipc_client) {
+    if (!std::dynamic_pointer_cast<runtime::IRuntimeRouteLeaseProvider>(ipc_client)) {
+        return false;
+    }
+    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc_client);
+    // No selection on the legitimate session manager is an offline state. A non-session provider
+    // or a selected session that cannot yield an authenticated lease is malformed/unavailable.
+    return !sessions || sessions->activeSession().has_value();
 }
 
 json liveResourcePayload(json payload, const std::optional<runtime::SessionDescriptor>& session) {
@@ -167,7 +173,7 @@ void ResourceRegistry::registerAllDefaultResources() {
             return liveResourceError(error, session,
                                      "Failed to retrieve editor state: ");
         }
-        if (isManagedRuntimeRoute(m_ipcClient)) {
+        if (managedRouteMustFailClosed(m_ipcClient)) {
             return liveResourceError(
                 Error::notConnected(
                     "No authenticated runtime route is available for live resource dispatch"),
@@ -228,7 +234,7 @@ void ResourceRegistry::registerAllDefaultResources() {
             return liveResourceError(error, session,
                                      "Failed to retrieve live runtime logs: ");
         }
-        if (isManagedRuntimeRoute(m_ipcClient)) {
+        if (managedRouteMustFailClosed(m_ipcClient)) {
             return liveResourceError(
                 Error::notConnected(
                     "No authenticated runtime route is available for live resource dispatch"),

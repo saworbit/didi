@@ -29,9 +29,9 @@ static bool managedRouteUnavailable(const std::shared_ptr<ipc::IIpcClient>& clie
     }
     const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(client);
     if (!sessions) return true;
-    const auto selected = sessions->activeSession();
-    return !selected.has_value() ||
-           runtime::SessionDescriptor::fromJson(selected->toJson(true)).isErr();
+    // A real session manager with nothing selected is the normal offline state. Once a route is
+    // selected, failure to produce its authenticated lease is authoritative unavailability.
+    return sessions->activeSession().has_value();
 }
 
 static void addCurrentAvailability(json& definition, const ExecutionCapability& capability,
