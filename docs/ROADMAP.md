@@ -75,9 +75,9 @@ Godot 4.5 cannot report editor dirty state through GDExtension, so `scene_close`
 Phase 3 adds ten canonical tools and closes authenticated attach-to-running for concurrent editor and game processes:
 
 - Atomic schema-1 descriptors in `<OS temp>/didi-sessions`, process-unique same-user endpoints, PID plus process-start identity, private 64-hex tokens, and a finite 3-second protocol-1.3 handshake.
-- Explicit transactional attach/detach/get management. v1.3.0 starts detached; failed attach preserves a healthy route and public metadata never exposes tokens.
+- Deterministic same-project auto-selection for a sole session or unique editor, explicit transactional attach/detach, and fresh bounded `get` revalidation. Ambiguity remains detached, failed explicit attach preserves a healthy route, failed revalidation clears it, and public metadata never exposes tokens.
 - A 2,000-record structured Didi log ring with cursors, retention-gap disclosure, deterministic filtering, and bounded UTF-8 payloads.
-- Live runtime tree inspection capped at 10,000 nodes plus verified pause, exact 1–60 frame stepping, single-pending-step enforcement, shutdown cancellation, and graceful stop request.
+- Live runtime tree inspection capped at 10,000 nodes and 256 KiB with UTF-8-safe field truncation, plus verified pause, exact 1–60 frame stepping, single-pending-step enforcement, shutdown cancellation, and graceful stop request.
 - `eval_gdscript` as a strict read-only expression subset with receiver-aware calls, native scalar ClassDB property prebinding, in-subtree context/results, result depth/element/size bounds, and cooperative (not preemptive) timeout checks.
 
 The structured ring does not intercept arbitrary external `print()` output. `runtime_launch` remains the bounded child stdout/stderr capture path. Input injection, call stacks, and profiler telemetry remain registered but unimplemented.
@@ -165,4 +165,4 @@ This is the planned protocol surface, not a claim that every row executes today.
 | **8. Runtime & Debug (4)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Process launch implemented; input/debug/profiler tools unimplemented. |
 | **9. Editor Lifecycle (4)**| `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Implemented live; reload requests a filesystem source scan. |
 | **10. Phase 2 Project Wiring (18)** | Script attach/detach; autoloads; InputMap; project settings; groups; scene create/open/close/pack | Implemented live. Project writes persist with rollback; node writes use UndoRedo; resource writes require safe paths and explicit overwrite. |
-| **11. Phase 3 Runtime Sessions (10)** | Session list/attach/detach/get; logs; pause/step/stop/tree; `eval_gdscript` | Implemented. Four tools execute as local session management; six require an explicitly attached live editor/game. Evaluation is read-only and expression-only. |
+| **11. Phase 3 Runtime Sessions (10)** | Session list/attach/detach/get; logs; pause/step/stop/tree; `eval_gdscript` | Implemented. Four tools execute as local session management; six require an authenticated auto-selected or explicitly attached live editor/game. Evaluation is read-only and expression-only. |

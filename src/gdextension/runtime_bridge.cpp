@@ -3,9 +3,11 @@
 #include "didi/common/logger.hpp"
 
 #include <array>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace didi {
 namespace godot {
@@ -14,6 +16,14 @@ namespace {
 constexpr size_t kOpaqueBytes = 64;
 constexpr size_t kMaxRuntimeNodes = 10000;
 constexpr size_t kMaxRuntimePathBytes = 1024;
+constexpr size_t kMaxRuntimeTreeNameBytes = 1024;
+constexpr size_t kMaxRuntimeTreeTypeBytes = 256;
+constexpr size_t kMaxRuntimeTreeNodePathBytes = 4096;
+constexpr size_t kMaxRuntimeTreeResponseBytes = 256 * 1024;
+// The public router adds token-free session provenance from a descriptor whose
+// validated on-disk representation is capped at 64 KiB. Keep the engine tree
+// sufficiently below the public limit for that provenance and fixed metadata.
+constexpr size_t kRuntimeTreeEnvelopeReserveBytes = 72 * 1024;
 using Opaque = std::array<std::byte, kOpaqueBytes>;
 
 json errorJson(int code, const std::string& message) {
@@ -146,6 +156,64 @@ Result<std::string> nativeStringToUtf8(const void* native_string) {
     return text;
 }
 
+struct BoundedUtf8 {
+    std::string value;
+    bool truncated{false};
+};
+
+BoundedUtf8 boundUtf8(std::string_view input, size_t maximum_bytes) {
+    BoundedUtf8 bounded;
+    bounded.value.reserve(std::min(input.size(), maximum_bytes));
+    for (size_t index = 0; index < input.size();) {
+        const auto first = static_cast<unsigned char>(input[index]);
+        size_t width = 1;
+        bool valid = false;
+        uint32_t codepoint = 0;
+        if ((first & 0x80) == 0) {
+            valid = true;
+            codepoint = first;
+        } else if ((first & 0xE0) == 0xC0 && first >= 0xC2) {
+            width = 2;
+            valid = true;
+            codepoint = first & 0x1F;
+        } else if ((first & 0xF0) == 0xE0) {
+            width = 3;
+            valid = true;
+            codepoint = first & 0x0F;
+        } else if ((first & 0xF8) == 0xF0 && first <= 0xF4) {
+            width = 4;
+            valid = true;
+            codepoint = first & 0x07;
+        }
+        valid = valid && index + width <= input.size();
+        for (size_t offset = 1; valid && offset < width; ++offset) {
+            const auto next = static_cast<unsigned char>(input[index + offset]);
+            valid = (next & 0xC0) == 0x80;
+            codepoint = (codepoint << 6) | (next & 0x3F);
+        }
+        valid = valid && (width == 1 || (width == 2 && codepoint >= 0x80) ||
+                          (width == 3 && codepoint >= 0x800) ||
+                          (width == 4 && codepoint >= 0x10000));
+        valid = valid && !(codepoint >= 0xD800 && codepoint <= 0xDFFF) &&
+                codepoint <= 0x10FFFF;
+        if (!valid) {
+            bounded.truncated = true;
+            if (bounded.value.size() + 1 > maximum_bytes) break;
+            bounded.value.push_back('?');
+            ++index;
+            continue;
+        }
+        if (bounded.value.size() + width > maximum_bytes) {
+            bounded.truncated = true;
+            break;
+        }
+        bounded.value.append(input.substr(index, width));
+        index += width;
+    }
+    if (bounded.value.size() < input.size()) bounded.truncated = true;
+    return bounded;
+}
+
 Result<std::string> callStringResult(GDExtensionObjectPtr object,
                                      const char* class_name,
                                      const char* method_name,
@@ -250,16 +318,31 @@ Result<GDExtensionObjectPtr> resolveRuntimeNode(GDExtensionObjectPtr root,
 
 struct TraversalState {
     size_t node_count{0};
+    size_t estimated_pretty_tree_bytes{0};
     bool truncated{false};
 };
 
+size_t estimatePrettyNodeBytes(const json& node, int depth, bool needs_separator) {
+    const auto pretty = node.dump(2);
+    const size_t line_count =
+        1 + static_cast<size_t>(std::count(pretty.begin(), pretty.end(), '\n'));
+    // CallToolResult::successJson uses dump(2). Each nested Node adds an object
+    // and a children array, so its absolute indentation grows by four spaces.
+    // Charge every line at that indentation and conservatively assume that its
+    // empty children array expands, even for leaves.
+    const size_t absolute_indent = 4 * static_cast<size_t>(depth) + 2;
+    const size_t children_array_overhead = absolute_indent + 4;
+    return pretty.size() + line_count * absolute_indent + children_array_overhead +
+           (needs_separator ? 1 : 0);
+}
+
 Result<json> serializeRuntimeNode(GDExtensionObjectPtr node, int depth,
-                                  int max_depth, TraversalState& state) {
+                                  int max_depth, bool needs_separator,
+                                  TraversalState& state) {
     if (state.node_count >= kMaxRuntimeNodes) {
         state.truncated = true;
-        return Error::invalidArgument("Runtime tree traversal reached the 10,000-node limit");
+        return json(nullptr);
     }
-    ++state.node_count;
     auto name = callStringResult(node, "Node", "get_name", 2002593661LL,
                                  GDEXTENSION_VARIANT_TYPE_STRING_NAME);
     auto type = callStringResult(node, "Object", "get_class", 201670096LL,
@@ -275,14 +358,30 @@ Result<json> serializeRuntimeNode(GDExtensionObjectPtr node, int depth,
     if (path.isErr()) return path.error();
     if (child_count.isErr()) return child_count.error();
 
-    json result = {{"name", name.value()}, {"type", type.value()},
-                   {"path", path.value()}, {"child_count", child_count.value()},
+    auto bounded_name = boundUtf8(name.value(), kMaxRuntimeTreeNameBytes);
+    auto bounded_type = boundUtf8(type.value(), kMaxRuntimeTreeTypeBytes);
+    auto bounded_path = boundUtf8(path.value(), kMaxRuntimeTreeNodePathBytes);
+    json result = {{"name", std::move(bounded_name.value)},
+                   {"type", std::move(bounded_type.value)},
+                   {"path", std::move(bounded_path.value)}, {"child_count", child_count.value()},
                    {"children", json::array()}};
+    if (bounded_name.truncated) result["name_truncated"] = true;
+    if (bounded_type.truncated) result["type_truncated"] = true;
+    if (bounded_path.truncated) result["path_truncated"] = true;
+    if (depth >= max_depth && child_count.value() > 0) {
+        result["children_truncated"] = true;
+        state.truncated = true;
+    }
+    const size_t node_bytes = estimatePrettyNodeBytes(result, depth, needs_separator);
+    const size_t tree_budget = kMaxRuntimeTreeResponseBytes - kRuntimeTreeEnvelopeReserveBytes;
+    if (node_bytes > tree_budget -
+                         std::min(state.estimated_pretty_tree_bytes, tree_budget)) {
+        state.truncated = true;
+        return json(nullptr);
+    }
+    state.estimated_pretty_tree_bytes += node_bytes;
+    ++state.node_count;
     if (depth >= max_depth) {
-        if (child_count.value() > 0) {
-            result["children_truncated"] = true;
-            state.truncated = true;
-        }
         return result;
     }
 
@@ -297,8 +396,13 @@ Result<json> serializeRuntimeNode(GDExtensionObjectPtr node, int depth,
         auto child = callObjectResult(node, "Node", "get_child", 541253412LL, child_args);
         if (child.isErr()) return child.error();
         if (!child.value()) return Error::internal("Godot returned a null runtime child node");
-        auto child_json = serializeRuntimeNode(child.value(), depth + 1, max_depth, state);
+        auto child_json = serializeRuntimeNode(child.value(), depth + 1, max_depth,
+                                               !result["children"].empty(), state);
         if (child_json.isErr()) return child_json.error();
+        if (child_json.value().is_null()) {
+            result["children_truncated"] = true;
+            break;
+        }
         result["children"].push_back(std::move(child_json.value()));
     }
     return result;
@@ -358,14 +462,23 @@ json executeRuntimeBridge(const std::string& method, const json& params,
         auto target = resolveRuntimeNode(root.value(), root_path);
         if (target.isErr()) return errorJson(target.error().code, target.error().message);
         TraversalState state;
-        auto serialized = serializeRuntimeNode(target.value(), 0, max_depth, state);
+        auto serialized = serializeRuntimeNode(target.value(), 0, max_depth, false, state);
         if (serialized.isErr()) return errorJson(serialized.error().code, serialized.error().message);
+        if (serialized.value().is_null()) {
+            return errorJson(507, "Runtime tree root exceeds the serialized response budget");
+        }
         auto paused = sceneTreePaused(tree.value());
         if (paused.isErr()) return errorJson(paused.error().code, paused.error().message);
-        return liveResult({{"root_path", root_path}, {"scene_tree", serialized.value()},
-                           {"paused", paused.value()}, {"node_count", state.node_count},
-                           {"max_nodes", kMaxRuntimeNodes}, {"max_depth", max_depth},
-                           {"truncated", state.truncated}}, session_kind);
+        auto response = liveResult({{"root_path", root_path}, {"scene_tree", serialized.value()},
+                                    {"paused", paused.value()}, {"node_count", state.node_count},
+                                    {"max_nodes", kMaxRuntimeNodes}, {"max_depth", max_depth},
+                                    {"max_response_bytes", kMaxRuntimeTreeResponseBytes},
+                                    {"truncated", state.truncated}},
+                                   session_kind);
+        if (response.dump().size() > kMaxRuntimeTreeResponseBytes) {
+            return errorJson(507, "Runtime tree response exceeds the 256 KiB serialized budget");
+        }
+        return response;
     }
 
     if (method == "runtime.setPaused") {

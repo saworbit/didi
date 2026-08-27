@@ -284,7 +284,9 @@ void ToolRegistry::registerAllDefaultTools() {
         t.name = "runtime_attach_session";
         t.description = "Attaches transactionally to a discovered Godot runtime session.";
         t.inputSchema = {{"type", "object"}, {"properties", {
-            {"session_id", {{"type", "string"}}}
+            {"session_id", {{"type", "string"}, {"description", "Exact lowercase 32-hex discovered session ID"},
+                            {"minLength", 32}, {"maxLength", 32},
+                            {"pattern", "^[0-9a-f]{32}$"}}}
         }}, {"required", {"session_id"}}};
         t.handler = [this](const json& args) { return handleRuntimeAttachSession(args, m_runtimeSessionClient); };
         registerTool(std::move(t));
@@ -300,7 +302,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "runtime_get_session";
-        t.description = "Returns token-free local metadata for the selected runtime session.";
+        t.description = "Performs a fresh authenticated handshake and returns token-free authoritative session identity metadata.";
         t.inputSchema = {{"type", "object"}};
         t.handler = [this](const json& args) { return handleRuntimeGetSession(args, m_runtimeSessionClient); };
         registerTool(std::move(t));
@@ -316,7 +318,7 @@ void ToolRegistry::registerAllDefaultTools() {
     };
     register_live_runtime("runtime_read_logs", "Reads incremental structured logs from the active runtime session.",
         {{"type", "object"}, {"properties", {
-            {"cursor", {{"type", "integer"}, {"default", 0}}},
+            {"cursor", {{"type", "integer"}, {"default", 0}, {"minimum", 0}}},
             {"limit", {{"type", "integer"}, {"default", 100}, {"minimum", 1}, {"maximum", 500}}},
             {"minimum_level", {{"type", "string"}, {"enum", {"debug", "info", "warning", "error"}}}}
         }}}, handleRuntimeReadLogs);
@@ -329,14 +331,16 @@ void ToolRegistry::registerAllDefaultTools() {
     register_live_runtime("runtime_stop", "Requests graceful shutdown of the active game session.",
         {{"type", "object"}, {"properties", {{"exit_code", {{"type", "integer"}, {"default", 0}, {"minimum", 0}, {"maximum", 255}}}}}},
         handleRuntimeStop);
-    register_live_runtime("runtime_get_tree", "Returns a bounded tree from the active runtime session.",
+    register_live_runtime("runtime_get_tree", "Returns a UTF-8 field-bounded, 256 KiB tree from the active runtime session.",
         {{"type", "object"}, {"properties", {
-            {"root_path", {{"type", "string"}, {"default", "/root"}}},
+            {"root_path", {{"type", "string"}, {"description", "Canonical /root NodePath; server enforces a 1024-byte UTF-8 cap"}, {"default", "/root"},
+                           {"minLength", 1}, {"maxLength", 1024}}},
             {"max_depth", {{"type", "integer"}, {"default", 4}, {"minimum", 0}, {"maximum", 16}}}
         }}}, handleRuntimeGetTree);
     register_live_runtime("eval_gdscript", "Evaluates a bounded read-only GDScript expression in the active runtime session.",
         {{"type", "object"}, {"properties", {
-            {"expression", {{"type", "string"}}}, {"context_node", {{"type", "string"}}},
+            {"expression", {{"type", "string"}, {"description", "Read-only expression; server enforces a 2048-byte UTF-8 cap"}, {"minLength", 1}, {"maxLength", 2048}}},
+            {"context_node", {{"type", "string"}, {"description", "Optional in-subtree canonical NodePath; server enforces a 1024-byte UTF-8 cap"}, {"minLength", 1}, {"maxLength", 1024}}},
             {"timeout_ms", {{"type", "integer"}, {"default", 1000}, {"minimum", 1}, {"maximum", 5000}}}
         }}, {"required", {"expression"}}}, handleEvalGdscript);
     {

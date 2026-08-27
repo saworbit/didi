@@ -30,7 +30,7 @@ This guide walks through configuring Didi with popular AI coding assistants and 
 2. Open your project in the **Godot Editor**.
 3. Navigate to **Project $\rightarrow$ Project Settings $\rightarrow$ Plugins**.
 4. Check the **Enable** box next to **Didi Native MCP Bridge**.
-5. The GDExtension starts a process-unique same-user endpoint and atomically publishes its private descriptor under `<OS temp>/didi-sessions`.
+5. The GDExtension starts a process-unique token-authenticated endpoint and atomically publishes its private descriptor under `<OS temp>/didi-sessions`; POSIX defaults are owner-only, while Windows grants the owning SID and local administrators.
 
 ---
 
@@ -114,14 +114,14 @@ Add to your `mcp_config.json`:
 | `GODOT_BIN` | auto-detected | Explicit path to the Godot binary (e.g. `C:\Godot\Godot_v4.7.2-stable_win64_console.exe`) |
 | `GODOT_PATH` | auto-detected | Fallback path to the Godot installation directory |
 | `DIDI_LOG_LEVEL` | `INFO` | Logging verbosity: `DEBUG`, `INFO`, `WARN`, `ERROR`, `NONE` |
-| `DIDI_SESSION_DIR` | `<OS temp>/didi-sessions` | Controlled descriptor-registry override; both Didi components must run as the same OS user. |
+| `DIDI_SESSION_DIR` | `<OS temp>/didi-sessions` | Controlled descriptor-registry override; both Didi components must run under compatible local accounts, and the operator owns override-directory access controls. |
 
 ---
 
 ## 4. Troubleshooting & FAQ
 
 ### Q: Does Didi require Godot Editor to be open at all times?
-**A:** No. File-based tools such as `script_check_syntax`, `project_list_resources`, and `runtime_launch` remain available in `offline_fallback` mode. Scene mutations, Phase 2 project wiring, and editor lifecycle tools require a live editor; Phase 3 runtime tools require an explicitly attached editor or game session.
+**A:** No. File-based tools such as `script_check_syntax`, `project_list_resources`, and `runtime_launch` remain available in `offline_fallback` mode. Scene mutations, Phase 2 project wiring, and editor lifecycle tools require a live editor; Phase 3 runtime tools require an authenticated auto-selected or explicitly attached editor/game session.
 
 ### Q: Why does `scene_close` require `discard_unsaved: true` even for a scene I believe is clean?
 **A:** Godot 4.5 does not expose active-scene dirty state through GDExtension. Didi refuses the default call rather than risk discarding work. Pass `discard_unsaved: true` only when closing without a save prompt is intentional.
@@ -138,7 +138,7 @@ Add to your `mcp_config.json`:
 ### Q: Is there any network port conflict?
 **A:** Didi uses process-unique local Windows named pipes (`\\.\pipe\godot_didi_<pid>_<session-id>`) or POSIX Unix-domain sockets instead of TCP, so it does not allocate a network port or require a firewall rule.
 
-Phase 3 discovers endpoints from owner-only descriptors and authenticates each request. `--pipe-name`/`DIDI_PIPE_NAME` remains a legacy/direct IPC override and is not required for process-unique session routing.
+Phase 3 discovers endpoints from access-controlled descriptors and authenticates each request. Default POSIX paths are owner-only; Windows descriptors/endpoints allow the owning SID and local administrators. `--pipe-name`/`DIDI_PIPE_NAME` remains a legacy/direct IPC override and is not required for process-unique session routing.
 
 ---
 
@@ -147,9 +147,9 @@ Phase 3 discovers endpoints from owner-only descriptors and authenticates each r
 `tools/list` returns 68 canonical tools and 10 legacy registrations. Integrators should treat the four session-management tools as local operations even though their discovery metadata uses the existing `offline_fallback` capability label:
 
 1. Start Didi with `--project <canonical-project-root>`.
-2. Call `runtime_list_sessions` and choose an exact `session_id` and `kind`.
-3. Call `runtime_attach_session`. A 3-second token-authenticated handshake completes before the selected route changes; failed attach preserves the old route.
-4. Call `runtime_get_session` to read token-free local selection metadata. It does not issue a new handshake.
+2. Didi may auto-attach on first availability when there is one live project match, or one matching editor among games. Multiple editors or multiple games without an editor stay detached.
+3. Call `runtime_list_sessions`, then `runtime_attach_session` with an exact `session_id` and `kind` whenever auto-selection is unavailable or not the intended route. A 3-second token-authenticated handshake completes before the selected route changes; failed explicit attach preserves the old route.
+4. Call `runtime_get_session` to perform a fresh, at-most-3-second identity handshake and return token-free selection plus handshake metadata. Transport, authentication, or identity failure quarantines that route and returns a structured local-management error. If an explicit route change concurrently supersedes the refresh, it is retained and the stale refresh returns `409`.
 5. Route live operations and verify `session_kind` (`editor` versus `game`) in every response.
 6. Call `runtime_detach_session` before changing projects or choosing another process.
 

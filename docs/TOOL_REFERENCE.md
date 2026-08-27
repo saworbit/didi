@@ -284,7 +284,7 @@ Scene paths reject absolute filesystem paths, backslashes, and parent-relative s
 
 ## 11. Phase 3 runtime sessions
 
-Phase 3 routes live operations to one explicitly selected Godot editor or game. The four session-management tools advertise `offline_fallback` because they run locally in the MCP process; successful payloads identify `execution_mode: "local_session_management"`. The other six tools advertise `live` and require an attached session. Didi v1.3.0 does not auto-attach.
+Phase 3 routes live operations to one authenticated Godot editor or game. The four session-management tools advertise `offline_fallback` because they run locally in the MCP process; successful payloads identify `execution_mode: "local_session_management"`. The other six tools advertise `live` and require an attached session. On first availability, Didi auto-attaches only when canonical-project discovery yields one session, or one editor among games. Multiple editors or game-only multiplicity remain detached. Explicit attach/detach or route quarantine disables later auto-selection.
 
 ### `runtime_list_sessions` — Local session management
 
@@ -306,7 +306,7 @@ Published private descriptors use this exact schema:
 }
 ```
 
-On POSIX the endpoint is the OS temporary directory plus `godot_didi_<pid>_<session-id>.sock`. Session ID and token are cryptographically random lowercase hex values of 32 and 64 characters. PID plus process-start identity prevents PID reuse from reviving a stale descriptor. Malformed, symlink/reparse, oversized (>64 KiB), escaped, or unprovably stale descriptors are diagnosed rather than deleted. Orderly shutdown retires an owned descriptor to a non-`.json` no-replace tombstone before deletion; a collision can leave an owner-only retired file, which discovery ignores.
+On POSIX the endpoint is the OS temporary directory plus `godot_didi_<pid>_<session-id>.sock`. Session ID and token are cryptographically random lowercase hex values of 32 and 64 characters. PID plus process-start identity prevents PID reuse from reviving a stale descriptor. Malformed, symlink/reparse, oversized (>64 KiB), escaped, or unprovably stale descriptors are diagnosed rather than deleted. Orderly shutdown and proven-stale cleanup atomically retire an exact identity-matched descriptor to an unpredictable no-replace non-`.json` path, re-verify it, and normally delete it. A collision, replacement race, unavailable atomic operation, or retry exhaustion can retain an active file or tombstone rather than risk deleting another object; discovery ignores retained non-`.json` files.
 
 ### `runtime_attach_session` — Local session management
 
@@ -314,7 +314,7 @@ Requires `session_id`. Didi connects to the exact validated process-unique endpo
 
 ### `runtime_detach_session` and `runtime_get_session` — Local session management
 
-`runtime_detach_session` drops the selected route and returns its prior public descriptor; repeated detach is an error. `runtime_get_session` returns the selected token-free local descriptor with `execution_mode: "local_session_management"`, or `503` when none is selected. It deliberately does not issue a fresh live handshake.
+`runtime_detach_session` drops the selected route and returns its prior public descriptor; repeated detach is an error. `runtime_get_session` performs a new token-authenticated handshake within 3,000 ms. Success returns `execution_mode: "local_session_management"`, `connected: true`, the public `session`, and the complete token-free authoritative `handshake` (`status`, schema, session ID, PID, kind, project path, endpoint, start identity, and protocol). Transport, authentication, or any identity mismatch disconnects and clears that route, then returns an error payload with `execution_mode: "local_session_management"` and `session: null`. If an explicit route change concurrently supersedes the refresh, the new route is retained and the stale refresh returns `409`; no selected route is also an error.
 
 ### `runtime_read_logs` — Live
 
@@ -350,7 +350,7 @@ The cursor is the next sequence to inspect. Cursor `0` starts at the oldest reta
 
 ### `runtime_get_tree` — Live
 
-Traverses the selected process's running `SceneTree`, not necessarily the editor's edited scene. `root_path` defaults to `/root`; `max_depth` defaults to `4` and is limited to `0..16`. Results include canonical path, name, class, child count, pause state, and truncation metadata. Traversal is capped at 10,000 nodes. Editor and game results always identify `session_kind` so callers do not confuse edited-state and running-game state.
+Traverses the selected process's running `SceneTree`, not necessarily the editor's edited scene. `root_path` defaults to `/root`; `max_depth` defaults to `4` and is limited to `0..16`. Results include canonical path, name, class, child count, pause state, `node_count`, `max_nodes`, `max_response_bytes`, and truncation metadata. Traversal is capped at 10,000 nodes and the complete public tool payload, including token-free session provenance, at 256 KiB. Each name is capped at 1,024 valid UTF-8 bytes, type at 256, and path at 4,096; a clipped value has the corresponding `name_truncated`, `type_truncated`, or `path_truncated` flag. `children_truncated` and top-level `truncated` identify depth, node, or response-budget truncation. Editor and game results always identify `session_kind` so callers do not confuse edited-state and running-game state.
 
 ### `eval_gdscript` — Live
 

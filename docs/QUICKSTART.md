@@ -120,12 +120,12 @@ Signal wiring, physics/navigation queries, TileMap/GridMap editing, runtime inpu
 
 ## 🔗 Step 6: Attach to a running editor or game
 
-Phase 3 starts detached; v1.3.0 never guesses which local process you intended. With the addon enabled in one or more editor/game processes:
+Phase 3 starts detached. On first availability, v1.3.0 selects only an unambiguous canonical-project match: a sole editor/game, or a unique editor among games. Multiple editors or game-only multiplicity stay detached. With the addon enabled in one or more editor/game processes:
 
 1. Call `runtime_list_sessions` with your canonical `project_path`.
 2. Choose the token-free descriptor whose `kind` is `editor` or `game` as intended.
-3. Call `runtime_attach_session` with its 32-hex `session_id`. The private token stays in the owner-only descriptor and internal handshake.
-4. Confirm `runtime_get_session` reports `execution_mode: "local_session_management"` and the intended `kind`.
+3. If auto-selection did not choose it, call `runtime_attach_session` with its 32-hex `session_id`. The private token stays in the access-controlled descriptor and internal handshake; POSIX defaults are owner-only, while Windows grants the owning SID and local administrators.
+4. Confirm `runtime_get_session` reports `execution_mode: "local_session_management"`, `connected: true`, the intended public `session`, and a matching token-free `handshake`. This is a fresh bounded identity check; failure quarantines that route, while a concurrent explicit route change wins and produces `409` for the stale refresh.
 5. Use `runtime_get_tree` or poll `runtime_read_logs` with the returned `next_cursor`.
 
 For a paused game, call `runtime_set_paused` with `true`, then `runtime_step` with `frames` from 1–60. The step resolves only after exact advancement and re-pause verification. `runtime_stop` requests quit; poll discovery until the session disappears before claiming it exited.

@@ -82,7 +82,7 @@ Didi currently includes 23 native tests:
 22. `GDScript.PatchSignal`: Signal patching.
 23. `ResourceIndexer.TypeDetection`: Resource type and UID detection.
 
-The Windows live integration harness copies the tracked fixture into `build/`, starts a real Godot editor, and sends 119 ordered MCP requests through the named pipe. It checks Phase 1 scene editing and viewport behavior plus Phase 2 scripts, groups, autoloads, nested settings, all supported InputEvent forms, runtime InputMap reload, forced persistence rollback, scene create/open/close/pack, resource ownership, overwrite guards, unsafe paths, and honest errors:
+The Windows live integration harness copies the tracked fixture into `build/`, starts real Godot processes, and preserves the 119 ordered Phase 1/2 MCP requests through the named pipe. Phase 3 adds concurrent editor/game discovery, authenticated routing, logs, bounded trees, pause/step/stop, strict evaluation, and cleanup sequences. The earlier baseline still checks scene editing and viewport behavior plus scripts, groups, autoloads, nested settings, all supported InputEvent forms, runtime InputMap reload, forced persistence rollback, scene create/open/close/pack, resource ownership, overwrite guards, unsafe paths, and honest errors:
 
 ```powershell
 .\tests\run_godot_integration.ps1 `
@@ -151,14 +151,14 @@ Route the method from `EditorHook::executeOnMainThread` into a bounded implement
 - `src/runtime/session_client.cpp`: descriptor discovery, opened-handle validation, cross-platform PID/process-start identity, 3-second transactional handshake, token insertion, and local route state.
 - `src/gdextension/session_host.cpp`: bind-before-publish editor/game endpoint lifecycle, private descriptor generation, authentication stripping, and safe no-replace descriptor retirement.
 - `src/gdextension/runtime_log.cpp`: bounded 2,000-record ring, UTF-8-safe 16 KiB messages, 64 KiB details, cursor gaps, filtering, and logger sink mirroring.
-- `src/gdextension/runtime_bridge.cpp`: SceneTree resolution, 10,000-node bounded tree, pause verification, exact one-active-step state machine, shutdown cancellation, and stop requests.
+- `src/gdextension/runtime_bridge.cpp`: SceneTree resolution, UTF-8 field limits, 10,000-node/256 KiB tree budgets, explicit truncation, pause verification, exact one-active-step state machine, shutdown cancellation, and stop requests.
 - `src/gdextension/expression_sandbox.cpp`: tokenizer/policy, receiver-aware call validation, ClassDB-prebound native scalar property reads, context confinement, cooperative deadlines, and bounded Variant-to-JSON conversion.
 
-The standalone router starts detached; keep local session management distinct from live engine calls. Never add implicit auto-attach without a separate design and tests for ambiguity. Never log or return descriptor tokens or full submitted expression source.
+The standalone router starts detached, then may auto-attach on first availability only to an unambiguous live canonical-project match: the sole session, or a unique editor among games. Preserve the tests that keep same-kind ambiguity detached, roll back failed handshakes, disable auto-selection after explicit attach/detach or quarantine, and make `runtime_get_session` revalidate the complete token-free identity. Keep local session management distinct from live engine calls. Never log or return descriptor tokens or full submitted expression source.
 
 ## Phase 3 tests and release gate
 
-The v1.3.0 baseline reports 58 native tests; the runner's final count is authoritative as tests evolve. Focused native suites cover descriptor identity/TOCTOU/cleanup, attach rollback, log cursors/bounds, expression scanner policy, capability metadata, and pending-step state. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and covers discovery, attach, logs, tree, pause/resume/multi-frame step, stop, strict evaluation, malicious callback probes, cleanup, and source-fixture integrity.
+The v1.3.0 release gate contains 76 native tests; the runner's reported total remains authoritative as cases evolve. Focused suites cover descriptor identity/TOCTOU/cleanup, deterministic auto-selection and attach rollback, fresh route revalidation and supersession, route provenance/deadlines, log cursors/bounds, expression scanner policy, capability metadata, and pending-step state. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and covers discovery, attach, live cursor logs, UTF-8 and wide-tree response bounds, pause/resume/multi-frame step, stop, strict evaluation, malicious callback probes, cleanup, and source-fixture integrity.
 
 Run from a clean worktree:
 

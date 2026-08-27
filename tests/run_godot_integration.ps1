@@ -323,6 +323,7 @@ try {
         (Tool-Request 365 "eval_gdscript" @{ expression = "node.get('process_priority')" }),
         (Tool-Request 366 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 2 }),
         (Tool-Request 367 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot/RuntimeChild/Nested"; max_depth = 1 }),
+        (Tool-Request 379 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot/RuntimeChild"; max_depth = 1 }),
         (Tool-Request 307 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 17 }),
         (Tool-Request 308 "runtime_get_tree" @{ root_path = ".."; max_depth = 1 }),
         (Tool-Request 309 "runtime_set_paused" @{ paused = $false }),
@@ -403,7 +404,7 @@ try {
     $runtimeTree = Tool-Payload $runtimeById[302]
     Assert-True ($runtimeTree.scene_tree.path -eq "/root/RuntimeRoot") "Runtime tree root was not canonical."
     Assert-True ($runtimeTree.scene_tree.child_count -eq 2) "Runtime tree did not report child_count."
-    Assert-True ($runtimeTree.node_count -eq 4 -and $runtimeTree.truncated) "Runtime tree bounds metadata did not report the deliberately large truncated subtree."
+    Assert-True ($runtimeTree.node_count -eq 5 -and $runtimeTree.truncated) "Runtime tree bounds metadata did not report the deliberately large truncated subtree."
     Assert-True ((Tool-Payload $runtimeById[303]).paused -eq $true) "Game pause was not verified."
     $beforeStep = Runtime-FrameCounter (Tool-Payload $runtimeById[304])
     $step = Tool-Payload $runtimeById[305]
@@ -424,8 +425,15 @@ try {
     Assert-True ($multiStepFrame -eq ($afterStep + 3) -and $multiStepEval.value -eq $multiStepFrame) "Three-frame step did not advance live state by exactly three frames."
     Assert-True ($multiStepTree.paused -eq $true) "Three-frame step left the game running."
     $cappedTree = Tool-Payload $runtimeById[367]
-    Assert-True ($cappedTree.node_count -eq 10000 -and $cappedTree.max_nodes -eq 10000 -and $cappedTree.truncated) "Runtime tree did not stop at the 10,000-node cap."
-    Assert-True ($cappedTree.scene_tree.children_truncated -eq $true -and @($cappedTree.scene_tree.children).Count -eq 9999) "Runtime tree cap metadata did not identify the truncated child list."
+    $cappedTreeBytes = [Text.Encoding]::UTF8.GetByteCount([string]$runtimeById[367].result.content[0].text)
+    Assert-True ($cappedTree.node_count -lt 10000 -and $cappedTree.max_nodes -eq 10000 -and $cappedTree.truncated) "Runtime tree did not stop at the serialized response budget before the node cap."
+    Assert-True ($cappedTree.max_response_bytes -eq 262144 -and $cappedTreeBytes -le $cappedTree.max_response_bytes) "Runtime tree public payload was $cappedTreeBytes bytes and exceeded its advertised 256 KiB serialized response budget after session provenance."
+    Assert-True ($cappedTree.scene_tree.children_truncated -eq $true) "Runtime tree response-budget metadata did not identify the truncated child list."
+    $fieldBoundTree = Tool-Payload $runtimeById[379]
+    $oversizedNameNode = @($fieldBoundTree.scene_tree.children | Where-Object { $_.name -like "TreeName_*" })[0]
+    Assert-True ($null -ne $oversizedNameNode) "Runtime tree did not expose the oversized-name probe."
+    Assert-True ($oversizedNameNode.name_truncated -eq $true -and [Text.Encoding]::UTF8.GetByteCount([string]$oversizedNameNode.name) -le 1024) "Runtime tree did not UTF-8 truncate an oversized node name explicitly."
+    Assert-True ($oversizedNameNode.path_truncated -eq $true -and [Text.Encoding]::UTF8.GetByteCount([string]$oversizedNameNode.path) -le 4096) "Runtime tree did not UTF-8 truncate an oversized node path explicitly."
     foreach ($rejectedId in 307, 308, 310, 312, 313, 314, 315, 318, 320, 321) {
         Assert-True ([bool]$runtimeById[$rejectedId].result.isError) "Runtime rejection $rejectedId returned fake success."
     }

@@ -242,6 +242,8 @@ static void test_tool_capabilities_are_honest() {
     const auto* list_sessions = reg.getTool("runtime_list_sessions");
     const auto* get_session = reg.getTool("runtime_get_session");
     const auto* read_logs = reg.getTool("runtime_read_logs");
+    const auto* attach_session = reg.getTool("runtime_attach_session");
+    const auto* runtime_tree = reg.getTool("runtime_get_tree");
     const auto* evaluate = reg.getTool("eval_gdscript");
     const auto* inject_input = reg.getTool("runtime_inject_input");
     const auto* call_stack = reg.getTool("runtime_get_call_stack");
@@ -255,6 +257,8 @@ static void test_tool_capabilities_are_honest() {
     ASSERT_TRUE(list_sessions != nullptr);
     ASSERT_TRUE(get_session != nullptr);
     ASSERT_TRUE(read_logs != nullptr);
+    ASSERT_TRUE(attach_session != nullptr);
+    ASSERT_TRUE(runtime_tree != nullptr);
     ASSERT_TRUE(evaluate != nullptr);
     ASSERT_TRUE(inject_input != nullptr);
     ASSERT_TRUE(call_stack != nullptr);
@@ -268,6 +272,8 @@ static void test_tool_capabilities_are_honest() {
     auto list_sessions_json = list_sessions->toJson();
     auto get_session_json = get_session->toJson();
     auto read_logs_json = read_logs->toJson();
+    auto attach_session_json = attach_session->toJson();
+    auto runtime_tree_json = runtime_tree->toJson();
     auto evaluate_json = evaluate->toJson();
     auto inject_input_json = inject_input->toJson();
     auto call_stack_json = call_stack->toJson();
@@ -292,12 +298,24 @@ static void test_tool_capabilities_are_honest() {
     ASSERT_EQ(list_sessions_json["_meta"]["didi"]["implemented"], true);
     ASSERT_EQ(get_session_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"offline_fallback"}));
-    ASSERT_EQ(get_session_json["description"],
-              "Returns token-free local metadata for the selected runtime session.");
+    const auto get_session_description = get_session_json["description"].get<std::string>();
+    ASSERT_TRUE(get_session_description.find("fresh authenticated handshake") != std::string::npos);
+    ASSERT_TRUE(get_session_description.find("token-free authoritative session identity") !=
+                std::string::npos);
     ASSERT_EQ(read_logs_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"live"}));
     ASSERT_EQ(read_logs_json["_meta"]["didi"]["implemented"], true);
     ASSERT_EQ(read_logs_json["inputSchema"]["properties"]["cursor"]["default"], 0);
+    ASSERT_EQ(read_logs_json["inputSchema"]["properties"]["cursor"]["minimum"], 0);
+    ASSERT_EQ(attach_session_json["inputSchema"]["properties"]["session_id"]["minLength"], 32);
+    ASSERT_EQ(attach_session_json["inputSchema"]["properties"]["session_id"]["maxLength"], 32);
+    ASSERT_EQ(attach_session_json["inputSchema"]["properties"]["session_id"]["pattern"], "^[0-9a-f]{32}$");
+    ASSERT_EQ(runtime_tree_json["inputSchema"]["properties"]["root_path"]["minLength"], 1);
+    ASSERT_EQ(runtime_tree_json["inputSchema"]["properties"]["root_path"]["maxLength"], 1024);
+    ASSERT_EQ(evaluate_json["inputSchema"]["properties"]["expression"]["minLength"], 1);
+    ASSERT_EQ(evaluate_json["inputSchema"]["properties"]["expression"]["maxLength"], 2048);
+    ASSERT_EQ(evaluate_json["inputSchema"]["properties"]["context_node"]["minLength"], 1);
+    ASSERT_EQ(evaluate_json["inputSchema"]["properties"]["context_node"]["maxLength"], 1024);
     ASSERT_EQ(read_logs_json["inputSchema"]["properties"]["limit"]["maximum"], 500);
     ASSERT_EQ(evaluate_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"live"}));
@@ -394,7 +412,25 @@ static void test_tool_capture_viewport_with_ipc() {
             };
         }
         if (method == "runtime.getLogs") {
-            return {{"error", {{"code", 500}, {"message", "simulated live log failure"}}}};
+            const auto params = req.contains("params") && req["params"].is_object()
+                                    ? req["params"] : didi::json::object();
+            const auto cursor = params.value("cursor", 0u);
+            didi::json records = didi::json::array();
+            if (cursor <= 42) {
+                records.push_back({{"sequence", 42}, {"timestamp_ms", 1787790000123LL},
+                                   {"level", "info"}, {"source", "RUNTIME"},
+                                   {"message", "fake live cursor record"}, {"details", nullptr}});
+            }
+            return {{"records", std::move(records)}, {"oldest_cursor", 42},
+                    {"next_cursor", cursor <= 42 ? 43 : cursor},
+                    {"dropped_before_cursor", false}, {"execution_mode", "live"},
+                    {"session_kind", "game"}};
+        }
+        if (method == "runtime.evalGdscript") {
+            return {{"context_node", "/root"}, {"value", 1}, {"value_type", "int"},
+                    {"elapsed_ms", 0}, {"timeout_ms", 1000}, {"read_only", true},
+                    {"sandbox_profile", "expression_const_v1"},
+                    {"execution_mode", "live"}, {"session_kind", "game"}};
         }
         if (method == "script.attachToNode") {
             return {{"error", {{"code", 422}, {"message", "simulated script attachment rejection"}}}};
@@ -425,8 +461,21 @@ static void test_tool_capture_viewport_with_ipc() {
     ASSERT_TRUE(!result.content[1].data.empty());
 
     const auto live_logs = reg.callTool("runtime_read_logs", {{"cursor", 0}, {"limit", 1}});
-    ASSERT_TRUE(live_logs.isError);
-    ASSERT_TRUE(live_logs.content[0].text.find("simulated live log failure") != std::string::npos);
+    ASSERT_TRUE(!live_logs.isError);
+    const auto live_page = didi::json::parse(live_logs.content[0].text);
+    ASSERT_EQ(live_page["execution_mode"], "live");
+    ASSERT_EQ(live_page["records"].size(), 1u);
+    ASSERT_EQ(live_page["records"][0]["sequence"], 42);
+    ASSERT_EQ(live_page["next_cursor"], 43);
+    const auto next_logs = reg.callTool("runtime_read_logs", {{"cursor", 43}, {"limit", 1}});
+    ASSERT_TRUE(!next_logs.isError);
+    const auto next_page = didi::json::parse(next_logs.content[0].text);
+    ASSERT_TRUE(next_page["records"].empty());
+    ASSERT_EQ(next_page["next_cursor"], 43);
+
+    const auto evaluation = reg.callTool("eval_gdscript", {{"expression", "1"}});
+    ASSERT_TRUE(!evaluation.isError);
+    ASSERT_EQ(didi::json::parse(evaluation.content[0].text)["value"], 1);
 
     auto reflected = reg.callTool("script_reflect_class", {{"class_name", "CharacterBody3D"}});
     ASSERT_TRUE(!reflected.isError);
@@ -443,9 +492,8 @@ static void test_tool_capture_viewport_with_ipc() {
     ASSERT_TRUE(project_tree_json.contains("total_resources"));
 
     auto runtime_logs = resources.readResource("godot://runtime/logs");
-    ASSERT_TRUE(runtime_logs.isErr());
-    ASSERT_EQ(runtime_logs.error().code, 500);
-    ASSERT_TRUE(runtime_logs.error().message.find("simulated live log failure") != std::string::npos);
+    ASSERT_TRUE(runtime_logs.isOk());
+    ASSERT_EQ(didi::json::parse(runtime_logs.value())["execution_mode"], "live");
 
     didi::mcp::McpServer mcp_server;
     mcp_server.setIpcClient(client);
@@ -459,10 +507,13 @@ static void test_tool_capture_viewport_with_ipc() {
     resource_request.method = "resources/read";
     resource_request.params = {{"uri", "godot://runtime/logs"}};
     const auto resource_response = mcp_server.handleRequest(resource_request);
-    ASSERT_TRUE(resource_response.error.has_value());
-    ASSERT_EQ(resource_response.error->code, 500);
-    ASSERT_EQ(resource_response.error->data["execution_mode"], "live");
-    ASSERT_EQ(resource_response.error->data["error"]["code"], 500);
+    ASSERT_TRUE(!resource_response.error.has_value());
+    const auto rpc_live_logs = didi::json::parse(
+        resource_response.result["contents"][0]["text"].get<std::string>());
+    ASSERT_EQ(rpc_live_logs["execution_mode"], "live");
+    ASSERT_EQ(rpc_live_logs["records"].size(), 1u);
+    ASSERT_EQ(rpc_live_logs["records"][0]["sequence"], 42);
+    ASSERT_EQ(rpc_live_logs["next_cursor"], 43);
 
     auto attach = reg.callTool("script_attach_to_node", {
         {"target_node", "/root/SmokeRoot/Subject"},

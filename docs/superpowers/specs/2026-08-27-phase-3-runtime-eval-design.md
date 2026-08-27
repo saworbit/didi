@@ -35,7 +35,7 @@ Route runtime operations through the Godot editor debugger. This can expose debu
 
 ### 3. Native local session registry and direct endpoint (chosen)
 
-Each loaded Didi extension publishes an atomic, same-user session descriptor and listens on a process-unique local named pipe or Unix-domain socket. The standalone MCP server discovers descriptors, removes only proven-stale entries, connects directly, and verifies a per-session random token before selecting the endpoint. This preserves the Phase 1 main-thread bridge, allows editor and game sessions to coexist, and keeps transport local.
+Each loaded Didi extension publishes an atomic, same-user session descriptor and listens on a process-unique local named pipe or Unix-domain socket. The standalone MCP server discovers descriptors, diagnoses stale entries, connects directly, and verifies a per-session random token before selecting the endpoint. This preserves the Phase 1 main-thread bridge, allows editor and game sessions to coexist, and keeps transport local.
 
 For evaluation, arbitrary script compilation was rejected because in-process GDScript cannot be safely preempted or stripped of all filesystem/process APIs. The chosen surface evaluates one Godot `Expression` with `const_calls_only: true`, an allowlisted call vocabulary, bounded source and result sizes, and a maximum 5,000 ms request budget. This supports state queries without making a false general-purpose sandbox claim.
 
@@ -57,11 +57,11 @@ The extension starts its IPC service at Godot’s scene initialization level so 
 }
 ```
 
-Descriptors are written to a temporary sibling then atomically renamed. Paths, identifiers, types, token length, endpoint prefix, and protocol version are validated before use. A descriptor is stale only when its PID is provably not running; malformed descriptors are ignored and reported, not deleted. The extension removes only its own descriptor during orderly shutdown.
+Descriptors are written to a temporary sibling then atomically renamed. Paths, identifiers, types, token length, endpoint prefix, and protocol version are validated before use. A descriptor is stale only when process identity is provably gone; malformed or merely unverifiable descriptors are ignored and reported, not deleted. Orderly shutdown and proven-stale cleanup atomically retire an exact identity-matched descriptor, re-verify it, and normally delete it. Collision, replacement race, unavailable atomic operations, or retry exhaustion retain the object rather than risk another path.
 
-Every IPC request carries the token in an internal envelope. `session.handshake` verifies it and returns the authoritative session metadata. A token mismatch returns `401`; incompatible protocol versions return `409`. Local IPC remains restricted to the current OS user. This is local attachment authentication, not a remote security boundary.
+Every IPC request carries the token in an internal envelope. `session.handshake` verifies it and returns the authoritative session metadata. A token mismatch returns `401`; incompatible protocol versions return `409`. Default POSIX paths are owner-only; Windows grants the owning SID and local administrators. A `DIDI_SESSION_DIR` override is operator-managed. This is local attachment authentication, not a remote security boundary.
 
-On MCP startup, the client auto-attaches only when exactly one valid session matches the canonical configured project root, or when one matching editor is the unambiguous preferred session. Otherwise it remains detached and exposes the candidates through `runtime_list_sessions`.
+The standalone client starts detached and exposes candidates through `runtime_list_sessions`. On first availability it filters to live canonical-project matches and auto-attaches only an unambiguous route: exactly one matching session, or a unique matching editor in preference to games. Multiple matching editors, or multiple games without an editor, remain detached. An auto-attach handshake failure rolls back to detached. Explicit attach/detach or route quarantine disables later auto-selection.
 
 ## Public Runtime Tools
 
@@ -70,7 +70,7 @@ On MCP startup, the client auto-attaches only when exactly one valid session mat
 - `runtime_list_sessions`: optional `project_path`; returns validated sessions, malformed-entry diagnostics, and staleness status. It never opens a session.
 - `runtime_attach_session`: required `session_id`; connects to the descriptor endpoint, performs the handshake, then atomically swaps the active routed client. The previous client is retained until the new handshake succeeds.
 - `runtime_detach_session`: disconnects the active session and returns its prior metadata. Repeated detach is an error.
-- `runtime_get_session`: returns the selected descriptor plus a fresh handshake-derived state. No active session returns a structured `503` tool error.
+- `runtime_get_session`: performs a fresh authoritative handshake within 3,000 ms. Success returns the selected public descriptor plus the complete token-free handshake identity and `connected: true`. Transport, authentication, or identity failure clears that route and returns a structured local-management error with `session: null`. If an explicit route change concurrently supersedes the refresh, it wins; the stale refresh returns `409` without clearing the new route. No active session is also an error.
 
 These four tools execute in the standalone process and advertise `offline_fallback`; their result field `execution_mode` is `local_session_management`.
 
@@ -80,7 +80,7 @@ These four tools execute in the standalone process and advertise `offline_fallba
 - `runtime_set_paused`: required `paused`; uses the live `SceneTree` pause state and verifies the observed value before success.
 - `runtime_step`: optional `frames` (default `1`, range `1..60`); requires a paused game session, schedules exactly that many main-loop callbacks, and re-pauses before completing the response. Editor sessions reject stepping.
 - `runtime_stop`: optional `exit_code` (default `0`, range `0..255`); requests `SceneTree.quit`. The response states that shutdown was requested; it does not claim the process exited until the session disappears.
-- `runtime_get_tree`: optional `root_path` (default `/root`) and `max_depth` (default `4`, range `0..16`); traverses the live running SceneTree and returns bounded names, types, paths, child counts, pause state, and truncation metadata.
+- `runtime_get_tree`: optional `root_path` (default `/root`) and `max_depth` (default `4`, range `0..16`); traverses the live running SceneTree and returns bounded names, types, paths, child counts, pause state, and explicit truncation metadata. Names are capped at 1,024 UTF-8 bytes, types at 256, paths at 4,096, traversal at 10,000 nodes, and the complete payload at 256 KiB.
 
 Control and tree tools are live-only. They use the existing main-thread queue and return `503` when no session is attached. Editor-only mutation tools continue to reject game sessions when `EditorInterface` is unavailable.
 
@@ -108,13 +108,15 @@ This ring is the live structured Didi/runtime stream. It does not claim to inter
 - `context_node` is optional and must resolve inside the active edited-scene subtree for editor sessions or the live SceneTree for game sessions.
 - `timeout_ms` defaults to `1000` and is restricted to `1..5000`.
 
-The expression is parsed by Godot’s `Expression` class with inputs named `node` and `tree`. Calls are accepted only for this read-only vocabulary: `get`, `get_node`, `get_node_or_null`, `has_node`, `get_child`, `get_child_count`, `get_children`, `get_path`, `get_class`, `is_class`, `is_in_group`, `get_groups`, `has_method`, `has_meta`, `get_meta`, `get_property_list`, `get_signal_list`, `size`, `is_empty`, `keys`, `values`, `has`, `find`, `count`, `min`, `max`, `abs`, `clamp`, `snapped`, `Vector2`, `Vector3`, `Color`, and `str`.
+The expression is parsed by Godot’s `Expression` class with inputs named `node` and `tree`, but `tree` has no callable surface and cannot be returned. The accepted vocabulary was deliberately narrowed during the authorized red-team pass because apparently read-only Object methods can invoke project callbacks, traverse out of scope, or allocate before a cooperative deadline check. Accepted calls are source-local `min`, `max`, `abs`, `clamp`, `snapped`, `Vector2`, `Vector3`, and `Color`; bounded string/array/dictionary literal queries; direct `node.get_child_count()`, `node.get_path()`, `node.get_class()`, `is_class`, `is_in_group`, `has_method`, and `has_meta`; and exact `node.get(<literal>)` reads only after ClassDB resolves and prebinds a native scalar property. Traversal, child/metadata enumeration or values, property/index syntax, chaining, `in`, dynamic dispatch, callbacks, reflection, object stringification, and mutation are rejected.
 
 Identifiers inside string literals do not participate in security scanning. Every callable token outside the vocabulary is rejected before parse. High-risk singleton and API names—including `OS`, `FileAccess`, `DirAccess`, `ResourceLoader`, `ProjectSettings`, `Engine`, `ClassDB`, `JavaScriptBridge`, `load`, `preload`, `execute`, `open`, `remove`, `rename`, `store`, `set`, `call`, `callv`, `emit_signal`, `queue_free`, `free`, `quit`, and `change_scene`—are rejected as identifiers even when not called.
 
-Execution sets Godot `Expression.execute(..., show_error=false, const_calls_only=true)`. The bridge checks the elapsed budget before parse, after parse, and after execution, and the outer IPC command budget remains 5 seconds. Because the accepted grammar has no loops, recursion, mutation calls, or arbitrary dispatch, evaluation is bounded by expression size and the listed const operations. The result conversion is limited to JSON null, booleans, finite numbers, strings, arrays, dictionaries, Vector2, Vector3, Color, and Node/Object summaries; nesting is at most 16 and serialized output at most 256 KiB. Unsupported or oversized results are errors, never stringified fake values.
+Execution sets Godot `Expression.execute(..., show_error=false, const_calls_only=true)`. The bridge checks the elapsed budget before parse, after parse, after execution, and during result conversion, while the outer IPC command budget remains 5 seconds. Because the accepted grammar has no loops, recursion, mutation calls, arbitrary project dispatch, or unbounded live receivers, evaluation is bounded by expression size and the conservative call surface. The result conversion is limited to JSON null, booleans, finite numbers, strings, arrays, string-keyed dictionaries, Vector2, Vector3, Color, and in-subtree Node summaries; nesting is at most 16, total container elements at most 4,096, and the complete serialized response at most 256 KiB. Unsupported or oversized results are errors, never stringified fake values.
 
-The result includes `expression`, canonical `context_node`, `value`, `value_type`, `elapsed_ms`, `timeout_ms`, `read_only: true`, `sandbox_profile: "expression_const_v1"`, session metadata, and `execution_mode: "live"`.
+The result includes canonical `context_node`, `value`, `value_type`, `elapsed_ms`, `timeout_ms`, `read_only: true`, `sandbox_profile: "expression_const_v1"`, `session_kind`, and `execution_mode: "live"`. It intentionally omits submitted expression source.
+
+This narrowed vocabulary and provenance contract supersede the broader preliminary vocabulary in the accompanying plan. The change is an approved security hardening within the original read-only objective, not an expansion of Phase 3 scope.
 
 ## Threading, State, and Error Handling
 

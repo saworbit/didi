@@ -88,8 +88,8 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
    - A command that has not started within 15 seconds is atomically cancelled before it can mutate. Once main-thread execution has started, both the extension bridge and the outer MCP transport wait for the definitive result instead of returning an ambiguous timeout followed by a late mutation.
    - Filesystem reads, static GDScript parsing, and offline process tools stay in the standalone MCP process and never enter the Godot main-thread queue.
 4. **Restricted Security DACL**:
-   - Windows Named Pipes are provisioned with an SDDL security descriptor restricting read/write access exclusively to the Current User (`OW`) and Administrators (`BA`).
-   - Phase 3 initializes the session host at `GDEXTENSION_INITIALIZATION_SCENE` in both editor and game processes. Each endpoint is same-user-only, process-unique, and token-authenticated; it is a local attachment boundary, not remote authentication.
+   - Windows Named Pipes use SDDL grants for the owning SID (`OW`) and local Administrators (`BA`); this is access-controlled but not strictly owner-only.
+   - Phase 3 initializes the session host at `GDEXTENSION_INITIALIZATION_SCENE` in both editor and game processes. Each endpoint is process-unique and token-authenticated. POSIX defaults are owner-only; Windows grants the owning SID and local administrators. This is a local attachment boundary, not remote authentication.
 
 ---
 
@@ -156,17 +156,17 @@ Each loaded Didi extension follows bind-before-publish startup:
 ```text
 Godot editor/game process
   -> create 32-hex session ID + 64-hex token
-  -> bind same-user process-unique endpoint
+  -> bind access-controlled process-unique endpoint
   -> atomically publish schema-1 descriptor in <OS temp>/didi-sessions
   -> authenticate session.handshake and every routed request
   -> queue Godot-object work on the main-thread bridge
 ```
 
-Descriptors bind identity to PID plus process start time, preventing PID reuse from appearing live. Discovery reads only direct `*.json` regular files through validated handles, limits each file to 64 KiB, validates exact field/endpoint shapes, and reports malformed entries without deleting them. Clean shutdown retires only the exact owned descriptor with an atomic no-replace move; a collision may retain an owner-only non-`.json` tombstone, which discovery ignores.
+Descriptors bind identity to PID plus process start time, preventing PID reuse from appearing live. Discovery reads only direct `*.json` regular files through validated handles, limits each file to 64 KiB, validates exact field/endpoint shapes, and reports malformed entries without deleting them. Clean shutdown and proven-stale cleanup retire only an exact identity-matched descriptor with an atomic no-replace move, re-verify it, and normally delete it. Collision, replacement race, unavailable atomic operations, or retry exhaustion retain the active file or non-`.json` tombstone rather than risk another object; discovery ignores retained tombstones.
 
-The standalone `RuntimeSessionClient` starts detached in v1.3.0. `runtime_list_sessions` and the attach/detach/get operations execute locally and report `local_session_management`; an explicit attach performs a 3-second authenticated handshake before atomically replacing a previous route. Public metadata never contains the token.
+The standalone `RuntimeSessionClient` starts detached. On first availability it considers only live canonical-project matches: a sole session is selected, a unique editor is preferred over games, and editor or game same-kind ambiguity remains detached. Explicit attach performs a 3-second authenticated handshake before atomically replacing a previous route; explicit attach/detach or route quarantine disables later auto-selection. `runtime_get_session` performs a fresh bounded authoritative handshake and quarantines a route on transport, authentication, or identity failure. A concurrently superseding explicit route wins the race and is retained while the stale refresh returns `409`. These operations report `local_session_management`; public metadata never contains the token.
 
-The runtime bridge resolves `Engine.get_main_loop()` as `SceneTree`, supports both editor and game tree inspection, and labels every response with `session_kind`. Pause, frame step, and stop are game controls. A step holds one pending main-thread command across exactly 1–60 callbacks and resolves only after re-pause verification or shutdown cancellation.
+The runtime bridge resolves `Engine.get_main_loop()` as `SceneTree`, supports both editor and game tree inspection, and labels every response with `session_kind`. Tree traversal caps nodes at 10,000; UTF-8 names, types, and paths at 1,024, 256, and 4,096 bytes; and the complete payload at 256 KiB. Field and child truncation are explicit. Pause, frame step, and stop are game controls. A step holds one pending main-thread command across exactly 1–60 callbacks and resolves only after re-pause verification or shutdown cancellation.
 
 The 2,000-record sequence ring is structured Didi telemetry. Cursor reads advance across filtered records and disclose retention gaps. It is not a hook for arbitrary Godot/external `print()` output; offline `runtime_launch` remains the bounded child stdout/stderr capture path.
 

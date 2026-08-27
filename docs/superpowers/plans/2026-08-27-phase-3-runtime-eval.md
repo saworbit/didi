@@ -6,6 +6,8 @@
 
 **Architecture:** A `RuntimeSessionClient` in the standalone process validates same-user descriptor files and transactionally routes the existing `IIpcClient` interface to one selected process-unique endpoint. The extension publishes its descriptor at scene initialization, authenticates every request, and continues to execute all Godot access on the main-loop bridge. Runtime observation/control and `Expression` evaluation are small bridge modules with explicit bounds and honest mode metadata.
 
+**Approved implementation reconciliation:** The authorized red-team iteration intentionally tightened the preliminary design while preserving its session-routing contract. The standalone router starts detached, then auto-attaches on first availability only to an unambiguous live canonical-project match (a sole session, or a unique editor among games); ambiguity and failed auto-handshake remain detached, and explicit attach/detach or quarantine disables later auto-selection. `runtime_get_session` performs a fresh bounded authoritative handshake and quarantines a failed route; a concurrently superseding explicit route wins and the stale refresh returns `409`. The internal evaluation method is `runtime.evalGdscript`; submitted source is omitted from provenance; and the expression vocabulary is the conservative receiver-aware subset in the governing design and Tool Reference. Traversal/enumeration, dynamic getters, object stringification, and other callback-bearing operations named in early task examples are rejected. This security hardening preserves the approved read-only objective and supersedes conflicting language below.
+
 **Tech Stack:** C++20, Godot 4.5+ GDExtension C ABI, JSON-RPC/MCP 2024-11-05, local named pipes/Unix-domain sockets, CMake/MSVC, PowerShell Godot integration harness.
 
 ## Global Constraints
@@ -168,7 +170,7 @@ Use cryptographically strong OS randomness (`BCryptGenRandom` on Windows and `ge
 
 - [ ] **Step 4: Rebuild and verify GREEN**
 
-Run native tests and the editor-discovery slice of the Godot harness. Confirm the existing Phase 1/2 requests still auto-attach to the single matching editor.
+Run native tests and the editor-discovery slice of the Godot harness. Confirm the existing Phase 1/2 requests explicitly attach to the selected matching editor.
 
 - [ ] **Step 5: Commit**
 
@@ -269,7 +271,7 @@ Expected: game sessions are absent because the extension still lacks the runtime
 
 - [ ] **Step 3: Implement runtime root resolution and verified control**
 
-Resolve the active `SceneTree` from `Engine.get_main_loop()` and require `is_class("SceneTree")`. For editor sessions, `runtime_get_tree` may inspect the SceneTree but existing scene/editor mutation methods continue to use `EditorInterface`. Reuse canonical absolute NodePaths and cap traversal at 10,000 nodes.
+Resolve the active `SceneTree` from `Engine.get_main_loop()` and require `is_class("SceneTree")`. For editor sessions, `runtime_get_tree` may inspect the SceneTree but existing scene/editor mutation methods continue to use `EditorInterface`. Reuse canonical absolute NodePaths; cap traversal at 10,000 nodes, bound each UTF-8 name/type/path field, and stop with explicit truncation metadata before the complete payload exceeds 256 KiB.
 
 For pause/resume, call `SceneTree.set_pause`, then `is_paused` and compare the requested state. For stepping, accept only a paused game, reject concurrent steps, set pause false, decrement on subsequent main-loop callbacks, set pause true on the final callback, verify it, and only then fulfill the held response. Shutdown cancels an outstanding step. For stop, call `quit(exit_code)` and return `shutdown_requested: true`.
 
@@ -301,7 +303,7 @@ git -c user.name="Shane Wall" -c user.email="shane.wall@gmail.com" commit -m "fe
 **Interfaces:**
 - Produces: `ExpressionPolicy::validate(source)` with a token scanner that ignores quoted-string contents and escapes.
 - Produces: `executeExpression(params, session_kind)` using Godot `Expression.parse` and `Expression.execute`.
-- Produces: bounded JSON conversion for Vector2, Vector3, Color, and Object/Node summaries.
+- Produces: bounded JSON conversion for Vector2, Vector3, Color, and in-subtree Node summaries; other Objects are rejected.
 
 - [ ] **Step 1: Write failing policy and live evaluation tests**
 
@@ -330,7 +332,7 @@ Expected: policy and tool are absent.
 
 Scan UTF-8 bytes into identifiers, strings, punctuation, and operators; reject unterminated strings and escape errors. Reject all statements/assignments and any identifier in the design’s high-risk set. When an identifier is followed by `(` after whitespace, require it in the exact callable allowlist. Do not regex raw source because quoted dangerous words must remain harmless and escapes must not bypass scanning.
 
-Construct `Expression`, call `parse(expression, PackedStringArray{"node", "tree"})`, then `execute(Array{context_node, scene_tree}, nullptr, false, true)`. Check `has_execute_failed` and `get_error_text`. Measure monotonic elapsed time at validation, parse, and execution boundaries. Destroy the Expression on every exit path. Convert only the specified bounded types and include sandbox provenance fields.
+Construct `Expression`, call `parse(expression, PackedStringArray{"node", "tree"})`, then `execute(Array{context_node, scene_tree}, nullptr, false, true)`. Check `has_execute_failed` and `get_error_text`. Measure monotonic elapsed time at validation, parse, execution, and conversion boundaries. Destroy the Expression on every exit path. Convert only the specified bounded types, omit submitted source, and include the documented sandbox provenance fields. Route the public tool through internal method `runtime.evalGdscript`.
 
 - [ ] **Step 4: Rebuild and verify GREEN**
 
@@ -374,7 +376,7 @@ Expected on the first expansion: at least one adversarial assertion exposes an i
 
 - [ ] **Step 3: Red-green every confirmed defect**
 
-Pressure-test malformed descriptors, symlink/reparse escapes, PID reuse metadata, endpoint prefix tricks, token leakage, handshake timeout, failed attach rollback, simultaneous descriptor creation, descriptor deletion during attach, session death during a call, cursor overflow/gaps/filter starvation, 16 KiB messages, 64 KiB details, step shutdown, concurrent step, pause verification failure, 10,000-node truncation, escaped quotes, Unicode identifiers, comment/semicolon/newline injection, callable whitespace, dynamic dispatch, const-call bypass, deep/large values, non-finite numbers, and source-fixture cleanliness. Add one failing regression before each implementation fix.
+Pressure-test malformed descriptors, symlink/reparse escapes, PID reuse metadata, endpoint prefix tricks, token leakage, handshake timeout, failed attach rollback, simultaneous descriptor creation, descriptor deletion during attach, session death during a call, cursor overflow/gaps/filter starvation, 16 KiB messages, 64 KiB details, step shutdown, concurrent step, pause verification failure, runtime-tree node/field/serialized-response truncation, escaped quotes, Unicode identifiers, comment/semicolon/newline injection, callable whitespace, dynamic dispatch, const-call bypass, deep/large values, non-finite numbers, and source-fixture cleanliness. Add one failing regression before each implementation fix.
 
 - [ ] **Step 4: Run the complete verification slice**
 
@@ -421,7 +423,7 @@ Set CMake, executable banner, and package references to `1.3.0`. Assert exactly 
 
 - [ ] **Step 2: Reconcile every user/operator/developer guide**
 
-Document exact schemas and examples, descriptor location and cleanup, auto-attach rules, editor/game mode differences, token secrecy, cursor polling, pause/step/stop semantics, expression grammar/allowlist/limits, error handling, current test counts, and Phase 3 completion. State prominently that the structured session ring does not intercept arbitrary external-process `print()` output and that `runtime_launch` remains the captured stdout/stderr path.
+Document exact schemas and examples, descriptor location and cleanup, deterministic auto-selection and explicit-attach rules, fresh route revalidation, editor/game mode differences, token secrecy, cursor polling, pause/step/stop semantics, expression grammar/allowlist/limits, error handling, current test counts, and Phase 3 completion. State prominently that the structured session ring does not intercept arbitrary external-process `print()` output and that `runtime_launch` remains the captured stdout/stderr path.
 
 - [ ] **Step 3: Request independent whole-branch red-team review**
 

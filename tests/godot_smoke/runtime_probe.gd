@@ -14,6 +14,10 @@ func _ready() -> void:
 	detached_probe = Node.new()
 	detached_probe.name = "DetachedRuntimeProbe"
 	set_meta("detached_node", detached_probe)
+	var oversized_name := Node.new()
+	oversized_name.name = ("TreeName_🚀".repeat(600))
+	oversized_name.process_priority = 99
+	$RuntimeChild.add_child(oversized_name)
 	for index in 10001:
 		var child := Node.new()
 		child.name = "LargeRuntimeChild_%d" % index

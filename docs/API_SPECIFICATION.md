@@ -108,9 +108,9 @@ Tool execution failures use MCP `result.isError: true` with explanatory text. JS
 
 ## 3. Internal IPC Protocol (Named Pipes & UNIX Sockets)
 
-- **Session descriptor directory**: `<OS temporary directory>/didi-sessions` (controlled override: `DIDI_SESSION_DIR`)
+- **Session descriptor directory**: `<OS temporary directory>/didi-sessions` (controlled override: `DIDI_SESSION_DIR`; override access controls are operator-managed)
 - **Pipe Name (Windows)**: `\\.\pipe\godot_didi_<pid>_<32-hex-session-id>`
-- **Security Descriptor (Windows)**: SDDL `D:(A;;GA;;;BA)(A;;GA;;;OW)`
+- **Security Descriptor (Windows)**: SDDL `D:(A;;GA;;;BA)(A;;GA;;;OW)` (local administrators and the owning SID; not strictly owner-only)
 - **Socket Path (POSIX)**: `<OS temp>/godot_didi_<pid>_<32-hex-session-id>.sock`, with owner-only permissions
 
 ### Frame Format:
@@ -134,7 +134,7 @@ Offset 4..N:  char payload_bytes[payload_length] (UTF-8 JSON string)
 - `editor.undo`, `editor.redo`, `editor.saveScene`, `editor.reloadProject`
 - `vision.captureViewport`
 - `runtime.getLogs`, `runtime.getTree`, `runtime.setPaused`, `runtime.step`, `runtime.stop`
-- `runtime.evalExpression`
+- `runtime.evalGdscript`
 
 These scene/editor/viewport/log methods execute through the extension's main-thread bridge. Public asset queries, script diagnostics/reflection, and visual-test-lab generation are standalone filesystem/parser handlers and are never routed through extension IPC. If an offline-only helper name is sent to the extension directly, it returns `409`; other reserved internal names return a structured `501` envelope:
 
@@ -151,7 +151,7 @@ See [Current Capability Matrix](CAPABILITIES.md) for the public tool mapping.
 
 ### Session descriptor and authentication envelope
 
-The extension binds its endpoint first, then atomically publishes one schema-`1` JSON descriptor containing `session_id`, private `token`, `pid`, `kind`, canonical `project_path`, `endpoint`, process `started_at_ms`, and protocol version `1.3`. Discovery accepts only direct regular-file `*.json` children no larger than 64 KiB, exact endpoint shapes, exact field sets, and a live PID whose process-start identity matches. Public forms omit `token`.
+The extension binds its endpoint first, then atomically publishes one schema-`1` JSON descriptor containing `session_id`, private `token`, `pid`, `kind`, canonical `project_path`, `endpoint`, process `started_at_ms`, and protocol version `1.3`. Discovery accepts only direct regular-file `*.json` children no larger than 64 KiB, exact endpoint shapes, exact field sets, and a live PID whose process-start identity matches. Public forms omit `token`. Orderly shutdown and proven-stale cleanup retire only an exact identity-matched object to an unpredictable no-replace path, re-verify it, and normally delete it; collision/race/unavailable-operation cases retain the object rather than risk another path.
 
 Every routed live request copies public parameters and adds `_didi_session_token` internally. The extension compares all 64 token bytes in constant work, strips the field, then dispatches the command. `session.handshake` must complete within 3,000 ms and echo matching session/protocol identity before a candidate route replaces the current route. Failed attach is transactional.
 
@@ -175,6 +175,10 @@ The token must never be placed in MCP requests, responses, logs, diagnostics, or
 
 The ring is Didi-owned structured telemetry only. It does not intercept arbitrary Godot/external-process `print()` output; the offline `runtime_launch` tool is the bounded stdout/stderr capture path.
 
+### Runtime tree response bounds
+
+`runtime.getTree` returns at most 10,000 nodes and at most 256 KiB of serialized public tool payload, including token-free session provenance. Node `name`, `type`, and `path` fields are valid UTF-8 capped at 1,024, 256, and 4,096 bytes respectively. Per-field `*_truncated`, per-node `children_truncated`, and top-level `truncated` flags make every clipped boundary explicit; `node_count`, `max_nodes`, and `max_response_bytes` report the observed and configured limits.
+
 ### Expression response and timeout semantics
 
-`runtime.evalExpression` accepts the public `eval_gdscript` fields and returns a token-free result with `context_node`, bounded `value`, `value_type`, `elapsed_ms`, `timeout_ms`, `read_only`, `sandbox_profile`, `execution_mode`, and `session_kind`. It intentionally does not echo expression source. The 1–5,000 ms deadline is checked cooperatively around parse, execution, and conversion; it cannot preempt a native call already in progress. See [Tool Reference](TOOL_REFERENCE.md#eval_gdscript--live) for the exact accepted grammar and receiver allowlist.
+`runtime.evalGdscript` accepts the public `eval_gdscript` fields and returns a token-free result with `context_node`, bounded `value`, `value_type`, `elapsed_ms`, `timeout_ms`, `read_only`, `sandbox_profile`, `execution_mode`, and `session_kind`. It intentionally does not echo expression source. The 1–5,000 ms deadline is checked cooperatively around parse, execution, and conversion; it cannot preempt a native call already in progress. See [Tool Reference](TOOL_REFERENCE.md#eval_gdscript--live) for the exact accepted grammar and receiver allowlist.

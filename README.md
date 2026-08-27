@@ -80,7 +80,7 @@
 
 ## 🛠️ Protocol Surface (68 Canonical Tools)
 
-The 68 canonical names are the stable protocol surface, with 10 additional legacy registrations (78 total). Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, and `liveAvailable` from `tools/list`. Phase 3 adds explicit local editor/game session discovery and attachment, structured cursor logs, runtime control/tree inspection, and bounded read-only expression evaluation.
+The 68 canonical names are the stable protocol surface, with 10 additional legacy registrations (78 total). Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, and `liveAvailable` from `tools/list`. Phase 3 adds explicit local editor/game session discovery and attachment, structured cursor logs, runtime control/tree inspection, and bounded read-only expression evaluation. Runtime trees cap UTF-8 names/types/paths, stop before a 256 KiB payload limit, and report exactly where traversal was truncated.
 
 | Domain | Key Tools | Current execution |
 | :--- | :--- | :--- |
@@ -94,11 +94,11 @@ The 68 canonical names are the stable protocol surface, with 10 additional legac
 | **8. Runtime & Debug (4)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Process launch is implemented offline; input, call stack, and profiler tools are unimplemented. |
 | **9. Editor Lifecycle (4)** | `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Implemented live. Reload requests a resource-filesystem rescan. |
 | **10. Project Wiring (18)** | Script attach/detach; autoload, InputMap, and setting management; groups; scene create/open/close/pack | Implemented live with UndoRedo, ProjectSettings persistence, typed events, overwrite guards, and normalized `res://` paths. |
-| **11. Runtime Sessions (10)** | `runtime_list_sessions`, attach/detach/get, logs, pause/step/stop/tree, `eval_gdscript` | Four local session-management tools plus six live tools. Attachment is explicit and authenticated; evaluation is a strict read-only expression subset, not arbitrary GDScript. |
+| **11. Runtime Sessions (10)** | `runtime_list_sessions`, attach/detach/get, logs, pause/step/stop/tree, `eval_gdscript` | Four local session-management tools plus six live tools. Attachment is deterministic or explicit and always authenticated; evaluation is a strict read-only expression subset, not arbitrary GDScript. |
 
 ### Phase 3 runtime contract
 
-Didi publishes one private descriptor per loaded editor or game process under the OS temporary directory's `didi-sessions` child (override only for controlled tests with `DIDI_SESSION_DIR`). Start the MCP server with the same canonical project root, call `runtime_list_sessions`, then explicitly call `runtime_attach_session`; v1.3.0 does not auto-attach. Public responses never include the 64-hex authentication token. Descriptor schema `1` / protocol `1.3` binds a 32-hex session ID to PID plus process start time so PID reuse is not treated as the same engine.
+Didi publishes one private descriptor per loaded editor or game process under the OS temporary directory's `didi-sessions` child (override only for controlled tests with `DIDI_SESSION_DIR`; the operator owns override-directory access controls). POSIX defaults are owner-only; Windows grants the owning SID and local administrators. On first live availability, Didi auto-attaches only when the canonical project has one matching session, or one matching editor among games; same-kind ambiguity stays detached. Use `runtime_list_sessions` and `runtime_attach_session` to choose explicitly when needed. Public responses never include the 64-hex authentication token. Descriptor schema `1` / protocol `1.3` binds a 32-hex session ID to PID plus process start time so PID reuse is not treated as the same engine.
 
 `runtime_read_logs` polls the bounded 2,000-record Didi ring with a cursor. This structured ring records Didi lifecycle, command, control, and evaluation events; it does **not** intercept arbitrary `print()` output from Godot or another external process. Use `runtime_launch` when you need bounded child-process stdout/stderr captured after that process exits.
 

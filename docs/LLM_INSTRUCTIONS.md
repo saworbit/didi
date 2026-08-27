@@ -94,11 +94,11 @@ Use `runtime_launch` to start a separate Godot process, optionally headless, and
 
 ### Observe or control an already-running session
 
-Didi v1.3.0 starts detached and exposes 68 canonical tools plus 10 legacy registrations. Never assume the only discovered process is selected:
+Didi v1.3.0 starts detached and exposes 68 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
 
 1. Call `runtime_list_sessions`, preferably with the canonical project path.
-2. Choose the intended `editor` or `game` descriptor and explicitly call `runtime_attach_session`.
-3. Verify the token-free local selection with `runtime_get_session`; it is a local metadata read, not a new handshake.
+2. Choose the intended `editor` or `game` descriptor and call `runtime_attach_session` if deterministic auto-selection did not choose it.
+3. Verify the token-free selection with `runtime_get_session`; it performs a fresh bounded handshake and quarantines a route that fails transport, authentication, or identity verification. A concurrent explicit route change wins and the stale refresh returns `409`.
 4. Keep editor edited-state and game runtime-state separate by checking `session_kind` on every live result.
 
 Poll `runtime_read_logs` from cursor `0`, then pass its `next_cursor` on every later call. A true `dropped_before_cursor` means retained history was lost. Filtering still advances the cursor. Never claim the Didi ring contains arbitrary `print()` output: it contains structured Didi events only. Use `runtime_launch` for bounded child stdout/stderr.
