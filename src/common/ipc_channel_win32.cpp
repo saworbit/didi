@@ -51,6 +51,10 @@ DWORD remainingWaitMilliseconds(const Win32Deadline& deadline) {
     return static_cast<DWORD>(std::min<int64_t>(rounded.count(), MAXDWORD - 1));
 }
 
+bool deadlineExpired(const Win32Deadline& deadline) {
+    return deadline.finite && std::chrono::steady_clock::now() >= deadline.expires_at;
+}
+
 enum class ExactIoStatus {
     completed,
     timed_out,
@@ -87,6 +91,9 @@ ExactIoResult exactOverlappedIo(HANDLE pipe,
     auto* bytes = static_cast<uint8_t*>(buffer);
     size_t offset = 0;
     while (offset < length) {
+        if (deadlineExpired(deadline)) {
+            return {ExactIoStatus::timed_out, offset};
+        }
         OVERLAPPED operation{};
         operation.hEvent = io_event;
         ResetEvent(io_event);
@@ -166,7 +173,7 @@ public:
 
     bool connect(const std::string& pipe_name = kDefaultPipeName, int timeout_ms = 2000) override {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
-        return connectUnlocked(pipe_name, timeout_ms);
+        return connectUnlocked(pipe_name, win32DeadlineAfter(timeout_ms));
     }
 
     void disconnect() override {
@@ -185,10 +192,11 @@ public:
 
     Result<json> sendRequest(const std::string& method, const json& params = json::object(), int timeout_ms = 10000) override {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        const auto deadline = win32DeadlineAfter(timeout_ms);
         if (m_pipe == INVALID_HANDLE_VALUE) {
-            if (!connectUnlocked(m_pipeName.empty() ? kDefaultPipeName : m_pipeName, 500)) {
+            if (!connectUnlocked(m_pipeName.empty() ? kDefaultPipeName : m_pipeName, deadline)) {
                 return transportFailure("Cannot connect to Godot Didi GDExtension IPC pipe.",
-                                        {false, false, false});
+                                        {false, false, deadlineExpired(deadline)});
             }
         }
 
@@ -202,7 +210,6 @@ public:
         };
 
         const std::vector<uint8_t> frame = frameMessage(request_json);
-        const auto deadline = win32DeadlineAfter(timeout_ms);
         ScopedWinHandle io_event(CreateEventA(nullptr, TRUE, FALSE, nullptr));
         if (!io_event.get()) {
             return failLocked("Unable to create IPC request event", false, false, false);
@@ -267,16 +274,16 @@ private:
         return transportFailure(message, {request_started, outcome_unknown, timed_out});
     }
 
-    bool connectUnlocked(const std::string& pipe_name, int timeout_ms) {
+    bool connectUnlocked(const std::string& pipe_name, const Win32Deadline& deadline) {
         if (m_pipe != INVALID_HANDLE_VALUE) {
             CloseHandle(m_pipe);
             m_pipe = INVALID_HANDLE_VALUE;
         }
 
         m_pipeName = pipe_name;
-        auto start = std::chrono::steady_clock::now();
 
         while (true) {
+            if (deadlineExpired(deadline)) return false;
             m_pipe = CreateFileA(
                 m_pipeName.c_str(),
                 GENERIC_READ | GENERIC_WRITE,
@@ -294,16 +301,15 @@ private:
 
             DWORD err = GetLastError();
             if (err != ERROR_PIPE_BUSY) {
-                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - start).count();
-                if (elapsed >= timeout_ms) {
-                    return false;
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                const DWORD remaining = remainingWaitMilliseconds(deadline);
+                if (remaining == 0) return false;
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(std::min<DWORD>(50, remaining)));
                 continue;
             }
 
-            if (!WaitNamedPipeA(m_pipeName.c_str(), timeout_ms)) {
+            const DWORD remaining = remainingWaitMilliseconds(deadline);
+            if (remaining == 0 || !WaitNamedPipeA(m_pipeName.c_str(), remaining)) {
                 return false;
             }
         }

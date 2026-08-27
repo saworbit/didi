@@ -257,6 +257,94 @@ static void test_win32_client_write_obeys_end_to_end_deadline() {
     ASSERT_TRUE(!still_connected);
 }
 
+static void test_win32_connect_retries_use_remaining_deadline() {
+    // Break caught: fixed 50 ms retry sleeps overshoot a shorter absolute connect budget.
+    const auto name = rawPipeName("missing-connect-budget");
+    auto client = didi::ipc::createIpcClient();
+    const auto started = std::chrono::steady_clock::now();
+    const bool connected = client->connect(name, 10);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+    client->disconnect();
+    ASSERT_TRUE(!connected);
+    ASSERT_TRUE(elapsed < std::chrono::milliseconds(35));
+}
+
+static void test_win32_reconnect_and_io_share_one_deadline() {
+    // Break caught: auto-connect gets 500 ms, then request I/O starts a fresh timeout budget.
+    const auto name = rawPipeName("connect-then-response-budget");
+    const HANDLE occupied_pipe = createRawPipe(name);
+    ASSERT_TRUE(occupied_pipe != INVALID_HANDLE_VALUE);
+    const HANDLE holder = CreateFileA(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                                      OPEN_EXISTING, 0, nullptr);
+    ASSERT_TRUE(holder != INVALID_HANDLE_VALUE);
+
+    auto client = didi::ipc::createIpcClient();
+    ASSERT_TRUE(!client->connect(name, 0));
+    std::atomic<bool> peer_done{false};
+    std::thread peer([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(70));
+        CloseHandle(holder);
+        DisconnectNamedPipe(occupied_pipe);
+        if (rawConnectPipe(occupied_pipe) && rawReadFrame(occupied_pipe)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(70));
+            const auto frame = didi::ipc::frameMessage(
+                didi::json{{"id", "1"}, {"result", {{"status", "late"}}}});
+            (void)rawWriteExact(occupied_pipe, frame.data(), frame.size());
+        }
+        CloseHandle(occupied_pipe);
+        peer_done.store(true);
+    });
+
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = client->sendRequest("runtime.step", {}, 100);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+    client->disconnect();
+    if (!peer_done.load()) {
+        const HANDLE cleanup = CreateFileA(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                                           OPEN_EXISTING, 0, nullptr);
+        if (cleanup != INVALID_HANDLE_VALUE) CloseHandle(cleanup);
+    }
+    peer.join();
+
+    ASSERT_TRUE(result.isErr());
+    ASSERT_TRUE(elapsed < std::chrono::milliseconds(180));
+    const auto state = didi::ipc::transportFailureState(result.error());
+    ASSERT_TRUE(state.has_value());
+    ASSERT_TRUE(state->timed_out);
+}
+
+static void test_win32_expired_deadline_rejects_queued_synchronous_response() {
+    // Break caught: continuously available synchronous completions bypass all deadline checks.
+    const auto name = rawPipeName("queued-expired-response");
+    const HANDLE pipe = createRawPipe(name);
+    ASSERT_TRUE(pipe != INVALID_HANDLE_VALUE);
+    std::atomic<bool> queued{false};
+    std::thread peer([&] {
+        if (rawConnectPipe(pipe)) {
+            const auto frame = didi::ipc::frameMessage(
+                didi::json{{"id", "1"}, {"result", {{"status", "too-late"}}}});
+            for (const auto byte : frame) {
+                if (!rawWriteExact(pipe, &byte, 1)) break;
+            }
+            queued.store(true);
+            (void)rawReadFrame(pipe);
+        }
+        CloseHandle(pipe);
+    });
+
+    auto client = didi::ipc::createIpcClient();
+    const bool connected = client->connect(name, 1000);
+    while (!queued.load()) std::this_thread::yield();
+    const auto result = client->sendRequest("runtime.step", {}, 0);
+    client->disconnect();
+    peer.join();
+    ASSERT_TRUE(connected);
+    ASSERT_TRUE(result.isErr());
+    ASSERT_TRUE(hasTransportState(result.error(), false, false, true));
+}
+
 static void test_win32_client_accepts_fragmented_response_header() {
     const auto name = rawPipeName("fragmented-header");
     const HANDLE pipe = createRawPipe(name);
@@ -562,6 +650,9 @@ struct RegisterIpcTests {
         registerTest("IPC.NoTimeoutRoundtrip", test_ipc_negative_timeout_waits_for_definitive_response);
 #if defined(_WIN32)
         registerTest("IPC.Win32WriteDeadline", test_win32_client_write_obeys_end_to_end_deadline);
+        registerTest("IPC.Win32ConnectRetryDeadline", test_win32_connect_retries_use_remaining_deadline);
+        registerTest("IPC.Win32ReconnectSharesDeadline", test_win32_reconnect_and_io_share_one_deadline);
+        registerTest("IPC.Win32QueuedResponseDeadline", test_win32_expired_deadline_rejects_queued_synchronous_response);
         registerTest("IPC.Win32FragmentedHeader", test_win32_client_accepts_fragmented_response_header);
         registerTest("IPC.Win32TrickleState", test_win32_client_trickle_timeout_is_structured_and_quarantines);
         registerTest("IPC.Win32HandshakeCap", test_win32_handshake_cap_rejects_before_payload_read);
