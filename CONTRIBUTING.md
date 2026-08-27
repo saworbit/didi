@@ -60,7 +60,7 @@ Thank you for your interest in contributing to **Didi** (`godot-mcp-native`)!
 
 - Version changes must update `CMakeLists.txt`, `include/didi/mcp/mcp_protocol.hpp`, `src/standalone/main.cpp`, `addons/didi/plugin.cfg`, `README.md`, `CHANGELOG.md`, `docs/CAPABILITIES.md`, and `SECURITY.md` together.
 - Tool registration or capability changes must update the MCP discovery tests, [Tool Reference](docs/TOOL_REFERENCE.md), [Capability Matrix](docs/CAPABILITIES.md), [Roadmap](docs/ROADMAP.md), [LLM Instructions](docs/LLM_INSTRUCTIONS.md), and relevant setup/integration examples.
-- Current-facing documentation must describe executable behavior. Preserve `docs/superpowers/specs/` and `docs/superpowers/plans/` as historical decision records unless a link is broken.
+- Current-facing documentation must describe executable behavior. Do not commit agent-specific workflow reports, plans, or scratch artifacts; `.superpowers/` and `docs/superpowers/` are explicitly excluded from the project tree.
 
 ---
 

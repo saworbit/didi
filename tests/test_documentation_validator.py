@@ -149,6 +149,30 @@ Second section.
 
         self.assertTrue(any("LICENSE: required file is missing" in error for error in errors), errors)
 
+    def test_rejects_superpowers_artifacts(self):
+        root = self.make_valid_repository()
+        self.write(".superpowers/internal-report.md", "# Internal report\n")
+        self.write("docs/superpowers/internal-plan.md", "# Internal plan\n")
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(any(".superpowers" in error for error in errors), errors)
+        self.assertTrue(any("docs/superpowers" in error for error in errors), errors)
+
+    def test_rejects_workflow_reference_to_superpowers(self):
+        root = self.make_valid_repository()
+        self.write(
+            ".github/workflows/ci.yml",
+            "run: cat docs/superpowers/internal-plan.md\n",
+        )
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(
+            any(".github/workflows/ci.yml" in error and "Superpowers" in error for error in errors),
+            errors,
+        )
+
     def test_rejects_stale_supported_minor(self):
         root = self.make_valid_repository()
         security = (root / "SECURITY.md").read_text(encoding="utf-8")

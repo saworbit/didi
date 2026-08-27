@@ -14,6 +14,7 @@ Historical entries describe the surface advertised by those releases. For the ex
 ### Changed
 
 - Reconciled current Phase 3 documentation, corrected security support to the current `1.3.x` line, made cross-platform executable/library and local-IPC terminology explicit, and added automated version, release-fact, support-policy, and Markdown-link drift validation.
+- Removed agent-internal Superpowers workflow reports, plans, and specifications from the project tree, ignored their former paths, and added validation to prevent them from being committed again.
 
 ## [1.3.0] - 2026-08-27
 
