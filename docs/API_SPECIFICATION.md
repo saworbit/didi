@@ -122,6 +122,12 @@ Offset 4..N:  char payload_bytes[payload_length] (UTF-8 JSON string)
 
 - `editor.getState`
 - `scene.getHierarchy`, `scene.instantiateNode`, `scene.removeNode`, `scene.reparentNode`, `scene.setProperty`, `scene.getProperty`, `scene.duplicateNode`
+- `script.attachToNode`, `script.detachFromNode`
+- `project.listAutoloads`, `project.setAutoload`, `project.removeAutoload`
+- `project.listInputActions`, `project.setInputAction`, `project.removeInputAction`
+- `project.getSetting`, `project.setSetting`
+- `scene.listGroups`, `scene.addToGroup`, `scene.removeFromGroup`, `scene.getGroupMembers`
+- `scene.create`, `scene.open`, `scene.close`, `scene.packBranch`
 - `editor.undo`, `editor.redo`, `editor.saveScene`, `editor.reloadProject`
 - `vision.captureViewport`
 - `runtime.getLogs`

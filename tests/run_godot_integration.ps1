@@ -7,7 +7,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$fixtureRoot = Join-Path $PSScriptRoot "godot_smoke"
+$sourceFixtureRoot = Join-Path $PSScriptRoot "godot_smoke"
+$buildRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot "build"))
+$fixtureRoot = [IO.Path]::GetFullPath((Join-Path $buildRoot "godot_phase2_smoke"))
 $didiExecutable = Join-Path $repoRoot "build\$Configuration\didi.exe"
 $stdoutPath = Join-Path $repoRoot "build\godot_integration.out"
 $stderrPath = Join-Path $repoRoot "build\godot_integration.err"
@@ -18,6 +20,12 @@ if (-not (Test-Path -LiteralPath $GodotExecutable)) {
 if (-not (Test-Path -LiteralPath $didiExecutable)) {
     throw "Didi executable not found: $didiExecutable"
 }
+if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to recreate an integration fixture outside the build directory: $fixtureRoot"
+}
+
+Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
+Copy-Item -LiteralPath $sourceFixtureRoot -Destination $fixtureRoot -Recurse
 
 Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
 $godot = $null
@@ -32,7 +40,7 @@ function Tool-Request([int]$Id, [string]$Name, [hashtable]$Arguments) {
         id = $Id
         method = "tools/call"
         params = @{ name = $Name; arguments = $Arguments }
-    } | ConvertTo-Json -Compress -Depth 20
+    } | ConvertTo-Json -Compress -Depth 100
 }
 
 function Tool-Payload($Response) {
@@ -57,6 +65,9 @@ try {
         Start-Sleep -Milliseconds 250
     }
     Assert-True $ready "Godot editor did not start Didi IPC and open the smoke scene within $StartupTimeoutSeconds seconds."
+
+    $tooDeep = @{ leaf = "value" }
+    foreach ($level in 1..18) { $tooDeep = @{ nested = $tooDeep } }
 
     $requests = @(
         (@{ jsonrpc = "2.0"; id = 1; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
@@ -101,7 +112,81 @@ try {
         (Tool-Request 40 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/SpawnedCopy"; new_parent_path = "/root/SmokeRoot/Container" }),
         (Tool-Request 41 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/Container"; new_parent_path = "/root/SmokeRoot/Container/SpawnedCopy" }),
         (Tool-Request 42 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/Subject"; new_parent_path = "/root/SmokeRoot/Subject" }),
-        (Tool-Request 43 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 3 })
+        (Tool-Request 43 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 3 }),
+        (Tool-Request 44 "project_set_setting" @{ setting = "didi_phase2/nested"; value = @{ enabled = $true; count = 3; names = @("alpha", "beta"); nested = @{ ratio = 0.5 } } }),
+        (Tool-Request 45 "project_get_setting" @{ setting = "didi_phase2/nested" }),
+        (Tool-Request 46 "project_set_setting" @{ setting = "didi_phase2/nested"; remove = $true }),
+        (Tool-Request 47 "project_get_setting" @{ setting = "didi_phase2/nested" }),
+        (Tool-Request 48 "project_set_setting" @{ setting = "autoload/Blocked"; value = "res://blocked.gd" }),
+        (Tool-Request 49 "project_set_setting" @{ setting = "input/blocked"; value = @{ deadzone = 0.2; events = @() } }),
+        (Tool-Request 50 "project_set_setting" @{ setting = "didi_phase2/too_deep"; value = $tooDeep }),
+        (Tool-Request 51 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/Subject"; script_path = "res://subject.gd" }),
+        (Tool-Request 52 "script_detach_from_node" @{ target_node = "/root/SmokeRoot/Subject" }),
+        (Tool-Request 53 "editor_undo" @{}),
+        (Tool-Request 54 "editor_redo" @{}),
+        (Tool-Request 55 "script_detach_from_node" @{ target_node = "/root/SmokeRoot/Subject" }),
+        (Tool-Request 56 "scene_add_to_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two"; persistent = $true }),
+        (Tool-Request 57 "scene_list_groups" @{ target_node = "/root/SmokeRoot/Subject" }),
+        (Tool-Request 58 "scene_get_group_members" @{ group = "phase_two" }),
+        (Tool-Request 59 "scene_remove_from_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two" }),
+        (Tool-Request 60 "scene_get_group_members" @{ group = "phase_two" }),
+        (Tool-Request 61 "editor_undo" @{}),
+        (Tool-Request 62 "scene_get_group_members" @{ group = "phase_two" }),
+        (Tool-Request 63 "scene_add_to_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two"; persistent = $true }),
+        (Tool-Request 64 "project_list_autoloads" @{}),
+        (Tool-Request 65 "project_set_autoload" @{ name = "PhaseTwo"; path = "res://subject.gd"; singleton = $true }),
+        (Tool-Request 66 "project_list_autoloads" @{}),
+        (Tool-Request 67 "project_set_autoload" @{ name = "PhaseTwo"; path = "res://subject.gd"; singleton = $true }),
+        (Tool-Request 68 "project_set_autoload" @{ name = "PhaseTwo"; path = "res://subject.gd"; singleton = $false; replace = $true }),
+        (Tool-Request 69 "project_list_autoloads" @{}),
+        (Tool-Request 70 "project_remove_autoload" @{ name = "PhaseTwo" }),
+        (Tool-Request 71 "project_list_autoloads" @{}),
+        (Tool-Request 72 "project_remove_autoload" @{ name = "PhaseTwo" }),
+        (Tool-Request 73 "project_set_autoload" @{ name = "not-valid"; path = "res://subject.gd" }),
+        (Tool-Request 74 "project_set_autoload" @{ name = "Missing"; path = "res://missing.gd" }),
+        (Tool-Request 75 "project_list_input_actions" @{}),
+        (Tool-Request 76 "project_set_input_action" @{ action = "phase_two_jump"; deadzone = 0.35; events = @(
+            @{ type = "key"; keycode = 32; shift = $true },
+            @{ type = "mouse_button"; button_index = 1; device = 2 },
+            @{ type = "joypad_button"; button_index = 0; device = 1 },
+            @{ type = "joypad_motion"; axis = 0; axis_value = -0.75; device = 3 }
+        ) }),
+        (Tool-Request 77 "project_list_input_actions" @{}),
+        (Tool-Request 78 "project_set_input_action" @{ action = "phase_two_jump"; events = @() }),
+        (Tool-Request 79 "project_set_input_action" @{ action = "phase_two_jump"; deadzone = 0.1; events = @(); replace = $true }),
+        (Tool-Request 80 "project_list_input_actions" @{}),
+        (Tool-Request 81 "project_remove_input_action" @{ action = "phase_two_jump" }),
+        (Tool-Request 82 "project_list_input_actions" @{}),
+        (Tool-Request 83 "project_set_input_action" @{ action = "bad_event"; events = @(@{ type = "touch" }) }),
+        (Tool-Request 84 "project_set_input_action" @{ action = "bad_deadzone"; deadzone = 1.5; events = @() }),
+        (Tool-Request 85 "project_set_input_action" @{ action = "empty_key"; events = @(@{ type = "key" }) }),
+        (Tool-Request 86 "scene_close" @{}),
+        (Tool-Request 87 "scene_pack_branch" @{ target_node = "/root/SmokeRoot/Container"; scene_path = "res://packed_branch.tscn" }),
+        (Tool-Request 88 "scene_pack_branch" @{ target_node = "/root/SmokeRoot/Container"; scene_path = "res://packed_branch.tscn" }),
+        (Tool-Request 89 "scene_open" @{ scene_path = "res://packed_branch.tscn" }),
+        (Tool-Request 90 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 2 }),
+        (Tool-Request 91 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 92 "scene_create" @{ scene_path = "res://created_phase2.tscn"; root_type = "Node2D"; root_name = "Created" }),
+        (Tool-Request 93 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 1 }),
+        (Tool-Request 94 "scene_create" @{ scene_path = "res://created_phase2.tscn"; root_type = "Control"; root_name = "Blocked" }),
+        (Tool-Request 95 "scene_open" @{ scene_path = "res://packed_branch.tscn" }),
+        (Tool-Request 96 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 97 "scene_open" @{ scene_path = "res://missing_scene.tscn" }),
+        (Tool-Request 98 "scene_create" @{ scene_path = "C:\\unsafe.tscn" }),
+        (Tool-Request 99 "scene_create" @{ scene_path = "res://created_phase2.tscn"; root_type = "Control"; root_name = "Replaced"; overwrite = $true }),
+        (Tool-Request 100 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 1 }),
+        (Tool-Request 101 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 102 "scene_open" @{ scene_path = "res://main.tscn" }),
+        (Tool-Request 103 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/Subject"; script_path = "res://missing.gd" }),
+        (Tool-Request 104 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/Subject"; script_path = "res://main.tscn" }),
+        (Tool-Request 105 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/Subject"; script_path = "res://incompatible.gd" }),
+        (Tool-Request 106 "scene_add_to_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two_transient"; persistent = $false }),
+        (Tool-Request 107 "scene_remove_from_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two_transient" }),
+        (Tool-Request 108 "editor_undo" @{}),
+        (Tool-Request 109 "scene_pack_branch" @{ target_node = "/root/SmokeRoot/Subject"; scene_path = "res://transient_probe.tscn" }),
+        (Tool-Request 110 "scene_remove_from_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two_transient" }),
+        (Tool-Request 111 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 112 "scene_create" @{ scene_path = "res:////escape.tscn" })
     )
 
     $rawResponses = $requests | & $didiExecutable
@@ -182,13 +267,132 @@ try {
     Assert-True (@($cycleContainer.children.name) -contains "SpawnedCopy") "Rejected cyclic reparenting changed the hierarchy."
     Assert-True (@($cycleHierarchy.scene_tree.children.name) -contains "Subject") "Rejected self-reparenting changed the hierarchy."
 
+    $settingWrite = Tool-Payload $byId[44]
+    Assert-True ($settingWrite.persisted -eq $true) "Project setting write did not confirm persistence."
+    $settingRead = Tool-Payload $byId[45]
+    Assert-True ($settingRead.value.enabled -eq $true) "Nested project setting lost its boolean value."
+    Assert-True ($settingRead.value.names[1] -eq "beta") "Nested project setting lost its array value."
+    Assert-True ($settingRead.value.nested.ratio -eq 0.5) "Nested project setting lost its dictionary value."
+    Assert-True ((Tool-Payload $byId[46]).removed -eq $true) "Project setting removal did not report success."
+    Assert-True $byId[47].result.isError "Missing project setting returned fake success."
+    Assert-True $byId[48].result.isError "Generic project settings tool wrote into the autoload namespace."
+    Assert-True $byId[49].result.isError "Generic project settings tool wrote into the InputMap namespace."
+    Assert-True $byId[50].result.isError "Excessively nested project setting was accepted."
+
+    Assert-True ((Tool-Payload $byId[51]).undo_redo_registered) "Script attachment bypassed UndoRedo."
+    Assert-True ((Tool-Payload $byId[52]).detached -eq $true) "Script detachment was not observed."
+    Assert-True (-not $byId[53].result.isError) "Script detach could not be undone."
+    Assert-True (-not $byId[54].result.isError) "Script detach could not be redone."
+    Assert-True $byId[55].result.isError "Detaching a node without a script returned fake success."
+
+    Assert-True ((Tool-Payload $byId[56]).undo_redo_registered) "Group addition bypassed UndoRedo."
+    Assert-True (@((Tool-Payload $byId[57]).groups) -contains "phase_two") "Added group was not listed."
+    Assert-True (@((Tool-Payload $byId[58]).members) -contains "/root/SmokeRoot/Subject") "Group member query missed the edited-scene node."
+    Assert-True (@((Tool-Payload $byId[60]).members).Count -eq 0) "Removed group membership remained visible."
+    Assert-True (@((Tool-Payload $byId[62]).members) -contains "/root/SmokeRoot/Subject") "Group removal undo did not restore membership."
+    Assert-True $byId[63].result.isError "Duplicate group membership returned fake success."
+
+    Assert-True (@((Tool-Payload $byId[64]).autoloads).Count -eq 0) "Disposable fixture unexpectedly began with autoloads."
+    $autoload = @((Tool-Payload $byId[66]).autoloads)[0]
+    Assert-True ($autoload.name -eq "PhaseTwo" -and $autoload.path -eq "res://subject.gd" -and $autoload.singleton -eq $true) "Autoload did not persist in canonical form."
+    Assert-True $byId[67].result.isError "Existing autoload was overwritten without replace: true."
+    Assert-True (@((Tool-Payload $byId[69]).autoloads)[0].singleton -eq $false) "Explicit autoload replacement did not persist singleton=false."
+    Assert-True ((Tool-Payload $byId[70]).removed -eq $true) "Autoload removal did not report success."
+    Assert-True (@((Tool-Payload $byId[71]).autoloads).Count -eq 0) "Removed autoload remained persisted."
+    Assert-True $byId[72].result.isError "Removing a missing autoload returned fake success."
+    Assert-True $byId[73].result.isError "Invalid autoload identifier was accepted."
+    Assert-True $byId[74].result.isError "Missing autoload resource was accepted."
+
+    Assert-True (-not (@((Tool-Payload $byId[75]).actions.action) -contains "phase_two_jump")) "Disposable fixture unexpectedly began with the Phase 2 input action."
+    $inputAction = @((Tool-Payload $byId[77]).actions | Where-Object action -eq "phase_two_jump")[0]
+    Assert-True ($inputAction.action -eq "phase_two_jump" -and $inputAction.deadzone -eq 0.35) "Input action metadata did not persist."
+    Assert-True (@($inputAction.events).Count -eq 4) "Input action did not persist every supported event shape."
+    Assert-True ($inputAction.events[0].type -eq "key" -and $inputAction.events[0].shift -eq $true) "Key event was not normalized correctly."
+    Assert-True ($inputAction.events[3].type -eq "joypad_motion" -and $inputAction.events[3].axis_value -eq -0.75) "Joypad motion event was not normalized correctly."
+    Assert-True $byId[78].result.isError "Existing input action was overwritten without replace: true."
+    $replacedInputAction = @((Tool-Payload $byId[80]).actions | Where-Object action -eq "phase_two_jump")[0]
+    Assert-True (@($replacedInputAction.events).Count -eq 0) "Explicit input action replacement did not persist."
+    Assert-True ((Tool-Payload $byId[81]).removed -eq $true) "Input action removal did not report success."
+    Assert-True (-not (@((Tool-Payload $byId[82]).actions.action) -contains "phase_two_jump")) "Removed input action remained persisted."
+    Assert-True $byId[83].result.isError "Unknown input event type was accepted."
+    Assert-True $byId[84].result.isError "Out-of-range InputMap deadzone was accepted."
+    Assert-True $byId[85].result.isError "Empty key event was accepted."
+
+    Assert-True $byId[86].result.isError "Scene close discarded unsaved edits without explicit permission."
+    Assert-True ((Tool-Payload $byId[87]).saved -eq $true) "Packed branch did not report a saved PackedScene."
+    Assert-True $byId[88].result.isError "Packed branch overwrote an existing scene without overwrite: true."
+    Assert-True ((Tool-Payload $byId[89]).opened -eq $true) "Packed branch could not be opened."
+    $packedHierarchy = Tool-Payload $byId[90]
+    Assert-True ($packedHierarchy.scene_tree.name -eq "Container") "Packed branch root was not preserved."
+    Assert-True (@($packedHierarchy.scene_tree.children.name) -contains "SpawnedCopy") "Packed branch lost its owned child."
+    Assert-True ((Tool-Payload $byId[91]).closed -eq $true) "Clean packed scene could not be closed."
+    Assert-True ((Tool-Payload $byId[92]).opened -eq $true) "New scene was not created and opened."
+    Assert-True ((Tool-Payload $byId[93]).scene_tree.name -eq "Created") "Created scene root was not observable."
+    Assert-True $byId[94].result.isError "Scene create overwrote an existing target without overwrite: true."
+    Assert-True ((Tool-Payload $byId[95]).opened -eq $true) "Existing PackedScene could not be reopened."
+    Assert-True ((Tool-Payload $byId[96]).closed -eq $true) "Reopened clean scene could not be closed."
+    Assert-True $byId[97].result.isError "Missing PackedScene returned fake open success."
+    Assert-True $byId[98].result.isError "Absolute filesystem scene path was accepted."
+    Assert-True ((Tool-Payload $byId[99]).opened -eq $true) "Explicit scene overwrite failed."
+    Assert-True ((Tool-Payload $byId[100]).scene_tree.name -eq "Replaced") "Explicit scene overwrite did not replace the root."
+    Assert-True ((Tool-Payload $byId[101]).closed -eq $true) "Clean replaced scene could not be closed."
+    Assert-True ((Tool-Payload $byId[102]).opened -eq $true) "Smoke scene could not be reopened for script rejection checks."
+    Assert-True $byId[103].result.isError "Missing script resource was accepted."
+    Assert-True $byId[104].result.isError "Non-script scene resource was accepted for script attachment."
+    Assert-True $byId[105].result.isError "Native-base-incompatible script returned fake attachment success."
+    Assert-True ((Tool-Payload $byId[106]).added -eq $true) "Transient group setup failed."
+    Assert-True ((Tool-Payload $byId[107]).removed -eq $true) "Transient group removal failed."
+    Assert-True (-not $byId[108].result.isError) "Transient group removal could not be undone."
+    Assert-True ((Tool-Payload $byId[109]).saved -eq $true) "Transient group probe scene could not be packed."
+    $transientProbe = Get-Content -LiteralPath (Join-Path $fixtureRoot "transient_probe.tscn") -Raw
+    Assert-True ($transientProbe -notmatch "phase_two_transient") "Remove undo changed a transient group into persistent membership."
+    Assert-True ((Tool-Payload $byId[110]).removed -eq $true) "Transient group cleanup failed."
+    Assert-True ((Tool-Payload $byId[111]).closed -eq $true) "Smoke scene cleanup failed."
+    Assert-True $byId[112].result.isError "Non-normalized res:// scene path was accepted."
+    Assert-True ($byId[112].result.content[0].text -match "normalized") "Non-normalized path error was not actionable."
+
     $engineErrors = @(
         Get-Content $stderrPath -ErrorAction SilentlyContinue |
             Where-Object { $_ -match 'UndoRedo history mismatch|Parameter "t" is null|\[ERROR' }
     )
     Assert-True ($engineErrors.Count -eq 0) "Godot reported bridge errors:`n$($engineErrors -join "`n")"
 
-    Write-Output "Godot Phase 1 integration passed: live hierarchy, scalar properties, all node mutations with UndoRedo, viewport PNG, and honest errors."
+    $projectConfigPath = [IO.Path]::GetFullPath((Join-Path $fixtureRoot "project.godot"))
+    $projectBackupPath = [IO.Path]::GetFullPath((Join-Path $fixtureRoot "project.godot.rollback-fixture"))
+    if (-not $projectConfigPath.StartsWith($fixtureRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to alter a persistence-failure fixture outside its disposable project: $projectConfigPath"
+    }
+    Move-Item -LiteralPath $projectConfigPath -Destination $projectBackupPath
+    New-Item -ItemType Directory -Path $projectConfigPath | Out-Null
+    try {
+        $failureRequests = @(
+            (@{ jsonrpc = "2.0"; id = 200; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+            (Tool-Request 201 "project_set_setting" @{ setting = "didi_phase2/rollback_probe"; value = @{ changed = $true } }),
+            (Tool-Request 202 "project_get_setting" @{ setting = "didi_phase2/rollback_probe" }),
+            (Tool-Request 203 "project_set_autoload" @{ name = "RollbackProbe"; path = "res://subject.gd" }),
+            (Tool-Request 204 "project_list_autoloads" @{}),
+            (Tool-Request 205 "project_set_input_action" @{ action = "rollback_probe"; events = @() }),
+            (Tool-Request 206 "project_list_input_actions" @{})
+        )
+        $rawFailureResponses = $failureRequests | & $didiExecutable
+        $failureResponses = @($rawFailureResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
+        Assert-True ($LASTEXITCODE -eq 0) "Didi rollback MCP process exited with $LASTEXITCODE."
+        Assert-True ($failureResponses.Count -eq $failureRequests.Count) "Rollback batch response count mismatch."
+        $failureById = @{}
+        foreach ($response in $failureResponses) { $failureById[[int]$response.id] = $response }
+        Assert-True ([bool]$failureById[201].result.isError) "Project setting save failure returned fake success: $($failureById[201] | ConvertTo-Json -Compress -Depth 20)"
+        Assert-True ([bool]$failureById[202].result.isError) "Failed project setting mutation remained in memory after rollback."
+        Assert-True ([bool]$failureById[203].result.isError) "Autoload save failure returned fake success."
+        Assert-True (-not (@((Tool-Payload $failureById[204]).autoloads.name) -contains "RollbackProbe")) "Failed autoload mutation remained in memory after rollback."
+        Assert-True ([bool]$failureById[205].result.isError) "InputMap save failure returned fake success."
+        Assert-True (-not (@((Tool-Payload $failureById[206]).actions.action) -contains "rollback_probe")) "Failed InputMap mutation remained live after rollback reload."
+    }
+    finally {
+        Remove-Item -LiteralPath $projectConfigPath -Force
+        Move-Item -LiteralPath $projectBackupPath -Destination $projectConfigPath
+    }
+
+    Write-Output "Godot integration passed: Phase 1 live editing plus Phase 2 project wiring, typed InputMap, scene lifecycle, persistence, UndoRedo, and rejection paths."
 }
 finally {
     if ($null -ne $godot -and -not $godot.HasExited) {

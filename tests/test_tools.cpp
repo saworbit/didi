@@ -13,7 +13,7 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_TRUE(tools.size() >= 36);
+    ASSERT_EQ(tools.size(), 68u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -73,6 +73,19 @@ static void test_tool_registry_default_tools() {
     ASSERT_TRUE(reg.getTool("editor_save_scene") != nullptr);
     ASSERT_TRUE(reg.getTool("editor_reload_project") != nullptr);
 
+    // Phase 2: Project Wiring
+    for (const auto* name : {
+        "script_attach_to_node", "script_detach_from_node",
+        "project_list_autoloads", "project_set_autoload", "project_remove_autoload",
+        "project_list_input_actions", "project_set_input_action", "project_remove_input_action",
+        "project_get_setting", "project_set_setting",
+        "scene_list_groups", "scene_add_to_group", "scene_remove_from_group",
+        "scene_get_group_members", "scene_create", "scene_open", "scene_close",
+        "scene_pack_branch"
+    }) {
+        ASSERT_TRUE(reg.getTool(name) != nullptr);
+    }
+
     // Legacy Aliases
     ASSERT_TRUE(reg.getTool("capture_viewport") != nullptr);
     ASSERT_TRUE(reg.getTool("get_scene_hierarchy") != nullptr);
@@ -87,16 +100,19 @@ static void test_tool_capabilities_are_honest() {
     const auto* instantiate = reg.getTool("scene_instantiate_node");
     const auto* signal_connect = reg.getTool("signal_connect");
     const auto* syntax = reg.getTool("script_check_syntax");
+    const auto* attach_script = reg.getTool("script_attach_to_node");
 
     ASSERT_TRUE(hierarchy != nullptr);
     ASSERT_TRUE(instantiate != nullptr);
     ASSERT_TRUE(signal_connect != nullptr);
     ASSERT_TRUE(syntax != nullptr);
+    ASSERT_TRUE(attach_script != nullptr);
 
     auto hierarchy_json = hierarchy->toJson();
     auto instantiate_json = instantiate->toJson();
     auto signal_json = signal_connect->toJson();
     auto syntax_json = syntax->toJson();
+    auto attach_script_json = attach_script->toJson();
 
     ASSERT_EQ(hierarchy_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"live", "offline_fallback"}));
@@ -109,6 +125,9 @@ static void test_tool_capabilities_are_honest() {
     ASSERT_TRUE(signal_json["description"].get<std::string>().rfind("UNIMPLEMENTED:", 0) == 0);
     ASSERT_EQ(syntax_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"offline_fallback"}));
+    ASSERT_EQ(attach_script_json["_meta"]["didi"]["executionModes"],
+              didi::json::array({"live"}));
+    ASSERT_EQ(attach_script_json["_meta"]["didi"]["implemented"], true);
 
     reg.setIpcClient(nullptr);
     auto unavailable = reg.callTool("signal_list_connections", {{"target_node", "/root"}});
@@ -191,6 +210,9 @@ static void test_tool_capture_viewport_with_ipc() {
         if (method == "runtime.getLogs") {
             return {{"error", {{"code", 500}, {"message", "simulated live log failure"}}}};
         }
+        if (method == "script.attachToNode") {
+            return {{"error", {{"code", 422}, {"message", "simulated script attachment rejection"}}}};
+        }
         return {{"status", "ok"}};
     });
 
@@ -234,6 +256,13 @@ static void test_tool_capture_viewport_with_ipc() {
     ASSERT_TRUE(runtime_logs.isOk());
     auto runtime_logs_json = didi::json::parse(runtime_logs.value());
     ASSERT_EQ(runtime_logs_json["execution_mode"], "offline_fallback");
+
+    auto attach = reg.callTool("script_attach_to_node", {
+        {"target_node", "/root/SmokeRoot/Subject"},
+        {"script_path", "res://subject.gd"}
+    });
+    ASSERT_TRUE(attach.isError);
+    ASSERT_TRUE(attach.content[0].text.find("simulated script attachment rejection") != std::string::npos);
 
     client->disconnect();
     server->stop();

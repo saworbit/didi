@@ -346,5 +346,44 @@ CallToolResult handleMutateSceneTree(const json& args, std::shared_ptr<ipc::IIpc
     return CallToolResult::error("Godot Editor is offline. Please launch Godot Editor to execute live SceneTree mutations with EditorUndoRedoManager.");
 }
 
+static CallToolResult forwardLiveSceneWiring(const json& args,
+                                             const std::shared_ptr<ipc::IIpcClient>& ipc,
+                                             const char* method,
+                                             const char* operation) {
+    if (!ipc || !ipc->isConnected()) {
+        return CallToolResult::error(std::string("Godot Editor is offline. Launch Godot to ") + operation + ".");
+    }
+    auto response = ipc->sendRequest(method, args, ipc::kWaitForDefinitiveResponse);
+    if (response.isErr()) {
+        return CallToolResult::error(std::string("Failed to ") + operation + ": " + response.error().message);
+    }
+    return CallToolResult::successJson(response.value());
+}
+
+CallToolResult handleSceneListGroups(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    return forwardLiveSceneWiring(args, ipc, "scene.listGroups", "list node groups");
+}
+CallToolResult handleSceneAddToGroup(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    return forwardLiveSceneWiring(args, ipc, "scene.addToGroup", "add a node to a group");
+}
+CallToolResult handleSceneRemoveFromGroup(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    return forwardLiveSceneWiring(args, ipc, "scene.removeFromGroup", "remove a node from a group");
+}
+CallToolResult handleSceneGetGroupMembers(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    return forwardLiveSceneWiring(args, ipc, "scene.getGroupMembers", "query group members");
+}
+CallToolResult handleSceneCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    return forwardLiveSceneWiring(args, ipc, "scene.create", "create a scene");
+}
+CallToolResult handleSceneOpen(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    return forwardLiveSceneWiring(args, ipc, "scene.open", "open a scene");
+}
+CallToolResult handleSceneClose(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    return forwardLiveSceneWiring(args, ipc, "scene.close", "close the active scene");
+}
+CallToolResult handleScenePackBranch(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    return forwardLiveSceneWiring(args, ipc, "scene.packBranch", "pack a scene branch");
+}
+
 } // namespace mcp
 } // namespace didi

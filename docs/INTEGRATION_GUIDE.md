@@ -120,7 +120,13 @@ Add to your `mcp_config.json`:
 ## 4. Troubleshooting & FAQ
 
 ### Q: Does Didi require Godot Editor to be open at all times?
-**A:** No. File-based tools such as `script_check_syntax`, `project_list_resources`, and `runtime_launch` remain available in `offline_fallback` mode. Scene mutations and editor lifecycle tools require the editor connection.
+**A:** No. File-based tools such as `script_check_syntax`, `project_list_resources`, and `runtime_launch` remain available in `offline_fallback` mode. Scene mutations, Phase 2 project wiring, and editor lifecycle tools require the editor connection.
+
+### Q: Why does `scene_close` require `discard_unsaved: true` even for a scene I believe is clean?
+**A:** Godot 4.5 does not expose active-scene dirty state through GDExtension. Didi refuses the default call rather than risk discarding work. Pass `discard_unsaved: true` only when closing without a save prompt is intentional.
+
+### Q: Do project wiring tools edit `project.godot` directly?
+**A:** No. Autoloads, InputMap actions, and generic settings run inside the connected editor through `ProjectSettings`, verify `save()`, and restore the previous in-memory setting if persistence fails.
 
 ### Q: Why does viewport capture return a grid?
 **A:** The grid is an explicitly synthesized offline preview (`is_live_frame: false`). A real editor image requires an active Godot 4.5+ editor with the addon enabled and reports `execution_mode: "live"` and `is_live_frame: true`.

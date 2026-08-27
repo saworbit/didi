@@ -105,13 +105,19 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
 json EditorHook::executeOnMainThread(const std::string& method, const json& params) {
     DIDI_LOG_DEBUG("EDITOR_HOOK", "Executing command on Godot main thread: ", method);
 
-    static const std::unordered_set<std::string> live_phase_one = {
+    static const std::unordered_set<std::string> live_bridge_methods = {
         "editor.getState", "scene.getHierarchy", "scene.instantiateNode",
         "scene.removeNode", "scene.reparentNode", "scene.setProperty",
         "scene.getProperty", "scene.duplicateNode", "editor.undo", "editor.redo",
-        "editor.saveScene", "editor.reloadProject"
+        "editor.saveScene", "editor.reloadProject", "script.attachToNode",
+        "script.detachFromNode", "project.listAutoloads", "project.setAutoload",
+        "project.removeAutoload", "project.listInputActions", "project.setInputAction",
+        "project.removeInputAction", "project.getSetting", "project.setSetting",
+        "scene.listGroups", "scene.addToGroup", "scene.removeFromGroup",
+        "scene.getGroupMembers", "scene.create", "scene.open", "scene.close",
+        "scene.packBranch"
     };
-    if (live_phase_one.count(method)) {
+    if (live_bridge_methods.count(method)) {
         return GodotBridge::instance().execute(method, params);
     }
 

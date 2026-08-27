@@ -21,8 +21,8 @@
 | 🚀 [**Quickstart Guide**](docs/QUICKSTART.md) | **Developers / Humans** | 5-minute step-by-step setup for Godot, Cursor, Claude, and VS Code. |
 | 🤖 [**LLM Agent Instructions**](docs/LLM_INSTRUCTIONS.md) | **AI Assistants / LLMs** | Dedicated system prompt & decision tree for Claude, Cursor, Windsurf, Antigravity. |
 | ✅ [**Current Capability Matrix**](docs/CAPABILITIES.md) | **Everyone** | Authoritative live, offline, unavailable, and unimplemented behavior. |
-| 🗺️ [**Roadmap & 40-Tool Surface**](docs/ROADMAP.md) | **Developers / Contributors** | Nine-domain roadmap and technical build order. |
-| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 40 canonical tools plus 10 legacy names. |
+| 🗺️ [**Roadmap & 58-Tool Surface**](docs/ROADMAP.md) | **Developers / Contributors** | Completed phases and technical build order. |
+| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 58 canonical tools plus 10 legacy names. |
 | 🏛️ [**Architecture & System Topology**](docs/ARCHITECTURE.md) | **Engineers / Architects** | Deep-dive into C++20 design, dual execution topology, threading safety, and named-pipe IPC. |
 | 📦 [**Dynamic Resources & Prompts**](docs/RESOURCES_AND_PROMPTS.md) | **Developers / LLMs** | Technical specs for `godot://...` resources and prompt workflows. |
 | 🛡️ [**Administrator & Operations Guide**](docs/ADMIN_GUIDE.md) | **DevOps / Admins** | Security DACL hardening, CI/CD headless execution, observability, and troubleshooting. |
@@ -37,7 +37,7 @@
 | Feature | Legacy Script/CLI Wrappers | Multi-Hop Network Bridges | **Didi (godot-mcp-native)** |
 | :--- | :--- | :--- | :--- |
 | **Execution Topology** | Offline CLI subprocesses | Node.js + WebSocket + C# Plugin | **Direct C++ GDExtension + Standalone Binary** |
-| **In-Memory Scene Access** | ❌ Blind to live editor state | ⚠️ Depends on bridge | ✅ **Direct Godot objects for supported Phase 1 tools** |
+| **In-Memory Scene Access** | ❌ Blind to live editor state | ⚠️ Depends on bridge | ✅ **Direct Godot objects for supported live tools** |
 | **Undo / Redo Safety** | ❌ None (file overwrites) | ⚠️ Varies | ✅ **Native `EditorUndoRedoManager` transactions** |
 | **Visual Inspection** | ❌ None | ⚠️ Often requires export | ✅ **Actual editor viewport pixels encoded as PNG** |
 | **Transport** | Process startup per call | Network or multi-process bridge | **Local named pipe / Unix socket** |
@@ -57,7 +57,7 @@
 ┌─────────────────────────────────────────────────────────────┐
 │             Didi (C++ MCP Core Engine - didi.exe)           │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2024-11-05 standard)       │
-│  - Registry (40 canonical tools + 10 legacy names)          │
+│  - Registry (58 canonical tools + 10 legacy names)          │
 │  - Dynamic Resources (godot://project/tree, editor/state)   │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
 │  - Offline Fallback Engine (GDScript AST, .tscn parser)     │
@@ -78,9 +78,9 @@
 
 ---
 
-## 🛠️ Nine-Domain Protocol Surface (40 Canonical Tools)
+## 🛠️ Protocol Surface (58 Canonical Tools)
 
-The 40 canonical names are the stable protocol surface, with 10 additional legacy registrations. Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, and `liveAvailable` from `tools/list`. Phase 1 live support covers scene hierarchy, scalar property access, built-in node mutations with UndoRedo, editor lifecycle, and viewport capture; unsupported registered endpoints return errors and advertise `unimplemented`.
+The 58 canonical names are the stable protocol surface, with 10 additional legacy registrations. Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, and `liveAvailable` from `tools/list`. Phase 2 adds script attachment, autoloads, typed InputMap settings, general project settings, scene groups, and scene-file lifecycle operations to the Phase 1 live substrate.
 
 | Domain | Key Tools | Current execution |
 | :--- | :--- | :--- |
@@ -93,6 +93,7 @@ The 40 canonical names are the stable protocol surface, with 10 additional legac
 | **7. Resources & Files (4)** | `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map` | Implemented offline/file-based. |
 | **8. Runtime & Debug (4)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Process launch is implemented offline; input, call stack, and profiler tools are unimplemented. |
 | **9. Editor Lifecycle (4)** | `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Implemented live. Reload requests a resource-filesystem rescan. |
+| **10. Project Wiring (18)** | Script attach/detach; autoload, InputMap, and setting management; groups; scene create/open/close/pack | Implemented live with UndoRedo, ProjectSettings persistence, typed events, overwrite guards, and normalized `res://` paths. |
 
 ---
 

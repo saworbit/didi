@@ -49,6 +49,7 @@ addons/didi/test_lab_sandbox.tscn
 *.sublime-workspace
 
 # Agent & System Metadata
+.worktrees/
 .gemini/
 .DS_Store
 Thumbs.db

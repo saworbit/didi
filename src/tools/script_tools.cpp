@@ -161,5 +161,27 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
     return CallToolResult::successJson(result);
 }
 
+static CallToolResult forwardLiveScriptWiring(const json& args,
+                                              const std::shared_ptr<ipc::IIpcClient>& ipc,
+                                              const char* method,
+                                              const char* operation) {
+    if (!ipc || !ipc->isConnected()) {
+        return CallToolResult::error(std::string("Godot Editor is offline. Launch Godot to ") + operation + ".");
+    }
+    auto response = ipc->sendRequest(method, args, ipc::kWaitForDefinitiveResponse);
+    if (response.isErr()) {
+        return CallToolResult::error(std::string("Failed to ") + operation + ": " + response.error().message);
+    }
+    return CallToolResult::successJson(response.value());
+}
+
+CallToolResult handleScriptAttachToNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    return forwardLiveScriptWiring(args, ipc, "script.attachToNode", "attach a script to a node");
+}
+
+CallToolResult handleScriptDetachFromNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    return forwardLiveScriptWiring(args, ipc, "script.detachFromNode", "detach a script from a node");
+}
+
 } // namespace mcp
 } // namespace didi

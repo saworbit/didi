@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(didi VERSION 1.1.0 LANGUAGES C CXX)
+project(didi VERSION 1.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -40,6 +40,7 @@ set(CORE_SOURCES
     src/tools/script_tools.cpp
     src/tools/runtime_tools.cpp
     src/tools/asset_tools.cpp
+    src/tools/project_tools.cpp
     src/tools/signal_tools.cpp
     src/tools/physics_nav_tools.cpp
     src/tools/tilemap_grid_tools.cpp

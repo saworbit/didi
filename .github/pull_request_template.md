@@ -14,4 +14,6 @@
 - [ ] My code adheres to the project's coding style guidelines (C++20, 4 spaces).
 - [ ] I have added automated tests in `tests/` covering new functionality.
 - [ ] All native unit tests pass (`./build/Release/didi_tests.exe` or `ctest`).
+- [ ] Live bridge changes pass `tests/run_godot_integration.ps1` on Godot 4.5.1.
+- [ ] Tool counts, capability metadata, reference docs, roadmap, and changelog are current.
 - [ ] I have updated relevant documentation in `docs/` and `README.md`.

@@ -11,8 +11,13 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-27
+
 ### Added
 - **Phase 1 live engine substrate** for Godot 4.5+: native main-loop dispatch, real edited `SceneTree` traversal, scalar property access, UndoRedo-backed node mutations, editor undo/redo/save/rescan, and real editor viewport PNG capture.
+- **Phase 2 project wiring** with 18 new canonical live tools for script attachment, autoloads, typed InputMap events, bounded project settings, scene groups, and scene create/open/close/branch packing.
+- **Atomic project persistence** through `ProjectSettings.save()` with snapshot rollback and live `InputMap` reload.
+- **Disposable 119-request Godot integration fixture** covering Phase 1 and Phase 2 success, undo/redo, persistence failure and rollback, resource ownership, overwrite, malformed input, and unsafe-path cases.
 - **Honest capability discovery**: every `tools/list` and `resources/list` entry now reports `_meta.didi.executionModes`, `implemented`, and an explanatory `reason` when unavailable. Dynamic metadata also reports the current live/offline state.
 - **Cross-version integration harness** covering Godot 4.5.1, 4.6.2, and 4.7.2.
 
@@ -27,7 +32,9 @@ Historical entries describe the surface advertised by those releases. For the ex
 - Confined node resolution and mutations to the edited scene subtree, protected its root, rejected cyclic reparenting, and rejected non-`Node` ClassDB objects before UndoRedo registration.
 - Preserved live viewport provenance and dimensions at the public MCP boundary; only real GPU-backed captures report `is_live_frame: true`.
 - Centralized result-level execution provenance and kept offline-only filesystem/parser work out of Godot's main-thread command queue.
-- Updated pull-request CI assertions to cover the complete 50-tool surface, dynamic execution modes, resources, and canonical scene hierarchy output.
+- Updated pull-request CI assertions to cover the complete 68-registration surface, dynamic execution modes, resources, and canonical scene hierarchy output.
+- Made `scene_close` conservative on Godot 4.5: explicit `discard_unsaved: true` is required because that API cannot expose active-scene dirty state.
+- Made explicit scene overwrite replace the ResourceLoader cache and reload existing editor tabs before verification.
 - Raised the minimum supported Godot version to 4.5, where the required native main-loop callback API is available.
 - Reconciled README, quickstart, capability, tool, protocol, architecture, operations, LLM, resource/prompt, developer, roadmap, contribution, and security documentation with the verified implementation.
 

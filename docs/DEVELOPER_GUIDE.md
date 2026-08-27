@@ -45,7 +45,7 @@ didi/
 │   ├── common/           # Platform IPC (Win32 Named Pipes, POSIX sockets)
 │   ├── mcp/              # MCP protocol handlers
 │   ├── offline/          # AST analysis, file indexing, headless subprocess runner
-│   ├── tools/            # Public tool handlers across nine domains
+│   ├── tools/            # Public tool handlers for the canonical and legacy surfaces
 │   ├── gdextension/      # In-engine GDExtension module & renderer
 │   └── standalone/       # main.cpp entry point for didi.exe
 ├── tests/                # Native suite plus real Godot smoke fixture/harness
@@ -82,14 +82,14 @@ Didi currently includes 23 native tests:
 22. `GDScript.PatchSignal`: Signal patching.
 23. `ResourceIndexer.TypeDetection`: Resource type and UID detection.
 
-The Windows live integration harness starts a real Godot editor, sends MCP requests through the named pipe, and checks absolute nested hierarchy paths, edited-scene containment and root protection, node-type/property validation, UndoRedo lifetime and sibling-order restoration, live viewport provenance plus PNG dimensions, and honest errors:
+The Windows live integration harness copies the tracked fixture into `build/`, starts a real Godot editor, and sends 119 ordered MCP requests through the named pipe. It checks Phase 1 scene editing and viewport behavior plus Phase 2 scripts, groups, autoloads, nested settings, all supported InputEvent forms, runtime InputMap reload, forced persistence rollback, scene create/open/close/pack, resource ownership, overwrite guards, unsafe paths, and honest errors:
 
 ```powershell
 .\tests\run_godot_integration.ps1 `
   -GodotExecutable C:\Godot\Godot_v4.5.1-stable_win64_console.exe
 ```
 
-The Phase 1 verification matrix has also been run against Godot 4.6.2 and 4.7.2.
+The Phase 1 substrate has also been run against Godot 4.6.2 and 4.7.2. Phase 2's compatibility floor and CI integration target are Godot 4.5.1; bridge method hashes must be taken from that version's extension API.
 
 ---
 
