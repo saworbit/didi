@@ -13,6 +13,10 @@ Makefile
 __pycache__/
 *.py[cod]
 
+# Agent-Internal Workflow Artifacts
+.superpowers/
+docs/superpowers/
+
 # Compiled Binaries & Libraries
 *.exe
 *.dll
