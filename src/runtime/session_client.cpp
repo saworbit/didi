@@ -615,6 +615,23 @@ struct DiscoveredSession {
     bool alive{false};
 };
 
+Result<json> authenticateSession(const std::shared_ptr<ipc::IIpcClient>& client,
+                                 const SessionDescriptor& descriptor) {
+    if (!client) return Error::internal("Runtime IPC client factory returned no client");
+    const json handshake_params = {{"_didi_session_token", descriptor.token},
+                                   {"protocol_version", "1.3"}};
+    auto handshake = client->sendRequest("session.handshake", handshake_params,
+                                         kSessionHandshakeTimeoutMs);
+    if (handshake.isErr()) return handshake.error();
+    auto expected = descriptor.toJson();
+    expected["status"] = "ok";
+    if (!handshake.value().is_object() || handshake.value() != expected ||
+        handshake.value().contains("token")) {
+        return Error(409, "Runtime session handshake identity did not match the selected descriptor");
+    }
+    return handshake.value();
+}
+
 std::vector<DiscoveredSession> discoverSessions(json& diagnostics,
                                                 const DescriptorOpenedHook& opened_hook) {
     std::vector<DiscoveredSession> sessions;
@@ -685,6 +702,8 @@ public:
             std::lock_guard<std::mutex> lock(m_mutex);
             previous = std::move(m_activeClient);
             m_activeDescriptor.reset();
+            m_autoAttachEnabled = false;
+            ++m_routeGeneration;
         }
         if (previous) previous->disconnect();
     }
@@ -695,10 +714,12 @@ public:
             std::lock_guard<std::mutex> lock(m_mutex);
             active = m_activeClient;
         }
-        return active && active->isConnected();
+        if (active) return active->isConnected();
+        return const_cast<RuntimeSessionClient*>(this)->tryAutoAttach();
     }
 
     Result<json> sendRequest(const std::string& method, const json& params, int timeout_ms) override {
+        (void)isConnected();
         std::shared_ptr<ipc::IIpcClient> active;
         std::optional<SessionDescriptor> descriptor;
         {
@@ -729,6 +750,13 @@ public:
     }
 
     Result<json> attachSession(const std::string& session_id) override {
+        uint64_t generation = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_autoAttachEnabled = false;
+            ++m_routeGeneration;
+            generation = m_routeGeneration;
+        }
         json diagnostics = json::array();
         const auto sessions = discoverSessions(diagnostics, m_descriptorOpenedHook);
         auto found = std::find_if(sessions.begin(), sessions.end(), [&](const DiscoveredSession& item) {
@@ -736,39 +764,7 @@ public:
         });
         if (found == sessions.end()) return Error::notFound("Runtime session not found: " + session_id);
         if (!found->alive) return Error::notConnected("Runtime session is stale: " + session_id);
-        if (!m_factory) return Error::internal("Runtime IPC client factory is not configured");
-
-        auto candidate = std::shared_ptr<ipc::IIpcClient>(m_factory());
-        if (!candidate || !candidate->connect(found->descriptor.endpoint, 2000)) {
-            return Error::notConnected("Unable to connect to runtime session: " + session_id);
-        }
-        json handshake_params = {{"_didi_session_token", found->descriptor.token},
-                                 {"protocol_version", "1.3"}};
-        auto handshake = candidate->sendRequest("session.handshake", handshake_params,
-                                                kSessionHandshakeTimeoutMs);
-        if (handshake.isErr()) {
-            candidate->disconnect();
-            return handshake.error();
-        }
-        const auto& response = handshake.value();
-        if (!response.is_object() || !response.contains("status") || !response["status"].is_string() ||
-            response["status"] != "ok" || !response.contains("session_id") ||
-            !response["session_id"].is_string() || response["session_id"] != found->descriptor.session_id ||
-            !response.contains("protocol_version") || !response["protocol_version"].is_string() ||
-            response["protocol_version"] != "1.3") {
-            candidate->disconnect();
-            return Error(409, "Runtime session handshake was not accepted by the descriptor contract");
-        }
-
-        std::shared_ptr<ipc::IIpcClient> previous;
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            previous = std::move(m_activeClient);
-            m_activeClient = std::move(candidate);
-            m_activeDescriptor = found->descriptor;
-        }
-        if (previous) previous->disconnect();
-        return json{{"session", found->descriptor.toJson()}, {"handshake", handshake.value()}};
+        return attachDescriptor(found->descriptor, generation);
     }
 
     Result<json> detachSession() override {
@@ -776,6 +772,8 @@ public:
         std::optional<SessionDescriptor> descriptor;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
+            m_autoAttachEnabled = false;
+            ++m_routeGeneration;
             if (!m_activeDescriptor.has_value()) return Error::notConnected("No runtime session is attached");
             previous = std::move(m_activeClient);
             descriptor = std::move(m_activeDescriptor);
@@ -784,18 +782,146 @@ public:
         return json{{"session", descriptor->toJson()}};
     }
 
+    Result<json> refreshSession() override {
+        (void)isConnected();
+        std::shared_ptr<ipc::IIpcClient> active;
+        std::optional<SessionDescriptor> descriptor;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            active = m_activeClient;
+            descriptor = m_activeDescriptor;
+        }
+        if (!active || !descriptor.has_value() || !active->isConnected()) {
+            if (active) quarantineIfCurrent(active);
+            return Error::notConnected("No runtime session is attached");
+        }
+        auto handshake = authenticateSession(active, *descriptor);
+        if (handshake.isErr()) {
+            quarantineIfCurrent(active);
+            return handshake.error();
+        }
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_activeClient != active || !m_activeDescriptor.has_value() ||
+                m_activeDescriptor->session_id != descriptor->session_id) {
+                return Error(409, "Fresh runtime session handshake was superseded by a route change");
+            }
+        }
+        return json{{"session", descriptor->toJson()}, {"handshake", handshake.value()},
+                    {"connected", true}};
+    }
+
     std::optional<SessionDescriptor> activeSession() const override {
         std::lock_guard<std::mutex> lock(m_mutex);
         return m_activeDescriptor;
     }
 
 private:
+    Result<json> attachDescriptor(const SessionDescriptor& descriptor,
+                                  std::optional<uint64_t> expected_generation = std::nullopt) {
+        if (!m_factory) return Error::internal("Runtime IPC client factory is not configured");
+        auto candidate = std::shared_ptr<ipc::IIpcClient>(m_factory());
+        if (!candidate || !candidate->connect(descriptor.endpoint, 2000)) {
+            return Error::notConnected("Unable to connect to runtime session: " + descriptor.session_id);
+        }
+        auto handshake = authenticateSession(candidate, descriptor);
+        if (handshake.isErr()) {
+            candidate->disconnect();
+            return handshake.error();
+        }
+
+        std::shared_ptr<ipc::IIpcClient> previous;
+        bool accepted = true;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (expected_generation.has_value() &&
+                m_routeGeneration != *expected_generation) {
+                accepted = false;
+            } else {
+                previous = std::move(m_activeClient);
+                m_activeClient = std::move(candidate);
+                m_activeDescriptor = descriptor;
+                ++m_routeGeneration;
+            }
+        }
+        if (!accepted) {
+            candidate->disconnect();
+            return Error(409, "Runtime attach was superseded by a later route change");
+        }
+        if (previous) previous->disconnect();
+        return json{{"session", descriptor.toJson()}, {"handshake", handshake.value()}};
+    }
+
+    bool tryAutoAttach() {
+        uint64_t generation = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_activeClient) return m_activeClient->isConnected();
+            if (!m_autoAttachEnabled || m_autoAttachInProgress) return false;
+            m_autoAttachInProgress = true;
+            generation = m_routeGeneration;
+        }
+
+        bool attached = false;
+        try {
+            json diagnostics = json::array();
+            const auto discovered = discoverSessions(diagnostics, m_descriptorOpenedHook);
+            std::vector<SessionDescriptor> matching;
+            for (const auto& session : discovered) {
+                if (session.alive && session.descriptor.project_path == m_projectRoot) {
+                    matching.push_back(session.descriptor);
+                }
+            }
+
+            std::optional<SessionDescriptor> selected;
+            if (matching.size() == 1) {
+                selected = matching.front();
+            } else if (matching.size() > 1) {
+                const auto editor_count = std::count_if(
+                    matching.begin(), matching.end(),
+                    [](const SessionDescriptor& session) { return session.kind == "editor"; });
+                if (editor_count == 1) {
+                    selected = *std::find_if(
+                        matching.begin(), matching.end(),
+                        [](const SessionDescriptor& session) { return session.kind == "editor"; });
+                }
+            }
+            if (selected.has_value()) {
+                attached = attachDescriptor(*selected, generation).isOk();
+            }
+        } catch (const std::exception&) {
+            attached = false;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_autoAttachInProgress = false;
+        }
+        return attached;
+    }
+
+    void quarantineIfCurrent(const std::shared_ptr<ipc::IIpcClient>& client) {
+        std::shared_ptr<ipc::IIpcClient> quarantined;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_activeClient != client) return;
+            quarantined = std::move(m_activeClient);
+            m_activeDescriptor.reset();
+            m_autoAttachEnabled = false;
+            ++m_routeGeneration;
+        }
+        if (quarantined) quarantined->disconnect();
+    }
+
     std::string m_projectRoot;
     ipc::IpcClientFactory m_factory;
     DescriptorOpenedHook m_descriptorOpenedHook;
     mutable std::mutex m_mutex;
     std::shared_ptr<ipc::IIpcClient> m_activeClient;
     std::optional<SessionDescriptor> m_activeDescriptor;
+    bool m_autoAttachEnabled{true};
+    bool m_autoAttachInProgress{false};
+    uint64_t m_routeGeneration{0};
 };
 
 } // namespace

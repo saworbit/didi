@@ -154,26 +154,29 @@ public:
             if (params.value("_didi_session_token", "") != std::string(64, 'a')) {
                 return didi::Error(401, "token rejected");
             }
+            if (params.value("protocol_version", "") != "1.3") {
+                return didi::Error(409, "protocol rejected");
+            }
             if (m_endpoint.find("11111111111111111111111111111111") != std::string::npos) return didi::json::object();
             if (m_endpoint.find("22222222222222222222222222222222") != std::string::npos) return didi::json::array();
+            const auto separator = m_endpoint.find_last_of('_');
+            const auto session_id = separator == std::string::npos ? std::string{} : m_endpoint.substr(separator + 1);
+            auto response = validDescriptor(session_id, m_endpoint);
+            response.erase("token");
+            response["status"] = "ok";
             if (m_endpoint.find("33333333333333333333333333333333") != std::string::npos) {
-                return didi::json{{"status", "rejected"},
-                                  {"session_id", "0123456789abcdef0123456789abcdef"},
-                                  {"protocol_version", "1.3"}};
+                response["status"] = "rejected";
+                return response;
             }
             if (m_endpoint.find("44444444444444444444444444444444") != std::string::npos) {
-                return didi::json{{"status", "ok"},
-                                  {"session_id", "fedcba9876543210fedcba9876543210"},
-                                  {"protocol_version", "1.3"}};
+                response["session_id"] = "fedcba9876543210fedcba9876543210";
+                return response;
             }
             if (m_endpoint.find("55555555555555555555555555555555") != std::string::npos) {
-                return didi::json{{"status", "ok"},
-                                  {"session_id", "0123456789abcdef0123456789abcdef"},
-                                  {"protocol_version", "1.2"}};
+                response["protocol_version"] = "1.2";
+                return response;
             }
-            return didi::json{{"status", "ok"},
-                              {"session_id", "0123456789abcdef0123456789abcdef"},
-                              {"protocol_version", "1.3"}};
+            return response;
         }
         return didi::json{{"endpoint", m_endpoint}, {"token", params.value("_didi_session_token", "")}};
     }

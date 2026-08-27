@@ -36,6 +36,12 @@ public:
         return didi::Error::internal("attach should not be called by this test");
     }
     didi::Result<didi::json> detachSession() override { return didi::json::object(); }
+    didi::Result<didi::json> refreshSession() override {
+        const auto session = activeSession()->toJson();
+        auto handshake = session;
+        handshake["status"] = "ok";
+        return didi::json{{"session", session}, {"handshake", handshake}, {"connected", true}};
+    }
     std::optional<didi::runtime::SessionDescriptor> activeSession() const override {
         return didi::runtime::SessionDescriptor{
             1, "0123456789abcdef0123456789abcdef", std::string(64, 'a'), 1,

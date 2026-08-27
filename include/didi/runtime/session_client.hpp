@@ -52,6 +52,9 @@ public:
     virtual Result<json> listSessions(const std::optional<std::string>& project_path) = 0;
     virtual Result<json> attachSession(const std::string& session_id) = 0;
     virtual Result<json> detachSession() = 0;
+    virtual Result<json> refreshSession() {
+        return Error::notConnected("Fresh runtime session state is unavailable");
+    }
     virtual std::optional<SessionDescriptor> activeSession() const = 0;
 };
 

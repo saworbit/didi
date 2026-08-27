@@ -100,8 +100,44 @@ std::optional<std::string> validateExpressionContextPath(const std::string& path
     return std::nullopt;
 }
 
-CallToolResult sessionError(const Error& error) {
-    return CallToolResult::error(error.message);
+CallToolResult sessionError(const Error& error,
+                            const std::shared_ptr<runtime::IRuntimeSessionClient>& sessions) {
+    const auto active = sessions ? sessions->activeSession()
+                                 : std::optional<runtime::SessionDescriptor>{};
+    json data = error.data.is_object() ? error.data : json::object();
+    if (!error.data.is_null() && !error.data.is_object()) data["details"] = error.data;
+    json envelope = {{"execution_mode", "local_session_management"},
+                     {"session", active.has_value() ? active->toJson() : json(nullptr)},
+                     {"error", {{"code", error.code}, {"message", error.message},
+                                {"data", std::move(data)}}}};
+    auto result = CallToolResult::successJson(envelope);
+    result.isError = true;
+    return result;
+}
+
+CallToolResult liveError(const Error& error,
+                         const std::optional<runtime::SessionDescriptor>& session) {
+    json data = error.data.is_object() ? error.data : json::object();
+    if (!error.data.is_null() && !error.data.is_object()) data["details"] = error.data;
+    json envelope = {
+        {"execution_mode", "live"},
+        {"session", session.has_value() ? session->toJson() : json(nullptr)},
+        {"error", {{"code", error.code}, {"message", error.message}, {"data", std::move(data)}}}
+    };
+    auto result = CallToolResult::successJson(envelope);
+    result.isError = true;
+    return result;
+}
+
+std::optional<runtime::SessionDescriptor> activeSessionFor(
+    const std::shared_ptr<ipc::IIpcClient>& ipc) {
+    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
+    return sessions ? sessions->activeSession() : std::optional<runtime::SessionDescriptor>{};
+}
+
+CallToolResult liveValidationError(const std::string& message,
+                                   const std::shared_ptr<ipc::IIpcClient>& ipc) {
+    return liveError(Error::invalidArgument(message), activeSessionFor(ipc));
 }
 
 CallToolResult localSessionSuccess(json payload) {
@@ -112,60 +148,94 @@ CallToolResult localSessionSuccess(json payload) {
 CallToolResult forwardLiveRuntime(const std::string& method, const json& args,
                                   const std::shared_ptr<ipc::IIpcClient>& ipc) {
     if (!ipc || !ipc->isConnected()) {
-        return CallToolResult::error("No runtime session is attached.");
+        return liveError(Error::notConnected("No runtime session is attached"),
+                         activeSessionFor(ipc));
     }
-    auto result = ipc->sendRequest(method, args, ipc::kWaitForDefinitiveResponse);
-    if (result.isErr()) return sessionError(result.error());
-    return CallToolResult::successJson(result.value());
+    // isConnected() may perform first-use auto-attachment. Snapshot only after it completes.
+    const auto session = activeSessionFor(ipc);
+    if ((method == "runtime.setPaused" || method == "runtime.step" || method == "runtime.stop") &&
+        (!session.has_value() || session->kind != "game")) {
+        return liveError(Error(409, "Runtime control is available only for game sessions",
+                               {{"allowed_session_kinds", json::array({"game"})}}), session);
+    }
+    constexpr int kEndToEndLiveDeadlineMs = 17000;
+    auto result = ipc->sendRequest(method, args, kEndToEndLiveDeadlineMs);
+    if (result.isErr()) {
+        auto error = result.error();
+        const bool explicit_quarantine = error.data.is_object() &&
+            error.data.value("route_quarantine", false);
+        const bool known_transport_timeout = error.code == 500 &&
+            (error.message.rfind("Timeout waiting for response", 0) == 0 ||
+             error.message.rfind("Failed or timed out reading response", 0) == 0 ||
+             error.message.rfind("Failed or timed out writing to", 0) == 0);
+        const bool transport_deadline =
+            (error.code == 504 || known_transport_timeout) &&
+            (!error.data.is_object() || !error.data.contains("outcome"));
+        if (explicit_quarantine || transport_deadline) {
+            if (transport_deadline) error.code = 504;
+            if (!error.data.is_object()) error.data = json::object();
+            error.data["outcome"] = "unknown_outcome";
+            error.data["route_quarantine"] = true;
+            ipc->disconnect();
+        }
+        return liveError(error, session);
+    }
+    json response = result.value().is_object()
+                        ? result.value()
+                        : json{{"result", result.value()}};
+    response["execution_mode"] = "live";
+    response["session"] = session.has_value() ? session->toJson() : json(nullptr);
+    return CallToolResult::successJson(response);
 }
 
 } // namespace
 
 CallToolResult handleRuntimeListSessions(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions) {
-    if (!sessions) return CallToolResult::error("Runtime session management is unavailable.");
+    if (!sessions) return sessionError(Error::notConnected("Runtime session management is unavailable"), sessions);
     std::optional<std::string> project_path;
     if (args.contains("project_path")) {
-        if (!args["project_path"].is_string()) return CallToolResult::error("project_path must be a string.");
+        if (!args["project_path"].is_string()) {
+            return sessionError(Error::invalidArgument("project_path must be a string"), sessions);
+        }
         project_path = args["project_path"].get<std::string>();
     }
     auto result = sessions->listSessions(project_path);
-    return result.isOk() ? localSessionSuccess(result.value()) : sessionError(result.error());
+    return result.isOk() ? localSessionSuccess(result.value()) : sessionError(result.error(), sessions);
 }
 
 CallToolResult handleRuntimeAttachSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions) {
-    if (!sessions) return CallToolResult::error("Runtime session management is unavailable.");
+    if (!sessions) return sessionError(Error::notConnected("Runtime session management is unavailable"), sessions);
     if (!args.contains("session_id") || !args["session_id"].is_string()) {
-        return CallToolResult::error("session_id must be a string.");
+        return sessionError(Error::invalidArgument("session_id must be a string"), sessions);
     }
     const auto session_id = args["session_id"].get<std::string>();
-    if (session_id.empty()) return CallToolResult::error("session_id is required.");
+    if (session_id.empty()) return sessionError(Error::invalidArgument("session_id is required"), sessions);
     auto result = sessions->attachSession(session_id);
-    return result.isOk() ? localSessionSuccess(result.value()) : sessionError(result.error());
+    return result.isOk() ? localSessionSuccess(result.value()) : sessionError(result.error(), sessions);
 }
 
 CallToolResult handleRuntimeDetachSession(const json&, std::shared_ptr<runtime::IRuntimeSessionClient> sessions) {
-    if (!sessions) return CallToolResult::error("Runtime session management is unavailable.");
+    if (!sessions) return sessionError(Error::notConnected("Runtime session management is unavailable"), sessions);
     auto result = sessions->detachSession();
-    return result.isOk() ? localSessionSuccess(result.value()) : sessionError(result.error());
+    return result.isOk() ? localSessionSuccess(result.value()) : sessionError(result.error(), sessions);
 }
 
 CallToolResult handleRuntimeGetSession(const json&, std::shared_ptr<runtime::IRuntimeSessionClient> sessions) {
-    if (!sessions) return CallToolResult::error("Runtime session management is unavailable.");
-    const auto active = sessions->activeSession();
-    if (!active.has_value()) return CallToolResult::error("No runtime session is attached.");
-    return localSessionSuccess({{"session", active->toJson()}, {"connected", sessions->isConnected()}});
+    if (!sessions) return sessionError(Error::notConnected("Runtime session management is unavailable"), sessions);
+    auto result = sessions->refreshSession();
+    return result.isOk() ? localSessionSuccess(result.value()) : sessionError(result.error(), sessions);
 }
 
 CallToolResult handleRuntimeReadLogs(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (const auto error = validateRuntimeLogRequest(args); error.has_value()) {
-        return CallToolResult::error("Invalid runtime log request: " + *error);
+        return liveValidationError("Invalid runtime log request: " + *error, ipc);
     }
     return forwardLiveRuntime("runtime.getLogs", args, ipc);
 }
 
 CallToolResult handleRuntimeSetPaused(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object() || !args.contains("paused") || !args["paused"].is_boolean()) {
-        return CallToolResult::error("Invalid runtime pause request: paused must be a boolean.");
+        return liveValidationError("Invalid runtime pause request: paused must be a boolean", ipc);
     }
     return forwardLiveRuntime("runtime.setPaused", args, ipc);
 }
@@ -173,7 +243,8 @@ CallToolResult handleRuntimeSetPaused(const json& args, std::shared_ptr<ipc::IIp
 CallToolResult handleRuntimeStep(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object() ||
         (args.contains("frames") && !integerInRange(args["frames"], 1, 60))) {
-        return CallToolResult::error("Invalid runtime step request: frames must be an integer from 1 to 60.");
+        return liveValidationError(
+            "Invalid runtime step request: frames must be an integer from 1 to 60", ipc);
     }
     return forwardLiveRuntime("runtime.step", args, ipc);
 }
@@ -181,49 +252,54 @@ CallToolResult handleRuntimeStep(const json& args, std::shared_ptr<ipc::IIpcClie
 CallToolResult handleRuntimeStop(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object() ||
         (args.contains("exit_code") && !integerInRange(args["exit_code"], 0, 255))) {
-        return CallToolResult::error("Invalid runtime stop request: exit_code must be an integer from 0 to 255.");
+        return liveValidationError(
+            "Invalid runtime stop request: exit_code must be an integer from 0 to 255", ipc);
     }
     return forwardLiveRuntime("runtime.stop", args, ipc);
 }
 
 CallToolResult handleRuntimeGetTree(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object()) {
-        return CallToolResult::error("Invalid runtime tree request: params must be an object.");
+        return liveValidationError("Invalid runtime tree request: params must be an object", ipc);
     }
     if (args.contains("root_path")) {
         if (!args["root_path"].is_string()) {
-            return CallToolResult::error("Invalid runtime tree request: root_path must be a string.");
+            return liveValidationError(
+                "Invalid runtime tree request: root_path must be a string", ipc);
         }
         if (const auto error = validateRuntimePath(args["root_path"].get<std::string>()); error.has_value()) {
-            return CallToolResult::error("Invalid runtime tree request: " + *error + ".");
+            return liveValidationError("Invalid runtime tree request: " + *error, ipc);
         }
     }
     if (args.contains("max_depth") && !integerInRange(args["max_depth"], 0, 16)) {
-        return CallToolResult::error("Invalid runtime tree request: max_depth must be an integer from 0 to 16.");
+        return liveValidationError(
+            "Invalid runtime tree request: max_depth must be an integer from 0 to 16", ipc);
     }
     return forwardLiveRuntime("runtime.getTree", args, ipc);
 }
 
 CallToolResult handleEvalGdscript(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object() || !args.contains("expression") || !args["expression"].is_string()) {
-        return CallToolResult::error("Invalid expression request: expression is required and must be a string.");
+        return liveValidationError(
+            "Invalid expression request: expression is required and must be a string", ipc);
     }
     const auto policy = godot::ExpressionPolicy::validate(args["expression"].get<std::string>());
     if (policy.isErr()) {
-        return CallToolResult::error("Invalid expression request: " + policy.error().message + ".");
+        return liveValidationError("Invalid expression request: " + policy.error().message, ipc);
     }
     if (args.contains("context_node")) {
         if (!args["context_node"].is_string()) {
-            return CallToolResult::error("Invalid expression request: context_node must be a string.");
+            return liveValidationError(
+                "Invalid expression request: context_node must be a string", ipc);
         }
         if (const auto error = validateExpressionContextPath(
                 args["context_node"].get<std::string>()); error.has_value()) {
-            return CallToolResult::error("Invalid expression request: " + *error + ".");
+            return liveValidationError("Invalid expression request: " + *error, ipc);
         }
     }
     if (args.contains("timeout_ms") && !integerInRange(args["timeout_ms"], 1, 5000)) {
-        return CallToolResult::error(
-            "Invalid expression request: timeout_ms must be an integer from 1 to 5000.");
+        return liveValidationError(
+            "Invalid expression request: timeout_ms must be an integer from 1 to 5000", ipc);
     }
     return forwardLiveRuntime("runtime.evalGdscript", args, ipc);
 }

@@ -11,18 +11,44 @@
 namespace didi {
 namespace mcp {
 
+static bool liveAllowedFor(const std::string& identifier, bool resource,
+                           const std::string& session_kind) {
+    if (resource) {
+        if (identifier == "godot://runtime/logs") return session_kind == "editor" || session_kind == "game";
+        return session_kind == "editor";
+    }
+    if (identifier == "runtime_set_paused" || identifier == "runtime_step" ||
+        identifier == "runtime_stop") {
+        return session_kind == "game";
+    }
+    if (identifier == "runtime_read_logs" || identifier == "runtime_get_tree" ||
+        identifier == "eval_gdscript") {
+        return session_kind == "editor" || session_kind == "game";
+    }
+    return session_kind == "editor";
+}
+
 static void addCurrentAvailability(json& definition, const ExecutionCapability& capability,
-                                   bool editor_connected) {
+                                   bool connected, const std::optional<std::string>& session_kind,
+                                   bool resource = false) {
     const auto has_mode = [&](const std::string& mode) {
         return std::find(capability.modes.begin(), capability.modes.end(), mode) != capability.modes.end();
     };
+    const auto identifier = definition.value(resource ? "uri" : "name", "");
+    const auto effective_kind = session_kind.value_or(connected ? "editor" : "");
+    const bool live_available = connected && has_mode("live") &&
+                                liveAllowedFor(identifier, resource, effective_kind);
     std::string current_mode = "unavailable";
     if (!capability.implemented) current_mode = "unimplemented";
-    else if (editor_connected && has_mode("live")) current_mode = "live";
+    else if (live_available) current_mode = "live";
+    // Tool handlers prefer a connected transport over their offline fallback. On a live route of
+    // the wrong kind, advertising that fallback would promise execution the handler cannot take.
+    else if (!resource && connected && has_mode("live")) current_mode = "unavailable";
     else if (has_mode("offline_fallback")) current_mode = "offline_fallback";
     definition["_meta"]["didi"]["currentMode"] = current_mode;
-    definition["_meta"]["didi"]["liveAvailable"] = editor_connected && has_mode("live");
-    definition["_meta"]["didi"]["editorConnected"] = editor_connected;
+    definition["_meta"]["didi"]["liveAvailable"] = live_available;
+    definition["_meta"]["didi"]["editorConnected"] = connected && effective_kind == "editor";
+    if (!effective_kind.empty()) definition["_meta"]["didi"]["sessionKind"] = effective_kind;
 }
 
 McpServer::McpServer() {
@@ -50,9 +76,6 @@ void McpServer::setIpcClient(std::shared_ptr<ipc::IIpcClient> ipc_client) {
     m_ipcClient = ipc_client;
     m_runtimeSessionClient = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(m_ipcClient);
     ToolRegistry::instance().setIpcClient(m_ipcClient);
-    if (m_runtimeSessionClient) {
-        ToolRegistry::instance().setRuntimeSessionClient(m_runtimeSessionClient);
-    }
     ResourceRegistry::instance().setIpcClient(m_ipcClient);
 }
 
@@ -121,10 +144,15 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     if (req.method == "tools/list") {
         auto tools = ToolRegistry::instance().listTools();
         json tool_list = json::array();
-        const bool editor_connected = m_ipcClient && m_ipcClient->isConnected();
+        const bool connected = m_ipcClient && m_ipcClient->isConnected();
+        const auto active = m_runtimeSessionClient ? m_runtimeSessionClient->activeSession()
+                                                   : std::optional<runtime::SessionDescriptor>{};
+        const auto session_kind = active.has_value()
+                                      ? std::optional<std::string>(active->kind)
+                                      : std::optional<std::string>{};
         for (const auto& t : tools) {
             json definition = t.toJson();
-            addCurrentAvailability(definition, t.capability, editor_connected);
+            addCurrentAvailability(definition, t.capability, connected, session_kind);
             tool_list.push_back(std::move(definition));
         }
         return JsonRpcResponse::makeSuccess(req.id, {{"tools", tool_list}});
@@ -149,10 +177,15 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     if (req.method == "resources/list") {
         auto resources = ResourceRegistry::instance().listResources();
         json res_list = json::array();
-        const bool editor_connected = m_ipcClient && m_ipcClient->isConnected();
+        const bool connected = m_ipcClient && m_ipcClient->isConnected();
+        const auto active = m_runtimeSessionClient ? m_runtimeSessionClient->activeSession()
+                                                   : std::optional<runtime::SessionDescriptor>{};
+        const auto session_kind = active.has_value()
+                                      ? std::optional<std::string>(active->kind)
+                                      : std::optional<std::string>{};
         for (const auto& r : resources) {
             json definition = r.toJson();
-            addCurrentAvailability(definition, r.capability, editor_connected);
+            addCurrentAvailability(definition, r.capability, connected, session_kind, true);
             res_list.push_back(std::move(definition));
         }
         return JsonRpcResponse::makeSuccess(req.id, {{"resources", res_list}});

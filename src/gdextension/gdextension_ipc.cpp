@@ -1,5 +1,6 @@
 #include "didi/gdextension/gdextension_ipc.hpp"
 #include "didi/gdextension/editor_hook.hpp"
+#include "didi/gdextension/runtime_request_router.hpp"
 #include "didi/common/logger.hpp"
 
 namespace didi {
@@ -51,13 +52,11 @@ bool GDExtensionIpc::start(const std::string& kind, const std::string& project_p
         json params = sanitized.value("params", json::object());
 
         if (method == "session.handshake") {
-            DIDI_LOG_INFO("GDEXT_IPC", "Authenticated runtime session handshake completed");
-            return {{"status", "ok"},
-                    {"session_id", session->session_id},
-                    {"protocol_version", session->protocol_version},
-                    {"kind", session->kind},
-                    {"project_path", session->project_path},
-                    {"pid", session->pid}};
+            auto response = handleSessionHandshake(params, *session);
+            if (!response.contains("error")) {
+                DIDI_LOG_INFO("GDEXT_IPC", "Authenticated runtime session handshake completed");
+            }
+            return response;
         }
 
         DIDI_LOG_INFO("GDEXT_IPC", "Live command started: ", method);
@@ -65,41 +64,13 @@ bool GDExtensionIpc::start(const std::string& kind, const std::string& project_p
         // Forward to EditorHook to execute safely on Godot's Main Thread
         auto ticket = EditorHook::instance().postCommand(method, params);
 
-        auto status = ticket.response.wait_for(std::chrono::seconds(15));
-        if (status == std::future_status::ready) {
-            auto response = ticket.response.get();
-            if (response.contains("error")) {
-                EditorHook::instance().runtimeLogs().append("error", "GDEXT_IPC", "Live command failed",
-                                                            {{"method", method}, {"code", response["error"].value("code", 500)}});
-            } else {
-                DIDI_LOG_INFO("GDEXT_IPC", "Live command completed: ", method);
-            }
-            if (method == "runtime.getLogs" && !response.contains("error")) {
-                response["session"] = session->toJson();
-            }
-            return response;
-        }
-
-        if (ticket.control && ticket.control->tryCancelPending()) {
-            if (ticket.response_promise && ticket.control->tryClaimResponse()) {
-                ticket.response_promise->set_value(
-                    {{"error", {{"code", 504}, {"message", "Main thread command timed out before execution"}}}});
-            }
-            DIDI_LOG_ERROR("GDEXT_IPC", "Command timed out on main thread: ", method);
-            return ticket.response.get();
-        }
-
-        DIDI_LOG_WARN("GDEXT_IPC", "Command exceeded timeout after execution started; waiting for definitive result: ", method);
-        ticket.response.wait();
-        auto response = ticket.response.get();
+        auto response = awaitRuntimeCommand(std::move(ticket), method, *session,
+                                            std::chrono::seconds(15));
         if (response.contains("error")) {
             EditorHook::instance().runtimeLogs().append("error", "GDEXT_IPC", "Live command failed",
                                                         {{"method", method}, {"code", response["error"].value("code", 500)}});
         } else {
             DIDI_LOG_INFO("GDEXT_IPC", "Live command completed: ", method);
-        }
-        if (method == "runtime.getLogs" && !response.contains("error")) {
-            response["session"] = session->toJson();
         }
         return response;
     });

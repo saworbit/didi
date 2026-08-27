@@ -35,6 +35,7 @@ set(CORE_SOURCES
     src/runtime/session_client.cpp
     src/gdextension/session_host.cpp
     src/gdextension/runtime_log.cpp
+    src/gdextension/runtime_request_router.cpp
     src/gdextension/expression_sandbox.cpp
     src/offline/gdscript_diagnostics.cpp
     src/offline/resource_indexer.cpp
@@ -95,6 +96,7 @@ set(TEST_SOURCES
     tests/test_jsonrpc.cpp
     tests/test_ipc.cpp
     tests/test_runtime_sessions.cpp
+    tests/test_runtime_routing.cpp
     tests/test_runtime_logs.cpp
     tests/test_expression_sandbox.cpp
     tests/test_tools.cpp

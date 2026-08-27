@@ -9,6 +9,43 @@
 namespace didi {
 namespace mcp {
 
+namespace {
+
+std::optional<runtime::SessionDescriptor> selectedSession(
+    const std::shared_ptr<ipc::IIpcClient>& ipc_client) {
+    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc_client);
+    return sessions ? sessions->activeSession() : std::optional<runtime::SessionDescriptor>{};
+}
+
+bool editorRouteAvailable(const std::shared_ptr<ipc::IIpcClient>& ipc_client) {
+    if (!ipc_client || !ipc_client->isConnected()) return false;
+    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc_client);
+    if (!sessions) return true; // Legacy injected/fixed-pipe routes are editor routes.
+    const auto selected = sessions->activeSession();
+    return selected.has_value() && selected->kind == "editor";
+}
+
+json liveResourcePayload(json payload, const std::optional<runtime::SessionDescriptor>& session) {
+    if (!payload.is_object()) payload = {{"result", std::move(payload)}};
+    payload["execution_mode"] = "live";
+    payload["session"] = session.has_value() ? session->toJson() : json(nullptr);
+    return payload;
+}
+
+Error liveResourceError(const Error& error,
+                        const std::optional<runtime::SessionDescriptor>& session,
+                        const std::string& context) {
+    json engine_data = error.data.is_object() ? error.data : json::object();
+    if (!error.data.is_null() && !error.data.is_object()) engine_data["details"] = error.data;
+    return Error(error.code, context + error.message,
+                 {{"execution_mode", "live"},
+                  {"session", session.has_value() ? session->toJson() : json(nullptr)},
+                  {"error", {{"code", error.code}, {"message", error.message},
+                             {"data", std::move(engine_data)}}}});
+}
+
+} // namespace
+
 ResourceRegistry& ResourceRegistry::instance() {
     static ResourceRegistry s_instance;
     return s_instance;
@@ -89,12 +126,14 @@ void ResourceRegistry::registerAllDefaultResources() {
     editor_state.description = "Connection state and active edited-scene root when live, or an explicit offline status.";
     editor_state.mimeType = "application/json";
     editor_state.readHandler = [this]() -> Result<std::string> {
-        if (m_ipcClient && m_ipcClient->isConnected()) {
+        if (editorRouteAvailable(m_ipcClient)) {
+            const auto session = selectedSession(m_ipcClient);
             auto res = m_ipcClient->sendRequest("editor.getState", {}, ipc::kWaitForDefinitiveResponse);
             if (res.isOk()) {
-                return res.value().dump(2);
+                return liveResourcePayload(res.value(), session).dump(2);
             }
-            return Error::internal("Failed to retrieve editor state: " + res.error().message);
+            return liveResourceError(res.error(), session,
+                                     "Failed to retrieve editor state: ");
         }
         json offline_state = {
             {"status", "offline"},
@@ -114,19 +153,43 @@ void ResourceRegistry::registerAllDefaultResources() {
     runtime_logs.mimeType = "application/json";
     runtime_logs.readHandler = [this]() -> Result<std::string> {
         if (m_ipcClient && m_ipcClient->isConnected()) {
-            auto res = m_ipcClient->sendRequest("runtime.getLogs", {}, ipc::kWaitForDefinitiveResponse);
+            const auto session = selectedSession(m_ipcClient);
+            constexpr int kEndToEndLiveDeadlineMs = 17000;
+            auto res = m_ipcClient->sendRequest("runtime.getLogs", {}, kEndToEndLiveDeadlineMs);
             if (res.isOk()) {
-                return res.value().dump(2);
+                return liveResourcePayload(res.value(), session).dump(2);
             }
-            return Error(res.error().code, "Failed to retrieve live runtime logs: " + res.error().message,
-                         {{"execution_mode", "live"},
-                          {"error", {{"code", res.error().code}, {"message", res.error().message}}}});
+            auto error = res.error();
+            const bool explicit_quarantine = error.data.is_object() &&
+                error.data.value("route_quarantine", false);
+            const bool known_transport_timeout = error.code == 500 &&
+                (error.message.rfind("Timeout waiting for response", 0) == 0 ||
+                 error.message.rfind("Failed or timed out reading response", 0) == 0 ||
+                 error.message.rfind("Failed or timed out writing to", 0) == 0);
+            const bool transport_deadline =
+                (error.code == 504 || known_transport_timeout) &&
+                (!error.data.is_object() || !error.data.contains("outcome"));
+            if (explicit_quarantine || transport_deadline) {
+                if (transport_deadline) error.code = 504;
+                if (!error.data.is_object()) error.data = json::object();
+                error.data["outcome"] = "unknown_outcome";
+                error.data["route_quarantine"] = true;
+                const auto wrapped = liveResourceError(
+                    error, session, "Failed to retrieve live runtime logs: ");
+                m_ipcClient->disconnect();
+                return wrapped;
+            }
+            return liveResourceError(error, session,
+                                     "Failed to retrieve live runtime logs: ");
         }
         const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(m_ipcClient);
         if (sessions && sessions->activeSession().has_value()) {
             return Error(503, "Selected runtime session is disconnected while reading live runtime logs",
                          {{"execution_mode", "live"},
-                          {"error", {{"code", 503}, {"message", "Selected runtime session is disconnected"}}}});
+                          {"session", sessions->activeSession()->toJson()},
+                          {"error", {{"code", 503},
+                                     {"message", "Selected runtime session is disconnected"},
+                                     {"data", json::object()}}}});
         }
         const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
