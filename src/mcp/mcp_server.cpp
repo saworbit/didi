@@ -21,9 +21,22 @@ static bool liveAllowedFor(const std::string& identifier, bool resource,
     return runtime::allowsSessionKind(runtime::livePolicyForTool(identifier), session_kind);
 }
 
+static bool managedRouteUnavailable(const std::shared_ptr<ipc::IIpcClient>& client,
+                                    bool connected) {
+    if (connected ||
+        !std::dynamic_pointer_cast<runtime::IRuntimeRouteLeaseProvider>(client)) {
+        return false;
+    }
+    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(client);
+    if (!sessions) return true;
+    const auto selected = sessions->activeSession();
+    return !selected.has_value() ||
+           runtime::SessionDescriptor::fromJson(selected->toJson(true)).isErr();
+}
+
 static void addCurrentAvailability(json& definition, const ExecutionCapability& capability,
                                    bool connected, const std::optional<std::string>& session_kind,
-                                   bool resource = false) {
+                                   bool resource = false, bool managed_unavailable = false) {
     const auto has_mode = [&](const std::string& mode) {
         return std::find(capability.modes.begin(), capability.modes.end(), mode) != capability.modes.end();
     };
@@ -36,7 +49,7 @@ static void addCurrentAvailability(json& definition, const ExecutionCapability& 
     else if (live_available) current_mode = "live";
     // A connected route of the wrong kind is an authoritative live selection, not an invitation
     // to silently run an offline fallback. This applies equally to tools and resources.
-    else if (connected && has_mode("live")) current_mode = "unavailable";
+    else if ((connected || managed_unavailable) && has_mode("live")) current_mode = "unavailable";
     else if (has_mode("offline_fallback")) current_mode = "offline_fallback";
     definition["_meta"]["didi"]["currentMode"] = current_mode;
     definition["_meta"]["didi"]["liveAvailable"] = live_available;
@@ -139,6 +152,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         json tool_list = json::array();
         const auto lease = runtime::acquireRuntimeRouteLease(m_ipcClient);
         const bool connected = lease.has_value();
+        const bool managed_unavailable = managedRouteUnavailable(m_ipcClient, connected);
         const auto active = lease.has_value()
                                 ? lease->descriptor
                                 : std::optional<runtime::SessionDescriptor>{};
@@ -147,7 +161,8 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                                       : std::optional<std::string>{};
         for (const auto& t : tools) {
             json definition = t.toJson();
-            addCurrentAvailability(definition, t.capability, connected, session_kind);
+            addCurrentAvailability(definition, t.capability, connected, session_kind, false,
+                                   managed_unavailable);
             tool_list.push_back(std::move(definition));
         }
         return JsonRpcResponse::makeSuccess(req.id, {{"tools", tool_list}});
@@ -174,6 +189,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         json res_list = json::array();
         const auto lease = runtime::acquireRuntimeRouteLease(m_ipcClient);
         const bool connected = lease.has_value();
+        const bool managed_unavailable = managedRouteUnavailable(m_ipcClient, connected);
         const auto active = lease.has_value()
                                 ? lease->descriptor
                                 : std::optional<runtime::SessionDescriptor>{};
@@ -182,7 +198,8 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                                       : std::optional<std::string>{};
         for (const auto& r : resources) {
             json definition = r.toJson();
-            addCurrentAvailability(definition, r.capability, connected, session_kind, true);
+            addCurrentAvailability(definition, r.capability, connected, session_kind, true,
+                                   managed_unavailable);
             res_list.push_back(std::move(definition));
         }
         return JsonRpcResponse::makeSuccess(req.id, {{"resources", res_list}});

@@ -14,7 +14,17 @@ namespace {
 std::optional<runtime::SessionDescriptor> selectedSession(
     const std::shared_ptr<ipc::IIpcClient>& ipc_client) {
     const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc_client);
-    return sessions ? sessions->activeSession() : std::optional<runtime::SessionDescriptor>{};
+    if (!sessions) return std::nullopt;
+    const auto selected = sessions->activeSession();
+    if (!selected.has_value() ||
+        runtime::SessionDescriptor::fromJson(selected->toJson(true)).isErr()) {
+        return std::nullopt;
+    }
+    return selected;
+}
+
+bool isManagedRuntimeRoute(const std::shared_ptr<ipc::IIpcClient>& ipc_client) {
+    return std::dynamic_pointer_cast<runtime::IRuntimeRouteLeaseProvider>(ipc_client) != nullptr;
 }
 
 json liveResourcePayload(json payload, const std::optional<runtime::SessionDescriptor>& session) {
@@ -157,6 +167,12 @@ void ResourceRegistry::registerAllDefaultResources() {
             return liveResourceError(error, session,
                                      "Failed to retrieve editor state: ");
         }
+        if (isManagedRuntimeRoute(m_ipcClient)) {
+            return liveResourceError(
+                Error::notConnected(
+                    "No authenticated runtime route is available for live resource dispatch"),
+                selectedSession(m_ipcClient), "");
+        }
         json offline_state = {
             {"status", "offline"},
             {"editor_connected", false},
@@ -212,14 +228,11 @@ void ResourceRegistry::registerAllDefaultResources() {
             return liveResourceError(error, session,
                                      "Failed to retrieve live runtime logs: ");
         }
-        const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(m_ipcClient);
-        if (sessions && sessions->activeSession().has_value()) {
-            return Error(503, "Selected runtime session is disconnected while reading live runtime logs",
-                         {{"execution_mode", "live"},
-                          {"session", sessions->activeSession()->toJson()},
-                          {"error", {{"code", 503},
-                                     {"message", "Selected runtime session is disconnected"},
-                                     {"data", json::object()}}}});
+        if (isManagedRuntimeRoute(m_ipcClient)) {
+            return liveResourceError(
+                Error::notConnected(
+                    "No authenticated runtime route is available for live resource dispatch"),
+                selectedSession(m_ipcClient), "");
         }
         const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();

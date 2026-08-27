@@ -1082,9 +1082,10 @@ std::optional<RuntimeRouteLease> acquireRuntimeRouteLease(
     const auto provider = std::dynamic_pointer_cast<IRuntimeRouteLeaseProvider>(router);
     if (provider) {
         auto lease = provider->acquireRouteLease();
-        if (!lease.has_value() || !lease->client) return std::nullopt;
-        if (lease->descriptor.has_value() &&
-            SessionDescriptor::fromJson(lease->descriptor->toJson(true)).isErr()) {
+        if (!lease.has_value() || !lease->client || !lease->descriptor.has_value()) {
+            return std::nullopt;
+        }
+        if (SessionDescriptor::fromJson(lease->descriptor->toJson(true)).isErr()) {
             return std::nullopt;
         }
         return lease;

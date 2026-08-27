@@ -1107,6 +1107,72 @@ void test_provider_only_routes_are_kind_gated_and_fail_closed() {
     registry.setIpcClient(nullptr);
 }
 
+void test_descriptorless_provider_routes_are_unauthenticated_and_unavailable() {
+    // Break caught: provider-only leases could dispatch without authoritative session identity.
+    auto route = std::make_shared<ProviderOnlyFake>(std::nullopt);
+    ASSERT_FALSE(didi::runtime::acquireRuntimeRouteLease(route).has_value());
+
+    auto& tools = didi::mcp::ToolRegistry::instance();
+    tools.registerAllDefaultTools();
+    tools.setIpcClient(route);
+    const auto tool_result = tools.callTool(
+        "scene_instantiate_node", {{"node_type", "Node"}});
+    ASSERT_TRUE(tool_result.isError);
+    ASSERT_EQ(payload(tool_result)["error"]["code"], 503);
+    ASSERT_EQ(route->requests, 0);
+    tools.setIpcClient(nullptr);
+
+    auto& resources = didi::mcp::ResourceRegistry::instance();
+    resources.registerAllDefaultResources();
+    resources.setIpcClient(route);
+    const auto editor_state = resources.readResource("godot://editor/state");
+    ASSERT_TRUE(editor_state.isErr());
+    ASSERT_EQ(editor_state.error().code, 503);
+    ASSERT_EQ(editor_state.error().data["execution_mode"], "live");
+    ASSERT_TRUE(editor_state.error().data["session"].is_null());
+    ASSERT_EQ(editor_state.error().data["error"]["code"], 503);
+    ASSERT_EQ(route->requests, 0);
+    resources.setIpcClient(nullptr);
+
+    didi::mcp::McpServer server;
+    server.setIpcClient(route);
+    didi::mcp::JsonRpcRequest initialize;
+    initialize.id = 32;
+    initialize.method = "initialize";
+    initialize.params = didi::json::object();
+    ASSERT_FALSE(server.handleRequest(initialize).error.has_value());
+    const auto list_metadata = [&](const std::string& method, const std::string& collection,
+                                   const std::string& key, const std::string& value) {
+        didi::mcp::JsonRpcRequest request;
+        request.id = 33;
+        request.method = method;
+        request.params = didi::json::object();
+        const auto response = server.handleRequest(request);
+        ASSERT_FALSE(response.error.has_value());
+        ASSERT_TRUE(response.result.contains(collection));
+        for (const auto& definition : response.result[collection]) {
+            if (definition.contains(key) && definition[key].is_string() &&
+                definition[key].get<std::string>() == value) {
+                return definition["_meta"]["didi"];
+            }
+        }
+        throw std::runtime_error("Expected advertised definition was not found in " + method);
+    };
+    const auto tool_meta = list_metadata(
+        "tools/list", "tools", "name", "scene_instantiate_node");
+    ASSERT_EQ(tool_meta["currentMode"], "unavailable");
+    ASSERT_EQ(tool_meta["liveAvailable"], false);
+    ASSERT_EQ(tool_meta["editorConnected"], false);
+    ASSERT_FALSE(tool_meta.contains("sessionKind"));
+    const auto resource_meta = list_metadata(
+        "resources/list", "resources", "uri", "godot://editor/state");
+    ASSERT_EQ(resource_meta["currentMode"], "unavailable");
+    ASSERT_EQ(resource_meta["liveAvailable"], false);
+    ASSERT_EQ(resource_meta["editorConnected"], false);
+    ASSERT_FALSE(resource_meta.contains("sessionKind"));
+    ASSERT_EQ(route->requests, 0);
+}
+
 void test_nested_offline_call_cannot_inherit_outer_route_lease() {
     // Break caught: nested no-lease calls saw the outer ToolRegistry TLS lease frame.
     auto& registry = didi::mcp::ToolRegistry::instance();
@@ -1275,6 +1341,8 @@ struct RegisterRuntimeRoutingTests {
                      test_descriptorless_session_lease_fails_closed);
         registerTest("RuntimeRouting.ProviderOnlyRoutesAreManaged",
                      test_provider_only_routes_are_kind_gated_and_fail_closed);
+        registerTest("RuntimeRouting.DescriptorlessProviderFailsClosed",
+                     test_descriptorless_provider_routes_are_unauthenticated_and_unavailable);
         registerTest("RuntimeRouting.NestedDispatchIsolation",
                      test_nested_offline_call_cannot_inherit_outer_route_lease);
         registerTest("RuntimeRouting.WrongKindExtensionDispatch",

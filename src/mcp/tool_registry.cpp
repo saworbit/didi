@@ -139,8 +139,7 @@ Error normalizeLiveRouteError(Error error) {
     return error;
 }
 
-class LeaseDispatchClient final : public ipc::IIpcClient,
-                                  public runtime::IRuntimeRouteLeaseProvider {
+class LeaseDispatchClient : public ipc::IIpcClient {
 public:
     explicit LeaseDispatchClient(std::shared_ptr<ipc::IIpcClient> source)
         : m_source(std::move(source)),
@@ -222,12 +221,12 @@ public:
         return result;
     }
 
-    std::optional<runtime::RuntimeRouteLease> acquireRouteLease() override {
+    std::optional<runtime::RuntimeRouteLease> routeLease() {
         const auto* state = current();
         return state ? state->lease
                      : runtime::acquireRuntimeRouteLease(m_source);
     }
-    bool quarantineRoute(const runtime::RuntimeRouteLease& lease) override {
+    bool quarantineLease(const runtime::RuntimeRouteLease& lease) {
         return runtime::quarantineRuntimeRoute(m_source, lease);
     }
 
@@ -253,6 +252,28 @@ private:
 
 thread_local std::unordered_map<const LeaseDispatchClient*, std::vector<LeaseDispatchClient::BoundState>>
     LeaseDispatchClient::m_bound;
+
+class ManagedLeaseDispatchClient final : public LeaseDispatchClient,
+                                         public runtime::IRuntimeRouteLeaseProvider {
+public:
+    using LeaseDispatchClient::LeaseDispatchClient;
+
+    std::optional<runtime::RuntimeRouteLease> acquireRouteLease() override {
+        return routeLease();
+    }
+    bool quarantineRoute(const runtime::RuntimeRouteLease& lease) override {
+        return quarantineLease(lease);
+    }
+};
+
+std::shared_ptr<ipc::IIpcClient> makeLeaseDispatchClient(
+    const std::shared_ptr<ipc::IIpcClient>& source) {
+    if (!source) return {};
+    if (std::dynamic_pointer_cast<runtime::IRuntimeRouteLeaseProvider>(source)) {
+        return std::make_shared<ManagedLeaseDispatchClient>(source);
+    }
+    return std::make_shared<LeaseDispatchClient>(source);
+}
 
 CallToolResult structuredLiveToolError(const Error& error,
                                        const std::optional<runtime::SessionDescriptor>& session) {
@@ -398,9 +419,7 @@ void ToolRegistry::setIpcClient(std::shared_ptr<ipc::IIpcClient> ipc_client) {
     m_sourceIpcClient = std::move(ipc_client);
     m_runtimeSessionClient =
         std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(m_sourceIpcClient);
-    m_ipcClient = m_sourceIpcClient
-                      ? std::make_shared<LeaseDispatchClient>(m_sourceIpcClient)
-                      : std::shared_ptr<ipc::IIpcClient>{};
+    m_ipcClient = makeLeaseDispatchClient(m_sourceIpcClient);
 }
 
 std::shared_ptr<ipc::IIpcClient> ToolRegistry::getIpcClient() const {
@@ -410,9 +429,7 @@ std::shared_ptr<ipc::IIpcClient> ToolRegistry::getIpcClient() const {
 void ToolRegistry::setRuntimeSessionClient(std::shared_ptr<runtime::IRuntimeSessionClient> session_client) {
     m_runtimeSessionClient = std::move(session_client);
     m_sourceIpcClient = m_runtimeSessionClient;
-    m_ipcClient = m_sourceIpcClient
-                      ? std::make_shared<LeaseDispatchClient>(m_sourceIpcClient)
-                      : std::shared_ptr<ipc::IIpcClient>{};
+    m_ipcClient = makeLeaseDispatchClient(m_sourceIpcClient);
 }
 
 std::shared_ptr<runtime::IRuntimeSessionClient> ToolRegistry::getRuntimeSessionClient() const {
