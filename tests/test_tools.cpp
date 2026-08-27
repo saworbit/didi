@@ -131,7 +131,7 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 78u);
+    ASSERT_EQ(tools.size(), 80u);
     const std::unordered_set<std::string> legacy_names = {
         "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
         "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
@@ -143,7 +143,7 @@ static void test_tool_registry_default_tools() {
         if (legacy_names.count(tool.name) == 0) ++canonical_count;
     }
     ASSERT_EQ(legacy_names.size(), 10u);
-    ASSERT_EQ(canonical_count, 68u);
+    ASSERT_EQ(canonical_count, 70u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -190,6 +190,8 @@ static void test_tool_registry_default_tools() {
     ASSERT_TRUE(reg.getTool("resource_inspect") != nullptr);
     ASSERT_TRUE(reg.getTool("project_list_resources") != nullptr);
     ASSERT_TRUE(reg.getTool("project_get_uid_map") != nullptr);
+    ASSERT_TRUE(reg.getTool("project_search_text") != nullptr);
+    ASSERT_TRUE(reg.getTool("project_search_symbols") != nullptr);
 
     // Domain 8: Execution, Input Injection & Debugging
     ASSERT_TRUE(reg.getTool("runtime_launch") != nullptr);
@@ -227,6 +229,33 @@ static void test_tool_registry_default_tools() {
         "runtime_step", "runtime_stop", "runtime_get_tree", "eval_gdscript"
     }) {
         ASSERT_TRUE(reg.getTool(name) != nullptr);
+    }
+}
+
+static void test_project_search_public_validation_and_schema() {
+    // Break caught: public search accepts coercible/unbounded inputs or advertises a live route.
+    auto& reg = didi::mcp::ToolRegistry::instance();
+    reg.registerAllDefaultTools();
+    const auto* text = reg.getTool("project_search_text");
+    const auto* symbols = reg.getTool("project_search_symbols");
+    ASSERT_TRUE(text != nullptr);
+    ASSERT_TRUE(symbols != nullptr);
+    const auto text_json = text->toJson();
+    const auto symbols_json = symbols->toJson();
+    ASSERT_EQ(text_json["inputSchema"]["properties"]["query"]["minLength"], 1);
+    ASSERT_EQ(text_json["inputSchema"]["properties"]["query"]["maxLength"], 256);
+    ASSERT_EQ(text_json["inputSchema"]["properties"]["max_results"]["maximum"], 500);
+    ASSERT_EQ(symbols_json["inputSchema"]["properties"]["match"]["enum"],
+              didi::json::array({"exact", "prefix", "contains"}));
+    ASSERT_EQ(text_json["_meta"]["didi"]["executionModes"],
+              didi::json::array({"offline_fallback"}));
+
+    for (const auto& args : {
+        didi::json::object(), didi::json{{"query", ""}}, didi::json{{"query", 7}},
+        didi::json{{"query", "Player"}, {"max_results", 0}},
+        didi::json{{"query", "Player"}, {"extensions", didi::json::array({".md"})}}
+    }) {
+        ASSERT_TRUE(reg.callTool("project_search_text", args).isError);
     }
 }
 
@@ -648,6 +677,7 @@ static void test_symbol_extraction() {
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.DefaultRegistration", test_tool_registry_default_tools);
+        registerTest("Tools.ProjectSearchPublicValidationAndSchema", test_project_search_public_validation_and_schema);
         registerTest("McpServer.PreservesInjectedIpcClient", test_mcp_server_preserves_injected_ipc_client);
         registerTest("Tools.RuntimeSessionLocalAndValidated", test_runtime_get_session_is_local_and_attach_rejects_non_string_id);
         registerTest("Tools.RuntimeReadLogsInputValidation", test_runtime_read_logs_rejects_invalid_cursor_limit_and_level);

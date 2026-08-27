@@ -35,6 +35,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "project_get_uid_map", "runtime_launch",
         "execute_test_session", "runtime_list_sessions", "runtime_attach_session",
         "runtime_detach_session", "runtime_get_session"
+        , "project_search_text", "project_search_symbols"
     };
 
     if (live_and_offline.count(name)) {
@@ -566,6 +567,40 @@ void ToolRegistry::registerAllDefaultTools() {
             {"context_node", {{"type", "string"}, {"description", "Optional in-subtree canonical NodePath; server enforces a 1024-byte UTF-8 cap"}, {"minLength", 1}, {"maxLength", 1024}}},
             {"timeout_ms", {{"type", "integer"}, {"default", 1000}, {"minimum", 1}, {"maximum", 5000}}}
         }}, {"required", {"expression"}}}, handleEvalGdscript);
+    {
+        ToolDefinition t;
+        t.name = "project_search_text";
+        t.description = "Searches literal text in bounded project-owned .gd, .cs, .tscn, and .tres files without opening a Godot session.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"query", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256}}},
+            {"search_path", {{"type", "string"}, {"default", "res://"}, {"minLength", 6}, {"maxLength", 1024}}},
+            {"extensions", {{"type", "array"}, {"minItems", 1}, {"maxItems", 4}, {"uniqueItems", true},
+                            {"items", {{"type", "string"}, {"enum", {".gd", ".cs", ".tscn", ".tres"}}}}}},
+            {"case_sensitive", {{"type", "boolean"}, {"default", true}}},
+            {"whole_word", {{"type", "boolean"}, {"default", false}}},
+            {"max_results", {{"type", "integer"}, {"default", 100}, {"minimum", 1}, {"maximum", 500}}}
+        }}, {"required", {"query"}}};
+        t.handler = [this](const json& args) { return handleProjectSearchText(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_search_symbols";
+        t.description = "Lexically searches bounded GDScript and C# declarations without opening a Godot session.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"query", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256}}},
+            {"search_path", {{"type", "string"}, {"default", "res://"}, {"minLength", 6}, {"maxLength", 1024}}},
+            {"extensions", {{"type", "array"}, {"minItems", 1}, {"maxItems", 4}, {"uniqueItems", true},
+                            {"items", {{"type", "string"}, {"enum", {".gd", ".cs", ".tscn", ".tres"}}}}}},
+            {"case_sensitive", {{"type", "boolean"}, {"default", true}}},
+            {"max_results", {{"type", "integer"}, {"default", 100}, {"minimum", 1}, {"maximum", 500}}},
+            {"match", {{"type", "string"}, {"default", "prefix"}, {"enum", {"exact", "prefix", "contains"}}}},
+            {"kinds", {{"type", "array"}, {"minItems", 1}, {"maxItems", 6}, {"uniqueItems", true},
+                       {"items", {{"type", "string"}, {"enum", {"class", "function", "signal", "variable", "constant", "enum"}}}}}}
+        }}, {"required", {"query"}}};
+        t.handler = [this](const json& args) { return handleProjectSearchSymbols(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
     {
         ToolDefinition t;
         t.name = "scene_remove_node";
