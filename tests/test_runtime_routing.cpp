@@ -454,9 +454,15 @@ public:
             1, session_id, std::string(64, session_id.front()), currentPid(), kind,
             project.empty() ? project_path : project, endpointForSession(session_id),
             started_at_ms, "1.3"};
-        std::ofstream output(directory / (session_id + ".json"), std::ios::binary);
+        const auto descriptor_path = directory / (session_id + ".json");
+        std::ofstream output(descriptor_path, std::ios::binary);
         output << descriptor.toJson(true).dump();
         output.close();
+#if !defined(_WIN32)
+        if (chmod(descriptor_path.c_str(), S_IRUSR | S_IWUSR) != 0) {
+            throw std::runtime_error("Failed to secure runtime routing test descriptor");
+        }
+#endif
         state->by_endpoint[descriptor.endpoint] = descriptor;
         return descriptor;
     }
