@@ -4,11 +4,28 @@
 #include "didi/offline/test_runner.hpp"
 #include "didi/common/png.hpp"
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <vector>
 
 namespace didi {
 namespace mcp {
+
+namespace {
+
+bool isCaptureId(const json& value) {
+    if (!value.is_string()) return false;
+    const auto id = value.get<std::string>();
+    return id.size() == 32 && std::all_of(id.begin(), id.end(), [](unsigned char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+    });
+}
+
+CallToolResult invalidViewportDiff(const std::string& message) {
+    return CallToolResult::error("Invalid viewport diff request: " + message);
+}
+
+} // namespace
 
 CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (ipc && ipc->isConnected()) {
@@ -17,12 +34,24 @@ CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpc
             json result_data = res.value();
             std::string b64 = result_data.value("image_base64", "");
             if (!b64.empty()) {
+                if (!result_data.contains("capture_id") || !isCaptureId(result_data["capture_id"])) {
+                    return CallToolResult::error("Live viewport capture returned a missing or malformed capture_id.");
+                }
                 result_data.erase("image_base64");
                 return CallToolResult::successImage(std::move(b64), result_data.dump(2));
             }
             return CallToolResult::successJson(result_data);
         }
         return CallToolResult::error("Failed to capture viewport via Godot GDExtension: " + res.error().message);
+    }
+
+    if (args.contains("node_isolation_path")) {
+        if (!args["node_isolation_path"].is_string()) {
+            return CallToolResult::error("Invalid viewport capture request: node_isolation_path must be a string.");
+        }
+        if (!args["node_isolation_path"].get<std::string>().empty()) {
+            return CallToolResult::error("Viewport node isolation requires a live Godot editor.");
+        }
     }
 
     int width = 256;
@@ -54,6 +83,56 @@ CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpc
         {"message", "Synthesized preview only; launch Godot Editor for a live viewport frame."}
     };
     return CallToolResult::successImage(std::move(encoded), metadata.dump());
+}
+
+CallToolResult handleViewportDiffCapture(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!args.is_object()) return invalidViewportDiff("arguments must be an object");
+    if (!args.contains("baseline_capture_id") || !isCaptureId(args["baseline_capture_id"])) {
+        return invalidViewportDiff("baseline_capture_id must be exactly 32 lowercase hexadecimal characters");
+    }
+    if (args.contains("threshold")) {
+        const auto& threshold = args["threshold"];
+        const bool valid = threshold.is_number_unsigned()
+            ? threshold.get<uint64_t>() <= 255u
+            : threshold.is_number_integer() && threshold.get<int64_t>() >= 0 &&
+              threshold.get<int64_t>() <= 255;
+        if (!valid) {
+            return invalidViewportDiff("threshold must be an integer from 0 to 255");
+        }
+    }
+    if (args.contains("camera_identifier") && !args["camera_identifier"].is_string()) {
+        return invalidViewportDiff("camera_identifier must be a string");
+    }
+    if (args.contains("node_isolation_path") && !args["node_isolation_path"].is_string()) {
+        return invalidViewportDiff("node_isolation_path must be a string");
+    }
+    if (args.contains("isolation_background")) {
+        if (!args["isolation_background"].is_string()) {
+            return invalidViewportDiff("isolation_background must be a string");
+        }
+        const auto background = args["isolation_background"].get<std::string>();
+        if (background != "original" && background != "transparent") {
+            return invalidViewportDiff("isolation_background must be original or transparent");
+        }
+    }
+    if (!ipc || !ipc->isConnected()) {
+        return CallToolResult::error("Viewport diff capture requires a live Godot editor.");
+    }
+    auto res = ipc->sendRequest("vision.diffViewport", args, ::didi::ipc::kWaitForDefinitiveResponse);
+    if (res.isErr()) {
+        return CallToolResult::error("Failed to diff viewport via Godot GDExtension: " + res.error().message);
+    }
+    json result_data = res.value();
+    const std::string b64 = result_data.value("image_base64", "");
+    if (b64.empty()) {
+        return CallToolResult::error("Live viewport diff returned no PNG image.");
+    }
+    if (!result_data.contains("comparison_capture_id") ||
+        !isCaptureId(result_data["comparison_capture_id"])) {
+        return CallToolResult::error("Live viewport diff returned a missing or malformed comparison_capture_id.");
+    }
+    result_data.erase("image_base64");
+    return CallToolResult::successImage(b64, result_data.dump(2));
 }
 
 CallToolResult handleViewportSetCameraTransform(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

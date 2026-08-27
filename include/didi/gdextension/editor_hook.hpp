@@ -152,7 +152,10 @@ private:
     std::queue<EngineCommand> m_commandQueue;
     std::mutex m_queueMutex;
     std::mutex m_stepMutex;
-    std::mutex m_reimportMutex;
+    // EditorFileSystem.reimport_files can synchronously re-enter the main-loop callback.
+    // Recursive ownership keeps that same-thread observation from deadlocking while the
+    // pending request is established; cross-thread shutdown still serializes normally.
+    std::recursive_mutex m_reimportMutex;
     RuntimeStepGate m_runtimeStepGate;
     std::optional<PendingRuntimeStep> m_pendingRuntimeStep;
     std::optional<PendingAssetReimport> m_pendingAssetReimport;

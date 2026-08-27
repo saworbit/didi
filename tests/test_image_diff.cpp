@@ -85,6 +85,28 @@ void test_capture_cache_rejects_bad_ids_and_oversize_entries() {
     ASSERT_TRUE(!cache.find("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").has_value());
 }
 
+void test_restoration_guard_runs_once_on_early_exit() {
+    // Break caught: an encoding/capture error bypasses temporary editor-state restoration.
+    int restorations = 0;
+    {
+        didi::godot::RestorationGuard guard([&]() {
+            ++restorations;
+            return didi::Result<void>::ok();
+        });
+    }
+    ASSERT_EQ(restorations, 1);
+
+    {
+        didi::godot::RestorationGuard guard([&]() {
+            ++restorations;
+            return didi::Result<void>::ok();
+        });
+        ASSERT_TRUE(guard.restoreNow().isOk());
+        ASSERT_TRUE(guard.restoreNow().isOk());
+    }
+    ASSERT_EQ(restorations, 2);
+}
+
 struct RegisterImageDiffTests {
     RegisterImageDiffTests() {
         registerTest("ImageDiff.ThresholdAndBoundingBox", test_threshold_and_bounding_box);
@@ -92,6 +114,7 @@ struct RegisterImageDiffTests {
         registerTest("ImageDiff.RejectsShapeMismatchAndInvalidStorage", test_rejects_shape_mismatch_and_invalid_storage);
         registerTest("CaptureCache.LruAndByteBudget", test_capture_cache_lru_and_byte_budget);
         registerTest("CaptureCache.RejectsBadIdsAndOversizeEntries", test_capture_cache_rejects_bad_ids_and_oversize_entries);
+        registerTest("ViewportIsolation.RestorationGuard", test_restoration_guard_runs_once_on_early_exit);
     }
 } g_register_image_diff_tests;
 

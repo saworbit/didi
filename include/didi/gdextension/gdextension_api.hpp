@@ -35,6 +35,8 @@ public:
             object_method_bind_ptrcall = (GDExtensionInterfaceObjectMethodBindPtrcall)p_get_proc_address("object_method_bind_ptrcall");
             global_get_singleton = (GDExtensionInterfaceGlobalGetSingleton)p_get_proc_address("global_get_singleton");
             object_destroy = (GDExtensionInterfaceObjectDestroy)p_get_proc_address("object_destroy");
+            object_get_instance_from_id = (GDExtensionInterfaceObjectGetInstanceFromId)p_get_proc_address("object_get_instance_from_id");
+            object_get_instance_id = (GDExtensionInterfaceObjectGetInstanceId)p_get_proc_address("object_get_instance_id");
             classdb_construct_object = (GDExtensionInterfaceClassdbConstructObject2)p_get_proc_address("classdb_construct_object2");
             mem_alloc = (GDExtensionInterfaceMemAlloc)p_get_proc_address("mem_alloc");
             mem_free = (GDExtensionInterfaceMemFree)p_get_proc_address("mem_free");
@@ -80,6 +82,8 @@ public:
     GDExtensionInterfaceObjectMethodBindPtrcall object_method_bind_ptrcall{nullptr};
     GDExtensionInterfaceGlobalGetSingleton global_get_singleton{nullptr};
     GDExtensionInterfaceObjectDestroy object_destroy{nullptr};
+    GDExtensionInterfaceObjectGetInstanceFromId object_get_instance_from_id{nullptr};
+    GDExtensionInterfaceObjectGetInstanceId object_get_instance_id{nullptr};
     GDExtensionInterfaceClassdbConstructObject2 classdb_construct_object{nullptr};
     GDExtensionInterfaceMemAlloc mem_alloc{nullptr};
     GDExtensionInterfaceMemFree mem_free{nullptr};

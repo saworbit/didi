@@ -29,7 +29,7 @@ json ImageDiffResult::toJson() const {
                                       {"b", mean_absolute_error[2]},
                                       {"a", mean_absolute_error[3]}}},
             {"max_channel_delta", max_channel_delta},
-            {"changed_bounds", bounds.has_value() ? json(bounds->toJson()) : json(nullptr)},
+            {"bounding_box", bounds.has_value() ? json(bounds->toJson()) : json(nullptr)},
             {"identical", changed_pixels == 0}};
 }
 

@@ -4,6 +4,7 @@
 #include "didi/common/json.hpp"
 #include "didi/common/image_diff.hpp"
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -11,6 +12,28 @@
 
 namespace didi {
 namespace godot {
+
+class RestorationGuard {
+public:
+    explicit RestorationGuard(std::function<Result<void>()> restore)
+        : m_restore(std::move(restore)) {}
+    RestorationGuard(const RestorationGuard&) = delete;
+    RestorationGuard& operator=(const RestorationGuard&) = delete;
+    ~RestorationGuard() {
+        if (m_active && m_restore) (void)m_restore();
+    }
+
+    Result<void> restoreNow() {
+        if (!m_active) return Result<void>::ok();
+        m_active = false;
+        return m_restore ? m_restore() : Result<void>::ok();
+    }
+    void dismiss() { m_active = false; }
+
+private:
+    std::function<Result<void>()> m_restore;
+    bool m_active{true};
+};
 
 class CaptureCache {
 public:
@@ -41,6 +64,7 @@ public:
     static ViewportRenderer& instance();
 
     json captureViewport(const json& params);
+    json diffViewport(const json& params);
 
     std::string encodeImageToPngBase64(const uint8_t* rgba_data, int width, int height);
 

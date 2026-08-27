@@ -188,7 +188,7 @@ void EditorHook::scheduleAssetReimport(
         timeout_ms = params["timeout_ms"].get<int64_t>();
     }
 
-    std::lock_guard<std::mutex> lock(m_reimportMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_reimportMutex);
     if (m_pendingAssetReimport.has_value()) {
         control->markCompleted();
         fulfillCommand(promise, control,
@@ -216,7 +216,7 @@ void EditorHook::processAssetReimportFrame() {
     std::optional<PendingAssetReimport> completed;
     json response;
     {
-        std::lock_guard<std::mutex> lock(m_reimportMutex);
+        std::lock_guard<std::recursive_mutex> lock(m_reimportMutex);
         if (!m_pendingAssetReimport.has_value()) return;
         const auto now = std::chrono::steady_clock::now();
         auto scanning = GodotBridge::instance().isEditorFilesystemScanning();
@@ -381,7 +381,7 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
     }
     std::optional<PendingAssetReimport> active_reimport;
     {
-        std::lock_guard<std::mutex> lock(m_reimportMutex);
+        std::lock_guard<std::recursive_mutex> lock(m_reimportMutex);
         if (m_pendingAssetReimport.has_value()) {
             active_reimport = std::move(m_pendingAssetReimport);
             m_pendingAssetReimport.reset();
@@ -419,7 +419,18 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
     }
 
     if (method == "vision.captureViewport") {
+        if (m_sessionKind != "editor" && params.value("node_isolation_path", "") != "") {
+            return {{"error", {{"code", 409},
+                                {"message", "Viewport node isolation is unavailable in a game session"}}}};
+        }
         return ViewportRenderer::instance().captureViewport(params);
+    }
+    if (method == "vision.diffViewport") {
+        if (m_sessionKind != "editor") {
+            return {{"error", {{"code", 409},
+                                {"message", "Viewport diff capture is unavailable in a game session"}}}};
+        }
+        return ViewportRenderer::instance().diffViewport(params);
     }
     if (method == "runtime.getLogs") {
         uint64_t cursor = 0;
