@@ -1,6 +1,7 @@
 #include "didi/runtime/session_client.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cctype>
 #include <cstdlib>
@@ -17,20 +18,61 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+#include <bcrypt.h>
 #elif defined(__APPLE__)
 #include <fcntl.h>
 #include <libproc.h>
 #include <signal.h>
+#include <sys/attr.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #else
 #include <fcntl.h>
+#include <linux/fs.h>
 #include <signal.h>
+#include <sys/random.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 #endif
 
 namespace didi::runtime {
+
+namespace {
+
+std::filesystem::path absoluteLexicalPath(const std::filesystem::path& path) {
+    std::error_code error;
+    const auto absolute = path.is_absolute() ? path : std::filesystem::absolute(path, error);
+    return (error ? path : absolute).lexically_normal();
+}
+
+} // namespace
+
+Result<std::filesystem::path> resolveSessionDescriptorDirectory() {
+    const char* configured = std::getenv("DIDI_SESSION_DIR");
+    if (configured && *configured) return absoluteLexicalPath(configured);
+
+    std::error_code error;
+#if !defined(_WIN32)
+    const char* xdg_runtime = std::getenv("XDG_RUNTIME_DIR");
+    if (xdg_runtime && *xdg_runtime) {
+        const std::filesystem::path root(xdg_runtime);
+        if (!root.is_absolute()) {
+            return Error::invalidArgument("XDG_RUNTIME_DIR must be an absolute path");
+        }
+        return root.lexically_normal() / "didi-sessions";
+    }
+#endif
+    const auto temporary = std::filesystem::temp_directory_path(error);
+    if (error) {
+        return Error::internal("Unable to resolve the system temporary directory: " + error.message());
+    }
+#if defined(_WIN32)
+    return absoluteLexicalPath(temporary / "didi-sessions");
+#else
+    return absoluteLexicalPath(temporary / ("didi-sessions-" + std::to_string(geteuid())));
+#endif
+}
 
 Result<ProcessIdentity> queryProcessIdentity(uint64_t pid) {
     if (pid == 0) return Error::invalidArgument("Process identity requires a non-zero PID");
@@ -121,7 +163,7 @@ class ScopedNativeHandle {
 public:
     explicit ScopedNativeHandle(HANDLE handle) : m_handle(handle) {}
     ~ScopedNativeHandle() {
-        if (m_handle != INVALID_HANDLE_VALUE) CloseHandle(m_handle);
+        if (m_handle && m_handle != INVALID_HANDLE_VALUE) CloseHandle(m_handle);
     }
     ScopedNativeHandle(const ScopedNativeHandle&) = delete;
     ScopedNativeHandle& operator=(const ScopedNativeHandle&) = delete;
@@ -188,12 +230,244 @@ std::filesystem::path canonicalPath(const std::filesystem::path& path) {
     return ec ? path.lexically_normal() : canonical;
 }
 
-std::filesystem::path descriptorDirectory() {
-    const char* configured = std::getenv("DIDI_SESSION_DIR");
-    if (configured && *configured) return canonicalPath(configured);
-    std::error_code ec;
-    const auto temp = std::filesystem::temp_directory_path(ec);
-    return canonicalPath((ec ? std::filesystem::current_path() : temp) / "didi-sessions");
+Result<void> validateDescriptorDirectory(const std::filesystem::path& directory) {
+#if defined(_WIN32)
+    std::error_code error;
+    if (!std::filesystem::is_directory(directory, error) || error) {
+        return Error::notFound("Session descriptor directory is not readable");
+    }
+#else
+    ScopedNativeHandle directory_fd(open(directory.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+    if (directory_fd.get() < 0) {
+        return Error::notFound("Session descriptor directory is not readable");
+    }
+    struct stat info{};
+    if (fstat(directory_fd.get(), &info) != 0 || !S_ISDIR(info.st_mode) ||
+        info.st_uid != geteuid() || (info.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
+        return Error::invalidArgument("Session descriptor directory must be owner-only");
+    }
+#endif
+    return Result<void>::ok();
+}
+
+struct DescriptorFileIdentity {
+    uint64_t first{0};
+    uint64_t second{0};
+};
+
+bool operator==(const DescriptorFileIdentity& left, const DescriptorFileIdentity& right) {
+    return left.first == right.first && left.second == right.second;
+}
+
+struct OwnedDescriptorSnapshot {
+    DescriptorFileIdentity identity;
+};
+
+bool descriptorMatchesOwner(const std::string& contents, const SessionDescriptor& expected) {
+    try {
+        const auto decoded = SessionDescriptor::fromJson(json::parse(contents));
+        return decoded.isOk() && decoded.value().session_id == expected.session_id &&
+               decoded.value().token == expected.token && decoded.value().pid == expected.pid &&
+               decoded.value().started_at_ms == expected.started_at_ms;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+#if defined(_WIN32)
+Result<std::pair<std::string, DescriptorFileIdentity>> readSecureDescriptorHandle(HANDLE handle) {
+    FILE_ATTRIBUTE_TAG_INFO attributes{};
+    BY_HANDLE_FILE_INFORMATION identity{};
+    LARGE_INTEGER size{};
+    if (!GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &attributes,
+                                      sizeof(attributes)) ||
+        (attributes.FileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) != 0 ||
+        GetFileType(handle) != FILE_TYPE_DISK || !GetFileInformationByHandle(handle, &identity) ||
+        !GetFileSizeEx(handle, &size) || size.QuadPart < 0 ||
+        static_cast<uint64_t>(size.QuadPart) > kMaxDescriptorBytes) {
+        return Error::invalidArgument("Descriptor handle is not a secure regular file");
+    }
+    LARGE_INTEGER beginning{};
+    if (!SetFilePointerEx(handle, beginning, nullptr, FILE_BEGIN)) {
+        return Error::internal("Descriptor seek failed");
+    }
+    std::string contents(static_cast<size_t>(size.QuadPart), '\0');
+    size_t offset = 0;
+    while (offset < contents.size()) {
+        DWORD count = 0;
+        const auto remaining = static_cast<DWORD>(std::min<size_t>(
+            contents.size() - offset, std::numeric_limits<DWORD>::max()));
+        if (!ReadFile(handle, contents.data() + offset, remaining, &count, nullptr) || count == 0) {
+            return Error::internal("Descriptor read failed");
+        }
+        offset += count;
+    }
+    return std::make_pair(
+        std::move(contents),
+        DescriptorFileIdentity{identity.dwVolumeSerialNumber,
+                               (static_cast<uint64_t>(identity.nFileIndexHigh) << 32) |
+                                   identity.nFileIndexLow});
+}
+#else
+Result<std::pair<std::string, DescriptorFileIdentity>> readSecureDescriptorFd(int descriptor_fd) {
+    struct stat info{};
+    if (fstat(descriptor_fd, &info) != 0 || !S_ISREG(info.st_mode) ||
+        info.st_uid != geteuid() || (info.st_mode & (S_IRWXG | S_IRWXO)) != 0 ||
+        info.st_size < 0 || static_cast<uint64_t>(info.st_size) > kMaxDescriptorBytes) {
+        return Error::invalidArgument("Descriptor must be an owner-only regular file");
+    }
+    std::string contents(static_cast<size_t>(info.st_size), '\0');
+    size_t offset = 0;
+    while (offset < contents.size()) {
+        const auto count = pread(descriptor_fd, contents.data() + offset,
+                                 contents.size() - offset, static_cast<off_t>(offset));
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) return Error::internal("Descriptor read failed");
+        offset += static_cast<size_t>(count);
+    }
+    return std::make_pair(std::move(contents),
+                          DescriptorFileIdentity{static_cast<uint64_t>(info.st_dev),
+                                                 static_cast<uint64_t>(info.st_ino)});
+}
+#endif
+
+Result<OwnedDescriptorSnapshot> inspectOwnedDescriptor(
+    const std::filesystem::path& path, const SessionDescriptor& expected) {
+#if defined(_WIN32)
+    ScopedNativeHandle handle(CreateFileW(
+        path.wstring().c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+    if (handle.get() == INVALID_HANDLE_VALUE) return Error::notFound("Descriptor is not readable");
+    auto snapshot = readSecureDescriptorHandle(handle.get());
+#else
+    ScopedNativeHandle directory_fd(open(path.parent_path().c_str(),
+                                         O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+    if (directory_fd.get() < 0) return Error::notFound("Descriptor directory is not readable");
+    ScopedNativeHandle handle(openat(directory_fd.get(), path.filename().c_str(),
+                                     O_RDONLY | O_NOFOLLOW | O_CLOEXEC));
+    if (handle.get() < 0) return Error::notFound("Descriptor is not readable");
+    auto snapshot = readSecureDescriptorFd(handle.get());
+#endif
+    if (snapshot.isErr()) return snapshot.error();
+    if (!descriptorMatchesOwner(snapshot.value().first, expected)) {
+        return Error(409, "Descriptor ownership changed");
+    }
+    return OwnedDescriptorSnapshot{snapshot.value().second};
+}
+
+enum class NoReplaceMoveResult {
+    moved,
+    destination_exists,
+    failed,
+};
+
+NoReplaceMoveResult moveNoReplace(const std::filesystem::path& source,
+                                  const std::filesystem::path& destination) {
+#if defined(_WIN32)
+    if (MoveFileExW(source.wstring().c_str(), destination.wstring().c_str(), MOVEFILE_WRITE_THROUGH)) {
+        return NoReplaceMoveResult::moved;
+    }
+    const auto error = GetLastError();
+    return (error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS)
+               ? NoReplaceMoveResult::destination_exists
+               : NoReplaceMoveResult::failed;
+#elif defined(__linux__)
+    if (syscall(SYS_renameat2, AT_FDCWD, source.c_str(), AT_FDCWD, destination.c_str(),
+                RENAME_NOREPLACE) == 0) {
+        return NoReplaceMoveResult::moved;
+    }
+    return errno == EEXIST ? NoReplaceMoveResult::destination_exists
+                           : NoReplaceMoveResult::failed;
+#elif defined(__APPLE__)
+    if (renamex_np(source.c_str(), destination.c_str(), RENAME_EXCL) == 0) {
+        return NoReplaceMoveResult::moved;
+    }
+    return errno == EEXIST ? NoReplaceMoveResult::destination_exists
+                           : NoReplaceMoveResult::failed;
+#else
+    (void)source;
+    (void)destination;
+    return NoReplaceMoveResult::failed;
+#endif
+}
+
+Result<std::string> retirementNonce() {
+    std::array<uint8_t, 16> bytes{};
+#if defined(_WIN32)
+    if (BCryptGenRandom(nullptr, bytes.data(), static_cast<ULONG>(bytes.size()),
+                        BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
+        return Error::internal("Unable to generate descriptor retirement nonce");
+    }
+#elif defined(__linux__)
+    size_t offset = 0;
+    while (offset < bytes.size()) {
+        const auto count = getrandom(bytes.data() + offset, bytes.size() - offset, 0);
+        if (count > 0) offset += static_cast<size_t>(count);
+        else if (count < 0 && errno == EINTR) continue;
+        else break;
+    }
+    if (offset != bytes.size()) return Error::internal("Unable to generate descriptor retirement nonce");
+#else
+    ScopedNativeHandle random_fd(open("/dev/urandom", O_RDONLY | O_CLOEXEC));
+    if (random_fd.get() < 0) return Error::internal("Unable to generate descriptor retirement nonce");
+    size_t offset = 0;
+    while (offset < bytes.size()) {
+        const auto count = read(random_fd.get(), bytes.data() + offset, bytes.size() - offset);
+        if (count > 0) offset += static_cast<size_t>(count);
+        else if (count < 0 && errno == EINTR) continue;
+        else return Error::internal("Unable to generate descriptor retirement nonce");
+    }
+#endif
+    static constexpr char digits[] = "0123456789abcdef";
+    std::string encoded;
+    encoded.reserve(bytes.size() * 2);
+    for (const auto byte : bytes) {
+        encoded.push_back(digits[(byte >> 4) & 0x0f]);
+        encoded.push_back(digits[byte & 0x0f]);
+    }
+    return encoded;
+}
+
+bool deleteOwnedDescriptorIfSame(const std::filesystem::path& path,
+                                 const SessionDescriptor& descriptor,
+                                 const DescriptorFileIdentity& expected_identity) {
+#if defined(_WIN32)
+    ScopedNativeHandle handle(CreateFileW(
+        path.wstring().c_str(), GENERIC_READ | DELETE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+    if (handle.get() == INVALID_HANDLE_VALUE) return false;
+    const auto snapshot = readSecureDescriptorHandle(handle.get());
+    if (snapshot.isErr() || !(snapshot.value().second == expected_identity) ||
+        !descriptorMatchesOwner(snapshot.value().first, descriptor)) {
+        return false;
+    }
+    FILE_DISPOSITION_INFO disposition{};
+    disposition.DeleteFile = TRUE;
+    return SetFileInformationByHandle(handle.get(), FileDispositionInfo, &disposition,
+                                      sizeof(disposition)) != 0;
+#else
+    ScopedNativeHandle directory_fd(open(path.parent_path().c_str(),
+                                         O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+    if (directory_fd.get() < 0) return false;
+    ScopedNativeHandle handle(openat(directory_fd.get(), path.filename().c_str(),
+                                     O_RDONLY | O_NOFOLLOW | O_CLOEXEC));
+    if (handle.get() < 0) return false;
+    const auto snapshot = readSecureDescriptorFd(handle.get());
+    if (snapshot.isErr() || !(snapshot.value().second == expected_identity) ||
+        !descriptorMatchesOwner(snapshot.value().first, descriptor)) {
+        return false;
+    }
+    struct stat path_info{};
+    if (fstatat(directory_fd.get(), path.filename().c_str(), &path_info,
+                AT_SYMLINK_NOFOLLOW) != 0 ||
+        DescriptorFileIdentity{static_cast<uint64_t>(path_info.st_dev),
+                               static_cast<uint64_t>(path_info.st_ino)} != expected_identity) {
+        return false;
+    }
+    return unlinkat(directory_fd.get(), path.filename().c_str(), 0) == 0;
+#endif
 }
 
 Result<std::string> readDescriptorFromValidatedHandle(
@@ -253,8 +527,14 @@ Result<std::string> readDescriptorFromValidatedHandle(
     }
     return contents;
 #else
-    ScopedNativeHandle directory_fd(open(directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+    ScopedNativeHandle directory_fd(open(directory.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
     if (directory_fd.get() < 0) return Error::notFound("Session descriptor directory is not readable");
+    struct stat directory_info{};
+    if (fstat(directory_fd.get(), &directory_info) != 0 || !S_ISDIR(directory_info.st_mode) ||
+        directory_info.st_uid != geteuid() ||
+        (directory_info.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
+        return Error::invalidArgument("Session descriptor directory must be owner-only");
+    }
     ScopedNativeHandle descriptor_fd(openat(directory_fd.get(), path.filename().c_str(),
                                             O_RDONLY | O_NOFOLLOW | O_CLOEXEC));
     const int open_error = errno;
@@ -271,6 +551,9 @@ Result<std::string> readDescriptorFromValidatedHandle(
     }
     if (!S_ISREG(info.st_mode)) {
         return Error::invalidArgument("Descriptor must be a regular file");
+    }
+    if (info.st_uid != geteuid() || (info.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
+        return Error::invalidArgument("Descriptor must be owner-only");
     }
     if (info.st_size < 0 || static_cast<uint64_t>(info.st_size) > kMaxDescriptorBytes) {
         return Error::invalidArgument("Descriptor exceeds 64 KiB limit");
@@ -291,11 +574,40 @@ Result<std::string> readDescriptorFromValidatedHandle(
 #endif
 }
 
-bool isProcessInstanceAlive(uint64_t pid, int64_t started_at_ms) {
+enum class ProcessInstanceState {
+    alive,
+    proven_stale,
+    unverifiable,
+};
+
+ProcessInstanceState processInstanceState(uint64_t pid, int64_t started_at_ms) {
     const auto identity = queryProcessIdentity(pid);
-    return identity.isOk() &&
-           std::llabs(identity.value().started_at_ms - started_at_ms) <=
-               identity.value().resolution_ms;
+    if (identity.isOk()) {
+        return std::llabs(identity.value().started_at_ms - started_at_ms) <=
+                       identity.value().resolution_ms
+                   ? ProcessInstanceState::alive
+                   : ProcessInstanceState::proven_stale;
+    }
+#if defined(_WIN32)
+    if (pid > std::numeric_limits<DWORD>::max()) return ProcessInstanceState::proven_stale;
+    ScopedNativeHandle process(OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(pid)));
+    if (process.get() == INVALID_HANDLE_VALUE || process.get() == nullptr) {
+        return GetLastError() == ERROR_INVALID_PARAMETER ? ProcessInstanceState::proven_stale
+                                                         : ProcessInstanceState::unverifiable;
+    }
+    return WaitForSingleObject(process.get(), 0) == WAIT_OBJECT_0
+               ? ProcessInstanceState::proven_stale
+               : ProcessInstanceState::unverifiable;
+#else
+    if (pid > static_cast<uint64_t>(std::numeric_limits<pid_t>::max())) {
+        return ProcessInstanceState::proven_stale;
+    }
+    errno = 0;
+    if (kill(static_cast<pid_t>(pid), 0) != 0 && errno == ESRCH) {
+        return ProcessInstanceState::proven_stale;
+    }
+    return ProcessInstanceState::unverifiable;
+#endif
 }
 
 struct DiscoveredSession {
@@ -306,11 +618,20 @@ struct DiscoveredSession {
 std::vector<DiscoveredSession> discoverSessions(json& diagnostics,
                                                 const DescriptorOpenedHook& opened_hook) {
     std::vector<DiscoveredSession> sessions;
-    const auto directory = descriptorDirectory();
+    const auto resolved_directory = resolveSessionDescriptorDirectory();
+    if (resolved_directory.isErr()) {
+        diagnostics.push_back({{"path", ""}, {"error", resolved_directory.error().message}});
+        return sessions;
+    }
+    const auto directory = resolved_directory.value();
     std::error_code ec;
     if (!std::filesystem::exists(directory, ec)) return sessions;
-    if (ec || !std::filesystem::is_directory(directory, ec)) {
-        diagnostics.push_back({{"path", directory.string()}, {"error", "Session descriptor directory is not readable"}});
+    const auto valid_directory = validateDescriptorDirectory(directory);
+    if (ec || valid_directory.isErr()) {
+        diagnostics.push_back({{"path", directory.string()},
+                               {"error", valid_directory.isErr()
+                                             ? valid_directory.error().message
+                                             : "Session descriptor directory is not readable"}});
         return sessions;
     }
 
@@ -331,8 +652,16 @@ std::vector<DiscoveredSession> discoverSessions(json& diagnostics,
             }
             auto descriptor = decoded.value();
             descriptor.project_path = canonicalPath(descriptor.project_path).string();
-            const bool alive = isProcessInstanceAlive(descriptor.pid, descriptor.started_at_ms);
-            sessions.push_back({std::move(descriptor), alive});
+            const auto state = processInstanceState(descriptor.pid, descriptor.started_at_ms);
+            if (state == ProcessInstanceState::proven_stale) {
+                const auto retired = retireOwnedSessionDescriptor(path, descriptor);
+                if (retired != DescriptorRetirementOutcome::deleted) {
+                    diagnostics.push_back({{"path", path.string()},
+                                           {"error", "Proven-stale descriptor was retained after a cleanup collision or race"}});
+                }
+                continue;
+            }
+            sessions.push_back({std::move(descriptor), state == ProcessInstanceState::alive});
         } catch (const std::exception& error) {
             diagnostics.push_back({{"path", path.string()}, {"error", std::string("Malformed descriptor: ") + error.what()}});
         }
@@ -470,6 +799,44 @@ private:
 };
 
 } // namespace
+
+DescriptorRetirementOutcome retireOwnedSessionDescriptor(
+    const std::filesystem::path& path,
+    const SessionDescriptor& descriptor,
+    const std::function<void(const std::filesystem::path&)>& before_move,
+    const std::function<void(const std::filesystem::path&)>& after_verification) {
+    const auto active_snapshot = inspectOwnedDescriptor(path, descriptor);
+    if (active_snapshot.isErr()) {
+        return DescriptorRetirementOutcome::retained_collision_or_race;
+    }
+    constexpr size_t kRetirementAttempts = 8;
+    for (size_t attempt = 0; attempt < kRetirementAttempts; ++attempt) {
+        const auto nonce = retirementNonce();
+        if (nonce.isErr()) return DescriptorRetirementOutcome::retained_unavailable;
+        const auto retired_path = std::filesystem::path(
+            path.string() + ".didi-retired-" + descriptor.session_id + "-" + nonce.value());
+        if (before_move) before_move(retired_path);
+        const auto moved = moveNoReplace(path, retired_path);
+        if (moved == NoReplaceMoveResult::destination_exists) continue;
+        if (moved != NoReplaceMoveResult::moved) {
+            return DescriptorRetirementOutcome::retained_unavailable;
+        }
+
+        const auto retired_snapshot = inspectOwnedDescriptor(retired_path, descriptor);
+        if (retired_snapshot.isErr() ||
+            !(retired_snapshot.value().identity == active_snapshot.value().identity)) {
+            (void)moveNoReplace(retired_path, path);
+            return DescriptorRetirementOutcome::retained_collision_or_race;
+        }
+        if (after_verification) after_verification(retired_path);
+        if (deleteOwnedDescriptorIfSame(retired_path, descriptor,
+                                        active_snapshot.value().identity)) {
+            return DescriptorRetirementOutcome::deleted;
+        }
+        return DescriptorRetirementOutcome::retained_collision_or_race;
+    }
+    return DescriptorRetirementOutcome::retained_collision_or_race;
+}
 
 json SessionDescriptor::toJson(bool include_token) const {
     json value = {

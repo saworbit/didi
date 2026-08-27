@@ -16,6 +16,7 @@ struct ProcessIdentity {
 };
 
 Result<ProcessIdentity> queryProcessIdentity(uint64_t pid);
+Result<std::filesystem::path> resolveSessionDescriptorDirectory();
 
 using DescriptorOpenedHook = std::function<void(const std::filesystem::path&)>;
 
@@ -33,6 +34,18 @@ struct SessionDescriptor {
     json toJson(bool include_token = false) const;
     static Result<SessionDescriptor> fromJson(const json& value);
 };
+
+enum class DescriptorRetirementOutcome {
+    deleted,
+    retained_collision_or_race,
+    retained_unavailable,
+};
+
+DescriptorRetirementOutcome retireOwnedSessionDescriptor(
+    const std::filesystem::path& path,
+    const SessionDescriptor& descriptor,
+    const std::function<void(const std::filesystem::path&)>& before_move = {},
+    const std::function<void(const std::filesystem::path&)>& after_verification = {});
 
 class IRuntimeSessionClient : public ipc::IIpcClient {
 public:

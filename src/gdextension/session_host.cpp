@@ -14,11 +14,7 @@
 #include <cerrno>
 #include <fcntl.h>
 #if defined(__linux__)
-#include <linux/fs.h>
 #include <sys/random.h>
-#include <sys/syscall.h>
-#elif defined(__APPLE__)
-#include <sys/attr.h>
 #endif
 #include <sys/stat.h>
 #include <unistd.h>
@@ -34,12 +30,7 @@ std::filesystem::path canonicalPath(const std::filesystem::path& path) {
 }
 
 Result<std::filesystem::path> sessionDirectory() {
-    const char* configured = std::getenv("DIDI_SESSION_DIR");
-    if (configured && *configured) return canonicalPath(configured);
-    std::error_code ec;
-    const auto temp = std::filesystem::temp_directory_path(ec);
-    if (ec) return Error::internal("Unable to resolve the system temporary directory: " + ec.message());
-    return canonicalPath(temp / "didi-sessions");
+    return runtime::resolveSessionDescriptorDirectory();
 }
 
 uint64_t processId() {
@@ -123,18 +114,25 @@ Result<void> ensureDescriptorDirectory(const std::filesystem::path& directory) {
             return Error::internal("Unable to create secure session descriptor directory");
         }
     }
-    if (lstat(directory.c_str(), &status) != 0 || !S_ISDIR(status.st_mode) || S_ISLNK(status.st_mode)) {
+    const int directory_fd = open(directory.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (directory_fd < 0 || fstat(directory_fd, &status) != 0 || !S_ISDIR(status.st_mode)) {
+        if (directory_fd >= 0) close(directory_fd);
         return Error::internal("Session descriptor directory is not a real directory");
     }
     if (status.st_uid != geteuid()) {
+        close(directory_fd);
         return Error::internal("Session descriptor directory is not owned by the current user");
     }
-    if (chmod(directory.c_str(), S_IRWXU) != 0) {
+    if (fchmod(directory_fd, S_IRWXU) != 0) {
+        close(directory_fd);
         return Error::internal("Unable to restrict session descriptor directory permissions");
     }
-    if (lstat(directory.c_str(), &status) != 0 || (status.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
+    if (fstat(directory_fd, &status) != 0 || status.st_uid != geteuid() ||
+        (status.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
+        close(directory_fd);
         return Error::internal("Session descriptor directory permissions are not owner-only");
     }
+    close(directory_fd);
 #endif
     return Result<void>::ok();
 }
@@ -143,10 +141,10 @@ Result<void> writeDescriptorAtomically(const std::filesystem::path& destination,
     const auto directory = destination.parent_path();
     auto secured = ensureDescriptorDirectory(directory);
     if (secured.isErr()) return secured.error();
-    std::error_code ec;
-    const auto temporary = destination.string() + ".tmp";
     const auto contents = descriptor.dump();
 #if defined(_WIN32)
+    std::error_code ec;
+    const auto temporary = destination.string() + ".tmp";
     {
         std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
         if (!output) return Error::internal("Unable to create temporary session descriptor");
@@ -162,8 +160,25 @@ Result<void> writeDescriptorAtomically(const std::filesystem::path& destination,
         return Error::internal("Unable to atomically publish session descriptor");
     }
 #else
-    const int fd = open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, S_IRUSR | S_IWUSR);
-    if (fd < 0) return Error::internal("Unable to create temporary session descriptor");
+    const int directory_fd = open(directory.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (directory_fd < 0) return Error::internal("Unable to open secure session descriptor directory");
+    const auto temporary_name = destination.filename().string() + ".tmp";
+    const int fd = openat(directory_fd, temporary_name.c_str(),
+                          O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+                          S_IRUSR | S_IWUSR);
+    if (fd < 0) {
+        close(directory_fd);
+        return Error::internal("Unable to create temporary session descriptor");
+    }
+    struct stat descriptor_status{};
+    if (fstat(fd, &descriptor_status) != 0 || !S_ISREG(descriptor_status.st_mode) ||
+        descriptor_status.st_uid != geteuid() ||
+        (descriptor_status.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
+        close(fd);
+        unlinkat(directory_fd, temporary_name.c_str(), 0);
+        close(directory_fd);
+        return Error::internal("Temporary session descriptor is not owner-only");
+    }
     size_t offset = 0;
     while (offset < contents.size()) {
         const auto written = write(fd, contents.data() + offset, contents.size() - offset);
@@ -173,73 +188,27 @@ Result<void> writeDescriptorAtomically(const std::filesystem::path& destination,
         }
         if (written < 0 && errno == EINTR) continue;
         close(fd);
-        unlink(temporary.c_str());
+        unlinkat(directory_fd, temporary_name.c_str(), 0);
+        close(directory_fd);
         return Error::internal("Unable to write temporary session descriptor");
     }
     if (fsync(fd) != 0) {
         close(fd);
-        unlink(temporary.c_str());
+        unlinkat(directory_fd, temporary_name.c_str(), 0);
+        close(directory_fd);
         return Error::internal("Unable to sync temporary session descriptor");
     }
     close(fd);
-    if (rename(temporary.c_str(), destination.c_str()) != 0) {
-        unlink(temporary.c_str());
+    if (renameat(directory_fd, temporary_name.c_str(), directory_fd,
+                 destination.filename().c_str()) != 0) {
+        unlinkat(directory_fd, temporary_name.c_str(), 0);
+        close(directory_fd);
         return Error::internal("Unable to atomically publish session descriptor");
     }
-    const int directory_fd = open(directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (directory_fd >= 0) {
-        fsync(directory_fd);
-        close(directory_fd);
-    }
+    fsync(directory_fd);
+    close(directory_fd);
 #endif
     return Result<void>::ok();
-}
-
-bool isOwnedDescriptor(const std::filesystem::path& path, const runtime::SessionDescriptor& descriptor) {
-    std::error_code ec;
-    if (!std::filesystem::is_regular_file(path, ec) || ec) return false;
-    std::ifstream input(path, std::ios::binary);
-    if (!input) return false;
-    try {
-        auto decoded = runtime::SessionDescriptor::fromJson(json::parse(input));
-        return decoded.isOk() && decoded.value().session_id == descriptor.session_id &&
-               secureEquals(decoded.value().token, descriptor.token);
-    } catch (const std::exception&) {
-        return false;
-    }
-}
-
-enum class NoReplaceMoveResult {
-    moved,
-    destination_exists,
-    failed,
-};
-
-NoReplaceMoveResult moveNoReplace(const std::filesystem::path& source, const std::filesystem::path& destination) {
-#if defined(_WIN32)
-    if (MoveFileExA(source.string().c_str(), destination.string().c_str(), MOVEFILE_WRITE_THROUGH)) {
-        return NoReplaceMoveResult::moved;
-    }
-    const auto error = GetLastError();
-    return (error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS)
-        ? NoReplaceMoveResult::destination_exists
-        : NoReplaceMoveResult::failed;
-#elif defined(__linux__)
-    if (syscall(SYS_renameat2, AT_FDCWD, source.c_str(), AT_FDCWD, destination.c_str(), RENAME_NOREPLACE) == 0) {
-        return NoReplaceMoveResult::moved;
-    }
-    return errno == EEXIST ? NoReplaceMoveResult::destination_exists : NoReplaceMoveResult::failed;
-#elif defined(__APPLE__)
-    if (renamex_np(source.c_str(), destination.c_str(), RENAME_EXCL) == 0) {
-        return NoReplaceMoveResult::moved;
-    }
-    return errno == EEXIST ? NoReplaceMoveResult::destination_exists : NoReplaceMoveResult::failed;
-#else
-    // No portable POSIX no-replace rename exists. Retain the discoverable file rather than risk deletion.
-    (void)source;
-    (void)destination;
-    return NoReplaceMoveResult::failed;
-#endif
 }
 
 } // namespace
@@ -333,30 +302,10 @@ Result<json> SessionHost::authorize(const json& request) const {
 
 void SessionHost::stop() {
     std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_published && m_descriptor.has_value() && isOwnedDescriptor(m_descriptorPath, *m_descriptor)) {
-        constexpr size_t kRetirementAttempts = 8;
-        for (size_t attempt = 0; attempt < kRetirementAttempts; ++attempt) {
-            const auto nonce = secureRandom(16);
-            if (nonce.isErr()) break;
-            const auto retiredPath = m_descriptorPath.string() + ".didi-retired-" +
-                                     m_descriptor->session_id + "-" + lowerHex(nonce.value());
-            if (m_beforeRetirementHook) {
-                m_beforeRetirementHook(retiredPath);
-            }
-            const auto moved = moveNoReplace(m_descriptorPath, retiredPath);
-            if (moved == NoReplaceMoveResult::destination_exists) continue;
-            if (moved != NoReplaceMoveResult::moved) break;
-
-            const bool ownsRetired = isOwnedDescriptor(retiredPath, *m_descriptor);
-            if (m_afterRetiredVerificationHook) {
-                m_afterRetiredVerificationHook(retiredPath);
-            }
-            if (!ownsRetired) {
-                // Restore only if the active descriptor pathname remains vacant; otherwise retain the retired file.
-                (void)moveNoReplace(retiredPath, m_descriptorPath);
-            }
-            break;
-        }
+    if (m_published && m_descriptor.has_value()) {
+        (void)runtime::retireOwnedSessionDescriptor(
+            m_descriptorPath, *m_descriptor, m_beforeRetirementHook,
+            m_afterRetiredVerificationHook);
     }
     m_published = false;
     m_descriptor.reset();

@@ -4,6 +4,9 @@
 #include <mutex>
 #include <condition_variable>
 #include <chrono>
+#include <algorithm>
+#include <cerrno>
+#include <climits>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -561,6 +564,123 @@ private:
 #else
 
 // POSIX Domain Socket implementation
+namespace {
+
+constexpr uint32_t kMaximumFrameBytes = 128U * 1024U * 1024U;
+constexpr uint32_t kMaximumHandshakeResponseBytes = 64U * 1024U;
+constexpr int kServerFrameTimeoutMs = 5000;
+#if defined(MSG_NOSIGNAL)
+constexpr int kNoSignalSendFlag = MSG_NOSIGNAL;
+#else
+constexpr int kNoSignalSendFlag = 0;
+#endif
+
+struct MonotonicDeadline {
+    bool finite{false};
+    std::chrono::steady_clock::time_point expires_at{};
+};
+
+MonotonicDeadline deadlineAfter(int timeout_ms) {
+    if (timeout_ms < 0) return {};
+    return {true, std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms)};
+}
+
+int remainingPollMilliseconds(const MonotonicDeadline& deadline) {
+    if (!deadline.finite) return -1;
+    const auto remaining = deadline.expires_at - std::chrono::steady_clock::now();
+    if (remaining <= std::chrono::steady_clock::duration::zero()) return 0;
+    const auto rounded = std::chrono::duration_cast<std::chrono::milliseconds>(
+        remaining + std::chrono::milliseconds(1) - std::chrono::steady_clock::duration(1));
+    return static_cast<int>(std::min<int64_t>(rounded.count(), INT_MAX));
+}
+
+bool setNonblockingCloseOnExec(int socket_fd) {
+#if defined(SO_NOSIGPIPE)
+    const int enabled = 1;
+    if (setsockopt(socket_fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof(enabled)) != 0) {
+        return false;
+    }
+#endif
+    const int status_flags = fcntl(socket_fd, F_GETFL, 0);
+    if (status_flags < 0 || fcntl(socket_fd, F_SETFL, status_flags | O_NONBLOCK) < 0) {
+        return false;
+    }
+    const int descriptor_flags = fcntl(socket_fd, F_GETFD, 0);
+    return descriptor_flags >= 0 &&
+           fcntl(socket_fd, F_SETFD, descriptor_flags | FD_CLOEXEC) == 0;
+}
+
+bool waitForSocket(int socket_fd,
+                   short events,
+                   const MonotonicDeadline& deadline,
+                   const std::atomic<bool>* running = nullptr) {
+    while (!running || running->load()) {
+        const int timeout_ms = remainingPollMilliseconds(deadline);
+        if (deadline.finite && timeout_ms == 0) return false;
+
+        pollfd descriptor{socket_fd, events, 0};
+        const int result = poll(&descriptor, 1, timeout_ms);
+        if (result > 0) {
+            if ((descriptor.revents & events) != 0) return true;
+            return false;
+        }
+        if (result == 0) return false;
+        if (errno != EINTR) return false;
+    }
+    return false;
+}
+
+bool readExact(int socket_fd,
+               void* buffer,
+               size_t length,
+               const MonotonicDeadline& deadline,
+               const std::atomic<bool>* running = nullptr) {
+    auto* bytes = static_cast<uint8_t*>(buffer);
+    size_t offset = 0;
+    while (offset < length && (!running || running->load())) {
+        const ssize_t count = recv(socket_fd, bytes + offset, length - offset, 0);
+        if (count > 0) {
+            offset += static_cast<size_t>(count);
+            continue;
+        }
+        if (count == 0) return false;
+        if (errno == EINTR) continue;
+        if (errno != EAGAIN && errno != EWOULDBLOCK) return false;
+        if (!waitForSocket(socket_fd, POLLIN, deadline, running)) return false;
+    }
+    return offset == length;
+}
+
+bool writeExact(int socket_fd,
+                const void* buffer,
+                size_t length,
+                const MonotonicDeadline& deadline,
+                const std::atomic<bool>* running = nullptr) {
+    const auto* bytes = static_cast<const uint8_t*>(buffer);
+    size_t offset = 0;
+    while (offset < length && (!running || running->load())) {
+        const ssize_t count = send(socket_fd, bytes + offset, length - offset, kNoSignalSendFlag);
+        if (count > 0) {
+            offset += static_cast<size_t>(count);
+            continue;
+        }
+        if (count == 0) return false;
+        if (errno == EINTR) continue;
+        if (errno != EAGAIN && errno != EWOULDBLOCK) return false;
+        if (!waitForSocket(socket_fd, POLLOUT, deadline, running)) return false;
+    }
+    return offset == length;
+}
+
+uint32_t decodeFrameLength(const uint8_t (&header)[4]) {
+    return static_cast<uint32_t>(header[0]) |
+           (static_cast<uint32_t>(header[1]) << 8) |
+           (static_cast<uint32_t>(header[2]) << 16) |
+           (static_cast<uint32_t>(header[3]) << 24);
+}
+
+} // namespace
+
 class PosixIpcClient : public IIpcClient {
 public:
     PosixIpcClient() : m_sock(-1) {}
@@ -570,26 +690,36 @@ public:
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         m_pipeName = pipe_name;
 
-        struct sockaddr_un addr{};
+        sockaddr_un addr{};
+        if (m_pipeName.size() >= sizeof(addr.sun_path)) return false;
+
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, m_pipeName.c_str(), sizeof(addr.sun_path) - 1);
 
-        auto start = std::chrono::steady_clock::now();
+        const auto deadline = deadlineAfter(timeout_ms);
         while (true) {
             m_sock = socket(AF_UNIX, SOCK_STREAM, 0);
-            if (m_sock >= 0) {
-                if (::connect(m_sock, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+            if (m_sock >= 0 && setNonblockingCloseOnExec(m_sock)) {
+                if (::connect(m_sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
                     return true;
                 }
+                if (errno == EINPROGRESS && waitForSocket(m_sock, POLLOUT, deadline)) {
+                    int socket_error = 0;
+                    socklen_t length = sizeof(socket_error);
+                    if (getsockopt(m_sock, SOL_SOCKET, SO_ERROR, &socket_error, &length) == 0 &&
+                        socket_error == 0) {
+                        return true;
+                    }
+                }
+            }
+            if (m_sock >= 0) {
                 close(m_sock);
                 m_sock = -1;
             }
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start).count();
-            if (elapsed >= timeout_ms) {
-                return false;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            const int remaining_ms = remainingPollMilliseconds(deadline);
+            if (deadline.finite && remaining_ms == 0) return false;
+            const int retry_delay_ms = remaining_ms < 0 ? 20 : std::min(20, remaining_ms);
+            (void)poll(nullptr, 0, retry_delay_ms);
         }
     }
 
@@ -622,56 +752,29 @@ public:
             {"params", params}
         };
 
-        std::vector<uint8_t> frame = frameMessage(request_json);
-        ssize_t sent = write(m_sock, frame.data(), frame.size());
-        if (sent != (ssize_t)frame.size()) {
-            close(m_sock);
-            m_sock = -1;
-            return Error::internal("Failed to write to Unix socket");
-        }
-
-        struct pollfd pfd;
-        pfd.fd = m_sock;
-        pfd.events = POLLIN;
-
-        if (poll(&pfd, 1, timeout_ms) <= 0) {
-            close(m_sock);
-            m_sock = -1;
-            return Error::internal("Timeout waiting for Unix socket response");
+        const auto deadline = deadlineAfter(timeout_ms);
+        const std::vector<uint8_t> frame = frameMessage(request_json);
+        if (!writeExact(m_sock, frame.data(), frame.size(), deadline)) {
+            return failLocked("Failed or timed out writing to Unix socket");
         }
 
         uint8_t len_buf[4] = {0};
-        ssize_t r = read(m_sock, len_buf, 4);
-        if (r != 4) {
-            close(m_sock);
-            m_sock = -1;
-            return Error::internal("Failed to read response length from Unix socket");
+        if (!readExact(m_sock, len_buf, sizeof(len_buf), deadline)) {
+            return failLocked("Failed or timed out reading response length from Unix socket");
         }
 
-        uint32_t resp_len = (uint32_t)len_buf[0] | ((uint32_t)len_buf[1] << 8) |
-                            ((uint32_t)len_buf[2] << 16) | ((uint32_t)len_buf[3] << 24);
+        const uint32_t resp_len = decodeFrameLength(len_buf);
+        const uint32_t maximum_response = method == "session.handshake"
+            ? kMaximumHandshakeResponseBytes
+            : kMaximumFrameBytes;
 
-        if (resp_len == 0 || resp_len > 128 * 1024 * 1024) {
-            close(m_sock);
-            m_sock = -1;
-            return Error::internal("Invalid payload length from Unix socket");
+        if (resp_len == 0 || resp_len > maximum_response) {
+            return failLocked("Invalid payload length from Unix socket");
         }
 
         std::vector<char> payload(resp_len);
-        size_t total = 0;
-        while (total < resp_len) {
-            if (poll(&pfd, 1, timeout_ms) <= 0) {
-                close(m_sock);
-                m_sock = -1;
-                return Error::internal("Timeout reading full response payload from Unix socket");
-            }
-            ssize_t c = read(m_sock, payload.data() + total, resp_len - total);
-            if (c <= 0) {
-                close(m_sock);
-                m_sock = -1;
-                return Error::internal("Failed to read full response payload from Unix socket");
-            }
-            total += c;
+        if (!readExact(m_sock, payload.data(), payload.size(), deadline)) {
+            return failLocked("Failed or timed out reading response payload from Unix socket");
         }
 
         try {
@@ -682,11 +785,17 @@ public:
             }
             return resp_json.value("result", json{});
         } catch (const std::exception& e) {
-            return Error::internal(e.what());
+            return failLocked(e.what());
         }
     }
 
 private:
+    Result<json> failLocked(const std::string& message) {
+        if (m_sock >= 0) close(m_sock);
+        m_sock = -1;
+        return Error::internal(message);
+    }
+
     int m_sock{-1};
     std::string m_pipeName{kDefaultPipeName};
     mutable std::recursive_mutex m_mutex;
@@ -703,9 +812,19 @@ public:
         unlink(m_pipeName.c_str());
 
         m_listenSock = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (m_listenSock < 0) return false;
+        if (m_listenSock < 0 || !setNonblockingCloseOnExec(m_listenSock)) {
+            if (m_listenSock >= 0) close(m_listenSock);
+            m_listenSock = -1;
+            return false;
+        }
 
-        struct sockaddr_un addr{};
+        sockaddr_un addr{};
+        if (m_pipeName.size() >= sizeof(addr.sun_path)) {
+            close(m_listenSock);
+            m_listenSock = -1;
+            return false;
+        }
+
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, m_pipeName.c_str(), sizeof(addr.sun_path) - 1);
 
@@ -722,7 +841,12 @@ public:
         }
 
         // Restrict Unix domain socket permissions to owner only
-        chmod(m_pipeName.c_str(), 0600);
+        if (chmod(m_pipeName.c_str(), 0600) != 0) {
+            close(m_listenSock);
+            m_listenSock = -1;
+            unlink(m_pipeName.c_str());
+            return false;
+        }
 
         m_running.store(true);
         m_thread = std::thread(&PosixIpcServer::serverLoop, this);
@@ -736,6 +860,8 @@ public:
             close(m_listenSock);
             m_listenSock = -1;
         }
+        const int active_client = m_activeClient.exchange(-1);
+        if (active_client >= 0) shutdown(active_client, SHUT_RDWR);
         unlink(m_pipeName.c_str());
         if (m_thread.joinable()) m_thread.join();
     }
@@ -756,39 +882,27 @@ private:
             int pr = poll(&pfd, 1, 50);
             if (pr <= 0) continue;
 
-            int client = accept(m_listenSock, NULL, NULL);
+            int client = accept(m_listenSock, nullptr, nullptr);
             if (client < 0) {
                 if (!m_running.load()) break;
                 continue;
             }
-
-            struct pollfd cpfd;
-            cpfd.fd = client;
-            cpfd.events = POLLIN;
+            if (!setNonblockingCloseOnExec(client)) {
+                close(client);
+                continue;
+            }
+            m_activeClient.store(client);
 
             while (m_running.load()) {
-                int cpr = poll(&cpfd, 1, 50);
-                if (cpr < 0) break;
-                if (cpr == 0) continue;
-
+                const auto request_deadline = deadlineAfter(kServerFrameTimeoutMs);
                 uint8_t len_buf[4] = {0};
-                ssize_t r = read(client, len_buf, 4);
-                if (r != 4) break;
+                if (!readExact(client, len_buf, sizeof(len_buf), request_deadline, &m_running)) break;
 
-                uint32_t req_len = (uint32_t)len_buf[0] | ((uint32_t)len_buf[1] << 8) |
-                                  ((uint32_t)len_buf[2] << 16) | ((uint32_t)len_buf[3] << 24);
-                if (req_len == 0 || req_len > 128 * 1024 * 1024) break;
+                const uint32_t req_len = decodeFrameLength(len_buf);
+                if (req_len == 0 || req_len > kMaximumFrameBytes) break;
 
                 std::vector<char> payload(req_len);
-                size_t total = 0;
-                bool ok = true;
-                while (total < req_len) {
-                    if (poll(&cpfd, 1, 5000) <= 0) { ok = false; break; }
-                    ssize_t c = read(client, payload.data() + total, req_len - total);
-                    if (c <= 0) { ok = false; break; }
-                    total += c;
-                }
-                if (!ok) break;
+                if (!readExact(client, payload.data(), payload.size(), request_deadline, &m_running)) break;
 
                 json resp_json;
                 try {
@@ -814,13 +928,17 @@ private:
                 }
 
                 auto frame = frameMessage(resp_json);
-                write(client, frame.data(), frame.size());
+                const auto response_deadline = deadlineAfter(kServerFrameTimeoutMs);
+                if (!writeExact(client, frame.data(), frame.size(), response_deadline, &m_running)) break;
             }
+            int expected_client = client;
+            (void)m_activeClient.compare_exchange_strong(expected_client, -1);
             close(client);
         }
     }
 
     std::atomic<bool> m_running{false};
+    std::atomic<int> m_activeClient{-1};
     int m_listenSock{-1};
     std::string m_pipeName;
     std::thread m_thread;

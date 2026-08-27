@@ -15,8 +15,10 @@
 #include <windows.h>
 #elif defined(__APPLE__)
 #include <libproc.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #else
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -213,6 +215,9 @@ std::filesystem::path makeSessionDirectory() {
                            ("didi-runtime-session-test-" + std::to_string(currentProcessId()));
     std::filesystem::remove_all(directory);
     std::filesystem::create_directories(directory);
+#if !defined(_WIN32)
+    ASSERT_TRUE(chmod(directory.c_str(), S_IRWXU) == 0);
+#endif
     return directory;
 }
 
@@ -220,6 +225,10 @@ void writeDescriptor(const std::filesystem::path& directory, const std::string& 
                      const didi::json& descriptor) {
     std::ofstream output(directory / name, std::ios::binary);
     output << descriptor.dump();
+    output.close();
+#if !defined(_WIN32)
+    ASSERT_TRUE(chmod((directory / name).c_str(), S_IRUSR | S_IWUSR) == 0);
+#endif
 }
 
 void setSessionDirectory(const std::filesystem::path& directory) {
@@ -311,7 +320,7 @@ void test_session_host_publishes_atomically_and_removes_only_its_descriptor() {
     ASSERT_EQ(active_descriptor_count(), 1u);
     second.stop();
     ASSERT_EQ(active_descriptor_count(), 0u);
-    ASSERT_EQ(std::distance(std::filesystem::directory_iterator(directory), std::filesystem::directory_iterator()), 2);
+    ASSERT_TRUE(std::filesystem::is_empty(directory));
 
     clearSessionDirectory();
     std::filesystem::remove_all(directory);
@@ -444,7 +453,7 @@ void test_session_host_retirement_collision_preserves_selected_destination() {
     std::ifstream collision_input(collision_path, std::ios::binary);
     ASSERT_EQ(didi::json::parse(collision_input)["token"], std::string(64, 'a'));
     collision_input.close();
-    ASSERT_TRUE(std::filesystem::exists(retired_path));
+    ASSERT_FALSE(std::filesystem::exists(retired_path));
     ASSERT_TRUE(retired_path != collision_path);
     ASSERT_FALSE(std::filesystem::exists(directory / (descriptor->session_id + ".json")));
     clearSessionDirectory();
@@ -521,10 +530,17 @@ void test_runtime_session_discovery_ignores_retained_retirement_files() {
     setSessionDirectory(directory);
     didi::godot::SessionHost host;
     ASSERT_TRUE(host.prepare("editor", std::filesystem::current_path().string()).isOk());
+    const auto descriptor = host.descriptor();
+    ASSERT_TRUE(descriptor.has_value());
     ASSERT_TRUE(host.publish().isOk());
     std::filesystem::path retired_path;
+    auto replacement = validDescriptor(descriptor->session_id, descriptor->endpoint);
+    replacement["kind"] = descriptor->kind;
+    replacement["project_path"] = descriptor->project_path;
+    replacement["started_at_ms"] = descriptor->started_at_ms;
     host.setAfterRetiredVerificationHookForTesting([&](const std::filesystem::path& verified) {
         retired_path = verified;
+        writeDescriptor(directory, verified.filename().string(), replacement);
     });
     host.stop();
 
@@ -681,8 +697,8 @@ void test_session_discovery_does_not_treat_reused_pid_metadata_as_live() {
     auto client = didi::runtime::createRuntimeSessionClient(std::filesystem::current_path().string());
     const auto listed = client->listSessions(std::nullopt);
     ASSERT_TRUE(listed.isOk());
-    ASSERT_EQ(listed.value()["sessions"].size(), 1u);
-    ASSERT_FALSE(listed.value()["sessions"][0]["alive"].get<bool>());
+    ASSERT_TRUE(listed.value()["sessions"].empty());
+    ASSERT_FALSE(std::filesystem::exists(directory / "stale.json"));
 
     auto near_mismatch = validDescriptor(session_id, endpointFor(session_id));
     const auto [process_started_at_ms, resolution_ms] = currentProcessStartIdentity();
@@ -690,17 +706,105 @@ void test_session_discovery_does_not_treat_reused_pid_metadata_as_live() {
     writeDescriptor(directory, "near-mismatch.json", near_mismatch);
     const auto relisted = client->listSessions(std::nullopt);
     ASSERT_TRUE(relisted.isOk());
-    const auto mismatched = std::find_if(relisted.value()["sessions"].begin(),
-                                         relisted.value()["sessions"].end(),
-                                         [&](const didi::json& item) {
-                                             return item["started_at_ms"] == near_mismatch["started_at_ms"];
-                                         });
-    ASSERT_TRUE(mismatched != relisted.value()["sessions"].end());
-    ASSERT_FALSE((*mismatched)["alive"].get<bool>());
+    ASSERT_TRUE(relisted.value()["sessions"].empty());
+    ASSERT_FALSE(std::filesystem::exists(directory / "near-mismatch.json"));
 
     clearSessionDirectory();
     std::filesystem::remove_all(directory);
 }
+
+void test_session_discovery_preserves_replacement_at_proven_stale_path() {
+    // Break caught: stale cleanup retires or deletes a different descriptor that replaced the validated object.
+    const auto directory = makeSessionDirectory();
+    const auto session_id = std::string("abababababababababababababababab");
+    auto stale = validDescriptor(session_id, endpointFor(session_id));
+    stale["started_at_ms"] = 1;
+    const auto descriptor_path = directory / "stale-race.json";
+    writeDescriptor(directory, descriptor_path.filename().string(), stale);
+    setSessionDirectory(directory);
+
+    auto replacement = validDescriptor(session_id, endpointFor(session_id));
+    replacement["token"] = std::string(64, 'b');
+    bool swapped = false;
+    auto client = didi::runtime::createRuntimeSessionClient(
+        std::filesystem::current_path().string(),
+        [] { return std::make_unique<FakeIpcClient>(); },
+        [&](const std::filesystem::path& opened) {
+            if (swapped || opened != descriptor_path) return;
+            swapped = true;
+            std::filesystem::rename(opened, directory / "validated-stale.retired");
+            writeDescriptor(directory, descriptor_path.filename().string(), replacement);
+        });
+
+    const auto listed = client->listSessions(std::nullopt);
+    ASSERT_TRUE(listed.isOk());
+    ASSERT_TRUE(swapped);
+    ASSERT_TRUE(listed.value()["sessions"].empty());
+    ASSERT_TRUE(std::filesystem::exists(descriptor_path));
+    std::ifstream replacement_input(descriptor_path, std::ios::binary);
+    ASSERT_EQ(didi::json::parse(replacement_input)["token"], std::string(64, 'b'));
+    replacement_input.close();
+
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
+#if !defined(_WIN32)
+void test_session_registry_prefers_xdg_runtime_directory() {
+    // Break caught: default discovery shares a global temporary registry across Unix users.
+    const auto runtime_root = makeSessionDirectory();
+    clearSessionDirectory();
+    setenv("XDG_RUNTIME_DIR", runtime_root.c_str(), 1);
+    const auto resolved = didi::runtime::resolveSessionDescriptorDirectory();
+    ASSERT_TRUE(resolved.isOk());
+    ASSERT_EQ(resolved.value(), runtime_root / "didi-sessions");
+    unsetenv("XDG_RUNTIME_DIR");
+    std::filesystem::remove_all(runtime_root);
+}
+
+void test_session_registry_uid_qualifies_temporary_fallback() {
+    // Break caught: the no-XDG fallback is a cross-user /tmp/didi-sessions directory.
+    clearSessionDirectory();
+    unsetenv("XDG_RUNTIME_DIR");
+    const auto resolved = didi::runtime::resolveSessionDescriptorDirectory();
+    ASSERT_TRUE(resolved.isOk());
+    ASSERT_EQ(resolved.value().filename(), "didi-sessions-" + std::to_string(geteuid()));
+}
+
+void test_session_discovery_rejects_permissive_registry_directory() {
+    // Break caught: discovery trusts a registry directory writable/readable by another user.
+    const auto directory = makeSessionDirectory();
+    const auto session_id = std::string("cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd");
+    writeDescriptor(directory, "permissive-dir.json", validDescriptor(session_id, endpointFor(session_id)));
+    ASSERT_TRUE(chmod(directory.c_str(), S_IRWXU | S_IRGRP | S_IXGRP) == 0);
+    setSessionDirectory(directory);
+    auto client = didi::runtime::createRuntimeSessionClient(std::filesystem::current_path().string());
+    const auto listed = client->listSessions(std::nullopt);
+    ASSERT_TRUE(listed.isOk());
+    ASSERT_TRUE(listed.value()["sessions"].empty());
+    ASSERT_TRUE(!listed.value()["diagnostics"].empty());
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
+void test_session_discovery_rejects_permissive_descriptor_file() {
+    // Break caught: discovery authenticates a descriptor readable by another user.
+    const auto directory = makeSessionDirectory();
+    const auto session_id = std::string(32, 'd');
+    const auto descriptor_path = directory / "permissive-file.json";
+    auto descriptor = validDescriptor(session_id, endpointFor(session_id));
+    writeDescriptor(directory, descriptor_path.filename().string(), descriptor);
+    ASSERT_TRUE(chmod(descriptor_path.c_str(), S_IRUSR | S_IWUSR | S_IRGRP) == 0);
+    setSessionDirectory(directory);
+    auto client = didi::runtime::createRuntimeSessionClient(std::filesystem::current_path().string());
+    const auto listed = client->listSessions(std::nullopt);
+    ASSERT_TRUE(listed.isOk());
+    ASSERT_TRUE(listed.value()["sessions"].empty());
+    ASSERT_TRUE(!listed.value()["diagnostics"].empty());
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+#endif
 
 void test_session_discovery_reads_the_validated_descriptor_object() {
     // Break caught: discovery validates one pathname object, then reopens and trusts a replacement.
@@ -772,6 +876,8 @@ struct RegisterRuntimeSessionTests {
                      test_session_discovery_rejects_non_regular_json_entries);
         registerTest("RuntimeSessions.RejectsReusedPidMetadata",
                      test_session_discovery_does_not_treat_reused_pid_metadata_as_live);
+        registerTest("RuntimeSessions.StaleRetirementPreservesReplacement",
+                     test_session_discovery_preserves_replacement_at_proven_stale_path);
         registerTest("RuntimeSessions.ReadsValidatedDescriptorObject",
                      test_session_discovery_reads_the_validated_descriptor_object);
         registerTest("RuntimeSessions.ClosesValidatedHandleOnException",
@@ -796,6 +902,16 @@ struct RegisterRuntimeSessionTests {
                      test_session_host_retained_file_survives_replacement_after_verification);
         registerTest("RuntimeSessions.DiscoveryIgnoresRetainedRetirementFiles",
                      test_runtime_session_discovery_ignores_retained_retirement_files);
+#if !defined(_WIN32)
+        registerTest("RuntimeSessions.RegistryUsesXdgRuntimeDirectory",
+                     test_session_registry_prefers_xdg_runtime_directory);
+        registerTest("RuntimeSessions.RegistryFallbackIsUidQualified",
+                     test_session_registry_uid_qualifies_temporary_fallback);
+        registerTest("RuntimeSessions.RejectsPermissiveRegistryDirectory",
+                     test_session_discovery_rejects_permissive_registry_directory);
+        registerTest("RuntimeSessions.RejectsPermissiveDescriptorFile",
+                     test_session_discovery_rejects_permissive_descriptor_file);
+#endif
     }
 } g_registerRuntimeSessionTests;
 
