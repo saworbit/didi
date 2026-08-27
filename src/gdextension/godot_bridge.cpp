@@ -10,7 +10,9 @@
 #include <cstddef>
 #include <functional>
 #include <cstring>
+#include <filesystem>
 #include <limits>
+#include <set>
 #include <utility>
 
 namespace didi {
@@ -682,6 +684,23 @@ Result<void> validateScriptPath(const std::string& path) {
     return validateResPath(path, strings::endsWith(path, ".gd") ? ".gd" : ".cs");
 }
 
+bool pathWithin(const std::filesystem::path& root, const std::filesystem::path& candidate) {
+    auto root_value = root.lexically_normal().generic_string();
+    auto candidate_value = candidate.lexically_normal().generic_string();
+#if defined(_WIN32)
+    std::transform(root_value.begin(), root_value.end(), root_value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    std::transform(candidate_value.begin(), candidate_value.end(), candidate_value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+#endif
+    return candidate_value == root_value ||
+           (candidate_value.size() > root_value.size() &&
+            candidate_value.compare(0, root_value.size(), root_value) == 0 &&
+            candidate_value[root_value.size()] == '/');
+}
+
 Result<void> restoreProjectSetting(GDExtensionObjectPtr project_settings, VariantValue& name,
                                    VariantValue& previous) {
     auto restored = callObject(project_settings, "ProjectSettings", "set_setting", 402577236LL,
@@ -960,6 +979,72 @@ json liveResult(const json& fields) {
 GodotBridge& GodotBridge::instance() {
     static GodotBridge bridge;
     return bridge;
+}
+
+Result<std::vector<std::string>> GodotBridge::beginAssetReimport(
+    const std::vector<std::string>& paths) {
+    namespace fs = std::filesystem;
+    if (paths.empty() || paths.size() > 256) {
+        return Error::invalidArgument("paths must contain 1 to 256 source assets");
+    }
+    auto project_path = resolveGodotProjectPath();
+    if (project_path.isErr()) return project_path.error();
+    std::error_code ec;
+    const auto root = fs::weakly_canonical(project_path.value(), ec);
+    if (ec || !fs::is_directory(root, ec)) return Error::internal("Godot project root is unavailable");
+
+    std::set<std::string> unique;
+    std::vector<std::string> normalized;
+    normalized.reserve(paths.size());
+    for (const auto& path : paths) {
+        if (path.size() < 7 || path.size() > 1024 || path.find('\0') != std::string::npos ||
+            strings::startsWith(path, "res://.godot/") || strings::endsWith(path, ".import")) {
+            return Error::invalidArgument("Every reimport path must identify a project source asset");
+        }
+        auto valid = validateResPath(path, "");
+        if (valid.isErr()) return valid.error();
+        const auto relative = fs::path(path.substr(6));
+        const auto candidate = fs::canonical(root / relative, ec);
+        if (ec || !pathWithin(root, candidate) || !fs::is_regular_file(candidate, ec) ||
+            fs::is_symlink(fs::symlink_status(root / relative, ec))) {
+            return Error::invalidArgument("Reimport path must be an existing regular file beneath the project root: " + path);
+        }
+        auto relative_canonical = fs::relative(candidate, root, ec);
+        if (ec) return Error::invalidArgument("Unable to normalize reimport path: " + path);
+        const auto resource_path = "res://" + relative_canonical.generic_string();
+        if (!unique.insert(resource_path).second) {
+            return Error::invalidArgument("Reimport paths must be unique after normalization");
+        }
+        normalized.push_back(resource_path);
+    }
+
+    auto editor = editorInterface();
+    if (editor.isErr()) return editor.error();
+    auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
+    if (filesystem.isErr()) return filesystem.error();
+    auto object = objectFromVariant(filesystem.value());
+    if (object.isErr() || !object.value()) return Error::notConnected("EditorFileSystem is unavailable");
+    json path_array = normalized;
+    auto godot_paths = makeJsonVariant(path_array);
+    if (godot_paths.isErr()) return godot_paths.error();
+    auto started = callObject(object.value(), "EditorFileSystem", "reimport_files", 4015028928LL,
+                              {&godot_paths.value()});
+    if (started.isErr()) return started.error();
+    return normalized;
+}
+
+Result<bool> GodotBridge::isEditorFilesystemScanning() {
+    auto editor = editorInterface();
+    if (editor.isErr()) return editor.error();
+    auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
+    if (filesystem.isErr()) return filesystem.error();
+    auto object = objectFromVariant(filesystem.value());
+    if (object.isErr() || !object.value()) return Error::notConnected("EditorFileSystem is unavailable");
+    auto scanning = callObject(object.value(), "EditorFileSystem", "is_scanning", 36873697LL);
+    if (scanning.isErr()) return scanning.error();
+    auto value = scalarFromVariant<GDExtensionBool>(scanning.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (value.isErr()) return value.error();
+    return value.value() != 0;
 }
 
 json GodotBridge::execute(const std::string& method, const json& params,

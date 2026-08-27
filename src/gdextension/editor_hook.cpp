@@ -95,6 +95,10 @@ void EditorHook::processQueue() {
             continue;
         }
         try {
+            if (cmd.method == "asset.reimport") {
+                scheduleAssetReimport(cmd.params, cmd.response_promise, cmd.control);
+                continue;
+            }
             if (cmd.method == "runtime.step") {
                 if (!cmd.params.is_object() ||
                     (cmd.params.contains("frames") &&
@@ -136,6 +140,114 @@ void EditorHook::processQueue() {
         }
     }
     processRuntimeStepFrame();
+    processAssetReimportFrame();
+}
+
+void EditorHook::scheduleAssetReimport(
+    const json& params,
+    const std::shared_ptr<std::promise<json>>& promise,
+    const std::shared_ptr<CommandControl>& control) {
+    if (m_sessionKind != "editor") {
+        control->markCompleted();
+        fulfillCommand(promise, control,
+                       {{"error", {{"code", 409},
+                                    {"message", "Asset reimport is available only in editor sessions"}}}});
+        return;
+    }
+    if (!params.is_object() || !params.contains("paths") || !params["paths"].is_array() ||
+        params["paths"].empty() || params["paths"].size() > 256) {
+        control->markCompleted();
+        fulfillCommand(promise, control,
+                       {{"error", {{"code", 400},
+                                    {"message", "paths must contain 1 to 256 source assets"}}}});
+        return;
+    }
+    std::vector<std::string> paths;
+    paths.reserve(params["paths"].size());
+    for (const auto& value : params["paths"]) {
+        if (!value.is_string()) {
+            control->markCompleted();
+            fulfillCommand(promise, control,
+                           {{"error", {{"code", 400},
+                                        {"message", "paths must contain only strings"}}}});
+            return;
+        }
+        paths.push_back(value.get<std::string>());
+    }
+    int64_t timeout_ms = 10000;
+    if (params.contains("timeout_ms")) {
+        if (!params["timeout_ms"].is_number_integer() ||
+            params["timeout_ms"].get<int64_t>() < 1 ||
+            params["timeout_ms"].get<int64_t>() > 10000) {
+            control->markCompleted();
+            fulfillCommand(promise, control,
+                           {{"error", {{"code", 400},
+                                        {"message", "timeout_ms must be an integer from 1 to 10000"}}}});
+            return;
+        }
+        timeout_ms = params["timeout_ms"].get<int64_t>();
+    }
+
+    std::lock_guard<std::mutex> lock(m_reimportMutex);
+    if (m_pendingAssetReimport.has_value()) {
+        control->markCompleted();
+        fulfillCommand(promise, control,
+                       {{"error", {{"code", 409},
+                                    {"message", "An asset reimport request is already active"}}}});
+        return;
+    }
+    auto started = GodotBridge::instance().beginAssetReimport(paths);
+    if (started.isErr()) {
+        control->markCompleted();
+        fulfillCommand(promise, control,
+                       {{"error", {{"code", started.error().code},
+                                    {"message", started.error().message}}}});
+        return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    m_pendingAssetReimport.emplace(PendingAssetReimport{
+        started.value(), ReimportProgress(now, std::chrono::milliseconds(timeout_ms)),
+        promise, control
+    });
+    DIDI_LOG_INFO("EDITOR_HOOK", "Started bounded asset reimport for ", started.value().size(), " path(s)");
+}
+
+void EditorHook::processAssetReimportFrame() {
+    std::optional<PendingAssetReimport> completed;
+    json response;
+    {
+        std::lock_guard<std::mutex> lock(m_reimportMutex);
+        if (!m_pendingAssetReimport.has_value()) return;
+        const auto now = std::chrono::steady_clock::now();
+        auto scanning = GodotBridge::instance().isEditorFilesystemScanning();
+        if (scanning.isErr()) {
+            completed = std::move(m_pendingAssetReimport);
+            m_pendingAssetReimport.reset();
+            response = {{"error", {{"code", scanning.error().code},
+                                    {"message", scanning.error().message}}}};
+        } else {
+            const auto state = m_pendingAssetReimport->progress.observe(scanning.value(), now);
+            if (state == ReimportProgressState::Pending) return;
+            const auto elapsed = m_pendingAssetReimport->progress.elapsedMs(now);
+            completed = std::move(m_pendingAssetReimport);
+            m_pendingAssetReimport.reset();
+            if (state == ReimportProgressState::TimedOut) {
+                response = {{"error", {{"code", 504},
+                                        {"message", "Asset reimport did not reach editor idle before timeout"},
+                                        {"data", {{"outcome", "unknown_outcome"},
+                                                   {"route_quarantine", false}}}}}};
+            } else {
+                response = {{"paths", completed->paths},
+                            {"accepted_count", completed->paths.size()},
+                            {"elapsed_ms", elapsed}, {"idle", true},
+                            {"execution_mode", "live"}, {"is_live_engine", true},
+                            {"session_kind", "editor"}};
+            }
+        }
+    }
+    if (!completed.has_value()) return;
+    completed->control->markCompleted();
+    fulfillCommand(completed->response_promise, completed->control, std::move(response));
 }
 
 void EditorHook::scheduleRuntimeStep(
@@ -265,6 +377,19 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
     if (active_step.has_value() && active_step->control &&
         active_step->control->tryCancelRunning()) {
         fulfillCommand(active_step->response_promise, active_step->control,
+                       {{"error", {{"code", 503}, {"message", reason}}}});
+    }
+    std::optional<PendingAssetReimport> active_reimport;
+    {
+        std::lock_guard<std::mutex> lock(m_reimportMutex);
+        if (m_pendingAssetReimport.has_value()) {
+            active_reimport = std::move(m_pendingAssetReimport);
+            m_pendingAssetReimport.reset();
+        }
+    }
+    if (active_reimport.has_value() && active_reimport->control &&
+        active_reimport->control->tryCancelRunning()) {
+        fulfillCommand(active_reimport->response_promise, active_reimport->control,
                        {{"error", {{"code", 503}, {"message", reason}}}});
     }
 }

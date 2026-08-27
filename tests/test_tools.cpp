@@ -4,6 +4,7 @@
 #include "didi/mcp/mcp_server.hpp"
 #include "didi/gdextension/editor_hook.hpp"
 
+#include <chrono>
 #include <unordered_set>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
@@ -131,7 +132,7 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 80u);
+    ASSERT_EQ(tools.size(), 81u);
     const std::unordered_set<std::string> legacy_names = {
         "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
         "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
@@ -143,7 +144,7 @@ static void test_tool_registry_default_tools() {
         if (legacy_names.count(tool.name) == 0) ++canonical_count;
     }
     ASSERT_EQ(legacy_names.size(), 10u);
-    ASSERT_EQ(canonical_count, 70u);
+    ASSERT_EQ(canonical_count, 71u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -192,6 +193,7 @@ static void test_tool_registry_default_tools() {
     ASSERT_TRUE(reg.getTool("project_get_uid_map") != nullptr);
     ASSERT_TRUE(reg.getTool("project_search_text") != nullptr);
     ASSERT_TRUE(reg.getTool("project_search_symbols") != nullptr);
+    ASSERT_TRUE(reg.getTool("asset_reimport") != nullptr);
 
     // Domain 8: Execution, Input Injection & Debugging
     ASSERT_TRUE(reg.getTool("runtime_launch") != nullptr);
@@ -257,6 +259,53 @@ static void test_project_search_public_validation_and_schema() {
     }) {
         ASSERT_TRUE(reg.callTool("project_search_text", args).isError);
     }
+}
+
+static void test_asset_reimport_public_validation_and_schema() {
+    // Break caught: reimport accepts a partial/ambiguous batch or lacks bounded wait semantics.
+    auto& reg = didi::mcp::ToolRegistry::instance();
+    reg.registerAllDefaultTools();
+    const auto* tool = reg.getTool("asset_reimport");
+    ASSERT_TRUE(tool != nullptr);
+    const auto definition = tool->toJson();
+    ASSERT_EQ(definition["_meta"]["didi"]["executionModes"], didi::json::array({"live"}));
+    ASSERT_EQ(definition["inputSchema"]["properties"]["paths"]["minItems"], 1);
+    ASSERT_EQ(definition["inputSchema"]["properties"]["paths"]["maxItems"], 256);
+    ASSERT_EQ(definition["inputSchema"]["properties"]["timeout_ms"]["maximum"], 10000);
+
+    for (const auto& args : {
+        didi::json::object(), didi::json{{"paths", didi::json::array()}},
+        didi::json{{"paths", "res://icon.svg"}},
+        didi::json{{"paths", didi::json::array({"res://icon.svg", "res://icon.svg"})}},
+        didi::json{{"paths", didi::json::array({"../icon.svg"})}},
+        didi::json{{"paths", didi::json::array({"res://./icon.svg"})}},
+        didi::json{{"paths", didi::json::array({"res://.godot/icon.svg"})}},
+        didi::json{{"paths", didi::json::array({"res://icon.svg.import"})}},
+        didi::json{{"paths", didi::json::array({"res://icon.svg"})}, {"timeout_ms", 0}}
+    }) {
+        const auto result = reg.callTool("asset_reimport", args);
+        ASSERT_TRUE(result.isError);
+        ASSERT_TRUE(result.content[0].text.find("Invalid asset reimport request") != std::string::npos);
+    }
+}
+
+static void test_reimport_progress_requires_two_idle_frames_and_times_out() {
+    // Break caught: one transient idle frame is reported as complete or the deadline is ignored.
+    using Clock = std::chrono::steady_clock;
+    const auto start = Clock::time_point{};
+    didi::godot::ReimportProgress progress(start, std::chrono::milliseconds(100));
+    ASSERT_EQ(progress.observe(false, start + std::chrono::milliseconds(1)),
+              didi::godot::ReimportProgressState::Pending);
+    ASSERT_EQ(progress.observe(true, start + std::chrono::milliseconds(2)),
+              didi::godot::ReimportProgressState::Pending);
+    ASSERT_EQ(progress.observe(false, start + std::chrono::milliseconds(3)),
+              didi::godot::ReimportProgressState::Pending);
+    ASSERT_EQ(progress.observe(false, start + std::chrono::milliseconds(4)),
+              didi::godot::ReimportProgressState::Idle);
+
+    didi::godot::ReimportProgress timeout(start, std::chrono::milliseconds(100));
+    ASSERT_EQ(timeout.observe(true, start + std::chrono::milliseconds(100)),
+              didi::godot::ReimportProgressState::TimedOut);
 }
 
 static void test_tool_capabilities_are_honest() {
@@ -461,6 +510,11 @@ static void test_tool_capture_viewport_with_ipc() {
                     {"sandbox_profile", "expression_const_v1"},
                     {"execution_mode", "live"}, {"session_kind", "game"}};
         }
+        if (method == "asset.reimport") {
+            return {{"paths", req["params"]["paths"]}, {"accepted_count", 1},
+                    {"elapsed_ms", 2}, {"idle", true}, {"execution_mode", "live"},
+                    {"is_live_engine", true}, {"session_kind", "editor"}};
+        }
         if (method == "script.attachToNode") {
             return {{"error", {{"code", 422}, {"message", "simulated script attachment rejection"}}}};
         }
@@ -550,6 +604,14 @@ static void test_tool_capture_viewport_with_ipc() {
     });
     ASSERT_TRUE(attach.isError);
     ASSERT_TRUE(attach.content[0].text.find("simulated script attachment rejection") != std::string::npos);
+
+    auto reimport = reg.callTool("asset_reimport", {
+        {"paths", didi::json::array({"res://reimport_probe.svg"})}, {"timeout_ms", 1000}
+    });
+    ASSERT_TRUE(!reimport.isError);
+    const auto reimport_json = didi::json::parse(reimport.content[0].text);
+    ASSERT_EQ(reimport_json["accepted_count"], 1);
+    ASSERT_EQ(reimport_json["idle"], true);
 
     client->disconnect();
     server->stop();
@@ -678,6 +740,8 @@ struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.DefaultRegistration", test_tool_registry_default_tools);
         registerTest("Tools.ProjectSearchPublicValidationAndSchema", test_project_search_public_validation_and_schema);
+        registerTest("Tools.AssetReimportPublicValidationAndSchema", test_asset_reimport_public_validation_and_schema);
+        registerTest("EditorHook.ReimportProgress", test_reimport_progress_requires_two_idle_frames_and_times_out);
         registerTest("McpServer.PreservesInjectedIpcClient", test_mcp_server_preserves_injected_ipc_client);
         registerTest("Tools.RuntimeSessionLocalAndValidated", test_runtime_get_session_is_local_and_attach_rejects_non_string_id);
         registerTest("Tools.RuntimeReadLogsInputValidation", test_runtime_read_logs_rejects_invalid_cursor_limit_and_level);

@@ -26,6 +26,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "scene_create", "scene_open", "scene_close", "scene_pack_branch",
         "runtime_read_logs", "runtime_set_paused", "runtime_step", "runtime_stop",
         "runtime_get_tree", "eval_gdscript"
+        , "asset_reimport"
     };
     static const std::unordered_set<std::string> offline = {
         "script_check_syntax", "analyze_script_diagnostics", "script_reflect_class",
@@ -102,6 +103,7 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
 CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectGetUidMap(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleInstantiateAsset(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
 CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleInjectInputEvent(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -599,6 +601,18 @@ void ToolRegistry::registerAllDefaultTools() {
                        {"items", {{"type", "string"}, {"enum", {"class", "function", "signal", "variable", "constant", "enum"}}}}}}
         }}, {"required", {"query"}}};
         t.handler = [this](const json& args) { return handleProjectSearchSymbols(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "asset_reimport";
+        t.description = "Reimports a validated atomic batch of project source assets and waits for two consecutive editor-idle frames.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"paths", {{"type", "array"}, {"minItems", 1}, {"maxItems", 256}, {"uniqueItems", true},
+                       {"items", {{"type", "string"}, {"minLength", 7}, {"maxLength", 1024}}}}},
+            {"timeout_ms", {{"type", "integer"}, {"default", 10000}, {"minimum", 1}, {"maximum", 10000}}}
+        }}, {"required", {"paths"}}};
+        t.handler = [this](const json& args) { return handleAssetReimport(args, m_ipcClient); };
         registerTool(std::move(t));
     }
     {

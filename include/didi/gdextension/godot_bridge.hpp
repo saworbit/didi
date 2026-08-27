@@ -22,6 +22,8 @@ public:
     json execute(const std::string& method, const json& params,
                  const std::string& session_kind = "editor");
     Result<ViewportPixels> captureEditorViewport(const std::string& camera_identifier);
+    Result<std::vector<std::string>> beginAssetReimport(const std::vector<std::string>& paths);
+    Result<bool> isEditorFilesystemScanning();
 
 private:
     GodotBridge() = default;
