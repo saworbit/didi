@@ -50,9 +50,10 @@ FORBIDDEN_ARTIFACT_PATHS = (
 FUTURE_PHASE_RANGE = range(7, 13)
 VALID_PHASE_STATUSES = {"PLANNED", "IN PROGRESS", "COMPLETE"}
 FUTURE_PHASE_GOVERNANCE_TERMS = (
+    "scope",
     "explicit exclusions",
     "security",
-    "mutation",
+    "mutation classification",
     "exit evidence",
     "completion date",
     "pull request",

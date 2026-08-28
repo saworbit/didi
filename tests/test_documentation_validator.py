@@ -177,7 +177,7 @@ Second section.
             "scope": "Scope: define the capability boundary for every future phase.",
             "explicit exclusions": "Explicit exclusions: identify deferred behavior that is not delivered.",
             "security": "Security: preserve the local authenticated safety boundary.",
-            "mutation": "Mutation classification: identify each new or reclassified mutation.",
+            "mutation classification": "Mutation classification: identify each new or reclassified mutation.",
             "exit evidence": "Exit evidence: require implementation, native tests, integration tests, and CI evidence.",
             "completion date": "Completion date: record the date when a phase is complete.",
             "pull request": "Pull request before COMPLETE: record the pull request before marking a phase complete.",
@@ -595,9 +595,10 @@ Second section.
 
     def test_requires_each_future_phase_governance_field(self):
         for field in (
+            "scope",
             "explicit exclusions",
             "security",
-            "mutation",
+            "mutation classification",
             "exit evidence",
             "completion date",
             "pull request",
@@ -615,6 +616,23 @@ Second section.
                     "docs/FUTURE_PHASES_DESIGN.md must define future-phase governance",
                     errors,
                 )
+
+    def test_rejects_generic_mutation_without_classification(self):
+        root = self.make_valid_repository()
+        self.write(
+            "docs/FUTURE_PHASES_DESIGN.md",
+            self.make_future_phase_governance().replace(
+                "Mutation classification:",
+                "Mutation:",
+            ),
+        )
+
+        errors = validate_repository(root)
+
+        self.assertIn(
+            "docs/FUTURE_PHASES_DESIGN.md must define future-phase governance",
+            errors,
+        )
 
     def test_reports_missing_markdown_target(self):
         root = self.make_valid_repository()
