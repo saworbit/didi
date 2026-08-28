@@ -80,6 +80,13 @@ FENCED_CODE_PATTERN = re.compile(
 )
 INLINE_CODE_PATTERN = re.compile(r"(?<!`)`[^`\n]*`(?!`)")
 
+MINIMUM_NODE24_ACTION_MAJORS = {
+    "actions/checkout": 5,
+    "actions/upload-artifact": 6,
+    "actions/download-artifact": 7,
+    "softprops/action-gh-release": 3,
+}
+
 
 def _workflow_steps(text: str) -> list[str]:
     """Return top-level YAML step blocks without requiring a YAML dependency."""
@@ -103,10 +110,21 @@ def _workflow_steps(text: str) -> list[str]:
 
 def validate_workflow_contract(relative_path: str, text: str) -> list[str]:
     """Validate release-runner assumptions that have caused packaging failures."""
-    if "windows-latest" not in text:
-        return []
-
     errors: list[str] = []
+    for match in re.finditer(
+        r"uses:\s*([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@v(\d+)(?:\b|\.)", text
+    ):
+        action, major_text = match.groups()
+        minimum = MINIMUM_NODE24_ACTION_MAJORS.get(action)
+        if minimum is not None and int(major_text) < minimum:
+            errors.append(
+                f"{relative_path}: {action}@v{major_text} still targets deprecated Node 20; "
+                f"use v{minimum} or later"
+            )
+
+    if "windows-latest" not in text:
+        return errors
+
     for step in _workflow_steps(text):
         if "jwlawson/actions-setup-cmake@v2" not in step:
             continue

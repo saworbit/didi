@@ -198,6 +198,31 @@ Second section.
             errors,
         )
 
+    def test_rejects_actions_that_still_target_deprecated_node_20(self):
+        root = self.make_valid_repository()
+        self.write(
+            ".github/workflows/ci.yml",
+            """steps:
+  - uses: actions/checkout@v4
+  - uses: actions/upload-artifact@v4
+  - uses: actions/download-artifact@v4
+  - uses: softprops/action-gh-release@v2
+""",
+        )
+
+        errors = VALIDATOR.validate_repository(root)
+
+        for action in (
+            "actions/checkout",
+            "actions/upload-artifact",
+            "actions/download-artifact",
+            "softprops/action-gh-release",
+        ):
+            self.assertTrue(
+                any(action in error and "Node 20" in error for error in errors),
+                (action, errors),
+            )
+
     def test_rejects_stale_supported_minor(self):
         root = self.make_valid_repository()
         security = (root / "SECURITY.md").read_text(encoding="utf-8")
