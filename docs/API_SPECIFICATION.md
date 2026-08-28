@@ -78,7 +78,7 @@ The internal extension envelope can use `400` (invalid argument), `401` (runtime
 
 | Method | Direction | Description |
 | :--- | :--- | :--- |
-| `initialize` | Client $\rightarrow$ Server | Initializes session; negotiates protocol version and server capabilities |
+| `initialize` | Client $\rightarrow$ Server | Initializes the session and advertises implemented tool, resource, and prompt capabilities. Logging is omitted until `logging/setLevel` exists. |
 | `notifications/initialized` | Client $\rightarrow$ Server | Notification acknowledging initialization |
 | `ping` | Client $\rightarrow$ Server | Liveness check; returns `{}` |
 | `tools/list` | Client $\rightarrow$ Server | Lists all registered tools with JSON input schemas and Didi capability metadata |
