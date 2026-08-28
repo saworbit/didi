@@ -41,6 +41,11 @@ VERSION_SOURCES = (
     "SECURITY.md",
 )
 
+FORBIDDEN_ARTIFACT_PATHS = (
+    ".superpowers",
+    "docs/superpowers",
+)
+
 FACT_PATTERNS = {
     "README.md": (
         (r"\b72[- ]canonical|\b72 canonical", "72 canonical"),
@@ -187,6 +192,27 @@ def validate_repository(root: Path) -> list[str]:
     root = root.resolve()
     errors: list[str] = []
     texts: dict[str, str] = {}
+
+    for relative_path in FORBIDDEN_ARTIFACT_PATHS:
+        if (root / relative_path).exists():
+            errors.append(
+                f"{relative_path}: agent workflow artifacts must not be committed to the project"
+            )
+
+    workflow_root = root / ".github" / "workflows"
+    if workflow_root.is_dir():
+        for workflow in sorted(workflow_root.glob("*.y*ml")):
+            try:
+                workflow_text = workflow.read_text(encoding="utf-8", errors="strict")
+            except (OSError, UnicodeError) as error:
+                errors.append(
+                    f"{workflow.relative_to(root).as_posix()}: cannot read UTF-8 workflow: {error}"
+                )
+                continue
+            if ".superpowers/" in workflow_text or "docs/superpowers/" in workflow_text:
+                errors.append(
+                    f"{workflow.relative_to(root).as_posix()}: Superpowers artifacts must not be CI dependencies"
+                )
 
     for relative_path in sorted(set(REQUIRED_DOCUMENTS + VERSION_SOURCES)):
         text = _read_required(root, relative_path, errors)

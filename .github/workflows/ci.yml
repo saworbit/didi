@@ -139,8 +139,6 @@ jobs:
                   'No live path waits forever', '.didi-retired-<session-id>-<32hex>'),
               pathlib.Path('docs/TOOL_REFERENCE.md'): (
                   'POSIX normally retains', '<OS temp>/didi-sessions-<euid>'),
-              pathlib.Path('docs/superpowers/specs/2026-08-27-phase-3-runtime-eval-design.md'): (
-                  'No live route waits indefinitely', 'Verified POSIX retirement tombstones'),
           }
           forbidden_claims = {
               pathlib.Path('README.md'): (
@@ -156,8 +154,6 @@ jobs:
               pathlib.Path('docs/ARCHITECTURE.md'): (
                   'wait for the definitive result instead of returning an ambiguous timeout',),
               pathlib.Path('docs/TOOL_REFERENCE.md'): ('re-verify it, and normally delete it',),
-              pathlib.Path('docs/superpowers/plans/2026-08-27-phase-3-runtime-eval.md'): (
-                  'descriptor directory is empty after cleanup',),
           }
 
           def heading_anchors(path):
