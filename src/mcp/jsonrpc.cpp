@@ -38,6 +38,9 @@ std::optional<JsonRpcRequest> JsonRpcRequest::fromJson(const json& j) {
     }
 
     if (j.contains("params")) {
+        if (!j["params"].is_object() && !j["params"].is_array()) {
+            return std::nullopt;
+        }
         req.params = j["params"];
     } else {
         req.params = json::object();

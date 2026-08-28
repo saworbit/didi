@@ -149,7 +149,13 @@ static std::string runStdioWithInput(didi::mcp::McpServer& server, const std::st
     std::ostringstream output;
     const auto* old_input = std::cin.rdbuf(input.rdbuf());
     const auto* old_output = std::cout.rdbuf(output.rdbuf());
-    server.runStdio();
+    try {
+        server.runStdio();
+    } catch (...) {
+        std::cin.rdbuf(const_cast<std::streambuf*>(old_input));
+        std::cout.rdbuf(const_cast<std::streambuf*>(old_output));
+        throw;
+    }
     std::cin.rdbuf(const_cast<std::streambuf*>(old_input));
     std::cout.rdbuf(const_cast<std::streambuf*>(old_output));
     return output.str();
@@ -160,9 +166,12 @@ static void test_mcp_distinguishes_parse_errors_from_invalid_requests() {
     const auto output = runStdioWithInput(
         server,
         "not-json\n"
+        "{\"jsonrpc\":\"2.0\",\"id\":1e400,\"method\":\"ping\"}\n"
         "{\"id\":7,\"method\":\"ping\"}\n"
         "{\"jsonrpc\":\"2.0\",\"id\":{},\"method\":\"ping\"}\n"
         "{\"jsonrpc\":\"2.0\",\"id\":9}\n"
+        "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"ping\",\"params\":42}\n"
+        "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"ping\",\"params\":null}\n"
         "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"initialize\",\"params\":{}}\n");
 
     std::istringstream lines(output);
@@ -171,17 +180,23 @@ static void test_mcp_distinguishes_parse_errors_from_invalid_requests() {
     while (std::getline(lines, line)) {
         if (!line.empty()) responses.push_back(didi::json::parse(line));
     }
-    ASSERT_EQ(responses.size(), 5u);
+    ASSERT_EQ(responses.size(), 8u);
     ASSERT_EQ(responses[0]["error"]["code"], didi::mcp::JsonRpcErrorCode::ParseError);
     ASSERT_TRUE(responses[0]["id"].is_null());
-    ASSERT_EQ(responses[1]["error"]["code"], didi::mcp::JsonRpcErrorCode::InvalidRequest);
-    ASSERT_EQ(responses[1]["id"], 7);
+    ASSERT_EQ(responses[1]["error"]["code"], didi::mcp::JsonRpcErrorCode::ParseError);
+    ASSERT_TRUE(responses[1]["id"].is_null());
     ASSERT_EQ(responses[2]["error"]["code"], didi::mcp::JsonRpcErrorCode::InvalidRequest);
-    ASSERT_TRUE(responses[2]["id"].is_null());
+    ASSERT_EQ(responses[2]["id"], 7);
     ASSERT_EQ(responses[3]["error"]["code"], didi::mcp::JsonRpcErrorCode::InvalidRequest);
-    ASSERT_EQ(responses[3]["id"], 9);
-    ASSERT_TRUE(responses[4].contains("result"));
-    ASSERT_EQ(responses[4]["id"], 10);
+    ASSERT_TRUE(responses[3]["id"].is_null());
+    ASSERT_EQ(responses[4]["error"]["code"], didi::mcp::JsonRpcErrorCode::InvalidRequest);
+    ASSERT_EQ(responses[4]["id"], 9);
+    ASSERT_EQ(responses[5]["error"]["code"], didi::mcp::JsonRpcErrorCode::InvalidRequest);
+    ASSERT_EQ(responses[5]["id"], 11);
+    ASSERT_EQ(responses[6]["error"]["code"], didi::mcp::JsonRpcErrorCode::InvalidRequest);
+    ASSERT_EQ(responses[6]["id"], 12);
+    ASSERT_TRUE(responses[7].contains("result"));
+    ASSERT_EQ(responses[7]["id"], 10);
 }
 
 static void test_mcp_maps_resource_and_prompt_failures_to_server_error_range() {

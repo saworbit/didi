@@ -741,6 +741,30 @@ static void test_posix_reconnect_and_io_share_request_deadline() {
     ASSERT_TRUE(hasTransportState(result.error(), false, false, true));
 }
 
+static void test_posix_expired_deadline_rejects_synchronous_io() {
+    // Break caught: queued socket I/O succeeds because send/recv run before deadline checks.
+    const auto path = rawSocketPath("queued-expired-response");
+    const int listener = createRawListener(path);
+    std::thread peer([&] {
+        const int socket_fd = accept(listener, nullptr, nullptr);
+        didi::json request;
+        if (socket_fd >= 0 && rawReadFrame(socket_fd, &request)) {
+            const auto frame = rawSuccessFrame(request["id"]);
+            (void)rawWriteExact(socket_fd, frame.data(), frame.size());
+        }
+        if (socket_fd >= 0) close(socket_fd);
+    });
+    auto client = didi::ipc::createIpcClient();
+    ASSERT_TRUE(client->connect(path, 1000));
+    const auto result = client->sendRequest("runtime.step", {}, 0);
+    client->disconnect();
+    peer.join();
+    close(listener);
+    unlink(path.c_str());
+    ASSERT_TRUE(result.isErr());
+    ASSERT_TRUE(hasTransportState(result.error(), false, false, true));
+}
+
 static void test_posix_client_rejects_mismatched_response_id() {
     // Break caught: a stale or cross-request response is accepted as the current request result.
     const auto path = rawSocketPath("mismatched-response-id");
@@ -794,6 +818,7 @@ struct RegisterIpcTests {
         registerTest("IPC.PosixHandshakeResponseCap", test_posix_handshake_rejects_large_response_before_allocation);
         registerTest("IPC.PosixPartialWrite", test_posix_client_completes_request_after_partial_write);
         registerTest("IPC.PosixReconnectSharesDeadline", test_posix_reconnect_and_io_share_request_deadline);
+        registerTest("IPC.PosixQueuedIoDeadline", test_posix_expired_deadline_rejects_synchronous_io);
         registerTest("IPC.PosixResponseIdCorrelation", test_posix_client_rejects_mismatched_response_id);
 #endif
     }

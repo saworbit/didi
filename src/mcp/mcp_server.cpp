@@ -338,7 +338,7 @@ void McpServer::runStdio() {
         json payload;
         try {
             payload = json::parse(trimmed);
-        } catch (const json::parse_error&) {
+        } catch (const json::exception&) {
             DIDI_LOG_WARN("MCP_SERVER", "Malformed JSON payload received");
             sendResponse(JsonRpcResponse::makeError(nullptr, JsonRpcErrorCode::ParseError, "Parse error"));
             continue;

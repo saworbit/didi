@@ -2469,6 +2469,8 @@ Result<ViewportPixels> GodotBridge::captureEditorViewport(const std::string& cam
     if (texture_width.value() <= 0 || texture_height.value() <= 0) {
         return Error::notFound("Editor viewport has no rendered texture in the current display mode");
     }
+    const auto texture_size = image::checkedRgbaSize(texture_width.value(), texture_height.value());
+    if (texture_size.isErr()) return texture_size.error();
     auto image = callObject(texture_object.value(), "Texture2D", "get_image", 4190603485LL);
     if (image.isErr()) return image.error();
     auto image_object = objectFromVariant(image.value());

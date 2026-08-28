@@ -27,6 +27,8 @@ Didi accepts exactly one JSON-RPC object per line, terminated by `\n` or `\r\n`.
 }
 ```
 
+Requests require `jsonrpc: "2.0"` and a string `method`. When present, `id` must be a string, number, or `null`, and `params` must be an object or array. JSON syntax/conversion failures, including numeric overflow, return `-32700`; a parsed value that violates this request shape returns `-32600` and echoes a legal request ID when available.
+
 ### Standard Success Response:
 ```json
 {

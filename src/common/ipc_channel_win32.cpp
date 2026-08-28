@@ -200,8 +200,7 @@ public:
             }
         }
 
-        static uint64_t req_id_counter = 1;
-        std::string req_id = std::to_string(req_id_counter++);
+        std::string req_id = std::to_string(m_nextRequestId++);
 
         json request_json = {
             {"id", req_id},
@@ -322,6 +321,7 @@ private:
 
     HANDLE m_pipe{INVALID_HANDLE_VALUE};
     std::string m_pipeName{kDefaultPipeName};
+    uint64_t m_nextRequestId{1};
     mutable std::recursive_mutex m_mutex;
 };
 
@@ -697,6 +697,9 @@ bool readExact(int socket_fd,
     auto* bytes = static_cast<uint8_t*>(buffer);
     size_t offset = 0;
     while (offset < length && (!running || running->load())) {
+        if (deadline.finite && std::chrono::steady_clock::now() >= deadline.expires_at) {
+            return false;
+        }
         const ssize_t count = recv(socket_fd, bytes + offset, length - offset, 0);
         if (count > 0) {
             offset += static_cast<size_t>(count);
@@ -718,6 +721,9 @@ bool writeExact(int socket_fd,
     const auto* bytes = static_cast<const uint8_t*>(buffer);
     size_t offset = 0;
     while (offset < length && (!running || running->load())) {
+        if (deadline.finite && std::chrono::steady_clock::now() >= deadline.expires_at) {
+            return false;
+        }
         const ssize_t count = send(socket_fd, bytes + offset, length - offset, kNoSignalSendFlag);
         if (count > 0) {
             offset += static_cast<size_t>(count);
@@ -772,8 +778,7 @@ public:
                 return transportFailure("Cannot connect to Unix socket", {false, false, timed_out});
             }
         }
-        static uint64_t req_id_counter = 1;
-        std::string req_id = std::to_string(req_id_counter++);
+        std::string req_id = std::to_string(m_nextRequestId++);
 
         json request_json = {
             {"id", req_id},
@@ -874,6 +879,7 @@ private:
 
     int m_sock{-1};
     std::string m_pipeName{kDefaultPipeName};
+    uint64_t m_nextRequestId{1};
     mutable std::recursive_mutex m_mutex;
 };
 

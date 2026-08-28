@@ -1,5 +1,6 @@
 #include "didi/offline/test_runner.hpp"
 #include "didi/common/logger.hpp"
+#include <algorithm>
 #include <chrono>
 #include <sstream>
 #include <thread>
@@ -174,17 +175,26 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
     char buffer[1024];
     DWORD bytes_read = 0;
 
+    const auto drainAvailableOutput = [&]() {
+        while (true) {
+            DWORD bytes_avail = 0;
+            if (!PeekNamedPipe(hReadPipe, NULL, 0, NULL, &bytes_avail, NULL) || bytes_avail == 0) {
+                break;
+            }
+            const DWORD to_read = std::min<DWORD>(bytes_avail, sizeof(buffer) - 1);
+            if (!ReadFile(hReadPipe, buffer, to_read, &bytes_read, NULL) || bytes_read == 0) {
+                break;
+            }
+            buffer[bytes_read] = '\0';
+            full_output.append(buffer, bytes_read);
+        }
+    };
+
     auto timeout_dur = std::chrono::seconds(timeout_seconds);
 
     // Read loop with timeout
     while (true) {
-        DWORD bytes_avail = 0;
-        if (PeekNamedPipe(hReadPipe, NULL, 0, NULL, &bytes_avail, NULL) && bytes_avail > 0) {
-            if (ReadFile(hReadPipe, buffer, sizeof(buffer) - 1, &bytes_read, NULL) && bytes_read > 0) {
-                buffer[bytes_read] = '\0';
-                full_output += buffer;
-            }
-        }
+        drainAvailableOutput();
 
         // The wait handle is authoritative. Exit code 259 is a valid completed process status and
         // must not be confused with STILL_ACTIVE.
@@ -198,11 +208,9 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
             } else {
                 result.exit_code = static_cast<int>(exit_code);
             }
-            // Drain any remaining output.
-            while (ReadFile(hReadPipe, buffer, sizeof(buffer) - 1, &bytes_read, NULL) && bytes_read > 0) {
-                buffer[bytes_read] = '\0';
-                full_output += buffer;
-            }
+            // Drain only bytes already queued by the tracked process. Descendants can inherit the
+            // pipe, so waiting for EOF would violate the caller's bounded launch contract.
+            drainAvailableOutput();
             break;
         }
         if (process_state == WAIT_FAILED) {

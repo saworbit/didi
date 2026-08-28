@@ -106,6 +106,17 @@ void test_windows_exit_code_259_is_completed_not_timed_out() {
     ASSERT_EQ(result.exit_code, 259);
     ASSERT_TRUE(result.duration_seconds < 0.8);
 }
+
+void test_windows_completed_parent_does_not_wait_for_inherited_stdout() {
+    // Break caught: blocking EOF drain waits for a descendant that inherited the output pipe.
+    ScopedEnvironmentVariable godot_bin("GODOT_BIN");
+    godot_bin.set(commandShell());
+    const auto result = didi::offline::TestRunner::runSession(
+        "", 5, false, false,
+        {"/d", "/c", "start", "/b", "ping", "-n", "4", "127.0.0.1"});
+    ASSERT_EQ(result.exit_code, 0);
+    ASSERT_TRUE(result.duration_seconds < 1.2);
+}
 #endif
 
 struct RegisterTestRunnerTests {
@@ -115,6 +126,7 @@ struct RegisterTestRunnerTests {
         registerTest("RuntimeLaunch.Godot451Discovery", test_resolver_finds_documented_godot_451_layout);
 #if defined(_WIN32)
         registerTest("RuntimeLaunch.WindowsExit259", test_windows_exit_code_259_is_completed_not_timed_out);
+        registerTest("RuntimeLaunch.WindowsBoundedOutputDrain", test_windows_completed_parent_does_not_wait_for_inherited_stdout);
 #endif
     }
 } g_register_test_runner_tests;
