@@ -918,6 +918,8 @@ static void test_symbol_extraction() {
         "@export_range(0, 20)\n"
         "var speed: float = 5.0\n"
         "@onready var sprite = $Sprite\n"
+        "@export_group(\"Presentation\")\n"
+        "var display_label = \"ready\"\n"
         "signal reached_goal(time_taken)\n\n"
         "@rpc(\"any_peer\") func jump() -> void:\n\tpass\n"
         "static func build_player():\n\tpass\n"
@@ -930,10 +932,12 @@ static void test_symbol_extraction() {
     ASSERT_EQ(parsed["functions"].size(), 2);
     ASSERT_EQ(parsed["functions"][0]["name"], "jump");
     ASSERT_EQ(parsed["functions"][1]["name"], "build_player");
-    ASSERT_EQ(parsed["variables"].size(), 3);
+    ASSERT_EQ(parsed["variables"].size(), 4);
     ASSERT_EQ(parsed["variables"][0]["name"], "speed");
     ASSERT_TRUE(parsed["variables"][0]["exported"]);
     ASSERT_EQ(parsed["variables"][1]["name"], "sprite");
+    ASSERT_EQ(parsed["variables"][2]["name"], "display_label");
+    ASSERT_TRUE(!parsed["variables"][2]["exported"]);
     ASSERT_EQ(parsed["signals"].size(), 1);
     ASSERT_EQ(parsed["signals"][0]["name"], "reached_goal");
     ASSERT_EQ(parsed["classes"].size(), 1);
@@ -998,6 +1002,15 @@ static void test_project_paths_accept_utf8_names() {
     ASSERT_TRUE(resolved.isOk());
     ASSERT_EQ(std::filesystem::weakly_canonical(resolved.value()),
               std::filesystem::weakly_canonical(script));
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(std::make_shared<DisconnectedIpcClient>());
+    const auto syntax = registry.callTool("script_check_syntax", {{"file_path", request}});
+    ASSERT_TRUE(!syntax.isError);
+    const auto syntax_json = didi::json::parse(syntax.content[0].text);
+    ASSERT_TRUE(!syntax_json["has_errors"]);
+    registry.setIpcClient(nullptr);
 }
 
 struct RegisterToolTests {

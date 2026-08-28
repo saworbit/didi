@@ -11,6 +11,10 @@
 
 void registerTest(const std::string& name, std::function<void()> fn);
 
+static std::string utf8(const std::u8string& value) {
+    return {reinterpret_cast<const char*>(value.data()), value.size()};
+}
+
 static void test_resource_type_detection() {
     ASSERT_EQ(didi::offline::ResourceIndexer::detectResourceType(".tscn"), "PackedScene");
     ASSERT_EQ(didi::offline::ResourceIndexer::detectResourceType(".tres"), "Resource");
@@ -52,22 +56,28 @@ static void test_uid_sidecars_are_indexed_for_external_resources() {
                       ("didi-resource-uid-scan-" + std::to_string(
                           std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(root);
-    const auto shader = root / "water.gdshader";
+    const auto shader = root / std::filesystem::path(u8"水.gdshader");
     std::ofstream(shader) << "shader_type spatial;\n";
-    std::ofstream(shader.string() + ".uid") << "uid://watershader123\n";
-    const auto texture = root / "water.png";
+    auto shader_sidecar = shader;
+    shader_sidecar += ".uid";
+    std::ofstream(shader_sidecar) << "uid://watershader123\n";
+    const auto texture = root / std::filesystem::path(u8"纹理.png");
     std::ofstream(texture, std::ios::binary) << "not-a-real-png";
-    std::ofstream(texture.string() + ".uid") << "uid://watertexture456\n";
+    auto texture_sidecar = texture;
+    texture_sidecar += ".uid";
+    std::ofstream(texture_sidecar) << "uid://watertexture456\n";
 
     didi::offline::ResourceIndexer indexer;
     indexer.scan(root.string());
-    const auto shaders = indexer.query("res://", "Shader", "water.gdshader", true);
-    const auto textures = indexer.query("res://", "Texture2D", "water.png", true);
+    const auto shaders = indexer.query("res://", "Shader", utf8(u8"水.gdshader"), true);
+    const auto textures = indexer.query("res://", "Texture2D", utf8(u8"纹理.png"), true);
     std::filesystem::remove_all(root);
 
     ASSERT_EQ(shaders.size(), 1u);
+    ASSERT_EQ(shaders[0].path, "res://" + utf8(u8"水.gdshader"));
     ASSERT_EQ(shaders[0].uid, "uid://watershader123");
     ASSERT_EQ(textures.size(), 1u);
+    ASSERT_EQ(textures[0].path, "res://" + utf8(u8"纹理.png"));
     ASSERT_EQ(textures[0].uid, "uid://watertexture456");
 }
 

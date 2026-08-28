@@ -31,6 +31,11 @@ inline std::filesystem::path projectPathFromUtf8(const std::string& value) {
 #endif
 }
 
+inline std::string projectPathToUtf8(const std::filesystem::path& path) {
+    const auto value = path.generic_u8string();
+    return {reinterpret_cast<const char*>(value.data()), value.size()};
+}
+
 inline bool isWithinProject(const std::filesystem::path& root,
                             const std::filesystem::path& candidate) {
     const auto root_value = normalizedProjectPath(root);

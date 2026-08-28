@@ -25,7 +25,7 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
         if (resolved.isErr()) {
             return CallToolResult::error("Invalid script file path: " + resolved.error().message);
         }
-        analysis_path = resolved.value().string();
+        analysis_path = paths::projectPathToUtf8(resolved.value());
     }
 
     auto diags = offline::GDScriptDiagnostics::analyze(analysis_path, source_text);
@@ -122,7 +122,7 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
     std::string patched_content = patch_res.value();
     std::ofstream out_file(disk_path, std::ios::trunc);
     if (!out_file.is_open()) {
-        return CallToolResult::error("Cannot write patched file to disk: " + disk_path.string());
+        return CallToolResult::error("Cannot write patched file to disk: " + file_path);
     }
     out_file << patched_content;
     out_file.close();

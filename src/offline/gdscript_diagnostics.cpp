@@ -1,6 +1,7 @@
 #include "didi/offline/gdscript_diagnostics.hpp"
 #include "didi/offline/test_runner.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/project_path.hpp"
 #include <fstream>
 #include <sstream>
 #include <string_view>
@@ -100,7 +101,7 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& fi
             actual_path = actual_path.substr(6);
         }
 
-        std::ifstream file(actual_path);
+        std::ifstream file(paths::projectPathFromUtf8(actual_path));
 
         if (file.is_open()) {
             std::stringstream ss;
@@ -256,8 +257,11 @@ std::optional<GDScriptDeclaration> GDScriptDiagnostics::parseDeclaration(
         }
         if (offset == name_start) return std::nullopt;
         const auto annotation = code_line.substr(name_start, offset - name_start);
+        const bool export_grouping = annotation == "export_group" ||
+                                     annotation == "export_category" ||
+                                     annotation == "export_subgroup";
         exported = exported || annotation == "export" ||
-                   strings::startsWith(annotation, "export_");
+                   (strings::startsWith(annotation, "export_") && !export_grouping);
         while (offset < code_line.size() &&
                std::isspace(static_cast<unsigned char>(code_line[offset]))) {
             ++offset;
@@ -336,7 +340,7 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const s
         return diags; // Prevent command injection
     }
 
-    if (!fs::exists(actual_path)) return diags;
+    if (!fs::exists(paths::projectPathFromUtf8(actual_path))) return diags;
 
     std::string godot_exe = resolveGodotExecutable();
     std::string output;

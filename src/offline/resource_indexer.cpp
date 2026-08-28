@@ -1,5 +1,6 @@
 #include "didi/offline/resource_indexer.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/project_path.hpp"
 #include <fstream>
 #include <regex>
 #include <algorithm>
@@ -17,8 +18,10 @@ bool isValidUid(const std::string& uid) {
     return std::regex_match(uid, uid_regex);
 }
 
-std::string extractUidSidecar(const std::string& file_path) {
-    std::ifstream sidecar(file_path + ".uid", std::ios::binary);
+std::string extractUidSidecar(const fs::path& file_path) {
+    auto sidecar_path = file_path;
+    sidecar_path += ".uid";
+    std::ifstream sidecar(sidecar_path, std::ios::binary);
     if (!sidecar.is_open()) return "";
     std::array<char, 257> buffer{};
     sidecar.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
@@ -27,6 +30,39 @@ std::string extractUidSidecar(const std::string& file_path) {
     const std::string uid = strings::trim(
         std::string(buffer.data(), static_cast<size_t>(bytes_read)));
     return isValidUid(uid) ? uid : "";
+}
+
+std::string extractUidFromPath(const fs::path& file_path) {
+    std::ifstream file(file_path);
+    static const std::regex uid_regex(R"re(uid="(uid:\/\/[^"]+)")re");
+    if (file.is_open()) {
+        std::string line;
+        int count = 0;
+        while (std::getline(file, line) && count++ < 10) {
+            std::smatch match;
+            if (std::regex_search(line, match, uid_regex) && match.size() > 1) {
+                const auto uid = match[1].str();
+                if (isValidUid(uid)) return uid;
+            }
+        }
+    }
+    return extractUidSidecar(file_path);
+}
+
+std::vector<std::string> extractDependenciesFromPath(const fs::path& file_path) {
+    std::vector<std::string> deps;
+    std::ifstream file(file_path);
+    if (!file.is_open()) return deps;
+
+    std::string line;
+    static const std::regex path_regex(R"re(\[ext_resource[^\]]*path="(res:\/\/[^"]+)")re");
+    while (std::getline(file, line)) {
+        std::smatch match;
+        if (std::regex_search(line, match, path_regex) && match.size() > 1) {
+            deps.push_back(match[1].str());
+        }
+    }
+    return deps;
 }
 
 } // namespace
@@ -51,36 +87,11 @@ std::string ResourceIndexer::detectResourceType(const std::string& ext) {
 }
 
 std::string ResourceIndexer::extractUidFromFile(const std::string& file_path) {
-    std::ifstream file(file_path);
-    static const std::regex uid_regex(R"re(uid="(uid:\/\/[^"]+)")re");
-    if (file.is_open()) {
-        std::string line;
-        int count = 0;
-        while (std::getline(file, line) && count++ < 10) {
-            std::smatch match;
-            if (std::regex_search(line, match, uid_regex) && match.size() > 1) {
-                const auto uid = match[1].str();
-                if (isValidUid(uid)) return uid;
-            }
-        }
-    }
-    return extractUidSidecar(file_path);
+    return extractUidFromPath(paths::projectPathFromUtf8(file_path));
 }
 
 std::vector<std::string> ResourceIndexer::extractDependenciesFromFile(const std::string& file_path) {
-    std::vector<std::string> deps;
-    std::ifstream file(file_path);
-    if (!file.is_open()) return deps;
-
-    std::string line;
-    static const std::regex path_regex(R"re(\[ext_resource[^\]]*path="(res:\/\/[^"]+)")re");
-    while (std::getline(file, line)) {
-        std::smatch match;
-        if (std::regex_search(line, match, path_regex) && match.size() > 1) {
-            deps.push_back(match[1].str());
-        }
-    }
-    return deps;
+    return extractDependenciesFromPath(paths::projectPathFromUtf8(file_path));
 }
 
 void ResourceIndexer::scan(const std::string& root_dir) {
@@ -88,14 +99,14 @@ void ResourceIndexer::scan(const std::string& root_dir) {
     m_uidMap.clear();
 
     try {
-        fs::path root_path(root_dir);
+        fs::path root_path = paths::projectPathFromUtf8(root_dir);
         if (!fs::exists(root_path)) return;
 
         for (auto it = fs::recursive_directory_iterator(root_path, fs::directory_options::skip_permission_denied);
              it != fs::recursive_directory_iterator(); ++it) {
             const auto& entry = *it;
             if (entry.is_directory()) {
-                auto name = entry.path().filename().string();
+                const auto name = entry.path().filename();
                 if (name == ".godot" || name == ".git" || name == "build" || name == ".gemini" || name == ".vs" || name == "out" || name == "bin") {
                     it.disable_recursion_pending();
                 }
@@ -103,28 +114,23 @@ void ResourceIndexer::scan(const std::string& root_dir) {
             }
 
             if (entry.is_regular_file()) {
-                std::string full_path = entry.path().string();
-                std::replace(full_path.begin(), full_path.end(), '\\', '/');
-
                 // Convert to res:// relative path
-                std::string rel_path;
-                auto rel = fs::relative(entry.path(), root_path).string();
-                std::replace(rel.begin(), rel.end(), '\\', '/');
-                rel_path = "res://" + rel;
+                const auto rel = fs::relative(entry.path(), root_path);
+                const std::string rel_path = "res://" + paths::projectPathToUtf8(rel);
 
-                std::string ext = entry.path().extension().string();
-                std::string filename = entry.path().filename().string();
+                const std::string ext = paths::projectPathToUtf8(entry.path().extension());
+                const std::string filename = paths::projectPathToUtf8(entry.path().filename());
                 std::string type = detectResourceType(ext);
                 std::string uid = "";
                 std::vector<std::string> deps;
 
                 if (type == "PackedScene" || type == "Resource" || type == "GDScript") {
-                    uid = extractUidFromFile(full_path);
+                    uid = extractUidFromPath(entry.path());
                     if (type == "PackedScene") {
-                        deps = extractDependenciesFromFile(full_path);
+                        deps = extractDependenciesFromPath(entry.path());
                     }
                 } else if (ext != ".uid") {
-                    uid = extractUidSidecar(full_path);
+                    uid = extractUidSidecar(entry.path());
                 }
 
                 uintmax_t file_size = 0;
