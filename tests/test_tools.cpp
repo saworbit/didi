@@ -925,6 +925,50 @@ static void test_symbol_extraction() {
     ASSERT_EQ(parsed["signals"][0]["name"], "reached_goal");
 }
 
+static void test_offline_tools_do_not_fallback_to_demo_paths() {
+    const auto repository_root = std::filesystem::current_path();
+    const auto outside_script = repository_root / "tests/godot_smoke/subject.gd";
+    const auto outside_scene = repository_root / "tests/godot_smoke/main.tscn";
+    ScopedToolProject project("no-demo-fallback");
+    std::filesystem::create_directories("demo/scripts");
+    const std::string original_script = "func decoy():\n\tpass\n";
+    std::ofstream("demo/scripts/player.gd", std::ios::binary) << original_script;
+    std::ofstream("demo/project.godot")
+        << "[application]\nrun/main_scene=\"res://main.tscn\"\n";
+    std::ofstream("demo/main.tscn")
+        << "[gd_scene format=3]\n\n[node name=\"Decoy\" type=\"Node\"]\n";
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(std::make_shared<DisconnectedIpcClient>());
+
+    const auto symbols = registry.callTool(
+        "script_get_symbols", {{"file_path", "res://scripts/player.gd"}});
+    ASSERT_TRUE(symbols.isError);
+
+    const auto patch = registry.callTool(
+        "script_patch_method",
+        {{"file_path", "res://scripts/player.gd"},
+         {"method_name", "decoy"},
+         {"new_definition", "func decoy():\n\treturn 1"}});
+    ASSERT_TRUE(patch.isError);
+    ASSERT_EQ(readToolTestFile("demo/scripts/player.gd"), original_script);
+
+    const auto hierarchy = registry.callTool("scene_get_hierarchy", didi::json::object());
+    ASSERT_TRUE(hierarchy.isError);
+
+    const auto outside_symbols = registry.callTool(
+        "script_get_symbols", {{"file_path", outside_script.string()}});
+    ASSERT_TRUE(outside_symbols.isError);
+    const auto outside_diagnostics = registry.callTool(
+        "script_check_syntax", {{"file_path", outside_script.string()}});
+    ASSERT_TRUE(outside_diagnostics.isError);
+    const auto outside_hierarchy = registry.callTool(
+        "scene_get_hierarchy", {{"root_path", outside_scene.string()}});
+    ASSERT_TRUE(outside_hierarchy.isError);
+    registry.setIpcClient(nullptr);
+}
+
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.DefaultRegistration", test_tool_registry_default_tools);
@@ -952,6 +996,7 @@ struct RegisterToolTests {
         registerTest("EditorHook.PendingStepGate", test_runtime_step_gate_rejects_a_second_pending_step);
         registerTest("Tools.ClassReflection", test_class_reflection);
         registerTest("Tools.SymbolExtraction", test_symbol_extraction);
+        registerTest("Tools.NoDemoPathFallback", test_offline_tools_do_not_fallback_to_demo_paths);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }

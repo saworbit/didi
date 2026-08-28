@@ -96,10 +96,6 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& fi
         }
 
         std::ifstream file(actual_path);
-        if (!file.is_open() && fs::exists("demo/" + actual_path)) {
-            actual_path = "demo/" + actual_path;
-            file.open(actual_path);
-        }
 
         if (file.is_open()) {
             std::stringstream ss;
@@ -273,13 +269,7 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const s
         return diags; // Prevent command injection
     }
 
-    if (!fs::exists(actual_path)) {
-        if (fs::exists("demo/" + actual_path)) {
-            actual_path = "demo/" + actual_path;
-        } else {
-            return diags;
-        }
-    }
+    if (!fs::exists(actual_path)) return diags;
 
     std::string godot_exe = resolveGodotExecutable();
     std::string output;

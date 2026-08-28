@@ -1,6 +1,7 @@
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/project_path.hpp"
 #include "didi/offline/gdscript_diagnostics.hpp"
 #include <fstream>
 #include <sstream>
@@ -18,8 +19,16 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
         return CallToolResult::error("Parameter 'file_path' or 'source_text' is required.");
     }
 
-    // Run offline analysis
-    auto diags = offline::GDScriptDiagnostics::analyze(file_path, source_text);
+    std::string analysis_path = file_path;
+    if (source_text.empty() && !file_path.empty()) {
+        auto resolved = paths::resolveProjectFile(file_path);
+        if (resolved.isErr()) {
+            return CallToolResult::error("Invalid script file path: " + resolved.error().message);
+        }
+        analysis_path = resolved.value().string();
+    }
+
+    auto diags = offline::GDScriptDiagnostics::analyze(analysis_path, source_text);
     json diag_arr = json::array();
     bool has_error = false;
     for (const auto& d : diags) {
@@ -55,13 +64,11 @@ CallToolResult handleScriptGetSymbols(const json& args, std::shared_ptr<ipc::IIp
     std::string source_text = args.value("source_text", "");
 
     if (source_text.empty() && !file_path.empty()) {
-        std::string disk_path = file_path;
-        if (strings::startsWith(disk_path, "res://")) disk_path = disk_path.substr(6);
-        std::ifstream file(disk_path);
-        if (!file.is_open() && std::filesystem::exists("demo/" + disk_path)) {
-            disk_path = "demo/" + disk_path;
-            file.open(disk_path);
+        auto resolved = paths::resolveProjectFile(file_path);
+        if (resolved.isErr()) {
+            return CallToolResult::error("Invalid script file path: " + resolved.error().message);
         }
+        std::ifstream file(resolved.value());
         if (file.is_open()) {
             std::stringstream ss;
             ss << file.rdbuf();
@@ -89,36 +96,15 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
         return CallToolResult::error("Parameters 'file_path', 'method_name'/'symbol_name', and 'new_definition' are required.");
     }
 
-    std::string disk_path = file_path;
-    if (strings::startsWith(disk_path, "res://")) {
-        disk_path = disk_path.substr(6);
-    }
-
     namespace fs = std::filesystem;
-    fs::path target_p(disk_path);
-    fs::path current_root = fs::current_path();
-
-    try {
-        auto canon_root = fs::weakly_canonical(current_root);
-        auto canon_target = fs::weakly_canonical(current_root / target_p);
-        auto [root_it, target_it] = std::mismatch(
-            canon_root.begin(), canon_root.end(),
-            canon_target.begin(), canon_target.end()
-        );
-        if (root_it != canon_root.end()) {
-            return CallToolResult::error("Access denied: file path is outside the project root directory.");
-        }
-    } catch (const std::exception& e) {
-        return CallToolResult::error(std::string("Path resolution error: ") + e.what());
+    auto resolved = paths::resolveProjectFile(file_path);
+    if (resolved.isErr()) {
+        return CallToolResult::error("Invalid script file path: " + resolved.error().message);
     }
+    const fs::path disk_path = resolved.value();
 
     std::string original_content;
     std::ifstream in_file(disk_path);
-    if (!in_file.is_open() && fs::exists("demo/" + disk_path)) {
-        disk_path = "demo/" + disk_path;
-        in_file.open(disk_path);
-    }
-
     if (in_file.is_open()) {
         std::stringstream ss;
         ss << in_file.rdbuf();
@@ -136,7 +122,7 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
     std::string patched_content = patch_res.value();
     std::ofstream out_file(disk_path, std::ios::trunc);
     if (!out_file.is_open()) {
-        return CallToolResult::error("Cannot write patched file to disk: " + disk_path);
+        return CallToolResult::error("Cannot write patched file to disk: " + disk_path.string());
     }
     out_file << patched_content;
     out_file.close();
