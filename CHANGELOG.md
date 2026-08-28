@@ -16,6 +16,7 @@ Historical entries describe the surface advertised by those releases. For the ex
 - Closed Phase 6 without expanding the protocol surface: mandatory explicit Godot project selection, project-keyed runtime endpoints, one-client OS session locks, mutation dry-runs, and exact confirm-before-write tokens.
 - Closed Phase 5 with six canonical tools: C# build diagnostics, real shader compilation diagnostics, secret-redacted export-preset discovery, guarded headless export, deterministic GridMap MeshLibrary generation, and live non-injecting UI hit-testing.
 - Added a cross-platform argv-only process runner with finite deadlines, child-group termination, a 1 MiB combined-output cap, and Windows command-line quoting coverage.
+- Added the approved Phase 7-12 roadmap, including canonical-surface completion and governance requirements for all future phases.
 
 ### Changed
 

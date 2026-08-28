@@ -126,6 +126,14 @@ Didi now refuses startup without `--project <root>` or `DIDI_PROJECT_ROOT`, and 
 
 ---
 
+## Delivery Roadmap
+
+Phases 1-6 established the current implementation baseline. Phase 7 is planned to complete the canonical surface from 60/78 to 78/78 tools; Phases 8-12 cover project intelligence, advanced authoring, parallel orchestration, protocol evolution, and ecosystem maturity.
+
+See the [Roadmap](docs/ROADMAP.md) for delivery status and the [Future Phases Design](docs/FUTURE_PHASES_DESIGN.md) for approved scope and exit gates.
+
+---
+
 ## ⚡ 60-Second Setup for Humans
 
 1. **Build Didi**:
