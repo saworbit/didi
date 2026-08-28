@@ -134,6 +134,62 @@ Second section.
         )
         return self.root
 
+    def make_future_phase_roadmap(
+        self,
+        omitted_phase: int | None = None,
+        phase_statuses: dict[int, str] | None = None,
+    ) -> str:
+        phase_names = {
+            7: "Canonical Surface Completion",
+            8: "Expanded Visual Verification",
+            9: "Asset Import and Pipeline Management",
+            10: "Animation and UI Authoring",
+            11: "Enhanced MCP Protocol Surface",
+            12: "Structured Engine Logging",
+        }
+        statuses = {phase: "PLANNED" for phase in phase_names}
+        if phase_statuses:
+            statuses.update(phase_statuses)
+
+        lines = [
+            "# Roadmap",
+            "",
+            "## Phase 6: Enterprise Safety (COMPLETE)",
+            "",
+            "| **13. Phase 5 Deep Domains (6)** | Implemented |",
+            "",
+        ]
+        for phase, name in phase_names.items():
+            if phase == omitted_phase:
+                continue
+            lines.extend(
+                [
+                    f"## Phase {phase}: {name}",
+                    "",
+                    f"**Status:** `{statuses[phase]}`",
+                    "",
+                ]
+            )
+        return "\n".join(lines)
+
+    def make_future_phase_governance(self, omitted_field: str | None = None) -> str:
+        requirements = {
+            "scope": "Scope: define the capability boundary for every future phase.",
+            "explicit exclusions": "Explicit exclusions: identify deferred behavior that is not delivered.",
+            "security": "Security: preserve the local authenticated safety boundary.",
+            "mutation classification": "Mutation classification: identify each new or reclassified mutation.",
+            "exit evidence": "Exit evidence: require implementation, native tests, integration tests, and CI evidence.",
+            "completion date": "Completion date: record the date when a phase is complete.",
+            "pull request before COMPLETE": "Pull request before COMPLETE: record the pull request before marking a phase complete.",
+        }
+        lines = ["# Future Phase Governance", ""]
+        lines.extend(
+            line
+            for field, line in requirements.items()
+            if field != omitted_field
+        )
+        return "\n".join(lines) + "\n"
+
     def test_valid_repository_has_no_errors(self):
         self.assertEqual(VALIDATOR.validate_repository(self.make_valid_repository()), [])
 
@@ -478,15 +534,37 @@ Second section.
         ]
         self.assertEqual([], future_phase_errors)
 
-    def test_reports_missing_future_phase_declaration(self):
-        root = self.make_valid_repository()
+    def test_reports_missing_each_required_future_phase(self):
+        for phase in range(7, 13):
+            with self.subTest(phase=phase):
+                root = self.make_valid_repository()
+                self.write(
+                    "docs/ROADMAP.md",
+                    self.make_future_phase_roadmap(omitted_phase=phase),
+                )
 
-        errors = validate_repository(root)
+                errors = validate_repository(root)
 
-        self.assertIn(
-            "docs/ROADMAP.md must declare Phase 12",
-            errors,
-        )
+                self.assertIn(
+                    f"docs/ROADMAP.md must declare Phase {phase}",
+                    errors,
+                )
+
+    def test_accepts_each_allowed_future_phase_status(self):
+        for status in ("PLANNED", "IN PROGRESS", "COMPLETE"):
+            with self.subTest(status=status):
+                root = self.make_valid_repository()
+                self.write(
+                    "docs/ROADMAP.md",
+                    self.make_future_phase_roadmap(phase_statuses={8: status}),
+                )
+
+                errors = validate_repository(root)
+
+                self.assertFalse(
+                    any("invalid status" in error.lower() for error in errors),
+                    errors,
+                )
 
     def test_reports_invalid_future_phase_status(self):
         root = self.make_valid_repository()
@@ -541,6 +619,30 @@ Second section.
             "docs/FUTURE_PHASES_DESIGN.md must define future-phase governance",
             errors,
         )
+
+    def test_requires_each_future_phase_governance_field(self):
+        for field in (
+            "scope",
+            "explicit exclusions",
+            "security",
+            "mutation classification",
+            "exit evidence",
+            "completion date",
+            "pull request before COMPLETE",
+        ):
+            with self.subTest(field=field):
+                root = self.make_valid_repository()
+                self.write(
+                    "docs/FUTURE_PHASES_DESIGN.md",
+                    self.make_future_phase_governance(omitted_field=field),
+                )
+
+                errors = validate_repository(root)
+
+                self.assertIn(
+                    "docs/FUTURE_PHASES_DESIGN.md must define future-phase governance",
+                    errors,
+                )
 
     def test_reports_missing_markdown_target(self):
         root = self.make_valid_repository()
