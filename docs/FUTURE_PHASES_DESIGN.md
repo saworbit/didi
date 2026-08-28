@@ -21,7 +21,17 @@ Complete the existing 78-tool canonical surface, then extend Didi through projec
 
 **Status:** `PLANNED`
 
-**Goal:** Move from 60/78 to 78/78 implemented canonical tools without adding public tool names.
+**Goal:** Implement the remaining 18 canonical tools, moving from 60/78 to 78/78 without adding public tool names.
+
+**Scope:** Phase 7A-7C complete the registered canonical surface through editor authoring, simulation and animation, and runtime debugging.
+
+**Explicit exclusions:** No new public tool names, arbitrary debugger control, or engine-output streaming beyond implemented Godot APIs.
+
+**Security classification:** Local authenticated editor/game tooling; project containment, route authentication, and bounded payload rules remain mandatory.
+
+**Mutation classification:** Mixed read-only and mutating operations; every mutation is bounded, dry-runnable, explicitly classified for confirmation, and transactional where persistent.
+
+**Exit evidence:** The Phase 7 evidence below must prove all canonical implementations, safety policies, tests, documentation, and cross-platform checks.
 
 ### Phase 7A: Editor Authoring Completion
 
@@ -90,7 +100,7 @@ Requirements:
 
 **Goal:** Make project-wide dependencies, UID resolution, and import health inspectable and safely configurable.
 
-Scope:
+**Scope:**
 
 - Reverse scene/resource usage lookup.
 - Real `.godot/uid_cache.bin` resolution and UID-to-path reconciliation.
@@ -99,13 +109,17 @@ Scope:
 - Generated `extension_api.json` or live ClassDB reflection replacing the limited static map.
 - Incremental indexing with deterministic invalidation, bounded memory, and explicit freshness.
 
-Exclusions:
+**Explicit exclusions:**
 
 - No custom GDScript language server.
 - No unbounded whole-project semantic analysis.
 - No silent import-setting mutation.
 
-Exit gate:
+**Security classification:** Local authenticated project analysis and import tooling; project containment, provenance, and freshness must be preserved.
+
+**Mutation classification:** Mixed read-only indexing/diagnostics and guarded import-configuration mutations; writes require preview, explicit intent, and post-reimport verification.
+
+**Exit evidence:**
 
 - Didi can explain resource usage and import health with source provenance and freshness.
 - Index corruption, symlinks, malformed cache data, and generated-directory escapes fail safely.
@@ -117,7 +131,7 @@ Exit gate:
 
 **Goal:** Author and visually verify UI, animation, and presentation changes through reversible, bounded operations.
 
-Scope:
+**Scope:**
 
 - Explicit 2D canvas, 3D world, editor viewport, and running-game capture targets.
 - Reversible debug overlays and visualization modifiers.
@@ -126,13 +140,17 @@ Scope:
 - Multi-frame and richer visual baselines with deterministic comparison metadata.
 - Additional guided character, signal, UI, animation, and visual-verification prompt workflows.
 
-Exclusions:
+**Explicit exclusions:**
 
 - No arbitrary GPU command injection.
 - No sticky global debug state.
 - No image-diff claim across mismatched dimensions or undocumented color conversion.
 
-Exit gate:
+**Security classification:** Local authenticated editor/game authoring; capture data and temporary visual state stay bounded to the selected project and route.
+
+**Mutation classification:** Authoring changes are mutating and must be dry-runnable, UndoRedo-backed, bounded, and reversible; inspections and comparisons remain read-only.
+
+**Exit evidence:**
 
 - Authoring mutations are UndoRedo-backed and dry-runnable.
 - Temporary visual state is restored on success, error, timeout, and cancellation.
@@ -144,7 +162,7 @@ Exit gate:
 
 **Goal:** Let one Didi MCP process run isolated Godot experiments in parallel without interfering with the user's editor.
 
-Scope:
+**Scope:**
 
 - Owned Godot bench pool with acquire, release, status, and bounded experiment execution.
 - Workspace isolation, capacity limits, TTLs, cancellation, orphan detection, and reaping.
@@ -152,14 +170,18 @@ Scope:
 - Aggregated structured outcomes, logs, captures, and comparison artifacts.
 - Deterministic scheduling and cleanup under partial child failure.
 
-Exclusions:
+**Explicit exclusions:**
 
 - No autonomous planning inside Gogo.
 - No Agent-to-Agent transport in the initial phase.
 - No attachment to or termination of Godot processes Gogo does not own.
 - No claim that a fixed number of benches is universally supported.
 
-Exit gate:
+**Security classification:** Local owned-child orchestration; process ownership, workspace isolation, capacity, TTL, and cleanup boundaries are mandatory.
+
+**Mutation classification:** Bench acquisition, experiment execution, artifact creation, and cleanup mutate owned local state only and require bounded lifecycle controls.
+
+**Exit evidence:**
 
 - Parallel experiments are isolated by project/workspace and ownership identity.
 - Capacity and artifact budgets are enforced under concurrency.
@@ -171,7 +193,7 @@ Exit gate:
 
 **Goal:** Use broader MCP capabilities honestly while retaining authenticated local engine IPC.
 
-Scope:
+**Scope:**
 
 - Resource templates for nodes, scripts, scenes, assets, and bounded project queries.
 - Resource subscriptions and change notifications.
@@ -180,13 +202,17 @@ Scope:
 - Explicit protocol-version negotiation and compatibility tests.
 - Bounded notification queues, coalescing, backpressure, and dropped-event disclosure.
 
-Exclusions:
+**Explicit exclusions:**
 
 - No replacement of stdio MCP with network transport.
 - No notification claim for data Didi cannot observe reliably.
 - No unbounded event or log streaming.
 
-Exit gate:
+**Security classification:** Authenticated local MCP evolution over stdio and existing engine IPC; no network transport or broader trust boundary is introduced.
+
+**Mutation classification:** Protocol subscriptions and diagnostics are read-only state observation; prompt workflows may invoke only capability-checked tools under their existing mutation policies.
+
+**Exit evidence:**
 
 - Subscription lifecycle, reconnect behavior, ordering, loss disclosure, and backpressure are specified and tested.
 - Older supported MCP clients retain a documented compatibility path.
@@ -198,7 +224,7 @@ Exit gate:
 
 **Goal:** Make Didi straightforward to install, upgrade, audit, extend, and support as production-grade local development tooling.
 
-Scope:
+**Scope:**
 
 - Signed, reproducible release artifacts with provenance and SBOMs.
 - Package-manager and Godot addon distribution.
@@ -208,12 +234,16 @@ Scope:
 - Vulnerability-response automation and recurring security audits.
 - Stable third-party extension points that preserve capability honesty and mutation safety.
 
-Exclusions:
+**Explicit exclusions:**
 
 - Didi does not become a remote multi-tenant service or hostile-host isolation boundary.
 - Third-party extensions cannot bypass project containment, authentication, route policy, dry-run, or confirmation controls.
 
-Exit gate:
+**Security classification:** Local distribution and extension ecosystem controls; provenance, signing, compatibility, and vulnerability-response policy govern trust.
+
+**Mutation classification:** Packaging, installation, upgrade, rollback, and release automation mutate distribution state but cannot bypass runtime project, authentication, dry-run, or confirmation controls.
+
+**Exit evidence:**
 
 - Release artifacts are reproducible, signed, installable, and traceable to source.
 - Supported Godot/platform combinations are explicit and continuously verified.

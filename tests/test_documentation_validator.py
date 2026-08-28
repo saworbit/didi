@@ -3,6 +3,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -28,13 +29,16 @@ class DocumentationValidatorTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
 
-    def stage(self, *relative_paths: str) -> None:
+    def init_git(self) -> None:
         subprocess.run(
             ["git", "init", "--quiet", str(self.root)],
             check=True,
             capture_output=True,
             text=True,
         )
+
+    def stage(self, *relative_paths: str) -> None:
+        self.init_git()
         subprocess.run(
             ["git", "-C", str(self.root), "add", *relative_paths],
             check=True,
@@ -65,6 +69,8 @@ Didi exposes 78 canonical tools plus 10 legacy names (88 total).
 
 Startup requires --project or DIDI_PROJECT_ROOT. Mutations expose dry_run and protected writes use confirmation_token.
 
+Phase 7 is planned to implement the remaining 18 canonical tools, completing the canonical surface from 60/78 to 78/78 tools.
+
 [Guide](docs/GUIDE.md#details-1) | [Security](SECURITY.md) | [Overview](#didi)
 """,
         )
@@ -74,9 +80,11 @@ Startup requires --project or DIDI_PROJECT_ROOT. Mutations expose dry_run and pr
 
 ## [Unreleased]
 
+Discovery now exposes 78 canonical tools plus 10 legacy registrations (88 total). Sixty canonical tools are implemented and 18 remain unimplemented.
+
 ## [1.4.0] - 2026-08-28
 
-Version 1.4.0 exposes 78 canonical tools, 10 legacy registrations, and 88 total registrations. Sixty canonical tools are implemented and 18 remain unimplemented.
+Version 1.4.0 release record.
 """,
         )
         self.write(
@@ -149,12 +157,15 @@ Second section.
 [External](https://example.com/docs#anchor)
 """,
         )
+        self.init_git()
         return self.root
 
     def make_future_phase_roadmap(
         self,
         omitted_phase: int | None = None,
         phase_statuses: dict[int, str] | None = None,
+        duplicate_phase: int | None = None,
+        sequence_statuses: dict[int, str] | None = None,
     ) -> str:
         phase_names = {
             7: "Canonical Surface Completion",
@@ -167,6 +178,9 @@ Second section.
         statuses = {phase: "PLANNED" for phase in phase_names}
         if phase_statuses:
             statuses.update(phase_statuses)
+        implementation_statuses = {phase: "COMPLETE" for phase in range(1, 7)}
+        if sequence_statuses:
+            implementation_statuses.update(sequence_statuses)
 
         lines = [
             "# Roadmap",
@@ -185,24 +199,67 @@ Second section.
                     "",
                 ]
             )
+            if phase == 7:
+                lines.extend(
+                    [
+                        "**Objective:** Implement the remaining 18 canonical tools, moving the protocol surface from 60/78 to 78/78.",
+                        "",
+                    ]
+                )
+        if duplicate_phase is not None:
+            lines.extend(
+                [
+                    f"## Phase {duplicate_phase}: Duplicate (`{statuses[duplicate_phase]}`)",
+                    "",
+                ]
+            )
+        lines.extend(
+            [
+                "## Suggested Implementation Sequence",
+                "",
+                "| Phase | Milestone | Rationale |",
+                "| :--- | :--- | :--- |",
+            ]
+        )
+        for phase, status in implementation_statuses.items():
+            lines.append(f"| **Phase {phase} ({status})** | Milestone | Evidence |")
         return "\n".join(lines)
 
-    def make_future_phase_governance(self, omitted_field: str | None = None) -> str:
-        requirements = {
-            "scope": "Scope: define the capability boundary for every future phase.",
-            "explicit exclusions": "Explicit exclusions: identify deferred behavior that is not delivered.",
-            "security": "Security: preserve the local authenticated safety boundary.",
-            "mutation classification": "Mutation classification: identify each new or reclassified mutation.",
-            "exit evidence": "Exit evidence: require implementation, native tests, integration tests, and CI evidence.",
-            "completion date": "Completion date: record the date when a phase is complete.",
-            "pull request": "Pull request before COMPLETE: record the pull request before marking a phase complete.",
+    def make_future_phase_governance(
+        self,
+        omitted_phase_field: tuple[int, str] | None = None,
+        completed_phase: int | None = None,
+        omitted_completion_field: str | None = None,
+    ) -> str:
+        phase_fields = {
+            "scope": "**Scope:** Define this phase's capability boundary.",
+            "explicit exclusions": "**Explicit exclusions:** Identify deferred behavior.",
+            "security classification": "**Security classification:** Local authenticated boundary.",
+            "mutation classification": "**Mutation classification:** Mixed read and bounded mutation operations.",
+            "exit evidence": "**Exit evidence:** Native, integration, CI, and documentation evidence.",
+        }
+        completion_fields = {
+            "completion date": "**Completion date:** 2026-08-29",
+            "pull request": "**Pull request:** #123",
+            "verification evidence": "**Verification evidence:** Focused and repository gates passed.",
         }
         lines = ["# Future Phase Governance", ""]
-        lines.extend(
-            line
-            for field, line in requirements.items()
-            if field != omitted_field
-        )
+        for phase in range(7, 13):
+            lines.extend([f"## Phase {phase}: Future Work", ""])
+            if phase == 7:
+                lines.extend(
+                    [
+                        "**Goal:** Implement the remaining 18 canonical tools, moving from 60/78 to 78/78.",
+                        "",
+                    ]
+                )
+            for field, line in phase_fields.items():
+                if omitted_phase_field != (phase, field):
+                    lines.extend([line, ""])
+            if phase == completed_phase:
+                for field, line in completion_fields.items():
+                    if field != omitted_completion_field:
+                        lines.extend([line, ""])
         return "\n".join(lines) + "\n"
 
     def test_valid_repository_has_no_errors(self):
@@ -238,6 +295,14 @@ Second section.
         self.assertTrue(any(".superpowers" in error for error in errors), errors)
         self.assertTrue(any("docs/superpowers" in error for error in errors), errors)
 
+    def test_rejects_untracked_docs_superpowers_artifact(self):
+        root = self.make_valid_repository()
+        self.write("docs/superpowers/untracked-plan.md", "# Untracked plan\n")
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(any("docs/superpowers" in error for error in errors), errors)
+
     def test_allows_untracked_superpowers_workspace(self):
         root = self.make_valid_repository()
         self.write(".superpowers/sdd/task-5-report.md", "# Task 5 report\n")
@@ -245,6 +310,30 @@ Second section.
         errors = VALIDATOR.validate_repository(root)
 
         self.assertFalse(any(".superpowers" in error for error in errors), errors)
+
+    def test_reports_git_failure_while_checking_forbidden_artifacts(self):
+        root = self.make_valid_repository()
+
+        with mock.patch.object(
+            VALIDATOR.subprocess,
+            "run",
+            side_effect=OSError("git unavailable"),
+        ):
+            errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(
+            any("git ls-files failed" in error and "git unavailable" in error for error in errors),
+            errors,
+        )
+
+    def test_rejects_non_ascii_tracked_superpowers_filename(self):
+        root = self.make_valid_repository()
+        self.write(".superpowers/résumé.md", "# Internal report\n")
+        self.stage(".superpowers/résumé.md")
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(any(".superpowers" in error for error in errors), errors)
 
     def test_rejects_workflow_reference_to_superpowers(self):
         root = self.make_valid_repository()
@@ -551,12 +640,29 @@ Second section.
         )
 
     def test_repository_requires_future_phase_roadmap(self):
+        roadmap = (REPOSITORY_ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
+        design = (REPOSITORY_ROOT / "docs/FUTURE_PHASES_DESIGN.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertEqual([], VALIDATOR.validate_future_phase_roadmap(roadmap))
+        self.assertEqual(
+            [],
+            VALIDATOR.validate_future_phase_governance(design, roadmap),
+        )
+
         errors = validate_repository(REPOSITORY_ROOT)
-        future_phase_errors = [
-            error for error in errors
-            if "future phase" in error.lower() or "phase status" in error.lower()
-        ]
-        self.assertEqual([], future_phase_errors)
+        exact_error_families = (
+            "docs/ROADMAP.md declares Phase",
+            "docs/ROADMAP.md Phase",
+            "docs/ROADMAP.md must declare Phase",
+            "docs/FUTURE_PHASES_DESIGN.md Phase",
+            "docs/FUTURE_PHASES_DESIGN.md must define Phase",
+        )
+        self.assertFalse(
+            any(error.startswith(exact_error_families) for error in errors),
+            errors,
+        )
 
     def test_reports_missing_each_required_future_phase(self):
         for phase in range(7, 13):
@@ -582,6 +688,12 @@ Second section.
                     "docs/ROADMAP.md",
                     self.make_future_phase_roadmap(phase_statuses={8: status}),
                 )
+                self.write(
+                    "docs/FUTURE_PHASES_DESIGN.md",
+                    self.make_future_phase_governance(
+                        completed_phase=8 if status == "COMPLETE" else None
+                    ),
+                )
 
                 errors = validate_repository(root)
 
@@ -606,55 +718,133 @@ Second section.
                     errors,
                 )
 
-    def test_requires_future_phase_governance_document(self):
-        root = self.make_valid_repository()
-        self.write("docs/FUTURE_PHASES_DESIGN.md", "# Future Phases\n")
+    def test_rejects_duplicate_phase_declaration(self):
+        roadmap = self.make_future_phase_roadmap(duplicate_phase=8)
 
-        errors = validate_repository(root)
+        errors = VALIDATOR.validate_future_phase_roadmap(roadmap)
+
+        self.assertIn("docs/ROADMAP.md declares Phase 8 more than once", errors)
+
+    def test_rejects_invalid_implementation_sequence_status(self):
+        roadmap = self.make_future_phase_roadmap(sequence_statuses={2: "DONE"})
+
+        errors = VALIDATOR.validate_future_phase_roadmap(roadmap)
+
+        self.assertIn("docs/ROADMAP.md Phase 2 has invalid status 'DONE'", errors)
+
+    def test_requires_future_phase_governance_document(self):
+        errors = VALIDATOR.validate_future_phase_governance(
+            "# Future Phases\n",
+            self.make_future_phase_roadmap(),
+        )
 
         self.assertIn(
-            "docs/FUTURE_PHASES_DESIGN.md must define future-phase governance",
+            "docs/FUTURE_PHASES_DESIGN.md must define Phase 7",
             errors,
         )
 
     def test_requires_each_future_phase_governance_field(self):
+        for phase in range(7, 13):
+            for field in (
+                "scope",
+                "explicit exclusions",
+                "security classification",
+                "mutation classification",
+                "exit evidence",
+            ):
+                with self.subTest(phase=phase, field=field):
+                    errors = VALIDATOR.validate_future_phase_governance(
+                        self.make_future_phase_governance(
+                            omitted_phase_field=(phase, field)
+                        ),
+                        self.make_future_phase_roadmap(),
+                    )
+
+                    self.assertIn(
+                        f"docs/FUTURE_PHASES_DESIGN.md Phase {phase} is missing "
+                        f"required governance field: {field}",
+                        errors,
+                    )
+
+    def test_complete_phase_requires_each_completion_field(self):
+        roadmap = self.make_future_phase_roadmap(phase_statuses={8: "COMPLETE"})
         for field in (
-            "scope",
-            "explicit exclusions",
-            "security",
-            "mutation classification",
-            "exit evidence",
             "completion date",
             "pull request",
+            "verification evidence",
         ):
             with self.subTest(field=field):
-                root = self.make_valid_repository()
-                self.write(
-                    "docs/FUTURE_PHASES_DESIGN.md",
-                    self.make_future_phase_governance(omitted_field=field),
+                errors = VALIDATOR.validate_future_phase_governance(
+                    self.make_future_phase_governance(
+                        completed_phase=8,
+                        omitted_completion_field=field,
+                    ),
+                    roadmap,
                 )
 
-                errors = validate_repository(root)
-
                 self.assertIn(
-                    "docs/FUTURE_PHASES_DESIGN.md must define future-phase governance",
+                    f"docs/FUTURE_PHASES_DESIGN.md Phase 8 is COMPLETE but "
+                    f"missing completion field: {field}",
                     errors,
                 )
 
     def test_rejects_generic_mutation_without_classification(self):
-        root = self.make_valid_repository()
-        self.write(
-            "docs/FUTURE_PHASES_DESIGN.md",
+        errors = VALIDATOR.validate_future_phase_governance(
             self.make_future_phase_governance().replace(
-                "Mutation classification:",
-                "Mutation:",
+                "**Mutation classification:** Mixed read and bounded mutation operations.",
+                "**Mutation:** Mixed read and bounded mutation operations.",
+                1,
             ),
+            self.make_future_phase_roadmap(),
+        )
+
+        self.assertIn(
+            "docs/FUTURE_PHASES_DESIGN.md Phase 7 is missing required governance field: mutation classification",
+            errors,
+        )
+
+    def test_rejects_canonical_count_mutation_in_each_current_document(self):
+        mutations = {
+            "README.md": ("remaining 18 canonical", "remaining 17 canonical"),
+            "docs/CAPABILITIES.md": ("18 remain reserved", "17 remain reserved"),
+            "docs/ROADMAP.md": ("remaining 18 canonical", "remaining 17 canonical"),
+            "docs/FUTURE_PHASES_DESIGN.md": (
+                "remaining 18 canonical",
+                "remaining 17 canonical",
+            ),
+            "CHANGELOG.md": ("18 remain unimplemented", "17 remain unimplemented"),
+        }
+        for relative_path, (original, mutation) in mutations.items():
+            with self.subTest(relative_path=relative_path):
+                root = self.make_valid_repository()
+                path = root / relative_path
+                text = path.read_text(encoding="utf-8")
+                self.assertIn(original, text)
+                self.write(relative_path, text.replace(original, mutation, 1))
+
+                errors = validate_repository(root)
+
+                self.assertTrue(
+                    any(
+                        relative_path in error
+                        and "canonical implementation counts" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
+
+    def test_enforces_canonical_count_arithmetic(self):
+        root = self.make_valid_repository()
+        roadmap = (root / "docs/ROADMAP.md").read_text(encoding="utf-8")
+        self.write(
+            "docs/ROADMAP.md",
+            roadmap.replace("remaining 18 canonical", "remaining 17 canonical", 1),
         )
 
         errors = validate_repository(root)
 
-        self.assertIn(
-            "docs/FUTURE_PHASES_DESIGN.md must define future-phase governance",
+        self.assertTrue(
+            any("docs/ROADMAP.md" in error and "do not add up" in error for error in errors),
             errors,
         )
 

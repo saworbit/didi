@@ -230,12 +230,12 @@ These are missing capabilities that an AI agent actually requires to complete fu
 
 | Phase | Milestone / Capability | Strategic Rationale |
 | :--- | :--- | :--- |
-| **Phase 1 (DONE)** | **Live Pump + Real SceneTree / UndoRedo + Honest Errors** | Verified on Godot 4.5.1, 4.6.2, and 4.7.2. |
-| **Phase 2 (DONE)** | **Attach Script, Autoloads, InputMap, Project Settings, Groups, Scene Lifecycle** | Verified through real Godot persistence, UndoRedo, resource packing, and adversarial rejection paths. |
-| **Phase 3 (DONE)** | **`eval_gdscript`, Runtime Log Stream, Attach-to-Running** | Verified authenticated concurrent editor/game routing, bounded controls/logs/tree, and a strict read-only expression subset. |
-| **Phase 4 (DONE)** | **Symbol Search, Asset Reimport, Viewport Diffing & Isolation** | Verified bounded search and reversible live visual feedback against Godot 4.5.1. |
-| **Phase 5 (DONE)** | **C# / Shaders, Project Export, GridMap MeshLibrary, UI Hit-Testing** | Verified bounded diagnostics, guarded delivery, deterministic asset conversion, and live UI inspection against Godot 4.5.1. |
-| **Phase 6 (DONE)** | **Project Isolation, Session Locks, Dry-Run, Confirm-Before-Write** | Verified fail-closed project selection, project-keyed endpoints, one-client leases, and context-bound single-use confirmations. |
+| **Phase 1 (COMPLETE)** | **Live Pump + Real SceneTree / UndoRedo + Honest Errors** | Verified on Godot 4.5.1, 4.6.2, and 4.7.2. |
+| **Phase 2 (COMPLETE)** | **Attach Script, Autoloads, InputMap, Project Settings, Groups, Scene Lifecycle** | Verified through real Godot persistence, UndoRedo, resource packing, and adversarial rejection paths. |
+| **Phase 3 (COMPLETE)** | **`eval_gdscript`, Runtime Log Stream, Attach-to-Running** | Verified authenticated concurrent editor/game routing, bounded controls/logs/tree, and a strict read-only expression subset. |
+| **Phase 4 (COMPLETE)** | **Symbol Search, Asset Reimport, Viewport Diffing & Isolation** | Verified bounded search and reversible live visual feedback against Godot 4.5.1. |
+| **Phase 5 (COMPLETE)** | **C# / Shaders, Project Export, GridMap MeshLibrary, UI Hit-Testing** | Verified bounded diagnostics, guarded delivery, deterministic asset conversion, and live UI inspection against Godot 4.5.1. |
+| **Phase 6 (COMPLETE)** | **Project Isolation, Session Locks, Dry-Run, Confirm-Before-Write** | Verified fail-closed project selection, project-keyed endpoints, one-client leases, and context-bound single-use confirmations. |
 
 ---
 
