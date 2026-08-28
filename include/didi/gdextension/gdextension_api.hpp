@@ -50,6 +50,7 @@ public:
             get_variant_to_type_constructor = (GDExtensionInterfaceGetVariantToTypeConstructor)p_get_proc_address("get_variant_to_type_constructor");
             variant_get_ptr_constructor = (GDExtensionInterfaceVariantGetPtrConstructor)p_get_proc_address("variant_get_ptr_constructor");
             variant_get_ptr_destructor = (GDExtensionInterfaceVariantGetPtrDestructor)p_get_proc_address("variant_get_ptr_destructor");
+            variant_get_ptr_getter = (GDExtensionInterfaceVariantGetPtrGetter)p_get_proc_address("variant_get_ptr_getter");
             variant_get_type = (GDExtensionInterfaceVariantGetType)p_get_proc_address("variant_get_type");
             packed_byte_array_operator_index_const = (GDExtensionInterfacePackedByteArrayOperatorIndexConst)p_get_proc_address("packed_byte_array_operator_index_const");
             register_main_loop_callbacks = (GDExtensionInterfaceRegisterMainLoopCallbacks)p_get_proc_address("register_main_loop_callbacks");
@@ -97,6 +98,7 @@ public:
     GDExtensionInterfaceGetVariantToTypeConstructor get_variant_to_type_constructor{nullptr};
     GDExtensionInterfaceVariantGetPtrConstructor variant_get_ptr_constructor{nullptr};
     GDExtensionInterfaceVariantGetPtrDestructor variant_get_ptr_destructor{nullptr};
+    GDExtensionInterfaceVariantGetPtrGetter variant_get_ptr_getter{nullptr};
     GDExtensionInterfaceVariantGetType variant_get_type{nullptr};
     GDExtensionInterfacePackedByteArrayOperatorIndexConst packed_byte_array_operator_index_const{nullptr};
     GDExtensionInterfaceRegisterMainLoopCallbacks register_main_loop_callbacks{nullptr};

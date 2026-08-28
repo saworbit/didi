@@ -26,7 +26,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "scene_create", "scene_open", "scene_close", "scene_pack_branch",
         "runtime_read_logs", "runtime_set_paused", "runtime_step", "runtime_stop",
         "runtime_get_tree", "eval_gdscript"
-        , "asset_reimport", "viewport_diff_capture"
+        , "asset_reimport", "viewport_diff_capture", "ui_hit_test"
     };
     static const std::unordered_set<std::string> offline = {
         "script_check_syntax", "analyze_script_diagnostics", "script_reflect_class",
@@ -36,7 +36,9 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "project_get_uid_map", "runtime_launch",
         "execute_test_session", "runtime_list_sessions", "runtime_attach_session",
         "runtime_detach_session", "runtime_get_session"
-        , "project_search_text", "project_search_symbols"
+        , "project_search_text", "project_search_symbols",
+        "csharp_check_build", "shader_check_compile", "project_list_export_presets",
+        "project_export", "gridmap_export_mesh_library"
     };
 
     if (live_and_offline.count(name)) {
@@ -105,6 +107,12 @@ CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpc
 CallToolResult handleProjectGetUidMap(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleInstantiateAsset(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleCSharpCheckBuild(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleProjectListExportPresets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleUiHitTest(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
 CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleInjectInputEvent(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -1381,6 +1389,82 @@ void ToolRegistry::registerAllDefaultTools() {
             {"overwrite", {{"type", "boolean"}, {"default", false}}}
         }}, {"required", {"target_node", "scene_path"}}},
         [this](const json& args) { return handleScenePackBranch(args, m_ipcClient); });
+
+    // ==========================================
+    // Phase 5: Deep Domains
+    // ==========================================
+    {
+        ToolDefinition t;
+        t.name = "csharp_check_build";
+        t.description = "Runs a bounded dotnet build and returns structured C# compiler diagnostics.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"project_file", {{"type", "string"}}},
+            {"configuration", {{"type", "string"}, {"enum", {"Debug", "Release"}}, {"default", "Debug"}}},
+            {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 300}, {"default", 60}}}
+        }}};
+        t.handler = [this](const json& args) { return handleCSharpCheckBuild(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "shader_check_compile";
+        t.description = "Loads one gdshader through bounded headless Godot and returns engine diagnostics.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"shader_path", {{"type", "string"}}},
+            {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 300}, {"default", 30}}}
+        }}, {"required", {"shader_path"}}};
+        t.handler = [this](const json& args) { return handleShaderCheckCompile(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_list_export_presets";
+        t.description = "Lists non-sensitive fields from the project's export presets.";
+        t.inputSchema = {{"type", "object"}, {"properties", json::object()}};
+        t.handler = [this](const json& args) { return handleProjectListExportPresets(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_export";
+        t.description = "Runs a bounded headless export for an existing preset under path and overwrite guards.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"preset", {{"type", "string"}}}, {"output_path", {{"type", "string"}}},
+            {"mode", {{"type", "string"}, {"enum", {"release", "debug", "pack"}}, {"default", "release"}}},
+            {"overwrite", {{"type", "boolean"}, {"default", false}}},
+            {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 900}, {"default", 300}}}
+        }}, {"required", {"preset", "output_path"}}};
+        t.handler = [this](const json& args) { return handleProjectExport(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "gridmap_export_mesh_library";
+        t.description = "Converts direct scene children into a deterministic GridMap MeshLibrary through headless Godot.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"source_scene", {{"type", "string"}}}, {"output_path", {{"type", "string"}}},
+            {"generate_collisions", {{"type", "boolean"}, {"default", true}}},
+            {"overwrite", {{"type", "boolean"}, {"default", false}}},
+            {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 300}, {"default", 60}}}
+        }}, {"required", {"source_scene", "output_path"}}};
+        t.handler = [this](const json& args) { return handleGridmapExportMeshLibrary(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "ui_hit_test";
+        t.description = "Hit-tests live Control nodes at a viewport-space point without injecting input.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"point", {{"type", "object"}, {"properties", {
+                {"x", {{"type", "number"}}}, {"y", {{"type", "number"}}}
+            }}, {"required", {"x", "y"}}}},
+            {"root_path", {{"type", "string"}, {"default", "/root"}}},
+            {"include_mouse_filter_ignore", {{"type", "boolean"}, {"default", false}}},
+            {"max_results", {{"type", "integer"}, {"minimum", 1}, {"maximum", 256}, {"default", 32}}}
+        }}, {"required", {"point"}}};
+        t.handler = [this](const json& args) { return handleUiHitTest(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
 }
 
 } // namespace mcp

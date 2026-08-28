@@ -43,6 +43,8 @@ set(CORE_SOURCES
     src/offline/resource_indexer.cpp
     src/offline/project_search.cpp
     src/offline/test_runner.cpp
+    src/offline/process_runner.cpp
+    src/offline/deep_domain_support.cpp
     src/tools/visual_tools.cpp
     src/tools/scene_tools.cpp
     src/tools/script_tools.cpp
@@ -53,6 +55,7 @@ set(CORE_SOURCES
     src/tools/physics_nav_tools.cpp
     src/tools/tilemap_grid_tools.cpp
     src/tools/editor_tools.cpp
+    src/tools/deep_domain_tools.cpp
 )
 
 find_package(Threads REQUIRED)
@@ -108,6 +111,7 @@ set(TEST_SOURCES
     tests/test_project_search.cpp
     tests/test_image_diff.cpp
     tests/test_test_runner.cpp
+    tests/test_phase5.cpp
 )
 
 add_executable(didi_tests ${TEST_SOURCES})
