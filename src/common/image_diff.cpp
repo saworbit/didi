@@ -5,7 +5,7 @@
 
 namespace didi::image {
 
-Result<size_t> checkedRgbaSize(int width, int height) {
+Result<size_t> checkedRgbaSize(int64_t width, int64_t height) {
     if (width < 1 || height < 1 || width > kMaxCaptureDimension || height > kMaxCaptureDimension) {
         return Error::invalidArgument("Image dimensions must be from 1 to 2048 pixels");
     }

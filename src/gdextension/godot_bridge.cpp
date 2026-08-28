@@ -2484,16 +2484,15 @@ Result<ViewportPixels> GodotBridge::captureEditorViewport(const std::string& cam
     auto height = scalarFromVariant<int64_t>(height_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
     if (width.isErr()) return width.error();
     if (height.isErr()) return height.error();
-    if (width.value() <= 0 || height.value() <= 0 || width.value() > 8192 || height.value() > 8192) {
-        return Error::internal("Editor viewport returned invalid dimensions");
-    }
+    const auto expected_size = image::checkedRgbaSize(width.value(), height.value());
+    if (expected_size.isErr()) return expected_size.error();
     auto data = callObject(image_object.value(), "Image", "get_data", 2362200018LL);
     if (data.isErr()) return data.error();
     auto size_value = callVariant(data.value(), "size");
     if (size_value.isErr()) return size_value.error();
     auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
     if (size.isErr()) return size.error();
-    const int64_t expected = width.value() * height.value() * 4;
+    const int64_t expected = static_cast<int64_t>(expected_size.value());
     if (size.value() != expected) return Error::internal("RGBA8 viewport byte count does not match dimensions");
     auto to_packed = GodotApi::instance().get_variant_to_type_constructor(GDEXTENSION_VARIANT_TYPE_PACKED_BYTE_ARRAY);
     if (!to_packed) return Error::internal("PackedByteArray conversion API is unavailable");

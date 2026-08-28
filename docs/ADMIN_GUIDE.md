@@ -37,7 +37,7 @@ Phase 4 live capture IDs and raw RGBA buffers exist only inside the selected ext
 
 ### 3. Buffer & Payload Overflow Protection
 - **Transport Framing & Pipe Frame Cap**: Stdio accepts one newline-delimited JSON-RPC object per line and rejects `Content-Length` framing. Internal pipe/socket frames are capped at `128 MB`.
-- **Viewport Bounds**: Live captures reject non-positive dimensions and dimensions above `8192`; offline preview dimensions are clamped to `16`–`1024`.
+- **Viewport Bounds**: Live captures reject non-positive dimensions and dimensions above `2048` before pixel extraction or PNG encoding; offline preview dimensions are clamped to `16`–`1024`.
 - **Session descriptors**: Exact schema/field/endpoint validation, 64 KiB file cap, opened-handle regular-file checks, PID plus process-start identity, and a 3-second handshake prevent stale/PID-reuse and path-substitution attachment.
 - **Expression bounds**: 2,048-byte source, 1,024-byte context, depth 16, 4,096 container elements, 256 KiB response, and a strict receiver-aware read-only grammar. Timeouts are cooperative rather than native-thread preemption.
 

@@ -45,6 +45,6 @@ Result<ImageDiffResult> diffRgba(const RgbaImage& before,
                                  const RgbaImage& after,
                                  uint8_t threshold);
 
-Result<size_t> checkedRgbaSize(int width, int height);
+Result<size_t> checkedRgbaSize(int64_t width, int64_t height);
 
 } // namespace didi::image
