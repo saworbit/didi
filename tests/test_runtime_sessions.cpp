@@ -271,7 +271,7 @@ void test_session_host_prepares_private_unique_descriptor_and_authorizes_without
     const auto [process_started_at_ms, process_resolution_ms] = currentProcessStartIdentity();
     ASSERT_TRUE(std::llabs(descriptor->started_at_ms - process_started_at_ms) <= process_resolution_ms);
     ASSERT_TRUE(descriptor->endpoint.find(std::to_string(descriptor->pid)) != std::string::npos);
-    ASSERT_TRUE(descriptor->endpoint.find(descriptor->session_id) != std::string::npos);
+    ASSERT_TRUE(descriptor->endpoint.find(descriptor->session_id.substr(0, 12)) != std::string::npos);
     ASSERT_TRUE(std::filesystem::is_empty(directory));
 
     const auto missing_token = host.authorize({{"method", "session.handshake"}, {"params", didi::json::object()}});

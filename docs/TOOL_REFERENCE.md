@@ -337,7 +337,7 @@ On POSIX the endpoint is the OS temporary directory plus `godot_didi_<project-ke
 
 Requires `session_id`. Didi connects to the exact validated process-unique endpoint and performs a token-authenticated protocol `1.3` handshake with a 3,000 ms finite deadline. The token is inserted only into the internal envelope and stripped before bridge dispatch, responses, logs, and diagnostics. Route replacement is transactional: connection, authentication, ID, or protocol failure leaves the previous session selected.
 
-Before transport connection, the MCP process acquires `<session-id>.lock` with an OS exclusive lock. One client can hold a runtime session; another explicit attach returns `423`. The kernel releases the lock if the owner exits or crashes, and the persistent metadata file contains no authentication token.
+Before transport connection, the MCP process acquires `<session-id>.lock` with an OS exclusive lock. One client can hold a runtime session; another explicit attach returns `423`. The kernel releases the lock if the owner exits or crashes, and the persistent metadata file contains no authentication token. POSIX normally retains that metadata file after release; ownership is enforced by the kernel lock, not file presence.
 
 ### `runtime_detach_session` and `runtime_get_session` — Local session management
 
