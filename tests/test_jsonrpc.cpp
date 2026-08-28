@@ -155,6 +155,60 @@ static std::string runStdioWithInput(didi::mcp::McpServer& server, const std::st
     return output.str();
 }
 
+static void test_mcp_distinguishes_parse_errors_from_invalid_requests() {
+    didi::mcp::McpServer server;
+    const auto output = runStdioWithInput(
+        server,
+        "not-json\n"
+        "{\"id\":7,\"method\":\"ping\"}\n"
+        "{\"jsonrpc\":\"2.0\",\"id\":{},\"method\":\"ping\"}\n"
+        "{\"jsonrpc\":\"2.0\",\"id\":9}\n"
+        "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"initialize\",\"params\":{}}\n");
+
+    std::istringstream lines(output);
+    std::vector<didi::json> responses;
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (!line.empty()) responses.push_back(didi::json::parse(line));
+    }
+    ASSERT_EQ(responses.size(), 5u);
+    ASSERT_EQ(responses[0]["error"]["code"], didi::mcp::JsonRpcErrorCode::ParseError);
+    ASSERT_TRUE(responses[0]["id"].is_null());
+    ASSERT_EQ(responses[1]["error"]["code"], didi::mcp::JsonRpcErrorCode::InvalidRequest);
+    ASSERT_EQ(responses[1]["id"], 7);
+    ASSERT_EQ(responses[2]["error"]["code"], didi::mcp::JsonRpcErrorCode::InvalidRequest);
+    ASSERT_TRUE(responses[2]["id"].is_null());
+    ASSERT_EQ(responses[3]["error"]["code"], didi::mcp::JsonRpcErrorCode::InvalidRequest);
+    ASSERT_EQ(responses[3]["id"], 9);
+    ASSERT_TRUE(responses[4].contains("result"));
+    ASSERT_EQ(responses[4]["id"], 10);
+}
+
+static void test_mcp_maps_resource_and_prompt_failures_to_server_error_range() {
+    didi::mcp::McpServer server;
+    initializeServer(server);
+
+    didi::mcp::JsonRpcRequest resource_request;
+    resource_request.id = 2;
+    resource_request.method = "resources/read";
+    resource_request.params = {{"uri", "godot://missing"}};
+    const auto resource_response = server.handleRequest(resource_request);
+    ASSERT_TRUE(resource_response.error.has_value());
+    ASSERT_TRUE(resource_response.error->code <= -32000 &&
+                resource_response.error->code >= -32099);
+    ASSERT_EQ(resource_response.error->data["application_code"], 404);
+
+    didi::mcp::JsonRpcRequest prompt_request;
+    prompt_request.id = 3;
+    prompt_request.method = "prompts/get";
+    prompt_request.params = {{"name", "missing"}, {"arguments", didi::json::object()}};
+    const auto prompt_response = server.handleRequest(prompt_request);
+    ASSERT_TRUE(prompt_response.error.has_value());
+    ASSERT_TRUE(prompt_response.error->code <= -32000 &&
+                prompt_response.error->code >= -32099);
+    ASSERT_TRUE(prompt_response.error->data.contains("application_code"));
+}
+
 static void test_mcp_request_notification_does_not_execute_tool() {
     didi::mcp::McpServer server;
     int call_count = 0;
@@ -238,6 +292,10 @@ struct RegisterJsonRpcTests {
                      test_mcp_request_notification_does_not_execute_tool);
         registerTest("McpServer.ContentLengthCannotSmuggleRequest",
                      test_mcp_content_length_header_cannot_smuggle_request);
+        registerTest("McpServer.ParseVsInvalidRequest",
+                     test_mcp_distinguishes_parse_errors_from_invalid_requests);
+        registerTest("McpServer.ApplicationErrorRange",
+                     test_mcp_maps_resource_and_prompt_failures_to_server_error_range);
         registerTest("McpServer.OutputLoggingRedactsBodies",
                      test_mcp_output_logging_never_copies_response_bodies);
     }

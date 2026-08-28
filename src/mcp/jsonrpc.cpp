@@ -15,6 +15,11 @@ std::optional<JsonRpcRequest> JsonRpcRequest::parse(const std::string& raw_json)
 std::optional<JsonRpcRequest> JsonRpcRequest::fromJson(const json& j) {
     if (!j.is_object()) return std::nullopt;
 
+    if (!j.contains("jsonrpc") || !j["jsonrpc"].is_string() ||
+        j["jsonrpc"].get<std::string>() != "2.0") {
+        return std::nullopt;
+    }
+
     JsonRpcRequest req;
     if (!j.contains("method") || !j["method"].is_string()) {
         return std::nullopt;
@@ -22,6 +27,9 @@ std::optional<JsonRpcRequest> JsonRpcRequest::fromJson(const json& j) {
     req.method = j["method"].get<std::string>();
 
     if (j.contains("id")) {
+        if (!j["id"].is_null() && !j["id"].is_string() && !j["id"].is_number()) {
+            return std::nullopt;
+        }
         req.id = j["id"];
         req.is_notification = false;
     } else {
