@@ -173,6 +173,31 @@ Second section.
             errors,
         )
 
+    def test_rejects_pinned_cmake_setup_on_windows_release_runner(self):
+        root = self.make_valid_repository()
+        self.write(
+            ".github/workflows/release.yml",
+            """jobs:
+  package:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.28.x'
+""",
+        )
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(
+            any("release.yml" in error and "Windows runner CMake" in error for error in errors),
+            errors,
+        )
+
     def test_rejects_stale_supported_minor(self):
         root = self.make_valid_repository()
         security = (root / "SECURITY.md").read_text(encoding="utf-8")

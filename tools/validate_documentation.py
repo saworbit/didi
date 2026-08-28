@@ -81,6 +81,49 @@ FENCED_CODE_PATTERN = re.compile(
 INLINE_CODE_PATTERN = re.compile(r"(?<!`)`[^`\n]*`(?!`)")
 
 
+def _workflow_steps(text: str) -> list[str]:
+    """Return top-level YAML step blocks without requiring a YAML dependency."""
+    lines = text.splitlines()
+    starts: list[tuple[int, int]] = []
+    for index, line in enumerate(lines):
+        match = re.match(r"^(\s*)-\s+(?:name|uses):", line)
+        if match:
+            starts.append((index, len(match.group(1))))
+
+    blocks: list[str] = []
+    for position, (start, indent) in enumerate(starts):
+        end = len(lines)
+        for candidate, candidate_indent in starts[position + 1 :]:
+            if candidate_indent == indent:
+                end = candidate
+                break
+        blocks.append("\n".join(lines[start:end]))
+    return blocks
+
+
+def validate_workflow_contract(relative_path: str, text: str) -> list[str]:
+    """Validate release-runner assumptions that have caused packaging failures."""
+    if "windows-latest" not in text:
+        return []
+
+    errors: list[str] = []
+    for step in _workflow_steps(text):
+        if "jwlawson/actions-setup-cmake@v2" not in step:
+            continue
+        if not re.search(r"cmake-version:\s*['\"]?3\.28\.x['\"]?", step):
+            continue
+        excludes_windows = re.search(
+            r"^\s*if:\s*runner\.os\s*!=\s*['\"]Windows['\"]\s*$",
+            step,
+            flags=re.MULTILINE,
+        )
+        if not excludes_windows:
+            errors.append(
+                f"{relative_path}: pinned CMake 3.28 must not replace the Windows runner CMake"
+            )
+    return errors
+
+
 def extract_project_version(cmake_text: str) -> str:
     match = re.search(
         r"project\s*\(\s*didi\s+VERSION\s+(\d+\.\d+\.\d+)\b",
@@ -213,6 +256,11 @@ def validate_repository(root: Path) -> list[str]:
                 errors.append(
                     f"{workflow.relative_to(root).as_posix()}: Superpowers artifacts must not be CI dependencies"
                 )
+            errors.extend(
+                validate_workflow_contract(
+                    workflow.relative_to(root).as_posix(), workflow_text
+                )
+            )
 
     for relative_path in sorted(set(REQUIRED_DOCUMENTS + VERSION_SOURCES)):
         text = _read_required(root, relative_path, errors)
