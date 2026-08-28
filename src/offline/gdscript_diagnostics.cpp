@@ -429,7 +429,7 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
             int actual_start = static_cast<int>(i);
             while (actual_start > 0) {
                 std::string prev = strings::trim(lines[actual_start - 1]);
-                if (strings::startsWith(prev, "@") || strings::startsWith(prev, "##") || strings::startsWith(prev, "#")) {
+                if (strings::startsWith(prev, "@") || strings::startsWith(prev, "##")) {
                     actual_start--;
                 } else {
                     break;
