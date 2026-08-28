@@ -15,6 +15,9 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 - Preserved ordinary comments when replacing GDScript symbols.
 - Preserved explicit `null` JSON-RPC success results.
+- Failed closed before creating a Windows session pipe when the owner-and-Administrators security descriptor cannot be built.
+- Rejected malformed MCP parameter types, request-only methods sent without an ID, and unsupported `Content-Length` framing without dispatching hidden mutations.
+- Protected `resource_create` and visual test-lab files from replacement unless callers pass `overwrite: true`.
 
 ## [1.4.0] - 2026-08-28
 

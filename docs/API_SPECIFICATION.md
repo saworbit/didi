@@ -8,9 +8,9 @@ This document defines the complete technical specifications for the JSON-RPC 2.0
 
 Didi listens on `stdin` and responds on `stdout`. Log output is strictly routed to `stderr`.
 
-### Framing Modes Supported:
-1. **Newline-Delimited JSON**: Single JSON-RPC object per line terminated by `\n` or `\r\n`.
-2. **HTTP-Style Framing**: Header `Content-Length: <bytes>\r\n\r\n` followed by raw JSON payload (payload cap enforced at `128 MB`).
+### Framing
+
+Didi accepts exactly one JSON-RPC object per line, terminated by `\n` or `\r\n`. HTTP-style `Content-Length` framing is unsupported. A detected `Content-Length` header returns `-32700` and closes the stdio session so a following payload cannot be interpreted as a separate request.
 
 ### Standard Request Schema:
 ```json
@@ -85,6 +85,8 @@ The internal extension envelope can use `400` (invalid argument), `401` (runtime
 | `resources/read` | Client $\rightarrow$ Server | Retrieves contents of a specific resource URI (`godot://...`) |
 | `prompts/list` | Client $\rightarrow$ Server | Lists all registered prompt templates |
 | `prompts/get` | Client $\rightarrow$ Server | Evaluates a prompt template with provided arguments |
+
+Only `notifications/*` methods may omit `id`. Request-only methods such as `tools/call`, `resources/read`, and `prompts/get` are ignored when sent as notifications and cannot execute mutations. For calls and prompt retrievals, `name`/`uri` must be strings and an `arguments` member, when present, must be an object; violations return `-32602` without terminating the server.
 
 ### Didi capability extension
 

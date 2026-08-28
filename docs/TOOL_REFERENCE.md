@@ -150,6 +150,7 @@ Writes `res://addons/didi/test_lab_sandbox.tscn` with a basic light, environment
 - `environment` (`string`, default `"studio_neutral"`).
 - `orthographic` (`boolean`, default `false`).
 - `camera_rig` (`array`, default `["front", "top", "isometric"]`; metadata matching the generated cameras).
+- `overwrite` (`boolean`, default `false`); an existing sandbox is preserved unless explicitly set to `true`.
 - Legacy alias: `create_visual_test_lab`.
 
 ### Reserved visual schemas — Unimplemented
@@ -185,6 +186,7 @@ Writes a textual `.tres` file under the project root. Supported JSON encodings i
 - `resource_type` (`string`, default `"StandardMaterial3D"`).
 - `save_path` (`string`, required).
 - `properties` (`object`, optional).
+- `overwrite` (`boolean`, default `false`); an existing target is preserved unless explicitly set to `true`.
 
 ### `resource_inspect` — Offline
 

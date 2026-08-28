@@ -27,6 +27,7 @@ D:(A;;GA;;;BA)(A;;GA;;;OW)
 - `OW` (Owner / Creator): Generic All (Full Control).
 
 World access is not granted. POSIX sockets are created with mode `0600`.
+If Windows cannot construct this security descriptor, startup fails before any named pipe is created; Didi never falls back to a null/default descriptor.
 
 ### 2. Editor and Game Session Exposure
 
@@ -35,7 +36,7 @@ Phase 3 starts the session host at scene initialization in both editor and game 
 Phase 4 live capture IDs and raw RGBA buffers exist only inside the selected extension process. The cache is bounded to eight entries and 64 MiB and is cleared by process exit; Didi does not persist capture pixels or IDs. Project search remains local and bounded but may return source-line previews, so treat its MCP output as project-sensitive data.
 
 ### 3. Buffer & Payload Overflow Protection
-- **Content-Length & Pipe Frame Cap**: Enforced at `128 MB` maximum payload size to prevent memory exhaustion attacks.
+- **Transport Framing & Pipe Frame Cap**: Stdio accepts one newline-delimited JSON-RPC object per line and rejects `Content-Length` framing. Internal pipe/socket frames are capped at `128 MB`.
 - **Viewport Bounds**: Live captures reject non-positive dimensions and dimensions above `8192`; offline preview dimensions are clamped to `16`–`1024`.
 - **Session descriptors**: Exact schema/field/endpoint validation, 64 KiB file cap, opened-handle regular-file checks, PID plus process-start identity, and a 3-second handshake prevent stale/PID-reuse and path-substitution attachment.
 - **Expression bounds**: 2,048-byte source, 1,024-byte context, depth 16, 4,096 container elements, 256 KiB response, and a strict receiver-aware read-only grammar. Timeouts are cooperative rather than native-thread preemption.
@@ -106,7 +107,7 @@ The live `godot://runtime/logs`/`runtime_read_logs` ring retains 2,000 structure
 | :--- | :--- | :--- |
 | `Cannot connect to Godot Didi GDExtension IPC pipe` | Godot Editor is not open, or Didi plugin is disabled. | 1. Open the project in Godot Editor.<br>2. Verify **Project Settings $\rightarrow$ Plugins $\rightarrow$ Didi** is checked.<br>3. Verify `didi_extension.dll` exists in `addons/didi/bin/`. |
 | `Failed to spawn Godot process` | `godot` is not in `PATH` and not found in default locations. | Set the `GODOT_BIN` environment variable to the exact path of your Godot console executable (e.g. `C:\Godot\Godot_v4.7.2-stable_win64_console.exe`). |
-| `Content-Length header parse error` | Malformed framing sent by a non-standard MCP client. | Check MCP client configuration to ensure clean UTF-8 framing without trailing garbage bytes. |
+| `Content-Length framing is not supported` | The MCP client is using HTTP-style framing instead of MCP 2024-11-05 newline-delimited JSON. | Configure the client to send one UTF-8 JSON-RPC object per line; Didi closes the session after this error to prevent request smuggling. |
 | `Timeout waiting for response length` | Godot Editor is suspended in a script breakpoint. | Resume execution in Godot Debugger or restart the editor session. |
 | Tool is listed but returns `unimplemented` | The name is reserved in the protocol surface but has no trustworthy execution path. | Check `_meta.didi.implemented` and use only implemented tools from [Current Capability Matrix](CAPABILITIES.md). |
 | Session is listed as stale | PID exited or process-start identity no longer matches (including PID reuse). | Start/reload the intended Godot process; do not edit descriptor identity fields. |

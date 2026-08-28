@@ -12,7 +12,7 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
 
 ### The C++ & GDExtension Solution
 - **Native In-Process Access**: The extension uses Godot's GDExtension C interface to call `EditorInterface`, edited-scene nodes, `EditorUndoRedoManager`, and editor viewport textures for the supported live surface.
-- **Dual Execution Topology**: The codebase builds both a standalone MCP stdio executable (`didi.exe` on Windows, `didi` on POSIX) and an in-engine extension library (`didi_extension.dll`, `libdidi_extension.so`, or `libdidi_extension.dylib`), connected through a local named pipe or Unix-domain socket.
+- **Dual Execution Topology**: The codebase builds both a standalone MCP stdio executable (`didi.exe` on Windows, `didi` on POSIX) and an in-engine extension library (`didi_extension.dll`, `libdidi_extension.so`, or `libdidi_extension.dylib`), connected through a local named pipe or Unix-domain socket. Stdio uses one newline-delimited JSON-RPC object per line; `Content-Length` framing is rejected.
 - **Deterministic Lifetime & Zero External Runtime**: Native compiled artifacts with zero Node.js, npm, or Python runtime dependencies.
 
 ---
@@ -90,6 +90,7 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
    - Filesystem reads, static GDScript parsing, and offline process tools stay in the standalone MCP process and never enter the Godot main-thread queue.
 4. **Restricted Security DACL**:
    - Windows Named Pipes use SDDL grants for the owning SID (`OW`) and local Administrators (`BA`); this is access-controlled but not strictly owner-only.
+   - Descriptor conversion is fail-closed: the server reports failed startup before creating a pipe if the SDDL cannot be applied.
    - Phase 3 initializes the session host at `GDEXTENSION_INITIALIZATION_SCENE` in both editor and game processes. Each endpoint is process-unique and token-authenticated. POSIX defaults are owner-only; Windows grants the owning SID and local administrators. This is a local attachment boundary, not remote authentication.
 
 ---
