@@ -6,14 +6,15 @@
 
 Complete the existing 78-tool canonical surface, then extend Didi through project intelligence, advanced authoring, parallel Godot orchestration, broader MCP capabilities, and mature distribution without weakening the local authenticated safety boundary.
 
-## Roadmap Rules
+## Future-Phase Governance
 
-- Every phase has `PLANNED`, `IN PROGRESS`, or `COMPLETE` status.
-- A phase is complete only when its implementation, documentation, native tests, Godot integration tests, and required cross-platform CI are complete.
+- Scope: every phase has `PLANNED`, `IN PROGRESS`, or `COMPLETE` status and defines its capability boundary.
+- Exit evidence: a phase is complete only when its implementation, documentation, native tests, Godot integration tests, and required cross-platform CI are complete.
+- Security: preserve the local authenticated safety boundary.
 - Registered tool names must describe working behavior. Do not add success stubs or increase the canonical count before implementation lands.
-- Every new or reclassified mutation must define dry-run behavior, confirmation policy, route/session policy, unknown-outcome handling, and rollback expectations.
-- Every phase states exact exclusions so deferred behavior cannot be mistaken for delivered behavior.
-- Completion records include the date, pull request, release impact, and verification evidence.
+- Mutation classification: every new or reclassified mutation must define dry-run behavior, confirmation policy, route/session policy, unknown-outcome handling, and rollback expectations.
+- Explicit exclusions: every phase states exact exclusions so deferred behavior cannot be mistaken for delivered behavior.
+- Completion date and pull request: completion records include the date, pull request, release impact, and verification evidence.
 - New numbered phases after Phase 12 must be documented and approved before implementation begins.
 
 ## Phase 7: Canonical Surface Completion

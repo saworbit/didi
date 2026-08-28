@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import re
+import subprocess
 import sys
 from typing import Sequence
 from urllib.parse import unquote, urlparse
@@ -525,13 +526,32 @@ def _include_markdown(root: Path, path: Path) -> bool:
     )
 
 
+def _tracked_paths(root: Path, relative_paths: tuple[str, ...]) -> set[str]:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--", *relative_paths],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return set()
+    if result.returncode != 0:
+        return set()
+    return set(result.stdout.splitlines())
+
+
 def validate_repository(root: Path) -> list[str]:
     root = root.resolve()
     errors: list[str] = []
     texts: dict[str, str] = {}
 
+    tracked_paths = _tracked_paths(root, FORBIDDEN_ARTIFACT_PATHS)
     for relative_path in FORBIDDEN_ARTIFACT_PATHS:
-        if (root / relative_path).exists():
+        if any(
+            path == relative_path or path.startswith(f"{relative_path}/")
+            for path in tracked_paths
+        ):
             errors.append(
                 f"{relative_path}: agent workflow artifacts must not be committed to the project"
             )

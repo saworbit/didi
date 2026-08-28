@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
@@ -26,6 +27,20 @@ class DocumentationValidatorTests(unittest.TestCase):
         path = self.root / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
+
+    def stage(self, *relative_paths: str) -> None:
+        subprocess.run(
+            ["git", "init", "--quiet", str(self.root)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(self.root), "add", *relative_paths],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
     def make_valid_repository(self) -> Path:
         self.write("LICENSE", "MIT License\n")
@@ -216,11 +231,20 @@ Second section.
         root = self.make_valid_repository()
         self.write(".superpowers/internal-report.md", "# Internal report\n")
         self.write("docs/superpowers/internal-plan.md", "# Internal plan\n")
+        self.stage(".superpowers", "docs/superpowers")
 
         errors = VALIDATOR.validate_repository(root)
 
         self.assertTrue(any(".superpowers" in error for error in errors), errors)
         self.assertTrue(any("docs/superpowers" in error for error in errors), errors)
+
+    def test_allows_untracked_superpowers_workspace(self):
+        root = self.make_valid_repository()
+        self.write(".superpowers/sdd/task-5-report.md", "# Task 5 report\n")
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertFalse(any(".superpowers" in error for error in errors), errors)
 
     def test_rejects_workflow_reference_to_superpowers(self):
         root = self.make_valid_repository()
