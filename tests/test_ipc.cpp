@@ -79,7 +79,7 @@ bool rawWriteExact(HANDLE pipe, const void* buffer, size_t length) {
     return true;
 }
 
-bool rawReadFrame(HANDLE pipe) {
+bool rawReadFrame(HANDLE pipe, didi::json* message = nullptr) {
     std::array<uint8_t, 4> header{};
     if (!rawReadExact(pipe, header.data(), header.size())) return false;
     const uint32_t length = static_cast<uint32_t>(header[0]) |
@@ -87,7 +87,15 @@ bool rawReadFrame(HANDLE pipe) {
                             (static_cast<uint32_t>(header[2]) << 16) |
                             (static_cast<uint32_t>(header[3]) << 24);
     std::vector<uint8_t> payload(length);
-    return length > 0 && rawReadExact(pipe, payload.data(), payload.size());
+    if (length == 0 || !rawReadExact(pipe, payload.data(), payload.size())) return false;
+    if (message) {
+        try {
+            *message = didi::json::parse(payload.begin(), payload.end());
+        } catch (...) {
+            return false;
+        }
+    }
+    return true;
 }
 
 #else
@@ -138,7 +146,7 @@ bool rawWriteExact(int socket_fd, const void* buffer, size_t length) {
     return true;
 }
 
-bool rawReadFrame(int socket_fd) {
+bool rawReadFrame(int socket_fd, didi::json* message = nullptr) {
     uint8_t header[4]{};
     if (!rawReadExact(socket_fd, header, sizeof(header))) return false;
     const uint32_t length = static_cast<uint32_t>(header[0]) |
@@ -146,12 +154,20 @@ bool rawReadFrame(int socket_fd) {
                             (static_cast<uint32_t>(header[2]) << 16) |
                             (static_cast<uint32_t>(header[3]) << 24);
     std::vector<uint8_t> payload(length);
-    return length > 0 && rawReadExact(socket_fd, payload.data(), payload.size());
+    if (length == 0 || !rawReadExact(socket_fd, payload.data(), payload.size())) return false;
+    if (message) {
+        try {
+            *message = didi::json::parse(payload.begin(), payload.end());
+        } catch (...) {
+            return false;
+        }
+    }
+    return true;
 }
 
-std::vector<uint8_t> rawSuccessFrame() {
+std::vector<uint8_t> rawSuccessFrame(const didi::json& id) {
     return didi::ipc::frameMessage(
-        didi::json{{"id", "1"}, {"result", {{"status", "ok"}}}});
+        didi::json{{"id", id}, {"result", {{"status", "ok"}}}});
 }
 
 void noRestartSignalHandler(int) {}
@@ -226,6 +242,30 @@ static void test_ipc_negative_timeout_waits_for_definitive_response() {
 
     client->disconnect();
     server->stop();
+}
+
+static void test_ipc_server_classifies_handler_exception_with_request_id() {
+    // Break caught: a handler exception is mislabeled as malformed JSON and loses the request ID.
+#if defined(_WIN32)
+    const std::string endpoint = "\\\\.\\pipe\\godot_didi_ipc_handler_exception_test";
+#else
+    const std::string endpoint = "/tmp/godot_didi_ipc_handler_exception_test.sock";
+#endif
+    auto server = didi::ipc::createIpcServer();
+    server->setHandler([](const didi::json&) -> didi::json {
+        throw std::runtime_error("forced handler failure");
+    });
+    ASSERT_TRUE(server->start(endpoint));
+
+    auto client = didi::ipc::createIpcClient();
+    ASSERT_TRUE(client->connect(endpoint, 2000));
+    const auto result = client->sendRequest("test.throw", {}, 1000);
+    client->disconnect();
+    server->stop();
+
+    ASSERT_TRUE(result.isErr());
+    ASSERT_EQ(result.error().code, 500);
+    ASSERT_TRUE(!didi::ipc::transportFailureState(result.error()).has_value());
 }
 
 #if defined(_WIN32)
@@ -350,9 +390,10 @@ static void test_win32_client_accepts_fragmented_response_header() {
     const HANDLE pipe = createRawPipe(name);
     ASSERT_TRUE(pipe != INVALID_HANDLE_VALUE);
     std::thread peer([pipe] {
-        if (rawConnectPipe(pipe) && rawReadFrame(pipe)) {
+        didi::json request;
+        if (rawConnectPipe(pipe) && rawReadFrame(pipe, &request)) {
             const auto frame = didi::ipc::frameMessage(
-                didi::json{{"id", "1"}, {"result", {{"status", "ok"}}}});
+                didi::json{{"id", request["id"]}, {"result", {{"status", "ok"}}}});
             for (size_t index = 0; index < 4; ++index) {
                 if (!rawWriteExact(pipe, frame.data() + index, 1)) break;
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -483,6 +524,32 @@ static void test_win32_malformed_response_is_structured_and_quarantines() {
     ASSERT_TRUE(!still_connected);
 }
 
+static void test_win32_client_rejects_mismatched_response_id() {
+    // Break caught: a stale or cross-request response is accepted as the current request result.
+    const auto name = rawPipeName("mismatched-response-id");
+    const HANDLE pipe = createRawPipe(name);
+    ASSERT_TRUE(pipe != INVALID_HANDLE_VALUE);
+    std::thread peer([pipe] {
+        if (rawConnectPipe(pipe) && rawReadFrame(pipe)) {
+            const auto frame = didi::ipc::frameMessage(
+                didi::json{{"id", "definitely-not-the-request-id"},
+                           {"result", {{"status", "wrong"}}}});
+            (void)rawWriteExact(pipe, frame.data(), frame.size());
+        }
+        CloseHandle(pipe);
+    });
+
+    auto client = didi::ipc::createIpcClient();
+    ASSERT_TRUE(client->connect(name, 1000));
+    const auto result = client->sendRequest("runtime.step", {}, 500);
+    const bool still_connected = client->isConnected();
+    client->disconnect();
+    peer.join();
+    ASSERT_TRUE(result.isErr());
+    ASSERT_TRUE(hasTransportState(result.error(), true, true, false));
+    ASSERT_TRUE(!still_connected);
+}
+
 static void test_win32_server_drops_slow_partial_frame() {
     const auto name = rawPipeName("server-frame-deadline");
     auto server = didi::ipc::createIpcServer();
@@ -523,8 +590,9 @@ static void test_posix_client_accepts_fragmented_response_header() {
     const int listener = createRawListener(path);
     std::thread peer([&] {
         const int client = accept(listener, nullptr, nullptr);
-        if (client >= 0 && rawReadFrame(client)) {
-            const auto frame = rawSuccessFrame();
+        didi::json request;
+        if (client >= 0 && rawReadFrame(client, &request)) {
+            const auto frame = rawSuccessFrame(request["id"]);
             for (size_t index = 0; index < 4; ++index) {
                 if (!rawWriteExact(client, frame.data() + index, 1)) break;
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -622,8 +690,9 @@ static void test_posix_client_completes_request_after_partial_write() {
             int receive_buffer = 4096;
             setsockopt(client, SOL_SOCKET, SO_RCVBUF, &receive_buffer, sizeof(receive_buffer));
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            if (rawReadFrame(client)) {
-                const auto frame = rawSuccessFrame();
+            didi::json request;
+            if (rawReadFrame(client, &request)) {
+                const auto frame = rawSuccessFrame(request["id"]);
                 (void)rawWriteExact(client, frame.data(), frame.size());
             }
             close(client);
@@ -655,6 +724,73 @@ static void test_posix_client_completes_request_after_partial_write() {
     ASSERT_TRUE(result.isOk());
     ASSERT_EQ(result.value()["status"], "ok");
 }
+
+static void test_posix_reconnect_and_io_share_request_deadline() {
+    // Break caught: automatic reconnect gets a fixed 500 ms before request I/O gets a fresh budget.
+    const auto path = rawSocketPath("missing-reconnect-deadline");
+    unlink(path.c_str());
+    auto client = didi::ipc::createIpcClient();
+    ASSERT_TRUE(!client->connect(path, 0));
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = client->sendRequest("runtime.step", {}, 50);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+    client->disconnect();
+    ASSERT_TRUE(result.isErr());
+    ASSERT_TRUE(elapsed < std::chrono::milliseconds(180));
+    ASSERT_TRUE(hasTransportState(result.error(), false, false, true));
+}
+
+static void test_posix_expired_deadline_rejects_synchronous_io() {
+    // Break caught: queued socket I/O succeeds because send/recv run before deadline checks.
+    const auto path = rawSocketPath("queued-expired-response");
+    const int listener = createRawListener(path);
+    std::thread peer([&] {
+        const int socket_fd = accept(listener, nullptr, nullptr);
+        didi::json request;
+        if (socket_fd >= 0 && rawReadFrame(socket_fd, &request)) {
+            const auto frame = rawSuccessFrame(request["id"]);
+            (void)rawWriteExact(socket_fd, frame.data(), frame.size());
+        }
+        if (socket_fd >= 0) close(socket_fd);
+    });
+    auto client = didi::ipc::createIpcClient();
+    ASSERT_TRUE(client->connect(path, 1000));
+    const auto result = client->sendRequest("runtime.step", {}, 0);
+    client->disconnect();
+    peer.join();
+    close(listener);
+    unlink(path.c_str());
+    ASSERT_TRUE(result.isErr());
+    ASSERT_TRUE(hasTransportState(result.error(), false, false, true));
+}
+
+static void test_posix_client_rejects_mismatched_response_id() {
+    // Break caught: a stale or cross-request response is accepted as the current request result.
+    const auto path = rawSocketPath("mismatched-response-id");
+    const int listener = createRawListener(path);
+    std::thread peer([&] {
+        const int socket_fd = accept(listener, nullptr, nullptr);
+        if (socket_fd >= 0 && rawReadFrame(socket_fd)) {
+            const auto frame = didi::ipc::frameMessage(
+                didi::json{{"id", "definitely-not-the-request-id"},
+                           {"result", {{"status", "wrong"}}}});
+            (void)rawWriteExact(socket_fd, frame.data(), frame.size());
+        }
+        if (socket_fd >= 0) close(socket_fd);
+    });
+    auto client = didi::ipc::createIpcClient();
+    ASSERT_TRUE(client->connect(path, 1000));
+    const auto result = client->sendRequest("runtime.step", {}, 500);
+    const bool still_connected = client->isConnected();
+    client->disconnect();
+    peer.join();
+    close(listener);
+    unlink(path.c_str());
+    ASSERT_TRUE(result.isErr());
+    ASSERT_TRUE(hasTransportState(result.error(), true, true, false));
+    ASSERT_TRUE(!still_connected);
+}
 #endif
 
 struct RegisterIpcTests {
@@ -662,6 +798,7 @@ struct RegisterIpcTests {
         registerTest("IPC.Framing", test_ipc_framing);
         registerTest("IPC.ClientServerRoundtrip", test_ipc_client_server_roundtrip);
         registerTest("IPC.NoTimeoutRoundtrip", test_ipc_negative_timeout_waits_for_definitive_response);
+        registerTest("IPC.HandlerExceptionClassification", test_ipc_server_classifies_handler_exception_with_request_id);
 #if defined(_WIN32)
         registerTest("IPC.Win32WriteDeadline", test_win32_client_write_obeys_end_to_end_deadline);
         registerTest("IPC.Win32ConnectRetryDeadline", test_win32_connect_retries_use_remaining_deadline);
@@ -672,6 +809,7 @@ struct RegisterIpcTests {
         registerTest("IPC.Win32HandshakeCap", test_win32_handshake_cap_rejects_before_payload_read);
         registerTest("IPC.Win32PostAcceptFailure", test_win32_post_accept_failure_is_structured_and_quarantines);
         registerTest("IPC.Win32MalformedResponse", test_win32_malformed_response_is_structured_and_quarantines);
+        registerTest("IPC.Win32ResponseIdCorrelation", test_win32_client_rejects_mismatched_response_id);
         registerTest("IPC.Win32ServerFrameDeadline", test_win32_server_drops_slow_partial_frame);
         registerTest("IPC.Win32SecurityDescriptorFailClosed", test_win32_server_fails_closed_without_security_descriptor);
 #else
@@ -679,6 +817,9 @@ struct RegisterIpcTests {
         registerTest("IPC.PosixSingleDeadline", test_posix_client_uses_one_deadline_for_slow_trickle);
         registerTest("IPC.PosixHandshakeResponseCap", test_posix_handshake_rejects_large_response_before_allocation);
         registerTest("IPC.PosixPartialWrite", test_posix_client_completes_request_after_partial_write);
+        registerTest("IPC.PosixReconnectSharesDeadline", test_posix_reconnect_and_io_share_request_deadline);
+        registerTest("IPC.PosixQueuedIoDeadline", test_posix_expired_deadline_rejects_synchronous_io);
+        registerTest("IPC.PosixResponseIdCorrelation", test_posix_client_rejects_mismatched_response_id);
 #endif
     }
 } g_registerIpcTests;

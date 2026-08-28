@@ -37,7 +37,7 @@ Phase 4 live capture IDs and raw RGBA buffers exist only inside the selected ext
 
 ### 3. Buffer & Payload Overflow Protection
 - **Transport Framing & Pipe Frame Cap**: Stdio accepts one newline-delimited JSON-RPC object per line and rejects `Content-Length` framing. Internal pipe/socket frames are capped at `128 MB`.
-- **Viewport Bounds**: Live captures reject non-positive dimensions and dimensions above `8192`; offline preview dimensions are clamped to `16`–`1024`.
+- **Viewport Bounds**: Live captures reject non-positive dimensions and dimensions above `2048` before pixel extraction or PNG encoding; offline preview dimensions are clamped to `16`–`1024`.
 - **Session descriptors**: Exact schema/field/endpoint validation, 64 KiB file cap, opened-handle regular-file checks, PID plus process-start identity, and a 3-second handshake prevent stale/PID-reuse and path-substitution attachment.
 - **Expression bounds**: 2,048-byte source, 1,024-byte context, depth 16, 4,096 container elements, 256 KiB response, and a strict receiver-aware read-only grammar. Timeouts are cooperative rather than native-thread preemption.
 
@@ -57,6 +57,8 @@ Administrators can configure Didi globally or per-service using standard environ
 | `DIDI_SESSION_DIR` | Directory path | Windows: `<OS temp>/didi-sessions`; POSIX: `$XDG_RUNTIME_DIR/didi-sessions`, otherwise `<OS temp>/didi-sessions-<euid>` | Controlled test/deployment override for the descriptor registry; Didi validates paths/handles but the operator must provision access controls appropriate to the host. |
 
 `DIDI_PIPE_NAME` remains available for legacy/direct IPC configuration. Phase 3 session routing uses process-unique descriptor endpoints instead. Do not share `DIDI_SESSION_DIR` across OS users.
+
+Godot discovery recognizes common 4.5.1, 4.6.2, and 4.7.2 Windows console/editor filenames under `GODOT_PATH` or `C:\Godot`, plus `godot`, `godot4`, standard `/usr` and `/usr/local` binary paths, `/opt/godot/godot`, and the standard macOS app bundle. Set `GODOT_BIN` to the exact executable when installations use another name or layout.
 
 ---
 

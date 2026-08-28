@@ -1,5 +1,6 @@
 #include "didi/offline/test_runner.hpp"
 #include "didi/common/logger.hpp"
+#include <algorithm>
 #include <chrono>
 #include <sstream>
 #include <thread>
@@ -30,11 +31,22 @@ std::string resolveGodotExecutable() {
     if (env_path && std::filesystem::exists(env_path)) {
         if (std::filesystem::is_directory(env_path)) {
             static const std::vector<std::string> dir_candidates = {
+#if defined(_WIN32)
                 "Godot_v4.7.2-stable_win64_console.exe",
                 "Godot_v4.7.2-stable_win64.exe",
+                "Godot_v4.6.2-stable_win64_console.exe",
+                "Godot_v4.6.2-stable_win64.exe",
+                "Godot_v4.5.1-stable_win64_console.exe",
+                "Godot_v4.5.1-stable_win64.exe",
                 "godot.exe",
                 "godot.cmd",
+#else
+                "Godot_v4.7.2-stable_linux.x86_64",
+                "Godot_v4.6.2-stable_linux.x86_64",
+                "Godot_v4.5.1-stable_linux.x86_64",
+                "godot4",
                 "godot"
+#endif
             };
             for (const auto& cand : dir_candidates) {
                 auto p = std::filesystem::path(env_path) / cand;
@@ -51,11 +63,29 @@ std::string resolveGodotExecutable() {
     static const std::vector<std::string> known_locations = {
         "C:\\Godot\\Godot_v4.7.2-stable_win64_console.exe",
         "C:\\Godot\\Godot_v4.7.2-stable_win64.exe",
+        "C:\\Godot\\Godot_v4.6.2-stable_win64_console.exe",
+        "C:\\Godot\\Godot_v4.6.2-stable_win64.exe",
+        "C:\\Godot\\Godot_v4.5.1-stable_win64_console.exe",
+        "C:\\Godot\\Godot_v4.5.1-stable_win64.exe",
         "C:\\Godot\\godot.cmd",
         "C:\\Godot\\godot.exe"
     };
     for (const auto& loc : known_locations) {
         if (std::filesystem::exists(loc)) {
+            return loc;
+        }
+    }
+#else
+    static const std::vector<std::string> known_locations = {
+        "/usr/local/bin/godot4",
+        "/usr/local/bin/godot",
+        "/usr/bin/godot4",
+        "/usr/bin/godot",
+        "/opt/godot/godot",
+        "/Applications/Godot.app/Contents/MacOS/Godot"
+    };
+    for (const auto& loc : known_locations) {
+        if (std::filesystem::exists(loc) && !std::filesystem::is_directory(loc)) {
             return loc;
         }
     }
@@ -145,35 +175,57 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
     char buffer[1024];
     DWORD bytes_read = 0;
 
+    const auto drainAvailableOutput = [&]() {
+        while (true) {
+            DWORD bytes_avail = 0;
+            if (!PeekNamedPipe(hReadPipe, NULL, 0, NULL, &bytes_avail, NULL) || bytes_avail == 0) {
+                break;
+            }
+            const DWORD to_read = std::min<DWORD>(bytes_avail, sizeof(buffer) - 1);
+            if (!ReadFile(hReadPipe, buffer, to_read, &bytes_read, NULL) || bytes_read == 0) {
+                break;
+            }
+            buffer[bytes_read] = '\0';
+            full_output.append(buffer, bytes_read);
+        }
+    };
+
     auto timeout_dur = std::chrono::seconds(timeout_seconds);
 
     // Read loop with timeout
     while (true) {
-        DWORD bytes_avail = 0;
-        if (PeekNamedPipe(hReadPipe, NULL, 0, NULL, &bytes_avail, NULL) && bytes_avail > 0) {
-            if (ReadFile(hReadPipe, buffer, sizeof(buffer) - 1, &bytes_read, NULL) && bytes_read > 0) {
-                buffer[bytes_read] = '\0';
-                full_output += buffer;
-            }
-        }
+        drainAvailableOutput();
 
-        // Check if process finished
-        DWORD exit_code = 0;
-        if (GetExitCodeProcess(pi.hProcess, &exit_code)) {
-            if (exit_code != STILL_ACTIVE) {
-                // Drain any remaining output
-                while (ReadFile(hReadPipe, buffer, sizeof(buffer) - 1, &bytes_read, NULL) && bytes_read > 0) {
-                    buffer[bytes_read] = '\0';
-                    full_output += buffer;
-                }
+        // The wait handle is authoritative. Exit code 259 is a valid completed process status and
+        // must not be confused with STILL_ACTIVE.
+        const DWORD process_state = WaitForSingleObject(pi.hProcess, 0);
+        if (process_state == WAIT_OBJECT_0) {
+            DWORD exit_code = 0;
+            if (!GetExitCodeProcess(pi.hProcess, &exit_code)) {
+                result.success = false;
+                result.summary = "Failed to read completed Godot process exit code.";
+                result.exit_code = 1;
+            } else {
                 result.exit_code = static_cast<int>(exit_code);
-                break;
             }
+            // Drain only bytes already queued by the tracked process. Descendants can inherit the
+            // pipe, so waiting for EOF would violate the caller's bounded launch contract.
+            drainAvailableOutput();
+            break;
+        }
+        if (process_state == WAIT_FAILED) {
+            TerminateProcess(pi.hProcess, 1);
+            WaitForSingleObject(pi.hProcess, 5000);
+            result.success = false;
+            result.exit_code = 1;
+            result.summary = "Failed while waiting for the Godot process.";
+            break;
         }
 
         auto elapsed = std::chrono::steady_clock::now() - start_time;
         if (elapsed > timeout_dur) {
             TerminateProcess(pi.hProcess, 1);
+            WaitForSingleObject(pi.hProcess, 5000);
             result.exit_code = 124; // Timeout exit code
             result.summary = "Test session timed out after " + std::to_string(timeout_seconds) + " seconds.";
             break;

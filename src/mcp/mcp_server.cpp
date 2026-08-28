@@ -43,6 +43,17 @@ static bool startsWithCaseInsensitive(const std::string& value, const std::strin
                       });
 }
 
+static bool isLegalJsonRpcId(const json& id) {
+    return id.is_null() || id.is_string() || id.is_number();
+}
+
+static JsonRpcResponse makeApplicationError(const json& id, const Error& error) {
+    json data = {{"application_code", error.code}};
+    if (!error.data.is_null()) data["application_data"] = error.data;
+    return JsonRpcResponse::makeError(id, JsonRpcErrorCode::ServerErrorStart,
+                                      error.message, data);
+}
+
 static void addCurrentAvailability(json& definition, const ExecutionCapability& capability,
                                    bool connected, const std::optional<std::string>& session_kind,
                                    bool resource = false, bool managed_unavailable = false) {
@@ -238,8 +249,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         }
         auto read_res = ResourceRegistry::instance().readResource(uri);
         if (read_res.isErr()) {
-            return JsonRpcResponse::makeError(req.id, read_res.error().code, read_res.error().message,
-                                              read_res.error().data);
+            return makeApplicationError(req.id, read_res.error());
         }
         auto r_def = ResourceRegistry::instance().getResource(uri);
         std::string mime = r_def ? r_def->mimeType : "text/plain";
@@ -284,7 +294,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         }
         auto p_res = PromptRegistry::instance().getPromptResult(name, args);
         if (p_res.isErr()) {
-            return JsonRpcResponse::makeError(req.id, p_res.error().code, p_res.error().message);
+            return makeApplicationError(req.id, p_res.error());
         }
         return JsonRpcResponse::makeSuccess(req.id, p_res.value());
     }
@@ -325,10 +335,24 @@ void McpServer::runStdio() {
             break;
         }
 
-        auto req_opt = JsonRpcRequest::parse(trimmed);
-        if (!req_opt.has_value()) {
-            DIDI_LOG_WARN("MCP_SERVER", "Malformed JSON-RPC payload received");
+        json payload;
+        try {
+            payload = json::parse(trimmed);
+        } catch (const json::exception&) {
+            DIDI_LOG_WARN("MCP_SERVER", "Malformed JSON payload received");
             sendResponse(JsonRpcResponse::makeError(nullptr, JsonRpcErrorCode::ParseError, "Parse error"));
+            continue;
+        }
+
+        auto req_opt = JsonRpcRequest::fromJson(payload);
+        if (!req_opt.has_value()) {
+            const json response_id = payload.is_object() && payload.contains("id") &&
+                                             isLegalJsonRpcId(payload["id"])
+                                         ? payload["id"]
+                                         : json(nullptr);
+            DIDI_LOG_WARN("MCP_SERVER", "Invalid JSON-RPC request received");
+            sendResponse(JsonRpcResponse::makeError(response_id, JsonRpcErrorCode::InvalidRequest,
+                                                     "Invalid Request"));
             continue;
         }
 

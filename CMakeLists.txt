@@ -107,6 +107,7 @@ set(TEST_SOURCES
     tests/test_resource_indexer.cpp
     tests/test_project_search.cpp
     tests/test_image_diff.cpp
+    tests/test_test_runner.cpp
 )
 
 add_executable(didi_tests ${TEST_SOURCES})

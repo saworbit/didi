@@ -57,6 +57,14 @@ void test_rejects_shape_mismatch_and_invalid_storage() {
     ASSERT_TRUE(didi::image::diffRgba(invalid, invalid, 0).isErr());
 }
 
+void test_shared_capture_dimension_policy_rejects_oversized_viewports() {
+    // Break caught: live capture accepts a frame that the cache/diff layer must reject later.
+    ASSERT_TRUE(didi::image::checkedRgbaSize(2560, 1440).isErr());
+    const auto largest_supported = didi::image::checkedRgbaSize(2048, 2048);
+    ASSERT_TRUE(largest_supported.isOk());
+    ASSERT_EQ(largest_supported.value(), 2048u * 2048u * 4u);
+}
+
 void test_capture_cache_lru_and_byte_budget() {
     // Break caught: capture IDs remain forever or eviction ignores recent baseline use.
     const std::string id1 = "00000000000000000000000000000001";
@@ -112,6 +120,7 @@ struct RegisterImageDiffTests {
         registerTest("ImageDiff.ThresholdAndBoundingBox", test_threshold_and_bounding_box);
         registerTest("ImageDiff.AlphaOnlyAndIdentical", test_alpha_only_and_identical_results);
         registerTest("ImageDiff.RejectsShapeMismatchAndInvalidStorage", test_rejects_shape_mismatch_and_invalid_storage);
+        registerTest("ImageDiff.SharedCaptureDimensionPolicy", test_shared_capture_dimension_policy_rejects_oversized_viewports);
         registerTest("CaptureCache.LruAndByteBudget", test_capture_cache_lru_and_byte_budget);
         registerTest("CaptureCache.RejectsBadIdsAndOversizeEntries", test_capture_cache_rejects_bad_ids_and_oversize_entries);
         registerTest("ViewportIsolation.RestorationGuard", test_restoration_guard_runs_once_on_early_exit);

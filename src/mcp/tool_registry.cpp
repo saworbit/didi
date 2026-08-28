@@ -1175,15 +1175,15 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "runtime_launch";
-        t.description = "Starts a separate Godot process, captures stdout/stderr, classifies errors, and enforces a timeout.";
+        t.description = "Starts a separate Godot process, captures stdout/stderr, classifies errors after exit, and enforces a 1-120 second timeout.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
                 {"scene_path", {{"type", "string"}}},
-                {"timeout_seconds", {{"type", "integer"}, {"default", 10}}},
+                {"timeout_seconds", {{"type", "integer"}, {"default", 10}, {"minimum", 1}, {"maximum", 120}}},
                 {"headless", {{"type", "boolean"}, {"default", true}}},
-                {"break_on_error", {{"type", "boolean"}, {"default", true}}},
-                {"extra_args", {{"type", "array"}}}
+                {"break_on_error", {{"type", "boolean"}, {"default", true}, {"description", "Classify captured ERROR lines as failure after process exit; does not terminate the child early"}}},
+                {"extra_args", {{"type", "array"}, {"items", {{"type", "string"}}}}}
             }}
         };
         t.handler = [this](const json& args) { return handleExecuteTestSession(args, m_ipcClient); };

@@ -8,6 +8,8 @@
 namespace didi {
 namespace offline {
 
+std::string resolveGodotExecutable();
+
 struct TestSessionLog {
     std::string level; // "INFO", "WARN", "ERROR", "SCRIPT_ERROR"
     std::string message;

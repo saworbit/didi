@@ -200,8 +200,7 @@ public:
             }
         }
 
-        static uint64_t req_id_counter = 1;
-        std::string req_id = std::to_string(req_id_counter++);
+        std::string req_id = std::to_string(m_nextRequestId++);
 
         json request_json = {
             {"id", req_id},
@@ -251,6 +250,11 @@ public:
         }
         try {
             json resp_json = json::parse(resp_payload.begin(), resp_payload.end());
+            if (!resp_json.is_object() || !resp_json.contains("id") ||
+                resp_json["id"] != req_id) {
+                return failLocked("IPC response ID does not match request ID",
+                                  true, true, false);
+            }
             if (resp_json.contains("error") && !resp_json["error"].is_null()) {
                 auto err = resp_json["error"];
                 int code = err.value("code", 500);
@@ -317,6 +321,7 @@ private:
 
     HANDLE m_pipe{INVALID_HANDLE_VALUE};
     std::string m_pipeName{kDefaultPipeName};
+    uint64_t m_nextRequestId{1};
     mutable std::recursive_mutex m_mutex;
 };
 
@@ -523,40 +528,55 @@ private:
                 }
 
                 json response_json;
+                json req_json;
                 try {
-                    json req_json = json::parse(req_payload.begin(), req_payload.end());
-                    std::string req_id = req_json.value("id", "0");
-
+                    req_json = json::parse(req_payload.begin(), req_payload.end());
+                } catch (const std::exception& e) {
+                    response_json = {
+                        {"id", nullptr},
+                        {"error", {{"code", 400}, {"message", std::string("Malformed JSON: ") + e.what()}}}
+                    };
+                }
+                if (response_json.is_null()) {
+                    const json req_id = req_json.contains("id") ? req_json["id"] : json(nullptr);
                     MessageHandler handler_copy;
                     {
                         std::lock_guard<std::mutex> lock(m_mutex);
                         handler_copy = m_handler;
                     }
-
-                    if (handler_copy) {
-                        json res = handler_copy(req_json);
-                        if (res.is_object() && res.contains("error") && !res["error"].is_null()) {
+                    try {
+                        if (!handler_copy) {
                             response_json = {
                                 {"id", req_id},
-                                {"error", res["error"]}
+                                {"error", {{"code", 501}, {"message", "No handler registered"}}}
                             };
                         } else {
-                            response_json = {
-                                {"id", req_id},
-                                {"result", res}
-                            };
+                            json res = handler_copy(req_json);
+                            if (res.is_object() && res.contains("error") && !res["error"].is_null()) {
+                                response_json = {
+                                    {"id", req_id},
+                                    {"error", res["error"]}
+                                };
+                            } else {
+                                response_json = {
+                                    {"id", req_id},
+                                    {"result", res}
+                                };
+                            }
                         }
-                    } else {
+                    } catch (const std::exception& e) {
+                        DIDI_LOG_ERROR("IPC_SERVER", "IPC handler failed: ", e.what());
                         response_json = {
                             {"id", req_id},
-                            {"error", {{"code", 501}, {"message", "No handler registered"}}}
+                            {"error", {{"code", 500}, {"message", "IPC handler failed"}}}
+                        };
+                    } catch (...) {
+                        DIDI_LOG_ERROR("IPC_SERVER", "IPC handler failed with an unknown exception");
+                        response_json = {
+                            {"id", req_id},
+                            {"error", {{"code", 500}, {"message", "IPC handler failed"}}}
                         };
                     }
-                } catch (const std::exception& e) {
-                    response_json = {
-                        {"id", "0"},
-                        {"error", {{"code", 400}, {"message", std::string("Malformed JSON: ") + e.what()}}}
-                    };
                 }
 
                 std::vector<uint8_t> frame = frameMessage(response_json);
@@ -677,6 +697,9 @@ bool readExact(int socket_fd,
     auto* bytes = static_cast<uint8_t*>(buffer);
     size_t offset = 0;
     while (offset < length && (!running || running->load())) {
+        if (deadline.finite && std::chrono::steady_clock::now() >= deadline.expires_at) {
+            return false;
+        }
         const ssize_t count = recv(socket_fd, bytes + offset, length - offset, 0);
         if (count > 0) {
             offset += static_cast<size_t>(count);
@@ -698,6 +721,9 @@ bool writeExact(int socket_fd,
     const auto* bytes = static_cast<const uint8_t*>(buffer);
     size_t offset = 0;
     while (offset < length && (!running || running->load())) {
+        if (deadline.finite && std::chrono::steady_clock::now() >= deadline.expires_at) {
+            return false;
+        }
         const ssize_t count = send(socket_fd, bytes + offset, length - offset, kNoSignalSendFlag);
         if (count > 0) {
             offset += static_cast<size_t>(count);
@@ -727,39 +753,7 @@ public:
 
     bool connect(const std::string& pipe_name = kDefaultPipeName, int timeout_ms = 2000) override {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
-        m_pipeName = pipe_name;
-
-        sockaddr_un addr{};
-        if (m_pipeName.size() >= sizeof(addr.sun_path)) return false;
-
-        addr.sun_family = AF_UNIX;
-        strncpy(addr.sun_path, m_pipeName.c_str(), sizeof(addr.sun_path) - 1);
-
-        const auto deadline = deadlineAfter(timeout_ms);
-        while (true) {
-            m_sock = socket(AF_UNIX, SOCK_STREAM, 0);
-            if (m_sock >= 0 && setNonblockingCloseOnExec(m_sock)) {
-                if (::connect(m_sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
-                    return true;
-                }
-                if (errno == EINPROGRESS && waitForSocket(m_sock, POLLOUT, deadline)) {
-                    int socket_error = 0;
-                    socklen_t length = sizeof(socket_error);
-                    if (getsockopt(m_sock, SOL_SOCKET, SO_ERROR, &socket_error, &length) == 0 &&
-                        socket_error == 0) {
-                        return true;
-                    }
-                }
-            }
-            if (m_sock >= 0) {
-                close(m_sock);
-                m_sock = -1;
-            }
-            const int remaining_ms = remainingPollMilliseconds(deadline);
-            if (deadline.finite && remaining_ms == 0) return false;
-            const int retry_delay_ms = remaining_ms < 0 ? 20 : std::min(20, remaining_ms);
-            (void)poll(nullptr, 0, retry_delay_ms);
-        }
+        return connectUnlocked(pipe_name, deadlineAfter(timeout_ms));
     }
 
     void disconnect() override {
@@ -777,13 +771,14 @@ public:
 
     Result<json> sendRequest(const std::string& method, const json& params = json::object(), int timeout_ms = 10000) override {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        const auto deadline = deadlineAfter(timeout_ms);
         if (m_sock < 0) {
-            if (!connect(m_pipeName.empty() ? kDefaultPipeName : m_pipeName, 500)) {
-                return transportFailure("Cannot connect to Unix socket", {false, false, false});
+            if (!connectUnlocked(m_pipeName.empty() ? kDefaultPipeName : m_pipeName, deadline)) {
+                const bool timed_out = deadline.finite && remainingPollMilliseconds(deadline) == 0;
+                return transportFailure("Cannot connect to Unix socket", {false, false, timed_out});
             }
         }
-        static uint64_t req_id_counter = 1;
-        std::string req_id = std::to_string(req_id_counter++);
+        std::string req_id = std::to_string(m_nextRequestId++);
 
         json request_json = {
             {"id", req_id},
@@ -791,7 +786,6 @@ public:
             {"params", params}
         };
 
-        const auto deadline = deadlineAfter(timeout_ms);
         const std::vector<uint8_t> frame = frameMessage(request_json);
         if (!writeExact(m_sock, frame.data(), frame.size(), deadline)) {
             const bool timed_out = deadline.finite && remainingPollMilliseconds(deadline) == 0;
@@ -823,6 +817,11 @@ public:
 
         try {
             json resp_json = json::parse(payload.begin(), payload.end());
+            if (!resp_json.is_object() || !resp_json.contains("id") ||
+                resp_json["id"] != req_id) {
+                return failLocked("IPC response ID does not match request ID",
+                                  true, true, false);
+            }
             if (resp_json.contains("error") && !resp_json["error"].is_null()) {
                 auto err = resp_json["error"];
                 return Error(err.value("code", 500), err.value("message", "IPC error"), err.value("data", json{}));
@@ -834,6 +833,41 @@ public:
     }
 
 private:
+    bool connectUnlocked(const std::string& pipe_name, const MonotonicDeadline& deadline) {
+        m_pipeName = pipe_name;
+
+        sockaddr_un addr{};
+        if (m_pipeName.size() >= sizeof(addr.sun_path)) return false;
+
+        addr.sun_family = AF_UNIX;
+        strncpy(addr.sun_path, m_pipeName.c_str(), sizeof(addr.sun_path) - 1);
+
+        while (true) {
+            m_sock = socket(AF_UNIX, SOCK_STREAM, 0);
+            if (m_sock >= 0 && setNonblockingCloseOnExec(m_sock)) {
+                if (::connect(m_sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
+                    return true;
+                }
+                if (errno == EINPROGRESS && waitForSocket(m_sock, POLLOUT, deadline)) {
+                    int socket_error = 0;
+                    socklen_t length = sizeof(socket_error);
+                    if (getsockopt(m_sock, SOL_SOCKET, SO_ERROR, &socket_error, &length) == 0 &&
+                        socket_error == 0) {
+                        return true;
+                    }
+                }
+            }
+            if (m_sock >= 0) {
+                close(m_sock);
+                m_sock = -1;
+            }
+            const int remaining_ms = remainingPollMilliseconds(deadline);
+            if (deadline.finite && remaining_ms == 0) return false;
+            const int retry_delay_ms = remaining_ms < 0 ? 20 : std::min(20, remaining_ms);
+            (void)poll(nullptr, 0, retry_delay_ms);
+        }
+    }
+
     Result<json> failLocked(const std::string& message,
                             bool request_started,
                             bool outcome_unknown,
@@ -845,6 +879,7 @@ private:
 
     int m_sock{-1};
     std::string m_pipeName{kDefaultPipeName};
+    uint64_t m_nextRequestId{1};
     mutable std::recursive_mutex m_mutex;
 };
 
@@ -952,26 +987,42 @@ private:
                 if (!readExact(client, payload.data(), payload.size(), request_deadline, &m_running)) break;
 
                 json resp_json;
+                json req_json;
                 try {
-                    json req_json = json::parse(payload.begin(), payload.end());
-                    std::string req_id = req_json.value("id", "0");
+                    req_json = json::parse(payload.begin(), payload.end());
+                } catch (const std::exception& error) {
+                    resp_json = {{"id", nullptr},
+                                 {"error", {{"code", 400},
+                                            {"message", std::string("Malformed JSON: ") + error.what()}}}};
+                }
+                if (resp_json.is_null()) {
+                    const json req_id = req_json.contains("id") ? req_json["id"] : json(nullptr);
                     MessageHandler h;
                     {
                         std::lock_guard<std::mutex> lock(m_mutex);
                         h = m_handler;
                     }
-                    if (h) {
-                        json res = h(req_json);
-                        if (res.is_object() && res.contains("error") && !res["error"].is_null()) {
-                            resp_json = {{"id", req_id}, {"error", res["error"]}};
+                    try {
+                        if (!h) {
+                            resp_json = {{"id", req_id},
+                                         {"error", {{"code", 501}, {"message", "No handler registered"}}}};
                         } else {
-                            resp_json = {{"id", req_id}, {"result", res}};
+                            json res = h(req_json);
+                            if (res.is_object() && res.contains("error") && !res["error"].is_null()) {
+                                resp_json = {{"id", req_id}, {"error", res["error"]}};
+                            } else {
+                                resp_json = {{"id", req_id}, {"result", res}};
+                            }
                         }
-                    } else {
-                        resp_json = {{"id", req_id}, {"error", {{"code", 501}, {"message", "No handler registered"}}}};
+                    } catch (const std::exception& error) {
+                        DIDI_LOG_ERROR("IPC_SERVER", "IPC handler failed: ", error.what());
+                        resp_json = {{"id", req_id},
+                                     {"error", {{"code", 500}, {"message", "IPC handler failed"}}}};
+                    } catch (...) {
+                        DIDI_LOG_ERROR("IPC_SERVER", "IPC handler failed with an unknown exception");
+                        resp_json = {{"id", req_id},
+                                     {"error", {{"code", 500}, {"message", "IPC handler failed"}}}};
                     }
-                } catch (...) {
-                    resp_json = {{"id", "0"}, {"error", {{"code", 400}, {"message", "Parse error"}}}};
                 }
 
                 auto frame = frameMessage(resp_json);
