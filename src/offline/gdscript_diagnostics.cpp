@@ -1,8 +1,10 @@
 #include "didi/offline/gdscript_diagnostics.hpp"
 #include "didi/offline/test_runner.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/project_path.hpp"
 #include <fstream>
 #include <sstream>
+#include <string_view>
 #include <regex>
 #include <filesystem>
 #include <cstdlib>
@@ -31,6 +33,64 @@ namespace fs = std::filesystem;
 
 std::string resolveGodotExecutable();
 
+namespace {
+
+std::string codeOutsideGdscriptLiterals(std::string_view line,
+                                        std::string& multiline_delimiter) {
+    std::string code;
+    code.reserve(line.size());
+    for (size_t i = 0; i < line.size();) {
+        if (!multiline_delimiter.empty()) {
+            if (line[i] == '\\' && i + 1 < line.size()) {
+                code.append(2, ' ');
+                i += 2;
+                continue;
+            }
+            if (i + multiline_delimiter.size() <= line.size() &&
+                line.substr(i, multiline_delimiter.size()) == multiline_delimiter) {
+                code.append(multiline_delimiter.size(), ' ');
+                i += multiline_delimiter.size();
+                multiline_delimiter.clear();
+            } else {
+                code.push_back(' ');
+                ++i;
+            }
+            continue;
+        }
+
+        if (line[i] == '#') break;
+        if (i + 3 <= line.size() &&
+            (line.substr(i, 3) == "\"\"\"" || line.substr(i, 3) == "'''")) {
+            multiline_delimiter = std::string(line.substr(i, 3));
+            code.append(3, ' ');
+            i += 3;
+            continue;
+        }
+        if (line[i] == '\"' || line[i] == '\'') {
+            const char delimiter = line[i];
+            code.push_back(' ');
+            ++i;
+            while (i < line.size()) {
+                code.push_back(' ');
+                if (line[i] == '\\' && i + 1 < line.size()) {
+                    ++i;
+                    code.push_back(' ');
+                } else if (line[i] == delimiter) {
+                    ++i;
+                    break;
+                }
+                ++i;
+            }
+            continue;
+        }
+        code.push_back(line[i]);
+        ++i;
+    }
+    return code;
+}
+
+} // namespace
+
 std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& file_path, const std::string& source_text) {
     std::vector<ScriptDiagnostic> diagnostics;
     std::string content = source_text;
@@ -41,11 +101,7 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& fi
             actual_path = actual_path.substr(6);
         }
 
-        std::ifstream file(actual_path);
-        if (!file.is_open() && fs::exists("demo/" + actual_path)) {
-            actual_path = "demo/" + actual_path;
-            file.open(actual_path);
-        }
+        std::ifstream file(paths::projectPathFromUtf8(actual_path));
 
         if (file.is_open()) {
             std::stringstream ss;
@@ -65,25 +121,15 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& fi
 
     std::vector<std::string> lines = strings::split(content, '\n');
     int open_paren = 0, open_bracket = 0, open_brace = 0;
-    bool in_multiline_string = false;
     std::string multiline_quote_type;
 
     for (size_t i = 0; i < lines.size(); ++i) {
         int line_num = static_cast<int>(i + 1);
         std::string raw_line = lines[i];
-        std::string trimmed = strings::trim(raw_line);
+        std::string trimmed = strings::trim(
+            codeOutsideGdscriptLiterals(raw_line, multiline_quote_type));
 
         if (trimmed.empty()) continue;
-
-        // Multiline string check """ or '''
-        if (trimmed.find("\"\"\"") != std::string::npos || trimmed.find("'''") != std::string::npos) {
-            in_multiline_string = !in_multiline_string;
-            continue;
-        }
-        if (in_multiline_string) continue;
-
-        // Skip full comment lines
-        if (trimmed[0] == '#') continue;
 
         // Check brackets & parentheses balance
         for (char c : trimmed) {
@@ -197,6 +243,71 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& fi
     return diagnostics;
 }
 
+std::optional<GDScriptDeclaration> GDScriptDiagnostics::parseDeclaration(
+    std::string_view code_line) {
+    size_t offset = code_line.find_first_not_of(" \t");
+    if (offset == std::string_view::npos) return std::nullopt;
+    bool exported = false;
+    while (offset < code_line.size() && code_line[offset] == '@') {
+        const size_t name_start = ++offset;
+        while (offset < code_line.size() &&
+               (std::isalnum(static_cast<unsigned char>(code_line[offset])) ||
+                code_line[offset] == '_')) {
+            ++offset;
+        }
+        if (offset == name_start) return std::nullopt;
+        const auto annotation = code_line.substr(name_start, offset - name_start);
+        const bool export_grouping = annotation == "export_group" ||
+                                     annotation == "export_category" ||
+                                     annotation == "export_subgroup";
+        exported = exported || annotation == "export" ||
+                   (strings::startsWith(annotation, "export_") && !export_grouping);
+        while (offset < code_line.size() &&
+               std::isspace(static_cast<unsigned char>(code_line[offset]))) {
+            ++offset;
+        }
+        if (offset < code_line.size() && code_line[offset] == '(') {
+            int depth = 0;
+            do {
+                if (code_line[offset] == '(') ++depth;
+                else if (code_line[offset] == ')') --depth;
+                ++offset;
+            } while (offset < code_line.size() && depth > 0);
+            if (depth != 0) return std::nullopt;
+        }
+        while (offset < code_line.size() &&
+               std::isspace(static_cast<unsigned char>(code_line[offset]))) {
+            ++offset;
+        }
+    }
+    if (offset >= code_line.size()) return std::nullopt;
+    code_line.remove_prefix(offset);
+
+    const std::pair<std::string_view, const char*> prefixes[] = {
+        {"class_name ", "class"}, {"static func ", "function"},
+        {"func ", "function"}, {"signal ", "signal"}, {"var ", "variable"},
+        {"const ", "constant"}, {"enum ", "enum"}, {"class ", "class"}
+    };
+    for (const auto& [prefix, kind] : prefixes) {
+        if (!strings::startsWith(code_line, prefix)) continue;
+        const auto name_source = code_line.substr(prefix.size());
+        size_t name_length = 0;
+        while (name_length < name_source.size() &&
+               (std::isalnum(static_cast<unsigned char>(name_source[name_length])) ||
+                name_source[name_length] == '_')) {
+            ++name_length;
+        }
+        if (name_length == 0) return std::nullopt;
+        return GDScriptDeclaration{
+            std::string(name_source.substr(0, name_length)),
+            kind,
+            std::string(code_line),
+            exported
+        };
+    }
+    return std::nullopt;
+}
+
 #if defined(_WIN32)
 #define DIDI_POPEN _popen
 #define DIDI_PCLOSE _pclose
@@ -229,13 +340,7 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const s
         return diags; // Prevent command injection
     }
 
-    if (!fs::exists(actual_path)) {
-        if (fs::exists("demo/" + actual_path)) {
-            actual_path = "demo/" + actual_path;
-        } else {
-            return diags;
-        }
-    }
+    if (!fs::exists(paths::projectPathFromUtf8(actual_path))) return diags;
 
     std::string godot_exe = resolveGodotExecutable();
     std::string output;
@@ -558,38 +663,60 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
     json variables = json::array();
     json signals = json::array();
     json enums = json::array();
+    json classes = json::array();
 
-    static const std::regex func_regex(R"re(^\s*func\s+([a-zA-Z0-9_]+)\s*\((.*)\)(?:\s*->\s*([a-zA-Z0-9_]+))?)re");
-    static const std::regex var_regex(R"re(^\s*(@export\s+)?var\s+([a-zA-Z0-9_]+)(?:\s*:\s*([a-zA-Z0-9_]+))?)re");
-    static const std::regex sig_regex(R"re(^\s*signal\s+([a-zA-Z0-9_]+)(?:\((.*)\))?)re");
-    static const std::regex enum_regex(R"re(^\s*enum\s+([a-zA-Z0-9_]+))re");
+    static const std::regex func_regex(R"re(^(?:static\s+)?func\s+([a-zA-Z0-9_]+)\s*\((.*)\)(?:\s*->\s*([a-zA-Z0-9_]+))?)re");
+    static const std::regex var_regex(R"re(^var\s+([a-zA-Z0-9_]+)(?:\s*:\s*([a-zA-Z0-9_]+))?)re");
+    static const std::regex sig_regex(R"re(^signal\s+([a-zA-Z0-9_]+)(?:\((.*)\))?)re");
+    static const std::regex enum_regex(R"re(^enum\s+([a-zA-Z0-9_]+))re");
+    std::string multiline_delimiter;
+    bool pending_export = false;
 
     for (size_t i = 0; i < lines.size(); ++i) {
-        std::string line = lines[i];
+        const auto masked = codeOutsideGdscriptLiterals(lines[i], multiline_delimiter);
+        const auto declaration = parseDeclaration(masked);
+        if (!declaration) {
+            const auto trimmed = strings::trim(masked);
+            if (strings::startsWith(trimmed, "@")) {
+                const auto annotation = parseDeclaration(trimmed + " var __didi_annotation");
+                if (annotation) pending_export = pending_export || annotation->exported;
+            } else if (!trimmed.empty()) {
+                pending_export = false;
+            }
+            continue;
+        }
+        const std::string& line = declaration->source;
+        const bool exported = declaration->exported || pending_export;
+        pending_export = false;
         std::smatch match;
-        if (std::regex_search(line, match, func_regex)) {
+        if (declaration->kind == "function" && std::regex_search(line, match, func_regex)) {
             functions.push_back({
                 {"name", match[1].str()},
                 {"parameters", match[2].str()},
                 {"return_type", match[3].matched ? match[3].str() : "void"},
                 {"line", i + 1}
             });
-        } else if (std::regex_search(line, match, var_regex)) {
+        } else if (declaration->kind == "variable" && std::regex_search(line, match, var_regex)) {
             variables.push_back({
-                {"name", match[2].str()},
-                {"exported", match[1].matched},
-                {"type", match[3].matched ? match[3].str() : "Variant"},
+                {"name", match[1].str()},
+                {"exported", exported},
+                {"type", match[2].matched ? match[2].str() : "Variant"},
                 {"line", i + 1}
             });
-        } else if (std::regex_search(line, match, sig_regex)) {
+        } else if (declaration->kind == "signal" && std::regex_search(line, match, sig_regex)) {
             signals.push_back({
                 {"name", match[1].str()},
                 {"arguments", match[2].matched ? match[2].str() : ""},
                 {"line", i + 1}
             });
-        } else if (std::regex_search(line, match, enum_regex)) {
+        } else if (declaration->kind == "enum" && std::regex_search(line, match, enum_regex)) {
             enums.push_back({
                 {"name", match[1].str()},
+                {"line", i + 1}
+            });
+        } else if (declaration->kind == "class") {
+            classes.push_back({
+                {"name", declaration->name},
                 {"line", i + 1}
             });
         }
@@ -599,7 +726,8 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
         {"functions", functions},
         {"variables", variables},
         {"signals", signals},
-        {"enums", enums}
+        {"enums", enums},
+        {"classes", classes}
     };
 }
 

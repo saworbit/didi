@@ -185,6 +185,35 @@ void test_gdscript_symbols_ignore_multiline_strings() {
     ASSERT_EQ(real_result.value().matches.size(), 2u);
 }
 
+void test_gdscript_symbols_include_annotations_static_and_inner_classes() {
+    SearchFixture fixture;
+    fixture.write("scripts/declarations.gd",
+                  "@export_range(0, 20) var speed: float = 5.0\n"
+                  "@onready var sprite = $Sprite\n"
+                  "@rpc(\"any_peer\") func remote_jump():\n"
+                  "\tpass\n"
+                  "static func build_player():\n"
+                  "\tpass\n"
+                  "class InnerState:\n"
+                  "\tpass\n");
+    didi::offline::ProjectSearch search(fixture.root());
+
+    for (const auto& [query, kind] : {
+             std::pair{"speed", "variable"},
+             std::pair{"sprite", "variable"},
+             std::pair{"remote_jump", "function"},
+             std::pair{"build_player", "function"},
+             std::pair{"InnerState", "class"}}) {
+        didi::offline::SymbolSearchOptions options;
+        options.query = query;
+        options.match = didi::offline::SymbolMatch::Exact;
+        const auto result = search.searchSymbols(options);
+        ASSERT_TRUE(result.isOk());
+        ASSERT_EQ(result.value().matches.size(), 1u);
+        ASSERT_EQ(result.value().matches[0].kind, kind);
+    }
+}
+
 void test_binary_file_is_diagnostic_not_match() {
     // Break caught: a NUL-bearing binary file leaks arbitrary bytes into search results.
     SearchFixture fixture;
@@ -224,6 +253,7 @@ struct RegisterProjectSearchTests {
         registerTest("ProjectSearch.CSharpSymbolsIgnoreCommentsAndStrings", test_csharp_symbols_ignore_comments_and_strings);
         registerTest("ProjectSearch.CSharpSymbolsIgnoreMultilineStrings", test_csharp_symbols_ignore_multiline_strings);
         registerTest("ProjectSearch.GdscriptSymbolsIgnoreMultilineStrings", test_gdscript_symbols_ignore_multiline_strings);
+        registerTest("ProjectSearch.GdscriptDeclarationForms", test_gdscript_symbols_include_annotations_static_and_inner_classes);
         registerTest("ProjectSearch.BinaryFileIsDiagnosticNotMatch", test_binary_file_is_diagnostic_not_match);
         registerTest("ProjectSearch.ResultOrderAndWholeWordBoundary", test_result_order_and_whole_word_boundary);
     }

@@ -17,7 +17,7 @@ The `_meta.didi` object returned by `tools/list` is authoritative. A registered 
 
 ### `scene_get_hierarchy` — Live + offline
 
-Returns a recursive hierarchy. Live results contain node name, class, logical path, and children; unsupported bulk fields are named in `omitted_fields`. Offline mode parses a `.tscn` file and returns `source: "parsed_tscn_file"`.
+Returns a recursive hierarchy. Live results contain node name, class, logical path, and children; unsupported bulk fields are named in `omitted_fields`. Offline mode parses an explicit in-project `.tscn` file, or the `run/main_scene` declared by the project-root `project.godot`, and returns `source: "parsed_tscn_file"`. It does not probe `demo/` or recursively guess a scene.
 
 - `root_path` (`string`, default `"/root"`): Live logical node path or offline `.tscn` path.
 - `max_depth` (`integer`, default `10`, live maximum `64`).
@@ -89,7 +89,7 @@ Calls return an MCP tool error; they do not inspect or mutate Godot signals.
 
 ### `script_check_syntax` — Offline
 
-Runs Didi's lightweight GDScript diagnostics. When `file_path` is supplied, it also attempts `godot --headless --check-only`; `source_text`-only checks do not invoke Godot.
+Runs Didi's string/comment-aware lightweight GDScript diagnostics. When an in-project `file_path` is supplied, it also attempts `godot --headless --check-only`; `source_text`-only checks do not invoke Godot.
 
 - `file_path` (`string`, optional).
 - `source_text` (`string`, optional).
@@ -104,7 +104,7 @@ Looks up a class in Didi's small built-in reference map. This is not live ClassD
 
 ### `script_get_symbols` — Offline
 
-Extracts functions, variables, signals, and enums from GDScript text using Didi's parser.
+Extracts functions, variables, signals, enums, and inner classes from GDScript text using the same comment/string-aware declaration scanner as project search. Inline or preceding-line annotations such as `@export_range`, `@onready`, and `@rpc`, plus `static func`, are recognized. File reads, including UTF-8 paths on Windows, are confined to the project root.
 
 - `file_path` (`string`, optional).
 - `source_text` (`string`, optional).
@@ -206,7 +206,7 @@ Scans the project working directory for resources.
 
 ### `project_get_uid_map` — Offline
 
-Returns UID-to-path mappings discovered in indexed project resources.
+Returns UID-to-path mappings discovered in indexed project resources. Embedded UIDs take precedence; modern Godot `.uid` sidecars are read for every resource type as a bounded fallback and accepted only when they match Godot's lowercase-alphanumeric textual UID format.
 
 ### `instantiate_asset` — Unimplemented legacy name
 
@@ -216,7 +216,7 @@ Asset or PackedScene instantiation is not implemented.
 
 Both tools search only `.gd`, `.cs`, `.tscn`, and `.tres` beneath a normalized in-project `search_path`. They reject traversal/absolute paths, skip symlinks plus `.git`, `.godot`, `.worktrees`, and build outputs, and cap each file at 4 MiB, each request at 10,000 files/64 MiB, results at 500, queries at 256 UTF-8 bytes, and previews at 1,024 bytes.
 
-Text matching is literal with optional ASCII case folding and whole-word boundaries; regular expressions are not supported. Symbol matching is lexical (`exact`, `prefix`, or `contains`) across GDScript and C# declarations after comments and strings are excluded. Symbol kinds are `class`, `function`, `signal`, `variable`, `constant`, and `enum`. Results use one-based locations and canonical `res://` paths; diagnostics are bounded per file.
+Text matching is literal with optional ASCII case folding and whole-word boundaries; regular expressions are not supported. Symbol matching is lexical (`exact`, `prefix`, or `contains`) across GDScript and C# declarations after comments and strings are excluded. GDScript recognition includes inline annotations, static functions, and inner classes. Symbol kinds are `class`, `function`, `signal`, `variable`, `constant`, and `enum`. Results use one-based locations and canonical `res://` paths; diagnostics are bounded per file.
 
 ### `asset_reimport` — Live
 

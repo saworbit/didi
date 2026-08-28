@@ -3,6 +3,7 @@
 #include "didi/mcp/prompt_registry.hpp"
 #include "didi/mcp/mcp_server.hpp"
 #include "didi/gdextension/editor_hook.hpp"
+#include "didi/common/project_path.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -912,17 +913,104 @@ static void test_class_reflection() {
 
 static void test_symbol_extraction() {
     auto& reg = didi::mcp::ToolRegistry::instance();
-    std::string script = "extends CharacterBody3D\n\n@export var speed: float = 5.0\nsignal reached_goal(time_taken)\n\nfunc jump() -> void:\n\tpass\n";
+    std::string script =
+        "extends CharacterBody3D\n\n"
+        "@export_range(0, 20)\n"
+        "var speed: float = 5.0\n"
+        "@onready var sprite = $Sprite\n"
+        "@export_group(\"Presentation\")\n"
+        "var display_label = \"ready\"\n"
+        "signal reached_goal(time_taken)\n\n"
+        "@rpc(\"any_peer\") func jump() -> void:\n\tpass\n"
+        "static func build_player():\n\tpass\n"
+        "class InnerState:\n\tpass\n"
+        "var docs = \"\"\"func fake():\nvar fake_value = 1\n\"\"\"\n";
     auto res = reg.callTool("script_get_symbols", {{"source_text", script}});
     ASSERT_TRUE(!res.isError);
     ASSERT_TRUE(!res.content.empty());
     didi::json parsed = didi::json::parse(res.content[0].text);
-    ASSERT_EQ(parsed["functions"].size(), 1);
+    ASSERT_EQ(parsed["functions"].size(), 2);
     ASSERT_EQ(parsed["functions"][0]["name"], "jump");
-    ASSERT_EQ(parsed["variables"].size(), 1);
+    ASSERT_EQ(parsed["functions"][1]["name"], "build_player");
+    ASSERT_EQ(parsed["variables"].size(), 4);
     ASSERT_EQ(parsed["variables"][0]["name"], "speed");
+    ASSERT_TRUE(parsed["variables"][0]["exported"]);
+    ASSERT_EQ(parsed["variables"][1]["name"], "sprite");
+    ASSERT_EQ(parsed["variables"][2]["name"], "display_label");
+    ASSERT_TRUE(!parsed["variables"][2]["exported"]);
     ASSERT_EQ(parsed["signals"].size(), 1);
     ASSERT_EQ(parsed["signals"][0]["name"], "reached_goal");
+    ASSERT_EQ(parsed["classes"].size(), 1);
+    ASSERT_EQ(parsed["classes"][0]["name"], "InnerState");
+}
+
+static void test_offline_tools_do_not_fallback_to_demo_paths() {
+    const auto repository_root = std::filesystem::current_path();
+    const auto outside_script = repository_root / "tests/godot_smoke/subject.gd";
+    const auto outside_scene = repository_root / "tests/godot_smoke/main.tscn";
+    ScopedToolProject project("no-demo-fallback");
+    std::filesystem::create_directories("demo/scripts");
+    const std::string original_script = "func decoy():\n\tpass\n";
+    std::ofstream("demo/scripts/player.gd", std::ios::binary) << original_script;
+    std::ofstream("demo/project.godot")
+        << "[application]\nrun/main_scene=\"res://main.tscn\"\n";
+    std::ofstream("demo/main.tscn")
+        << "[gd_scene format=3]\n\n[node name=\"Decoy\" type=\"Node\"]\n";
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(std::make_shared<DisconnectedIpcClient>());
+
+    const auto symbols = registry.callTool(
+        "script_get_symbols", {{"file_path", "res://scripts/player.gd"}});
+    ASSERT_TRUE(symbols.isError);
+
+    const auto patch = registry.callTool(
+        "script_patch_method",
+        {{"file_path", "res://scripts/player.gd"},
+         {"method_name", "decoy"},
+         {"new_definition", "func decoy():\n\treturn 1"}});
+    ASSERT_TRUE(patch.isError);
+    ASSERT_EQ(readToolTestFile("demo/scripts/player.gd"), original_script);
+
+    const auto hierarchy = registry.callTool("scene_get_hierarchy", didi::json::object());
+    ASSERT_TRUE(hierarchy.isError);
+
+    const auto outside_symbols = registry.callTool(
+        "script_get_symbols", {{"file_path", outside_script.string()}});
+    ASSERT_TRUE(outside_symbols.isError);
+    const auto outside_diagnostics = registry.callTool(
+        "script_check_syntax", {{"file_path", outside_script.string()}});
+    ASSERT_TRUE(outside_diagnostics.isError);
+    const auto outside_hierarchy = registry.callTool(
+        "scene_get_hierarchy", {{"root_path", outside_scene.string()}});
+    ASSERT_TRUE(outside_hierarchy.isError);
+    registry.setIpcClient(nullptr);
+}
+
+static void test_project_paths_accept_utf8_names() {
+    ScopedToolProject project("utf8-paths");
+    const std::filesystem::path directory(u8"项目");
+    const auto script = directory / std::filesystem::path(u8"脚本.gd");
+    std::filesystem::create_directories(directory);
+    std::ofstream(script, std::ios::binary) << "extends Node\n";
+
+    const std::u8string request_u8 = u8"res://项目/脚本.gd";
+    const std::string request(reinterpret_cast<const char*>(request_u8.data()),
+                              request_u8.size());
+    const auto resolved = didi::paths::resolveProjectFile(request);
+    ASSERT_TRUE(resolved.isOk());
+    ASSERT_EQ(std::filesystem::weakly_canonical(resolved.value()),
+              std::filesystem::weakly_canonical(script));
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(std::make_shared<DisconnectedIpcClient>());
+    const auto syntax = registry.callTool("script_check_syntax", {{"file_path", request}});
+    ASSERT_TRUE(!syntax.isError);
+    const auto syntax_json = didi::json::parse(syntax.content[0].text);
+    ASSERT_TRUE(!syntax_json["has_errors"]);
+    registry.setIpcClient(nullptr);
 }
 
 struct RegisterToolTests {
@@ -952,6 +1040,8 @@ struct RegisterToolTests {
         registerTest("EditorHook.PendingStepGate", test_runtime_step_gate_rejects_a_second_pending_step);
         registerTest("Tools.ClassReflection", test_class_reflection);
         registerTest("Tools.SymbolExtraction", test_symbol_extraction);
+        registerTest("Tools.NoDemoPathFallback", test_offline_tools_do_not_fallback_to_demo_paths);
+        registerTest("Tools.Utf8ProjectPaths", test_project_paths_accept_utf8_names);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }

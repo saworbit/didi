@@ -1,6 +1,7 @@
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/project_path.hpp"
 #include <fstream>
 #include <regex>
 #include <filesystem>
@@ -9,29 +10,20 @@ namespace didi {
 namespace mcp {
 
 static std::string findProjectMainScene() {
-    for (const auto& p : {"project.godot", "demo/project.godot"}) {
-        std::ifstream cfg(p);
-        if (cfg.is_open()) {
-            std::string line;
-            while (std::getline(cfg, line)) {
-                if (line.find("run/main_scene=\"") != std::string::npos) {
-                    auto start = line.find('\"') + 1;
-                    auto end = line.rfind('\"');
-                    if (start < end) {
-                        return line.substr(start, end - start);
-                    }
+    std::ifstream cfg("project.godot");
+    if (cfg.is_open()) {
+        std::string line;
+        while (std::getline(cfg, line)) {
+            if (line.find("run/main_scene=\"") != std::string::npos) {
+                auto start = line.find('\"') + 1;
+                auto end = line.rfind('\"');
+                if (start < end) {
+                    return line.substr(start, end - start);
                 }
             }
         }
     }
-    try {
-        for (const auto& entry : std::filesystem::recursive_directory_iterator(".")) {
-            if (entry.path().extension() == ".tscn") {
-                return "res://" + entry.path().lexically_relative(".").generic_string();
-            }
-        }
-    } catch (...) {}
-    return "res://scenes/main.tscn";
+    return "";
 }
 
 CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -48,14 +40,17 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
     if (root.empty() || root == "/root" || root == "." || !strings::endsWith(root, ".tscn")) {
         root = findProjectMainScene();
     }
-    std::string disk_path = root;
-    if (strings::startsWith(disk_path, "res://")) disk_path = disk_path.substr(6);
-
-    std::ifstream file(disk_path);
-    if (!file.is_open() && std::filesystem::exists("demo/" + disk_path)) {
-        disk_path = "demo/" + disk_path;
-        file.open(disk_path);
+    if (root.empty()) {
+        return CallToolResult::error(
+            "No offline scene path was provided and project.godot has no run/main_scene.");
     }
+    auto resolved = paths::resolveProjectFile(root);
+    if (resolved.isErr() || resolved.value().extension() != ".tscn") {
+        return CallToolResult::error(
+            "Invalid offline scene path: " +
+            (resolved.isErr() ? resolved.error().message : std::string("path must identify a .tscn file")));
+    }
+    std::ifstream file(resolved.value());
 
     if (file.is_open()) {
         struct NodeEntry {
