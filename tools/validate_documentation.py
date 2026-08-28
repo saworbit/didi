@@ -51,6 +51,9 @@ FACT_PATTERNS = {
         (r"\b78[- ]canonical|\b78 canonical", "78 canonical"),
         (r"\b10 (?:additional )?legacy", "10 legacy"),
         (r"\b88 total|\(88 total\)|88 registrations", "88 total"),
+        (r"--project[\s\S]*DIDI_PROJECT_ROOT|DIDI_PROJECT_ROOT[\s\S]*--project", "explicit project root"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
     ),
     "docs/CAPABILITIES.md": (
         (r"\b78 canonical", "78 canonical"),
@@ -58,11 +61,18 @@ FACT_PATTERNS = {
         (r"\b88 [`\w/-]* ?entries|exactly 88", "88 total"),
         (r"\b60 (?:canonical )?tools? (?:are )?implemented|Sixty (?:canonical )?tools? are implemented|Sixty are implemented", "60 implemented"),
         (r"\b18 (?:canonical )?(?:tools? )?(?:remain )?(?:reserved|unimplemented)", "18 unimplemented"),
+        (r"--project[\s\S]*DIDI_PROJECT_ROOT|DIDI_PROJECT_ROOT[\s\S]*--project", "explicit project root"),
+        (r"\b423\b", "one-client session lock"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
     ),
     "docs/TOOL_REFERENCE.md": (
         (r"\b78 canonical", "78 canonical"),
         (r"\b10 legacy", "10 legacy"),
         (r"\b88 registrations", "88 total"),
+        (r"\b423\b", "one-client session lock"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
     ),
     "CHANGELOG.md": (
         (r"\b78 canonical", "78 canonical"),
@@ -70,6 +80,26 @@ FACT_PATTERNS = {
         (r"\b88 total|88-registration", "88 total"),
         (r"\b60 (?:canonical )?tools? (?:are )?implemented|Sixty (?:canonical )?tools? are implemented", "60 implemented"),
         (r"\b18 (?:canonical )?(?:tools? )?(?:remain )?(?:reserved|honestly unimplemented|unimplemented)", "18 unimplemented"),
+    ),
+    "docs/API_SPECIFICATION.md": (
+        (r"\b423\b", "one-client session lock"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
+        (r"ui\.hitTest", "live UI hit-test IPC method"),
+    ),
+    "docs/LLM_INSTRUCTIONS.md": (
+        (r"--project[\s\S]*DIDI_PROJECT_ROOT|DIDI_PROJECT_ROOT[\s\S]*--project", "explicit project root"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
+    ),
+    "docs/QUICKSTART.md": (
+        (r"--project", "explicit project argument"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
+    ),
+    "docs/ROADMAP.md": (
+        (r"Phase 6[^\n]*COMPLETE", "completed Phase 6"),
+        (r"Phase 5 Deep Domains \(6\)", "six-tool Phase 5 canonical row"),
     ),
 }
 

@@ -97,6 +97,8 @@ Add to your VS Code MCP settings:
 
 ## ✅ Step 4: Confirm Availability
 
+The `--project` argument in the examples is mandatory unless `DIDI_PROJECT_ROOT` is set. The selected directory must contain `project.godot`; otherwise Didi exits with status `2` before MCP initialization.
+
 Ask the MCP client to list Didi's tools and inspect `_meta.didi`. Live tools should report `currentMode: "live"` when the matching Godot project is open with the addon enabled. If the editor is closed, live-only tools report `unavailable`; file-based tools report `offline_fallback`.
 
 See [Current Capability Matrix](CAPABILITIES.md) for the complete snapshot.
@@ -115,8 +117,11 @@ Once connected, ask your AI assistant any of the following:
 - 🔌 **Project Wiring**: *"Attach `res://player.gd`, add the Player to the controllable group, and bind a typed jump action."* (`script_attach_to_node`, `scene_add_to_group`, `project_set_input_action`)
 - 🗂️ **Scene Lifecycle**: *"Pack the Player branch to `res://actors/player.tscn`, reopen it, and verify the hierarchy."* (`scene_pack_branch`, `scene_open`, `scene_get_hierarchy`)
 - 🚀 **Runtime Test**: *"Run `res://scenes/main.tscn` headlessly and report any engine errors or warnings."* (`runtime_launch`)
+- 🛡️ **Safe Mutation Preview**: *"Preview creating a SpawnPoint without executing it; show the planned project and route before asking me to apply it."* (`scene_instantiate_node` with `dry_run: true`)
 
 Signal wiring, physics/navigation queries, TileMap/GridMap editing, runtime input injection, call stacks, and profiler telemetry are registered but unimplemented in the current build. An MCP client should not call them when `implemented` is false.
+
+Every implemented mutation supports `dry_run`. Editor reload, script patching, and overwrite-enabled offline writers require the exact preview's `confirmation_token`; it expires after 120 seconds and is single-use. Repeat the original arguments unchanged, remove `dry_run`, and add the token only when the preview matches your intent.
 
 ## 🔗 Step 6: Attach to a running editor or game
 
@@ -127,6 +132,8 @@ Phase 3 routing starts detached. On first availability, v1.4.0 selects only an u
 3. If auto-selection did not choose it, call `runtime_attach_session` with its 32-hex `session_id`. The private token stays in the access-controlled descriptor and internal handshake; POSIX defaults are owner-only, while Windows grants the owning SID and local administrators.
 4. Confirm `runtime_get_session` reports `execution_mode: "local_session_management"`, `connected: true`, the intended public `session`, and a matching token-free `handshake`. This is a fresh bounded identity check; failure quarantines that route, while a concurrent explicit route change wins and produces `409` for the stale refresh.
 5. Use `runtime_get_tree` or poll `runtime_read_logs` with the returned `next_cursor`.
+
+Only one MCP client can own a runtime session. A second attach receives `423`; detach or owner process exit/crash releases the OS lock.
 
 For a paused game, call `runtime_set_paused` with `true`, then `runtime_step` with `frames` from 1–60. The step resolves only after exact advancement and re-pause verification. `runtime_stop` requests quit; poll discovery until the session disappears before claiming it exited.
 

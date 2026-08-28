@@ -2,6 +2,8 @@
 
 This page describes what the current Didi build can execute. The runtime response from `tools/list` or `resources/list` is always authoritative if it differs from this snapshot.
 
+Didi must start with `--project <root>` or `DIDI_PROJECT_ROOT`; the selected canonical directory must contain `project.godot`. Missing or invalid project selection fails before MCP initialization.
+
 ## Reading capability metadata
 
 Every tool and resource definition includes `_meta.didi`:
@@ -66,12 +68,15 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 
 | URI | Modes | Current behavior |
 | :--- | :--- | :--- |
-| `godot://project/tree` | `offline_fallback` | Filesystem/resource-index snapshot rooted at the Didi project working directory. |
+| `godot://project/tree` | `offline_fallback` | Filesystem/resource-index snapshot rooted at the explicit canonical Godot project. |
 | `godot://editor/state` | `live`, `offline_fallback` | Live mode reports connection status and active edited-scene root; offline mode reports that no editor is connected. |
 | `godot://runtime/logs` | `live`, `offline_fallback` | Returns Didi's cursor-shaped extension ring when attached, or a schema-compatible server-status record offline. It does not capture arbitrary Godot/external `print()` output. |
 
 ## Current limits and safety rules
 
+- A runtime session has one MCP owner at a time. Attach acquires an OS-backed `<session-id>.lock`; another client receives `423`, and owner process exit/crash releases the kernel lock. Lock metadata contains no authentication token.
+- Every implemented mutation advertises `dry_run`. Dry-run requests stop before handlers and return a structured `mutation_preview` bound to the canonical project and live route context.
+- `editor_reload_project`, script patching, and overwrite-enabled `resource_create`, visual-test-lab creation, `project_export`, and `gridmap_export_mesh_library` require the preview's 64-hex `confirmation_token`. Tokens expire after 120 seconds, are single-use, and reject tool, argument, project, mode, session, generation, expiry, and replay mismatches.
 - Live node paths use `/root/<edited-scene-root>/...`; `/root` resolves to the active edited-scene root.
 - Live hierarchy output contains names, classes, logical paths, and children. Bulk properties, scripts, and signals are listed in `omitted_fields` rather than fabricated.
 - Property get/set supports JSON null, boolean, signed integer, real, and string values. Unknown properties, incompatible JSON types, and non-scalar Godot Variants are rejected.

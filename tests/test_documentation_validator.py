@@ -47,6 +47,8 @@ Current documented release: **1.4.0**.
 
 Didi exposes 78 canonical tools plus 10 legacy names (88 total).
 
+Startup requires --project or DIDI_PROJECT_ROOT. Mutations expose dry_run and protected writes use confirmation_token.
+
 [Guide](docs/GUIDE.md#details-1) | [Security](SECURITY.md) | [Overview](#didi)
 """,
         )
@@ -76,25 +78,27 @@ Current release: 1.4.0.
         )
         self.write("CONTRIBUTING.md", "# Contributing\n")
 
-        generic_docs = (
-            "ADMIN_GUIDE.md",
-            "API_SPECIFICATION.md",
-            "ARCHITECTURE.md",
-            "DEVELOPER_GUIDE.md",
-            "INTEGRATION_GUIDE.md",
-            "LLM_INSTRUCTIONS.md",
-            "QUICKSTART.md",
-            "RESOURCES_AND_PROMPTS.md",
-            "ROADMAP.md",
-        )
-        for name in generic_docs:
-            self.write(f"docs/{name}", f"# {name.removesuffix('.md').replace('_', ' ').title()}\n")
+        generic_docs = {
+            "ADMIN_GUIDE.md": "# Admin Guide\n",
+            "API_SPECIFICATION.md": "# API Specification\n\n423 Locked. Mutations expose dry_run and confirmation_token. Live IPC includes ui.hitTest.\n",
+            "ARCHITECTURE.md": "# Architecture\n",
+            "DEVELOPER_GUIDE.md": "# Developer Guide\n",
+            "INTEGRATION_GUIDE.md": "# Integration Guide\n",
+            "LLM_INSTRUCTIONS.md": "# LLM Instructions\n\nStart with --project or DIDI_PROJECT_ROOT. Preview with dry_run and use confirmation_token when returned.\n",
+            "QUICKSTART.md": "# Quickstart\n\nStart with --project. Preview mutations with dry_run and use confirmation_token when required.\n",
+            "RESOURCES_AND_PROMPTS.md": "# Resources And Prompts\n",
+            "ROADMAP.md": "# Roadmap\n\n## Phase 6: Enterprise Safety (COMPLETE)\n\n| **13. Phase 5 Deep Domains (6)** | Implemented |\n",
+        }
+        for name, text in generic_docs.items():
+            self.write(f"docs/{name}", text)
 
         self.write(
             "docs/CAPABILITIES.md",
             """# Current Capability Matrix
 
 Didi v1.4.0 registers 78 canonical tool names. Sixty are implemented in at least one mode; 18 remain reserved. Ten legacy names are registered separately, for exactly 88 tools/list entries.
+
+Startup requires --project or DIDI_PROJECT_ROOT. A second session owner receives 423. Mutations expose dry_run and protected writes use confirmation_token.
 """,
         )
         self.write(
@@ -102,6 +106,8 @@ Didi v1.4.0 registers 78 canonical tool names. Sixty are implemented in at least
             """# Tool Reference
 
 Didi exposes 78 canonical tool names plus 10 legacy names (88 registrations).
+
+Session lock conflicts return 423. Mutations expose dry_run and protected writes use confirmation_token.
 """,
         )
         self.write(
@@ -450,6 +456,18 @@ Second section.
         errors = VALIDATOR.validate_repository(root)
 
         self.assertTrue(any("README.md" in error and "78 canonical" in error for error in errors), errors)
+
+    def test_reports_missing_phase6_safety_fact(self):
+        root = self.make_valid_repository()
+        instructions = (root / "docs/LLM_INSTRUCTIONS.md").read_text(encoding="utf-8")
+        self.write("docs/LLM_INSTRUCTIONS.md", instructions.replace("dry_run", "preview_only"))
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(
+            any("docs/LLM_INSTRUCTIONS.md" in error and "mutation dry-run" in error for error in errors),
+            errors,
+        )
 
     def test_reports_missing_markdown_target(self):
         root = self.make_valid_repository()

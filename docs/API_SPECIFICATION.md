@@ -70,7 +70,7 @@ Requests require `jsonrpc: "2.0"` and a string `method`. When present, `id` must
 
 ### Bridge error codes
 
-The internal extension envelope can use `400` (invalid argument), `401` (runtime token rejected), `404` (missing object/property/session), `408` (cooperative expression deadline exceeded), `409` (protocol/mode/state conflict), `413` (bounded payload exceeded), `415` (unsupported expression result), `422` (parse/execution rejection), `500` (Godot/bridge failure), `501` (unimplemented), `503` (not connected/ready), or `504` (deadline exceeded). At the extension's 15-second main-thread deadline, a still-pending command is atomically cancelled and returns `outcome: "not_started"` with `route_quarantine: false`; a started but unresolved command returns `outcome: "unknown_outcome"` with `route_quarantine: true`. Public live tools and the runtime-log resource use a finite 17-second outer transport deadline. An explicit quarantine response or transport timeout quarantines that exact route; clients must not blindly retry a mutation whose outcome is unknown. Public `tools/call` converts these failures into MCP content with `result.isError: true`; clients should use the returned text and structured error data rather than expecting a top-level JSON-RPC code.
+The internal extension and local session envelopes can use `400` (invalid argument), `401` (runtime token rejected), `404` (missing object/property/session), `408` (cooperative expression deadline exceeded), `409` (protocol/mode/state conflict), `413` (bounded payload exceeded), `415` (unsupported expression result), `422` (parse/execution rejection), `423` (runtime session locked by another MCP client), `500` (Godot/bridge failure), `501` (unimplemented), `503` (not connected/ready), or `504` (deadline exceeded). At the extension's 15-second main-thread deadline, a still-pending command is atomically cancelled and returns `outcome: "not_started"` with `route_quarantine: false`; a started but unresolved command returns `outcome: "unknown_outcome"` with `route_quarantine: true`. Public live tools and the runtime-log resource use a finite 17-second outer transport deadline. An explicit quarantine response or transport timeout quarantines that exact route; clients must not blindly retry a mutation whose outcome is unknown. Public `tools/call` converts these failures into MCP content with `result.isError: true`; clients should use the returned text and structured error data rather than expecting a top-level JSON-RPC code.
 
 ---
 
@@ -109,6 +109,12 @@ Each tool and resource definition includes a namespaced `_meta.didi` object:
 
 Tool execution failures use MCP `result.isError: true` with explanatory text. JSON-RPC top-level errors remain reserved for malformed requests, unknown JSON-RPC methods, and other protocol-level failures.
 
+### Mutation safety extension
+
+Every implemented mutating tool schema includes `dry_run: boolean`. With `dry_run: true`, dispatch stops at the registry boundary and returns `dry_run: true` plus `mutation_preview`; no mutation handler or external process executes. The preview is bound to the tool, sanitized arguments, canonical project, execution mode, optional session ID, and route generation.
+
+`editor_reload_project`, `script_patch_method` and its legacy alias, plus overwrite-enabled `resource_create`, visual-test-lab creation, `project_export`, and `gridmap_export_mesh_library` require the preview's `confirmation_token`. The token is 64 lowercase hexadecimal characters, expires after 120 seconds, is consumed on its first validation attempt, and fails on any argument/context mismatch or replay. A request must not combine `dry_run: true` with `confirmation_token`.
+
 ---
 
 ## 3. Internal IPC Protocol (Named Pipes & UNIX Sockets)
@@ -142,10 +148,11 @@ Request IDs are correlated exactly. A missing or mismatched response ID closes t
 - `editor.undo`, `editor.redo`, `editor.saveScene`, `editor.reloadProject`
 - `asset.reimport`
 - `vision.captureViewport`, `vision.diffViewport`
+- `ui.hitTest`
 - `runtime.getLogs`, `runtime.getTree`, `runtime.setPaused`, `runtime.step`, `runtime.stop`
 - `runtime.evalGdscript`
 
-These scene/editor/reimport/viewport/log methods execute through the extension's main-thread bridge. Public project search, asset queries, script diagnostics/reflection, and visual-test-lab generation are standalone filesystem/parser handlers and are never routed through extension IPC. If an offline-only helper name is sent to the extension directly, it returns `409`; other reserved internal names return a structured `501` envelope:
+These scene/editor/reimport/viewport/UI/log methods execute through the extension's main-thread bridge. Public project search, asset queries, script diagnostics/reflection, visual-test-lab generation, C#/shader checks, export-preset discovery/export, and MeshLibrary generation are standalone filesystem/parser/process handlers and are never routed through extension IPC. If an offline-only helper name is sent to the extension directly, it returns `409`; other reserved internal names return a structured `501` envelope:
 
 ```json
 {
@@ -161,6 +168,8 @@ See [Current Capability Matrix](CAPABILITIES.md) for the public tool mapping.
 ### Session descriptor and authentication envelope
 
 The extension binds its endpoint first, then atomically publishes one schema-`1` JSON descriptor containing `session_id`, private `token`, `pid`, `kind`, canonical `project_path`, `endpoint`, process `started_at_ms`, and protocol version `1.3`. Discovery accepts only direct regular-file `*.json` children no larger than 64 KiB, exact endpoint shapes, exact field sets, and a live PID whose process-start identity matches. Public forms omit `token`. Orderly shutdown and proven-stale cleanup retire only an exact identity-matched object to an unpredictable no-replace path and re-verify it. Windows then deletes that exact verified object through its open handle. POSIX intentionally retains the verified `.didi-retired-<session-id>-<32hex>` tombstone because no portable object-bound unlink exists; the active `.json` name is gone and discovery ignores the tombstone. A move collision/race or unavailable atomic operation retains the safer object/path rather than risk another entry.
+
+Before connecting, the standalone client acquires the descriptor's `<session-id>.lock`. The OS lock, not metadata-file presence, enforces one MCP owner. Another client receives `423`; process exit or crash releases the kernel lock. The lock metadata never contains the session authentication token, and POSIX normally retains the owner-only metadata file after release.
 
 Every routed live request copies public parameters and adds `_didi_session_token` internally. The extension compares all 64 token bytes in constant work, strips the field, then dispatches the command. `session.handshake` must complete within 3,000 ms and echo matching session/protocol identity before a candidate route replaces the current route. Failed attach is transactional.
 

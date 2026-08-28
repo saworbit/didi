@@ -1,5 +1,7 @@
 # macOS CI Tap-Warning Cleanup Design
 
+> **Status:** Completed historical design record. The enforced current contract lives in `tools/validate_documentation.py` and the repository CI workflow.
+
 ## Context
 
 The `macos-latest` CI job completes successfully but emits a Homebrew tap-trust

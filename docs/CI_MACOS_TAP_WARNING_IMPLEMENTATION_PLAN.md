@@ -1,5 +1,7 @@
 # macOS CI Tap-Warning Cleanup Implementation Plan
 
+> **Status:** Completed historical implementation plan. Commands and repository-state expectations below record the delivery process and are not current setup guidance.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Remove the unused `aws/tap` from macOS runners before compiler-cache setup so pull-request and `main` CI complete with zero GitHub annotations.

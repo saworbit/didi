@@ -128,31 +128,31 @@ The native red-team contract covers invalid roots, project-key isolation, lock e
 
 These are missing capabilities that an AI agent actually requires to complete full development cycles and ship Godot changes.
 
-### 5. Deeper Search and Indexing
+### 1. Deeper Search and Indexing
 - **Reverse Usage Lookup**: "Where is this node type used?" and "Which scenes instance this sub-scene?"
 - **UID ↔ Path Synchronization**: Real-time sync with `.godot/uid_cache.bin` to resolve `uid://` references.
 - **Import Status Tracking**: Inspect `.import` remaps and detect broken/missing asset imports.
 
-### 6. Visual Verification & Image Diffing
+### 2. Expanded Visual Verification
 - **Multi-Target Viewports**: Explicitly capture 2D canvas, 3D world, active editor viewport, or running game window.
 - **Debug Draw Modifiers**: Non-destructive debug wireframes passed as capture parameters rather than global sticky toggles.
 
-### 7. Asset Import and Pipeline Management
+### 3. Asset Import and Pipeline Management
 - **Import Preset Configuration**: Configure compression modes, 3D normal filters, and mesh collision generation.
 
-### 8. C#, Shaders, and Animation Keyframing
+### 4. Animation and UI Authoring
 - **Animation Track Keyframing**: Add, remove, and interpolate keyframes and track lengths in `AnimationPlayer`.
 - **Theme & Layout Inspection**: Inspect Control node anchors, margins, minimum sizes, and theme overrides.
 
-### 9. Enhanced MCP Protocol Surface
-- **Live MCP Resources**: `godot://editor/state`, `godot://project/tree`, `godot://runtime/logs` with active push notifications.
+### 5. Enhanced MCP Protocol Surface
+- **Resource Subscriptions**: Add active change/push notifications for the existing `godot://editor/state`, `godot://project/tree`, and `godot://runtime/logs` resources.
 - **Resource Templates**: Dynamic URI templates `godot://node/{path}` and `godot://script/{res_path}`.
-- **Structured Workflows (Prompts)**: Encode guided multi-step agent prompts (*Create Character*, *Wire Signal*, *Visual Verification Loop*).
+- **Additional Structured Workflows**: Extend the existing anomaly-debugging and gameplay-slice prompts with guided *Create Character*, *Wire Signal*, and *Visual Verification Loop* workflows.
 - **Structured Engine Logging**: Support `logging/setLevel` and stream Godot engine warnings and errors into MCP notifications.
 
 ## 🚫 What NOT to Add Yet
 
-- ❌ **Do NOT add more domain stubs** (e.g. `audio_bus_*`, `multiplayer_*`, `particle_*`, `xr_*`) until Domains 1–4 are actively mutating Godot.
+- ❌ **Do NOT add more domain stubs** (e.g. `audio_bus_*`, `multiplayer_*`, `particle_*`, `xr_*`) while existing reserved signal, physics/navigation, TileMap/GridMap, camera/debug, and runtime-debugger schemas remain unimplemented.
 - ❌ **Do NOT create a second plugin architecture or network transport** — local named pipes and UNIX domain sockets are optimal.
 - ❌ **Do NOT build a custom GDScript language server** — extend the existing symbol extractor and headless Godot compiler check only where evidence requires it.
 - ❌ **Do NOT expand the limited static ClassDB map** — replace it with live Godot `ClassDB` or generated `extension_api.json` data.
@@ -174,7 +174,7 @@ These are missing capabilities that an AI agent actually requires to complete fu
 
 ## 📋 The 78-Tool Canonical Surface
 
-This is the planned protocol surface, not a claim that every row executes today. See [Current Capability Matrix](CAPABILITIES.md) for per-tool status.
+This is the current registered canonical surface, not a claim that every row executes today. See [Current Capability Matrix](CAPABILITIES.md) for per-tool status.
 
 | Domain | Key Tools | Current status |
 | :--- | :--- | :--- |
@@ -190,3 +190,4 @@ This is the planned protocol surface, not a claim that every row executes today.
 | **10. Phase 2 Project Wiring (18)** | Script attach/detach; autoloads; InputMap; project settings; groups; scene create/open/close/pack | Implemented live. Project writes persist with rollback; node writes use UndoRedo; resource writes require safe paths and explicit overwrite. |
 | **11. Phase 3 Runtime Sessions (10)** | Session list/attach/detach/get; logs; pause/step/stop/tree; `eval_gdscript` | Implemented. Four tools execute as local session management; six require an authenticated auto-selected or explicitly attached live editor/game. Evaluation is read-only and expression-only. |
 | **12. Phase 4 Verification (4)** | `project_search_text`, `project_search_symbols`, `asset_reimport`, `viewport_diff_capture` | Implemented. Search is bounded/offline; reimport and diff are editor-only; capture isolation is a reversible option on the existing live viewport tool. |
+| **13. Phase 5 Deep Domains (6)** | `csharp_check_build`, `shader_check_compile`, `project_list_export_presets`, `project_export`, `gridmap_export_mesh_library`, `ui_hit_test` | Implemented. Five tools are bounded offline file/process workflows; UI hit-testing is editor-only and does not inject input. |
