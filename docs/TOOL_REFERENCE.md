@@ -1,6 +1,6 @@
 # Didi MCP Tool Reference
 
-Didi exposes 72 canonical tool names plus 10 legacy names (82 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 78 canonical tool names plus 10 legacy names (88 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
@@ -403,3 +403,31 @@ Timeout checks run before/after policy, context resolution, parse, execution, an
 ### Runtime debugger tools still unavailable
 
 `runtime_inject_input`, `runtime_get_call_stack`, and `runtime_read_profiler` remain registered with `implemented: false`; Phase 3 does not synthesize input, debugger stacks, or profiler telemetry.
+
+## 12. Phase 5 deep domains
+
+All Phase 5 subprocess tools launch an executable with an argv array, never through a command shell. Combined stdout/stderr is capped at 1 MiB, output reports truncation, deadlines terminate the child process group, and paths are confined to the current project. Godot-backed operations use `GODOT_BIN` when set or normal Godot discovery; C# diagnostics require `dotnet` on `PATH`.
+
+### `csharp_check_build` — Offline
+
+Runs `dotnet build` with `configuration` (`Debug` or `Release`, default `Debug`) and `timeout_seconds` (`1..300`, default `60`). Optional `project_file` must be a normalized project-contained `.csproj`; when omitted, exactly one project-root `.csproj` must exist. The result includes exit/timeout/output metadata and bounded structured MSBuild diagnostics. This is a real build and may update normal `bin`/`obj` outputs.
+
+### `shader_check_compile` — Offline
+
+Requires a normalized existing `shader_path` ending in `.gdshader`; `timeout_seconds` defaults to `30` and is limited to `1..300`. A temporary headless Godot script loads the shader with the project's renderer, and the tool returns structured engine diagnostics with the requested resource path filled in when Godot reports only a temporary/internal location.
+
+### `project_list_export_presets` — Offline
+
+Accepts no arguments and parses the project-root `export_presets.cfg` without launching Godot. It returns deterministic preset records containing only index, name, platform, runnable, export filter, and export path. Platform option fields and their values are never returned. Malformed sections and duplicate preset names are rejected.
+
+### `project_export` — Offline
+
+Requires an existing preset `name` and normalized project-contained `output_path`. `mode` is `release` (default), `debug`, or `pack`; `timeout_seconds` is `1..900` (default `300`). The destination is preserved unless `overwrite: true`. Didi invokes the corresponding headless Godot export operation and verifies that a non-empty output artifact exists before reporting success. Installed export templates and platform SDKs remain Godot/operator prerequisites.
+
+### `gridmap_export_mesh_library` — Offline
+
+Requires an existing `.tscn` `source_scene` and a normalized `.meshlib` `output_path`. Direct source-root children become deterministic item IDs in scene order. Each item uses itself or its first recursive `MeshInstance3D`; `generate_collisions` defaults to true and creates a trimesh shape when possible. A first recursive `NavigationRegion3D` contributes navigation data. `timeout_seconds` is `1..300` (default `60`), existing output requires `overwrite: true`, and success reloads the saved `MeshLibrary` to verify its item count.
+
+### `ui_hit_test` — Live
+
+Requires finite viewport-space `point.x` and `point.y`. Optional `root_path` defaults to `/root`, `include_mouse_filter_ignore` defaults to false, and `max_results` defaults to `32` with range `1..256`. The editor bridge traverses at most 10,000 nodes under the active edited scene, transforms the point into each Control's local space, honors inherited visibility and clipping, and orders hits by canvas layer, effective z-index, then scene draw order. Results include canonical node path, class, effective mouse filter, layer/z/order, local point, and global rectangle. Script-defined `_has_point` overrides are used when callable; otherwise Godot's documented local rectangle default is applied. No input event is created or injected.

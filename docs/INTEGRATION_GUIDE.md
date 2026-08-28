@@ -144,7 +144,7 @@ Phase 3 discovers endpoints from access-controlled descriptors and authenticates
 
 ## 5. Phase 3 client integration sequence
 
-`tools/list` returns 72 canonical tools and 10 legacy registrations. Integrators should treat the four session-management tools as local operations even though their discovery metadata uses the existing `offline_fallback` capability label:
+`tools/list` returns 78 canonical tools and 10 legacy registrations. Integrators should treat the four session-management tools as local operations even though their discovery metadata uses the existing `offline_fallback` capability label:
 
 1. Start Didi with `--project <canonical-project-root>`.
 2. Didi may auto-attach on first availability when there is one live project match, or one matching editor among games. Multiple editors or multiple games without an editor stay detached.

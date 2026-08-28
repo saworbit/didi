@@ -169,6 +169,17 @@ Result<VariantValue> makeNodePath(const std::string& text) {
     return variantFromNative(GDEXTENSION_VARIANT_TYPE_NODE_PATH, native_path.ptr());
 }
 
+Result<VariantValue> makeVector2(double x, double y) {
+    auto constructor = GodotApi::instance().variant_get_ptr_constructor(
+        GDEXTENSION_VARIANT_TYPE_VECTOR2, 3);
+    if (!constructor) return Error::internal("Godot Vector2 constructor is unavailable");
+    NativeValue native(GDEXTENSION_VARIANT_TYPE_VECTOR2);
+    const void* arguments[] = {&x, &y};
+    constructor(native.ptr(), arguments);
+    native.markInitialized();
+    return variantFromNative(GDEXTENSION_VARIANT_TYPE_VECTOR2, native.ptr());
+}
+
 template <typename T>
 Result<VariantValue> makeScalar(GDExtensionVariantType type, T value) {
     return variantFromNative(type, &value);
@@ -429,6 +440,66 @@ Result<json> variantToJson(VariantValue& value, int depth = 0) {
         default:
             return Error::invalidArgument("Godot Variant type " + std::to_string(type) + " is not JSON-coercible");
     }
+}
+
+Result<json> nativeVector2ToJson(const void* native_vector) {
+    auto& api = GodotApi::instance();
+    if (!api.variant_get_ptr_getter) return Error::internal("Godot built-in member getter API is unavailable");
+    NativeName x_name("x");
+    NativeName y_name("y");
+    if (!x_name.valid() || !y_name.valid()) return Error::internal("Failed to construct Vector2 member names");
+    auto get_x = api.variant_get_ptr_getter(GDEXTENSION_VARIANT_TYPE_VECTOR2, x_name.ptr());
+    auto get_y = api.variant_get_ptr_getter(GDEXTENSION_VARIANT_TYPE_VECTOR2, y_name.ptr());
+    if (!get_x || !get_y) return Error::internal("Godot Vector2 member getters are unavailable");
+    double x = 0.0;
+    double y = 0.0;
+    get_x(native_vector, &x);
+    get_y(native_vector, &y);
+    return json{{"x", x}, {"y", y}};
+}
+
+Result<json> vector2ToJson(VariantValue& value) {
+    if (GodotApi::instance().variant_get_type(value.ptr()) != GDEXTENSION_VARIANT_TYPE_VECTOR2) {
+        return Error::invalidArgument("Godot value is not a Vector2");
+    }
+    auto converter = GodotApi::instance().get_variant_to_type_constructor(GDEXTENSION_VARIANT_TYPE_VECTOR2);
+    if (!converter) return Error::internal("Godot Vector2 conversion is unavailable");
+    NativeValue native(GDEXTENSION_VARIANT_TYPE_VECTOR2);
+    converter(native.ptr(), value.ptr());
+    native.markInitialized();
+    return nativeVector2ToJson(native.ptr());
+}
+
+Result<json> rect2ToJson(VariantValue& value) {
+    if (GodotApi::instance().variant_get_type(value.ptr()) != GDEXTENSION_VARIANT_TYPE_RECT2) {
+        return Error::invalidArgument("Godot value is not a Rect2");
+    }
+    auto& api = GodotApi::instance();
+    auto converter = api.get_variant_to_type_constructor(GDEXTENSION_VARIANT_TYPE_RECT2);
+    if (!converter || !api.variant_get_ptr_getter) {
+        return Error::internal("Godot Rect2 conversion is unavailable");
+    }
+    NativeValue native_rect(GDEXTENSION_VARIANT_TYPE_RECT2);
+    converter(native_rect.ptr(), value.ptr());
+    native_rect.markInitialized();
+    NativeName position_name("position");
+    NativeName size_name("size");
+    auto get_position = position_name.valid()
+        ? api.variant_get_ptr_getter(GDEXTENSION_VARIANT_TYPE_RECT2, position_name.ptr()) : nullptr;
+    auto get_size = size_name.valid()
+        ? api.variant_get_ptr_getter(GDEXTENSION_VARIANT_TYPE_RECT2, size_name.ptr()) : nullptr;
+    if (!get_position || !get_size) return Error::internal("Godot Rect2 member getters are unavailable");
+    NativeValue native_position(GDEXTENSION_VARIANT_TYPE_VECTOR2);
+    NativeValue native_size(GDEXTENSION_VARIANT_TYPE_VECTOR2);
+    get_position(native_rect.ptr(), native_position.ptr());
+    get_size(native_rect.ptr(), native_size.ptr());
+    native_position.markInitialized();
+    native_size.markInitialized();
+    auto position = nativeVector2ToJson(native_position.ptr());
+    auto size = nativeVector2ToJson(native_size.ptr());
+    if (position.isErr()) return position.error();
+    if (size.isErr()) return size.error();
+    return json{{"position", position.value()}, {"size", size.value()}};
 }
 
 Result<GDExtensionObjectPtr> singleton(const std::string& name) {
@@ -1279,6 +1350,208 @@ json GodotBridge::execute(const std::string& method, const json& params,
     auto editor_result = editorInterface();
     if (editor_result.isErr()) return errorJson(editor_result.error().code, editor_result.error().message);
     auto editor = editor_result.value();
+
+    if (method == "ui.hitTest") {
+        if (!params.is_object() || !params.contains("point") || !params["point"].is_object()) {
+            return errorJson(400, "point is required and must be an object");
+        }
+        const auto& point_json = params["point"];
+        if (!point_json.contains("x") || !point_json["x"].is_number() ||
+            !point_json.contains("y") || !point_json["y"].is_number()) {
+            return errorJson(400, "point.x and point.y are required numbers");
+        }
+        const double x = point_json["x"].get<double>();
+        const double y = point_json["y"].get<double>();
+        if (!std::isfinite(x) || !std::isfinite(y)) return errorJson(400, "point coordinates must be finite");
+        if (params.contains("root_path") && !params["root_path"].is_string()) {
+            return errorJson(400, "root_path must be a string");
+        }
+        if (params.contains("include_mouse_filter_ignore") &&
+            !params["include_mouse_filter_ignore"].is_boolean()) {
+            return errorJson(400, "include_mouse_filter_ignore must be a boolean");
+        }
+        if (params.contains("max_results") && !params["max_results"].is_number_integer()) {
+            return errorJson(400, "max_results must be an integer");
+        }
+        const int max_results = params.value("max_results", 32);
+        if (max_results < 1 || max_results > 256) return errorJson(400, "max_results must be from 1 to 256");
+
+        auto edited_root = editedSceneRoot(editor);
+        if (edited_root.isErr()) return errorJson(edited_root.error().code, edited_root.error().message);
+        const std::string requested_root = params.value("root_path", "/root");
+        auto traversal_root = resolveNode(edited_root.value(), requested_root);
+        if (traversal_root.isErr()) return errorJson(traversal_root.error().code, traversal_root.error().message);
+        auto point = makeVector2(x, y);
+        if (point.isErr()) return errorJson(point.error().code, point.error().message);
+
+        struct UiHit {
+            json value;
+            int64_t canvas_layer{0};
+            int64_t effective_z{0};
+            uint64_t draw_order{0};
+        };
+        std::vector<UiHit> hits;
+        uint64_t traversed = 0;
+        uint64_t draw_order = 0;
+        const bool include_ignored = params.value("include_mouse_filter_ignore", false);
+        auto control_name = makeString("Control");
+        auto canvas_item_name = makeString("CanvasItem");
+        if (control_name.isErr() || canvas_item_name.isErr()) {
+            return errorJson(500, "Failed to construct live UI class identifiers");
+        }
+
+        std::function<Result<void>(GDExtensionObjectPtr, bool, int64_t)> visit =
+            [&](GDExtensionObjectPtr node, bool ancestor_accepts_point, int64_t inherited_z) -> Result<void> {
+                if (++traversed > 10000) return Error::invalidArgument("UI traversal exceeds the 10,000 node limit");
+                const uint64_t current_order = draw_order++;
+                auto is_control_value = callObject(node, "Object", "is_class", 3927539163LL,
+                                                   {&control_name.value()});
+                auto is_canvas_value = callObject(node, "Object", "is_class", 3927539163LL,
+                                                  {&canvas_item_name.value()});
+                if (is_control_value.isErr()) return is_control_value.error();
+                if (is_canvas_value.isErr()) return is_canvas_value.error();
+                auto is_control = scalarFromVariant<GDExtensionBool>(is_control_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                auto is_canvas = scalarFromVariant<GDExtensionBool>(is_canvas_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                if (is_control.isErr()) return is_control.error();
+                if (is_canvas.isErr()) return is_canvas.error();
+
+                bool visible = true;
+                int64_t effective_z = inherited_z;
+                int64_t canvas_layer = 0;
+                if (is_canvas.value()) {
+                    auto visible_value = callObject(node, "CanvasItem", "is_visible_in_tree", 36873697LL);
+                    auto z_value = callObject(node, "CanvasItem", "get_z_index", 3905245786LL);
+                    auto relative_value = callObject(node, "CanvasItem", "is_z_relative", 36873697LL);
+                    if (visible_value.isErr()) return visible_value.error();
+                    if (z_value.isErr()) return z_value.error();
+                    if (relative_value.isErr()) return relative_value.error();
+                    auto visible_scalar = scalarFromVariant<GDExtensionBool>(visible_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                    auto z_scalar = scalarFromVariant<int64_t>(z_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                    auto relative_scalar = scalarFromVariant<GDExtensionBool>(relative_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                    if (visible_scalar.isErr()) return visible_scalar.error();
+                    if (z_scalar.isErr()) return z_scalar.error();
+                    if (relative_scalar.isErr()) return relative_scalar.error();
+                    visible = visible_scalar.value() != 0;
+                    effective_z = relative_scalar.value() ? inherited_z + z_scalar.value() : z_scalar.value();
+                    auto layer_node_value = callObject(node, "CanvasItem", "get_canvas_layer_node", 2602762519LL);
+                    if (layer_node_value.isErr()) return layer_node_value.error();
+                    auto layer_node = objectFromVariant(layer_node_value.value());
+                    if (layer_node.isErr()) return layer_node.error();
+                    if (layer_node.value()) {
+                        auto layer_value = callObject(layer_node.value(), "CanvasLayer", "get_layer", 3905245786LL);
+                        if (layer_value.isErr()) return layer_value.error();
+                        auto layer_scalar = scalarFromVariant<int64_t>(layer_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                        if (layer_scalar.isErr()) return layer_scalar.error();
+                        canvas_layer = layer_scalar.value();
+                    }
+                }
+
+                bool current_has_point = false;
+                bool clips_children = false;
+                if (is_control.value() && visible && ancestor_accepts_point) {
+                    auto local_value = callObject(node, "CanvasItem", "make_canvas_position_local", 2656412154LL,
+                                                  {&point.value()});
+                    if (local_value.isErr()) return local_value.error();
+                    auto local_json = vector2ToJson(local_value.value());
+                    if (local_json.isErr()) return local_json.error();
+                    auto object_value = makeObject(node);
+                    if (object_value.isErr()) return object_value.error();
+                    auto hit_value = callVariant(object_value.value(), "_has_point", {&local_value.value()});
+                    if (hit_value.isOk()) {
+                        auto hit_scalar = scalarFromVariant<GDExtensionBool>(hit_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                        if (hit_scalar.isErr()) return hit_scalar.error();
+                        current_has_point = hit_scalar.value() != 0;
+                    } else {
+                        auto size_value = callVariant(object_value.value(), "get_size");
+                        if (size_value.isErr()) return size_value.error();
+                        auto size_json = vector2ToJson(size_value.value());
+                        if (size_json.isErr()) return size_json.error();
+                        const double local_x = local_json.value().at("x").get<double>();
+                        const double local_y = local_json.value().at("y").get<double>();
+                        const double width = size_json.value().at("x").get<double>();
+                        const double height = size_json.value().at("y").get<double>();
+                        current_has_point = local_x >= 0.0 && local_y >= 0.0 &&
+                                            local_x < width && local_y < height;
+                    }
+                    auto clip_value = callObject(node, "Control", "is_clipping_contents", 2240911060LL);
+                    if (clip_value.isErr()) return clip_value.error();
+                    auto clip_scalar = scalarFromVariant<GDExtensionBool>(clip_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                    if (clip_scalar.isErr()) return clip_scalar.error();
+                    clips_children = clip_scalar.value() != 0;
+
+                    auto mouse_value = callObject(node, "Control", "get_mouse_filter_with_override", 1572545674LL);
+                    if (mouse_value.isErr()) return mouse_value.error();
+                    auto mouse_filter = scalarFromVariant<int64_t>(mouse_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                    if (mouse_filter.isErr()) return mouse_filter.error();
+                    if (current_has_point && (include_ignored || mouse_filter.value() != 2)) {
+                        auto path = logicalPathFromEditedRoot(edited_root.value(), node);
+                        auto class_name = nodeString(node, "get_class", 201670096LL);
+                        auto global_rect_value = callObject(node, "Control", "get_global_rect", 1639390495LL);
+                        auto rect_json = global_rect_value.isOk()
+                            ? rect2ToJson(global_rect_value.value())
+                            : Result<json>(global_rect_value.error());
+                        if (path.isErr()) return path.error();
+                        if (class_name.isErr()) return class_name.error();
+                        if (local_json.isErr()) return local_json.error();
+                        if (rect_json.isErr()) return rect_json.error();
+                        const char* filter_name = mouse_filter.value() == 0 ? "stop" :
+                                                  mouse_filter.value() == 1 ? "pass" : "ignore";
+                        hits.push_back({
+                            {{"node_path", path.value()}, {"class", class_name.value()},
+                             {"mouse_filter", filter_name}, {"mouse_filter_value", mouse_filter.value()},
+                             {"canvas_layer", canvas_layer}, {"effective_z_index", effective_z},
+                             {"draw_order", current_order}, {"local_point", local_json.value()},
+                             {"global_rect", rect_json.value()}},
+                            canvas_layer, effective_z, current_order
+                        });
+                    }
+                }
+
+                const bool children_accept = ancestor_accepts_point && visible &&
+                    (!is_control.value() || !clips_children || current_has_point);
+                auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+                if (include_internal.isErr()) return include_internal.error();
+                auto children = callObject(node, "Node", "get_children", 873284517LL, {&include_internal.value()});
+                if (children.isErr()) return children.error();
+                auto size_value = callVariant(children.value(), "size");
+                if (size_value.isErr()) return size_value.error();
+                auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                if (size.isErr()) return size.error();
+                for (int64_t index_value = 0; index_value < size.value(); ++index_value) {
+                    auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index_value);
+                    if (index.isErr()) return index.error();
+                    auto child_value = callVariant(children.value(), "get", {&index.value()});
+                    if (child_value.isErr()) return child_value.error();
+                    auto child = objectFromVariant(child_value.value());
+                    if (child.isErr() || !child.value()) return Error::internal("Godot returned an invalid UI child");
+                    auto nested = visit(child.value(), children_accept, effective_z);
+                    if (nested.isErr()) return nested.error();
+                }
+                return Result<void>::ok();
+            };
+
+        auto visited = visit(traversal_root.value(), true, 0);
+        if (visited.isErr()) return errorJson(visited.error().code, visited.error().message);
+        std::stable_sort(hits.begin(), hits.end(), [](const UiHit& left, const UiHit& right) {
+            if (left.canvas_layer != right.canvas_layer) return left.canvas_layer > right.canvas_layer;
+            if (left.effective_z != right.effective_z) return left.effective_z > right.effective_z;
+            return left.draw_order > right.draw_order;
+        });
+        const size_t total_hits = hits.size();
+        json output_hits = json::array();
+        for (size_t i = 0; i < std::min(hits.size(), static_cast<size_t>(max_results)); ++i) {
+            output_hits.push_back(hits[i].value);
+        }
+        json topmost = output_hits.empty() ? json(nullptr) : output_hits.front();
+        return liveResult({
+            {"point", {{"x", x}, {"y", y}}}, {"root_path", requested_root},
+            {"hits", output_hits}, {"topmost", topmost}, {"hit_count_total", total_hits},
+            {"returned_count", output_hits.size()}, {"traversed_nodes", traversed},
+            {"truncated", total_hits > output_hits.size()},
+            {"ordering", "canvas_layer_desc,effective_z_index_desc,scene_draw_order_desc"},
+            {"input_injected", false}
+        });
+    }
 
     if (method == "project.getSetting" || method == "project.setSetting") {
         const std::string setting = params.value("setting", "");

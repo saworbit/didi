@@ -181,7 +181,7 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 82u);
+    ASSERT_EQ(tools.size(), 88u);
     const std::unordered_set<std::string> legacy_names = {
         "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
         "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
@@ -193,7 +193,7 @@ static void test_tool_registry_default_tools() {
         if (legacy_names.count(tool.name) == 0) ++canonical_count;
     }
     ASSERT_EQ(legacy_names.size(), 10u);
-    ASSERT_EQ(canonical_count, 72u);
+    ASSERT_EQ(canonical_count, 78u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);

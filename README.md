@@ -23,8 +23,8 @@ The current documented release is **1.4.0**.
 | 🚀 [**Quickstart Guide**](docs/QUICKSTART.md) | **Developers / Humans** | 5-minute step-by-step setup for Godot, Cursor, Claude, and VS Code. |
 | 🤖 [**LLM Agent Instructions**](docs/LLM_INSTRUCTIONS.md) | **AI Assistants / LLMs** | Dedicated system prompt & decision tree for Claude, Cursor, Windsurf, Antigravity. |
 | ✅ [**Current Capability Matrix**](docs/CAPABILITIES.md) | **Everyone** | Authoritative live, offline, unavailable, and unimplemented behavior. |
-| 🗺️ [**Roadmap & 72-Tool Surface**](docs/ROADMAP.md) | **Developers / Contributors** | Completed phases and technical build order. |
-| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 72 canonical tools plus 10 legacy names. |
+| 🗺️ [**Roadmap & 78-Tool Surface**](docs/ROADMAP.md) | **Developers / Contributors** | Completed phases and technical build order. |
+| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 78 canonical tools plus 10 legacy names. |
 | 🏛️ [**Architecture & System Topology**](docs/ARCHITECTURE.md) | **Engineers / Architects** | Deep-dive into C++20 design, dual execution topology, threading safety, and named-pipe IPC. |
 | 📦 [**Dynamic Resources & Prompts**](docs/RESOURCES_AND_PROMPTS.md) | **Developers / LLMs** | Technical specs for `godot://...` resources and prompt workflows. |
 | 🛡️ [**Administrator & Operations Guide**](docs/ADMIN_GUIDE.md) | **DevOps / Admins** | Security DACL hardening, CI/CD headless execution, observability, and troubleshooting. |
@@ -60,7 +60,7 @@ The current documented release is **1.4.0**.
 ┌─────────────────────────────────────────────────────────────┐
 │        Didi (C++ MCP Core Engine - didi / didi.exe)         │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2024-11-05 standard)       │
-│  - Registry (72 canonical tools + 10 legacy names)          │
+│  - Registry (78 canonical tools + 10 legacy names)          │
 │  - Dynamic Resources (godot://project/tree, editor/state)   │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
 │  - Offline Fallback Engine (GDScript AST, .tscn parser)     │
@@ -81,9 +81,9 @@ The current documented release is **1.4.0**.
 
 ---
 
-## 🛠️ Protocol Surface (72 Canonical Tools)
+## 🛠️ Protocol Surface (78 Canonical Tools)
 
-The 72 canonical names are the stable protocol surface, with 10 additional legacy registrations (82 total). Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind` from `tools/list`. `editorConnected` is true only for an editor route, while `liveAvailable` also requires that the selected editor/game kind is allowed for that exact definition. Phase 4 adds bounded offline text/symbol search, editor-backed asset reimport, reversible named-node isolation, process-local capture IDs, and exact RGBA viewport diffs. Runtime trees retain the Phase 3 UTF-8 and 256 KiB bounds.
+The 78 canonical names are the stable protocol surface, with 10 additional legacy registrations (88 total). Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind` from `tools/list`. `editorConnected` is true only for an editor route, while `liveAvailable` also requires that the selected editor/game kind is allowed for that exact definition. Phase 5 adds bounded C# and shader diagnostics, redacted export-preset discovery, guarded headless export, deterministic MeshLibrary generation, and non-injecting live UI hit-testing. Runtime trees retain the Phase 3 UTF-8 and 256 KiB bounds.
 
 | Domain | Key Tools | Current execution |
 | :--- | :--- | :--- |
@@ -98,6 +98,7 @@ The 72 canonical names are the stable protocol surface, with 10 additional legac
 | **9. Editor Lifecycle (4)** | `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Implemented live. Reload requests a resource-filesystem rescan. |
 | **10. Project Wiring (18)** | Script attach/detach; autoload, InputMap, and setting management; groups; scene create/open/close/pack | Implemented live with UndoRedo, ProjectSettings persistence, typed events, overwrite guards, and normalized `res://` paths. |
 | **11. Runtime Sessions (10)** | `runtime_list_sessions`, attach/detach/get, logs, pause/step/stop/tree, `eval_gdscript` | Four local session-management tools plus six live tools. Attachment is deterministic or explicit and always authenticated; evaluation is a strict read-only expression subset, not arbitrary GDScript. |
+| **12. Deep Domains (6)** | `csharp_check_build`, `shader_check_compile`, `project_list_export_presets`, `project_export`, `gridmap_export_mesh_library`, `ui_hit_test` | Five bounded offline subprocess/file tools plus one editor-only transformed Control hit-test. Writes require project-contained normalized paths and explicit overwrite. |
 
 ### Phase 3 runtime contract
 
@@ -114,6 +115,10 @@ Live main-thread work has finite boundaries. At the extension's 15-second deadli
 `project_search_text` and `project_search_symbols` scan only allowlisted project text formats under strict file, byte, result, path, encoding, and preview bounds. `asset_reimport` accepts an all-or-nothing batch of normalized source assets and completes only after two consecutive editor-idle observations.
 
 Every successful live viewport capture returns a 32-lowercase-hex `capture_id` backed by an 8-entry/64 MiB process-local raw RGBA cache; offline previews never receive IDs. `node_isolation_path` temporarily hides unrelated 2D/3D branches and restores every original value before success. `viewport_diff_capture` requires an unexpired live ID, exact dimensions, and a `0..255` threshold, returning metrics plus one transparent PNG diff without duplicating Base64 in the JSON metadata.
+
+### Phase 5 deep-domain contract
+
+Process-backed Phase 5 tools launch argv directly without a command shell, enforce per-request deadlines, cap combined output at 1 MiB, and terminate the child process group on timeout. Godot-backed checks require a discoverable Godot 4.5+ executable (or `GODOT_BIN`); C# checks require `dotnet`. Export and MeshLibrary outputs must be normalized project-contained `res://` paths and preserve existing files unless `overwrite: true`. Export-preset listing exposes only public preset identity and routing fields, never option values. `ui_hit_test` traverses at most 10,000 live nodes, applies visibility, clipping, transforms, canvas layer, z-order, draw order, and mouse-filter rules, returns at most 256 hits, and never injects input.
 
 ---
 

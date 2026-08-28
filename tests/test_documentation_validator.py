@@ -45,7 +45,7 @@ class DocumentationValidatorTests(unittest.TestCase):
 
 Current documented release: **1.4.0**.
 
-Didi exposes 72 canonical tools plus 10 legacy names (82 total).
+Didi exposes 78 canonical tools plus 10 legacy names (88 total).
 
 [Guide](docs/GUIDE.md#details-1) | [Security](SECURITY.md) | [Overview](#didi)
 """,
@@ -58,7 +58,7 @@ Didi exposes 72 canonical tools plus 10 legacy names (82 total).
 
 ## [1.4.0] - 2026-08-28
 
-Version 1.4.0 exposes 72 canonical tools, 10 legacy registrations, and 82 total registrations. Fifty-four canonical tools are implemented and 18 remain unimplemented.
+Version 1.4.0 exposes 78 canonical tools, 10 legacy registrations, and 88 total registrations. Sixty canonical tools are implemented and 18 remain unimplemented.
 """,
         )
         self.write(
@@ -94,14 +94,14 @@ Current release: 1.4.0.
             "docs/CAPABILITIES.md",
             """# Current Capability Matrix
 
-Didi v1.4.0 registers 72 canonical tool names. Fifty-four are implemented in at least one mode; 18 remain reserved. Ten legacy names are registered separately, for exactly 82 tools/list entries.
+Didi v1.4.0 registers 78 canonical tool names. Sixty are implemented in at least one mode; 18 remain reserved. Ten legacy names are registered separately, for exactly 88 tools/list entries.
 """,
         )
         self.write(
             "docs/TOOL_REFERENCE.md",
             """# Tool Reference
 
-Didi exposes 72 canonical tool names plus 10 legacy names (82 registrations).
+Didi exposes 78 canonical tool names plus 10 legacy names (88 registrations).
 """,
         )
         self.write(
@@ -445,11 +445,11 @@ Second section.
     def test_reports_missing_current_release_fact(self):
         root = self.make_valid_repository()
         readme = (root / "README.md").read_text(encoding="utf-8")
-        self.write("README.md", readme.replace("72 canonical", "71 canonical"))
+        self.write("README.md", readme.replace("78 canonical", "77 canonical"))
 
         errors = VALIDATOR.validate_repository(root)
 
-        self.assertTrue(any("README.md" in error and "72 canonical" in error for error in errors), errors)
+        self.assertTrue(any("README.md" in error and "78 canonical" in error for error in errors), errors)
 
     def test_reports_missing_markdown_target(self):
         root = self.make_valid_repository()

@@ -59,6 +59,7 @@ $gameSessionId = ""
 $shutdownGameSessionId = ""
 $integrationSucceeded = $false
 $primaryFailureMessage = ""
+$rawPhase5Responses = @()
 
 function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
@@ -776,6 +777,65 @@ try {
     Assert-True ($restoredDiff.identical -eq $true -and $restoredDiff.changed_pixels -eq 0) "Undo did not restore an exact baseline viewport at threshold zero."
     Assert-True ((Tool-Payload $phase4ById[419]).value -eq $true) "Visual mutation undo did not restore scene visibility."
 
+    $phase5Requests = @(
+        (@{ jsonrpc = "2.0"; id = 500; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 501 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 502 "project_list_export_presets" @{}),
+        (Tool-Request 503 "shader_check_compile" @{ shader_path = "res://phase5_valid.gdshader"; timeout_seconds = 30 }),
+        (Tool-Request 504 "shader_check_compile" @{ shader_path = "res://phase5_invalid.gdshader"; timeout_seconds = 30 }),
+        (Tool-Request 505 "project_export" @{ preset = "Phase5 Pack"; output_path = "res://phase5-output.pck"; mode = "pack"; timeout_seconds = 120 }),
+        (Tool-Request 506 "gridmap_export_mesh_library" @{ source_scene = "res://phase5_mesh_source.tscn"; output_path = "res://phase5.meshlib"; generate_collisions = $true; timeout_seconds = 60 }),
+        (Tool-Request 511 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 507 "scene_open" @{ scene_path = "res://phase5_ui.tscn" }),
+        (Tool-Request 508 "ui_hit_test" @{ point = @{ x = 32; y = 32 }; root_path = "/root/Phase5Ui"; max_results = 16 }),
+        (Tool-Request 509 "ui_hit_test" @{ point = @{ x = 32; y = 32 }; root_path = "/root/Phase5Ui"; include_mouse_filter_ignore = $true; max_results = 16 })
+    )
+    $dotnetAvailable = $null -ne (Get-Command dotnet -ErrorAction SilentlyContinue)
+    if ($dotnetAvailable) {
+        $phase5Requests += Tool-Request 510 "csharp_check_build" @{ project_file = "res://Phase5.csproj"; configuration = "Debug"; timeout_seconds = 120 }
+    }
+    $previousGodotBin = $env:GODOT_BIN
+    try {
+        $env:GODOT_BIN = $GodotExecutable
+        Push-Location $fixtureRoot
+        try {
+            $rawPhase5Responses = $phase5Requests | & $didiExecutable
+        }
+        finally {
+            Pop-Location
+        }
+    }
+    finally {
+        if ($null -eq $previousGodotBin) { Remove-Item Env:GODOT_BIN -ErrorAction SilentlyContinue }
+        else { $env:GODOT_BIN = $previousGodotBin }
+    }
+    $phase5Responses = @($rawPhase5Responses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
+    Assert-True ($LASTEXITCODE -eq 0) "Phase 5 MCP process exited with $LASTEXITCODE."
+    $phase5ById = @{}
+    foreach ($response in $phase5Responses) { $phase5ById[[int]$response.id] = $response }
+    $phase5Presets = Tool-Payload $phase5ById[502]
+    Assert-True (@($phase5Presets.presets).Count -eq 1 -and $phase5Presets.presets[0].name -eq "Phase5 Pack") "Phase 5 export preset was not listed."
+    Assert-True ($phase5ById[502].result.content[0].text -notmatch "phase5-secret") "Export preset options leaked a secret value."
+    $validShader = Tool-Payload $phase5ById[503]
+    Assert-True ($validShader.success -eq $true -and $validShader.has_errors -eq $false) "Valid shader did not compile cleanly."
+    $invalidShader = Tool-Payload $phase5ById[504]
+    Assert-True ($invalidShader.success -eq $false -and $invalidShader.has_errors -eq $true -and @($invalidShader.diagnostics).Count -ge 1) "Invalid shader did not return structured diagnostics."
+    $phase5Export = Tool-Payload $phase5ById[505]
+    Assert-True ($phase5Export.success -eq $true -and $phase5Export.size_bytes -gt 0) "Phase 5 pack export did not create a non-empty artifact."
+    $meshLibrary = Tool-Payload $phase5ById[506]
+    Assert-True ($meshLibrary.success -eq $true -and $meshLibrary.item_count -eq 2) "MeshLibrary export did not preserve two deterministic items."
+    Assert-True ((Tool-Payload $phase5ById[511]).handshake.status -eq "ok") "Phase 5 did not restore the editor route after offline subprocess work."
+    Assert-True ((Tool-Payload $phase5ById[507]).opened -eq $true) "Phase 5 UI fixture scene could not be opened."
+    $uiDefault = Tool-Payload $phase5ById[508]
+    Assert-True ($uiDefault.topmost.node_path -match "/TopControl$") "UI hit-test did not return the top non-ignored Control first."
+    Assert-True (-not (@($uiDefault.hits.node_path) -match "/IgnoredControl$")) "UI hit-test included MOUSE_FILTER_IGNORE by default."
+    $uiIncludingIgnored = Tool-Payload $phase5ById[509]
+    Assert-True ($uiIncludingIgnored.topmost.node_path -match "/IgnoredControl$") "UI hit-test did not honor include_mouse_filter_ignore ordering."
+    if ($dotnetAvailable) {
+        $csharpBuild = Tool-Payload $phase5ById[510]
+        Assert-True ($csharpBuild.success -eq $true -and $csharpBuild.has_errors -eq $false) "C# diagnostic build did not compile the fixture."
+    }
+
     Assert-True $byId[20].result.isError "Unimplemented signal tool returned fake success."
     Assert-True ($byId[20].result.content[0].text -match "no trustworthy execution path") "Unimplemented tool error is not actionable."
     Assert-True $byId[21].result.isError "Missing node lookup returned fake success."
@@ -1071,6 +1131,7 @@ try {
         @($rawResponses)
         @($rawPhase4BaselineResponses)
         @($rawPhase4Responses)
+        @($rawPhase5Responses)
         @($rawNextLogResponses)
         @($rawStopResponses)
         @($rawCleanupResponses)
@@ -1095,7 +1156,7 @@ try {
     })
     Assert-True ($unexpectedSourceArtifacts.Count -eq 0) "Integration generated artifacts in the checked-in source fixture."
     $integrationSucceeded = $true
-    Write-Output "Godot integration passed: Phase 1-4 editor/runtime workflows, bounded search/reimport, and reversible live visual diff."
+    Write-Output "Godot integration passed: Phases 1-5 editor/runtime workflows, deep diagnostics, export, MeshLibrary, and live UI hit-testing."
 }
 catch {
     $primaryFailureMessage = $_.Exception.Message

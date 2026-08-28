@@ -1,7 +1,7 @@
 # Didi Strategic Roadmap & Technical Build Order 🗺️
 
 > **Core Philosophy**:
-> The 72-tool canonical surface includes completed Phases 1–4: live editor substrate, project wiring, authenticated editor/game runtime sessions, and bounded search/reimport/visual verification. The next milestone is Phase 5 deep-domain support.
+> The 78-tool canonical surface includes completed Phases 1–5: live editor substrate, project wiring, authenticated editor/game runtime sessions, bounded search/reimport/visual verification, and deep-domain diagnostics/export/UI support. The next milestone is Phase 6 enterprise safety.
 
 ---
 
@@ -19,9 +19,9 @@
 ├─────────────────────────┼─────────────────────────┼────────────────────────────────────┤
 │ Phase 4: Verification   │ Phase 5: Deep Domains   │ Phase 6: Enterprise Safety         │
 │  - Symbol/Text Search   │  - C# & Shaders         │  - Per-project pipe isolation      │
-│  - Asset Reimport       │  - Animation keyframing │  - Multi-project session locking   │
+│  - Asset Reimport       │  - Project export       │  - Multi-project session locking   │
 │  - Viewport image diff  │  - MeshLibrary export   │  - Mutation preview / dry-run      │
-│  - Node isolation frame │  - Live MCP subscriptions│ - Confirm-before-write             │
+│  - Node isolation frame │  - UI hit-testing       │  - Confirm-before-write            │
 └─────────────────────────┴─────────────────────────┴────────────────────────────────────┘
 ```
 
@@ -97,7 +97,20 @@ The native suite covers containment, lexical filtering, lifecycle states, arithm
 
 ---
 
-## 🚀 Remaining Capabilities After Phase 4
+## ✅ Phase 5: Deep Domains (COMPLETE — 2026-08-28)
+
+Phase 5 adds six canonical tools across diagnostics, delivery, 3D asset pipelines, and UI inspection:
+
+- `csharp_check_build` and `shader_check_compile` run bounded argv-only subprocesses and return structured compiler/engine diagnostics.
+- `project_list_export_presets` exposes only non-sensitive preset fields; `project_export` validates an existing preset, project-contained destination, overwrite intent, timeout, and non-empty artifact.
+- `gridmap_export_mesh_library` deterministically converts direct scene children to verified MeshLibrary items with optional trimesh collision and navigation data.
+- `ui_hit_test` performs bounded live Control traversal with transformed points, visibility/clipping, mouse filters, canvas layers, effective z-index, and draw order without injecting input.
+
+The shared process runner caps combined output at 1 MiB, kills child process groups on timeout, and avoids command-shell parsing. Native tests cover schemas, containment, redaction, argument quoting, and real Godot 4.5 shader diagnostics. The disposable Godot 4.5.1 integration harness verifies valid/invalid shaders, pack export, two-item MeshLibrary generation, offline-to-live route restoration, and both default and ignored-control hit ordering.
+
+---
+
+## 🚀 Remaining Capabilities After Phase 5
 
 These are missing capabilities that an AI agent actually requires to complete full development cycles and ship Godot changes.
 
@@ -112,12 +125,8 @@ These are missing capabilities that an AI agent actually requires to complete fu
 
 ### 7. Asset Import and Pipeline Management
 - **Import Preset Configuration**: Configure compression modes, 3D normal filters, and mesh collision generation.
-- **Export Presets & Headless Export**: Query export presets and trigger `export_project` for target platforms.
-- **MeshLibrary Export**: Generate `.meshlib` assets from 3D scenes for `GridMap` workflows.
 
 ### 8. C#, Shaders, and Animation Keyframing
-- **C# (`.cs`) Diagnostics**: Compiler checks via `dotnet build` / Godot C# bindings.
-- **Shader Compilation Diagnostics**: Intercept and parse `*.gdshader` compile errors from the engine log.
 - **Animation Track Keyframing**: Add, remove, and interpolate keyframes and track lengths in `AnimationPlayer`.
 - **Theme & Layout Inspection**: Inspect Control node anchors, margins, minimum sizes, and theme overrides.
 
@@ -153,11 +162,11 @@ These are missing capabilities that an AI agent actually requires to complete fu
 | **Phase 2 (DONE)** | **Attach Script, Autoloads, InputMap, Project Settings, Groups, Scene Lifecycle** | Verified through real Godot persistence, UndoRedo, resource packing, and adversarial rejection paths. |
 | **Phase 3 (DONE)** | **`eval_gdscript`, Runtime Log Stream, Attach-to-Running** | Verified authenticated concurrent editor/game routing, bounded controls/logs/tree, and a strict read-only expression subset. |
 | **Phase 4 (DONE)** | **Symbol Search, Asset Reimport, Viewport Diffing & Isolation** | Verified bounded search and reversible live visual feedback against Godot 4.5.1. |
-| **Phase 5 (LATER)** | **C# / Shaders, Project Export, GridMap MeshLibrary, UI Hit-Testing** | Provides deep domain depth across all Godot engine subsystems. |
+| **Phase 5 (DONE)** | **C# / Shaders, Project Export, GridMap MeshLibrary, UI Hit-Testing** | Verified bounded diagnostics, guarded delivery, deterministic asset conversion, and live UI inspection against Godot 4.5.1. |
 
 ---
 
-## 📋 The 72-Tool Canonical Surface
+## 📋 The 78-Tool Canonical Surface
 
 This is the planned protocol surface, not a claim that every row executes today. See [Current Capability Matrix](CAPABILITIES.md) for per-tool status.
 
