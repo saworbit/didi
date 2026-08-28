@@ -36,7 +36,7 @@
 - Consumes: `VALIDATOR.validate_repository(root: pathlib.Path) -> list[str]`
 - Produces: regression expectations for an error containing `aws/tap` and `ccache` when cleanup is absent or follows cache setup, and no error when guarded cleanup precedes it.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add `test_requires_macos_aws_tap_cleanup_before_ccache` with two subtests. Each writes a macOS matrix workflow using `hendrikmuhs/ccache-action@v1.2.23`; one omits cleanup and one puts it after ccache. Assert both yield an error containing `aws/tap` and `ccache`.
 
@@ -51,7 +51,7 @@ Add `test_accepts_macos_aws_tap_cleanup_before_ccache`. Its fixture puts this gu
     fi
 ```
 
-- [ ] **Step 2: Run the focused tests and observe red**
+- [x] **Step 2: Run the focused tests and observe red**
 
 Run: `python -m unittest tests.test_documentation_validator.DocumentationValidatorTests.test_requires_macos_aws_tap_cleanup_before_ccache tests.test_documentation_validator.DocumentationValidatorTests.test_accepts_macos_aws_tap_cleanup_before_ccache -v`
 
@@ -68,7 +68,7 @@ Expected: the required-cleanup test fails because the validator does not yet emi
 - Consumes: `_workflow_steps(text: str) -> list[str]` and Task 1's fixture expectations.
 - Produces: `_has_macos_aws_tap_cleanup(step: str) -> bool` plus a repository error if a macOS ccache step lacks earlier guarded cleanup.
 
-- [ ] **Step 1: Implement the minimal validator rule**
+- [x] **Step 1: Implement the minimal validator rule**
 
 Add a helper requiring all three elements in one step: `if: runner.os == 'macOS'`, a `brew tap` presence check, and `brew untap aws/tap`:
 
@@ -87,7 +87,7 @@ In `validate_workflow_contract`, when text contains both `macos-latest` and `hen
 f"{relative_path}: remove aws/tap on macOS before hendrikmuhs/ccache-action"
 ```
 
-- [ ] **Step 2: Add the idempotent cleanup to CI**
+- [x] **Step 2: Add the idempotent cleanup to CI**
 
 Insert immediately before `Setup Compiler Cache (ccache / sccache)`:
 
@@ -101,7 +101,7 @@ Insert immediately before `Setup Compiler Cache (ccache / sccache)`:
     fi
 ```
 
-- [ ] **Step 3: Run focused and full contract tests**
+- [x] **Step 3: Run focused and full contract tests**
 
 Run: `python -m unittest tests.test_documentation_validator -v`
 
@@ -111,7 +111,7 @@ Run: `python tools/validate_documentation.py`
 
 Expected: `Documentation contract valid` with all Markdown files and version sources aligned.
 
-- [ ] **Step 4: Run native and hygiene verification**
+- [x] **Step 4: Run native and hygiene verification**
 
 Run: `build\Release\didi_tests.exe`
 
@@ -121,7 +121,7 @@ Run: `git diff --check`
 
 Expected: no output and exit status 0.
 
-- [ ] **Step 5: Commit the tested implementation**
+- [x] **Step 5: Commit the tested implementation**
 
 Stage `.github/workflows/ci.yml`, `tools/validate_documentation.py`, `tests/test_documentation_validator.py`, and this plan, then commit with message `ci: remove unused macOS Homebrew tap`.
 
@@ -136,7 +136,7 @@ Stage `.github/workflows/ci.yml`, `tools/validate_documentation.py`, `tests/test
 - Consumes: a clean feature-branch commit and GitHub check-run/annotation APIs.
 - Produces: merged `main`, zero annotations, and no residual branch, pull request, worktree, or uncommitted state.
 
-- [ ] **Step 1: Red-team the contract locally**
+- [x] **Step 1: Red-team the contract locally**
 
 Evaluate representative workflow strings with cleanup missing, cleanup after ccache, cleanup without the macOS guard, cleanup without the tap-presence check, and valid guarded cleanup before ccache. Expected: only the valid guarded, correctly ordered case returns no `aws/tap` contract error. Do not commit temporary fixtures beyond Task 1's permanent regression tests.
 
