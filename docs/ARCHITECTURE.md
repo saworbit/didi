@@ -29,7 +29,7 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
 ┌─────────────────────────────────────────────────────────────┐
 │        Didi (C++ MCP Core Engine - didi / didi.exe)         │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2024-11-05 standard)       │
-│  - Registry (68 canonical tools + 10 legacy names)          │
+│  - Registry (72 canonical tools + 10 legacy names)          │
 │  - Dynamic Resources (godot://project/tree, editor/state)   │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
 │  - Offline file/process tools and capability metadata       │
@@ -70,7 +70,7 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
        │
        ├─► Execute Scene Mutation / Traversal with UndoRedo
        ├─► Persist ProjectSettings, InputMap, and PackedScenes
-       ├─► Capture active editor viewport texture & encode PNG
+       ├─► Isolate/restore scene visibility, capture RGBA8, cache ID, encode PNG/diff
        ├─► Read the extension's bounded log ring
        │
        ▼
@@ -123,9 +123,12 @@ LLM tool call (capture_viewport)
        ▼
 GDExtension ViewportRenderer
        │
+       ├─► Optionally snapshot/hide unrelated scene branches
        ├─► Resolve active editor 3D or 2D SubViewport
        ├─► Read its ViewportTexture image at actual dimensions
        ├─► Blit pixel buffer (RGBA8888)
+       ├─► Restore saved visibility/background in reverse order
+       ├─► Retain raw pixels in bounded process-local LRU cache
        ├─► Compress to PNG in memory via stb_image_write
        ├─► Encode buffer to RFC 4648 Base64 (with strict padding)
        │
@@ -133,7 +136,7 @@ GDExtension ViewportRenderer
 MCP Response: { "type": "image", "data": "iVBORw0KGgo...", "mimeType": "image/png" }
 ```
 
-Camera-node selection, requested live resizing, debug flags, and node isolation remain unimplemented. Without an editor connection, the standalone tool produces a clearly attributed synthetic grid PNG instead.
+Camera-node selection, requested live resizing, and debug flags remain unimplemented. Named-node isolation is main-thread-only and guarded so capture, encoding, or exception paths restore temporary state before returning. Live capture IDs address exact RGBA8 buffers in an 8-entry/64 MiB cache; diffing requires matching dimensions and never accepts arbitrary image payloads. Without an editor connection, the standalone tool produces a clearly attributed synthetic grid PNG without an ID.
 
 ---
 
@@ -143,6 +146,7 @@ When the Godot Editor is not open, Didi automatically switches to its built-in o
 - **`script_check_syntax`**: Runs lightweight diagnostics and, for a file path, attempts a sanitized `godot --headless --check-only` compiler check.
 - **`scene_get_hierarchy`**: Parses `.tscn` text files into a structured hierarchy when live editor state is unavailable.
 - **`project_list_resources`**: Scans the project filesystem, extracts `uid://` references and dependencies, and prunes deny-listed directories.
+- **`project_search_text` / `project_search_symbols`**: Bounded literal and lexical scans across allowlisted project text formats with canonical containment and symlink/build-directory exclusion.
 - **`runtime_launch`**: Spawns a separate Godot process, captures stdout/stderr, classifies errors, and enforces a timeout.
 - **`viewport_create_test_lab`**: Writes a basic standalone sandbox `.tscn` with lights and cameras.
 

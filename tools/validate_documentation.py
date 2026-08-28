@@ -48,27 +48,27 @@ FORBIDDEN_ARTIFACT_PATHS = (
 
 FACT_PATTERNS = {
     "README.md": (
-        (r"\b68[- ]canonical|\b68 canonical", "68 canonical"),
+        (r"\b72[- ]canonical|\b72 canonical", "72 canonical"),
         (r"\b10 (?:additional )?legacy", "10 legacy"),
-        (r"\b78 total|\(78 total\)|78 registrations", "78 total"),
+        (r"\b82 total|\(82 total\)|82 registrations", "82 total"),
     ),
     "docs/CAPABILITIES.md": (
-        (r"\b68 canonical", "68 canonical"),
+        (r"\b72 canonical", "72 canonical"),
         (r"\b10 legacy|Ten legacy", "10 legacy"),
-        (r"\b78 [`\w/-]* ?entries|exactly 78", "78 total"),
-        (r"\b50 (?:canonical )?tools? (?:are )?implemented|Fifty (?:canonical )?tools? are implemented|Fifty are implemented", "50 implemented"),
+        (r"\b82 [`\w/-]* ?entries|exactly 82", "82 total"),
+        (r"\b54 (?:canonical )?tools? (?:are )?implemented|Fifty-four (?:canonical )?tools? are implemented|Fifty-four are implemented", "54 implemented"),
         (r"\b18 (?:canonical )?(?:tools? )?(?:remain )?(?:reserved|unimplemented)", "18 unimplemented"),
     ),
     "docs/TOOL_REFERENCE.md": (
-        (r"\b68 canonical", "68 canonical"),
+        (r"\b72 canonical", "72 canonical"),
         (r"\b10 legacy", "10 legacy"),
-        (r"\b78 registrations", "78 total"),
+        (r"\b82 registrations", "82 total"),
     ),
     "CHANGELOG.md": (
-        (r"\b68 canonical", "68 canonical"),
+        (r"\b72 canonical", "72 canonical"),
         (r"\b10 legacy", "10 legacy"),
-        (r"\b78 total|78-registration", "78 total"),
-        (r"\b50 (?:canonical )?tools? (?:are )?implemented|Fifty (?:canonical )?tools? are implemented", "50 implemented"),
+        (r"\b82 total|82-registration", "82 total"),
+        (r"\b54 (?:canonical )?tools? (?:are )?implemented|Fifty-four (?:canonical )?tools? are implemented", "54 implemented"),
         (r"\b18 (?:canonical )?(?:tools? )?(?:remain )?(?:reserved|honestly unimplemented|unimplemented)", "18 unimplemented"),
     ),
 }

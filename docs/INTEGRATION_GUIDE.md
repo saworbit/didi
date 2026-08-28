@@ -121,7 +121,7 @@ Add to your `mcp_config.json`:
 ## 4. Troubleshooting & FAQ
 
 ### Q: Does Didi require Godot Editor to be open at all times?
-**A:** No. File-based tools such as `script_check_syntax`, `project_list_resources`, and `runtime_launch` remain available in `offline_fallback` mode. Scene mutations, Phase 2 project wiring, and editor lifecycle tools require a live editor; Phase 3 runtime tools require an authenticated auto-selected or explicitly attached editor/game session.
+**A:** No. File-based tools such as `script_check_syntax`, `project_list_resources`, project search, and `runtime_launch` remain available in `offline_fallback` mode. Scene mutations, project wiring, reimport, isolation, diffing, and editor lifecycle tools require a live editor; Phase 3 runtime tools require an authenticated auto-selected or explicitly attached editor/game session.
 
 ### Q: Why does `scene_close` require `discard_unsaved: true` even for a scene I believe is clean?
 **A:** Godot 4.5 does not expose active-scene dirty state through GDExtension. Didi refuses the default call rather than risk discarding work. Pass `discard_unsaved: true` only when closing without a save prompt is intentional.
@@ -144,7 +144,7 @@ Phase 3 discovers endpoints from access-controlled descriptors and authenticates
 
 ## 5. Phase 3 client integration sequence
 
-`tools/list` returns 68 canonical tools and 10 legacy registrations. Integrators should treat the four session-management tools as local operations even though their discovery metadata uses the existing `offline_fallback` capability label:
+`tools/list` returns 72 canonical tools and 10 legacy registrations. Integrators should treat the four session-management tools as local operations even though their discovery metadata uses the existing `offline_fallback` capability label:
 
 1. Start Didi with `--project <canonical-project-root>`.
 2. Didi may auto-attach on first availability when there is one live project match, or one matching editor among games. Multiple editors or multiple games without an editor stay detached.
@@ -160,3 +160,5 @@ For games, pause before step, allow only one in-flight `runtime_step`, and do no
 For evaluation, send only expressions supported by the [exact receiver allowlist](TOOL_REFERENCE.md#eval_gdscript--live). The submitted source is intentionally absent from successful responses and operational logs. Context and returned Nodes must remain inside the active editor/game subtree. The timeout is cooperative, not preemptive.
 
 Runtime input injection, call stacks, and profiler telemetry remain unimplemented and must not be feature-detected by name alone; check `_meta.didi.implemented`.
+
+For Phase 4 verification, search paths and results are canonical `res://` paths. Reimport only source assets through an attached editor and wait for `idle: true`. Live capture IDs are opaque, process-local, and bounded; do not persist them across editor restarts. A diff request must use a prior live ID and identical dimensions. Isolation success is trustworthy only when metadata says `state_restored: true`; an offline grid cannot be isolated or used as a baseline.

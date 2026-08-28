@@ -29,7 +29,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-Didi v1.3.0 registers 68 canonical tool names. Fifty are implemented in at least one mode; 18 remain reserved and return an MCP tool error. Ten legacy names are registered separately, for exactly 78 `tools/list` entries.
+Didi v1.4.0 registers 72 canonical tool names. Fifty-four are implemented in at least one mode; 18 remain reserved and return an MCP tool error. Ten legacy names are registered separately, for exactly 82 `tools/list` entries.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
@@ -40,7 +40,8 @@ Didi v1.3.0 registers 68 canonical tool names. Fifty are implemented in at least
 | `live` | `scene_create`, `scene_open`, `scene_close`, `scene_pack_branch` | Uses `PackedScene`, `ResourceLoader`, `ResourceSaver`, and `EditorInterface` with path and overwrite guards. |
 | `offline_fallback` (local management) | `runtime_list_sessions`, `runtime_attach_session`, `runtime_detach_session`, `runtime_get_session` | Scans validated access-controlled descriptors and changes the selected route in the standalone MCP process. Public payloads use `execution_mode: "local_session_management"` and never return the private token. |
 | `live` | `runtime_read_logs`, `runtime_set_paused`, `runtime_step`, `runtime_stop`, `runtime_get_tree`, `eval_gdscript` | Requires an authenticated auto-selected or explicitly attached editor/game session. Operations execute on that Godot process's main thread and identify `session_kind`; game-only control rejects editor sessions. |
-| `offline_fallback` | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method`, `viewport_create_test_lab`, `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map`, `runtime_launch` | Operates on project files or launches a separate Godot process. Results are not live editor state. |
+| `live` | `asset_reimport`, `viewport_diff_capture` | Editor-only. Reimport validates a complete batch before mutation and waits for stable idle. Diff captures a fresh live frame against an exact cached baseline. |
+| `offline_fallback` | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method`, `viewport_create_test_lab`, `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map`, `project_search_text`, `project_search_symbols`, `runtime_launch` | Operates on bounded project files or launches a separate Godot process. Results are not live editor state. |
 | `unimplemented` | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `physics_raycast_query`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Registered schema only. Calls are rejected before legacy handlers execute. |
 
 ## Legacy names
@@ -75,8 +76,12 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 - Property get/set supports JSON null, boolean, signed integer, real, and string values. Unknown properties, incompatible JSON types, and non-scalar Godot Variants are rejected.
 - `scene_instantiate_node` creates built-in ClassDB node types only. `scene_path`/`PackedScene` instantiation is not implemented.
 - Scene mutations are registered with the edited scene's `EditorUndoRedoManager`. Removed nodes use undo-side lifetime references, and removal/reparent undo restores the original sibling index.
-- Live viewport capture supports the active 3D editor viewport and the 2D editor viewport identifiers `editor_2d` or `active_editor_view_2d`. It captures the viewport's actual dimensions; requested resize, camera-node selection, debug flags, and node isolation are not implemented.
+- Live viewport capture supports the active 3D editor viewport and the 2D identifiers `editor_2d` or `active_editor_view_2d`. Requested resize, camera-node selection, and debug flags remain unsupported. Named-node isolation preserves the target branch and ancestor chain, temporarily hides unrelated visible `CanvasItem`/`Node3D` branches, optionally enables a reversible transparent background, and fails unless state restoration completes.
 - Offline viewport output is a synthetic grid preview with `execution_mode: "offline_fallback"` and `is_live_frame: false`.
+- Live captures use 32-lowercase-hex IDs in an 8-entry, 64 MiB process-local LRU cache. Each image is limited to 2,048 × 2,048 RGBA8 pixels. IDs expire on eviction or extension restart and are never assigned to offline previews.
+- `viewport_diff_capture` requires an exact cached baseline size and integer threshold `0..255`; it does not resize or color-convert. Its transparent PNG marks changed pixels, while metadata reports per-channel mean error, maximum delta, ratio, count, and bounding box.
+- Project search is literal/lexical, not regex or language-server analysis. It scans only `.gd`, `.cs`, `.tscn`, and `.tres`, skips symlinks and generated/hidden build trees, and enforces 10,000-file, 64 MiB-request, 4 MiB-file, 500-result, and 1,024-byte-preview bounds.
+- `asset_reimport` accepts 1–256 unique normalized `res://` source files, rejects `.godot` and `.import` targets, allows one active request, and reports success only after two consecutive idle callbacks. Timeout is bounded to 10 seconds and may report an unknown outcome.
 - Successful JSON results and resources identify their actual `execution_mode`. Offline-only script, resource, project, test-lab, and runtime handlers execute in the standalone process even while an editor is connected.
 - `script_check_syntax` combines lightweight diagnostics with a Godot `--headless --check-only` run only when a file path is supplied and a Godot executable is available. `source_text`-only checks do not invoke Godot.
 - `script_reflect_class` uses a small built-in offline class map, not live Godot ClassDB reflection.

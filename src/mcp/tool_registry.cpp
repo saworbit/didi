@@ -26,6 +26,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "scene_create", "scene_open", "scene_close", "scene_pack_branch",
         "runtime_read_logs", "runtime_set_paused", "runtime_step", "runtime_stop",
         "runtime_get_tree", "eval_gdscript"
+        , "asset_reimport", "viewport_diff_capture"
     };
     static const std::unordered_set<std::string> offline = {
         "script_check_syntax", "analyze_script_diagnostics", "script_reflect_class",
@@ -35,6 +36,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "project_get_uid_map", "runtime_launch",
         "execute_test_session", "runtime_list_sessions", "runtime_attach_session",
         "runtime_detach_session", "runtime_get_session"
+        , "project_search_text", "project_search_symbols"
     };
 
     if (live_and_offline.count(name)) {
@@ -52,6 +54,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
 
 // External handler forward declarations
 CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleViewportDiffCapture(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleViewportSetCameraTransform(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleViewportToggleDebugDraw(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -101,6 +104,7 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
 CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectGetUidMap(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleInstantiateAsset(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
 CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleInjectInputEvent(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -568,6 +572,52 @@ void ToolRegistry::registerAllDefaultTools() {
         }}, {"required", {"expression"}}}, handleEvalGdscript);
     {
         ToolDefinition t;
+        t.name = "project_search_text";
+        t.description = "Searches literal text in bounded project-owned .gd, .cs, .tscn, and .tres files without opening a Godot session.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"query", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256}}},
+            {"search_path", {{"type", "string"}, {"default", "res://"}, {"minLength", 6}, {"maxLength", 1024}}},
+            {"extensions", {{"type", "array"}, {"minItems", 1}, {"maxItems", 4}, {"uniqueItems", true},
+                            {"items", {{"type", "string"}, {"enum", {".gd", ".cs", ".tscn", ".tres"}}}}}},
+            {"case_sensitive", {{"type", "boolean"}, {"default", true}}},
+            {"whole_word", {{"type", "boolean"}, {"default", false}}},
+            {"max_results", {{"type", "integer"}, {"default", 100}, {"minimum", 1}, {"maximum", 500}}}
+        }}, {"required", {"query"}}};
+        t.handler = [this](const json& args) { return handleProjectSearchText(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_search_symbols";
+        t.description = "Lexically searches bounded GDScript and C# declarations without opening a Godot session.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"query", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256}}},
+            {"search_path", {{"type", "string"}, {"default", "res://"}, {"minLength", 6}, {"maxLength", 1024}}},
+            {"extensions", {{"type", "array"}, {"minItems", 1}, {"maxItems", 4}, {"uniqueItems", true},
+                            {"items", {{"type", "string"}, {"enum", {".gd", ".cs", ".tscn", ".tres"}}}}}},
+            {"case_sensitive", {{"type", "boolean"}, {"default", true}}},
+            {"max_results", {{"type", "integer"}, {"default", 100}, {"minimum", 1}, {"maximum", 500}}},
+            {"match", {{"type", "string"}, {"default", "prefix"}, {"enum", {"exact", "prefix", "contains"}}}},
+            {"kinds", {{"type", "array"}, {"minItems", 1}, {"maxItems", 6}, {"uniqueItems", true},
+                       {"items", {{"type", "string"}, {"enum", {"class", "function", "signal", "variable", "constant", "enum"}}}}}}
+        }}, {"required", {"query"}}};
+        t.handler = [this](const json& args) { return handleProjectSearchSymbols(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "asset_reimport";
+        t.description = "Reimports a validated atomic batch of project source assets and waits for two consecutive editor-idle frames.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"paths", {{"type", "array"}, {"minItems", 1}, {"maxItems", 256}, {"uniqueItems", true},
+                       {"items", {{"type", "string"}, {"minLength", 7}, {"maxLength", 1024}}}}},
+            {"timeout_ms", {{"type", "integer"}, {"default", 10000}, {"minimum", 1}, {"maximum", 10000}}}
+        }}, {"required", {"paths"}}};
+        t.handler = [this](const json& args) { return handleAssetReimport(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
         t.name = "scene_remove_node";
         t.description = "Detaches a node through UndoRedo while retaining its lifetime for undo and redo.";
         t.inputSchema = {
@@ -812,7 +862,8 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"camera_identifier", {{"type", "string"}, {"default", "active_editor_view"}}},
                 {"resolution", {{"type", "object"}, {"default", {{"width", 256}, {"height", 192}}}, {"description", "Offline preview size; reserved and ignored by live capture"}}},
                 {"render_debug_flags", {{"type", "array"}}},
-                {"node_isolation_path", {{"type", "string"}}}
+                {"node_isolation_path", {{"type", "string"}}},
+                {"isolation_background", {{"type", "string"}, {"enum", {"original", "transparent"}}, {"default", "original"}}}
             }}
         };
         t.handler = [this](const json& args) { return handleCaptureViewport(args, m_ipcClient); };
@@ -822,6 +873,25 @@ void ToolRegistry::registerAllDefaultTools() {
         t.name = "capture_viewport";
         t.handler = [this](const json& args) { return handleCaptureViewport(args, m_ipcClient); };
         registerTool(t);
+    }
+    {
+        ToolDefinition t;
+        t.name = "viewport_diff_capture";
+        t.description = "Captures a fresh live editor viewport frame and returns an exact RGBA pixel diff against a prior process-local capture ID.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"baseline_capture_id", {{"type", "string"}, {"minLength", 32}, {"maxLength", 32}, {"pattern", "^[0-9a-f]{32}$"}}},
+                {"camera_identifier", {{"type", "string"}, {"default", "active_editor_view"}}},
+                {"resolution", {{"type", "object"}, {"description", "Reserved and ignored by live capture"}}},
+                {"node_isolation_path", {{"type", "string"}}},
+                {"isolation_background", {{"type", "string"}, {"enum", {"original", "transparent"}}, {"default", "original"}}},
+                {"threshold", {{"type", "integer"}, {"minimum", 0}, {"maximum", 255}, {"default", 0}}}
+            }},
+            {"required", {"baseline_capture_id"}}
+        };
+        t.handler = [this](const json& args) { return handleViewportDiffCapture(args, m_ipcClient); };
+        registerTool(std::move(t));
     }
     {
         ToolDefinition t;

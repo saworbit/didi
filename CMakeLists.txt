@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(didi VERSION 1.3.0 LANGUAGES C CXX)
+project(didi VERSION 1.4.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -26,6 +26,8 @@ set(CORE_SOURCES
     src/common/logger.cpp
     src/common/base64.cpp
     src/common/png.cpp
+    src/common/image_diff.cpp
+    src/common/capture_cache.cpp
     src/common/ipc_channel_win32.cpp
     src/mcp/jsonrpc.cpp
     src/mcp/mcp_server.cpp
@@ -39,6 +41,7 @@ set(CORE_SOURCES
     src/gdextension/expression_sandbox.cpp
     src/offline/gdscript_diagnostics.cpp
     src/offline/resource_indexer.cpp
+    src/offline/project_search.cpp
     src/offline/test_runner.cpp
     src/tools/visual_tools.cpp
     src/tools/scene_tools.cpp
@@ -102,6 +105,8 @@ set(TEST_SOURCES
     tests/test_tools.cpp
     tests/test_script_patch.cpp
     tests/test_resource_indexer.cpp
+    tests/test_project_search.cpp
+    tests/test_image_diff.cpp
 )
 
 add_executable(didi_tests ${TEST_SOURCES})

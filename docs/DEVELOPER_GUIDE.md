@@ -66,7 +66,7 @@ The native runner's reported total is authoritative as the suite evolves. Covera
 - Runtime log cursor/gap/filter behavior, UTF-8 and payload bounds, runtime-tree bounds, and expression-sandbox policy.
 - Tool/resource live and offline provenance, viewport/image encoding, GDScript diagnostics/patching/reflection, and resource indexing.
 
-The Windows live integration harness copies the tracked fixture into `build/`, starts real Godot processes, and preserves the 119 ordered Phase 1/2 MCP requests through the named pipe. Phase 3 adds concurrent editor/game discovery, authenticated routing, logs, bounded trees, pause/step/stop, strict evaluation, and cleanup sequences. The earlier baseline still checks scene editing and viewport behavior plus scripts, groups, autoloads, nested settings, all supported InputEvent forms, runtime InputMap reload, forced persistence rollback, scene create/open/close/pack, resource ownership, overwrite guards, unsafe paths, and honest errors:
+The Windows live integration harness copies the tracked fixture into `build/` and starts real Godot processes. It preserves the Phase 1/2 sequence, adds Phase 3 concurrent editor/game routing, and now exercises Phase 4 bounded search, SVG reimport, reversible isolation, capture IDs, mutation diffs, exact undo restoration, and cleanup. The earlier coverage still checks scripts, groups, autoloads, nested settings, InputEvent forms, persistence rollback, scene lifecycle, resource ownership, unsafe paths, and honest errors:
 
 ```powershell
 .\tests\run_godot_integration.ps1 `
@@ -140,9 +140,9 @@ Route the method from `EditorHook::executeOnMainThread` into a bounded implement
 
 The standalone router starts detached, then may auto-attach on first availability only to an unambiguous live canonical-project match: the sole session, or a unique editor among games. Preserve the tests that keep same-kind ambiguity detached, roll back failed handshakes, disable auto-selection after explicit attach/detach or quarantine, and make `runtime_get_session` revalidate the complete token-free identity. Keep local session management distinct from live engine calls. Never log or return descriptor tokens or full submitted expression source.
 
-## Phase 3 tests and release gate
+## Phase 4 tests and release gate
 
-The v1.3.0 release gate runs the complete native suite; the runner's reported total remains authoritative as cases evolve. Focused suites cover descriptor identity/TOCTOU/cleanup, deterministic auto-selection and attach rollback, fresh route revalidation and supersession, route provenance/deadlines, log cursors/bounds, expression scanner policy, capability metadata, and pending-step state. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and covers discovery, attach, live cursor logs, UTF-8 and wide-tree response bounds, pause/resume/multi-frame step, stop, strict evaluation, malicious callback probes, cleanup, and source-fixture integrity.
+The v1.4.0 release gate runs the complete native suite; the runner's reported total remains authoritative as cases evolve. Focused suites cover the existing session/routing/evaluation contracts plus search containment and lexical filtering, two-idle-frame reimport progress, exact diff arithmetic, cache eviction, public response completeness, and restoration guards. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and also verifies the Phase 4 search/reimport/isolation/diff loop against Godot 4.5.1.
 
 Run from a clean worktree:
 
@@ -155,7 +155,7 @@ cmake --build build --config Release
 
 For expression-policy changes, add a failing native scanner test and a real editor/game integration probe before changing implementation. A new accepted Node operation must prove it cannot dispatch script callbacks, traverse outside the active subtree, allocate unbounded data before a check, leak source/token text, or turn the cooperative timeout into a hard-preemption claim.
 
-The CI MCP smoke must continue to assert exactly 68 canonical/78 total registrations, local metadata for the four session tools, live metadata for the six routed tools, cursor-shaped logs, and `implemented: false` for `runtime_inject_input`, `runtime_get_call_stack`, and `runtime_read_profiler`.
+The CI MCP smoke must continue to assert exactly 72 canonical/82 total registrations, offline-only search metadata, live-only reimport/diff metadata, strict Phase 4 schemas, local metadata for the four session tools, live metadata for the six routed runtime tools, cursor-shaped logs, and `implemented: false` for `runtime_inject_input`, `runtime_get_call_stack`, and `runtime_read_profiler`.
 
 ## Documentation and release gate
 
@@ -166,6 +166,6 @@ python -m unittest tests.test_documentation_validator -v
 python tools/validate_documentation.py
 ```
 
-The validator derives the release from `CMakeLists.txt` and checks the MCP server header, standalone version output, addon manifest, README, capability matrix, changelog, and security policy for alignment. It also locks the documented 68 canonical/10 legacy/78 total surface, the 50 implemented/18 unimplemented split in the designated release references, and all relative Markdown targets and anchors.
+The validator derives the release from `CMakeLists.txt` and checks the MCP server header, standalone version output, addon manifest, README, capability matrix, changelog, and security policy for alignment. It also locks the documented 72 canonical/10 legacy/82 total surface, the 54 implemented/18 unimplemented split in the designated release references, and all relative Markdown targets and anchors.
 
 When the release changes, update these files in one change: `CMakeLists.txt`, `include/didi/mcp/mcp_protocol.hpp`, `src/standalone/main.cpp`, `addons/didi/plugin.cfg`, `README.md`, `CHANGELOG.md`, `docs/CAPABILITIES.md`, and `SECURITY.md`. When the tool surface or capability modes change, also update runtime discovery tests, `docs/TOOL_REFERENCE.md`, `docs/ROADMAP.md`, `docs/LLM_INSTRUCTIONS.md`, and the relevant quickstart/integration examples. Historical specs and plans record their original decisions and should not be rewritten as current release documentation.

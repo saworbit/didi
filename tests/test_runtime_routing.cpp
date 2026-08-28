@@ -79,6 +79,11 @@ public:
         last_method = method;
         last_timeout_ms = timeout_ms;
         if (error.has_value()) return *error;
+        if (method == "vision.captureViewport") {
+            return didi::json{{"status", "ok"}, {"method", method},
+                              {"capture_id", "0123456789abcdef0123456789abcdef"},
+                              {"image_base64", "AA=="}};
+        }
         return didi::json{{"status", "ok"}, {"method", method}};
     }
     didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
@@ -119,6 +124,11 @@ public:
         bool isConnected() const override { return connected; }
         didi::Result<didi::json> sendRequest(const std::string& method, const didi::json&, int) override {
             last_method = method;
+            if (method == "vision.captureViewport") {
+                return didi::json{{"status", "ok"}, {"method", method},
+                                  {"capture_id", "0123456789abcdef0123456789abcdef"},
+                                  {"image_base64", "AA=="}};
+            }
             return didi::json{{"status", "ok"}, {"method", method}};
         }
         bool connected{true};
@@ -982,7 +992,10 @@ void test_tool_dispatch_stays_bound_to_kind_checked_route() {
 
     const auto result = registry.callTool("capture_viewport", didi::json::object());
     ASSERT_FALSE(result.isError);
-    const auto value = payload(result);
+    ASSERT_EQ(result.content.size(), 2u);
+    ASSERT_EQ(result.content[0].type, "text");
+    ASSERT_EQ(result.content[1].type, "image");
+    const auto value = didi::json::parse(result.content[0].text);
     ASSERT_EQ(value["method"], "vision.captureViewport");
     ASSERT_EQ(value["execution_mode"], "live");
     ASSERT_EQ(value["session"]["session_id"], routes->editor.session_id);
@@ -1290,7 +1303,7 @@ void test_nested_offline_call_cannot_inherit_outer_route_lease() {
 void test_extension_rejects_wrong_kind_methods_before_main_thread_dispatch() {
     // Break caught: direct authenticated IPC bypassed the MCP registry kind gate for viewport.
     const auto game = descriptorFor("game");
-    for (const auto& method : {"vision.captureViewport", "scene.getHierarchy",
+    for (const auto& method : {"vision.captureViewport", "vision.diffViewport", "scene.getHierarchy",
                                "editor.saveScene"}) {
         const auto rejected = didi::godot::rejectDisallowedSessionMethod(method, game);
         ASSERT_TRUE(rejected.has_value());
@@ -1309,6 +1322,8 @@ void test_extension_rejects_wrong_kind_methods_before_main_thread_dispatch() {
     }
     ASSERT_FALSE(didi::godot::rejectDisallowedSessionMethod(
         "vision.captureViewport", editor).has_value());
+    ASSERT_FALSE(didi::godot::rejectDisallowedSessionMethod(
+        "vision.diffViewport", editor).has_value());
 }
 
 void test_local_session_validation_errors_are_structured() {

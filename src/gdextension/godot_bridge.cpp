@@ -2,6 +2,7 @@
 #include "didi/gdextension/gdextension_api.hpp"
 #include "didi/gdextension/expression_sandbox.hpp"
 #include "didi/gdextension/runtime_bridge.hpp"
+#include "didi/gdextension/viewport_renderer.hpp"
 #include "didi/common/logger.hpp"
 #include <array>
 #include <algorithm>
@@ -10,7 +11,9 @@
 #include <cstddef>
 #include <functional>
 #include <cstring>
+#include <filesystem>
 #include <limits>
+#include <set>
 #include <utility>
 
 namespace didi {
@@ -682,6 +685,23 @@ Result<void> validateScriptPath(const std::string& path) {
     return validateResPath(path, strings::endsWith(path, ".gd") ? ".gd" : ".cs");
 }
 
+bool pathWithin(const std::filesystem::path& root, const std::filesystem::path& candidate) {
+    auto root_value = root.lexically_normal().generic_string();
+    auto candidate_value = candidate.lexically_normal().generic_string();
+#if defined(_WIN32)
+    std::transform(root_value.begin(), root_value.end(), root_value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    std::transform(candidate_value.begin(), candidate_value.end(), candidate_value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+#endif
+    return candidate_value == root_value ||
+           (candidate_value.size() > root_value.size() &&
+            candidate_value.compare(0, root_value.size(), root_value) == 0 &&
+            candidate_value[root_value.size()] == '/');
+}
+
 Result<void> restoreProjectSetting(GDExtensionObjectPtr project_settings, VariantValue& name,
                                    VariantValue& previous) {
     auto restored = callObject(project_settings, "ProjectSettings", "set_setting", 402577236LL,
@@ -960,6 +980,291 @@ json liveResult(const json& fields) {
 GodotBridge& GodotBridge::instance() {
     static GodotBridge bridge;
     return bridge;
+}
+
+Result<std::vector<std::string>> GodotBridge::beginAssetReimport(
+    const std::vector<std::string>& paths) {
+    namespace fs = std::filesystem;
+    if (paths.empty() || paths.size() > 256) {
+        return Error::invalidArgument("paths must contain 1 to 256 source assets");
+    }
+    auto project_path = resolveGodotProjectPath();
+    if (project_path.isErr()) return project_path.error();
+    std::error_code ec;
+    const auto root = fs::weakly_canonical(project_path.value(), ec);
+    if (ec || !fs::is_directory(root, ec)) return Error::internal("Godot project root is unavailable");
+
+    std::set<std::string> unique;
+    std::vector<std::string> normalized;
+    normalized.reserve(paths.size());
+    for (const auto& path : paths) {
+        if (path.size() < 7 || path.size() > 1024 || path.find('\0') != std::string::npos ||
+            strings::startsWith(path, "res://.godot/") || strings::endsWith(path, ".import")) {
+            return Error::invalidArgument("Every reimport path must identify a project source asset");
+        }
+        auto valid = validateResPath(path, "");
+        if (valid.isErr()) return valid.error();
+        const auto relative = fs::path(path.substr(6));
+        const auto candidate = fs::canonical(root / relative, ec);
+        if (ec || !pathWithin(root, candidate) || !fs::is_regular_file(candidate, ec) ||
+            fs::is_symlink(fs::symlink_status(root / relative, ec))) {
+            return Error::invalidArgument("Reimport path must be an existing regular file beneath the project root: " + path);
+        }
+        auto relative_canonical = fs::relative(candidate, root, ec);
+        if (ec) return Error::invalidArgument("Unable to normalize reimport path: " + path);
+        const auto resource_path = "res://" + relative_canonical.generic_string();
+        if (!unique.insert(resource_path).second) {
+            return Error::invalidArgument("Reimport paths must be unique after normalization");
+        }
+        normalized.push_back(resource_path);
+    }
+
+    auto editor = editorInterface();
+    if (editor.isErr()) return editor.error();
+    auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
+    if (filesystem.isErr()) return filesystem.error();
+    auto object = objectFromVariant(filesystem.value());
+    if (object.isErr() || !object.value()) return Error::notConnected("EditorFileSystem is unavailable");
+    json path_array = normalized;
+    auto godot_paths = makeJsonVariant(path_array);
+    if (godot_paths.isErr()) return godot_paths.error();
+    auto started = callObject(object.value(), "EditorFileSystem", "reimport_files", 4015028928LL,
+                              {&godot_paths.value()});
+    if (started.isErr()) return started.error();
+    return normalized;
+}
+
+Result<bool> GodotBridge::isEditorFilesystemScanning() {
+    auto editor = editorInterface();
+    if (editor.isErr()) return editor.error();
+    auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
+    if (filesystem.isErr()) return filesystem.error();
+    auto object = objectFromVariant(filesystem.value());
+    if (object.isErr() || !object.value()) return Error::notConnected("EditorFileSystem is unavailable");
+    auto scanning = callObject(object.value(), "EditorFileSystem", "is_scanning", 36873697LL);
+    if (scanning.isErr()) return scanning.error();
+    auto value = scalarFromVariant<GDExtensionBool>(scanning.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (value.isErr()) return value.error();
+    return value.value() != 0;
+}
+
+Result<ViewportIsolationState> GodotBridge::beginViewportIsolation(
+    const std::string& node_path, const std::string& camera_identifier,
+    const std::string& isolation_background) {
+    if (node_path.empty()) return Error::invalidArgument("node_isolation_path must not be empty");
+    if (isolation_background != "original" && isolation_background != "transparent") {
+        return Error::invalidArgument("isolation_background must be original or transparent");
+    }
+    auto& api = GodotApi::instance();
+    if (!api.object_get_instance_id || !api.object_get_instance_from_id) {
+        return Error::internal("Godot object identity API is unavailable");
+    }
+    auto editor = editorInterface();
+    if (editor.isErr()) return editor.error();
+    auto root = editedSceneRoot(editor.value());
+    if (root.isErr()) return root.error();
+    auto target = resolveNode(root.value(), node_path);
+    if (target.isErr()) return target.error();
+    auto canonical = logicalPathFromEditedRoot(root.value(), target.value());
+    if (canonical.isErr()) return canonical.error();
+
+    auto is_class = [&](GDExtensionObjectPtr object, const char* class_name) -> Result<bool> {
+        auto name = makeString(class_name);
+        if (name.isErr()) return name.error();
+        auto called = callObject(object, "Object", "is_class", 3927539163LL, {&name.value()});
+        if (called.isErr()) return called.error();
+        auto value = scalarFromVariant<GDExtensionBool>(called.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (value.isErr()) return value.error();
+        return value.value() != 0;
+    };
+    auto is_ancestor = [&](GDExtensionObjectPtr ancestor, GDExtensionObjectPtr node) -> Result<bool> {
+        auto node_value = makeObject(node);
+        if (node_value.isErr()) return node_value.error();
+        auto called = callObject(ancestor, "Node", "is_ancestor_of", 3093956946LL,
+                                 {&node_value.value()});
+        if (called.isErr()) return called.error();
+        auto value = scalarFromVariant<GDExtensionBool>(called.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (value.isErr()) return value.error();
+        return value.value() != 0;
+    };
+
+    ViewportIsolationState state;
+    state.canonical_node_path = canonical.value();
+    state.isolation_background = isolation_background;
+    std::vector<GDExtensionObjectPtr> stack{root.value()};
+    constexpr size_t kMaxIsolationNodes = 100000;
+    size_t visited = 0;
+    while (!stack.empty()) {
+        auto current = stack.back();
+        stack.pop_back();
+        if (++visited > kMaxIsolationNodes) {
+            return Error::invalidArgument("Edited scene exceeds the 100000-node isolation limit");
+        }
+
+        bool keep = current == target.value();
+        if (!keep) {
+            auto current_is_ancestor = is_ancestor(current, target.value());
+            if (current_is_ancestor.isErr()) return current_is_ancestor.error();
+            auto target_is_ancestor = is_ancestor(target.value(), current);
+            if (target_is_ancestor.isErr()) return target_is_ancestor.error();
+            keep = current_is_ancestor.value() || target_is_ancestor.value();
+        }
+        if (!keep) {
+            std::string owner;
+            auto canvas = is_class(current, "CanvasItem");
+            if (canvas.isErr()) return canvas.error();
+            if (canvas.value()) owner = "CanvasItem";
+            else {
+                auto node3d = is_class(current, "Node3D");
+                if (node3d.isErr()) return node3d.error();
+                if (node3d.value()) owner = "Node3D";
+            }
+            if (!owner.empty()) {
+                auto visible_value = callObject(current, owner.c_str(), "is_visible", 36873697LL);
+                if (visible_value.isErr()) return visible_value.error();
+                auto visible = scalarFromVariant<GDExtensionBool>(visible_value.value(),
+                                                                  GDEXTENSION_VARIANT_TYPE_BOOL);
+                if (visible.isErr()) return visible.error();
+                if (visible.value()) {
+                    state.visibility.push_back({static_cast<uint64_t>(api.object_get_instance_id(current)),
+                                                owner, true});
+                }
+            }
+        }
+
+        auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+        if (include_internal.isErr()) return include_internal.error();
+        auto children = callObject(current, "Node", "get_children", 873284517LL,
+                                   {&include_internal.value()});
+        if (children.isErr()) return children.error();
+        auto size_value = callVariant(children.value(), "size");
+        if (size_value.isErr()) return size_value.error();
+        auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (size.isErr()) return size.error();
+        for (int64_t i = size.value(); i-- > 0;) {
+            auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+            if (index.isErr()) return index.error();
+            auto child_value = callVariant(children.value(), "get", {&index.value()});
+            if (child_value.isErr()) return child_value.error();
+            auto child = objectFromVariant(child_value.value());
+            if (child.isErr() || !child.value()) return Error::internal("Godot returned an invalid child during isolation");
+            stack.push_back(child.value());
+        }
+    }
+
+    RestorationGuard mutation_guard([&]() {
+        return restoreViewportIsolation(state);
+    });
+    auto rollback = [&]() -> Result<ViewportIsolationState> {
+        auto restored = restoreViewportIsolation(state);
+        mutation_guard.dismiss();
+        if (restored.isErr()) {
+            return Error(500, "Viewport isolation failed and rollback was incomplete: " +
+                              restored.error().message);
+        }
+        return Error::internal("Viewport isolation mutation failed");
+    };
+    auto hidden = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    if (hidden.isErr()) return hidden.error();
+    for (const auto& point : state.visibility) {
+        auto object = api.object_get_instance_from_id(static_cast<GDObjectInstanceID>(point.instance_id));
+        if (!object) return rollback();
+        auto changed = callObject(object, point.class_name.c_str(), "set_visible", 2586408642LL,
+                                  {&hidden.value()});
+        if (changed.isErr()) return rollback();
+    }
+
+    if (isolation_background == "transparent") {
+        bool capture_2d = camera_identifier == "editor_2d" ||
+                          camera_identifier == "active_editor_view_2d";
+        Result<VariantValue> viewport = capture_2d
+            ? callObject(editor.value(), "EditorInterface", "get_editor_viewport_2d", 3750751911LL)
+            : [&]() -> Result<VariantValue> {
+                auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+                if (index.isErr()) return index.error();
+                return callObject(editor.value(), "EditorInterface", "get_editor_viewport_3d",
+                                  1970834490LL, {&index.value()});
+            }();
+        if (viewport.isErr()) return rollback();
+        auto viewport_object = objectFromVariant(viewport.value());
+        if (viewport_object.isErr() || !viewport_object.value()) return rollback();
+        auto original_value = callObject(viewport_object.value(), "Viewport",
+                                         "has_transparent_background", 36873697LL);
+        if (original_value.isErr()) return rollback();
+        auto original = scalarFromVariant<GDExtensionBool>(original_value.value(),
+                                                           GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (original.isErr()) return rollback();
+        state.viewport_instance_id = static_cast<uint64_t>(
+            api.object_get_instance_id(viewport_object.value()));
+        state.original_transparent_background = original.value() != 0;
+        state.restore_transparent_background = !state.original_transparent_background;
+        if (state.restore_transparent_background) {
+            auto enabled = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(1));
+            if (enabled.isErr()) return rollback();
+            auto changed = callObject(viewport_object.value(), "Viewport", "set_transparent_background",
+                                      2586408642LL, {&enabled.value()});
+            if (changed.isErr()) return rollback();
+        }
+    }
+    mutation_guard.dismiss();
+    return state;
+}
+
+Result<void> GodotBridge::restoreViewportIsolation(const ViewportIsolationState& state) {
+    auto& api = GodotApi::instance();
+    if (!api.object_get_instance_from_id) return Error::internal("Godot object identity API is unavailable");
+    std::vector<std::string> failures;
+    if (state.restore_transparent_background) {
+        auto viewport = api.object_get_instance_from_id(
+            static_cast<GDObjectInstanceID>(state.viewport_instance_id));
+        if (!viewport) failures.push_back("viewport was freed");
+        else {
+            auto original = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
+                                       static_cast<GDExtensionBool>(state.original_transparent_background));
+            auto restored = original.isOk()
+                ? callObject(viewport, "Viewport", "set_transparent_background", 2586408642LL,
+                             {&original.value()})
+                : Result<VariantValue>(original.error());
+            if (restored.isErr()) failures.push_back("viewport background restore failed");
+        }
+    }
+    for (auto it = state.visibility.rbegin(); it != state.visibility.rend(); ++it) {
+        auto object = api.object_get_instance_from_id(static_cast<GDObjectInstanceID>(it->instance_id));
+        if (!object) {
+            failures.push_back("scene object was freed");
+            continue;
+        }
+        auto visible = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
+                                  static_cast<GDExtensionBool>(it->visible));
+        if (visible.isErr()) {
+            failures.push_back("visibility value construction failed");
+            continue;
+        }
+        auto restored = callObject(object, it->class_name.c_str(), "set_visible", 2586408642LL,
+                                   {&visible.value()});
+        if (restored.isErr()) failures.push_back("scene visibility restore failed");
+    }
+    if (!failures.empty()) {
+        return Error(409, "Temporary viewport isolation could not fully restore editor state (" +
+                          std::to_string(failures.size()) + " failure(s))");
+    }
+    return Result<void>::ok();
+}
+
+Result<void> GodotBridge::forceDraw() {
+    auto& api = GodotApi::instance();
+    if (!api.isLiveReady()) return Error::notConnected("Godot main-loop bridge is not ready");
+    NativeName name("RenderingServer");
+    auto server = api.global_get_singleton(name.ptr());
+    if (!server) return Error::notConnected("RenderingServer singleton is unavailable");
+    auto swap_buffers = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    auto frame_step = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, 0.0);
+    if (swap_buffers.isErr()) return swap_buffers.error();
+    if (frame_step.isErr()) return frame_step.error();
+    auto drawn = callObject(server, "RenderingServer", "force_draw", 1076185472LL,
+                            {&swap_buffers.value(), &frame_step.value()});
+    if (drawn.isErr()) return drawn.error();
+    return Result<void>::ok();
 }
 
 json GodotBridge::execute(const std::string& method, const json& params,

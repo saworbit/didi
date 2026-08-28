@@ -4,6 +4,7 @@
 #include "didi/mcp/mcp_server.hpp"
 #include "didi/gdextension/editor_hook.hpp"
 
+#include <chrono>
 #include <unordered_set>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
@@ -18,6 +19,22 @@ public:
     bool isConnected() const override { return false; }
     didi::Result<didi::json> sendRequest(const std::string&, const didi::json&, int) override {
         return didi::Error::notConnected();
+    }
+};
+
+class MalformedVisionIpcClient final : public didi::ipc::IIpcClient {
+public:
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override {}
+    bool isConnected() const override { return true; }
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json&, int) override {
+        if (method == "vision.captureViewport") {
+            return didi::json{{"image_base64", 42}};
+        }
+        if (method == "vision.diffViewport") {
+            return didi::json{{"image_base64", "png-without-comparison-id"}};
+        }
+        return didi::json::object();
     }
 };
 
@@ -131,7 +148,7 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 78u);
+    ASSERT_EQ(tools.size(), 82u);
     const std::unordered_set<std::string> legacy_names = {
         "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
         "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
@@ -143,7 +160,7 @@ static void test_tool_registry_default_tools() {
         if (legacy_names.count(tool.name) == 0) ++canonical_count;
     }
     ASSERT_EQ(legacy_names.size(), 10u);
-    ASSERT_EQ(canonical_count, 68u);
+    ASSERT_EQ(canonical_count, 72u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -168,6 +185,7 @@ static void test_tool_registry_default_tools() {
 
     // Domain 4: Visual Verification & Viewport Rendering
     ASSERT_TRUE(reg.getTool("viewport_capture_frame") != nullptr);
+    ASSERT_TRUE(reg.getTool("viewport_diff_capture") != nullptr);
     ASSERT_TRUE(reg.getTool("viewport_set_camera_transform") != nullptr);
     ASSERT_TRUE(reg.getTool("viewport_create_test_lab") != nullptr);
     ASSERT_TRUE(reg.getTool("viewport_toggle_debug_draw") != nullptr);
@@ -190,6 +208,9 @@ static void test_tool_registry_default_tools() {
     ASSERT_TRUE(reg.getTool("resource_inspect") != nullptr);
     ASSERT_TRUE(reg.getTool("project_list_resources") != nullptr);
     ASSERT_TRUE(reg.getTool("project_get_uid_map") != nullptr);
+    ASSERT_TRUE(reg.getTool("project_search_text") != nullptr);
+    ASSERT_TRUE(reg.getTool("project_search_symbols") != nullptr);
+    ASSERT_TRUE(reg.getTool("asset_reimport") != nullptr);
 
     // Domain 8: Execution, Input Injection & Debugging
     ASSERT_TRUE(reg.getTool("runtime_launch") != nullptr);
@@ -228,6 +249,110 @@ static void test_tool_registry_default_tools() {
     }) {
         ASSERT_TRUE(reg.getTool(name) != nullptr);
     }
+}
+
+static void test_project_search_public_validation_and_schema() {
+    // Break caught: public search accepts coercible/unbounded inputs or advertises a live route.
+    auto& reg = didi::mcp::ToolRegistry::instance();
+    reg.registerAllDefaultTools();
+    const auto* text = reg.getTool("project_search_text");
+    const auto* symbols = reg.getTool("project_search_symbols");
+    ASSERT_TRUE(text != nullptr);
+    ASSERT_TRUE(symbols != nullptr);
+    const auto text_json = text->toJson();
+    const auto symbols_json = symbols->toJson();
+    ASSERT_EQ(text_json["inputSchema"]["properties"]["query"]["minLength"], 1);
+    ASSERT_EQ(text_json["inputSchema"]["properties"]["query"]["maxLength"], 256);
+    ASSERT_EQ(text_json["inputSchema"]["properties"]["max_results"]["maximum"], 500);
+    ASSERT_EQ(symbols_json["inputSchema"]["properties"]["match"]["enum"],
+              didi::json::array({"exact", "prefix", "contains"}));
+    ASSERT_EQ(text_json["_meta"]["didi"]["executionModes"],
+              didi::json::array({"offline_fallback"}));
+
+    for (const auto& args : {
+        didi::json::object(), didi::json{{"query", ""}}, didi::json{{"query", 7}},
+        didi::json{{"query", "Player"}, {"max_results", 0}},
+        didi::json{{"query", "Player"}, {"max_results", UINT64_MAX}},
+        didi::json{{"query", "Player"}, {"extensions", didi::json::array({".md"})}}
+    }) {
+        ASSERT_TRUE(reg.callTool("project_search_text", args).isError);
+    }
+}
+
+static void test_asset_reimport_public_validation_and_schema() {
+    // Break caught: reimport accepts a partial/ambiguous batch or lacks bounded wait semantics.
+    auto& reg = didi::mcp::ToolRegistry::instance();
+    reg.registerAllDefaultTools();
+    const auto* tool = reg.getTool("asset_reimport");
+    ASSERT_TRUE(tool != nullptr);
+    const auto definition = tool->toJson();
+    ASSERT_EQ(definition["_meta"]["didi"]["executionModes"], didi::json::array({"live"}));
+    ASSERT_EQ(definition["inputSchema"]["properties"]["paths"]["minItems"], 1);
+    ASSERT_EQ(definition["inputSchema"]["properties"]["paths"]["maxItems"], 256);
+    ASSERT_EQ(definition["inputSchema"]["properties"]["timeout_ms"]["maximum"], 10000);
+
+    for (const auto& args : {
+        didi::json::object(), didi::json{{"paths", didi::json::array()}},
+        didi::json{{"paths", "res://icon.svg"}},
+        didi::json{{"paths", didi::json::array({"res://icon.svg", "res://icon.svg"})}},
+        didi::json{{"paths", didi::json::array({"../icon.svg"})}},
+        didi::json{{"paths", didi::json::array({"res://./icon.svg"})}},
+        didi::json{{"paths", didi::json::array({"res://.godot/icon.svg"})}},
+        didi::json{{"paths", didi::json::array({"res://icon.svg.import"})}},
+        didi::json{{"paths", didi::json::array({"res://icon.svg"})}, {"timeout_ms", 0}}
+    }) {
+        const auto result = reg.callTool("asset_reimport", args);
+        ASSERT_TRUE(result.isError);
+        ASSERT_TRUE(result.content[0].text.find("Invalid asset reimport request") != std::string::npos);
+    }
+}
+
+static void test_viewport_diff_public_validation_and_schema() {
+    // Break caught: visual diffs accept ambiguous cache IDs/thresholds or advertise an offline route.
+    auto& reg = didi::mcp::ToolRegistry::instance();
+    reg.registerAllDefaultTools();
+    reg.setIpcClient(nullptr);
+    const auto* tool = reg.getTool("viewport_diff_capture");
+    ASSERT_TRUE(tool != nullptr);
+    const auto definition = tool->toJson();
+    ASSERT_EQ(definition["_meta"]["didi"]["executionModes"], didi::json::array({"live"}));
+    ASSERT_EQ(definition["inputSchema"]["properties"]["baseline_capture_id"]["minLength"], 32);
+    ASSERT_EQ(definition["inputSchema"]["properties"]["baseline_capture_id"]["maxLength"], 32);
+    ASSERT_EQ(definition["inputSchema"]["properties"]["baseline_capture_id"]["pattern"], "^[0-9a-f]{32}$");
+    ASSERT_EQ(definition["inputSchema"]["properties"]["threshold"]["maximum"], 255);
+
+    for (const auto& args : {
+        didi::json::object(),
+        didi::json{{"baseline_capture_id", "short"}},
+        didi::json{{"baseline_capture_id", std::string(32, 'A')}},
+        didi::json{{"baseline_capture_id", std::string(32, 'a')}, {"threshold", -1}},
+        didi::json{{"baseline_capture_id", std::string(32, 'a')}, {"threshold", 256}},
+        didi::json{{"baseline_capture_id", std::string(32, 'a')}, {"threshold", UINT64_MAX}},
+        didi::json{{"baseline_capture_id", std::string(32, 'a')}, {"threshold", 1.5}}
+    }) {
+        const auto result = reg.callTool("viewport_diff_capture", args);
+        ASSERT_TRUE(result.isError);
+        ASSERT_TRUE(result.content[0].text.find("Invalid viewport diff request") != std::string::npos);
+    }
+}
+
+static void test_reimport_progress_requires_two_idle_frames_and_times_out() {
+    // Break caught: one transient idle frame is reported as complete or the deadline is ignored.
+    using Clock = std::chrono::steady_clock;
+    const auto start = Clock::time_point{};
+    didi::godot::ReimportProgress progress(start, std::chrono::milliseconds(100));
+    ASSERT_EQ(progress.observe(false, start + std::chrono::milliseconds(1)),
+              didi::godot::ReimportProgressState::Pending);
+    ASSERT_EQ(progress.observe(true, start + std::chrono::milliseconds(2)),
+              didi::godot::ReimportProgressState::Pending);
+    ASSERT_EQ(progress.observe(false, start + std::chrono::milliseconds(3)),
+              didi::godot::ReimportProgressState::Pending);
+    ASSERT_EQ(progress.observe(false, start + std::chrono::milliseconds(4)),
+              didi::godot::ReimportProgressState::Idle);
+
+    didi::godot::ReimportProgress timeout(start, std::chrono::milliseconds(100));
+    ASSERT_EQ(timeout.observe(true, start + std::chrono::milliseconds(100)),
+              didi::godot::ReimportProgressState::TimedOut);
 }
 
 static void test_tool_capabilities_are_honest() {
@@ -402,6 +527,7 @@ static void test_tool_capture_viewport_with_ipc() {
         std::string method = req.value("method", "");
         if (method == "vision.captureViewport") {
             return {
+                {"capture_id", "0123456789abcdef0123456789abcdef"},
                 {"camera_identifier", "active_editor_view"},
                 {"image_base64", "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="},
                 {"description", "Mock Viewport Render"},
@@ -409,6 +535,19 @@ static void test_tool_capture_viewport_with_ipc() {
                 {"is_live_frame", true},
                 {"source", "godot_editor_viewport_texture"},
                 {"resolution", {{"width", 1}, {"height", 1}}}
+            };
+        }
+        if (method == "vision.diffViewport") {
+            return {
+                {"baseline_capture_id", req["params"]["baseline_capture_id"]},
+                {"comparison_capture_id", "fedcba9876543210fedcba9876543210"},
+                {"threshold", req["params"].value("threshold", 0)},
+                {"changed_pixels", 1}, {"total_pixels", 1},
+                {"changed_ratio", 1.0}, {"mean_absolute_error", 42.0},
+                {"max_channel_delta", 42},
+                {"bounding_box", {{"x", 0}, {"y", 0}, {"width", 1}, {"height", 1}}},
+                {"image_base64", "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="},
+                {"execution_mode", "live"}, {"is_live_frame", true}
             };
         }
         if (method == "runtime.getLogs") {
@@ -431,6 +570,11 @@ static void test_tool_capture_viewport_with_ipc() {
                     {"elapsed_ms", 0}, {"timeout_ms", 1000}, {"read_only", true},
                     {"sandbox_profile", "expression_const_v1"},
                     {"execution_mode", "live"}, {"session_kind", "game"}};
+        }
+        if (method == "asset.reimport") {
+            return {{"paths", req["params"]["paths"]}, {"accepted_count", 1},
+                    {"elapsed_ms", 2}, {"idle", true}, {"execution_mode", "live"},
+                    {"is_live_engine", true}, {"session_kind", "editor"}};
         }
         if (method == "script.attachToNode") {
             return {{"error", {{"code", 422}, {"message", "simulated script attachment rejection"}}}};
@@ -456,9 +600,21 @@ static void test_tool_capture_viewport_with_ipc() {
     ASSERT_EQ(metadata["source"], "godot_editor_viewport_texture");
     ASSERT_EQ(metadata["resolution"]["width"], 1);
     ASSERT_EQ(metadata["resolution"]["height"], 1);
+    ASSERT_EQ(metadata["capture_id"], "0123456789abcdef0123456789abcdef");
     ASSERT_EQ(result.content[1].type, "image");
     ASSERT_EQ(result.content[1].mimeType, "image/png");
     ASSERT_TRUE(!result.content[1].data.empty());
+
+    auto diff = reg.callTool("viewport_diff_capture", {
+        {"baseline_capture_id", metadata["capture_id"]}, {"threshold", 5}
+    });
+    ASSERT_TRUE(!diff.isError);
+    ASSERT_EQ(diff.content.size(), 2);
+    const auto diff_metadata = didi::json::parse(diff.content[0].text);
+    ASSERT_EQ(diff_metadata["comparison_capture_id"], "fedcba9876543210fedcba9876543210");
+    ASSERT_EQ(diff_metadata["threshold"], 5);
+    ASSERT_TRUE(!diff_metadata.contains("image_base64"));
+    ASSERT_EQ(diff.content[1].type, "image");
 
     const auto live_logs = reg.callTool("runtime_read_logs", {{"cursor", 0}, {"limit", 1}});
     ASSERT_TRUE(!live_logs.isError);
@@ -522,6 +678,14 @@ static void test_tool_capture_viewport_with_ipc() {
     ASSERT_TRUE(attach.isError);
     ASSERT_TRUE(attach.content[0].text.find("simulated script attachment rejection") != std::string::npos);
 
+    auto reimport = reg.callTool("asset_reimport", {
+        {"paths", didi::json::array({"res://reimport_probe.svg"})}, {"timeout_ms", 1000}
+    });
+    ASSERT_TRUE(!reimport.isError);
+    const auto reimport_json = didi::json::parse(reimport.content[0].text);
+    ASSERT_EQ(reimport_json["accepted_count"], 1);
+    ASSERT_EQ(reimport_json["idle"], true);
+
     client->disconnect();
     server->stop();
 }
@@ -543,6 +707,25 @@ static void test_tool_capture_viewport_offline_is_attributed() {
     ASSERT_EQ(result.content[1].type, "image");
     ASSERT_EQ(result.content[1].mimeType, "image/png");
     ASSERT_TRUE(result.content[1].data.rfind("iVBORw0K", 0) == 0);
+
+    auto isolated = reg.callTool("viewport_capture_frame", {
+        {"node_isolation_path", "Subject"}
+    });
+    ASSERT_TRUE(isolated.isError);
+    ASSERT_TRUE(isolated.content[0].text.find("requires a live Godot editor") != std::string::npos);
+    ASSERT_TRUE(!metadata.contains("capture_id"));
+}
+
+static void test_visual_tools_reject_incomplete_live_success() {
+    // Break caught: a transport peer can claim success without cache identity metadata.
+    auto& reg = didi::mcp::ToolRegistry::instance();
+    reg.registerAllDefaultTools();
+    reg.setIpcClient(std::make_shared<MalformedVisionIpcClient>());
+    ASSERT_TRUE(reg.callTool("viewport_capture_frame", didi::json::object()).isError);
+    ASSERT_TRUE(reg.callTool("viewport_diff_capture", {
+        {"baseline_capture_id", "0123456789abcdef0123456789abcdef"}
+    }).isError);
+    reg.setIpcClient(nullptr);
 }
 
 #include "didi/common/base64.hpp"
@@ -648,6 +831,10 @@ static void test_symbol_extraction() {
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.DefaultRegistration", test_tool_registry_default_tools);
+        registerTest("Tools.ProjectSearchPublicValidationAndSchema", test_project_search_public_validation_and_schema);
+        registerTest("Tools.AssetReimportPublicValidationAndSchema", test_asset_reimport_public_validation_and_schema);
+        registerTest("Tools.ViewportDiffPublicValidationAndSchema", test_viewport_diff_public_validation_and_schema);
+        registerTest("EditorHook.ReimportProgress", test_reimport_progress_requires_two_idle_frames_and_times_out);
         registerTest("McpServer.PreservesInjectedIpcClient", test_mcp_server_preserves_injected_ipc_client);
         registerTest("Tools.RuntimeSessionLocalAndValidated", test_runtime_get_session_is_local_and_attach_rejects_non_string_id);
         registerTest("Tools.RuntimeReadLogsInputValidation", test_runtime_read_logs_rejects_invalid_cursor_limit_and_level);
@@ -655,6 +842,7 @@ struct RegisterToolTests {
         registerTest("Tools.HonestCapabilities", test_tool_capabilities_are_honest);
         registerTest("Tools.CaptureViewportWithIpc", test_tool_capture_viewport_with_ipc);
         registerTest("Tools.CaptureViewportOfflineAttribution", test_tool_capture_viewport_offline_is_attributed);
+        registerTest("Tools.VisualLiveResponseCompleteness", test_visual_tools_reject_incomplete_live_success);
         registerTest("Tools.Base64Padding", test_base64_rfc4648_padding);
         registerTest("Tools.IpcErrorPropagation", test_ipc_error_propagation);
         registerTest("EditorHook.TimeoutState", test_running_editor_command_cannot_be_cancelled_as_pending);

@@ -32,6 +32,8 @@ World access is not granted. POSIX sockets are created with mode `0600`.
 
 Phase 3 starts the session host at scene initialization in both editor and game processes so local tooling can attach to a running game. Treat the addon as a development component: exclude `addons/didi` and its extension library from production exports unless a local attachment endpoint is explicitly acceptable. The pipe/socket is token-authenticated; POSIX defaults are owner-only, while Windows grants the owning SID and local administrators. It is not a remote or hostile-host security boundary.
 
+Phase 4 live capture IDs and raw RGBA buffers exist only inside the selected extension process. The cache is bounded to eight entries and 64 MiB and is cleared by process exit; Didi does not persist capture pixels or IDs. Project search remains local and bounded but may return source-line previews, so treat its MCP output as project-sensitive data.
+
 ### 3. Buffer & Payload Overflow Protection
 - **Content-Length & Pipe Frame Cap**: Enforced at `128 MB` maximum payload size to prevent memory exhaustion attacks.
 - **Viewport Bounds**: Live captures reject non-positive dimensions and dimensions above `8192`; offline preview dimensions are clamped to `16`–`1024`.

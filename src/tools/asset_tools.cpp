@@ -3,6 +3,7 @@
 #include "didi/common/logger.hpp"
 #include "didi/offline/resource_indexer.hpp"
 #include <fstream>
+#include <set>
 
 namespace didi {
 namespace mcp {
@@ -177,6 +178,46 @@ CallToolResult handleInstantiateAsset(const json& args, std::shared_ptr<ipc::IIp
     }
 
     return CallToolResult::error("Godot Editor is offline. Launch Godot Editor to instantiate assets directly into the scene tree.");
+}
+
+CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!args.is_object() || !args.contains("paths") || !args["paths"].is_array() ||
+        args["paths"].empty() || args["paths"].size() > 256) {
+        return CallToolResult::error("Invalid asset reimport request: paths must be an array of 1 to 256 strings");
+    }
+    std::set<std::string> unique;
+    for (const auto& value : args["paths"]) {
+        if (!value.is_string()) {
+            return CallToolResult::error("Invalid asset reimport request: paths must contain only strings");
+        }
+        const auto path = value.get<std::string>();
+        const auto remainder = strings::startsWith(path, "res://") ? path.substr(6) : std::string();
+        if (path.size() < 7 || path.size() > 1024 || !strings::startsWith(path, "res://") ||
+            path.find('\0') != std::string::npos || path.find("..") != std::string::npos ||
+            path.find('\\') != std::string::npos || strings::startsWith(path, "res://.godot/") ||
+            strings::endsWith(path, ".import") || remainder.empty() || remainder.front() == '/' ||
+            remainder.find("//") != std::string::npos || strings::startsWith(remainder, "./") ||
+            remainder.find("/./") != std::string::npos || strings::endsWith(remainder, "/.") ||
+            remainder.find(':') != std::string::npos) {
+            return CallToolResult::error("Invalid asset reimport request: every path must be a normalized project-owned res:// source asset");
+        }
+        if (!unique.insert(path).second) {
+            return CallToolResult::error("Invalid asset reimport request: paths must be unique");
+        }
+    }
+    if (args.contains("timeout_ms") &&
+        (!args["timeout_ms"].is_number_integer() || args["timeout_ms"].get<int64_t>() < 1 ||
+         args["timeout_ms"].get<int64_t>() > 10000)) {
+        return CallToolResult::error("Invalid asset reimport request: timeout_ms must be an integer from 1 to 10000");
+    }
+    if (!ipc || !ipc->isConnected()) {
+        return CallToolResult::error("Godot Editor is offline. Launch Godot to reimport assets.");
+    }
+    auto response = ipc->sendRequest("asset.reimport", args, ipc::kWaitForDefinitiveResponse);
+    if (response.isErr()) {
+        return CallToolResult::error("Failed to reimport assets: " + response.error().message);
+    }
+    return CallToolResult::successJson(response.value());
 }
 
 } // namespace mcp

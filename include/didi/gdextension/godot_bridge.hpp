@@ -15,6 +15,21 @@ struct ViewportPixels {
     std::vector<uint8_t> rgba;
 };
 
+struct VisibilityRestorePoint {
+    uint64_t instance_id{0};
+    std::string class_name;
+    bool visible{true};
+};
+
+struct ViewportIsolationState {
+    std::string canonical_node_path;
+    std::string isolation_background{"original"};
+    std::vector<VisibilityRestorePoint> visibility;
+    uint64_t viewport_instance_id{0};
+    bool restore_transparent_background{false};
+    bool original_transparent_background{false};
+};
+
 class GodotBridge {
 public:
     static GodotBridge& instance();
@@ -22,6 +37,13 @@ public:
     json execute(const std::string& method, const json& params,
                  const std::string& session_kind = "editor");
     Result<ViewportPixels> captureEditorViewport(const std::string& camera_identifier);
+    Result<std::vector<std::string>> beginAssetReimport(const std::vector<std::string>& paths);
+    Result<bool> isEditorFilesystemScanning();
+    Result<ViewportIsolationState> beginViewportIsolation(const std::string& node_path,
+                                                          const std::string& camera_identifier,
+                                                          const std::string& isolation_background);
+    Result<void> restoreViewportIsolation(const ViewportIsolationState& state);
+    Result<void> forceDraw();
 
 private:
     GodotBridge() = default;
