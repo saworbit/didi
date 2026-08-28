@@ -80,11 +80,12 @@ FENCED_CODE_PATTERN = re.compile(
 )
 INLINE_CODE_PATTERN = re.compile(r"(?<!`)`[^`\n]*`(?!`)")
 
-MINIMUM_NODE24_ACTION_MAJORS = {
-    "actions/checkout": 5,
-    "actions/upload-artifact": 6,
-    "actions/download-artifact": 7,
-    "softprops/action-gh-release": 3,
+MINIMUM_NODE24_ACTION_VERSIONS = {
+    "actions/checkout": (5,),
+    "actions/upload-artifact": (6,),
+    "actions/download-artifact": (7,),
+    "softprops/action-gh-release": (3,),
+    "hendrikmuhs/ccache-action": (1, 2, 21),
 }
 
 
@@ -112,14 +113,18 @@ def validate_workflow_contract(relative_path: str, text: str) -> list[str]:
     """Validate release-runner assumptions that have caused packaging failures."""
     errors: list[str] = []
     for match in re.finditer(
-        r"uses:\s*([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@v(\d+)(?:\b|\.)", text
+        r"uses:\s*([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@v(\d+(?:\.\d+){0,2})\b", text
     ):
-        action, major_text = match.groups()
-        minimum = MINIMUM_NODE24_ACTION_MAJORS.get(action)
-        if minimum is not None and int(major_text) < minimum:
+        action, version_text = match.groups()
+        minimum = MINIMUM_NODE24_ACTION_VERSIONS.get(action)
+        observed = tuple(int(part) for part in version_text.split("."))
+        padded_observed = observed + (0,) * (3 - len(observed))
+        padded_minimum = minimum + (0,) * (3 - len(minimum)) if minimum else None
+        if padded_minimum is not None and padded_observed < padded_minimum:
+            recommendation = ".".join(str(part) for part in minimum)
             errors.append(
-                f"{relative_path}: {action}@v{major_text} still targets deprecated Node 20; "
-                f"use v{minimum} or later"
+                f"{relative_path}: {action}@v{version_text} still targets deprecated Node 20; "
+                f"use v{recommendation} or later"
             )
 
     if "windows-latest" not in text:

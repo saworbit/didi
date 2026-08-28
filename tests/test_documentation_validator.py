@@ -207,6 +207,7 @@ Second section.
   - uses: actions/upload-artifact@v4
   - uses: actions/download-artifact@v4
   - uses: softprops/action-gh-release@v2
+  - uses: hendrikmuhs/ccache-action@v1.2
 """,
         )
 
@@ -217,6 +218,7 @@ Second section.
             "actions/upload-artifact",
             "actions/download-artifact",
             "softprops/action-gh-release",
+            "hendrikmuhs/ccache-action",
         ):
             self.assertTrue(
                 any(action in error and "Node 20" in error for error in errors),
