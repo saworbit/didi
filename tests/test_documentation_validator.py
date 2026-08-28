@@ -11,6 +11,7 @@ if SPEC is None or SPEC.loader is None:
     raise ImportError(f"Cannot load documentation validator from {VALIDATOR_PATH}")
 VALIDATOR = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(VALIDATOR)
+validate_repository = VALIDATOR.validate_repository
 
 
 class DocumentationValidatorTests(unittest.TestCase):
@@ -466,6 +467,78 @@ Second section.
 
         self.assertTrue(
             any("docs/LLM_INSTRUCTIONS.md" in error and "mutation dry-run" in error for error in errors),
+            errors,
+        )
+
+    def test_repository_requires_future_phase_roadmap(self):
+        errors = validate_repository(REPOSITORY_ROOT)
+        future_phase_errors = [
+            error for error in errors
+            if "future phase" in error.lower() or "phase status" in error.lower()
+        ]
+        self.assertEqual([], future_phase_errors)
+
+    def test_reports_missing_future_phase_declaration(self):
+        root = self.make_valid_repository()
+
+        errors = validate_repository(root)
+
+        self.assertIn(
+            "docs/ROADMAP.md must declare Phase 12",
+            errors,
+        )
+
+    def test_reports_invalid_future_phase_status(self):
+        root = self.make_valid_repository()
+        self.write(
+            "docs/ROADMAP.md",
+            """# Roadmap
+
+## Phase 6: Enterprise Safety (COMPLETE)
+
+| **13. Phase 5 Deep Domains (6)** | Implemented |
+
+## Phase 7: Canonical Surface Completion
+
+**Status:** `PLANNED`
+
+## Phase 8: Expanded Visual Verification
+
+**Status:** `FUTURE`
+
+## Phase 9: Asset Import and Pipeline Management
+
+**Status:** `PLANNED`
+
+## Phase 10: Animation and UI Authoring
+
+**Status:** `IN PROGRESS`
+
+## Phase 11: Enhanced MCP Protocol Surface
+
+**Status:** `PLANNED`
+
+## Phase 12: Structured Engine Logging
+
+**Status:** `COMPLETE`
+""",
+        )
+
+        errors = validate_repository(root)
+
+        self.assertIn(
+            "docs/ROADMAP.md Phase 8 has invalid status 'FUTURE'",
+            errors,
+        )
+
+    def test_requires_future_phase_governance_document(self):
+        root = self.make_valid_repository()
+        self.write("docs/FUTURE_PHASES_DESIGN.md", "# Future Phases\n")
+
+        errors = validate_repository(root)
+
+        self.assertIn(
+            "docs/FUTURE_PHASES_DESIGN.md must define future-phase governance",
             errors,
         )
 
