@@ -5,6 +5,7 @@
 #include "didi/common/png.hpp"
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <fstream>
 #include <vector>
 
@@ -162,10 +163,20 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
     std::string env = args.value("environment", "studio_neutral");
     bool ortho = args.value("orthographic", false);
     json rig = args.value("camera_rig", json::array({"front", "top", "isometric"}));
+    if (args.contains("overwrite") && !args["overwrite"].is_boolean()) {
+        return CallToolResult::error("Parameter 'overwrite' must be a boolean.");
+    }
+    const bool overwrite = args.value("overwrite", false);
 
     // Offline generator: Create an isolated visual testbed scene (.tscn) on disk!
     std::string lab_scene_path = "res://addons/didi/test_lab_sandbox.tscn";
     std::string disk_path = "addons/didi/test_lab_sandbox.tscn";
+
+    if (std::filesystem::exists(disk_path) && !overwrite) {
+        return CallToolResult::error(
+            "Visual test lab already exists; pass overwrite: true to replace it: " +
+            lab_scene_path);
+    }
 
     std::ofstream scene_file(disk_path);
     if (scene_file.is_open()) {

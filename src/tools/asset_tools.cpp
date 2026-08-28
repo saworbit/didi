@@ -37,6 +37,10 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     std::string resource_type = args.value("resource_type", "StandardMaterial3D");
     std::string save_path = args.value("save_path", "");
     json properties = args.value("properties", json::object());
+    if (args.contains("overwrite") && !args["overwrite"].is_boolean()) {
+        return CallToolResult::error("Parameter 'overwrite' must be a boolean.");
+    }
+    const bool overwrite = args.value("overwrite", false);
 
     if (save_path.empty()) {
         return CallToolResult::error("Parameter 'save_path' is required (e.g. res://materials/wood.tres).");
@@ -58,6 +62,10 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         );
         if (root_it != canon_root.end()) {
             return CallToolResult::error("Access denied: save_path is outside the project root directory.");
+        }
+        if (fs::exists(canon_target) && !overwrite) {
+            return CallToolResult::error(
+                "Resource already exists; pass overwrite: true to replace it: " + save_path);
         }
         if (target_p.has_parent_path()) {
             fs::create_directories(target_p.parent_path());
