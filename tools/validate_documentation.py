@@ -27,6 +27,7 @@ REQUIRED_DOCUMENTS = (
     "docs/QUICKSTART.md",
     "docs/RESOURCES_AND_PROMPTS.md",
     "docs/ROADMAP.md",
+    "docs/FUTURE_PHASES_DESIGN.md",
     "docs/TOOL_REFERENCE.md",
 )
 
@@ -44,6 +45,17 @@ VERSION_SOURCES = (
 FORBIDDEN_ARTIFACT_PATHS = (
     ".superpowers",
     "docs/superpowers",
+)
+
+FUTURE_PHASE_RANGE = range(7, 13)
+VALID_PHASE_STATUSES = {"PLANNED", "IN PROGRESS", "COMPLETE"}
+FUTURE_PHASE_GOVERNANCE_TERMS = (
+    "explicit exclusions",
+    "security",
+    "mutation",
+    "exit evidence",
+    "completion date",
+    "pull request",
 )
 
 FACT_PATTERNS = {
@@ -105,6 +117,10 @@ FACT_PATTERNS = {
 
 LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 HEADING_PATTERN = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
+PHASE_HEADING_PATTERN = re.compile(
+    r"^## Phase (?P<number>\d+):.*?\(`(?P<status>[^`]+)`\)\s*$",
+    re.MULTILINE,
+)
 FENCED_CODE_PATTERN = re.compile(
     r"^\s{0,3}(`{3,}|~{3,}).*?^\s{0,3}\1\s*$", re.MULTILINE | re.DOTALL
 )
@@ -470,6 +486,37 @@ def _read_required(root: Path, relative_path: str, errors: list[str]) -> str | N
         return None
 
 
+def validate_future_phase_roadmap(roadmap_text: str) -> list[str]:
+    errors: list[str] = []
+    phases = {
+        int(match.group("number")): match.group("status")
+        for match in PHASE_HEADING_PATTERN.finditer(roadmap_text)
+    }
+    for phase in FUTURE_PHASE_RANGE:
+        if phase not in phases:
+            errors.append(f"docs/ROADMAP.md must declare Phase {phase}")
+            continue
+        status = phases[phase]
+        if status not in VALID_PHASE_STATUSES:
+            errors.append(
+                f"docs/ROADMAP.md Phase {phase} has invalid status '{status}'"
+            )
+    return errors
+
+
+def validate_future_phase_governance(design_text: str) -> list[str]:
+    normalized = design_text.lower()
+    missing = [
+        term for term in FUTURE_PHASE_GOVERNANCE_TERMS
+        if term not in normalized
+    ]
+    if missing:
+        return [
+            "docs/FUTURE_PHASES_DESIGN.md must define future-phase governance"
+        ]
+    return []
+
+
 def _include_markdown(root: Path, path: Path) -> bool:
     relative_parts = path.relative_to(root).parts
     return not any(part in {".git", ".worktrees", ".superpowers"} for part in relative_parts) and not any(
@@ -563,6 +610,14 @@ def validate_repository(root: Path) -> list[str]:
         for pattern, label in requirements:
             if not re.search(pattern, text, flags=re.IGNORECASE):
                 errors.append(f"{relative_path}: missing current release fact: {label}")
+
+    roadmap_text = texts.get("docs/ROADMAP.md")
+    if roadmap_text is not None:
+        errors.extend(validate_future_phase_roadmap(roadmap_text))
+
+    design_text = texts.get("docs/FUTURE_PHASES_DESIGN.md")
+    if design_text is not None:
+        errors.extend(validate_future_phase_governance(design_text))
 
     markdown = sorted(
         path

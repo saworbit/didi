@@ -111,6 +111,8 @@ Didi exposes 78 canonical tool names plus 10 legacy names (88 registrations).
 Session lock conflicts return 423. Mutations expose dry_run and protected writes use confirmation_token.
 """,
         )
+        self.write("docs/ROADMAP.md", self.make_future_phase_roadmap())
+        self.write("docs/FUTURE_PHASES_DESIGN.md", self.make_future_phase_governance())
         self.write(
             "docs/GUIDE.md",
             """# Guide
@@ -154,7 +156,7 @@ Second section.
         lines = [
             "# Roadmap",
             "",
-            "## Phase 6: Enterprise Safety (COMPLETE)",
+            "## Phase 6: Enterprise Safety (`COMPLETE`)",
             "",
             "| **13. Phase 5 Deep Domains (6)** | Implemented |",
             "",
@@ -164,9 +166,7 @@ Second section.
                 continue
             lines.extend(
                 [
-                    f"## Phase {phase}: {name}",
-                    "",
-                    f"**Status:** `{statuses[phase]}`",
+                    f"## Phase {phase}: {name} (`{statuses[phase]}`)",
                     "",
                 ]
             )
@@ -177,10 +177,10 @@ Second section.
             "scope": "Scope: define the capability boundary for every future phase.",
             "explicit exclusions": "Explicit exclusions: identify deferred behavior that is not delivered.",
             "security": "Security: preserve the local authenticated safety boundary.",
-            "mutation classification": "Mutation classification: identify each new or reclassified mutation.",
+            "mutation": "Mutation classification: identify each new or reclassified mutation.",
             "exit evidence": "Exit evidence: require implementation, native tests, integration tests, and CI evidence.",
             "completion date": "Completion date: record the date when a phase is complete.",
-            "pull request before COMPLETE": "Pull request before COMPLETE: record the pull request before marking a phase complete.",
+            "pull request": "Pull request before COMPLETE: record the pull request before marking a phase complete.",
         }
         lines = ["# Future Phase Governance", ""]
         lines.extend(
@@ -567,47 +567,20 @@ Second section.
                 )
 
     def test_reports_invalid_future_phase_status(self):
-        root = self.make_valid_repository()
-        self.write(
-            "docs/ROADMAP.md",
-            """# Roadmap
+        for status in ("FUTURE", "DONE", "ACTIVE"):
+            with self.subTest(status=status):
+                root = self.make_valid_repository()
+                self.write(
+                    "docs/ROADMAP.md",
+                    self.make_future_phase_roadmap(phase_statuses={8: status}),
+                )
 
-## Phase 6: Enterprise Safety (COMPLETE)
+                errors = validate_repository(root)
 
-| **13. Phase 5 Deep Domains (6)** | Implemented |
-
-## Phase 7: Canonical Surface Completion
-
-**Status:** `PLANNED`
-
-## Phase 8: Expanded Visual Verification
-
-**Status:** `FUTURE`
-
-## Phase 9: Asset Import and Pipeline Management
-
-**Status:** `PLANNED`
-
-## Phase 10: Animation and UI Authoring
-
-**Status:** `IN PROGRESS`
-
-## Phase 11: Enhanced MCP Protocol Surface
-
-**Status:** `PLANNED`
-
-## Phase 12: Structured Engine Logging
-
-**Status:** `COMPLETE`
-""",
-        )
-
-        errors = validate_repository(root)
-
-        self.assertIn(
-            "docs/ROADMAP.md Phase 8 has invalid status 'FUTURE'",
-            errors,
-        )
+                self.assertIn(
+                    f"docs/ROADMAP.md Phase 8 has invalid status '{status}'",
+                    errors,
+                )
 
     def test_requires_future_phase_governance_document(self):
         root = self.make_valid_repository()
@@ -622,13 +595,12 @@ Second section.
 
     def test_requires_each_future_phase_governance_field(self):
         for field in (
-            "scope",
             "explicit exclusions",
             "security",
-            "mutation classification",
+            "mutation",
             "exit evidence",
             "completion date",
-            "pull request before COMPLETE",
+            "pull request",
         ):
             with self.subTest(field=field):
                 root = self.make_valid_repository()
