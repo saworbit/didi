@@ -85,6 +85,7 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
 2. **Editor Undo/Redo Integration**: All modifications register transactions with Godot's `EditorUndoRedoManager`, allowing human developers to press `Ctrl+Z` in the editor to undo any AI-generated modification.
 3. **Timeout & Deadlock Protection**:
    - IPC client operations use recursive mutexes and platform-specific readiness checks with millisecond deadlines: `PeekNamedPipe` on Windows and `poll` on POSIX.
+   - Automatic reconnect and request I/O consume one caller-supplied deadline on both platforms. Every response must echo the active request ID; mismatches close the route as an unknown-outcome transport failure.
    - The extension applies a 15-second main-thread deadline. A still-pending command is atomically cancelled and returns `504` with `outcome: "not_started"` and no quarantine. A started but unresolved command returns `504` with `outcome: "unknown_outcome"` and `route_quarantine: true`; it may still complete inside Godot, so clients must not blindly retry mutations.
    - Public live tools and `godot://runtime/logs` apply a finite 17-second outer transport deadline. Explicit unknown-outcome responses and transport timeouts quarantine only the exact routed generation, preserving a concurrently selected replacement. No live path waits forever for a definitive response.
    - Filesystem reads, static GDScript parsing, and offline process tools stay in the standalone MCP process and never enter the Godot main-thread queue.
@@ -109,6 +110,7 @@ Didi uses an optimized, low-overhead framing protocol over process-unique local 
 ### Transport characteristics
 
 - Maximum framed payload: `128 MB`.
+- Servers distinguish malformed frames from handler failures, preserve a parsed request ID in application-error responses, and return handler exceptions as internal (`500`) failures.
 - The local pipe/socket avoids TCP port allocation and firewall prompts.
 - No latency or throughput target is part of the compatibility contract; measure the target workstation and scene when performance matters.
 

@@ -122,6 +122,8 @@ Offset 0..3:  uint32_t payload_length (Little-Endian, Max 128 MB)
 Offset 4..N:  char payload_bytes[payload_length] (UTF-8 JSON string)
 ```
 
+Request IDs are correlated exactly. A missing or mismatched response ID closes the client route and reports an unknown-outcome transport failure. Reconnect, write, and read share the request's single deadline on Windows and POSIX. Once a request is parsed, an extension handler exception returns internal error `500` with the original request ID; malformed JSON remains a `400` framing/request error.
+
 ### Implemented internal methods
 
 - `session.handshake`

@@ -18,6 +18,7 @@ Historical entries describe the surface advertised by those releases. For the ex
 - Failed closed before creating a Windows session pipe when the owner-and-Administrators security descriptor cannot be built.
 - Rejected malformed MCP parameter types, request-only methods sent without an ID, and unsupported `Content-Length` framing without dispatching hidden mutations.
 - Protected `resource_create` and visual test-lab files from replacement unless callers pass `overwrite: true`.
+- Enforced one reconnect-and-I/O IPC deadline on POSIX, exact response-ID correlation on both transports, and distinct handler-exception responses that preserve the parsed request ID.
 
 ## [1.4.0] - 2026-08-28
 
