@@ -104,7 +104,7 @@ Looks up a class in Didi's small built-in reference map. This is not live ClassD
 
 ### `script_get_symbols` — Offline
 
-Extracts functions, variables, signals, enums, and inner classes from GDScript text using the same comment/string-aware declaration scanner as project search. Inline annotations such as `@export_range`, `@onready`, and `@rpc`, plus `static func`, are recognized. File reads are confined to the project root.
+Extracts functions, variables, signals, enums, and inner classes from GDScript text using the same comment/string-aware declaration scanner as project search. Inline or preceding-line annotations such as `@export_range`, `@onready`, and `@rpc`, plus `static func`, are recognized. File reads, including UTF-8 paths on Windows, are confined to the project root.
 
 - `file_path` (`string`, optional).
 - `source_text` (`string`, optional).
@@ -206,7 +206,7 @@ Scans the project working directory for resources.
 
 ### `project_get_uid_map` — Offline
 
-Returns UID-to-path mappings discovered in indexed project resources. Embedded UIDs take precedence; modern Godot `.uid` sidecars are read as a bounded fallback.
+Returns UID-to-path mappings discovered in indexed project resources. Embedded UIDs take precedence; modern Godot `.uid` sidecars are read for every resource type as a bounded fallback and accepted only when they match Godot's lowercase-alphanumeric textual UID format.
 
 ### `instantiate_asset` — Unimplemented legacy name
 

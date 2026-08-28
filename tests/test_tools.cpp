@@ -3,6 +3,7 @@
 #include "didi/mcp/prompt_registry.hpp"
 #include "didi/mcp/mcp_server.hpp"
 #include "didi/gdextension/editor_hook.hpp"
+#include "didi/common/project_path.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -914,7 +915,8 @@ static void test_symbol_extraction() {
     auto& reg = didi::mcp::ToolRegistry::instance();
     std::string script =
         "extends CharacterBody3D\n\n"
-        "@export_range(0, 20) var speed: float = 5.0\n"
+        "@export_range(0, 20)\n"
+        "var speed: float = 5.0\n"
         "@onready var sprite = $Sprite\n"
         "signal reached_goal(time_taken)\n\n"
         "@rpc(\"any_peer\") func jump() -> void:\n\tpass\n"
@@ -982,6 +984,22 @@ static void test_offline_tools_do_not_fallback_to_demo_paths() {
     registry.setIpcClient(nullptr);
 }
 
+static void test_project_paths_accept_utf8_names() {
+    ScopedToolProject project("utf8-paths");
+    const std::filesystem::path directory(u8"项目");
+    const auto script = directory / std::filesystem::path(u8"脚本.gd");
+    std::filesystem::create_directories(directory);
+    std::ofstream(script, std::ios::binary) << "extends Node\n";
+
+    const std::u8string request_u8 = u8"res://项目/脚本.gd";
+    const std::string request(reinterpret_cast<const char*>(request_u8.data()),
+                              request_u8.size());
+    const auto resolved = didi::paths::resolveProjectFile(request);
+    ASSERT_TRUE(resolved.isOk());
+    ASSERT_EQ(std::filesystem::weakly_canonical(resolved.value()),
+              std::filesystem::weakly_canonical(script));
+}
+
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.DefaultRegistration", test_tool_registry_default_tools);
@@ -1010,6 +1028,7 @@ struct RegisterToolTests {
         registerTest("Tools.ClassReflection", test_class_reflection);
         registerTest("Tools.SymbolExtraction", test_symbol_extraction);
         registerTest("Tools.NoDemoPathFallback", test_offline_tools_do_not_fallback_to_demo_paths);
+        registerTest("Tools.Utf8ProjectPaths", test_project_paths_accept_utf8_names);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }

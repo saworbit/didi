@@ -40,6 +40,11 @@ std::string codeOutsideGdscriptLiterals(std::string_view line,
     code.reserve(line.size());
     for (size_t i = 0; i < line.size();) {
         if (!multiline_delimiter.empty()) {
+            if (line[i] == '\\' && i + 1 < line.size()) {
+                code.append(2, ' ');
+                i += 2;
+                continue;
+            }
             if (i + multiline_delimiter.size() <= line.size() &&
                 line.substr(i, multiline_delimiter.size()) == multiline_delimiter) {
                 code.append(multiline_delimiter.size(), ' ');
@@ -661,12 +666,24 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
     static const std::regex sig_regex(R"re(^signal\s+([a-zA-Z0-9_]+)(?:\((.*)\))?)re");
     static const std::regex enum_regex(R"re(^enum\s+([a-zA-Z0-9_]+))re");
     std::string multiline_delimiter;
+    bool pending_export = false;
 
     for (size_t i = 0; i < lines.size(); ++i) {
-        const auto declaration = parseDeclaration(
-            codeOutsideGdscriptLiterals(lines[i], multiline_delimiter));
-        if (!declaration) continue;
+        const auto masked = codeOutsideGdscriptLiterals(lines[i], multiline_delimiter);
+        const auto declaration = parseDeclaration(masked);
+        if (!declaration) {
+            const auto trimmed = strings::trim(masked);
+            if (strings::startsWith(trimmed, "@")) {
+                const auto annotation = parseDeclaration(trimmed + " var __didi_annotation");
+                if (annotation) pending_export = pending_export || annotation->exported;
+            } else if (!trimmed.empty()) {
+                pending_export = false;
+            }
+            continue;
+        }
         const std::string& line = declaration->source;
+        const bool exported = declaration->exported || pending_export;
+        pending_export = false;
         std::smatch match;
         if (declaration->kind == "function" && std::regex_search(line, match, func_regex)) {
             functions.push_back({
@@ -678,7 +695,7 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
         } else if (declaration->kind == "variable" && std::regex_search(line, match, var_regex)) {
             variables.push_back({
                 {"name", match[1].str()},
-                {"exported", declaration->exported},
+                {"exported", exported},
                 {"type", match[2].matched ? match[2].str() : "Variant"},
                 {"line", i + 1}
             });

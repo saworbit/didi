@@ -10,6 +10,27 @@ namespace offline {
 
 namespace fs = std::filesystem;
 
+namespace {
+
+bool isValidUid(const std::string& uid) {
+    static const std::regex uid_regex(R"re(^uid:\/\/[a-z0-9]+$)re");
+    return std::regex_match(uid, uid_regex);
+}
+
+std::string extractUidSidecar(const std::string& file_path) {
+    std::ifstream sidecar(file_path + ".uid", std::ios::binary);
+    if (!sidecar.is_open()) return "";
+    std::array<char, 257> buffer{};
+    sidecar.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+    const auto bytes_read = sidecar.gcount();
+    if (bytes_read > 256) return "";
+    const std::string uid = strings::trim(
+        std::string(buffer.data(), static_cast<size_t>(bytes_read)));
+    return isValidUid(uid) ? uid : "";
+}
+
+} // namespace
+
 ResourceIndexer::ResourceIndexer() {}
 
 std::string ResourceIndexer::detectResourceType(const std::string& ext) {
@@ -38,22 +59,12 @@ std::string ResourceIndexer::extractUidFromFile(const std::string& file_path) {
         while (std::getline(file, line) && count++ < 10) {
             std::smatch match;
             if (std::regex_search(line, match, uid_regex) && match.size() > 1) {
-                return match[1].str();
+                const auto uid = match[1].str();
+                if (isValidUid(uid)) return uid;
             }
         }
     }
-
-    std::ifstream sidecar(file_path + ".uid", std::ios::binary);
-    if (!sidecar.is_open()) return "";
-    std::array<char, 257> buffer{};
-    sidecar.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-    const auto bytes_read = sidecar.gcount();
-    if (bytes_read > 256) return "";
-    const std::string uid = strings::trim(
-        std::string(buffer.data(), static_cast<size_t>(bytes_read)));
-    static const std::regex sidecar_uid_regex(R"re(^uid:\/\/[A-Za-z0-9_]+$)re");
-    if (std::regex_match(uid, sidecar_uid_regex)) return uid;
-    return "";
+    return extractUidSidecar(file_path);
 }
 
 std::vector<std::string> ResourceIndexer::extractDependenciesFromFile(const std::string& file_path) {
@@ -112,6 +123,8 @@ void ResourceIndexer::scan(const std::string& root_dir) {
                     if (type == "PackedScene") {
                         deps = extractDependenciesFromFile(full_path);
                     }
+                } else if (ext != ".uid") {
+                    uid = extractUidSidecar(full_path);
                 }
 
                 uintmax_t file_size = 0;

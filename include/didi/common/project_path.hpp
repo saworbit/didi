@@ -4,19 +4,31 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cwctype>
 #include <filesystem>
 #include <string>
 
 namespace didi::paths {
 
-inline std::string normalizedProjectPath(const std::filesystem::path& path) {
-    auto value = path.lexically_normal().generic_string();
+inline auto normalizedProjectPath(const std::filesystem::path& path) {
 #if defined(_WIN32)
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
-        return static_cast<char>(std::tolower(character));
+    auto value = path.lexically_normal().generic_wstring();
+    std::transform(value.begin(), value.end(), value.begin(), [](wchar_t character) {
+        return static_cast<wchar_t>(std::towlower(character));
     });
+#else
+    auto value = path.lexically_normal().generic_string();
 #endif
     return value;
+}
+
+inline std::filesystem::path projectPathFromUtf8(const std::string& value) {
+#if defined(_WIN32)
+    const auto* begin = reinterpret_cast<const char8_t*>(value.data());
+    return std::filesystem::path(std::u8string(begin, begin + value.size()));
+#else
+    return std::filesystem::path(value);
+#endif
 }
 
 inline bool isWithinProject(const std::filesystem::path& root,
@@ -33,7 +45,12 @@ inline Result<std::filesystem::path> resolveProjectFile(const std::string& file_
     if (file_path.empty()) return Error::invalidArgument("file path is empty");
     std::string relative_value = file_path;
     if (strings::startsWith(relative_value, "res://")) relative_value.erase(0, 6);
-    const std::filesystem::path relative(relative_value);
+    std::filesystem::path relative;
+    try {
+        relative = projectPathFromUtf8(relative_value);
+    } catch (const std::filesystem::filesystem_error&) {
+        return Error::invalidArgument("file path must be valid UTF-8");
+    }
     if (relative.is_absolute() || relative.has_root_name()) {
         return Error::invalidArgument("file path must be relative to the project root");
     }
