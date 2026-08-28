@@ -89,24 +89,203 @@ MINIMUM_NODE24_ACTION_VERSIONS = {
 }
 
 
-def _workflow_steps(text: str) -> list[str]:
-    """Return top-level YAML step blocks without requiring a YAML dependency."""
+def _workflow_job_blocks(text: str) -> list[str]:
+    """Return job-local YAML blocks without requiring a YAML dependency."""
     lines = text.splitlines()
-    starts: list[tuple[int, int]] = []
+    jobs_start: int | None = None
+    jobs_indent = 0
     for index, line in enumerate(lines):
-        match = re.match(r"^(\s*)-\s+(?:name|uses):", line)
+        match = re.match(r"^(\s*)jobs:\s*(?:#.*)?$", line)
         if match:
-            starts.append((index, len(match.group(1))))
+            jobs_start = index
+            jobs_indent = len(match.group(1))
+            break
+
+    if jobs_start is None:
+        return []
+
+    starts: list[tuple[int, int]] = []
+    job_indent: int | None = None
+    for index in range(jobs_start + 1, len(lines)):
+        line = lines[index]
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent <= jobs_indent:
+            break
+        match = re.match(
+            r"^(\s*)(?:[A-Za-z_][A-Za-z0-9_-]*|"
+            r"'[A-Za-z_][A-Za-z0-9_-]*'|"
+            r"\"[A-Za-z_][A-Za-z0-9_-]*\"):\s*(?:#.*)?$",
+            line,
+        )
+        if not match:
+            continue
+        if job_indent is None:
+            job_indent = len(match.group(1))
+        if len(match.group(1)) == job_indent:
+            starts.append((index, job_indent))
 
     blocks: list[str] = []
-    for position, (start, indent) in enumerate(starts):
-        end = len(lines)
-        for candidate, candidate_indent in starts[position + 1 :]:
-            if candidate_indent == indent:
-                end = candidate
+    for position, (start, _indent) in enumerate(starts):
+        end = starts[position + 1][0] if position + 1 < len(starts) else len(lines)
+        for index in range(start + 1, end):
+            line = lines[index]
+            if (
+                line.strip()
+                and not line.lstrip().startswith("#")
+                and len(line) - len(line.lstrip()) <= jobs_indent
+            ):
+                end = index
                 break
         blocks.append("\n".join(lines[start:end]))
     return blocks
+
+
+def _workflow_steps(text: str) -> list[str]:
+    """Return YAML list items from a job's steps block."""
+    lines = text.splitlines()
+    steps_start: int | None = None
+    steps_indent = 0
+    for index, line in enumerate(lines):
+        match = re.match(r"^(\s*)steps:\s*(?:#.*)?$", line)
+        if match:
+            steps_start = index
+            steps_indent = len(match.group(1))
+            break
+
+    if steps_start is None:
+        return []
+
+    starts: list[tuple[int, int]] = []
+    item_indent: int | None = None
+    section_end = len(lines)
+    for index in range(steps_start + 1, len(lines)):
+        line = lines[index]
+        if line.strip() and not line.lstrip().startswith("#"):
+            indent = len(line) - len(line.lstrip())
+            if indent <= steps_indent:
+                section_end = index
+                break
+            match = re.match(r"^(\s*)-(?:\s+.*)?$", line)
+            if match:
+                if item_indent is None:
+                    item_indent = len(match.group(1))
+                if len(match.group(1)) == item_indent:
+                    starts.append((index, item_indent))
+
+    blocks: list[str] = []
+    for position, (start, _indent) in enumerate(starts):
+        end = starts[position + 1][0] if position + 1 < len(starts) else section_end
+        blocks.append("\n".join(lines[start:end]))
+    return blocks
+
+
+def _dedent_yaml_block(lines: list[str]) -> str:
+    indents = [len(line) - len(line.lstrip()) for line in lines if line.strip()]
+    indent = min(indents) if indents else 0
+    return "\n".join(line[indent:] if line.strip() else "" for line in lines)
+
+
+def _step_mapping(step: str) -> dict[str, str]:
+    """Extract scalar values for keys on a workflow step itself."""
+    lines = step.splitlines()
+    if not lines:
+        return {}
+    item = re.match(r"^(\s*)-\s*(.*)$", lines[0])
+    if not item:
+        return {}
+    mapping_indent = len(item.group(1)) + 2
+
+    keys: list[tuple[int, str, str]] = []
+    first_key = re.match(r"^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$", item.group(2))
+    if first_key:
+        keys.append((0, first_key.group(1), first_key.group(2)))
+
+    for index, line in enumerate(lines[1:], start=1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if len(line) - len(line.lstrip()) != mapping_indent:
+            continue
+        match = re.match(r"^\s*([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$", line)
+        if match:
+            keys.append((index, match.group(1), match.group(2)))
+
+    values: dict[str, str] = {}
+    for position, (line_index, key, raw_value) in enumerate(keys):
+        if re.fullmatch(r"[|>][-+]?\d*", raw_value):
+            end = keys[position + 1][0] if position + 1 < len(keys) else len(lines)
+            values[key] = _dedent_yaml_block(lines[line_index + 1 : end])
+        else:
+            values[key] = raw_value.strip()
+    return values
+
+
+def _has_macos_aws_tap_cleanup(step: str) -> bool:
+    """Return whether a workflow step safely removes the unused runner tap."""
+    values = _step_mapping(step)
+    macos_only = re.fullmatch(
+        r"(?:runner\.os\s*==\s*['\"]macOS['\"]|"
+        r"\$\{\{\s*runner\.os\s*==\s*['\"]macOS['\"]\s*\}\})",
+        values.get("if", ""),
+    )
+    guarded_removal = re.search(
+        r"^[ \t]*if[ \t]+brew[ \t]+tap[ \t]*\|[ \t]*grep[ \t]+-qx[ \t]+"
+        r"(['\"])aws/tap\1;[ \t]+then[ \t]*\n"
+        r"[ \t]*brew[ \t]+untap[ \t]+aws/tap[ \t]*\n"
+        r"[ \t]*fi[ \t]*$",
+        values.get("run", ""),
+        flags=re.MULTILINE,
+    )
+    return bool(macos_only and guarded_removal)
+
+
+def _job_uses_macos_runner(job: str) -> bool:
+    runner_label = re.compile(
+        r"\bmacos-(?:latest|\d+)(?:-[A-Za-z0-9]+)*\b",
+        flags=re.IGNORECASE,
+    )
+    lines = job.splitlines()
+    steps_index = next(
+        (index for index, line in enumerate(lines) if re.match(r"^\s*steps:\s*$", line)),
+        len(lines),
+    )
+    configuration = lines[:steps_index]
+    runs_on = next(
+        (
+            match.group(1).strip()
+            for line in configuration
+            if (match := re.match(r"^\s*runs-on:\s*(.+)$", line))
+        ),
+        "",
+    )
+    if runner_label.search(runs_on):
+        return True
+    if "matrix." not in runs_on:
+        return False
+
+    for index, line in enumerate(configuration):
+        matrix = re.match(r"^(\s*)matrix:\s*(.*)$", line)
+        if not matrix:
+            continue
+        matrix_indent = len(matrix.group(1))
+        block = [matrix.group(2)]
+        for candidate in configuration[index + 1 :]:
+            if (
+                candidate.strip()
+                and not candidate.lstrip().startswith("#")
+                and len(candidate) - len(candidate.lstrip()) <= matrix_indent
+            ):
+                break
+            block.append(candidate)
+        if runner_label.search("\n".join(block)):
+            return True
+    return False
+
+
+def _step_uses_ccache_action(step: str) -> bool:
+    uses = _step_mapping(step).get("uses", "").strip().strip("'\"")
+    return bool(re.match(r"^hendrikmuhs/ccache-action@", uses))
 
 
 def validate_workflow_contract(relative_path: str, text: str) -> list[str]:
@@ -127,23 +306,37 @@ def validate_workflow_contract(relative_path: str, text: str) -> list[str]:
                 f"use v{recommendation} or later"
             )
 
+    for job in _workflow_job_blocks(text):
+        if not _job_uses_macos_runner(job):
+            continue
+        steps = _workflow_steps(job)
+        for index, step in enumerate(steps):
+            if not _step_uses_ccache_action(step):
+                continue
+            if index == 0 or not _has_macos_aws_tap_cleanup(steps[index - 1]):
+                errors.append(
+                    f"{relative_path}: remove aws/tap on macOS before "
+                    "hendrikmuhs/ccache-action"
+                )
+
     if "windows-latest" not in text:
         return errors
 
-    for step in _workflow_steps(text):
-        if "jwlawson/actions-setup-cmake@v2" not in step:
-            continue
-        if not re.search(r"cmake-version:\s*['\"]?3\.28\.x['\"]?", step):
-            continue
-        excludes_windows = re.search(
-            r"^\s*if:\s*runner\.os\s*!=\s*['\"]Windows['\"]\s*$",
-            step,
-            flags=re.MULTILINE,
-        )
-        if not excludes_windows:
-            errors.append(
-                f"{relative_path}: pinned CMake 3.28 must not replace the Windows runner CMake"
+    for job in _workflow_job_blocks(text):
+        for step in _workflow_steps(job):
+            if "jwlawson/actions-setup-cmake@v2" not in step:
+                continue
+            if not re.search(r"cmake-version:\s*['\"]?3\.28\.x['\"]?", step):
+                continue
+            excludes_windows = re.search(
+                r"^\s*if:\s*runner\.os\s*!=\s*['\"]Windows['\"]\s*$",
+                step,
+                flags=re.MULTILINE,
             )
+            if not excludes_windows:
+                errors.append(
+                    f"{relative_path}: pinned CMake 3.28 must not replace the Windows runner CMake"
+                )
     return errors
 
 

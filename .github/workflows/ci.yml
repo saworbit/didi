@@ -52,6 +52,14 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Remove Unused Homebrew Tap (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          if brew tap | grep -qx 'aws/tap'; then
+            brew untap aws/tap
+          fi
+
       - name: Setup Compiler Cache (ccache / sccache)
         uses: hendrikmuhs/ccache-action@v1.2.23
         with:

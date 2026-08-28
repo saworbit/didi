@@ -225,6 +225,211 @@ Second section.
                 (action, errors),
             )
 
+    def test_requires_macos_aws_tap_cleanup_before_ccache(self):
+        root = self.make_valid_repository()
+        workflows = {
+            "missing cleanup": """jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+""",
+            "cleanup after ccache": """jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - name: Remove unused Homebrew tap
+        if: runner.os == 'macOS'
+        run: |
+          if brew tap | grep -qx 'aws/tap'; then
+            brew untap aws/tap
+          fi
+""",
+            "cleanup without presence check": """jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Remove unused Homebrew tap
+        if: runner.os == 'macOS'
+        run: brew untap aws/tap
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+""",
+            "cleanup without macOS guard": """jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Remove unused Homebrew tap
+        run: |
+          if brew tap | grep -qx 'aws/tap'; then
+            brew untap aws/tap
+          fi
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+""",
+            "cleanup in a different job": """jobs:
+  cleanup:
+    runs-on: macos-latest
+    steps:
+      - name: Remove unused Homebrew tap
+        if: runner.os == 'macOS'
+        run: |
+          if brew tap | grep -qx 'aws/tap'; then
+            brew untap aws/tap
+          fi
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+""",
+            "only first ccache is guarded": """jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Remove unused Homebrew tap
+        if: runner.os == 'macOS'
+        run: |
+          if brew tap | grep -qx 'aws/tap'; then
+            brew untap aws/tap
+          fi
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - name: Separate cache setup
+        run: echo separate
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+""",
+            "id-first ccache step": """jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - id: compiler-cache
+        uses: hendrikmuhs/ccache-action@v1.2.23
+""",
+            "disconnected presence check": """jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Remove unused Homebrew tap
+        if: runner.os == 'macOS'
+        run: |
+          brew tap | grep -qx 'aws/tap' || true
+          brew untap aws/tap
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+""",
+            "concrete macOS runner label": """jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+""",
+            "quoted job id": """jobs:
+  'build':
+    runs-on: macos-latest
+    steps:
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+""",
+            "dedented comment before step": """jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+# The runner image carries an unused tap.
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+""",
+            "bare dash step item": """jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      -
+        id: compiler-cache
+        uses: hendrikmuhs/ccache-action@v1.2.23
+""",
+            "cleanup text only in env": """jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Pretend to remove unused Homebrew tap
+        if: runner.os == 'macOS'
+        env:
+          UNUSED_SCRIPT: |
+            if brew tap | grep -qx 'aws/tap'; then
+              brew untap aws/tap
+            fi
+        run: echo no-cleanup
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+""",
+        }
+
+        for scenario, workflow in workflows.items():
+            with self.subTest(scenario=scenario):
+                self.write(".github/workflows/ci.yml", workflow)
+                errors = VALIDATOR.validate_repository(root)
+                self.assertTrue(
+                    any("aws/tap" in error and "ccache" in error for error in errors),
+                    errors,
+                )
+
+    def test_accepts_macos_aws_tap_cleanup_before_ccache(self):
+        root = self.make_valid_repository()
+        workflows = {
+            "shorthand guard": """jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Remove unused Homebrew tap
+        if: runner.os == 'macOS'
+        run: |
+          if brew tap | grep -qx 'aws/tap'; then
+            brew untap aws/tap
+          fi
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+""",
+            "expression guard and id-first ccache": """jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - name: Remove unused Homebrew tap
+        if: ${{ runner.os == 'macOS' }}
+        run: |
+          if brew tap | grep -qx 'aws/tap'; then
+            brew untap aws/tap
+          fi
+      - id: compiler-cache
+        uses: hendrikmuhs/ccache-action@v1.2.23
+""",
+            "Ubuntu step only mentions macOS": """jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cache compiler; macos-latest uses another job
+        uses: hendrikmuhs/ccache-action@v1.2.23
+""",
+            "macOS step only echoes action name": """jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Explain cache action
+        run: echo hendrikmuhs/ccache-action
+""",
+        }
+
+        for scenario, workflow in workflows.items():
+            with self.subTest(scenario=scenario):
+                self.write(".github/workflows/ci.yml", workflow)
+                self.assertEqual(VALIDATOR.validate_repository(root), [])
+
     def test_rejects_stale_supported_minor(self):
         root = self.make_valid_repository()
         security = (root / "SECURITY.md").read_text(encoding="utf-8")
