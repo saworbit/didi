@@ -2,6 +2,7 @@
 #include "didi/common/logger.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 
 #if defined(_WIN32)
@@ -32,6 +33,14 @@ static bool managedRouteUnavailable(const std::shared_ptr<ipc::IIpcClient>& clie
     // A real session manager with nothing selected is the normal offline state. Once a route is
     // selected, failure to produce its authenticated lease is authoritative unavailability.
     return sessions->activeSession().has_value();
+}
+
+static bool startsWithCaseInsensitive(const std::string& value, const std::string& prefix) {
+    return value.size() >= prefix.size() &&
+           std::equal(prefix.begin(), prefix.end(), value.begin(),
+                      [](unsigned char left, unsigned char right) {
+                          return std::tolower(left) == std::tolower(right);
+                      });
 }
 
 static void addCurrentAvailability(json& definition, const ExecutionCapability& capability,
@@ -115,6 +124,8 @@ void McpServer::sendNotification(const std::string& method, const json& params) 
 JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     DIDI_LOG_DEBUG("MCP_REQ", "Method: ", req.method);
 
+    try {
+
     if (req.method == "initialize") {
         m_initialized = true;
         json result = {
@@ -172,8 +183,16 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         if (!req.params.is_object()) {
             return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams, "Params must be a JSON object");
         }
-        std::string name = req.params.value("name", "");
-        json arguments = req.params.contains("arguments") && req.params["arguments"].is_object()
+        if (!req.params.contains("name") || !req.params["name"].is_string()) {
+            return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams,
+                                              "Tool name must be a string");
+        }
+        if (req.params.contains("arguments") && !req.params["arguments"].is_object()) {
+            return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams,
+                                              "Tool arguments must be a JSON object");
+        }
+        std::string name = req.params["name"].get<std::string>();
+        json arguments = req.params.contains("arguments")
                              ? req.params["arguments"]
                              : json::object();
         if (name.empty()) {
@@ -209,7 +228,11 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         if (!req.params.is_object()) {
             return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams, "Params must be a JSON object");
         }
-        std::string uri = req.params.value("uri", "");
+        if (!req.params.contains("uri") || !req.params["uri"].is_string()) {
+            return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams,
+                                              "Resource URI must be a string");
+        }
+        std::string uri = req.params["uri"].get<std::string>();
         if (uri.empty()) {
             return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams, "Resource URI is required");
         }
@@ -244,8 +267,16 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         if (!req.params.is_object()) {
             return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams, "Params must be a JSON object");
         }
-        std::string name = req.params.value("name", "");
-        json args = req.params.contains("arguments") && req.params["arguments"].is_object()
+        if (!req.params.contains("name") || !req.params["name"].is_string()) {
+            return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams,
+                                              "Prompt name must be a string");
+        }
+        if (req.params.contains("arguments") && !req.params["arguments"].is_object()) {
+            return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams,
+                                              "Prompt arguments must be a JSON object");
+        }
+        std::string name = req.params["name"].get<std::string>();
+        json args = req.params.contains("arguments")
                         ? req.params["arguments"]
                         : json::object();
         if (name.empty()) {
@@ -259,6 +290,15 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     }
 
     return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::MethodNotFound, "Method not found: " + req.method);
+    } catch (const json::exception& error) {
+        DIDI_LOG_WARN("MCP_SERVER", "Invalid JSON parameters for ", req.method, ": ", error.what());
+        return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams,
+                                          "Invalid JSON parameter types");
+    } catch (const std::exception& error) {
+        DIDI_LOG_ERROR("MCP_SERVER", "Request handler failed for ", req.method, ": ", error.what());
+        return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InternalError,
+                                          "Internal request handling error");
+    }
 }
 
 void McpServer::runStdio() {
@@ -277,31 +317,12 @@ void McpServer::runStdio() {
         std::string trimmed = strings::trim(line);
         if (trimmed.empty()) continue;
 
-        // Check for HTTP-style Content-Length header
-        if (strings::startsWith(trimmed, "Content-Length:") || strings::startsWith(trimmed, "content-length:")) {
-            auto pos = trimmed.find(':');
-            if (pos != std::string::npos) {
-                try {
-                    int content_len = std::stoi(strings::trim(trimmed.substr(pos + 1)));
-                    if (content_len > 0 && content_len <= 128 * 1024 * 1024) {
-                        // Read following empty lines until header separator
-                        while (std::getline(std::cin, line)) {
-                            if (strings::trim(line).empty()) break;
-                        }
-                        std::vector<char> buffer(content_len);
-                        std::cin.read(buffer.data(), content_len);
-                        std::streamsize bytes_read = std::cin.gcount();
-                        if (bytes_read != content_len) {
-                            DIDI_LOG_WARN("MCP_SERVER", "Short read on Content-Length payload");
-                            continue;
-                        }
-                        trimmed = std::string(buffer.data(), static_cast<size_t>(bytes_read));
-                    }
-                } catch (const std::exception& e) {
-                    DIDI_LOG_WARN("MCP_SERVER", "Invalid Content-Length header: ", e.what());
-                    continue;
-                }
-            }
+        if (startsWithCaseInsensitive(trimmed, "content-length:")) {
+            DIDI_LOG_WARN("MCP_SERVER", "Content-Length framing is not supported; closing stdio session");
+            sendResponse(JsonRpcResponse::makeError(
+                nullptr, JsonRpcErrorCode::ParseError,
+                "Content-Length framing is not supported; send one JSON-RPC message per line"));
+            break;
         }
 
         auto req_opt = JsonRpcRequest::parse(trimmed);
@@ -313,7 +334,11 @@ void McpServer::runStdio() {
 
         const auto& req = req_opt.value();
         if (req.is_notification) {
-            handleRequest(req);
+            if (strings::startsWith(req.method, "notifications/")) {
+                handleRequest(req);
+            } else {
+                DIDI_LOG_WARN("MCP_SERVER", "Ignoring request-only method without id: ", req.method);
+            }
             continue;
         }
 

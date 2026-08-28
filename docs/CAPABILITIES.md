@@ -85,8 +85,8 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 - Successful JSON results and resources identify their actual `execution_mode`. Offline-only script, resource, project, test-lab, and runtime handlers execute in the standalone process even while an editor is connected.
 - `script_check_syntax` combines lightweight diagnostics with a Godot `--headless --check-only` run only when a file path is supplied and a Godot executable is available. `source_text`-only checks do not invoke Godot.
 - `script_reflect_class` uses a small built-in offline class map, not live Godot ClassDB reflection.
-- `resource_create` writes textual `.tres` content for scalar, array, and Vector2/Vector3-shaped JSON values. It does not instantiate and validate arbitrary Resource classes in Godot.
-- `viewport_create_test_lab` writes a sandbox `.tscn`; it does not instance the target resource or produce multi-angle live captures automatically.
+- `resource_create` writes textual `.tres` content for scalar, array, and Vector2/Vector3-shaped JSON values. It does not instantiate and validate arbitrary Resource classes in Godot, and it preserves an existing target unless `overwrite: true` is explicit.
+- `viewport_create_test_lab` writes a sandbox `.tscn`; it preserves an existing sandbox unless `overwrite: true` is explicit, does not instance the target resource, and does not produce multi-angle live captures automatically.
 - Phase 2 tools are live-only: they never edit `project.godot`, script references, or `.tscn` files behind a disconnected editor.
 - Generic project-setting values support bounded JSON scalars, arrays, and string-keyed dictionaries up to 16 levels. `autoload/*` and `input/*` writes must use their typed tools.
 - InputMap events support key, mouse-button, joypad-button, and joypad-motion descriptors. Unknown fields and types, invalid indices, empty key identities, non-finite numbers, and deadzones outside `0.0..1.0` are rejected.

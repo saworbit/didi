@@ -88,8 +88,8 @@ For API details outside that limited map, inspect the project or use official Go
 - After changing a source asset, call live editor-only `asset_reimport` and require `idle: true` before drawing conclusions from a capture.
 - `project_get_uid_map` returns discovered UID mappings.
 - `resource_inspect` returns indexed metadata and dependencies, not arbitrary inner Resource properties.
-- `resource_create` writes textual `.tres` content and does not validate arbitrary Resource classes in Godot.
-- `viewport_create_test_lab` writes a basic sandbox `.tscn`; open or run it explicitly before visual conclusions.
+- `resource_create` writes textual `.tres` content and does not validate arbitrary Resource classes in Godot. It preserves an existing target unless destructive replacement is explicitly authorized with `overwrite: true`.
+- `viewport_create_test_lab` writes a basic sandbox `.tscn` and preserves an existing sandbox unless `overwrite: true` is explicit; open or run it explicitly before visual conclusions.
 
 ### Run a scene or test
 

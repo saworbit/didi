@@ -919,7 +919,8 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"target_resource_path", {{"type", "string"}}},
                 {"environment", {{"type", "string"}, {"default", "studio_neutral"}}},
                 {"orthographic", {{"type", "boolean"}, {"default", false}}},
-                {"camera_rig", {{"type", "array"}, {"default", {"front", "top", "isometric"}}, {"description", "Metadata only; generated scene contains front, top, and isometric cameras"}}}
+                {"camera_rig", {{"type", "array"}, {"default", {"front", "top", "isometric"}}, {"description", "Metadata only; generated scene contains front, top, and isometric cameras"}}},
+                {"overwrite", {{"type", "boolean"}, {"default", false}}}
             }},
             {"required", {"target_resource_path"}}
         };
@@ -1099,7 +1100,8 @@ void ToolRegistry::registerAllDefaultTools() {
             {"properties", {
                 {"resource_type", {{"type", "string"}, {"default", "StandardMaterial3D"}}},
                 {"save_path", {{"type", "string"}, {"description", "Target res:// path"}}},
-                {"properties", {{"type", "object"}}}
+                {"properties", {{"type", "object"}}},
+                {"overwrite", {{"type", "boolean"}, {"default", false}}}
             }},
             {"required", {"save_path"}}
         };

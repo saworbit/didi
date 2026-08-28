@@ -5,6 +5,9 @@
 #include "didi/gdextension/editor_hook.hpp"
 
 #include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <unordered_set>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
@@ -82,6 +85,35 @@ public:
             99, "editor", "C:/project", "\\\\.\\pipe\\godot_didi_99", 1, "1.3"};
     }
 };
+
+class ScopedToolProject final {
+public:
+    explicit ScopedToolProject(const std::string& suffix)
+        : m_original(std::filesystem::current_path()),
+          m_root(m_original / "build" / "test-projects" /
+                 ("didi-tool-test-" + suffix + "-" +
+                  std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()))) {
+        std::filesystem::create_directories(m_root);
+        std::filesystem::current_path(m_root);
+    }
+
+    ~ScopedToolProject() {
+        std::error_code error;
+        std::filesystem::current_path(m_original, error);
+        std::filesystem::remove_all(m_root, error);
+    }
+
+private:
+    std::filesystem::path m_original;
+    std::filesystem::path m_root;
+};
+
+static std::string readToolTestFile(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    std::ostringstream contents;
+    contents << input.rdbuf();
+    return contents.str();
+}
 
 static void test_mcp_server_preserves_injected_ipc_client() {
     didi::mcp::McpServer server;
@@ -249,6 +281,71 @@ static void test_tool_registry_default_tools() {
     }) {
         ASSERT_TRUE(reg.getTool(name) != nullptr);
     }
+}
+
+static void test_offline_writer_schemas_require_explicit_overwrite() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    for (const auto* name : {"resource_create", "viewport_create_test_lab",
+                             "create_visual_test_lab"}) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        const auto& overwrite = tool->inputSchema["properties"]["overwrite"];
+        ASSERT_EQ(overwrite["type"], "boolean");
+        ASSERT_EQ(overwrite["default"], false);
+    }
+}
+
+static void test_resource_create_preserves_existing_file_without_overwrite() {
+    ScopedToolProject project("resource-overwrite");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const didi::json first_args = {
+        {"save_path", "res://materials/guarded.tres"},
+        {"resource_type", "StandardMaterial3D"},
+        {"properties", {{"roughness", 0.25}}}
+    };
+    const auto first_result = registry.callTool("resource_create", first_args);
+    if (first_result.isError) {
+        throw std::runtime_error("Initial resource_create failed: " + first_result.content[0].text);
+    }
+    const auto path = std::filesystem::path("materials/guarded.tres");
+    const auto original = readToolTestFile(path);
+    ASSERT_TRUE(!original.empty());
+
+    auto changed_args = first_args;
+    changed_args["properties"]["roughness"] = 0.9;
+    const auto rejected = registry.callTool("resource_create", changed_args);
+    ASSERT_TRUE(rejected.isError);
+    ASSERT_EQ(readToolTestFile(path), original);
+
+    changed_args["overwrite"] = true;
+    ASSERT_TRUE(!registry.callTool("resource_create", changed_args).isError);
+    ASSERT_TRUE(readToolTestFile(path) != original);
+}
+
+static void test_visual_lab_preserves_existing_file_without_overwrite() {
+    ScopedToolProject project("visual-lab-overwrite");
+    std::filesystem::create_directories("addons/didi");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    didi::json args = {{"target_resource_path", "res://models/hero.glb"},
+                       {"orthographic", false}};
+    ASSERT_TRUE(!registry.callTool("viewport_create_test_lab", args).isError);
+    const auto path = std::filesystem::path("addons/didi/test_lab_sandbox.tscn");
+    const auto original = readToolTestFile(path);
+    ASSERT_TRUE(!original.empty());
+
+    args["orthographic"] = true;
+    const auto rejected = registry.callTool("create_visual_test_lab", args);
+    ASSERT_TRUE(rejected.isError);
+    ASSERT_EQ(readToolTestFile(path), original);
+
+    args["overwrite"] = true;
+    ASSERT_TRUE(!registry.callTool("create_visual_test_lab", args).isError);
+    ASSERT_TRUE(readToolTestFile(path) != original);
 }
 
 static void test_project_search_public_validation_and_schema() {
@@ -831,6 +928,12 @@ static void test_symbol_extraction() {
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.DefaultRegistration", test_tool_registry_default_tools);
+        registerTest("Tools.OfflineWriterOverwriteSchemas",
+                     test_offline_writer_schemas_require_explicit_overwrite);
+        registerTest("Tools.ResourceCreateOverwriteGuard",
+                     test_resource_create_preserves_existing_file_without_overwrite);
+        registerTest("Tools.VisualLabOverwriteGuard",
+                     test_visual_lab_preserves_existing_file_without_overwrite);
         registerTest("Tools.ProjectSearchPublicValidationAndSchema", test_project_search_public_validation_and_schema);
         registerTest("Tools.AssetReimportPublicValidationAndSchema", test_asset_reimport_public_validation_and_schema);
         registerTest("Tools.ViewportDiffPublicValidationAndSchema", test_viewport_diff_public_validation_and_schema);

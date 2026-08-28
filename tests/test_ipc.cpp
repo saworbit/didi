@@ -500,6 +500,20 @@ static void test_win32_server_drops_slow_partial_frame() {
     server->stop();
     ASSERT_TRUE(!connection_alive);
 }
+
+static void test_win32_server_fails_closed_without_security_descriptor() {
+    const auto name = rawPipeName("security-descriptor-failure");
+    auto server = didi::ipc::testing::createIpcServerWithSecurityDescriptorFactory(
+        []() -> void* { return nullptr; });
+
+    ASSERT_TRUE(!server->start(name));
+    ASSERT_TRUE(!server->isRunning());
+
+    const HANDLE pipe = CreateFileA(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                                    OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
+    ASSERT_TRUE(pipe == INVALID_HANDLE_VALUE);
+    ASSERT_TRUE(GetLastError() == ERROR_FILE_NOT_FOUND);
+}
 #endif
 
 #if !defined(_WIN32)
@@ -659,6 +673,7 @@ struct RegisterIpcTests {
         registerTest("IPC.Win32PostAcceptFailure", test_win32_post_accept_failure_is_structured_and_quarantines);
         registerTest("IPC.Win32MalformedResponse", test_win32_malformed_response_is_structured_and_quarantines);
         registerTest("IPC.Win32ServerFrameDeadline", test_win32_server_drops_slow_partial_frame);
+        registerTest("IPC.Win32SecurityDescriptorFailClosed", test_win32_server_fails_closed_without_security_descriptor);
 #else
         registerTest("IPC.PosixFragmentedHeader", test_posix_client_accepts_fragmented_response_header);
         registerTest("IPC.PosixSingleDeadline", test_posix_client_uses_one_deadline_for_slow_trickle);
