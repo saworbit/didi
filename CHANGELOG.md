@@ -11,7 +11,10 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
-No unreleased changes.
+### Fixed
+
+- Preserved ordinary comments when replacing GDScript symbols.
+- Preserved explicit `null` JSON-RPC success results.
 
 ## [1.4.0] - 2026-08-28
 
