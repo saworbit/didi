@@ -3,6 +3,7 @@
 #include <fstream>
 #include <regex>
 #include <algorithm>
+#include <array>
 
 namespace didi {
 namespace offline {
@@ -30,18 +31,28 @@ std::string ResourceIndexer::detectResourceType(const std::string& ext) {
 
 std::string ResourceIndexer::extractUidFromFile(const std::string& file_path) {
     std::ifstream file(file_path);
-    if (!file.is_open()) return "";
-
-    std::string line;
-    // Check first 10 lines for uid="..."
-    int count = 0;
     static const std::regex uid_regex(R"re(uid="(uid:\/\/[^"]+)")re");
-    while (std::getline(file, line) && count++ < 10) {
-        std::smatch match;
-        if (std::regex_search(line, match, uid_regex) && match.size() > 1) {
-            return match[1].str();
+    if (file.is_open()) {
+        std::string line;
+        int count = 0;
+        while (std::getline(file, line) && count++ < 10) {
+            std::smatch match;
+            if (std::regex_search(line, match, uid_regex) && match.size() > 1) {
+                return match[1].str();
+            }
         }
     }
+
+    std::ifstream sidecar(file_path + ".uid", std::ios::binary);
+    if (!sidecar.is_open()) return "";
+    std::array<char, 257> buffer{};
+    sidecar.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+    const auto bytes_read = sidecar.gcount();
+    if (bytes_read > 256) return "";
+    const std::string uid = strings::trim(
+        std::string(buffer.data(), static_cast<size_t>(bytes_read)));
+    static const std::regex sidecar_uid_regex(R"re(^uid:\/\/[A-Za-z0-9_]+$)re");
+    if (std::regex_match(uid, sidecar_uid_regex)) return uid;
     return "";
 }
 
