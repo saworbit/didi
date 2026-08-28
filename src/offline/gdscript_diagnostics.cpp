@@ -1,4 +1,5 @@
 #include "didi/offline/gdscript_diagnostics.hpp"
+#include "didi/offline/test_runner.hpp"
 #include "didi/common/logger.hpp"
 #include <fstream>
 #include <sstream>
@@ -6,7 +7,10 @@
 #include <filesystem>
 #include <cstdlib>
 #include <chrono>
+#include <cctype>
+#include <optional>
 #include <thread>
+#include <utility>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -128,7 +132,12 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& fi
         };
 
         for (const auto& kw : block_keywords) {
-            if (strings::startsWith(trimmed, kw)) {
+            const bool keyword_matches = kw == "else"
+                ? (trimmed == "else" ||
+                   (trimmed.size() > 4 &&
+                    (trimmed[4] == ':' || std::isspace(static_cast<unsigned char>(trimmed[4])))))
+                : strings::startsWith(trimmed, kw);
+            if (keyword_matches) {
                 // If statement doesn't end with : and no trailing comment
                 std::string code_part = trimmed;
                 auto hash_pos = code_part.find('#');
@@ -233,9 +242,8 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const s
 
 #if defined(_WIN32)
     std::string win_command_line = "\"" + godot_exe + "\" --headless --check-only -s \"" + actual_path + "\"";
-    if (strings::endsWith(godot_exe, ".cmd") || strings::endsWith(godot_exe, ".bat")) {
-        win_command_line = "cmd.exe /c \"" + win_command_line + "\"";
-    }
+    auto process_command = detail::makeWindowsProcessCommand(godot_exe, win_command_line);
+    if (!process_command) return diags;
 
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(SECURITY_ATTRIBUTES);
@@ -248,9 +256,9 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const s
     }
     SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
 
-    STARTUPINFOA si;
-    ZeroMemory(&si, sizeof(STARTUPINFOA));
-    si.cb = sizeof(STARTUPINFOA);
+    STARTUPINFOW si;
+    ZeroMemory(&si, sizeof(STARTUPINFOW));
+    si.cb = sizeof(STARTUPINFOW);
     si.hStdError = hWritePipe;
     si.hStdOutput = hWritePipe;
     si.dwFlags |= STARTF_USESTDHANDLES;
@@ -258,10 +266,15 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const s
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof(PROCESS_INFORMATION));
 
-    std::vector<char> cmd_writable(win_command_line.begin(), win_command_line.end());
-    cmd_writable.push_back('\0');
+    std::vector<wchar_t> cmd_writable(process_command->command_line.begin(),
+                                      process_command->command_line.end());
+    cmd_writable.push_back(L'\0');
+    const wchar_t* application_name = process_command->application_name.empty()
+                                        ? nullptr
+                                        : process_command->application_name.c_str();
 
-    if (CreateProcessA(NULL, cmd_writable.data(), NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
+    if (CreateProcessW(application_name, cmd_writable.data(), NULL, NULL, TRUE, 0,
+                       NULL, NULL, &si, &pi)) {
         CloseHandle(hWritePipe);
 
         auto start_time = std::chrono::steady_clock::now();
@@ -363,25 +376,57 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const s
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
             }
             close(pipefd[0]);
+        } else {
+            close(pipefd[0]);
+            close(pipefd[1]);
         }
     }
 #endif
 
-    // Parse errors like: "SCRIPT ERROR: Parse Error: ... at res://...:12"
-    static const std::regex err_regex(R"re((SCRIPT ERROR|ERROR|WARNING): (.*) at (res:\/\/[^:]+):(\d+))re");
-    auto words_begin = std::sregex_iterator(output.begin(), output.end(), err_regex);
-    auto words_end = std::sregex_iterator();
+    static const std::regex inline_location(
+        R"re(^\s*(SCRIPT ERROR|ERROR|WARNING):\s*(.*?)\s+at\s+(res:\/\/.+):(\d+)\s*$)re");
+    static const std::regex message_line(
+        R"re(^\s*(SCRIPT ERROR|ERROR|WARNING):\s*(.*)\s*$)re");
+    static const std::regex location_line(
+        R"re(^\s*at:\s+\S+\s+\((res:\/\/.+):(\d+)\)\s*$)re");
 
-    for (std::sregex_iterator i = words_begin; i != words_end; ++i) {
-        std::smatch match = *i;
-        ScriptDiagnostic d;
-        std::string type = match[1].str();
-        d.severity = (type.find("WARNING") != std::string::npos) ? "warning" : "error";
-        d.message = match[2].str();
-        d.line = std::stoi(match[4].str());
-        d.column = 1;
-        d.rule = "godot_compiler";
-        diags.push_back(d);
+    std::optional<std::pair<std::string, std::string>> pending_message;
+    for (const auto& line : strings::split(output, '\n')) {
+        std::smatch match;
+        if (std::regex_match(line, match, inline_location)) {
+            ScriptDiagnostic diagnostic;
+            diagnostic.severity = match[1].str().find("WARNING") != std::string::npos
+                                      ? "warning" : "error";
+            diagnostic.message = match[2].str();
+            diagnostic.line = std::stoi(match[4].str());
+            diagnostic.rule = "godot_compiler";
+            diags.push_back(std::move(diagnostic));
+            pending_message.reset();
+            continue;
+        }
+        if (std::regex_match(line, match, message_line)) {
+            pending_message = std::make_pair(match[1].str(), match[2].str());
+            if (pending_message->second.find("Failed to load script") != std::string::npos) {
+                ScriptDiagnostic diagnostic;
+                diagnostic.severity = pending_message->first.find("WARNING") != std::string::npos
+                                          ? "warning" : "error";
+                diagnostic.message = pending_message->second;
+                diagnostic.rule = "godot_compiler";
+                diags.push_back(std::move(diagnostic));
+                pending_message.reset();
+            }
+            continue;
+        }
+        if (pending_message && std::regex_match(line, match, location_line)) {
+            ScriptDiagnostic diagnostic;
+            diagnostic.severity = pending_message->first.find("WARNING") != std::string::npos
+                                      ? "warning" : "error";
+            diagnostic.message = pending_message->second;
+            diagnostic.line = std::stoi(match[2].str());
+            diagnostic.rule = "godot_compiler";
+            diags.push_back(std::move(diagnostic));
+            pending_message.reset();
+        }
     }
 
     return diags;
