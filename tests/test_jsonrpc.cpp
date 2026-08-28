@@ -34,6 +34,18 @@ static void test_jsonrpc_response_serialization() {
     ASSERT_TRUE(json_str.find("\"jsonrpc\":\"2.0\"") != std::string::npos);
 }
 
+static void test_jsonrpc_null_result_serialization() {
+    auto resp = didi::mcp::JsonRpcResponse::makeSuccess(42, nullptr);
+
+    auto response_json = resp.toJson();
+    ASSERT_TRUE(response_json.contains("result"));
+    ASSERT_TRUE(response_json["result"].is_null());
+
+    auto serialized_json = didi::json::parse(resp.serialize());
+    ASSERT_TRUE(serialized_json.contains("result"));
+    ASSERT_TRUE(serialized_json["result"].is_null());
+}
+
 static void test_mcp_initialize() {
     didi::mcp::McpServer server;
     didi::mcp::JsonRpcRequest req;
@@ -115,6 +127,7 @@ struct RegisterJsonRpcTests {
         registerTest("JsonRpc.ParseValid", test_jsonrpc_parse_valid);
         registerTest("JsonRpc.ParseNotification", test_jsonrpc_parse_notification);
         registerTest("JsonRpc.ResponseSerialization", test_jsonrpc_response_serialization);
+        registerTest("JsonRpc.NullResultSerialization", test_jsonrpc_null_result_serialization);
         registerTest("McpServer.Initialize", test_mcp_initialize);
         registerTest("McpServer.ToolAvailability", test_mcp_tool_list_reports_current_availability);
         registerTest("McpServer.OutputLoggingRedactsBodies",
