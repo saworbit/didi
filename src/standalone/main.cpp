@@ -1,5 +1,6 @@
 #include "didi/mcp/mcp_server.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/project_path.hpp"
 #include <iostream>
 #include <csignal>
 
@@ -65,17 +66,18 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    if (!project_root.empty()) {
-        try {
-            if (std::filesystem::exists(project_root)) {
-                std::filesystem::current_path(project_root);
-                DIDI_LOG_INFO("MAIN", "Set working directory to Godot project root: ", project_root);
-            } else {
-                DIDI_LOG_WARN("MAIN", "Specified project root does not exist: ", project_root);
-            }
-        } catch (const std::exception& e) {
-            DIDI_LOG_ERROR("MAIN", "Failed to change working directory to project root: ", e.what());
-        }
+    const auto resolved_project = didi::paths::resolveExplicitProjectRoot(project_root);
+    if (resolved_project.isErr()) {
+        std::cerr << "Didi startup refused: " << resolved_project.error().message << std::endl;
+        return 2;
+    }
+    try {
+        std::filesystem::current_path(resolved_project.value());
+        DIDI_LOG_INFO("MAIN", "Set working directory to explicit Godot project root: ",
+                      didi::paths::projectPathToUtf8(resolved_project.value()));
+    } catch (const std::exception& e) {
+        DIDI_LOG_ERROR("MAIN", "Failed to change working directory to project root: ", e.what());
+        return 2;
     }
 
     DIDI_LOG_INFO("MAIN", "Starting Didi MCP Native Server v1.4.0 for Godot 4.5+...");

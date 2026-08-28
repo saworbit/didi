@@ -136,7 +136,7 @@ Add to your `mcp_config.json`:
 **A:** Didi retains the full protocol surface for compatibility. Inspect `_meta.didi` from `tools/list`; only call entries with `implemented: true`, and require `currentMode: "live"` for live-only tools. See [Current Capability Matrix](CAPABILITIES.md).
 
 ### Q: Is there any network port conflict?
-**A:** Didi uses process-unique local Windows named pipes (`\\.\pipe\godot_didi_<pid>_<session-id>`) or POSIX Unix-domain sockets instead of TCP, so it does not allocate a network port or require a firewall rule.
+**A:** Didi uses project-keyed process-unique local Windows named pipes (`\\.\pipe\godot_didi_<project-key>_<pid>_<session-id>`) or POSIX Unix-domain sockets instead of TCP, so it does not allocate a network port or require a firewall rule.
 
 Phase 3 discovers endpoints from access-controlled descriptors and authenticates each request. Default POSIX paths are owner-only; Windows descriptors/endpoints allow the owning SID and local administrators. `--pipe-name`/`DIDI_PIPE_NAME` remains a legacy/direct IPC override and is not required for process-unique session routing.
 
@@ -146,7 +146,7 @@ Phase 3 discovers endpoints from access-controlled descriptors and authenticates
 
 `tools/list` returns 78 canonical tools and 10 legacy registrations. Integrators should treat the four session-management tools as local operations even though their discovery metadata uses the existing `offline_fallback` capability label:
 
-1. Start Didi with `--project <canonical-project-root>`.
+1. Start Didi with `--project <canonical-project-root>` (or `DIDI_PROJECT_ROOT`). Phase 6 rejects startup if the explicit directory is missing or does not contain `project.godot`.
 2. Didi may auto-attach on first availability when there is one live project match, or one matching editor among games. Multiple editors or multiple games without an editor stay detached.
 3. Call `runtime_list_sessions`, then `runtime_attach_session` with an exact `session_id` and `kind` whenever auto-selection is unavailable or not the intended route. A 3-second token-authenticated handshake completes before the selected route changes; failed explicit attach preserves the old route.
 4. Call `runtime_get_session` to perform a fresh, at-most-3-second identity handshake and return token-free selection plus handshake metadata. Transport, authentication, or identity failure quarantines that route and returns a structured local-management error. If an explicit route change concurrently supersedes the refresh, it is retained and the stale refresh returns `409`.
@@ -156,6 +156,8 @@ Phase 3 discovers endpoints from access-controlled descriptors and authenticates
 For logs, begin with `{ "cursor": 0, "limit": 100 }` and persist `next_cursor`. Treat `dropped_before_cursor` as a retention gap; a severity filter never changes cursor advancement. Records contain `sequence`, timestamp, level, source, message, and `details`. They are structured Didi events, not arbitrary Godot/external stdout. Use `runtime_launch` for bounded child stdout/stderr.
 
 For games, pause before step, allow only one in-flight `runtime_step`, and do not equate `runtime_stop` success with confirmed process exit. Editor sessions support tree/log/evaluation observation but reject game-only step/stop behavior.
+
+Only one MCP client can hold a runtime session lock. Detach or stop the first client before attaching another. For mutating tools, use `dry_run: true` to obtain a change plan; guarded reload/script-patch/overwrite calls must then repeat the exact arguments with the returned single-use `confirmation_token`.
 
 For evaluation, send only expressions supported by the [exact receiver allowlist](TOOL_REFERENCE.md#eval_gdscript--live). The submitted source is intentionally absent from successful responses and operational logs. Context and returned Nodes must remain inside the active editor/game subtree. The timeout is cooperative, not preemptive.
 

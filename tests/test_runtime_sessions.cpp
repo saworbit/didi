@@ -271,7 +271,7 @@ void test_session_host_prepares_private_unique_descriptor_and_authorizes_without
     const auto [process_started_at_ms, process_resolution_ms] = currentProcessStartIdentity();
     ASSERT_TRUE(std::llabs(descriptor->started_at_ms - process_started_at_ms) <= process_resolution_ms);
     ASSERT_TRUE(descriptor->endpoint.find(std::to_string(descriptor->pid)) != std::string::npos);
-    ASSERT_TRUE(descriptor->endpoint.find(descriptor->session_id) != std::string::npos);
+    ASSERT_TRUE(descriptor->endpoint.find(descriptor->session_id.substr(0, 12)) != std::string::npos);
     ASSERT_TRUE(std::filesystem::is_empty(directory));
 
     const auto missing_token = host.authorize({{"method", "session.handshake"}, {"params", didi::json::object()}});
@@ -639,6 +639,8 @@ void test_session_attach_keeps_existing_route_when_candidate_handshake_fails() {
     ASSERT_TRUE(routed.value()["endpoint"].get<std::string>().find(healthy_id) != std::string::npos);
     ASSERT_EQ(routed.value()["token"], std::string(64, 'a'));
 
+    client->disconnect();
+
 #if defined(_WIN32)
     _putenv_s("DIDI_SESSION_DIR", "");
 #else
@@ -679,6 +681,8 @@ void test_session_attach_rejects_semantically_invalid_handshakes_without_replaci
         ASSERT_TRUE(routed.isOk());
         ASSERT_TRUE(routed.value()["endpoint"].get<std::string>().find(healthy_id) != std::string::npos);
     }
+
+    client->disconnect();
 
 #if defined(_WIN32)
     _putenv_s("DIDI_SESSION_DIR", "");
@@ -899,6 +903,7 @@ void test_session_discovery_reads_the_validated_descriptor_object() {
     ASSERT_TRUE(client->attachSession(session_id).isOk());
     ASSERT_TRUE(swapped);
 
+    client->disconnect();
     clearSessionDirectory();
     std::filesystem::remove_all(directory);
 }

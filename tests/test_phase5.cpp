@@ -124,6 +124,14 @@ TEST(Phase5, ParsesGodot45DummyRendererShaderDiagnostic) {
     ASSERT_EQ(diagnostics[0].line, 4);
 }
 
+TEST(Phase5, IsolatedGodotSubprocessesUseScriptCompatibleHeadlessArguments) {
+    const auto arguments = didi::offline::isolatedGodotArguments(
+        {"--path", "D:/game", "--script", "probe.gd"});
+    ASSERT_EQ(arguments[0], "--headless");
+    ASSERT_EQ(arguments[1], "--path");
+    ASSERT_EQ(arguments.size(), 5u);
+}
+
 TEST(Phase5, ExportPresetParserReturnsOnlyPublicFields) {
     const auto presets = parseExportPresets(
         "[preset.0]\n"

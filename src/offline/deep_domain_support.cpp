@@ -5,6 +5,13 @@
 #include <set>
 
 namespace didi::offline {
+
+std::vector<std::string> isolatedGodotArguments(std::vector<std::string> arguments) {
+    std::vector<std::string> isolated = {"--headless"};
+    isolated.reserve(arguments.size() + 1);
+    for (auto& argument : arguments) isolated.push_back(std::move(argument));
+    return isolated;
+}
 namespace {
 
 constexpr size_t kMaxDiagnostics = 1000;

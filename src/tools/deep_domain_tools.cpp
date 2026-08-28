@@ -6,10 +6,13 @@
 #include "didi/offline/test_runner.hpp"
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
+#include <optional>
 #include <cmath>
 #include <set>
 #include <sstream>
@@ -162,9 +165,46 @@ private:
     std::filesystem::path path_;
 };
 
+class ScopedOfflineHelperEnvironment {
+public:
+    ScopedOfflineHelperEnvironment() {
+        if (const auto* current = std::getenv(offline::kOfflineHelperEnvironment)) {
+            previous_ = current;
+        }
+#if defined(_WIN32)
+        ready_ = _putenv_s(offline::kOfflineHelperEnvironment, "1") == 0;
+#else
+        ready_ = setenv(offline::kOfflineHelperEnvironment, "1", 1) == 0;
+#endif
+    }
+
+    ~ScopedOfflineHelperEnvironment() {
+        if (!ready_) return;
+#if defined(_WIN32)
+        (void)_putenv_s(offline::kOfflineHelperEnvironment,
+                        previous_.has_value() ? previous_->c_str() : "");
+#else
+        if (previous_.has_value()) (void)setenv(offline::kOfflineHelperEnvironment, previous_->c_str(), 1);
+        else (void)unsetenv(offline::kOfflineHelperEnvironment);
+#endif
+    }
+
+    bool ready() const { return ready_; }
+
+private:
+    std::optional<std::string> previous_;
+    bool ready_{false};
+};
+
 Result<offline::ProcessResult> runGodot(const std::filesystem::path& root,
                                         std::vector<std::string> arguments,
                                         int timeout_seconds) {
+    static std::mutex environment_mutex;
+    std::lock_guard<std::mutex> environment_lock(environment_mutex);
+    ScopedOfflineHelperEnvironment offline_environment;
+    if (!offline_environment.ready()) {
+        return Error::internal("Unable to isolate the offline Godot helper environment");
+    }
     offline::ProcessRequest request;
     request.executable = offline::resolveGodotExecutable();
     request.arguments = std::move(arguments);
@@ -320,8 +360,9 @@ CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::I
     if (timeout.isErr()) return CallToolResult::error(timeout.error().message);
     auto helper = TemporaryScript::create("shader-check", shaderHelperSource());
     if (helper.isErr()) return CallToolResult::error(helper.error().message);
-    auto run = runGodot(root.value(), {"--headless", "--path", paths::projectPathToUtf8(root.value()),
-                        "--script", paths::projectPathToUtf8(helper.value().path()), "--", requested}, timeout.value());
+    auto run = runGodot(root.value(), offline::isolatedGodotArguments(
+        {"--path", paths::projectPathToUtf8(root.value()), "--script",
+         paths::projectPathToUtf8(helper.value().path()), "--", requested}), timeout.value());
     if (run.isErr()) return CallToolResult::error("Failed to run Godot shader compiler: " + run.error().message);
     if (run.value().timed_out) return CallToolResult::error("Shader compilation timed out before completion");
     auto diagnostics = offline::parseGodotDiagnostics(run.value().output);
@@ -394,8 +435,9 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
     if (error) return CallToolResult::error("Failed to create export output directory");
     const std::string flag = mode == "pack" ? "--export-pack" :
                              mode == "debug" ? "--export-debug" : "--export-release";
-    auto run = runGodot(root.value(), {"--headless", "--path", paths::projectPathToUtf8(root.value()),
-                        flag, preset, paths::projectPathToUtf8(output.value())}, timeout.value());
+    auto run = runGodot(root.value(), offline::isolatedGodotArguments(
+        {"--path", paths::projectPathToUtf8(root.value()), flag, preset,
+         paths::projectPathToUtf8(output.value())}), timeout.value());
     if (run.isErr()) return CallToolResult::error("Failed to launch Godot export: " + run.error().message);
     if (run.value().timed_out) return CallToolResult::error("Project export timed out; output status is unknown");
     if (run.value().exit_code != 0) return CallToolResult::error("Godot export failed: " + run.value().output);
@@ -449,9 +491,10 @@ CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<
     auto helper = TemporaryScript::create("mesh-library", meshLibraryHelperSource());
     if (helper.isErr()) return CallToolResult::error(helper.error().message);
     const std::string output_res = asResPath(root.value(), output.value());
-    auto run = runGodot(root.value(), {"--headless", "--path", paths::projectPathToUtf8(root.value()),
-                        "--script", paths::projectPathToUtf8(helper.value().path()), "--", source_request,
-                        output_res, args.value("generate_collisions", true) ? "true" : "false"}, timeout.value());
+    auto run = runGodot(root.value(), offline::isolatedGodotArguments(
+        {"--path", paths::projectPathToUtf8(root.value()), "--script",
+         paths::projectPathToUtf8(helper.value().path()), "--", source_request,
+         output_res, args.value("generate_collisions", true) ? "true" : "false"}), timeout.value());
     if (run.isErr()) return CallToolResult::error("Failed to launch MeshLibrary conversion: " + run.error().message);
     if (run.value().timed_out) return CallToolResult::error("MeshLibrary conversion timed out; output status is unknown");
     if (run.value().exit_code != 0) return CallToolResult::error("MeshLibrary conversion failed: " + run.value().output);

@@ -19,7 +19,7 @@ This guide covers deployment, security controls, system configuration, monitorin
 ## 🔒 Security & Access Control
 
 ### 1. Named Pipe Security Descriptor (Windows)
-Didi provisions each process-unique session pipe (`\\.\pipe\godot_didi_<pid>_<session-id>`) with an explicit SDDL Discretionary Access Control List (DACL):
+Didi provisions each project-keyed, process-unique session pipe (`\\.\pipe\godot_didi_<project-key>_<pid>_<session-id>`) with an explicit SDDL Discretionary Access Control List (DACL):
 ```
 D:(A;;GA;;;BA)(A;;GA;;;OW)
 ```
@@ -51,12 +51,12 @@ Administrators can configure Didi globally or per-service using standard environ
 | :--- | :--- | :--- | :--- |
 | `GODOT_BIN` | File path | Auto-detected | Path to the Godot binary executable (e.g. `C:\Godot\Godot_v4.7.2-stable_win64_console.exe` or `/usr/bin/godot`) |
 | `GODOT_PATH` | Directory path | Auto-detected | Directory or path containing Godot executable |
-| `DIDI_PROJECT_ROOT` | Directory path | Current directory | Root folder of the target Godot project (e.g. `D:/my_game`) |
+| `DIDI_PROJECT_ROOT` | Directory path | Required unless `--project` is supplied | Root folder of the target Godot project containing `project.godot` (e.g. `D:/my_game`) |
 | `DIDI_LOG_LEVEL` | `DEBUG`, `INFO`, `WARN`, `ERROR`, `NONE` | `INFO` | Stderr logging verbosity |
 | `DIDI_PIPE_NAME` | Pipe / Socket Path | Default | Override Named Pipe / UNIX domain socket path |
 | `DIDI_SESSION_DIR` | Directory path | Windows: `<OS temp>/didi-sessions`; POSIX: `$XDG_RUNTIME_DIR/didi-sessions`, otherwise `<OS temp>/didi-sessions-<euid>` | Controlled test/deployment override for the descriptor registry; Didi validates paths/handles but the operator must provision access controls appropriate to the host. |
 
-`DIDI_PIPE_NAME` remains available for legacy/direct IPC configuration. Phase 3 session routing uses process-unique descriptor endpoints instead. Do not share `DIDI_SESSION_DIR` across OS users.
+`DIDI_PIPE_NAME` remains available for legacy/direct IPC configuration. Phase 6 session routing uses project-keyed process-unique descriptor endpoints and owner-only `.lock` files in the session directory. Do not share `DIDI_SESSION_DIR` across OS users. Start one MCP client per editor/game session; a second explicit attach returns `423 Locked`.
 
 Godot discovery recognizes common 4.5.1, 4.6.2, and 4.7.2 Windows console/editor filenames under `GODOT_PATH` or `C:\Godot`, plus `godot`, `godot4`, standard `/usr` and `/usr/local` binary paths, `/opt/godot/godot`, and the standard macOS app bundle. Set `GODOT_BIN` to the exact executable when installations use another name or layout; Windows `.cmd` and `.bat` wrappers are launched through the trusted System32 `cmd.exe`, including when the wrapper path contains non-ASCII characters.
 

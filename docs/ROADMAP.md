@@ -1,7 +1,7 @@
 # Didi Strategic Roadmap & Technical Build Order 🗺️
 
 > **Core Philosophy**:
-> The 78-tool canonical surface includes completed Phases 1–5: live editor substrate, project wiring, authenticated editor/game runtime sessions, bounded search/reimport/visual verification, and deep-domain diagnostics/export/UI support. The next milestone is Phase 6 enterprise safety.
+> The 78-tool canonical surface includes completed Phases 1–6: live editor substrate, project wiring, authenticated runtime sessions, autonomous verification, deep-domain workflows, and enterprise safety controls.
 
 ---
 
@@ -110,7 +110,21 @@ The shared process runner caps combined output at 1 MiB, kills child process gro
 
 ---
 
-## 🚀 Remaining Capabilities After Phase 5
+## ✅ Phase 6: Enterprise Safety (COMPLETE — 2026-08-28)
+
+Phase 6 hardens the existing surface without adding tool names:
+
+- Standalone startup requires an explicit canonical Godot project through `--project` or `DIDI_PROJECT_ROOT` and fails before MCP initialization when `project.godot` is absent.
+- Runtime pipe/socket names include a stable 16-hex project key plus process/session uniqueness; descriptor authentication remains unchanged.
+- An owner-only OS file lock binds one MCP client to each runtime session. Lock release is kernel-backed on normal exit and process termination, so another client receives `423` instead of silently queueing.
+- Every implemented mutation advertises `dry_run` and returns a non-executing structured plan bound to project and route generation.
+- Editor reload, script patching, and overwrite-enabled offline writers require an exact 120-second single-use confirmation token. Argument, project, session, route, expiry, and replay mismatches fail closed.
+
+The native red-team contract covers invalid roots, project-key isolation, lock exclusion/release, preview non-execution, missing confirmation, tampering, route/context changes, expiry, replay, and schema honesty. The canonical/legacy counts remain 78/10.
+
+---
+
+## 🚀 Remaining Capabilities After Phase 6
 
 These are missing capabilities that an AI agent actually requires to complete full development cycles and ship Godot changes.
 
@@ -136,15 +150,6 @@ These are missing capabilities that an AI agent actually requires to complete fu
 - **Structured Workflows (Prompts)**: Encode guided multi-step agent prompts (*Create Character*, *Wire Signal*, *Visual Verification Loop*).
 - **Structured Engine Logging**: Support `logging/setLevel` and stream Godot engine warnings and errors into MCP notifications.
 
-### 10. Multi-Project Hardening & Enterprise Safety
-- **Per-Project Pipe/Socket Isolation**: Derive pipe names from project paths or editor PIDs (`\\.\pipe\godot_didi_<project_hash>`).
-- **Explicit Project Enforcement**: Refuse execution against Didi's own repository CWD; require explicit `--project`.
-- **Mutation Previews & Dry-Runs**: Allow agents to preview AST/scene diffs before committing transactions.
-- **Confirm-Before-Write**: Safe safeguards for `editor_reload_project` and destructive file modifications.
-- **Session Locking**: Ensure one MCP client per active editor instance.
-
----
-
 ## 🚫 What NOT to Add Yet
 
 - ❌ **Do NOT add more domain stubs** (e.g. `audio_bus_*`, `multiplayer_*`, `particle_*`, `xr_*`) until Domains 1–4 are actively mutating Godot.
@@ -163,6 +168,7 @@ These are missing capabilities that an AI agent actually requires to complete fu
 | **Phase 3 (DONE)** | **`eval_gdscript`, Runtime Log Stream, Attach-to-Running** | Verified authenticated concurrent editor/game routing, bounded controls/logs/tree, and a strict read-only expression subset. |
 | **Phase 4 (DONE)** | **Symbol Search, Asset Reimport, Viewport Diffing & Isolation** | Verified bounded search and reversible live visual feedback against Godot 4.5.1. |
 | **Phase 5 (DONE)** | **C# / Shaders, Project Export, GridMap MeshLibrary, UI Hit-Testing** | Verified bounded diagnostics, guarded delivery, deterministic asset conversion, and live UI inspection against Godot 4.5.1. |
+| **Phase 6 (DONE)** | **Project Isolation, Session Locks, Dry-Run, Confirm-Before-Write** | Verified fail-closed project selection, project-keyed endpoints, one-client leases, and context-bound single-use confirmations. |
 
 ---
 

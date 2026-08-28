@@ -4,9 +4,11 @@
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/editor_hook.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/offline/deep_domain_support.hpp"
 
 #include <array>
 #include <cstddef>
+#include <cstdlib>
 #include <filesystem>
 
 #if defined(_WIN32)
@@ -115,6 +117,9 @@ static void deinitialize_didi_module(void *userdata, GDExtensionInitializationLe
     }
 }
 
+static void initialize_offline_helper(void*, GDExtensionInitializationLevel) {}
+static void deinitialize_offline_helper(void*, GDExtensionInitializationLevel) {}
+
 } // namespace godot
 } // namespace didi
 
@@ -123,6 +128,16 @@ extern "C" {
 GDE_EXPORT GDExtensionBool didi_library_init(GDExtensionInterfaceGetProcAddress p_get_proc_address,
                                             GDExtensionClassLibraryPtr p_library,
                                             GDExtensionInitialization *r_initialization) {
+    const auto* offline_helper = std::getenv(didi::offline::kOfflineHelperEnvironment);
+    if (offline_helper && std::string(offline_helper) == "1") {
+        didi::godot::GodotApi::instance().init(p_get_proc_address, p_library, r_initialization);
+        r_initialization->initialize = didi::godot::initialize_offline_helper;
+        r_initialization->deinitialize = didi::godot::deinitialize_offline_helper;
+        r_initialization->userdata = nullptr;
+        r_initialization->minimum_initialization_level = GDEXTENSION_INITIALIZATION_CORE;
+        DIDI_LOG_INFO("GDEXTENSION", "Didi runtime disabled for isolated offline helper");
+        return 1;
+    }
     didi::godot::GodotApi::instance().init(p_get_proc_address, p_library, r_initialization);
 
     GDExtensionMainLoopCallbacks main_loop_callbacks{};

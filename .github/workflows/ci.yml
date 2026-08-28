@@ -233,12 +233,16 @@ jobs:
           import os
 
           exe = './build/Release/didi.exe' if os.name == 'nt' else './build/didi'
-          proc = subprocess.Popen([exe], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+          project_root = os.path.abspath('tests/godot_smoke')
+          proc = subprocess.Popen([exe, '--project', project_root], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
           def req(method, params, i):
               proc.stdin.write(json.dumps({'jsonrpc': '2.0', 'id': i, 'method': method, 'params': params}) + '\n')
               proc.stdin.flush()
-              return json.loads(proc.stdout.readline())
+              line = proc.stdout.readline()
+              if not line:
+                  raise RuntimeError(proc.stderr.read() or f'didi exited with status {proc.poll()}')
+              return json.loads(line)
 
           assert req('initialize', {'protocolVersion': '2024-11-05'}, 1)['result']['serverInfo']['name'] == 'didi'
           tools = req('tools/list', {}, 2)['result']['tools']
@@ -303,7 +307,7 @@ jobs:
 
           hierarchy = json.loads(req('tools/call', {
               'name': 'get_scene_hierarchy',
-              'arguments': {'root_path': 'res://tests/godot_smoke/main.tscn'}
+              'arguments': {'root_path': 'res://main.tscn'}
           }, 4)['result']['content'][0]['text'])
           assert hierarchy['execution_mode'] == 'offline_fallback'
           assert hierarchy['scene_tree']['path'].startswith('/root/')

@@ -83,7 +83,7 @@ The current documented release is **1.4.0**.
 
 ## 🛠️ Protocol Surface (78 Canonical Tools)
 
-The 78 canonical names are the stable protocol surface, with 10 additional legacy registrations (88 total). Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind` from `tools/list`. `editorConnected` is true only for an editor route, while `liveAvailable` also requires that the selected editor/game kind is allowed for that exact definition. Phase 5 adds bounded C# and shader diagnostics, redacted export-preset discovery, guarded headless export, deterministic MeshLibrary generation, and non-injecting live UI hit-testing. Runtime trees retain the Phase 3 UTF-8 and 256 KiB bounds.
+The 78 canonical names are the stable protocol surface, with 10 additional legacy registrations (88 total). Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind` from `tools/list`. `editorConnected` is true only for an editor route, while `liveAvailable` also requires that the selected editor/game kind is allowed for that exact definition. Phase 6 keeps the surface stable while requiring an explicit Godot project, adding project-keyed endpoints and one-client runtime locks, and exposing dry-run/confirmation controls on mutations.
 
 | Domain | Key Tools | Current execution |
 | :--- | :--- | :--- |
@@ -119,6 +119,10 @@ Every successful live viewport capture returns a 32-lowercase-hex `capture_id` b
 ### Phase 5 deep-domain contract
 
 Process-backed Phase 5 tools launch argv directly without a command shell, enforce per-request deadlines, cap combined output at 1 MiB, and terminate the child process group on timeout. Godot-backed checks require a discoverable Godot 4.5+ executable (or `GODOT_BIN`); C# checks require `dotnet`. Export and MeshLibrary outputs must be normalized project-contained `res://` paths and preserve existing files unless `overwrite: true`. Export-preset listing exposes only public preset identity and routing fields, never option values. `ui_hit_test` traverses at most 10,000 live nodes, applies visibility, clipping, transforms, canvas layer, z-order, draw order, and mouse-filter rules, returns at most 256 hits, and never injects input.
+
+### Phase 6 enterprise-safety contract
+
+Didi now refuses startup without `--project <root>` or `DIDI_PROJECT_ROOT`, and the selected directory must contain `project.godot`. Runtime endpoint names include a stable 16-hex project key while retaining process/session uniqueness. A per-session OS lock permits one MCP client at a time and is released automatically when that client exits. Every implemented mutation advertises `dry_run`; dry-runs return a handler-free structured change plan bound to the exact project and live route. `editor_reload_project`, script patching, and overwrite-enabled offline writers require the 64-hex, 120-second, single-use `confirmation_token` returned by the exact preview.
 
 ---
 

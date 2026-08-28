@@ -1,4 +1,5 @@
 #include "didi/gdextension/session_host.hpp"
+#include "didi/common/project_path.hpp"
 
 #include <array>
 #include <chrono>
@@ -235,14 +236,17 @@ Result<void> SessionHost::prepare(const std::string& kind, const std::string& pr
     }
     descriptor.kind = kind;
     descriptor.project_path = canonicalPath(project_path).string();
+    const auto project_key = paths::projectEndpointKey(descriptor.project_path);
 #if defined(_WIN32)
-    descriptor.endpoint = "\\\\.\\pipe\\godot_didi_" + std::to_string(descriptor.pid) + "_" + descriptor.session_id;
+    descriptor.endpoint = "\\\\.\\pipe\\godot_didi_" + project_key + "_" +
+                          std::to_string(descriptor.pid) + "_" + descriptor.session_id;
 #else
     std::error_code temp_error;
     const auto temp_directory = std::filesystem::temp_directory_path(temp_error);
     if (temp_error) return Error::internal("Unable to resolve the system temporary directory for the IPC endpoint: " + temp_error.message());
     descriptor.endpoint = (temp_directory /
-                           ("godot_didi_" + std::to_string(descriptor.pid) + "_" + descriptor.session_id + ".sock")).string();
+                           ("godot_didi_" + project_key + "_" + std::to_string(descriptor.pid) +
+                            "_" + descriptor.session_id.substr(0, 12) + ".sock")).string();
 #endif
     descriptor.started_at_ms = process_identity.value().started_at_ms;
     descriptor.protocol_version = "1.3";
