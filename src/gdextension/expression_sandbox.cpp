@@ -236,7 +236,7 @@ Result<std::vector<Token>> scanExpression(std::string_view source) {
             index += 2;
             continue;
         }
-        if (character == '-' || character == '*' || character == '/' ||
+        if (character == '+' || character == '-' || character == '*' || character == '/' ||
             character == '!' || character == '<' || character == '>' ||
             character == '&' || character == '|' || character == '^' || character == '~') {
             tokens.push_back({TokenKind::Operator, std::string(1, character), index, index + 1});
@@ -308,7 +308,7 @@ bool isSourceLocalContainer(const std::vector<Token>& tokens, size_t receiver_en
         if (token.kind == TokenKind::String || token.kind == TokenKind::Number ||
             isLiteralIdentifier(token) || token.text == "," || token.text == ":" ||
             token.text == "[" || token.text == "]" || token.text == "{" ||
-            token.text == "}" || token.text == "-") {
+            token.text == "}" || token.text == "+" || token.text == "-") {
             continue;
         }
         return false;
@@ -358,7 +358,8 @@ bool hasOnlySourceLocalNumericArguments(const std::vector<Token>& tokens,
     for (size_t index = call_index + 2; index < tokens.size(); ++index) {
         const auto& token = tokens[index];
         if (token.text == ")") return true;
-        if (token.kind == TokenKind::Number || token.text == "," || token.text == "-") {
+        if (token.kind == TokenKind::Number || token.text == "," ||
+            token.text == "+" || token.text == "-") {
             continue;
         }
         if (token.kind == TokenKind::Identifier &&

@@ -144,8 +144,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             {"capabilities", {
                 {"tools", {{"listChanged", false}}},
                 {"resources", {{"subscribe", false}, {"listChanged", false}}},
-                {"prompts", {{"listChanged", false}}},
-                {"logging", json::object()}
+                {"prompts", {{"listChanged", false}}}
             }},
             {"serverInfo", {
                 {"name", kServerName},

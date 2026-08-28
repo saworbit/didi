@@ -58,7 +58,7 @@ Administrators can configure Didi globally or per-service using standard environ
 
 `DIDI_PIPE_NAME` remains available for legacy/direct IPC configuration. Phase 3 session routing uses process-unique descriptor endpoints instead. Do not share `DIDI_SESSION_DIR` across OS users.
 
-Godot discovery recognizes common 4.5.1, 4.6.2, and 4.7.2 Windows console/editor filenames under `GODOT_PATH` or `C:\Godot`, plus `godot`, `godot4`, standard `/usr` and `/usr/local` binary paths, `/opt/godot/godot`, and the standard macOS app bundle. Set `GODOT_BIN` to the exact executable when installations use another name or layout.
+Godot discovery recognizes common 4.5.1, 4.6.2, and 4.7.2 Windows console/editor filenames under `GODOT_PATH` or `C:\Godot`, plus `godot`, `godot4`, standard `/usr` and `/usr/local` binary paths, `/opt/godot/godot`, and the standard macOS app bundle. Set `GODOT_BIN` to the exact executable when installations use another name or layout; Windows `.cmd` and `.bat` wrappers are launched through the trusted System32 `cmd.exe`, including when the wrapper path contains non-ASCII characters.
 
 ---
 

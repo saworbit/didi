@@ -1,10 +1,12 @@
 #include "didi/offline/test_runner.hpp"
 #include "didi/common/logger.hpp"
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <sstream>
 #include <thread>
 #include <regex>
+#include <limits>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -21,15 +23,115 @@
 namespace didi {
 namespace offline {
 
+#if defined(_WIN32)
+namespace detail {
+
+std::wstring trustedWindowsCommandInterpreter() {
+    std::vector<wchar_t> system_directory(32768);
+    const UINT length = GetSystemDirectoryW(
+        system_directory.data(), static_cast<UINT>(system_directory.size()));
+    if (length == 0 || length >= system_directory.size()) return {};
+    return (std::filesystem::path(system_directory.data()) / L"cmd.exe").wstring();
+}
+
+static std::optional<std::wstring> utf8ToWide(const std::string& value) {
+    if (value.empty()) return std::wstring();
+    if (value.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        return std::nullopt;
+    }
+    const int required = MultiByteToWideChar(
+        CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
+    if (required <= 0) return std::nullopt;
+    std::wstring wide(static_cast<size_t>(required), L'\0');
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
+                            static_cast<int>(value.size()), wide.data(), required) != required) {
+        return std::nullopt;
+    }
+    return wide;
+}
+
+static std::optional<std::string> wideToUtf8(const std::wstring& value) {
+    if (value.empty()) return std::string();
+    if (value.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        return std::nullopt;
+    }
+    const int required = WideCharToMultiByte(
+        CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
+        nullptr, 0, nullptr, nullptr);
+    if (required <= 0) return std::nullopt;
+    std::string utf8(static_cast<size_t>(required), '\0');
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+                            static_cast<int>(value.size()), utf8.data(), required,
+                            nullptr, nullptr) != required) {
+        return std::nullopt;
+    }
+    return utf8;
+}
+
+static std::optional<std::filesystem::path> windowsEnvironmentPath(const wchar_t* name) {
+    const DWORD required = GetEnvironmentVariableW(name, nullptr, 0);
+    if (required == 0) return std::nullopt;
+    std::wstring value(required, L'\0');
+    const DWORD length = GetEnvironmentVariableW(name, value.data(), required);
+    if (length == 0 || length >= required) return std::nullopt;
+    value.resize(length);
+    return std::filesystem::path(std::move(value));
+}
+
+static std::optional<std::string> pathToUtf8(const std::filesystem::path& path) {
+    return wideToUtf8(path.wstring());
+}
+
+std::optional<WindowsProcessCommand> makeWindowsProcessCommand(
+    const std::string& executable,
+    const std::string& command_line) {
+    auto wide_command_line = utf8ToWide(command_line);
+    if (!wide_command_line) return std::nullopt;
+
+    std::string lowercase_executable = executable;
+    std::transform(lowercase_executable.begin(), lowercase_executable.end(),
+                   lowercase_executable.begin(), [](unsigned char character) {
+                       return static_cast<char>(std::tolower(character));
+                   });
+    if (!strings::endsWith(lowercase_executable, ".cmd") &&
+        !strings::endsWith(lowercase_executable, ".bat")) {
+        return WindowsProcessCommand{{}, std::move(*wide_command_line)};
+    }
+
+    auto interpreter = trustedWindowsCommandInterpreter();
+    if (interpreter.empty()) return std::nullopt;
+    std::wstring wrapped = L"\"" + interpreter + L"\" /d /s /c \"" +
+                           *wide_command_line + L"\"";
+    return WindowsProcessCommand{std::move(interpreter), std::move(wrapped)};
+}
+
+} // namespace detail
+#endif
+
 std::string resolveGodotExecutable() {
+#if defined(_WIN32)
+    const auto env_bin = detail::windowsEnvironmentPath(L"GODOT_BIN");
+    if (env_bin && std::filesystem::exists(*env_bin) &&
+        !std::filesystem::is_directory(*env_bin)) {
+        if (auto utf8 = detail::pathToUtf8(*env_bin)) return *utf8;
+    }
+
+    const auto env_path = detail::windowsEnvironmentPath(L"GODOT_PATH");
+#else
     const char* env_bin = std::getenv("GODOT_BIN");
     if (env_bin && std::filesystem::exists(env_bin) && !std::filesystem::is_directory(env_bin)) {
         return std::string(env_bin);
     }
 
     const char* env_path = std::getenv("GODOT_PATH");
+#endif
+#if defined(_WIN32)
+    if (env_path && std::filesystem::exists(*env_path)) {
+        if (std::filesystem::is_directory(*env_path)) {
+#else
     if (env_path && std::filesystem::exists(env_path)) {
         if (std::filesystem::is_directory(env_path)) {
+#endif
             static const std::vector<std::string> dir_candidates = {
 #if defined(_WIN32)
                 "Godot_v4.7.2-stable_win64_console.exe",
@@ -49,13 +151,25 @@ std::string resolveGodotExecutable() {
 #endif
             };
             for (const auto& cand : dir_candidates) {
+#if defined(_WIN32)
+                auto p = *env_path / cand;
+#else
                 auto p = std::filesystem::path(env_path) / cand;
+#endif
                 if (std::filesystem::exists(p)) {
+#if defined(_WIN32)
+                    if (auto utf8 = detail::pathToUtf8(p)) return *utf8;
+#else
                     return p.string();
+#endif
                 }
             }
         } else {
+#if defined(_WIN32)
+            if (auto utf8 = detail::pathToUtf8(*env_path)) return *utf8;
+#else
             return std::string(env_path);
+#endif
         }
     }
 
@@ -134,7 +248,12 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
     DIDI_LOG_INFO("TEST_RUNNER", "Executing: ", command_line);
 
 #if defined(_WIN32)
-    std::string win_command_line = command_line;
+    auto process_command = detail::makeWindowsProcessCommand(godot_exe, command_line);
+    if (!process_command) {
+        result.success = false;
+        result.summary = "Failed to prepare the Windows Godot command line.";
+        return result;
+    }
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(SECURITY_ATTRIBUTES);
     sa.bInheritHandle = TRUE;
@@ -148,9 +267,9 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
     }
     SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
 
-    STARTUPINFOA si;
-    ZeroMemory(&si, sizeof(STARTUPINFOA));
-    si.cb = sizeof(STARTUPINFOA);
+    STARTUPINFOW si;
+    ZeroMemory(&si, sizeof(STARTUPINFOW));
+    si.cb = sizeof(STARTUPINFOW);
     si.hStdError = hWritePipe;
     si.hStdOutput = hWritePipe;
     si.dwFlags |= STARTF_USESTDHANDLES;
@@ -158,10 +277,15 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof(PROCESS_INFORMATION));
 
-    std::vector<char> cmd_writable(win_command_line.begin(), win_command_line.end());
-    cmd_writable.push_back('\0');
+    std::vector<wchar_t> cmd_writable(process_command->command_line.begin(),
+                                      process_command->command_line.end());
+    cmd_writable.push_back(L'\0');
+    const wchar_t* application_name = process_command->application_name.empty()
+                                        ? nullptr
+                                        : process_command->application_name.c_str();
 
-    if (!CreateProcessA(NULL, cmd_writable.data(), NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
+    if (!CreateProcessW(application_name, cmd_writable.data(), NULL, NULL, TRUE, 0,
+                        NULL, NULL, &si, &pi)) {
         CloseHandle(hWritePipe);
         CloseHandle(hReadPipe);
         result.success = false;

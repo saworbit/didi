@@ -481,6 +481,27 @@ Second section.
 
         self.assertTrue(any("missing target" in error for error in errors), errors)
 
+    def test_gdextension_declares_explicit_macos_architectures(self):
+        required_keys = {
+            "macos.debug.x86_64",
+            "macos.release.x86_64",
+            "macos.debug.arm64",
+            "macos.release.arm64",
+            "macos.debug.universal",
+            "macos.release.universal",
+        }
+        for relative_path in (
+            "addons/didi/didi.gdextension",
+            "tests/godot_smoke/addons/didi/didi.gdextension",
+        ):
+            text = (REPOSITORY_ROOT / relative_path).read_text(encoding="utf-8")
+            declared_keys = {
+                line.split("=", 1)[0].strip()
+                for line in text.splitlines()
+                if "=" in line
+            }
+            self.assertTrue(required_keys <= declared_keys, relative_path)
+
 
 if __name__ == "__main__":
     unittest.main()

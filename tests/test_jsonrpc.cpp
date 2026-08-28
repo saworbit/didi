@@ -57,6 +57,10 @@ static void test_mcp_initialize() {
     ASSERT_TRUE(!resp.error.has_value());
     ASSERT_EQ(resp.result["protocolVersion"].get<std::string>(), "2024-11-05");
     ASSERT_EQ(resp.result["serverInfo"]["name"].get<std::string>(), "didi");
+    ASSERT_TRUE(resp.result["capabilities"].contains("tools"));
+    ASSERT_TRUE(resp.result["capabilities"].contains("resources"));
+    ASSERT_TRUE(resp.result["capabilities"].contains("prompts"));
+    ASSERT_TRUE(!resp.result["capabilities"].contains("logging"));
 }
 
 static void test_mcp_tool_list_reports_current_availability() {

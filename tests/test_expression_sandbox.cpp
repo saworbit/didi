@@ -90,6 +90,7 @@ void test_expression_policy_accepts_read_only_containers_math_and_unicode_string
     for (const auto& source : {
         R"({"label": "caf\u00e9", "values": [1, 2, 3]})",
         "Vector2(1, 2)", "Vector3(1, 2, 3)", "Color(1, 0.5, 0.25, 1)",
+        "1 + 2", "+1", "node.get_child_count() + 1", "[+1].size()", "Vector2(+1, 2)",
         "node.get_child_count() >= 0", "node.get_path()", "node.get_class()",
         "node.is_class('Node')", "node.is_in_group('group')", "node.has_method('get_path')",
         "node.has_meta('key')", "[1, 2, 3].find(2) == 1", "[1, 2, 3].size()",

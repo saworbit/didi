@@ -98,6 +98,22 @@ void test_resolver_finds_documented_godot_451_layout() {
 }
 
 #if defined(_WIN32)
+class ScopedWideEnvironmentVariable {
+public:
+    explicit ScopedWideEnvironmentVariable(std::wstring name) : m_name(std::move(name)) {
+        if (const wchar_t* value = _wgetenv(m_name.c_str())) m_original = value;
+    }
+    ~ScopedWideEnvironmentVariable() { set(m_original); }
+
+    void set(const std::optional<std::wstring>& value) const {
+        _wputenv_s(m_name.c_str(), value ? value->c_str() : L"");
+    }
+
+private:
+    std::wstring m_name;
+    std::optional<std::wstring> m_original;
+};
+
 void test_windows_exit_code_259_is_completed_not_timed_out() {
     ScopedEnvironmentVariable godot_bin("GODOT_BIN");
     godot_bin.set(commandShell());
@@ -117,6 +133,47 @@ void test_windows_completed_parent_does_not_wait_for_inherited_stdout() {
     ASSERT_EQ(result.exit_code, 0);
     ASSERT_TRUE(result.duration_seconds < 1.2);
 }
+
+void test_windows_batch_wrapper_is_launched_through_command_shell() {
+    const std::filesystem::path interpreter(
+        didi::offline::detail::trustedWindowsCommandInterpreter());
+    ASSERT_TRUE(interpreter.is_absolute());
+    ASSERT_EQ(interpreter.filename().wstring(), L"cmd.exe");
+
+    ScopedEnvironmentVariable godot_bin("GODOT_BIN");
+    const auto root = std::filesystem::temp_directory_path() /
+                      ("didi-godot-wrapper-" + std::to_string(
+                          std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(root);
+    const auto wrapper = root / "godot.cmd";
+    std::ofstream(wrapper) << "@echo off\nexit /b 0\n";
+    godot_bin.set(wrapper.string());
+
+    const auto result = didi::offline::TestRunner::runSession("", 2, false, false);
+    std::filesystem::remove_all(root);
+    ASSERT_TRUE(result.success);
+    ASSERT_EQ(result.exit_code, 0);
+}
+
+void test_windows_batch_wrapper_supports_non_ascii_path() {
+    ScopedWideEnvironmentVariable godot_bin(L"GODOT_BIN");
+    const auto root = std::filesystem::temp_directory_path() /
+                      (L"didi-godot-测试-" + std::to_wstring(
+                          std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(root);
+    const auto wrapper = root / L"godot.cmd";
+    std::ofstream(wrapper) << "@echo off\nexit /b 0\n";
+    godot_bin.set(wrapper.wstring());
+
+    const auto resolved = didi::offline::resolveGodotExecutable();
+    const auto result = didi::offline::TestRunner::runSession("", 2, false, false);
+    std::filesystem::remove_all(root);
+    const auto expected_utf8 = wrapper.u8string();
+    ASSERT_EQ(resolved, std::string(reinterpret_cast<const char*>(expected_utf8.data()),
+                                    expected_utf8.size()));
+    ASSERT_TRUE(result.success);
+    ASSERT_EQ(result.exit_code, 0);
+}
 #endif
 
 struct RegisterTestRunnerTests {
@@ -127,6 +184,8 @@ struct RegisterTestRunnerTests {
 #if defined(_WIN32)
         registerTest("RuntimeLaunch.WindowsExit259", test_windows_exit_code_259_is_completed_not_timed_out);
         registerTest("RuntimeLaunch.WindowsBoundedOutputDrain", test_windows_completed_parent_does_not_wait_for_inherited_stdout);
+        registerTest("RuntimeLaunch.WindowsBatchWrapper", test_windows_batch_wrapper_is_launched_through_command_shell);
+        registerTest("RuntimeLaunch.WindowsUnicodeBatchWrapper", test_windows_batch_wrapper_supports_non_ascii_path);
 #endif
     }
 } g_register_test_runner_tests;
