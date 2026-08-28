@@ -1,4 +1,7 @@
 #include "didi/runtime/session_client.hpp"
+#include "didi/runtime/session_lock.hpp"
+#include "didi/common/secure_random.hpp"
+#include "didi/common/project_path.hpp"
 
 #include <algorithm>
 #include <array>
@@ -203,14 +206,20 @@ bool hasOnlyDescriptorFields(const json& value) {
     return true;
 }
 
-bool validEndpoint(const std::string& endpoint, uint64_t pid, const std::string& session_id) {
+bool validEndpoint(const std::string& endpoint, uint64_t pid, const std::string& session_id,
+                   const std::string& project_path) {
     if (endpoint.empty() || endpoint.find_first_of("\r\n") != std::string::npos) return false;
-    const auto stem = "godot_didi_" + std::to_string(pid) + "_" + session_id;
+    const auto legacy_stem = "godot_didi_" + std::to_string(pid) + "_" + session_id;
+    const auto project_stem = "godot_didi_" + paths::projectEndpointKey(project_path) + "_" +
+                              std::to_string(pid) + "_";
 #if defined(_WIN32)
-    return endpoint == "\\\\.\\pipe\\" + stem;
+    return endpoint == "\\\\.\\pipe\\" + legacy_stem ||
+           endpoint == "\\\\.\\pipe\\" + project_stem + session_id;
 #else
     const std::filesystem::path path(endpoint);
-    if (!path.is_absolute() || path.filename() != stem + ".sock") return false;
+    if (!path.is_absolute() ||
+        (path.filename() != legacy_stem + ".sock" &&
+         path.filename() != project_stem + session_id.substr(0, 12) + ".sock")) return false;
     std::error_code endpoint_error;
     std::error_code temp_error;
     const auto endpoint_parent = std::filesystem::weakly_canonical(path.parent_path(), endpoint_error);
@@ -713,15 +722,20 @@ public:
     RuntimeSessionClient(std::string project_root, ipc::IpcClientFactory factory,
                          DescriptorOpenedHook opened_hook)
         : m_projectRoot(canonicalPath(project_root).string()), m_factory(std::move(factory)),
-          m_descriptorOpenedHook(std::move(opened_hook)) {}
+          m_descriptorOpenedHook(std::move(opened_hook)) {
+        auto client_id = security::secureRandomHex(16);
+        if (client_id.isOk()) m_clientId = std::move(client_id.value());
+    }
 
     bool connect(const std::string&, int) override { return isConnected(); }
 
     void disconnect() override {
         std::shared_ptr<ipc::IIpcClient> previous;
+        std::shared_ptr<RuntimeSessionLock> previous_lock;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             previous = std::move(m_activeClient);
+            previous_lock = std::move(m_activeLock);
             m_activeDescriptor.reset();
             m_autoAttachEnabled = false;
             ++m_routeGeneration;
@@ -781,6 +795,7 @@ public:
 
     Result<json> detachSession() override {
         std::shared_ptr<ipc::IIpcClient> previous;
+        std::shared_ptr<RuntimeSessionLock> previous_lock;
         std::optional<SessionDescriptor> descriptor;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
@@ -788,6 +803,7 @@ public:
             ++m_routeGeneration;
             if (!m_activeDescriptor.has_value()) return Error::notConnected("No runtime session is attached");
             previous = std::move(m_activeClient);
+            previous_lock = std::move(m_activeLock);
             descriptor = std::move(m_activeDescriptor);
         }
         if (previous) previous->disconnect();
@@ -842,6 +858,7 @@ public:
 
     bool quarantineRoute(const RuntimeRouteLease& lease) override {
         std::shared_ptr<ipc::IIpcClient> quarantined;
+        std::shared_ptr<RuntimeSessionLock> quarantined_lock;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             if (m_routeGeneration != lease.generation || m_activeClient != lease.client ||
@@ -850,6 +867,7 @@ public:
                 return false;
             }
             quarantined = std::move(m_activeClient);
+            quarantined_lock = std::move(m_activeLock);
             m_activeDescriptor.reset();
             m_autoAttachEnabled = false;
             ++m_routeGeneration;
@@ -862,6 +880,27 @@ private:
     Result<json> attachDescriptor(const SessionDescriptor& descriptor,
                                   std::optional<uint64_t> expected_generation = std::nullopt) {
         if (!m_factory) return Error::internal("Runtime IPC client factory is not configured");
+        if (m_clientId.empty()) return Error::internal("Unable to establish MCP client identity");
+        std::shared_ptr<RuntimeSessionLock> session_lock;
+        bool reusing_owned_lock = false;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_activeDescriptor.has_value() && m_activeLock &&
+                m_activeDescriptor->session_id == descriptor.session_id) {
+                session_lock = m_activeLock;
+                reusing_owned_lock = true;
+            }
+        }
+        if (!session_lock) {
+            auto session_directory = resolveSessionDescriptorDirectory();
+            if (session_directory.isErr()) return session_directory.error();
+            auto acquired = RuntimeSessionLock::acquire(
+                session_directory.value() / (descriptor.session_id + ".lock"),
+                {{"client_id", m_clientId}, {"session_id", descriptor.session_id},
+                 {"project_path", descriptor.project_path}});
+            if (acquired.isErr()) return acquired.error();
+            session_lock = std::move(acquired.value());
+        }
         auto candidate = std::shared_ptr<ipc::IIpcClient>(m_factory());
         if (!candidate || !candidate->connect(descriptor.endpoint, 2000)) {
             return Error::notConnected("Unable to connect to runtime session: " + descriptor.session_id);
@@ -873,14 +912,23 @@ private:
         }
 
         std::shared_ptr<ipc::IIpcClient> previous;
+        std::shared_ptr<RuntimeSessionLock> previous_lock;
         bool accepted = true;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             if (expected_generation.has_value() &&
                 m_routeGeneration != *expected_generation) {
                 accepted = false;
+            } else if (reusing_owned_lock &&
+                       (!m_activeDescriptor.has_value() || m_activeLock != session_lock ||
+                        m_activeDescriptor->session_id != descriptor.session_id)) {
+                accepted = false;
             } else {
                 previous = std::move(m_activeClient);
+                if (!reusing_owned_lock) {
+                    previous_lock = std::move(m_activeLock);
+                    m_activeLock = session_lock;
+                }
                 m_activeClient = std::move(candidate);
                 m_activeDescriptor = descriptor;
                 ++m_routeGeneration;
@@ -956,10 +1004,12 @@ private:
     }
 
     std::string m_projectRoot;
+    std::string m_clientId;
     ipc::IpcClientFactory m_factory;
     DescriptorOpenedHook m_descriptorOpenedHook;
     mutable std::mutex m_mutex;
     std::shared_ptr<ipc::IIpcClient> m_activeClient;
+    std::shared_ptr<RuntimeSessionLock> m_activeLock;
     std::optional<SessionDescriptor> m_activeDescriptor;
     bool m_autoAttachEnabled{true};
     bool m_autoAttachInProgress{false};
@@ -1031,7 +1081,8 @@ Result<SessionDescriptor> SessionDescriptor::fromJson(const json& value) {
             !value.at("project_path").is_string() || value.at("project_path").get<std::string>().empty() ||
             !value.at("endpoint").is_string() ||
             !validEndpoint(value.at("endpoint").get<std::string>(), value.at("pid").get<uint64_t>(),
-                           value.at("session_id").get<std::string>()) ||
+                           value.at("session_id").get<std::string>(),
+                           value.at("project_path").get<std::string>()) ||
             !value.at("started_at_ms").is_number_integer() || value.at("started_at_ms").get<int64_t>() <= 0 ||
             !value.at("protocol_version").is_string() || value.at("protocol_version") != "1.3") {
             return Error::invalidArgument("Invalid session descriptor values");

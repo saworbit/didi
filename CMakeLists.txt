@@ -28,6 +28,7 @@ set(CORE_SOURCES
     src/common/png.cpp
     src/common/image_diff.cpp
     src/common/capture_cache.cpp
+    src/common/secure_random.cpp
     src/common/ipc_channel_win32.cpp
     src/mcp/jsonrpc.cpp
     src/mcp/mcp_server.cpp
@@ -35,6 +36,8 @@ set(CORE_SOURCES
     src/mcp/resource_registry.cpp
     src/mcp/prompt_registry.cpp
     src/runtime/session_client.cpp
+    src/runtime/session_lock.cpp
+    src/mcp/mutation_safety.cpp
     src/gdextension/session_host.cpp
     src/gdextension/runtime_log.cpp
     src/gdextension/runtime_request_router.cpp
@@ -112,6 +115,7 @@ set(TEST_SOURCES
     tests/test_image_diff.cpp
     tests/test_test_runner.cpp
     tests/test_phase5.cpp
+    tests/test_phase6.cpp
 )
 
 add_executable(didi_tests ${TEST_SOURCES})

@@ -322,6 +322,13 @@ static void test_resource_create_preserves_existing_file_without_overwrite() {
     ASSERT_EQ(readToolTestFile(path), original);
 
     changed_args["overwrite"] = true;
+    auto resource_preview_args = changed_args;
+    resource_preview_args["dry_run"] = true;
+    const auto resource_preview = registry.callTool("resource_create", resource_preview_args);
+    ASSERT_TRUE(!resource_preview.isError);
+    ASSERT_EQ(readToolTestFile(path), original);
+    changed_args["confirmation_token"] =
+        didi::json::parse(resource_preview.content[0].text)["mutation_preview"]["confirmation_token"];
     ASSERT_TRUE(!registry.callTool("resource_create", changed_args).isError);
     ASSERT_TRUE(readToolTestFile(path) != original);
 }
@@ -345,6 +352,13 @@ static void test_visual_lab_preserves_existing_file_without_overwrite() {
     ASSERT_EQ(readToolTestFile(path), original);
 
     args["overwrite"] = true;
+    auto lab_preview_args = args;
+    lab_preview_args["dry_run"] = true;
+    const auto lab_preview = registry.callTool("create_visual_test_lab", lab_preview_args);
+    ASSERT_TRUE(!lab_preview.isError);
+    ASSERT_EQ(readToolTestFile(path), original);
+    args["confirmation_token"] =
+        didi::json::parse(lab_preview.content[0].text)["mutation_preview"]["confirmation_token"];
     ASSERT_TRUE(!registry.callTool("create_visual_test_lab", args).isError);
     ASSERT_TRUE(readToolTestFile(path) != original);
 }

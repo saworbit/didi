@@ -92,13 +92,13 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
 4. **Restricted Security DACL**:
    - Windows Named Pipes use SDDL grants for the owning SID (`OW`) and local Administrators (`BA`); this is access-controlled but not strictly owner-only.
    - Descriptor conversion is fail-closed: the server reports failed startup before creating a pipe if the SDDL cannot be applied.
-   - Phase 3 initializes the session host at `GDEXTENSION_INITIALIZATION_SCENE` in both editor and game processes. Each endpoint is process-unique and token-authenticated. POSIX defaults are owner-only; Windows grants the owning SID and local administrators. This is a local attachment boundary, not remote authentication.
+   - Phase 6 adds a stable project key to each process-unique, token-authenticated endpoint and holds an OS-backed lock for the selected MCP client. POSIX defaults are owner-only; Windows grants the owning SID and local administrators. This is a local attachment boundary, not remote authentication.
 
 ---
 
 ## 4. IPC Wire Protocol & Framing
 
-Didi uses an optimized, low-overhead framing protocol over process-unique local Named Pipes (`\\.\pipe\godot_didi_<pid>_<session-id>` on Windows) or UNIX domain sockets in the OS temporary directory:
+Didi uses an optimized, low-overhead framing protocol over project-keyed process-unique local Named Pipes (`\\.\pipe\godot_didi_<project-key>_<pid>_<session-id>` on Windows) or UNIX domain sockets in the OS temporary directory. POSIX basenames use the same key/PID and a 12-hex session prefix to remain within platform path limits:
 
 ```
 ┌─────────────────────────┬────────────────────────────────────────────┐

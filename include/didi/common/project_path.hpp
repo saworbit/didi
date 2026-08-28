@@ -6,6 +6,8 @@
 #include <cctype>
 #include <cwctype>
 #include <filesystem>
+#include <iomanip>
+#include <sstream>
 #include <string>
 
 namespace didi::paths {
@@ -44,6 +46,42 @@ inline bool isWithinProject(const std::filesystem::path& root,
            (candidate_value.size() > root_value.size() &&
             candidate_value.compare(0, root_value.size(), root_value) == 0 &&
             candidate_value[root_value.size()] == '/');
+}
+
+inline Result<std::filesystem::path> resolveExplicitProjectRoot(const std::string& value) {
+    if (value.empty()) {
+        return Error::invalidArgument("An explicit Godot project root is required (--project or DIDI_PROJECT_ROOT)");
+    }
+    std::filesystem::path supplied;
+    try {
+        supplied = projectPathFromUtf8(value);
+    } catch (const std::filesystem::filesystem_error&) {
+        return Error::invalidArgument("The project root must be valid UTF-8");
+    }
+    std::error_code error;
+    const auto root = std::filesystem::weakly_canonical(
+        std::filesystem::absolute(supplied, error), error);
+    if (error || !std::filesystem::is_directory(root, error) || error) {
+        return Error::notFound("The explicit project root is not an accessible directory");
+    }
+    if (!std::filesystem::is_regular_file(root / "project.godot", error) || error) {
+        return Error::invalidArgument("The explicit project root must contain project.godot");
+    }
+    return root;
+}
+
+inline std::string projectEndpointKey(const std::filesystem::path& project_root) {
+    std::error_code error;
+    const auto canonical = std::filesystem::weakly_canonical(project_root, error);
+    const auto normalized = normalizedProjectPath(error ? project_root : canonical);
+    uint64_t hash = 1469598103934665603ull;
+    for (const auto character : normalized) {
+        hash ^= static_cast<uint64_t>(character);
+        hash *= 1099511628211ull;
+    }
+    std::ostringstream output;
+    output << std::hex << std::setfill('0') << std::setw(16) << hash;
+    return output.str();
 }
 
 inline Result<std::filesystem::path> resolveProjectFile(const std::string& file_path) {

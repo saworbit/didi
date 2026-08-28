@@ -25,10 +25,12 @@ $gameEngineLogPath = Join-Path $repoRoot "build\godot_game_engine.log"
 $shutdownGameStdoutPath = Join-Path $repoRoot "build\godot_shutdown_game_integration.out"
 $shutdownGameStderrPath = Join-Path $repoRoot "build\godot_shutdown_game_integration.err"
 $shutdownGameEngineLogPath = Join-Path $repoRoot "build\godot_shutdown_game_engine.log"
+$previousGodotBin = $env:GODOT_BIN
 
 if (-not (Test-Path -LiteralPath $GodotExecutable)) {
     throw "Godot executable not found: $GodotExecutable"
 }
+$env:GODOT_BIN = [IO.Path]::GetFullPath($GodotExecutable)
 if (-not (Test-Path -LiteralPath $didiExecutable)) {
     throw "Didi executable not found: $didiExecutable"
 }
@@ -202,7 +204,7 @@ $prelaunchRequests = @(
     (@{ jsonrpc = "2.0"; id = 880; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
     (Tool-Request 881 "runtime_list_sessions" @{ project_path = $fixtureRoot })
 )
-$rawPrelaunchResponses = $prelaunchRequests | & $didiExecutable
+$rawPrelaunchResponses = $prelaunchRequests | & $didiExecutable --project $fixtureRoot
 $prelaunchResponses = @($rawPrelaunchResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
 Assert-True ($LASTEXITCODE -eq 0) "Didi prelaunch discovery process exited with $LASTEXITCODE."
 $prelaunchById = @{}
@@ -238,7 +240,7 @@ try {
         (@{ jsonrpc = "2.0"; id = 901; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
         (Tool-Request 902 "runtime_list_sessions" @{ project_path = $fixtureRoot })
     )
-    $rawDiscoveryResponses = $discoveryRequests | & $didiExecutable
+    $rawDiscoveryResponses = $discoveryRequests | & $didiExecutable --project $fixtureRoot
     $discoveryResponses = @($rawDiscoveryResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
     Assert-True ($LASTEXITCODE -eq 0) "Didi discovery process exited with $LASTEXITCODE."
     $discoveryById = @{}
@@ -271,7 +273,7 @@ try {
             (@{ jsonrpc = "2.0"; id = 291; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
             (Tool-Request 292 "runtime_list_sessions" @{ project_path = $fixtureRoot })
         )
-        $rawGameDiscovery = $gameDiscoveryRequests | & $didiExecutable
+        $rawGameDiscovery = $gameDiscoveryRequests | & $didiExecutable --project $fixtureRoot
         $gameDiscoveryResponses = @($rawGameDiscovery | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
         if ($LASTEXITCODE -eq 0) {
             $gameDiscoveryById = @{}
@@ -389,7 +391,7 @@ try {
         (Tool-Request 320 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot:frame_counter"; max_depth = 1 }),
         (Tool-Request 321 "runtime_get_tree" @{ root_path = "/root/%RuntimeRoot"; max_depth = 1 })
     )
-    $rawRuntimeResponses = $runtimeRequests | & $didiExecutable
+    $rawRuntimeResponses = $runtimeRequests | & $didiExecutable --project $fixtureRoot
     $runtimeResponses = @($rawRuntimeResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
     Assert-True ($LASTEXITCODE -eq 0) "Didi runtime-control process exited with $LASTEXITCODE."
     Assert-True ($runtimeResponses.Count -eq $runtimeRequests.Count) "Runtime-control response count mismatch."
@@ -639,7 +641,7 @@ try {
         (Tool-Request 113 "runtime_read_logs" @{ cursor = 0; limit = 500; minimum_level = "debug" })
     )
 
-    $rawResponses = $requests | & $didiExecutable
+    $rawResponses = $requests | & $didiExecutable --project $fixtureRoot
     $responses = @($rawResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
     Assert-True ($LASTEXITCODE -eq 0) "Didi MCP process exited with $LASTEXITCODE."
     Assert-True ($responses.Count -eq $requests.Count) "Expected $($requests.Count) JSON-RPC responses, received $($responses.Count)."
@@ -728,10 +730,10 @@ try {
         (Tool-Request 401 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 402 "scene_open" @{ scene_path = "res://main.tscn" }),
         (Tool-Request 403 "viewport_capture_frame" @{ camera_identifier = "active_editor_view" }),
-        (Tool-Request 404 "project_search_text" @{ query = "DIDI_PHASE4_SEARCH_PROBE"; search_path = "res://tests/godot_smoke"; extensions = @(".gd"); max_results = 10 }),
-        (Tool-Request 405 "project_search_symbols" @{ query = "phase_four_probe"; search_path = "res://tests/godot_smoke"; extensions = @(".gd"); match = "exact"; kinds = @("function"); max_results = 10 })
+        (Tool-Request 404 "project_search_text" @{ query = "DIDI_PHASE4_SEARCH_PROBE"; search_path = "res://"; extensions = @(".gd"); max_results = 10 }),
+        (Tool-Request 405 "project_search_symbols" @{ query = "phase_four_probe"; search_path = "res://"; extensions = @(".gd"); match = "exact"; kinds = @("function"); max_results = 10 })
     )
-    $rawPhase4BaselineResponses = $phase4BaselineRequests | & $didiExecutable
+    $rawPhase4BaselineResponses = $phase4BaselineRequests | & $didiExecutable --project $fixtureRoot
     $phase4BaselineResponses = @($rawPhase4BaselineResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
     Assert-True ($LASTEXITCODE -eq 0) "Phase 4 baseline MCP process exited with $LASTEXITCODE."
     $phase4BaselineById = @{}
@@ -741,7 +743,7 @@ try {
     Assert-True ($phase4Baseline.capture_id -match '^[0-9a-f]{32}$') "Live baseline capture did not return a bounded process-local ID."
     $textSearch = Tool-Payload $phase4BaselineById[404]
     Assert-True ($textSearch.execution_mode -eq "offline_fallback" -and @($textSearch.matches).Count -eq 2) "Bounded project text search did not find the fixture probe."
-    Assert-True ($textSearch.matches[0].path -eq "res://tests/godot_smoke/subject.gd") "Project text search leaked a non-resource result path."
+    Assert-True ($textSearch.matches[0].path -eq "res://subject.gd") "Project text search leaked a non-resource result path."
     $symbolSearch = Tool-Payload $phase4BaselineById[405]
     Assert-True ($symbolSearch.lexical -eq $true -and @($symbolSearch.matches).Count -eq 1) "Lexical symbol search did not find exactly one fixture function."
     Assert-True ($symbolSearch.matches[0].name -eq "phase_four_probe" -and $symbolSearch.matches[0].kind -eq "function") "Symbol search returned the wrong declaration."
@@ -758,7 +760,7 @@ try {
         (Tool-Request 418 "viewport_diff_capture" @{ baseline_capture_id = $phase4Baseline.capture_id; camera_identifier = "active_editor_view"; threshold = 0 }),
         (Tool-Request 419 "scene_get_property" @{ target_node = "/root/SmokeRoot/Container"; property_name = "visible" })
     )
-    $rawPhase4Responses = $phase4Requests | & $didiExecutable
+    $rawPhase4Responses = $phase4Requests | & $didiExecutable --project $fixtureRoot
     $phase4Responses = @($rawPhase4Responses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
     Assert-True ($LASTEXITCODE -eq 0) "Phase 4 verification MCP process exited with $LASTEXITCODE."
     $phase4ById = @{}
@@ -799,7 +801,7 @@ try {
         $env:GODOT_BIN = $GodotExecutable
         Push-Location $fixtureRoot
         try {
-            $rawPhase5Responses = $phase5Requests | & $didiExecutable
+            $rawPhase5Responses = $phase5Requests | & $didiExecutable --project $fixtureRoot
         }
         finally {
             Pop-Location
@@ -968,7 +970,7 @@ try {
         (Tool-Request 121 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 122 "runtime_read_logs" @{ cursor = [uint64]$firstLogPage.next_cursor; limit = 5; minimum_level = "debug" })
     )
-    $rawNextLogResponses = $nextLogRequests | & $didiExecutable
+    $rawNextLogResponses = $nextLogRequests | & $didiExecutable --project $fixtureRoot
     $nextLogResponses = @($rawNextLogResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
     Assert-True ($LASTEXITCODE -eq 0) "Sequential log MCP process exited with $LASTEXITCODE."
     $nextLogById = @{}
@@ -984,7 +986,7 @@ try {
         (Tool-Request 331 "runtime_attach_session" @{ session_id = $gameSession.session_id }),
         (Tool-Request 332 "runtime_stop" @{ exit_code = 0 })
     )
-    $rawStopResponses = $stopRequests | & $didiExecutable
+    $rawStopResponses = $stopRequests | & $didiExecutable --project $fixtureRoot
     $stopResponses = @($rawStopResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
     Assert-True ($LASTEXITCODE -eq 0) "Didi runtime-stop process exited with $LASTEXITCODE."
     $stopById = @{}
@@ -999,7 +1001,7 @@ try {
         (@{ jsonrpc = "2.0"; id = 340; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
         (Tool-Request 341 "runtime_list_sessions" @{ project_path = $fixtureRoot })
     )
-    $rawCleanupResponses = $cleanupRequests | & $didiExecutable
+    $rawCleanupResponses = $cleanupRequests | & $didiExecutable --project $fixtureRoot
     $cleanupResponses = @($rawCleanupResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
     $cleanupById = @{}
     foreach ($response in $cleanupResponses) { $cleanupById[[int]$response.id] = $response }
@@ -1025,7 +1027,7 @@ try {
             (@{ jsonrpc = "2.0"; id = 420; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
             (Tool-Request 421 "runtime_list_sessions" @{ project_path = $fixtureRoot })
         )
-        $shutdownDiscoveryResponses = @($shutdownDiscoveryRequests | & $didiExecutable |
+        $shutdownDiscoveryResponses = @($shutdownDiscoveryRequests | & $didiExecutable --project $fixtureRoot |
             Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
         if ($LASTEXITCODE -eq 0) {
             $shutdownDiscoveryById = @{}
@@ -1053,7 +1055,7 @@ try {
         (Tool-Request 431 "runtime_attach_session" @{ session_id = $shutdownSession.session_id }),
         (Tool-Request 432 "runtime_set_paused" @{ paused = $true })
     )
-    $pauseForShutdownResponses = @($pauseForShutdownRequests | & $didiExecutable |
+    $pauseForShutdownResponses = @($pauseForShutdownRequests | & $didiExecutable --project $fixtureRoot |
         Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
     $pauseForShutdownById = @{}
     foreach ($response in $pauseForShutdownResponses) { $pauseForShutdownById[[int]$response.id] = $response }
@@ -1064,7 +1066,7 @@ try {
         (Tool-Request 441 "runtime_attach_session" @{ session_id = $shutdownSession.session_id }),
         (Tool-Request 442 "runtime_step" @{ frames = 60 })
     )
-    $shutdownStepResponses = @($shutdownStepRequests | & $didiExecutable |
+    $shutdownStepResponses = @($shutdownStepRequests | & $didiExecutable --project $fixtureRoot |
         Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
     $shutdownStepById = @{}
     foreach ($response in $shutdownStepResponses) { $shutdownStepById[[int]$response.id] = $response }
@@ -1086,12 +1088,23 @@ try {
     Assert-True ($engineErrors.Count -eq 0) "Godot reported bridge errors:`n$($engineErrors -join "`n")"
 
     $projectConfigPath = [IO.Path]::GetFullPath((Join-Path $fixtureRoot "project.godot"))
-    $projectBackupPath = [IO.Path]::GetFullPath((Join-Path $fixtureRoot "project.godot.rollback-fixture"))
     if (-not $projectConfigPath.StartsWith($fixtureRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to alter a persistence-failure fixture outside its disposable project: $projectConfigPath"
     }
-    Move-Item -LiteralPath $projectConfigPath -Destination $projectBackupPath
-    New-Item -ItemType Directory -Path $projectConfigPath | Out-Null
+    if ($IsWindows) {
+        $aclIdentity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        & icacls $projectConfigPath /deny "${aclIdentity}:(W,D)" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Unable to deny project.godot persistence rights for rollback testing." }
+        & icacls $fixtureRoot /deny "${aclIdentity}:(WD,AD,DC)" | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            & icacls $projectConfigPath /remove:d $aclIdentity | Out-Null
+            throw "Unable to deny project-root replacement rights for rollback testing."
+        }
+    }
+    else {
+        & chmod a-w -- $projectConfigPath
+        & chmod a-w -- $fixtureRoot
+    }
     try {
         $failureRequests = @(
             (@{ jsonrpc = "2.0"; id = 200; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
@@ -1103,7 +1116,7 @@ try {
             (Tool-Request 205 "project_set_input_action" @{ action = "rollback_probe"; events = @() }),
             (Tool-Request 206 "project_list_input_actions" @{})
         )
-        $rawFailureResponses = $failureRequests | & $didiExecutable
+        $rawFailureResponses = $failureRequests | & $didiExecutable --project $fixtureRoot
         $failureResponses = @($rawFailureResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
         Assert-True ($LASTEXITCODE -eq 0) "Didi rollback MCP process exited with $LASTEXITCODE."
         Assert-True ($failureResponses.Count -eq $failureRequests.Count) "Rollback batch response count mismatch."
@@ -1117,8 +1130,14 @@ try {
         Assert-True (-not (@((Tool-Payload $failureById[206]).actions.action) -contains "rollback_probe")) "Failed InputMap mutation remained live after rollback reload."
     }
     finally {
-        Remove-Item -LiteralPath $projectConfigPath -Force
-        Move-Item -LiteralPath $projectBackupPath -Destination $projectConfigPath
+        if ($IsWindows) {
+            & icacls $fixtureRoot /remove:d $aclIdentity | Out-Null
+            & icacls $projectConfigPath /remove:d $aclIdentity | Out-Null
+        }
+        else {
+            & chmod u+w -- $fixtureRoot
+            & chmod u+w -- $projectConfigPath
+        }
     }
 
     Assert-True (Request-ExactProcessClose $editorEnginePid $editorEngineStartedAtMs $StartupTimeoutSeconds) "Graceful close did not terminate the exact editor process."
@@ -1156,7 +1175,7 @@ try {
     })
     Assert-True ($unexpectedSourceArtifacts.Count -eq 0) "Integration generated artifacts in the checked-in source fixture."
     $integrationSucceeded = $true
-    Write-Output "Godot integration passed: Phases 1-5 editor/runtime workflows, deep diagnostics, export, MeshLibrary, and live UI hit-testing."
+    Write-Output "Godot integration passed: Phases 1-6 editor/runtime workflows, deep diagnostics, project isolation, export, MeshLibrary, and live UI hit-testing."
 }
 catch {
     $primaryFailureMessage = $_.Exception.Message
@@ -1192,12 +1211,21 @@ finally {
         }
         Assert-True (-not $entry.PSIsContainer) "Refusing to recursively remove unexpected descriptor directory: $($entry.Name)"
         Assert-True (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) "Refusing to remove descriptor reparse entry: $($entry.Name)"
-        Assert-True ($entry.Name -match '^([0-9a-f]{32})\.json\.didi-retired-\1-[0-9a-f]{32}$') "Refusing to remove unrecognized descriptor artifact: $($entry.Name)"
-        Assert-True ($knownSessionIds -contains $Matches[1]) "Refusing to remove a tombstone for an unknown session: $($entry.Name)"
+        $retiredMatch = [regex]::Match($entry.Name, '^([0-9a-f]{32})\.json\.didi-retired-\1-[0-9a-f]{32}$')
+        $lockMatch = [regex]::Match($entry.Name, '^([0-9a-f]{32})\.lock$')
+        Assert-True ($retiredMatch.Success -or $lockMatch.Success) "Refusing to remove unrecognized descriptor artifact: $($entry.Name)"
+        $artifactSessionId = if ($retiredMatch.Success) { $retiredMatch.Groups[1].Value } else { $lockMatch.Groups[1].Value }
+        Assert-True ($knownSessionIds -contains $artifactSessionId) "Refusing to remove an artifact for an unknown session: $($entry.Name)"
         Remove-Item -LiteralPath $entryPath -Force
     }
     $descriptorEntries = @(Get-ChildItem -LiteralPath $sessionDirectory -Force -ErrorAction SilentlyContinue)
     Remove-Item Env:DIDI_SESSION_DIR -ErrorAction SilentlyContinue
+    if ($null -eq $previousGodotBin) {
+        Remove-Item Env:GODOT_BIN -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:GODOT_BIN = $previousGodotBin
+    }
     if ($integrationSucceeded -and $descriptorEntries.Count -ne 0) {
         throw "Runtime descriptor directory was not empty after exact-PID cleanup: $($descriptorEntries.Name -join ', ')"
     }

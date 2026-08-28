@@ -7,6 +7,7 @@
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/runtime/session_client.hpp"
+#include "didi/mcp/mutation_safety.hpp"
 
 namespace didi {
 namespace mcp {
@@ -33,6 +34,7 @@ private:
     std::shared_ptr<ipc::IIpcClient> m_sourceIpcClient;
     std::shared_ptr<ipc::IIpcClient> m_ipcClient;
     std::shared_ptr<runtime::IRuntimeSessionClient> m_runtimeSessionClient;
+    MutationSafety m_mutationSafety;
 };
 
 } // namespace mcp

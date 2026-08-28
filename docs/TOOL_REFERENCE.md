@@ -248,7 +248,7 @@ All four tools are live-only:
 - `editor_undo`: Undoes the active edited scene's most recent UndoRedo action.
 - `editor_redo`: Redoes the active edited scene's next action.
 - `editor_save_scene`: Calls `EditorInterface.save_scene` for the active scene.
-- `editor_reload_project`: Requests an `EditorFileSystem.scan_sources` rescan; it is not a full editor restart.
+- `editor_reload_project`: Requests an `EditorFileSystem.scan_sources` rescan; it is not a full editor restart. Phase 6 requires an exact dry-run confirmation token.
 
 ## 10. Phase 2 project wiring
 
@@ -325,17 +325,19 @@ Published private descriptors use this exact schema:
   "pid": 1234,
   "kind": "editor",
   "project_path": "D:/game",
-  "endpoint": "\\\\.\\pipe\\godot_didi_1234_0123456789abcdef0123456789abcdef",
+  "endpoint": "\\\\.\\pipe\\godot_didi_89abcdef01234567_1234_0123456789abcdef0123456789abcdef",
   "started_at_ms": 1787790000000,
   "protocol_version": "1.3"
 }
 ```
 
-On POSIX the endpoint is the OS temporary directory plus `godot_didi_<pid>_<session-id>.sock`. Session ID and token are cryptographically random lowercase hex values of 32 and 64 characters. PID plus process-start identity prevents PID reuse from reviving a stale descriptor. Malformed, symlink/reparse, oversized (>64 KiB), escaped, or unprovably stale descriptors are diagnosed rather than deleted. Orderly shutdown and proven-stale cleanup atomically retire an exact identity-matched descriptor to an unpredictable no-replace non-`.json` path and re-verify it. Windows deletes the exact verified object through its open handle. POSIX normally retains the verified `.didi-retired-<session-id>-<32hex>` tombstone because no portable object-bound unlink exists; its active `.json` name is gone and discovery ignores it. A move collision/race or unavailable atomic operation retains the safer object/path rather than risk deleting another entry.
+On POSIX the endpoint is the OS temporary directory plus `godot_didi_<project-key>_<pid>_<session-prefix>.sock`. Session ID and token are cryptographically random lowercase hex values of 32 and 64 characters. The stable project key isolates endpoint namespaces while PID/session identity preserves concurrent instances. PID plus process-start identity prevents PID reuse from reviving a stale descriptor. Malformed, symlink/reparse, oversized (>64 KiB), escaped, or unprovably stale descriptors are diagnosed rather than deleted. Orderly shutdown and proven-stale cleanup atomically retire an exact identity-matched descriptor to an unpredictable no-replace non-`.json` path and re-verify it.
 
 ### `runtime_attach_session` — Local session management
 
 Requires `session_id`. Didi connects to the exact validated process-unique endpoint and performs a token-authenticated protocol `1.3` handshake with a 3,000 ms finite deadline. The token is inserted only into the internal envelope and stripped before bridge dispatch, responses, logs, and diagnostics. Route replacement is transactional: connection, authentication, ID, or protocol failure leaves the previous session selected.
+
+Before transport connection, the MCP process acquires `<session-id>.lock` with an OS exclusive lock. One client can hold a runtime session; another explicit attach returns `423`. The kernel releases the lock if the owner exits or crashes, and the persistent metadata file contains no authentication token.
 
 ### `runtime_detach_session` and `runtime_get_session` — Local session management
 
@@ -431,3 +433,9 @@ Requires an existing `.tscn` `source_scene` and a normalized `.meshlib` `output_
 ### `ui_hit_test` — Live
 
 Requires finite viewport-space `point.x` and `point.y`. Optional `root_path` defaults to `/root`, `include_mouse_filter_ignore` defaults to false, and `max_results` defaults to `32` with range `1..256`. The editor bridge traverses at most 10,000 nodes under the active edited scene, transforms the point into each Control's local space, honors inherited visibility and clipping, and orders hits by canvas layer, effective z-index, then scene draw order. Results include canonical node path, class, effective mouse filter, layer/z/order, local point, and global rectangle. Script-defined `_has_point` overrides are used when callable; otherwise Godot's documented local rectangle default is applied. No input event is created or injected.
+
+## 13. Phase 6 mutation safety
+
+Every implemented mutating tool schema includes `dry_run: boolean`. A true dry-run stops at the registry boundary and returns `dry_run: true` plus `mutation_preview`; no tool handler, subprocess, filesystem writer, or Godot main-thread command runs. The preview reports the exact tool/arguments, canonical project, execution mode, optional session ID, route generation, binding hash, and a conservative planned-change record.
+
+`editor_reload_project`, `script_patch_method`/`patch_script_symbols`, and `overwrite: true` calls to `resource_create`, `viewport_create_test_lab`/`create_visual_test_lab`, `project_export`, and `gridmap_export_mesh_library` require confirmation. Call the exact tool with identical arguments plus `dry_run: true`, then repeat it without `dry_run` and with the returned `confirmation_token`. Tokens are cryptographically random, expire after 120 seconds, are consumed on the first attempt, and reject tool, argument, project, execution-mode, session, route-generation, expiry, and replay mismatches.

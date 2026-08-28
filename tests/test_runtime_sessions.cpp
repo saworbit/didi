@@ -639,6 +639,8 @@ void test_session_attach_keeps_existing_route_when_candidate_handshake_fails() {
     ASSERT_TRUE(routed.value()["endpoint"].get<std::string>().find(healthy_id) != std::string::npos);
     ASSERT_EQ(routed.value()["token"], std::string(64, 'a'));
 
+    client->disconnect();
+
 #if defined(_WIN32)
     _putenv_s("DIDI_SESSION_DIR", "");
 #else
@@ -679,6 +681,8 @@ void test_session_attach_rejects_semantically_invalid_handshakes_without_replaci
         ASSERT_TRUE(routed.isOk());
         ASSERT_TRUE(routed.value()["endpoint"].get<std::string>().find(healthy_id) != std::string::npos);
     }
+
+    client->disconnect();
 
 #if defined(_WIN32)
     _putenv_s("DIDI_SESSION_DIR", "");
@@ -899,6 +903,7 @@ void test_session_discovery_reads_the_validated_descriptor_object() {
     ASSERT_TRUE(client->attachSession(session_id).isOk());
     ASSERT_TRUE(swapped);
 
+    client->disconnect();
     clearSessionDirectory();
     std::filesystem::remove_all(directory);
 }

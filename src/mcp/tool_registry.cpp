@@ -2,6 +2,7 @@
 #include "didi/mcp/project_tools.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
+#include "didi/common/project_path.hpp"
 #include <algorithm>
 #include <unordered_set>
 #include <utility>
@@ -310,6 +311,7 @@ ToolRegistry& ToolRegistry::instance() {
 void ToolRegistry::registerTool(ToolDefinition tool) {
     std::string name = tool.name;
     tool.capability = capabilityForTool(name);
+    MutationSafety::decorateSchema(name, tool.inputSchema);
     if (!tool.capability.implemented) {
         tool.description = "UNIMPLEMENTED: Reserved schema; calls are rejected. Intended contract: " +
                            tool.description;
@@ -386,11 +388,31 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
                 std::nullopt);
         }
     }
+    MutationContext safety_context;
+    std::error_code project_error;
+    const auto project_root = std::filesystem::weakly_canonical(
+        std::filesystem::current_path(project_error), project_error);
+    safety_context.project_root = paths::projectPathToUtf8(
+        project_error ? std::filesystem::current_path() : project_root);
+    safety_context.execution_mode = supports_live && lease.has_value()
+                                        ? "live"
+                                        : (supports_offline ? "offline_fallback" : "unavailable");
+    if (lease.has_value()) {
+        safety_context.route_generation = lease->generation;
+        if (lease->descriptor.has_value()) safety_context.session_id = lease->descriptor->session_id;
+    }
+    auto safety = m_mutationSafety.evaluate(name, arguments, safety_context);
+    if (!safety.execute) {
+        auto response = CallToolResult::successJson(std::move(safety.payload));
+        response.isError = safety.is_error;
+        return response;
+    }
+    auto authorized_arguments = std::move(safety.arguments);
     try {
         const auto dispatcher = std::dynamic_pointer_cast<LeaseDispatchClient>(m_ipcClient);
         std::optional<LeaseDispatchClient::Binding> binding;
         if (dispatcher) binding.emplace(dispatcher->bind(lease));
-        auto result = tool->handler(arguments);
+        auto result = tool->handler(authorized_arguments);
         if (result.isError) {
             if (dispatcher) {
                 if (const auto error = dispatcher->lastError(); error.has_value()) {

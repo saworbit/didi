@@ -114,9 +114,10 @@ Tool execution failures use MCP `result.isError: true` with explanatory text. JS
 ## 3. Internal IPC Protocol (Named Pipes & UNIX Sockets)
 
 - **Session descriptor directory**: Windows `<OS temporary directory>/didi-sessions`; POSIX `$XDG_RUNTIME_DIR/didi-sessions` when `XDG_RUNTIME_DIR` is absolute and set, otherwise `<OS temporary directory>/didi-sessions-<euid>` (controlled override: `DIDI_SESSION_DIR`; override access controls are operator-managed)
-- **Pipe Name (Windows)**: `\\.\pipe\godot_didi_<pid>_<32-hex-session-id>`
+- **Pipe Name (Windows)**: `\\.\pipe\godot_didi_<16-hex-project-key>_<pid>_<32-hex-session-id>`
 - **Security Descriptor (Windows)**: SDDL `D:(A;;GA;;;BA)(A;;GA;;;OW)` (local administrators and the owning SID; not strictly owner-only)
-- **Socket Path (POSIX)**: `<OS temp>/godot_didi_<pid>_<32-hex-session-id>.sock`, with owner-only permissions
+- **Socket Path (POSIX)**: `<OS temp>/godot_didi_<16-hex-project-key>_<pid>_<12-hex-session-prefix>.sock`, with owner-only permissions
+- **Client lock**: `<session-directory>/<32-hex-session-id>.lock`, held with an OS exclusive lock by one MCP client; ownership metadata contains no session token
 
 ### Frame Format:
 ```
