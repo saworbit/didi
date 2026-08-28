@@ -53,7 +53,7 @@ json JsonRpcResponse::toJson() const {
         }
         j["error"] = err_obj;
     } else {
-        j["result"] = result.is_null() ? json::object() : result;
+        j["result"] = result;
     }
 
     return j;

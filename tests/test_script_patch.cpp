@@ -64,10 +64,66 @@ static void test_gdscript_symbol_patch_signal() {
     ASSERT_TRUE(patched.find("signal health_changed(new_hp: int)") != std::string::npos);
 }
 
+static void test_gdscript_symbol_patch_preserves_ordinary_comments() {
+    std::string original =
+        "# Copyright 2026 Example Project\n"
+        "## Calculates damage dealt by the attacker.\n"
+        "@warning_ignore(\"unused_parameter\")\n"
+        "func calculate_damage(base: int) -> int:\n"
+        "\treturn base * 2\n\n"
+        "func other_func():\n"
+        "\tpass\n";
+
+    std::string new_func =
+        "func calculate_damage(base: int) -> int:\n"
+        "\tvar multiplier = 3\n"
+        "\treturn base * multiplier";
+
+    auto patch_res = didi::offline::GDScriptDiagnostics::patchSymbol(original, "calculate_damage", new_func, "function");
+    ASSERT_TRUE(patch_res.isOk());
+
+    std::string patched = patch_res.value();
+    ASSERT_TRUE(patched.find("# Copyright 2026 Example Project\n") == 0);
+    ASSERT_TRUE(patched.find("## Calculates damage dealt by the attacker.") == std::string::npos);
+    ASSERT_TRUE(patched.find("@warning_ignore(\"unused_parameter\")") == std::string::npos);
+    ASSERT_TRUE(patched.find("func calculate_damage(base: int) -> int:\n\tvar multiplier = 3\n\treturn base * multiplier") != std::string::npos);
+}
+
+static void test_gdscript_symbol_patch_preserves_next_sibling_preamble() {
+    std::string original =
+        "func calculate_damage(base: int) -> int:\n"
+        "\t# target implementation comment\n"
+        "\treturn base * 2\n"
+        "# Sibling license comment\n"
+        "## Sibling documentation.\n"
+        "@warning_ignore(\"unused_parameter\")\n"
+        "func other_func():\n"
+        "\tpass\n";
+
+    std::string new_func =
+        "func calculate_damage(base: int) -> int:\n"
+        "\treturn base * 3";
+
+    auto patch_res = didi::offline::GDScriptDiagnostics::patchSymbol(original, "calculate_damage", new_func, "function");
+    ASSERT_TRUE(patch_res.isOk());
+
+    std::string expected =
+        "func calculate_damage(base: int) -> int:\n"
+        "\treturn base * 3\n"
+        "# Sibling license comment\n"
+        "## Sibling documentation.\n"
+        "@warning_ignore(\"unused_parameter\")\n"
+        "func other_func():\n"
+        "\tpass\n";
+    ASSERT_EQ(patch_res.value(), expected);
+}
+
 struct RegisterScriptPatchTests {
     RegisterScriptPatchTests() {
         registerTest("GDScript.DiagnosticsDeprecation", test_gdscript_diagnostics_deprecation);
         registerTest("GDScript.PatchFunction", test_gdscript_symbol_patch_function);
         registerTest("GDScript.PatchSignal", test_gdscript_symbol_patch_signal);
+        registerTest("GDScript.PatchPreservesOrdinaryComments", test_gdscript_symbol_patch_preserves_ordinary_comments);
+        registerTest("GDScript.PatchPreservesSiblingPreamble", test_gdscript_symbol_patch_preserves_next_sibling_preamble);
     }
 } g_registerScriptPatchTests;
