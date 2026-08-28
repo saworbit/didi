@@ -1,4 +1,5 @@
 #include "didi/offline/project_search.hpp"
+#include "didi/offline/gdscript_diagnostics.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -460,28 +461,6 @@ std::optional<std::pair<std::string, std::string>> csharpDeclaration(std::string
     return std::nullopt;
 }
 
-std::optional<std::pair<std::string, std::string>> gdscriptDeclaration(std::string_view line) {
-    const auto first = line.find_first_not_of(" \t");
-    if (first == std::string_view::npos) return std::nullopt;
-    line.remove_prefix(first);
-    const std::pair<std::string_view, const char*> prefixes[] = {
-        {"class_name ", "class"}, {"func ", "function"}, {"signal ", "signal"},
-        {"var ", "variable"}, {"const ", "constant"}, {"enum ", "enum"}
-    };
-    for (const auto& [prefix, kind] : prefixes) {
-        if (!strings::startsWith(line, prefix)) continue;
-        line.remove_prefix(prefix.size());
-        size_t length = 0;
-        while (length < line.size() &&
-               (std::isalnum(static_cast<unsigned char>(line[length])) || line[length] == '_')) {
-            ++length;
-        }
-        if (length == 0) return std::nullopt;
-        return std::pair<std::string, std::string>{std::string(line.substr(0, length)), kind};
-    }
-    return std::nullopt;
-}
-
 bool symbolMatches(const std::string& name, const SymbolSearchOptions& options) {
     const auto candidate = options.case_sensitive ? name : asciiFold(name);
     const auto query = options.case_sensitive ? options.query : asciiFold(options.query);
@@ -611,9 +590,14 @@ Result<SearchResponse> ProjectSearch::searchSymbols(const SymbolSearchOptions& o
         while (std::getline(input, line)) {
             ++line_number;
             if (!line.empty() && line.back() == '\r') line.pop_back();
-            const auto declaration = gdscript
-                ? gdscriptDeclaration(maskGdscriptLine(line, gdscript_state))
-                : csharpDeclaration(maskCSharpLine(line, csharp_state));
+            std::optional<std::pair<std::string, std::string>> declaration;
+            if (gdscript) {
+                const auto parsed = GDScriptDiagnostics::parseDeclaration(
+                    maskGdscriptLine(line, gdscript_state));
+                if (parsed) declaration = std::pair{parsed->name, parsed->kind};
+            } else {
+                declaration = csharpDeclaration(maskCSharpLine(line, csharp_state));
+            }
             if (!declaration || !allowedKind(declaration->second, options.kinds) ||
                 !symbolMatches(declaration->first, options)) continue;
             const auto offset = line.find(declaration->first);

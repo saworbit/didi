@@ -1,6 +1,8 @@
 #pragma once
 
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 #include "didi/common/types.hpp"
 #include "didi/common/json.hpp"
@@ -26,6 +28,13 @@ struct ScriptDiagnostic {
     }
 };
 
+struct GDScriptDeclaration {
+    std::string name;
+    std::string kind;
+    std::string source;
+    bool exported{false};
+};
+
 class GDScriptDiagnostics {
 public:
     static std::vector<ScriptDiagnostic> analyze(const std::string& file_path, const std::string& source_text = "");
@@ -39,6 +48,7 @@ public:
 
     static json reflectClass(const std::string& class_name);
     static json extractSymbols(const std::string& source_text);
+    static std::optional<GDScriptDeclaration> parseDeclaration(std::string_view code_line);
 };
 
 } // namespace offline

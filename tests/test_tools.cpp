@@ -912,17 +912,30 @@ static void test_class_reflection() {
 
 static void test_symbol_extraction() {
     auto& reg = didi::mcp::ToolRegistry::instance();
-    std::string script = "extends CharacterBody3D\n\n@export var speed: float = 5.0\nsignal reached_goal(time_taken)\n\nfunc jump() -> void:\n\tpass\n";
+    std::string script =
+        "extends CharacterBody3D\n\n"
+        "@export_range(0, 20) var speed: float = 5.0\n"
+        "@onready var sprite = $Sprite\n"
+        "signal reached_goal(time_taken)\n\n"
+        "@rpc(\"any_peer\") func jump() -> void:\n\tpass\n"
+        "static func build_player():\n\tpass\n"
+        "class InnerState:\n\tpass\n"
+        "var docs = \"\"\"func fake():\nvar fake_value = 1\n\"\"\"\n";
     auto res = reg.callTool("script_get_symbols", {{"source_text", script}});
     ASSERT_TRUE(!res.isError);
     ASSERT_TRUE(!res.content.empty());
     didi::json parsed = didi::json::parse(res.content[0].text);
-    ASSERT_EQ(parsed["functions"].size(), 1);
+    ASSERT_EQ(parsed["functions"].size(), 2);
     ASSERT_EQ(parsed["functions"][0]["name"], "jump");
-    ASSERT_EQ(parsed["variables"].size(), 1);
+    ASSERT_EQ(parsed["functions"][1]["name"], "build_player");
+    ASSERT_EQ(parsed["variables"].size(), 3);
     ASSERT_EQ(parsed["variables"][0]["name"], "speed");
+    ASSERT_TRUE(parsed["variables"][0]["exported"]);
+    ASSERT_EQ(parsed["variables"][1]["name"], "sprite");
     ASSERT_EQ(parsed["signals"].size(), 1);
     ASSERT_EQ(parsed["signals"][0]["name"], "reached_goal");
+    ASSERT_EQ(parsed["classes"].size(), 1);
+    ASSERT_EQ(parsed["classes"][0]["name"], "InnerState");
 }
 
 static void test_offline_tools_do_not_fallback_to_demo_paths() {

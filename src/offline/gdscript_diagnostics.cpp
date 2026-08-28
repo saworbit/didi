@@ -237,6 +237,68 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& fi
     return diagnostics;
 }
 
+std::optional<GDScriptDeclaration> GDScriptDiagnostics::parseDeclaration(
+    std::string_view code_line) {
+    size_t offset = code_line.find_first_not_of(" \t");
+    if (offset == std::string_view::npos) return std::nullopt;
+    bool exported = false;
+    while (offset < code_line.size() && code_line[offset] == '@') {
+        const size_t name_start = ++offset;
+        while (offset < code_line.size() &&
+               (std::isalnum(static_cast<unsigned char>(code_line[offset])) ||
+                code_line[offset] == '_')) {
+            ++offset;
+        }
+        if (offset == name_start) return std::nullopt;
+        const auto annotation = code_line.substr(name_start, offset - name_start);
+        exported = exported || annotation == "export" ||
+                   strings::startsWith(annotation, "export_");
+        while (offset < code_line.size() &&
+               std::isspace(static_cast<unsigned char>(code_line[offset]))) {
+            ++offset;
+        }
+        if (offset < code_line.size() && code_line[offset] == '(') {
+            int depth = 0;
+            do {
+                if (code_line[offset] == '(') ++depth;
+                else if (code_line[offset] == ')') --depth;
+                ++offset;
+            } while (offset < code_line.size() && depth > 0);
+            if (depth != 0) return std::nullopt;
+        }
+        while (offset < code_line.size() &&
+               std::isspace(static_cast<unsigned char>(code_line[offset]))) {
+            ++offset;
+        }
+    }
+    if (offset >= code_line.size()) return std::nullopt;
+    code_line.remove_prefix(offset);
+
+    const std::pair<std::string_view, const char*> prefixes[] = {
+        {"class_name ", "class"}, {"static func ", "function"},
+        {"func ", "function"}, {"signal ", "signal"}, {"var ", "variable"},
+        {"const ", "constant"}, {"enum ", "enum"}, {"class ", "class"}
+    };
+    for (const auto& [prefix, kind] : prefixes) {
+        if (!strings::startsWith(code_line, prefix)) continue;
+        const auto name_source = code_line.substr(prefix.size());
+        size_t name_length = 0;
+        while (name_length < name_source.size() &&
+               (std::isalnum(static_cast<unsigned char>(name_source[name_length])) ||
+                name_source[name_length] == '_')) {
+            ++name_length;
+        }
+        if (name_length == 0) return std::nullopt;
+        return GDScriptDeclaration{
+            std::string(name_source.substr(0, name_length)),
+            kind,
+            std::string(code_line),
+            exported
+        };
+    }
+    return std::nullopt;
+}
+
 #if defined(_WIN32)
 #define DIDI_POPEN _popen
 #define DIDI_PCLOSE _pclose
@@ -592,38 +654,48 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
     json variables = json::array();
     json signals = json::array();
     json enums = json::array();
+    json classes = json::array();
 
-    static const std::regex func_regex(R"re(^\s*func\s+([a-zA-Z0-9_]+)\s*\((.*)\)(?:\s*->\s*([a-zA-Z0-9_]+))?)re");
-    static const std::regex var_regex(R"re(^\s*(@export\s+)?var\s+([a-zA-Z0-9_]+)(?:\s*:\s*([a-zA-Z0-9_]+))?)re");
-    static const std::regex sig_regex(R"re(^\s*signal\s+([a-zA-Z0-9_]+)(?:\((.*)\))?)re");
-    static const std::regex enum_regex(R"re(^\s*enum\s+([a-zA-Z0-9_]+))re");
+    static const std::regex func_regex(R"re(^(?:static\s+)?func\s+([a-zA-Z0-9_]+)\s*\((.*)\)(?:\s*->\s*([a-zA-Z0-9_]+))?)re");
+    static const std::regex var_regex(R"re(^var\s+([a-zA-Z0-9_]+)(?:\s*:\s*([a-zA-Z0-9_]+))?)re");
+    static const std::regex sig_regex(R"re(^signal\s+([a-zA-Z0-9_]+)(?:\((.*)\))?)re");
+    static const std::regex enum_regex(R"re(^enum\s+([a-zA-Z0-9_]+))re");
+    std::string multiline_delimiter;
 
     for (size_t i = 0; i < lines.size(); ++i) {
-        std::string line = lines[i];
+        const auto declaration = parseDeclaration(
+            codeOutsideGdscriptLiterals(lines[i], multiline_delimiter));
+        if (!declaration) continue;
+        const std::string& line = declaration->source;
         std::smatch match;
-        if (std::regex_search(line, match, func_regex)) {
+        if (declaration->kind == "function" && std::regex_search(line, match, func_regex)) {
             functions.push_back({
                 {"name", match[1].str()},
                 {"parameters", match[2].str()},
                 {"return_type", match[3].matched ? match[3].str() : "void"},
                 {"line", i + 1}
             });
-        } else if (std::regex_search(line, match, var_regex)) {
+        } else if (declaration->kind == "variable" && std::regex_search(line, match, var_regex)) {
             variables.push_back({
-                {"name", match[2].str()},
-                {"exported", match[1].matched},
-                {"type", match[3].matched ? match[3].str() : "Variant"},
+                {"name", match[1].str()},
+                {"exported", declaration->exported},
+                {"type", match[2].matched ? match[2].str() : "Variant"},
                 {"line", i + 1}
             });
-        } else if (std::regex_search(line, match, sig_regex)) {
+        } else if (declaration->kind == "signal" && std::regex_search(line, match, sig_regex)) {
             signals.push_back({
                 {"name", match[1].str()},
                 {"arguments", match[2].matched ? match[2].str() : ""},
                 {"line", i + 1}
             });
-        } else if (std::regex_search(line, match, enum_regex)) {
+        } else if (declaration->kind == "enum" && std::regex_search(line, match, enum_regex)) {
             enums.push_back({
                 {"name", match[1].str()},
+                {"line", i + 1}
+            });
+        } else if (declaration->kind == "class") {
+            classes.push_back({
+                {"name", declaration->name},
                 {"line", i + 1}
             });
         }
@@ -633,7 +705,8 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
         {"functions", functions},
         {"variables", variables},
         {"signals", signals},
-        {"enums", enums}
+        {"enums", enums},
+        {"classes", classes}
     };
 }
 
