@@ -18,6 +18,15 @@ bool isValidUid(const std::string& uid) {
     return std::regex_match(uid, uid_regex);
 }
 
+void foldAsciiLower(std::string& value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
+        if (character >= 'A' && character <= 'Z') {
+            return static_cast<char>(character + ('a' - 'A'));
+        }
+        return static_cast<char>(character);
+    });
+}
+
 std::string extractUidSidecar(const fs::path& file_path) {
     auto sidecar_path = file_path;
     sidecar_path += ".uid";
@@ -71,7 +80,7 @@ ResourceIndexer::ResourceIndexer() {}
 
 std::string ResourceIndexer::detectResourceType(const std::string& ext) {
     std::string lower = ext;
-    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    foldAsciiLower(lower);
 
     if (lower == ".tscn" || lower == ".scn") return "PackedScene";
     if (lower == ".tres" || lower == ".res") return "Resource";
@@ -164,10 +173,10 @@ std::vector<ResourceInfo> ResourceIndexer::query(const std::string& search_path,
                                                 bool include_uid) const {
     std::vector<ResourceInfo> results;
     std::string lower_fuzzy = fuzzy_query;
-    std::transform(lower_fuzzy.begin(), lower_fuzzy.end(), lower_fuzzy.begin(), ::tolower);
+    foldAsciiLower(lower_fuzzy);
 
     std::string lower_type = type_filter;
-    std::transform(lower_type.begin(), lower_type.end(), lower_type.begin(), ::tolower);
+    foldAsciiLower(lower_type);
 
     for (const auto& res : m_resources) {
         // Path filter
@@ -178,7 +187,7 @@ std::vector<ResourceInfo> ResourceIndexer::query(const std::string& search_path,
         // Type filter
         if (!lower_type.empty()) {
             std::string res_type = res.type;
-            std::transform(res_type.begin(), res_type.end(), res_type.begin(), ::tolower);
+            foldAsciiLower(res_type);
             if (res_type.find(lower_type) == std::string::npos) {
                 continue;
             }
@@ -187,7 +196,7 @@ std::vector<ResourceInfo> ResourceIndexer::query(const std::string& search_path,
         // Fuzzy filter
         if (!lower_fuzzy.empty()) {
             std::string path_lower = res.path;
-            std::transform(path_lower.begin(), path_lower.end(), path_lower.begin(), ::tolower);
+            foldAsciiLower(path_lower);
             if (path_lower.find(lower_fuzzy) == std::string::npos) {
                 continue;
             }
