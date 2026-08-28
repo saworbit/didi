@@ -19,6 +19,7 @@ Historical entries describe the surface advertised by those releases. For the ex
 - Rejected malformed MCP parameter types, request-only methods sent without an ID, and unsupported `Content-Length` framing without dispatching hidden mutations.
 - Protected `resource_create` and visual test-lab files from replacement unless callers pass `overwrite: true`.
 - Enforced one reconnect-and-I/O IPC deadline on POSIX, exact response-ID correlation on both transports, and distinct handler-exception responses that preserve the parsed request ID.
+- Bounded `runtime_launch` to 1–120 seconds, treated Windows exit code 259 as completed, broadened Godot 4.5.1/4.6.2/4.7.2 and POSIX/macOS discovery, and clarified that `break_on_error` classifies output after exit.
 
 ## [1.4.0] - 2026-08-28
 

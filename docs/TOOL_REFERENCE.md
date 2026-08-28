@@ -226,13 +226,13 @@ Accepts `paths` containing 1–256 unique normalized `res://` source files and `
 
 ### `runtime_launch` — Offline
 
-Launches a separate Godot process, optionally headless, captures stdout/stderr, classifies errors, and enforces a timeout.
+Launches a separate Godot process, optionally headless, captures stdout/stderr, classifies errors after exit, and enforces a timeout.
 
 - `scene_path` (`string`, optional).
-- `timeout_seconds` (`integer`, default `10`).
+- `timeout_seconds` (`integer`, `1`–`120`, default `10`).
 - `headless` (`boolean`, default `true`).
-- `break_on_error` (`boolean`, default `true`).
-- `extra_args` (`array`, optional; unsafe shell metacharacters are rejected).
+- `break_on_error` (`boolean`, default `true`): marks captured `ERROR:`/`SCRIPT ERROR:` lines as failure after the child exits; it does not stop the child early.
+- `extra_args` (`array` of strings, optional; unsafe shell metacharacters are rejected).
 - Legacy alias: `execute_test_session`.
 
 ### Reserved runtime schemas — Unimplemented

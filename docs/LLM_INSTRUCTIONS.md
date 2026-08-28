@@ -93,7 +93,7 @@ For API details outside that limited map, inspect the project or use official Go
 
 ### Run a scene or test
 
-Use `runtime_launch` to start a separate Godot process, optionally headless, and inspect captured output. This does not attach to a running game. Runtime input injection, call stacks, and profiler telemetry are unimplemented.
+Use `runtime_launch` to start a separate Godot process, optionally headless, for 1–120 seconds and inspect captured output. This does not attach to a running game. `break_on_error` affects result classification after exit; it does not terminate the child at the first error line. Runtime input injection, call stacks, and profiler telemetry are unimplemented.
 
 ### Observe or control an already-running session
 

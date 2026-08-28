@@ -150,7 +150,7 @@ When the Godot Editor is not open, Didi automatically switches to its built-in o
 - **`scene_get_hierarchy`**: Parses `.tscn` text files into a structured hierarchy when live editor state is unavailable.
 - **`project_list_resources`**: Scans the project filesystem, extracts `uid://` references and dependencies, and prunes deny-listed directories.
 - **`project_search_text` / `project_search_symbols`**: Bounded literal and lexical scans across allowlisted project text formats with canonical containment and symlink/build-directory exclusion.
-- **`runtime_launch`**: Spawns a separate Godot process, captures stdout/stderr, classifies errors, and enforces a timeout.
+- **`runtime_launch`**: Spawns a separate Godot process, captures stdout/stderr, classifies errors after exit, and enforces a 1–120 second timeout. On Windows, process-handle signaling determines completion so the valid exit code `259` is not confused with `STILL_ACTIVE`.
 - **`viewport_create_test_lab`**: Writes a basic standalone sandbox `.tscn` with lights and cameras.
 
 The exact live/offline/unimplemented split is documented in [Current Capability Matrix](CAPABILITIES.md).
