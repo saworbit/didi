@@ -286,7 +286,7 @@ jobs:
 
           hierarchy = json.loads(req('tools/call', {
               'name': 'get_scene_hierarchy',
-              'arguments': {'root_path': 'res://scenes/main.tscn'}
+              'arguments': {'root_path': 'res://tests/godot_smoke/main.tscn'}
           }, 4)['result']['content'][0]['text'])
           assert hierarchy['execution_mode'] == 'offline_fallback'
           assert hierarchy['scene_tree']['path'].startswith('/root/')
