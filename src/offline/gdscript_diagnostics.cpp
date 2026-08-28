@@ -443,7 +443,7 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
             while (j < lines.size()) {
                 std::string cur = lines[j];
                 std::string trimmed_cur = strings::trim(cur);
-                if (trimmed_cur.empty() || trimmed_cur[0] == '#') {
+                if (trimmed_cur.empty()) {
                     j++;
                     continue;
                 }
