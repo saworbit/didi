@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
 #include "didi/common/types.hpp"
@@ -9,6 +10,22 @@ namespace didi {
 namespace offline {
 
 std::string resolveGodotExecutable();
+
+#if defined(_WIN32)
+namespace detail {
+
+struct WindowsProcessCommand {
+    std::wstring application_name;
+    std::wstring command_line;
+};
+
+std::wstring trustedWindowsCommandInterpreter();
+std::optional<WindowsProcessCommand> makeWindowsProcessCommand(
+    const std::string& executable,
+    const std::string& command_line);
+
+} // namespace detail
+#endif
 
 struct TestSessionLog {
     std::string level; // "INFO", "WARN", "ERROR", "SCRIPT_ERROR"
