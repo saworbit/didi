@@ -5,6 +5,14 @@
 
 ---
 
+## Phase Status
+
+Roadmap phases use exactly three states: `PLANNED`, `IN PROGRESS`, and `COMPLETE`.
+Detailed scope and acceptance gates for all post-Phase-6 work are defined in
+[Future Phases Design](FUTURE_PHASES_DESIGN.md).
+
+---
+
 ## 🎯 Architectural Vision & Implementation Sequence
 
 ```
@@ -121,6 +129,65 @@ Phase 6 hardens the existing surface without adding tool names:
 - Editor reload, script patching, and overwrite-enabled offline writers require an exact 120-second single-use confirmation token. Argument, project, session, route, expiry, and replay mismatches fail closed.
 
 The native red-team contract covers invalid roots, project-key isolation, lock exclusion/release, preview non-execution, missing confirmation, tampering, route/context changes, expiry, replay, and schema honesty. The canonical/legacy counts remain 78/10.
+
+---
+
+## Phase 7: Canonical Surface Completion (`PLANNED`)
+
+**Objective:** Implement the remaining 18 canonical tools, moving the protocol surface from 60/78 to 78/78 without adding public tool names.
+
+**Delivery slices:**
+- 7A: signals, viewport camera/debug, and tile/grid operations (9 tools)
+- 7B: physics, navigation, and animation operations (6 tools)
+- 7C: input injection, call-stack inspection, and profiling (3 tools)
+
+**Exclusions:** No public tool names are added. No tool claims arbitrary debugger control or engine-output streaming beyond implemented Godot APIs.
+
+**Exit gate:** All 78 canonical tools have real implementations and cross-platform, native bridge, Godot, security, mutation-policy, and documentation evidence. Successful placeholders do not satisfy this gate. The 10 legacy registrations remain compatibility-only and do not change the canonical count.
+
+## Phase 8: Deep Project Intelligence and Asset Pipeline (`PLANNED`)
+
+**Objective:** Add dependency-aware project analysis, import health, asset provenance, and safe bulk asset workflows after canonical completion.
+
+**Exclusions:** No custom GDScript language server, unbounded whole-project semantic analysis, or silent import-setting mutation.
+
+**Exit gate:** Didi can explain resource usage and import health with source provenance and freshness. Index corruption, symlinks, malformed cache data, and generated-directory escapes fail safely. Import changes are previewable, explicit, and verified after reimport.
+
+## Phase 9: Advanced Visual, UI, and Authoring Workflows (`PLANNED`)
+
+**Objective:** Add higher-level scene, UI, visual validation, and authoring workflows built from stable canonical primitives.
+
+**Exclusions:** No arbitrary GPU command injection, sticky global debug state, or image-diff claim across mismatched dimensions or undocumented color conversion.
+
+**Exit gate:** Authoring mutations are UndoRedo-backed and dry-runnable. Temporary visual state is restored on success, error, timeout, and cancellation. Real editor and game fixtures prove layout, animation, capture-target, and comparison behavior.
+
+## Phase 10: Gogo Parallel Godot Orchestration (`PLANNED`)
+
+**Objective:** Coordinate isolated Godot work across parallel workers with deterministic ownership, conflict prevention, and auditable integration.
+
+**Exclusions:** No autonomous planning inside Gogo, Agent-to-Agent transport in the initial phase, attachment to or termination of Godot processes Gogo does not own, or claim that a fixed number of benches is universally supported.
+
+**Exit gate:** Parallel experiments are isolated by project/workspace and ownership identity. Capacity and artifact budgets are enforced under concurrency. Crashes, timeouts, cancellation, and parent death leave no owned live children or writable workspaces behind.
+
+## Phase 11: MCP Protocol and Workflow Evolution (`PLANNED`)
+
+**Objective:** Evolve protocol ergonomics, workflow composition, capability negotiation, and compatibility without destabilizing canonical behavior.
+
+**Exclusions:** No replacement of stdio MCP with network transport, notification claim for data Didi cannot observe reliably, or unbounded event or log streaming.
+
+**Exit gate:** Subscription lifecycle, reconnect behavior, ordering, loss disclosure, and backpressure are specified and tested. Older supported MCP clients retain a documented compatibility path. Every prompt checks capability metadata instead of assuming tool availability.
+
+## Phase 12: Distribution and Ecosystem Maturity (`PLANNED`)
+
+**Objective:** Mature packaging, release channels, extension governance, compatibility guarantees, and operator-facing distribution workflows.
+
+**Exclusions:** Didi does not become a remote multi-tenant service or hostile-host isolation boundary. Third-party extensions cannot bypass project containment, authentication, route policy, dry-run, or confirmation controls.
+
+**Exit gate:** Release artifacts are reproducible, signed, installable, and traceable to source. Supported Godot/platform combinations are explicit and continuously verified. Upgrade and rollback paths preserve project configuration and document breaking changes. Extension compatibility and security policy are versioned and enforceable.
+
+## Adding Future Phases
+
+Phase 13 and later must be documented before implementation begins. Each phase requires scope, explicit exclusions, security and mutation classifications, measurable exit evidence, and a roadmap status. A phase may move to `COMPLETE` only when its completion date and pull request are recorded with its evidence.
 
 ---
 
