@@ -101,6 +101,24 @@ static void test_gdscript_colon_rule_requires_else_as_a_complete_token() {
     ASSERT_EQ(missing_colon_lines[1], 4);
 }
 
+static void test_gdscript_diagnostics_ignore_brackets_in_strings_and_comments() {
+    const auto diagnostics = didi::offline::GDScriptDiagnostics::analyze(
+        "",
+        "var prompt = \"Enter name (optional): [required] {value}\"\n"
+        "var count = 1 # unmatched ((([[{{\n"
+        "var doc = \"\"\"single-line ( [ { documentation\"\"\"\n"
+        "export(int) var legacy = 1\n");
+
+    bool found_export = false;
+    for (const auto& diagnostic : diagnostics) {
+        ASSERT_TRUE(diagnostic.rule != "unbalanced_parentheses");
+        ASSERT_TRUE(diagnostic.rule != "unbalanced_brackets");
+        ASSERT_TRUE(diagnostic.rule != "unbalanced_braces");
+        if (diagnostic.rule == "deprecated_export") found_export = true;
+    }
+    ASSERT_TRUE(found_export);
+}
+
 static void test_godot_45_multiline_compiler_output_is_preserved() {
     ScopedTempDirectory temp("didi-godot-diagnostics-");
     const auto script = temp.path() / "player.gd";
@@ -235,6 +253,7 @@ struct RegisterScriptPatchTests {
     RegisterScriptPatchTests() {
         registerTest("GDScript.DiagnosticsDeprecation", test_gdscript_diagnostics_deprecation);
         registerTest("GDScript.ElseTokenColonRule", test_gdscript_colon_rule_requires_else_as_a_complete_token);
+        registerTest("GDScript.StringAwareBalance", test_gdscript_diagnostics_ignore_brackets_in_strings_and_comments);
         registerTest("GDScript.Godot45CompilerOutput", test_godot_45_multiline_compiler_output_is_preserved);
         registerTest("GDScript.PatchFunction", test_gdscript_symbol_patch_function);
         registerTest("GDScript.PatchSignal", test_gdscript_symbol_patch_signal);

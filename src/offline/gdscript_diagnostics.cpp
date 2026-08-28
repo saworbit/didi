@@ -3,6 +3,7 @@
 #include "didi/common/logger.hpp"
 #include <fstream>
 #include <sstream>
+#include <string_view>
 #include <regex>
 #include <filesystem>
 #include <cstdlib>
@@ -30,6 +31,59 @@ namespace offline {
 namespace fs = std::filesystem;
 
 std::string resolveGodotExecutable();
+
+namespace {
+
+std::string codeOutsideGdscriptLiterals(std::string_view line,
+                                        std::string& multiline_delimiter) {
+    std::string code;
+    code.reserve(line.size());
+    for (size_t i = 0; i < line.size();) {
+        if (!multiline_delimiter.empty()) {
+            if (i + multiline_delimiter.size() <= line.size() &&
+                line.substr(i, multiline_delimiter.size()) == multiline_delimiter) {
+                code.append(multiline_delimiter.size(), ' ');
+                i += multiline_delimiter.size();
+                multiline_delimiter.clear();
+            } else {
+                code.push_back(' ');
+                ++i;
+            }
+            continue;
+        }
+
+        if (line[i] == '#') break;
+        if (i + 3 <= line.size() &&
+            (line.substr(i, 3) == "\"\"\"" || line.substr(i, 3) == "'''")) {
+            multiline_delimiter = std::string(line.substr(i, 3));
+            code.append(3, ' ');
+            i += 3;
+            continue;
+        }
+        if (line[i] == '\"' || line[i] == '\'') {
+            const char delimiter = line[i];
+            code.push_back(' ');
+            ++i;
+            while (i < line.size()) {
+                code.push_back(' ');
+                if (line[i] == '\\' && i + 1 < line.size()) {
+                    ++i;
+                    code.push_back(' ');
+                } else if (line[i] == delimiter) {
+                    ++i;
+                    break;
+                }
+                ++i;
+            }
+            continue;
+        }
+        code.push_back(line[i]);
+        ++i;
+    }
+    return code;
+}
+
+} // namespace
 
 std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& file_path, const std::string& source_text) {
     std::vector<ScriptDiagnostic> diagnostics;
@@ -65,25 +119,15 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& fi
 
     std::vector<std::string> lines = strings::split(content, '\n');
     int open_paren = 0, open_bracket = 0, open_brace = 0;
-    bool in_multiline_string = false;
     std::string multiline_quote_type;
 
     for (size_t i = 0; i < lines.size(); ++i) {
         int line_num = static_cast<int>(i + 1);
         std::string raw_line = lines[i];
-        std::string trimmed = strings::trim(raw_line);
+        std::string trimmed = strings::trim(
+            codeOutsideGdscriptLiterals(raw_line, multiline_quote_type));
 
         if (trimmed.empty()) continue;
-
-        // Multiline string check """ or '''
-        if (trimmed.find("\"\"\"") != std::string::npos || trimmed.find("'''") != std::string::npos) {
-            in_multiline_string = !in_multiline_string;
-            continue;
-        }
-        if (in_multiline_string) continue;
-
-        // Skip full comment lines
-        if (trimmed[0] == '#') continue;
 
         // Check brackets & parentheses balance
         for (char c : trimmed) {
