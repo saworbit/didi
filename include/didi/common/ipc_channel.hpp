@@ -73,5 +73,13 @@ public:
 std::unique_ptr<IIpcClient> createIpcClient();
 std::unique_ptr<IIpcServer> createIpcServer();
 
+#if defined(_WIN32)
+namespace testing {
+using PipeSecurityDescriptorFactory = std::function<void*()>;
+std::unique_ptr<IIpcServer> createIpcServerWithSecurityDescriptorFactory(
+    PipeSecurityDescriptorFactory factory);
+} // namespace testing
+#endif
+
 } // namespace ipc
 } // namespace didi

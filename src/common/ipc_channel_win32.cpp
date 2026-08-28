@@ -322,7 +322,10 @@ private:
 
 class Win32IpcServer : public IIpcServer {
 public:
-    Win32IpcServer() : m_running(false), m_stopEvent(NULL) {}
+    explicit Win32IpcServer(testing::PipeSecurityDescriptorFactory security_descriptor_factory)
+        : m_running(false),
+          m_stopEvent(NULL),
+          m_securityDescriptorFactory(std::move(security_descriptor_factory)) {}
     ~Win32IpcServer() override {
         stop();
     }
@@ -410,13 +413,16 @@ private:
         sa.bInheritHandle = FALSE;
         sa.lpSecurityDescriptor = NULL;
 
-        // Restrict strictly to Current Owner (OW) and Administrators (BA)
-        PSECURITY_DESCRIPTOR pSD = NULL;
-        if (ConvertStringSecurityDescriptorToSecurityDescriptorA(
-                "D:(A;;GA;;;BA)(A;;GA;;;OW)",
-                SDDL_REVISION_1, &pSD, NULL)) {
-            sa.lpSecurityDescriptor = pSD;
+        PSECURITY_DESCRIPTOR pSD = m_securityDescriptorFactory
+            ? static_cast<PSECURITY_DESCRIPTOR>(m_securityDescriptorFactory())
+            : nullptr;
+        if (!pSD) {
+            DIDI_LOG_ERROR("IPC_SERVER", "Unable to create owner-only named pipe security descriptor");
+            m_running.store(false);
+            signalStartup(false);
+            return;
         }
+        sa.lpSecurityDescriptor = pSD;
 
         HANDLE hIoEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
         if (!hIoEvent) {
@@ -591,6 +597,7 @@ private:
     std::condition_variable m_startupCv;
     bool m_startupReady{false};
     bool m_startupSucceeded{false};
+    testing::PipeSecurityDescriptorFactory m_securityDescriptorFactory;
 };
 
 #else
@@ -998,11 +1005,27 @@ std::unique_ptr<IIpcClient> createIpcClient() {
 
 std::unique_ptr<IIpcServer> createIpcServer() {
 #if defined(_WIN32)
-    return std::make_unique<Win32IpcServer>();
+    return std::make_unique<Win32IpcServer>([]() -> void* {
+        PSECURITY_DESCRIPTOR descriptor = nullptr;
+        if (!ConvertStringSecurityDescriptorToSecurityDescriptorA(
+                "D:(A;;GA;;;BA)(A;;GA;;;OW)", SDDL_REVISION_1, &descriptor, nullptr)) {
+            return nullptr;
+        }
+        return descriptor;
+    });
 #else
     return std::make_unique<PosixIpcServer>();
 #endif
 }
+
+#if defined(_WIN32)
+namespace testing {
+std::unique_ptr<IIpcServer> createIpcServerWithSecurityDescriptorFactory(
+    PipeSecurityDescriptorFactory factory) {
+    return std::make_unique<Win32IpcServer>(std::move(factory));
+}
+} // namespace testing
+#endif
 
 } // namespace ipc
 } // namespace didi
