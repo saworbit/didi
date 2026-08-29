@@ -124,7 +124,7 @@ Add to your `mcp_config.json`:
 **A:** No. File-based tools such as `script_check_syntax`, `project_list_resources`, project search, and `runtime_launch` remain available in `offline_fallback` mode. Scene mutations, project wiring, reimport, isolation, diffing, and editor lifecycle tools require a live editor; Phase 3 runtime tools require an authenticated auto-selected or explicitly attached editor/game session.
 
 ### Q: Why does `scene_close` require `discard_unsaved: true` even for a scene I believe is clean?
-**A:** Godot 4.5 does not expose active-scene dirty state through GDExtension. Didi refuses the default call rather than risk discarding work. Pass `discard_unsaved: true` only when closing without a save prompt is intentional.
+**A:** Godot 4.5 and 4.6 do not expose active-scene dirty state through GDExtension. Godot 4.7 adds `EditorInterface.get_unsaved_scenes()`, but Didi does not yet read it, so the guard is uniform across supported versions. Didi refuses the default call rather than risk discarding work. Pass `discard_unsaved: true` only when closing without a save prompt is intentional.
 
 ### Q: Do project wiring tools edit `project.godot` directly?
 **A:** No. Autoloads, InputMap actions, and generic settings run inside the connected editor through `ProjectSettings`, verify `save()`, and restore the previous in-memory setting if persistence fails.

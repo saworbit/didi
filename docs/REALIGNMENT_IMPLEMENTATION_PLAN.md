@@ -94,14 +94,24 @@ counts in `tools/validate_documentation.py` were scaffolding that turned hostile
 | Explicit `--project`, fail closed | KEEP | Genuinely differentiating |
 | Zero external runtime dependencies | KEEP | The moat |
 | 10 legacy names retained indefinitely | AMEND | Adopt MCP's 12-month deprecation lifecycle |
-| `scene_close` requires `discard_unsaved` | **RECHECK** | See below |
+| `scene_close` requires `discard_unsaved` | **RESOLVED** | Rechecked against real engines; see below |
 
-**`scene_close` recheck.** The docs pin the constraint to *"Godot 4.5 does not
-expose active-scene dirty state through GDExtension"*, but CI now tests 4.5.1,
-4.6.2, and 4.7.2 and the refusal is unconditional in code. Either the limitation
-still holds in 4.7 and the docs are misleadingly version-pinned, or it was fixed
-upstream and the friction is now unnecessary. This needs a Godot integration test
-that asserts the limitation per version, not a sentence that asserts it.
+**`scene_close` recheck — done.** Resolved 2026-08-30 by dumping
+`extension_api.json` from each installed engine rather than trusting the sentence:
+
+| Engine | `EditorInterface` dirty-state API |
+| :--- | :--- |
+| Godot 4.5.1 | `mark_scene_as_unsaved` only (write-side) |
+| Godot 4.6.2 | `mark_scene_as_unsaved` only (write-side) |
+| Godot 4.7.2 | `mark_scene_as_unsaved` **and** `get_unsaved_scenes()` |
+
+The read Didi needs landed in Godot 4.7. The guard is therefore still correct on
+4.5 and 4.6, and the documentation was stale rather than wrong: it named 4.5 as
+though the limit were permanent. All four places that stated it now say which
+versions lack the API and that Didi does not yet consume the 4.7 call. Adopting it
+is a version-gated behavior change to a data-loss guard, so it is filed as a
+proposed [Surface Amendment](SURFACE_AMENDMENTS.md) with a per-version proving
+test, not slipped in here.
 
 ---
 

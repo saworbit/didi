@@ -58,6 +58,24 @@ August 2026 competitive review and are proposed, not accepted, in
 `runtime_read_output`, `ui_list_controls`, `godot_api_reference`, and an `until`
 parameter on the existing `runtime_step` (a change, not a new name).
 
+### PROPOSED: `scene_close` reads real dirty state on Godot 4.7+
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | No new name. A behavior change to `scene_close`. |
+| **Failing workflow** | An agent that opens a scene, inspects it, and closes it must pass `discard_unsaved: true` even when nothing was modified. That flag is the project's marker for destructive intent, so every close teaches the agent to assert destructive intent it does not have. |
+| **Execution modes** | `live`, editor sessions only. |
+| **Safety class** | `remove/overwrite` — unchanged. The guard relaxes only when the engine positively reports the scene as clean. |
+| **Proving test** | A Godot integration case per supported version: on 4.5.1 and 4.6.2 the default call must still refuse; on 4.7.2 it must succeed for a clean scene and still refuse for a dirty one. |
+| **Reviewer** | Unassigned. Requires security review: this narrows a data-loss guard. |
+
+Evidence gathered 2026-08-30 by dumping `extension_api.json` from each installed
+engine. `EditorInterface` exposes only the write-side `mark_scene_as_unsaved` on
+Godot 4.5.1 and 4.6.2; the read-side `get_unsaved_scenes()` first appears in 4.7.
+Didi supports 4.5+, so this cannot be adopted unconditionally — it must be gated
+on a runtime capability check, with the conservative refusal retained wherever the
+call is absent.
+
 ## Deprecating a name
 
 Removal is also an amendment. Didi follows the MCP feature lifecycle: a name
