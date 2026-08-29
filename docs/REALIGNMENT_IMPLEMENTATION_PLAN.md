@@ -59,6 +59,52 @@ Didi is not out of compliance because of the decisions you made. Didi is complia
 
 ---
 
+## Foundational rules audit
+
+Before executing, all 21 standing rules were audited against the current
+specification and the code that enforces them. Nine were kept, eight amended,
+three retired, one flagged for recheck. The discipline is overwhelmingly sound;
+one rule had inverted.
+
+**Only one rule was ever load-bearing for quality: "never claim success on a
+stub."** Everything else is scaffolding that grew around it. The hard-coded tool
+counts in `tools/validate_documentation.py` were scaffolding that turned hostile
+— built to protect the no-stub rule, they came to enforce prose agreement
+*instead of* truth, which is that rule's exact opposite. Workstream 0 fixes it.
+
+| Rule | Verdict | Note |
+| :--- | :--- | :--- |
+| Counts 78/10/88/60/18 as doc regexes | **RETIRED** | Workstream 0. Blocked Phase 7 |
+| `FUTURE_PHASE_RANGE = range(7,13)` | AMEND | Freezes roadmap shape in CI |
+| 17 fixed `REQUIRED_DOCUMENTS` paths | AMEND | Blocks doc consolidation (D1) |
+| Version consistency across 8 files | KEEP | Checks code, not just prose |
+| Forbidden agent-artifact paths | KEEP | Working as intended |
+| Link and anchor validation | KEEP | Rare and valuable |
+| **"No success stubs"** | **KEEP** | The crown jewel. Absolute |
+| "Don't increase the canonical count" | **RETIRED** | Workstream 0. Split from the rule above |
+| "No second plugin architecture or network transport" | AMEND | State the reason: local-only is a security boundary |
+| "No custom GDScript language server" | KEEP + clarify | Consuming Godot's LSP as a *client* is not this |
+| "Replace static ClassDB map with `extension_api.json`" | KEEP | Already pre-authorizes B5 |
+| Phase gates: docs + native + Godot + CI | KEEP | Why Didi is trustworthy |
+| Phases organized by engine subsystem | AMEND | Reorganize by agent workflow |
+| MCP `2024-11-05` | RETIRE | → dual-era, Workstream A |
+| `eval_gdscript` expression-only | KEEP | Now also the predicate language for B2 |
+| dry-run + confirmation tokens | KEEP + extend | Spec blesses the pattern; pair with elicitation |
+| One-client `423` lock on all operations | AMEND | Reads could be concurrent, mutations exclusive |
+| Explicit `--project`, fail closed | KEEP | Genuinely differentiating |
+| Zero external runtime dependencies | KEEP | The moat |
+| 10 legacy names retained indefinitely | AMEND | Adopt MCP's 12-month deprecation lifecycle |
+| `scene_close` requires `discard_unsaved` | **RECHECK** | See below |
+
+**`scene_close` recheck.** The docs pin the constraint to *"Godot 4.5 does not
+expose active-scene dirty state through GDExtension"*, but CI now tests 4.5.1,
+4.6.2, and 4.7.2 and the refusal is unconditional in code. Either the limitation
+still holds in 4.7 and the docs are misleadingly version-pinned, or it was fixed
+upstream and the friction is now unnecessary. This needs a Godot integration test
+that asserts the limitation per version, not a sentence that asserts it.
+
+---
+
 ## Workstream sequencing
 
 Each workstream produces working, testable software on its own. **A and C must be planned in full detail before execution; B, D, and E get their own plans when their turn comes** — this document scopes them and sets their exit gates.
@@ -73,6 +119,44 @@ A. Protocol modernization ──┐
 - **A** first because every other workstream writes tool definitions, and `outputSchema` / `annotations` / `resultType` change the shape of every one of them. Doing A last means rewriting everything twice.
 - **C** before **B** because B adds tool names and C is what makes adding names legitimate.
 - **D** continuously, gated last, because docs describe what exists.
+
+---
+
+# Workstream 0: Governance Unlock — `COMPLETE`
+
+**Delivered 2026-08-30.** Every other workstream writes tool definitions or
+consolidates documents, and both were blocked by counts hard-coded in CI. This
+had to land first.
+
+- `kLegacyToolNames` in `include/didi/mcp/mcp_protocol.hpp` is the single
+  declaration of which registrations are legacy. Before this, the
+  canonical/legacy split existed only in prose and was unverifiable.
+- `ToolRegistry::buildManifest()` and `didi --dump-tool-manifest` emit sorted,
+  byte-stable JSON with counts and names.
+- `tools/validate_documentation.py --tool-manifest` derives every published count
+  from that artifact. A missing, malformed, or internally inconsistent manifest
+  is a hard failure with an actionable message.
+- CI generates the manifest from the binary it just built and validates against it.
+- The fused rule is split: no success stubs stays absolute; the surface grows
+  through [Surface Amendments](SURFACE_AMENDMENTS.md).
+
+**Result:** the binary independently reports 78 canonical, 10 legacy, 88 total,
+60 implemented, 18 unimplemented — matching what the documents already claimed.
+The numbers were right; nothing could prove it. Implementing a reserved tool now
+updates every published count automatically instead of breaking CI.
+
+**Verified:** `didi_tests` 178 passed / 0 failed; `pytest
+tests/test_documentation_validator.py` 38 passed; doc validation exit 0; and
+negative cases — count drift, inconsistent manifest, missing manifest — all fail
+with the offending document and expected value named.
+
+**Known issue found while verifying:** `Tools.CaptureViewportWithIpc` is flaky.
+It failed once with `runtime_logs.isOk()` on the first run after a fresh build,
+then passed on five consecutive runs. Tracked separately; not addressed here.
+
+**Still open from the audit:** `FUTURE_PHASE_RANGE` and `REQUIRED_DOCUMENTS`
+remain coupled to the current roadmap and doc layout. Both block Workstream D and
+should be decoupled as part of it, not before.
 
 ---
 
