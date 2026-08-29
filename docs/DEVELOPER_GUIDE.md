@@ -153,9 +153,34 @@ cmake --build build --config Release
 .\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe
 ```
 
+The native runner accepts `--list` to print every registered case and
+`--filter=<substring>` to run a subset:
+
+```powershell
+.\build\Release\didi_tests.exe --list
+.\build\Release\didi_tests.exe --filter=Tools.CaptureViewportWithIpc
+```
+
+Run a test in isolation whenever it fails intermittently. The suite executes in a
+single process and shares the tool registry, the resource registry, and the
+working directory, so a case that does not register what it calls will pass only
+because an earlier case registered it, and will fail at a different assertion as
+the ordering changes. A test that passes in the full suite but fails alone is
+depending on a predecessor, not on the code under test.
+
 For expression-policy changes, add a failing native scanner test and a real editor/game integration probe before changing implementation. A new accepted Node operation must prove it cannot dispatch script callbacks, traverse outside the active subtree, allocate unbounded data before a check, leak source/token text, or turn the cooperative timeout into a hard-preemption claim.
 
-The CI MCP smoke must continue to assert exactly 78 canonical/88 total registrations, offline-only search/deep-domain metadata, live-only reimport/diff/UI-hit-test metadata, strict Phase 4/5 schemas, local metadata for the four session tools, live metadata for the six routed runtime tools, cursor-shaped logs, and `implemented: false` for `runtime_inject_input`, `runtime_get_call_stack`, and `runtime_read_profiler`.
+The CI MCP smoke must start Didi with an explicit fixture project and continue to assert exactly 78 canonical/88 total registrations, offline-only search/deep-domain metadata, live-only reimport/diff/UI-hit-test metadata, strict Phase 4/5/6 schemas, local metadata for the four session tools, live metadata for the six routed runtime tools, cursor-shaped logs, and `implemented: false` for `runtime_inject_input`, `runtime_get_call_stack`, and `runtime_read_profiler`.
+
+## Phase 5 and Phase 6 implementation map
+
+- `src/tools/deep_domain_tools.cpp` and `src/offline/deep_domain_support.cpp`: bounded C#/shader diagnostics, public export-preset parsing, guarded export, deterministic MeshLibrary generation, and live UI hit-test registration/dispatch.
+- `include/didi/common/project_path.hpp`: explicit project-root validation, canonical containment, and stable 16-hex project endpoint keys.
+- `src/runtime/session_lock.cpp`: owner-only cross-platform OS locks and `423` exclusion for a second MCP owner.
+- `src/mcp/mutation_safety.cpp`: mutation classification, schema decoration, handler-free previews, exact context binding, 120-second expiry, and single-use confirmation storage.
+- `tests/test_phase5.cpp`, `tests/test_phase6.cpp`, and `tests/run_godot_integration.ps1`: deep-domain contracts, project/lock/preview red-team cases, and disposable Phases 1–6 Godot workflows.
+
+When adding or reclassifying a mutation, update `MutationSafety::isMutation`, add `dry_run` schema coverage, and prove the dry-run never enters its handler. Add confirmation only for the documented high-risk set; changing that set is a public safety-contract change and requires updates to the Tool Reference, Capability Matrix, LLM instructions, and API specification.
 
 ## Documentation and release gate
 
