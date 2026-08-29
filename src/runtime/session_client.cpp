@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cmath>
 #include <mutex>
+#include <optional>
 #include <limits>
 #include <sstream>
 #include <set>
@@ -660,6 +661,91 @@ Result<json> authenticateSession(const std::shared_ptr<ipc::IIpcClient>& client,
     return handshake.value();
 }
 
+// Tombstone names are produced by retireOwnedSessionDescriptor as
+// "<session-id>.json.didi-retired-<session-id>-<nonce>", where both the session
+// id and the nonce are 32 lowercase hex characters. Returns the session id the
+// name claims, or nullopt when the entry is not one of our tombstones.
+std::optional<std::string> tombstoneSessionIdFromName(const std::string& name) {
+    static const std::string marker = ".json.didi-retired-";
+    const auto marker_offset = name.find(marker);
+    if (marker_offset != 32) return std::nullopt;
+
+    const std::string named_id = name.substr(0, 32);
+    if (!isLowerHex(named_id, 32)) return std::nullopt;
+
+    const std::string suffix = name.substr(marker_offset + marker.size());
+    if (suffix.size() != 32 + 1 + 32) return std::nullopt;
+    if (suffix.compare(0, 32, named_id) != 0 || suffix[32] != '-') return std::nullopt;
+    if (!isLowerHex(suffix.substr(33), 32)) return std::nullopt;
+    return named_id;
+}
+
+}  // namespace
+
+TombstoneReapOutcome reapOrphanedDescriptorTombstone(
+    const std::filesystem::path& directory, const std::filesystem::path& path) {
+    const auto named_id = tombstoneSessionIdFromName(path.filename().string());
+    if (!named_id.has_value()) return TombstoneReapOutcome::not_a_tombstone;
+
+    // Everything below is decided from a single opened handle, so the object
+    // that is verified is the object that is removed.
+#if defined(_WIN32)
+    ScopedNativeHandle handle(CreateFileW(
+        path.wstring().c_str(), GENERIC_READ | DELETE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+    if (handle.get() == INVALID_HANDLE_VALUE) return TombstoneReapOutcome::retained_unverifiable;
+    const auto snapshot = readSecureDescriptorHandle(handle.get());
+#else
+    ScopedNativeHandle directory_fd(open(directory.c_str(),
+                                         O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+    if (directory_fd.get() < 0) return TombstoneReapOutcome::retained_unverifiable;
+    ScopedNativeHandle handle(openat(directory_fd.get(), path.filename().c_str(),
+                                     O_RDONLY | O_NOFOLLOW | O_CLOEXEC));
+    if (handle.get() < 0) return TombstoneReapOutcome::retained_unverifiable;
+    const auto snapshot = readSecureDescriptorFd(handle.get());
+#endif
+    if (snapshot.isErr()) return TombstoneReapOutcome::retained_unverifiable;
+
+    SessionDescriptor descriptor;
+    try {
+        auto decoded = SessionDescriptor::fromJson(json::parse(snapshot.value().first));
+        if (decoded.isErr()) return TombstoneReapOutcome::retained_unverifiable;
+        descriptor = decoded.value();
+    } catch (const std::exception&) {
+        return TombstoneReapOutcome::retained_unverifiable;
+    }
+
+    // The name and the contents must agree. Without this, a descriptor placed
+    // under an unrelated tombstone name could authorize removing that name.
+    if (descriptor.session_id != named_id.value()) {
+        return TombstoneReapOutcome::retained_unverifiable;
+    }
+
+    // Never delete on a guess. Only a provably finished owner qualifies; alive
+    // and unverifiable both retain.
+    if (processInstanceState(descriptor.pid, descriptor.started_at_ms) !=
+        ProcessInstanceState::proven_stale) {
+        return TombstoneReapOutcome::retained_owner_not_proven_gone;
+    }
+
+#if defined(_WIN32)
+    FILE_DISPOSITION_INFO disposition{};
+    disposition.DeleteFile = TRUE;
+    return SetFileInformationByHandle(handle.get(), FileDispositionInfo, &disposition,
+                                      sizeof(disposition)) != 0
+               ? TombstoneReapOutcome::reaped
+               : TombstoneReapOutcome::retained_unavailable;
+#else
+    // POSIX has no portable unlink primitive bound to this verified open file.
+    // unlinkat() acts on the name, so removing it would reintroduce exactly the
+    // substitution window that retirement refuses to accept. Retain instead.
+    return TombstoneReapOutcome::retained_unavailable;
+#endif
+}
+
+namespace {
+
 std::vector<DiscoveredSession> discoverSessions(json& diagnostics,
                                                 const DescriptorOpenedHook& opened_hook) {
     std::vector<DiscoveredSession> sessions;
@@ -683,7 +769,14 @@ std::vector<DiscoveredSession> discoverSessions(json& diagnostics,
     for (std::filesystem::directory_iterator it(directory, ec), end; !ec && it != end; it.increment(ec)) {
         const auto& entry = *it;
         const auto path = entry.path();
-        if (path.extension() != ".json") continue;
+        if (path.extension() != ".json") {
+            // Opportunistic housekeeping. Retirement is move-then-delete, and an
+            // owner that dies between the two steps leaves a tombstone nobody
+            // will finish removing. Deliberately silent: a retained tombstone is
+            // not discoverable and is not a fault the caller needs reported.
+            (void)reapOrphanedDescriptorTombstone(directory, path);
+            continue;
+        }
         auto contents = readDescriptorFromValidatedHandle(directory, path, opened_hook);
         if (contents.isErr()) {
             diagnostics.push_back({{"path", path.string()}, {"error", contents.error().message}});

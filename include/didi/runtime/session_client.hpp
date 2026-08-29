@@ -59,6 +59,30 @@ enum class DescriptorRetirementOutcome {
     retained_unavailable,
 };
 
+// Retirement is move-then-delete. An owner that dies between the two steps
+// leaves a `<id>.json.didi-retired-<id>-<nonce>` tombstone that nothing will
+// ever finish removing. Reaping is deliberately conservative: a tombstone is
+// removed only when its contents parse as a descriptor, the session id in the
+// filename matches the session id inside it, and the owning process is provably
+// gone. Anything less is retained.
+enum class TombstoneReapOutcome {
+    reaped,
+    // The owner is alive, or its state could not be proven either way.
+    retained_owner_not_proven_gone,
+    // Unreadable, unparseable, or the name and contents disagree.
+    retained_unverifiable,
+    // POSIX only: no portable unlink primitive is bound to a verified open
+    // file, so removing by name would leave a substitution window. Retained for
+    // the same reason retirement retains its own tombstones.
+    retained_unavailable,
+    // Not one of our tombstones. The entry is left untouched.
+    not_a_tombstone,
+};
+
+TombstoneReapOutcome reapOrphanedDescriptorTombstone(
+    const std::filesystem::path& directory,
+    const std::filesystem::path& path);
+
 DescriptorRetirementOutcome retireOwnedSessionDescriptor(
     const std::filesystem::path& path,
     const SessionDescriptor& descriptor,
