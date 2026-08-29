@@ -49,11 +49,18 @@ Didi v1.4.0 registers 78 canonical tool names. Sixty are implemented in at least
 
 ## Phase 7 feasibility status
 
+<!-- phase7-current-status:start -->
+**Status:** `BLOCKED_AT_FEASIBILITY`
+**Canonical implementation:** `60/78`
+**Phase 7 registrations:** `18/18` unimplemented
+**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
+<!-- phase7-current-status:end -->
+
 Phase 7 is `BLOCKED_AT_FEASIBILITY`. The 2026-08-29 gate on Godot 4.5.1 and 4.7.2 classified 15/18 names as implementation-feasible and exactly 3/18 as API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three contracts, no supported public API/semantics satisfying the exact approved contract was found on either tested version. This is a versioned feasibility result, not a claim that the contracts are impossible forever.
 
 Feasibility does not make a tool callable. The implementation remains 60/78 canonical tools; all 18 Phase 7 names remain registered with `implemented: false` and reject calls. The approved all-or-nothing 78/78 activation gate prevented Tasks 2-13, so no production implementation started.
 
-Work can proceed only after governance authorizes partial delivery of the 15 feasible tools toward 75/78, retains atomic 78/78 while waiting for supported engine capabilities, or explicitly approves an engine fork/private debugger adapter with new support and security obligations. See the [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Work can proceed only after governance authorizes partial delivery of the 15 feasible tools toward 75/78, retains atomic 78/78 while waiting for supported engine capabilities, or explicitly approves and maintains engine changes or private adapters sufficient for all three exact blocked contracts. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied. See the [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Planned Capability Growth
 

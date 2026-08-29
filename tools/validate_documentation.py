@@ -113,6 +113,10 @@ PHASE7_CURRENT_STATE_DOCUMENTS = (
     "docs/ROADMAP.md",
     "docs/TOOL_REFERENCE.md",
 )
+PHASE7_CURRENT_STATUS_START = "<!-- phase7-current-status:start -->"
+PHASE7_CURRENT_STATUS_END = "<!-- phase7-current-status:end -->"
+PHASE7_FEASIBLE_NAMES_START = "<!-- phase7-feasible-names:start -->"
+PHASE7_FEASIBLE_NAMES_END = "<!-- phase7-feasible-names:end -->"
 
 FACT_PATTERNS = {
     "README.md": (
@@ -193,6 +197,13 @@ PHASE7_MATRIX_ROW_PATTERN = re.compile(
     r"^\|\s*`(?P<tool>[a-z0-9_]+)`\s*\|"
     r"(?:[^|\n]*\|)*\s*\*\*(?P<decision>GO|BLOCKED)\*\*\s*\|\s*$",
     re.MULTILINE,
+)
+PHASE7_CURRENT_STATUS_PATTERN = re.compile(
+    r"^\*\*Status:\*\*\s+`(?P<status>[^`\n]+)`\s*\n"
+    r"\*\*Canonical implementation:\*\*\s+`(?P<implemented>\d+)/(?P<canonical>\d+)`\s*\n"
+    r"\*\*Phase 7 registrations:\*\*\s+`(?P<registered>\d+)/(?P<phase7_total>\d+)`\s+unimplemented\s*\n"
+    r"\*\*Feasibility:\*\*\s+`(?P<feasible>\d+)/(?P<feasibility_total>\d+)`\s+"
+    r"implementation-feasible;\s+`(?P<blocked>\d+)/(?P=feasibility_total)`\s+API-blocked$"
 )
 
 MINIMUM_NODE24_ACTION_VERSIONS = {
@@ -725,6 +736,45 @@ def _current_changelog_section(text: str) -> str:
     return remainder[:end.start()] if end is not None else remainder
 
 
+def _without_phase7_excluded_contexts(text: str) -> str:
+    clean = FENCED_CODE_PATTERN.sub("", text)
+    lines: list[str] = []
+    excluded_level: int | None = None
+    for line in clean.splitlines():
+        heading = re.match(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$", line)
+        if heading is not None:
+            level = len(heading.group(1))
+            if excluded_level is not None and level <= excluded_level:
+                excluded_level = None
+            if re.search(
+                r"\b(?:glossary|historical)\b",
+                heading.group(2),
+                flags=re.IGNORECASE,
+            ):
+                excluded_level = level
+                continue
+        if excluded_level is None:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def _designated_phase7_block(
+    text: str,
+    start_marker: str,
+    end_marker: str,
+    relative_path: str,
+    label: str,
+) -> tuple[str | None, list[str]]:
+    clean = _without_phase7_excluded_contexts(text)
+    if clean.count(start_marker) != 1 or clean.count(end_marker) != 1:
+        return None, [
+            f"{relative_path}: must contain exactly one designated Phase 7 {label} block"
+        ]
+    start = clean.index(start_marker) + len(start_marker)
+    end = clean.index(end_marker, start)
+    return clean[start:end].strip(), []
+
+
 def validate_phase7_reconciliation(texts: dict[str, str]) -> list[str]:
     errors: list[str] = []
 
@@ -733,14 +783,47 @@ def validate_phase7_reconciliation(texts: dict[str, str]) -> list[str]:
         if text is None:
             continue
         source = _current_changelog_section(text) if relative_path == "CHANGELOG.md" else text
-        if PHASE7_STATUS not in source:
+        block, block_errors = _designated_phase7_block(
+            source,
+            PHASE7_CURRENT_STATUS_START,
+            PHASE7_CURRENT_STATUS_END,
+            relative_path,
+            "current-status",
+        )
+        errors.extend(block_errors)
+        if block is None:
+            continue
+        match = PHASE7_CURRENT_STATUS_PATTERN.fullmatch(block)
+        if match is None:
             errors.append(
-                f"{relative_path}: Phase 7 status must be {PHASE7_STATUS}"
+                f"{relative_path}: Phase 7 current status block has invalid field structure"
             )
-        if "15/18" not in source or "3/18" not in source:
+            continue
+        if match.group("status") != PHASE7_STATUS:
             errors.append(
-                f"{relative_path}: Phase 7 feasibility summary must report "
-                "15 feasible and 3 blocked"
+                f"{relative_path}: Phase 7 current status block must report status "
+                f"{PHASE7_STATUS}"
+            )
+        implementation = (
+            int(match.group("implemented")),
+            int(match.group("canonical")),
+            int(match.group("registered")),
+            int(match.group("phase7_total")),
+        )
+        if implementation != (60, 78, 18, 18):
+            errors.append(
+                f"{relative_path}: Phase 7 current status block must report "
+                "60/78 canonical implementation and 18/18 unimplemented registrations"
+            )
+        feasibility = (
+            int(match.group("feasible")),
+            int(match.group("feasibility_total")),
+            int(match.group("blocked")),
+        )
+        if feasibility != (15, 18, 3):
+            errors.append(
+                f"{relative_path}: Phase 7 current status block must report feasibility "
+                "as 15/18 implementation-feasible and 3/18 API-blocked"
             )
 
     for relative_path in PHASE7_CURRENT_STATE_DOCUMENTS:
@@ -748,6 +831,7 @@ def validate_phase7_reconciliation(texts: dict[str, str]) -> list[str]:
         if text is None:
             continue
         source = _current_changelog_section(text) if relative_path == "CHANGELOG.md" else text
+        source = _without_phase7_excluded_contexts(source)
         if re.search(r"\bPhase\s+7\s+is\s+planned\b", source, flags=re.IGNORECASE):
             errors.append(
                 f"{relative_path}: stale Phase 7 planned prose in current-state documentation"
@@ -819,6 +903,27 @@ def validate_phase7_reconciliation(texts: dict[str, str]) -> list[str]:
             errors.append(
                 f"Phase 7 blocked set must be exactly: {expected}"
             )
+        feasible_block, feasible_block_errors = _designated_phase7_block(
+            evidence,
+            PHASE7_FEASIBLE_NAMES_START,
+            PHASE7_FEASIBLE_NAMES_END,
+            "docs/PHASE_7_API_FEASIBILITY.md",
+            "feasible-name",
+        )
+        errors.extend(feasible_block_errors)
+        if feasible_block is not None:
+            feasible_names = re.findall(r"`([a-z0-9_]+)`", feasible_block)
+            matrix_go = {
+                name for name, decision in decisions.items() if decision == "GO"
+            }
+            if (
+                len(feasible_names) != len(set(feasible_names))
+                or set(feasible_names) != matrix_go
+            ):
+                errors.append(
+                    "docs/PHASE_7_API_FEASIBILITY.md: feasible-name list must "
+                    "exactly equal matrix GO set"
+                )
 
     plan = texts.get("docs/PHASE_7_IMPLEMENTATION_PLAN.md")
     if plan is not None and not re.search(

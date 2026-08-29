@@ -19,7 +19,12 @@ Complete the existing 78-tool canonical surface, then extend Didi through projec
 
 ## Phase 7: Canonical Surface Completion
 
+<!-- phase7-current-status:start -->
 **Status:** `BLOCKED_AT_FEASIBILITY`
+**Canonical implementation:** `60/78`
+**Phase 7 registrations:** `18/18` unimplemented
+**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
+<!-- phase7-current-status:end -->
 
 **Goal:** The implementation remains 60/78 canonical tools, with all 18 Phase 7 names remaining registered but unimplemented. The approved delivery goal was atomic 78/78 without adding public tool names.
 
@@ -52,7 +57,7 @@ Work can proceed only after governance chooses one path:
 
 - **A)** Authorize partial delivery of the 15 feasible tools, targeting 75/78 and retaining three honest unimplemented names.
 - **B)** Retain atomic 78/78 and wait for supported engine capabilities.
-- **C)** Explicitly approve an engine fork/private debugger adapter, with new support and security obligations.
+- **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.
 
 The detailed 7A-7C requirements below remain approved contract design, not delivered behavior.
 

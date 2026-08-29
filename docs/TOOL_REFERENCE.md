@@ -4,6 +4,13 @@ Didi exposes 78 canonical tool names plus 10 legacy names (88 registrations). Th
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
+<!-- phase7-current-status:start -->
+**Status:** `BLOCKED_AT_FEASIBILITY`
+**Canonical implementation:** `60/78`
+**Phase 7 registrations:** `18/18` unimplemented
+**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
+<!-- phase7-current-status:end -->
+
 Phase 7 is `BLOCKED_AT_FEASIBILITY`. The implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend

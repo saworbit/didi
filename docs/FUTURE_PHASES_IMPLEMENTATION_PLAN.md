@@ -10,9 +10,16 @@
 
 ## Execution note
 
+<!-- phase7-current-status:start -->
+**Status:** `BLOCKED_AT_FEASIBILITY`
+**Canonical implementation:** `60/78`
+**Phase 7 registrations:** `18/18` unimplemented
+**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
+<!-- phase7-current-status:end -->
+
 This is the approved historical plan that integrated the future-phases documentation. Its original task wording is preserved below. Current Phase 7 status is `BLOCKED_AT_FEASIBILITY`: the 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts. All 18 names remain registered but unimplemented at 60/78, and the all-or-nothing activation gate prevented Tasks 2-13 of the separate Phase 7 implementation plan; no production implementation started.
 
-Current evidence is [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md), and the approved executable plan is [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md). Further work requires governance to authorize partial 75/78 delivery, retain atomic 78/78, or approve an engine fork/private debugger adapter with new support and security obligations.
+Current evidence is [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md), and the approved executable plan is [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md). Further work requires governance to authorize partial 75/78 delivery, retain atomic 78/78, or explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. Under the third path, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2; contract weakening is a separate explicit contract amendment.
 
 ## Global Constraints
 

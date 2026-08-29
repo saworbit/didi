@@ -10,7 +10,12 @@
 
 ## Execution status
 
+<!-- phase7-current-status:start -->
 **Status:** `BLOCKED_AT_FEASIBILITY`
+**Canonical implementation:** `60/78`
+**Phase 7 registrations:** `18/18` unimplemented
+**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
+<!-- phase7-current-status:end -->
 
 Task 1 completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. The gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
@@ -20,7 +25,7 @@ Work can proceed only after governance chooses one path:
 
 - **A)** Authorize partial delivery of the 15 feasible tools, targeting 75/78 and retaining three honest unimplemented names.
 - **B)** Retain atomic 78/78 and wait for supported engine capabilities.
-- **C)** Explicitly approve an engine fork/private debugger adapter, with new support and security obligations.
+- **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.
 
 See [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) for reproducible evidence.
 

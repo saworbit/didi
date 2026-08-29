@@ -2,7 +2,12 @@
 
 ## Decision
 
+<!-- phase7-current-status:start -->
 **Status:** `BLOCKED_AT_FEASIBILITY`
+**Canonical implementation:** `60/78`
+**Phase 7 registrations:** `18/18` unimplemented
+**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
+<!-- phase7-current-status:end -->
 
 **Decision:** 15/18 are implementation-feasible; 3/18 are API-blocked under the approved contracts. The approved all-or-nothing gate stopped the plan before Task 2.
 
@@ -10,12 +15,14 @@ The feasibility gate completed on 2026-08-29 against Godot 4.5.1 and Godot 4.7.2
 
 The 15 implementation-feasible names are:
 
+<!-- phase7-feasible-names:start -->
 - `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`
 - `viewport_set_camera_transform`, `viewport_toggle_debug_draw`
 - `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`
 - `physics_raycast_query`, `nav_query_path`
 - `anim_list_tracks`, `anim_play_track`
 - `runtime_inject_input`, `runtime_read_profiler`
+<!-- phase7-feasible-names:end -->
 
 The blocking rows are:
 
@@ -33,15 +40,16 @@ This is the single hard Phase 7 feasibility gate from [PHASE_7_IMPLEMENTATION_PL
 | Runtime build | `4.5.1-stable (official)`, commit `f62fdbde15035c5576dad93e586201f4d41ef0cb` | `4.7.2-stable (official)`, commit `ed1daf0bf001b61586d9930840f2f1394092c079` |
 | `extension_api.json` SHA-256 | `ac9573a7db7f7efffeed4cf927fd61774dabbdaa5a87ca05af10755c0a7c16e5` | `d0e4c08c03b165156dabe6bfb6a906baf0069189f62035341230a246c86d6986` |
 | Extracted API slice SHA-256 | `1a02f67618135d4cc932cf4e0c3c9c13746c592b9a2c7b10a6b58eefa3365be5` | `4deebb48063ed5e0599edf9619cbdc9d52b4a837386f6dfc33c6dccee3752b09` |
-| Behavior log SHA-256 | `f06e88d477699ef1d4bb7c923b56ae07535a56d1df3013f5086344c2f2f6d207` | `a1002d98a576e70e284ba54ba4a3e0b75cb2dec3c044fd5f55b9bb929dc3f705` |
+| Tracked-runner normalized result SHA-256 | `f6da31c9794f21ea0facaff5c714beb52892619326bb33b107de04283f6ed11b` | `f6da31c9794f21ea0facaff5c714beb52892619326bb33b107de04283f6ed11b` |
 | Probe result audit | 18 distinct rows, 15 GO, 3 BLOCKED | 18 distinct rows, 15 GO, 3 BLOCKED |
 
-The ignored behavior probe is pinned by:
+The exact tracked reproducibility inputs are:
 
-- `build/phase7-feasibility/project.godot`: SHA-256 `0b98f60af0bb4b375fddb578eaf12a18e90ea21a9c877b2e717af381146cac25`
-- `build/phase7-feasibility/probe.gd`: SHA-256 `c776a8a9c6fa16b9bb4c1629120c49a7293b2977d1dcc51288cd91b677f90c6a`
+- [`tests/phase7_feasibility/project.godot`](../tests/phase7_feasibility/project.godot): SHA-256 `de9c12414475015a0bba7045cd279241cc747c7901287c103f76ee1a6cd8c3f7`
+- [`tests/phase7_feasibility/probe.gd`](../tests/phase7_feasibility/probe.gd): SHA-256 `c776a8a9c6fa16b9bb4c1629120c49a7293b2977d1dcc51288cd91b677f90c6a`
+- [`tests/phase7_feasibility/run_phase7_feasibility.ps1`](../tests/phase7_feasibility/run_phase7_feasibility.ps1): SHA-256 `55401674083bfff96b357dd7d78cc0fa0befb4052aae337cd6912f0962ab466d`
 
-Generated dumps, slices, probe source, and logs remain under ignored `build/` and are not committed.
+The runner copies the tracked project and probe into `build/phase7-feasibility/<version>/project` before each run. Godot's `.godot` state, engine logs, stdout/stderr, normalized results, audit output, API dumps, and extracted slices remain under ignored `build/` output and are not committed.
 
 ## API-kind rules
 
@@ -204,32 +212,24 @@ SLICE|4.7.2|original=4deebb48063ed5e0599edf9619cbdc9d52b4a837386f6dfc33c6dccee37
 ### Dual-engine semantic probe
 
 ```powershell
-Push-Location build/phase7-feasibility
-& C:\Godot\Godot_v4.5.1-stable_win64_console.exe --headless --log-file .\godot-4.5.1.log --path . --script .\probe.gd
-$exit451 = $LASTEXITCODE
-if ($exit451 -ne 0) { exit $exit451 }
-& C:\Godot\Godot_v4.7.2-stable_win64_console.exe --headless --log-file .\godot-4.7.2.log --path . --script .\probe.gd
-$exit472 = $LASTEXITCODE
-if ($exit472 -ne 0) { exit $exit472 }
-Pop-Location
+.\tests\phase7_feasibility\run_phase7_feasibility.ps1 `
+  -Godot451 C:\Godot\Godot_v4.5.1-stable_win64_console.exe `
+  -Godot472 C:\Godot\Godot_v4.7.2-stable_win64_console.exe
 ```
 
-Both commands exited `0`. Each log contains exactly 18 distinct `PHASE7_RESULT` records. The final mechanical audit output was:
-
-```text
-AUDIT|4.5.1|rows=18|distinct=18|duplicate_groups=0|go=15|blocked=3
-BLOCKED|4.5.1|nav_bake_mesh,physics_simulate_step,runtime_get_call_stack
-AUDIT|4.7.2|rows=18|distinct=18|duplicate_groups=0|go=15|blocked=3
-BLOCKED|4.7.2|nav_bake_mesh,physics_simulate_step,runtime_get_call_stack
-```
-
-A focused evidence-quality rerun used separate PowerShell processes and asserted each exit and row set independently:
+The tracked runner starts each executable in its own process, captures each exit independently, parses only `PHASE7_RESULT` rows, requires the exact 18-name set, and fails unless each engine reports 15 GO, 3 BLOCKED, and the exact blocker set. The 2026-08-29 rerun exited `0` with:
 
 ```text
 ENGINE_EXIT|4.5.1|0
+ENGINE_VERSION|4.5.1|4.5.1
 ROW_ASSERT|4.5.1|rows=18|distinct=18|go=15|blocked=3
+BLOCKED|4.5.1|nav_bake_mesh,physics_simulate_step,runtime_get_call_stack
+RESULT_SHA256|4.5.1|f6da31c9794f21ea0facaff5c714beb52892619326bb33b107de04283f6ed11b
 ENGINE_EXIT|4.7.2|0
+ENGINE_VERSION|4.7.2|4.7.2
 ROW_ASSERT|4.7.2|rows=18|distinct=18|go=15|blocked=3
+BLOCKED|4.7.2|nav_bake_mesh,physics_simulate_step,runtime_get_call_stack
+RESULT_SHA256|4.7.2|f6da31c9794f21ea0facaff5c714beb52892619326bb33b107de04283f6ed11b
 ```
 
 Godot reported a Windows root-certificate-store warning in the sandbox. It did not affect engine initialization, API behavior, row counts, or exit status. No network operation is part of the probe.
@@ -255,4 +255,4 @@ Work can proceed only after a governance decision:
 
 - **A)** Authorize partial delivery of the 15 feasible tools, targeting 75/78 and retaining three honest unimplemented names.
 - **B)** Retain atomic 78/78 and wait for supported engine capabilities.
-- **C)** Explicitly approve an engine fork/private debugger adapter, with new support and security obligations.
+- **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.

@@ -182,6 +182,28 @@ Second section.
 [External](https://example.com/docs#anchor)
 """,
         )
+        phase7_status_documents = (
+            "README.md",
+            "CHANGELOG.md",
+            "docs/CAPABILITIES.md",
+            "docs/DEVELOPER_GUIDE.md",
+            "docs/FUTURE_PHASES_DESIGN.md",
+            "docs/FUTURE_PHASES_IMPLEMENTATION_PLAN.md",
+            "docs/LLM_INSTRUCTIONS.md",
+            "docs/PHASE_7_API_FEASIBILITY.md",
+            "docs/PHASE_7_IMPLEMENTATION_PLAN.md",
+            "docs/ROADMAP.md",
+            "docs/TOOL_REFERENCE.md",
+        )
+        for relative_path in phase7_status_documents:
+            path = self.root / relative_path
+            text = path.read_text(encoding="utf-8")
+            block = self.phase7_current_status_block()
+            if relative_path == "CHANGELOG.md":
+                text = text.replace("## [1.4.0]", block + "\n## [1.4.0]", 1)
+            else:
+                text += "\n" + block
+            self.write(relative_path, text)
         self.init_git()
         return self.root
 
@@ -294,6 +316,15 @@ Second section.
                         lines.extend([line, ""])
         return "\n".join(lines) + "\n"
 
+    def phase7_current_status_block(self) -> str:
+        return """<!-- phase7-current-status:start -->
+**Status:** `BLOCKED_AT_FEASIBILITY`
+**Canonical implementation:** `60/78`
+**Phase 7 registrations:** `18/18` unimplemented
+**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
+<!-- phase7-current-status:end -->
+"""
+
     def make_phase7_feasibility_record(self) -> str:
         feasible = (
             "signal_list_connections",
@@ -328,9 +359,17 @@ Second section.
             "",
             "For each blocked row, no supported public API/semantics satisfying the exact approved contract was found on either tested version.",
             "",
-            "| Canonical tool | Decision |",
-            "| --- | --- |",
+            "<!-- phase7-feasible-names:start -->",
         ]
+        lines.extend(f"- `{name}`" for name in feasible)
+        lines.extend(
+            [
+                "<!-- phase7-feasible-names:end -->",
+                "",
+                "| Canonical tool | Decision |",
+                "| --- | --- |",
+            ]
+        )
         lines.extend(f"| `{name}` | **GO** |" for name in feasible)
         lines.extend(f"| `{name}` | **BLOCKED** |" for name in blocked)
         return "\n".join(lines) + "\n"
@@ -955,6 +994,103 @@ Second section.
 
         self.assertTrue(
             any("README.md" in error and "stale Phase 7 planned prose" in error for error in errors),
+            errors,
+        )
+
+    def test_rejects_primary_phase7_status_when_expected_literal_is_elsewhere(self):
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        readme = readme.replace(
+            "**Status:** `BLOCKED_AT_FEASIBILITY`",
+            "**Status:** `PLANNED`",
+            1,
+        )
+        readme += "\n## Glossary\n\n`BLOCKED_AT_FEASIBILITY` is a status token.\n"
+        self.write("README.md", readme)
+
+        errors = validate_repository(root)
+
+        self.assertTrue(
+            any(
+                "README.md" in error
+                and "current status block must report status" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_ignores_phase7_status_literals_in_glossary_and_code_fence(self):
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        readme += """
+
+## Glossary
+
+Historical vocabulary example: Phase 7 is planned.
+
+```markdown
+<!-- phase7-current-status:start -->
+**Status:** `PLANNED`
+<!-- phase7-current-status:end -->
+```
+"""
+        self.write("README.md", readme)
+
+        errors = validate_repository(root)
+
+        self.assertFalse(
+            any(
+                "README.md" in error
+                and (
+                    "stale Phase 7 planned prose" in error
+                    or "current status block" in error
+                )
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_rejects_primary_phase7_counts_when_expected_literals_are_elsewhere(self):
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        readme = readme.replace(
+            "**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked",
+            "**Feasibility:** `14/18` implementation-feasible; `4/18` API-blocked",
+            1,
+        )
+        readme += "\n## Audit literals\n\nExpected tokens: `15/18` and `3/18`.\n"
+        self.write("README.md", readme)
+
+        errors = validate_repository(root)
+
+        self.assertTrue(
+            any(
+                "README.md" in error
+                and "current status block must report feasibility" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_rejects_feasible_prose_list_that_disagrees_with_matrix(self):
+        root = self.make_valid_repository()
+        evidence_path = root / "docs/PHASE_7_API_FEASIBILITY.md"
+        evidence = evidence_path.read_text(encoding="utf-8")
+        evidence = evidence.replace(
+            "- `signal_list_connections`",
+            "- `physics_simulate_step`",
+            1,
+        )
+        self.write("docs/PHASE_7_API_FEASIBILITY.md", evidence)
+
+        errors = validate_repository(root)
+
+        self.assertTrue(
+            any(
+                "PHASE_7_API_FEASIBILITY.md" in error
+                and "feasible-name list must exactly equal matrix GO set" in error
+                for error in errors
+            ),
             errors,
         )
 

@@ -120,9 +120,16 @@ Treat `eval_gdscript` as a small read-only expression language. Prefer literals,
 
 ## Phase 7 status
 
+<!-- phase7-current-status:start -->
+**Status:** `BLOCKED_AT_FEASIBILITY`
+**Canonical implementation:** `60/78`
+**Phase 7 registrations:** `18/18` unimplemented
+**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
+<!-- phase7-current-status:end -->
+
 Phase 7 is `BLOCKED_AT_FEASIBILITY`. The implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
-Do not call or advertise any of the 15 feasible names as available; feasibility is not implementation. Work can proceed only after governance authorizes partial 75/78 delivery, retains atomic 78/78 while waiting for supported engine capabilities, or explicitly approves an engine fork/private debugger adapter with new support and security obligations. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Do not call or advertise any of the 15 feasible names as available; feasibility is not implementation. Work can proceed only after governance authorizes partial 75/78 delivery, retains atomic 78/78 while waiting for supported engine capabilities, or explicitly approves and maintains engine changes or private adapters sufficient for all three exact blocked contracts. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2 begins. Contract weakening requires a separate explicit contract amendment and is not implied. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Unimplemented domains
 

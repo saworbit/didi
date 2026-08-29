@@ -130,9 +130,16 @@ Didi now refuses startup without `--project <root>` or `DIDI_PROJECT_ROOT`, and 
 
 ## Delivery Roadmap
 
+<!-- phase7-current-status:start -->
+**Status:** `BLOCKED_AT_FEASIBILITY`
+**Canonical implementation:** `60/78`
+**Phase 7 registrations:** `18/18` unimplemented
+**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
+<!-- phase7-current-status:end -->
+
 Phases 1-6 established the current implementation baseline. Phase 7 is `BLOCKED_AT_FEASIBILITY`: the 2026-08-29 gate on Godot 4.5.1 and 4.7.2 found 15/18 names implementation-feasible and 3/18 API-blocked under the approved contracts. Feasibility is not implementation; the implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The approved all-or-nothing 78/78 activation gate prevented Tasks 2-13, so no production implementation started.
 
-Work can proceed only after governance chooses one of three paths: **A)** authorize partial delivery of the 15 feasible tools, targeting 75/78 while retaining three honest unimplemented names; **B)** retain atomic 78/78 and wait for supported engine capabilities; or **C)** explicitly approve an engine fork/private debugger adapter and accept its new support and security obligations. Phase 8 remains dependent on resolving this gate.
+Work can proceed only after governance chooses one of three paths: **A)** authorize partial delivery of the 15 feasible tools, targeting 75/78 while retaining three honest unimplemented names; **B)** retain atomic 78/78 and wait for supported engine capabilities; or **C)** explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. Under Option C, all three blockers must re-enter Task 1 and prove `GO` on both Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening is a separate explicit contract amendment and is not implied by Option C. Phase 8 remains dependent on resolving this gate.
 
 See the [Roadmap](docs/ROADMAP.md), [Phase 7 feasibility evidence](docs/PHASE_7_API_FEASIBILITY.md), [approved executable plan](docs/PHASE_7_IMPLEMENTATION_PLAN.md), and [Future Phases Design](docs/FUTURE_PHASES_DESIGN.md).
 
