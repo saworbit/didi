@@ -27,6 +27,7 @@ REQUIRED_DOCUMENTS = (
     "docs/QUICKSTART.md",
     "docs/RESOURCES_AND_PROMPTS.md",
     "docs/ROADMAP.md",
+    "docs/FUTURE_PHASES_DESIGN.md",
     "docs/TOOL_REFERENCE.md",
 )
 
@@ -51,6 +52,9 @@ FACT_PATTERNS = {
         (r"\b78[- ]canonical|\b78 canonical", "78 canonical"),
         (r"\b10 (?:additional )?legacy", "10 legacy"),
         (r"\b88 total|\(88 total\)|88 registrations", "88 total"),
+        (r"--project[\s\S]*DIDI_PROJECT_ROOT|DIDI_PROJECT_ROOT[\s\S]*--project", "explicit project root"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
     ),
     "docs/CAPABILITIES.md": (
         (r"\b78 canonical", "78 canonical"),
@@ -58,11 +62,18 @@ FACT_PATTERNS = {
         (r"\b88 [`\w/-]* ?entries|exactly 88", "88 total"),
         (r"\b60 (?:canonical )?tools? (?:are )?implemented|Sixty (?:canonical )?tools? are implemented|Sixty are implemented", "60 implemented"),
         (r"\b18 (?:canonical )?(?:tools? )?(?:remain )?(?:reserved|unimplemented)", "18 unimplemented"),
+        (r"--project[\s\S]*DIDI_PROJECT_ROOT|DIDI_PROJECT_ROOT[\s\S]*--project", "explicit project root"),
+        (r"\b423\b", "one-client session lock"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
     ),
     "docs/TOOL_REFERENCE.md": (
         (r"\b78 canonical", "78 canonical"),
         (r"\b10 legacy", "10 legacy"),
         (r"\b88 registrations", "88 total"),
+        (r"\b423\b", "one-client session lock"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
     ),
     "CHANGELOG.md": (
         (r"\b78 canonical", "78 canonical"),
@@ -71,7 +82,47 @@ FACT_PATTERNS = {
         (r"\b60 (?:canonical )?tools? (?:are )?implemented|Sixty (?:canonical )?tools? are implemented", "60 implemented"),
         (r"\b18 (?:canonical )?(?:tools? )?(?:remain )?(?:reserved|honestly unimplemented|unimplemented)", "18 unimplemented"),
     ),
+    "docs/API_SPECIFICATION.md": (
+        (r"\b423\b", "one-client session lock"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
+        (r"ui\.hitTest", "live UI hit-test IPC method"),
+    ),
+    "docs/LLM_INSTRUCTIONS.md": (
+        (r"--project[\s\S]*DIDI_PROJECT_ROOT|DIDI_PROJECT_ROOT[\s\S]*--project", "explicit project root"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
+    ),
+    "docs/QUICKSTART.md": (
+        (r"--project", "explicit project argument"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
+    ),
+    "docs/ROADMAP.md": (
+        (r"Phase 6[^\n]*COMPLETE", "completed Phase 6"),
+        (r"Phase 5 Deep Domains \(6\)", "six-tool Phase 5 canonical row"),
+    ),
 }
+
+FUTURE_PHASE_RANGE = range(7, 13)
+VALID_PHASE_STATUSES = {"PLANNED", "IN PROGRESS", "COMPLETE"}
+FUTURE_PHASE_GOVERNANCE_TERMS = (
+    "explicit exclusions",
+    "security",
+    "mutation",
+    "exit evidence",
+)
+FUTURE_PHASE_COMPLETION_EVIDENCE_TERMS = ("completion date", "pull request")
+PHASE_HEADING_PATTERN = re.compile(
+    r"^## Phase (?P<number>\d+):.*?\(`(?P<status>[^`]+)`\)\s*$",
+    re.MULTILINE,
+)
+FUTURE_PHASE_SECTION_PATTERN = re.compile(
+    r"(?ms)^##\s+Phase\s+(?P<number>\d+):.*?(?=^##\s+Phase\s+\d+:|\Z)",
+)
+FUTURE_PHASE_DESIGN_STATUS_PATTERN = re.compile(
+    r"(?im)^\*\*Status:\*\*\s*`(?P<status>[^`]+)`"
+)
 
 LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 HEADING_PATTERN = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
@@ -380,6 +431,137 @@ def markdown_anchors(text: str) -> set[str]:
     return anchors
 
 
+def validate_future_phase_roadmap(roadmap_text: str) -> list[str]:
+    errors: list[str] = []
+    phases: dict[int, str] = {}
+    seen_numbers: set[int] = set()
+    for match in PHASE_HEADING_PATTERN.finditer(roadmap_text):
+        phase = int(match.group("number"))
+        if phase in seen_numbers:
+            errors.append(f"docs/ROADMAP.md declares duplicate Phase {phase}")
+            continue
+        seen_numbers.add(phase)
+        status = match.group("status").strip()
+        phases[phase] = status
+    for phase in FUTURE_PHASE_RANGE:
+        if phase not in phases:
+            errors.append(f"docs/ROADMAP.md must declare Phase {phase}")
+            continue
+        status = phases[phase]
+        if status not in VALID_PHASE_STATUSES:
+            errors.append(f"docs/ROADMAP.md Phase {phase} has invalid status '{status}'")
+    return errors
+
+
+def validate_future_phase_governance(design_text: str) -> list[str]:
+    normalized = design_text.lower()
+    if any(term not in normalized for term in FUTURE_PHASE_GOVERNANCE_TERMS):
+        return ["docs/FUTURE_PHASES_DESIGN.md must define future-phase governance"]
+    normalized_sections = {
+        int(match.group("number")): match.group(0).lower()
+        for match in FUTURE_PHASE_SECTION_PATTERN.finditer(design_text)
+    }
+    errors: list[str] = []
+    for phase in FUTURE_PHASE_RANGE:
+        section = normalized_sections.get(phase)
+        if section is None:
+            continue
+        missing = [
+            term
+            for term in FUTURE_PHASE_GOVERNANCE_TERMS
+            if (term == "explicit exclusions" and "exclusions" not in section)
+            or (term != "explicit exclusions" and term not in section)
+        ]
+        if missing:
+            errors.append(
+                "docs/FUTURE_PHASES_DESIGN.md must define future-phase governance"
+            )
+            break
+    return errors
+
+
+def validate_future_phase_completion_records(
+    roadmap_text: str,
+    design_text: str,
+) -> list[str]:
+    roadmap_phases = {
+        int(match.group("number")): match.group("status").strip()
+        for match in PHASE_HEADING_PATTERN.finditer(roadmap_text)
+    }
+    errors: list[str] = []
+    complete_phases = [
+        phase
+        for phase, status in roadmap_phases.items()
+        if status == "COMPLETE" and phase in FUTURE_PHASE_RANGE
+    ]
+
+    design_sections = {
+        int(match.group("number")): match.group(0)
+        for match in FUTURE_PHASE_SECTION_PATTERN.finditer(design_text)
+    }
+    seen_sections: set[int] = set()
+    for match in FUTURE_PHASE_SECTION_PATTERN.finditer(design_text):
+        phase = int(match.group("number"))
+        if phase in seen_sections:
+            errors.append(f"docs/FUTURE_PHASES_DESIGN.md has duplicate Phase {phase}")
+            continue
+        seen_sections.add(phase)
+
+    for phase, roadmap_status in sorted(roadmap_phases.items()):
+        if phase not in FUTURE_PHASE_RANGE or roadmap_status == "COMPLETE":
+            continue
+        section = design_sections.get(phase)
+        if section is None:
+            errors.append(
+                "docs/FUTURE_PHASES_DESIGN.md must define "
+                f"Phase {phase} when roadmap status is {roadmap_status}"
+            )
+            continue
+        status_match = FUTURE_PHASE_DESIGN_STATUS_PATTERN.search(section)
+        if not status_match:
+            errors.append(
+                f"docs/FUTURE_PHASES_DESIGN.md must define status for Phase {phase}"
+            )
+            continue
+        if status_match.group("status").strip() != roadmap_status:
+            errors.append(
+                "docs/FUTURE_PHASES_DESIGN.md status for "
+                f"Phase {phase} must match roadmap status '{roadmap_status}'"
+            )
+
+    for phase in complete_phases:
+        section = design_sections.get(phase)
+        if section is None:
+            errors.append(
+                f"docs/FUTURE_PHASES_DESIGN.md must define a completion record for Phase {phase}"
+            )
+            continue
+
+        status_match = FUTURE_PHASE_DESIGN_STATUS_PATTERN.search(section)
+        if not status_match:
+            errors.append(
+                f"docs/FUTURE_PHASES_DESIGN.md must define status for Phase {phase}"
+            )
+            continue
+        if status_match.group("status").strip() != "COMPLETE":
+            errors.append(
+                f"docs/FUTURE_PHASES_DESIGN.md must mark Phase {phase} as COMPLETE when roadmap is COMPLETE"
+            )
+            continue
+
+        normalized = section.lower()
+        missing = [
+            term
+            for term in FUTURE_PHASE_COMPLETION_EVIDENCE_TERMS
+            if term not in normalized
+        ]
+        if missing:
+            errors.append(
+                f"docs/FUTURE_PHASES_DESIGN.md missing completion evidence for Phase {phase}"
+            )
+    return errors
+
+
 def validate_markdown_links(root: Path, markdown: list[Path]) -> list[str]:
     errors: list[str] = []
     anchor_cache: dict[Path, set[str]] = {}
@@ -533,6 +715,17 @@ def validate_repository(root: Path) -> list[str]:
         for pattern, label in requirements:
             if not re.search(pattern, text, flags=re.IGNORECASE):
                 errors.append(f"{relative_path}: missing current release fact: {label}")
+
+    roadmap_text = texts.get("docs/ROADMAP.md")
+    if roadmap_text is not None:
+        errors.extend(validate_future_phase_roadmap(roadmap_text))
+
+    design_text = texts.get("docs/FUTURE_PHASES_DESIGN.md")
+    if design_text is not None:
+        errors.extend(validate_future_phase_governance(design_text))
+
+    if roadmap_text is not None and design_text is not None:
+        errors.extend(validate_future_phase_completion_records(roadmap_text, design_text))
 
     markdown = sorted(
         path

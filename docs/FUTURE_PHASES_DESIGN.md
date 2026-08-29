@@ -12,8 +12,10 @@ Complete the existing 78-tool canonical surface, then extend Didi through projec
 - A phase is complete only when its implementation, documentation, native tests, Godot integration tests, and required cross-platform CI are complete.
 - Registered tool names must describe working behavior. Do not add success stubs or increase the canonical count before implementation lands.
 - Every new or reclassified mutation must define dry-run behavior, confirmation policy, route/session policy, unknown-outcome handling, and rollback expectations.
-- Every phase states exact exclusions so deferred behavior cannot be mistaken for delivered behavior.
+- Every phase states explicit exclusions so deferred behavior cannot be mistaken for delivered behavior.
 - Completion records include the date, pull request, release impact, and verification evidence.
+- Security implications and mutation classes are explicit for each phase.
+- Exit evidence is published for every completion record.
 - New numbered phases after Phase 12 must be documented and approved before implementation begins.
 
 ## Phase 7: Canonical Surface Completion
@@ -73,7 +75,18 @@ Requirements:
 - Profiler sampling has explicit duration, sample-count, category, and payload limits.
 - No tool claims arbitrary debugger control or engine-output streaming beyond implemented Godot APIs.
 
-### Phase 7 Exit Gate
+### Phase 7 Explicit Exclusions
+
+- No new public tool names. Phase 7 implements reserved names only.
+- No arbitrary debugger control or engine-output streaming beyond implemented Godot APIs.
+- No physics, navigation, or animation write path that cannot be undone or bounded.
+
+### Phase 7 Security and Mutation Classification
+
+- **Security:** enables live editor mutation in signals, tile and grid layers, and camera/debug state, plus game-session input injection. Each newly enabled mutation requires a security review before it ships.
+- **Mutation:** `signal_connect`, `signal_disconnect`, `signal_emit`, `tilemap_set_cells`, `gridmap_set_cells`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `nav_bake_mesh`, `anim_play_track`, and `runtime_inject_input` are mutations. Every other Phase 7 tool is a read.
+
+### Phase 7 Exit Gate and Exit Evidence
 
 - All 78 canonical registrations report `implemented: true`.
 - The 10 legacy registrations remain compatibility-only and do not change the canonical count.
@@ -98,13 +111,18 @@ Scope:
 - Generated `extension_api.json` or live ClassDB reflection replacing the limited static map.
 - Incremental indexing with deterministic invalidation, bounded memory, and explicit freshness.
 
-Exclusions:
+Security and mutation classification:
+
+- **Security:** reads `.godot` cache data and import configuration. Corrupt cache data, symlinks, and generated-directory escapes must fail closed rather than degrade.
+- **Mutation:** import remap and import-preset configuration are guarded mutations. Dependency, UID, and diagnostic queries are reads.
+
+Explicit exclusions:
 
 - No custom GDScript language server.
 - No unbounded whole-project semantic analysis.
 - No silent import-setting mutation.
 
-Exit gate:
+Exit gate and exit evidence:
 
 - Didi can explain resource usage and import health with source provenance and freshness.
 - Index corruption, symlinks, malformed cache data, and generated-directory escapes fail safely.
@@ -125,13 +143,18 @@ Scope:
 - Multi-frame and richer visual baselines with deterministic comparison metadata.
 - Additional guided character, signal, UI, animation, and visual-verification prompt workflows.
 
-Exclusions:
+Security and mutation classification:
+
+- **Security:** temporary live visual state must be restored on success, error, timeout, and cancellation. No sticky global debug state may survive a request.
+- **Mutation:** layout, keyframe, and overlay changes are UndoRedo-backed mutations. Capture, comparison, and inspection are reads.
+
+Explicit exclusions:
 
 - No arbitrary GPU command injection.
 - No sticky global debug state.
 - No image-diff claim across mismatched dimensions or undocumented color conversion.
 
-Exit gate:
+Exit gate and exit evidence:
 
 - Authoring mutations are UndoRedo-backed and dry-runnable.
 - Temporary visual state is restored on success, error, timeout, and cancellation.
@@ -151,14 +174,19 @@ Scope:
 - Aggregated structured outcomes, logs, captures, and comparison artifacts.
 - Deterministic scheduling and cleanup under partial child failure.
 
-Exclusions:
+Security and mutation classification:
+
+- **Security:** Gogo owns only processes it spawned. It never attaches to or terminates a Godot process it does not own, and each experiment is confined to an isolated workspace.
+- **Mutation:** bench acquisition, release, and experiment execution mutate only Gogo-owned workspaces. The user's project is never written.
+
+Explicit exclusions:
 
 - No autonomous planning inside Gogo.
 - No Agent-to-Agent transport in the initial phase.
 - No attachment to or termination of Godot processes Gogo does not own.
 - No claim that a fixed number of benches is universally supported.
 
-Exit gate:
+Exit gate and exit evidence:
 
 - Parallel experiments are isolated by project/workspace and ownership identity.
 - Capacity and artifact budgets are enforced under concurrency.
@@ -179,13 +207,18 @@ Scope:
 - Explicit protocol-version negotiation and compatibility tests.
 - Bounded notification queues, coalescing, backpressure, and dropped-event disclosure.
 
-Exclusions:
+Security and mutation classification:
+
+- **Security:** notification streams are bounded with backpressure and explicit drop disclosure. No unbounded event or log streaming, and the transport stays local stdio.
+- **Mutation:** protocol evolution adds no new project mutations. Subscriptions, templates, and prompts are read-only surfaces.
+
+Explicit exclusions:
 
 - No replacement of stdio MCP with network transport.
 - No notification claim for data Didi cannot observe reliably.
 - No unbounded event or log streaming.
 
-Exit gate:
+Exit gate and exit evidence:
 
 - Subscription lifecycle, reconnect behavior, ordering, loss disclosure, and backpressure are specified and tested.
 - Older supported MCP clients retain a documented compatibility path.
@@ -207,12 +240,17 @@ Scope:
 - Vulnerability-response automation and recurring security audits.
 - Stable third-party extension points that preserve capability honesty and mutation safety.
 
-Exclusions:
+Security and mutation classification:
+
+- **Security:** release artifacts are signed and traceable to source, with SBOMs and a documented vulnerability-response path.
+- **Mutation:** installation and upgrade mutate the user's environment, never project content. Third-party extensions cannot bypass project containment, dry-run, or confirmation controls.
+
+Explicit exclusions:
 
 - Didi does not become a remote multi-tenant service or hostile-host isolation boundary.
 - Third-party extensions cannot bypass project containment, authentication, route policy, dry-run, or confirmation controls.
 
-Exit gate:
+Exit gate and exit evidence:
 
 - Release artifacts are reproducible, signed, installable, and traceable to source.
 - Supported Godot/platform combinations are explicit and continuously verified.
