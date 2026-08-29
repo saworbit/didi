@@ -36,7 +36,7 @@ Thank you for your interest in contributing to **Didi** (`godot-mcp-native`)!
    ```
    *Make sure all tests pass before opening a Pull Request.*
 
-   On Windows, changes to the live bridge must also pass `tests/run_godot_integration.ps1` against a supported Godot 4.5+ editor build.
+   On Windows, Godot 4.7+ is supported and changes to the live bridge must pass `tests/run_godot_integration.ps1` against the current Godot 4.7.2 verification binary.
 
 4. **Validate Documentation**:
    ```bash

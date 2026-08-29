@@ -136,16 +136,10 @@ std::string resolveGodotExecutable() {
 #if defined(_WIN32)
                 "Godot_v4.7.2-stable_win64_console.exe",
                 "Godot_v4.7.2-stable_win64.exe",
-                "Godot_v4.6.2-stable_win64_console.exe",
-                "Godot_v4.6.2-stable_win64.exe",
-                "Godot_v4.5.1-stable_win64_console.exe",
-                "Godot_v4.5.1-stable_win64.exe",
                 "godot.exe",
                 "godot.cmd",
 #else
                 "Godot_v4.7.2-stable_linux.x86_64",
-                "Godot_v4.6.2-stable_linux.x86_64",
-                "Godot_v4.5.1-stable_linux.x86_64",
                 "godot4",
                 "godot"
 #endif
@@ -177,10 +171,6 @@ std::string resolveGodotExecutable() {
     static const std::vector<std::string> known_locations = {
         "C:\\Godot\\Godot_v4.7.2-stable_win64_console.exe",
         "C:\\Godot\\Godot_v4.7.2-stable_win64.exe",
-        "C:\\Godot\\Godot_v4.6.2-stable_win64_console.exe",
-        "C:\\Godot\\Godot_v4.6.2-stable_win64.exe",
-        "C:\\Godot\\Godot_v4.5.1-stable_win64_console.exe",
-        "C:\\Godot\\Godot_v4.5.1-stable_win64.exe",
         "C:\\Godot\\godot.cmd",
         "C:\\Godot\\godot.exe"
     };

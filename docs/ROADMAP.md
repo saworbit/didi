@@ -58,7 +58,7 @@ Before adding any additional tool endpoints, live engine integration must be gen
 - Live hierarchy, scalar property get/set, built-in node instantiate/remove/reparent/duplicate, editor undo/redo/save/rescan, and editor viewport capture execute against real Godot objects.
 - Only real editor pixels emit `is_live_frame: true`; synthesized previews identify `execution_mode: offline_fallback`.
 - Capability metadata blocks registered-but-unimplemented endpoints before legacy handlers can report success.
-- The end-to-end integration suite passes on Godot 4.5.1, 4.6.2, and 4.7.2.
+- The current end-to-end integration suite passes on Godot 4.7.2 only.
 
 Phase 1 deliberately does not implement the remaining registered domains. Their protocol definitions remain discoverable with `executionModes: ["unimplemented"]` and `implemented: false` until later phases supply trustworthy execution.
 
@@ -74,7 +74,7 @@ Phase 2 completes the normal create, wire, persist, and reopen loop:
 - Scenes can be created, opened, explicitly closed, and packed from owned node branches through Godot resource APIs.
 - Integration runs in a disposable project copy and covers 119 ordered live requests, overwrite guards, unsafe paths, duplicates, malformed values, forced persistence failure and rollback, runtime reload, and cleanup.
 
-Godot 4.5 cannot report editor dirty state through GDExtension, so `scene_close` deliberately requires `discard_unsaved: true`. This is a conservative data-loss guard, not a success stub.
+Godot 4.7 cannot report editor dirty state through GDExtension, so `scene_close` deliberately requires `discard_unsaved: true`. This is a conservative data-loss guard, not a success stub.
 
 ---
 
@@ -101,7 +101,7 @@ Phase 4 adds four canonical tools and closes the locate–change–reimport–ca
 - Live captures receive opaque 32-hex IDs backed by an 8-entry/64 MiB raw RGBA LRU cache; offline previews remain ID-free.
 - Named-node isolation temporarily hides unrelated visible 2D/3D branches and restores original visibility/background state before success. `viewport_diff_capture` compares exact-sized live frames at a `0..255` threshold and returns metrics plus a transparent PNG diff.
 
-The native suite covers containment, lexical filtering, lifecycle states, arithmetic, eviction, schema honesty, and restoration guards. The Godot 4.5.1 harness verifies real search, SVG reimport, isolation restoration, a non-empty mutation diff, and an exact zero-pixel post-undo diff.
+Historical verification: the native suite covered containment, lexical filtering, lifecycle states, arithmetic, eviction, schema honesty, and restoration guards, while the Godot 4.5.1 harness verified real search, SVG reimport, isolation restoration, a non-empty mutation diff, and an exact zero-pixel post-undo diff.
 
 ---
 
@@ -114,7 +114,7 @@ Phase 5 adds six canonical tools across diagnostics, delivery, 3D asset pipeline
 - `gridmap_export_mesh_library` deterministically converts direct scene children to verified MeshLibrary items with optional trimesh collision and navigation data.
 - `ui_hit_test` performs bounded live Control traversal with transformed points, visibility/clipping, mouse filters, canvas layers, effective z-index, and draw order without injecting input.
 
-The shared process runner caps combined output at 1 MiB, kills child process groups on timeout, and avoids command-shell parsing. Native tests cover schemas, containment, redaction, argument quoting, and real Godot 4.5 shader diagnostics. The disposable Godot 4.5.1 integration harness verifies valid/invalid shaders, pack export, two-item MeshLibrary generation, offline-to-live route restoration, and both default and ignored-control hit ordering.
+Historical verification: the shared process runner capped combined output at 1 MiB, killed child process groups on timeout, and avoided command-shell parsing. Native tests covered schemas, containment, redaction, argument quoting, and real Godot 4.5 shader diagnostics. The disposable Godot 4.5.1 integration harness verified valid/invalid shaders, pack export, two-item MeshLibrary generation, offline-to-live route restoration, and both default and ignored-control hit ordering.
 
 ---
 
@@ -143,7 +143,7 @@ The native red-team contract covers invalid roots, project-key isolation, lock e
 
 **Objective:** The implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The approved objective was atomic 78/78 without adding public tool names.
 
-**Feasibility result:** The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (15/18) are implementation-feasible: `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `runtime_inject_input`, and `runtime_read_profiler`.
+**Historical feasibility result:** The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (15/18) are implementation-feasible: `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `runtime_inject_input`, and `runtime_read_profiler`.
 
 Exactly three names (3/18) are API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility is not implementation, so none of the 15 feasible names is callable.
 
@@ -151,7 +151,7 @@ The approved all-or-nothing 78/78 activation gate prevented Tasks 2-13; no produ
 
 - **A)** Authorize partial delivery of the 15 feasible tools, targeting 75/78 and retaining three honest unimplemented names.
 - **B)** Retain atomic 78/78 and wait for supported engine capabilities.
-- **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.
+- **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.
 
 See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
@@ -251,11 +251,11 @@ These are missing capabilities that an AI agent actually requires to complete fu
 
 | Phase | Milestone / Capability | Strategic Rationale |
 | :--- | :--- | :--- |
-| **Phase 1 (COMPLETE)** | **Live Pump + Real SceneTree / UndoRedo + Honest Errors** | Verified on Godot 4.5.1, 4.6.2, and 4.7.2. |
+| **Phase 1 (COMPLETE)** | **Live Pump + Real SceneTree / UndoRedo + Honest Errors** | Historical verification covered Godot 4.5.1, 4.6.2, and 4.7.2. |
 | **Phase 2 (COMPLETE)** | **Attach Script, Autoloads, InputMap, Project Settings, Groups, Scene Lifecycle** | Verified through real Godot persistence, UndoRedo, resource packing, and adversarial rejection paths. |
 | **Phase 3 (COMPLETE)** | **`eval_gdscript`, Runtime Log Stream, Attach-to-Running** | Verified authenticated concurrent editor/game routing, bounded controls/logs/tree, and a strict read-only expression subset. |
-| **Phase 4 (COMPLETE)** | **Symbol Search, Asset Reimport, Viewport Diffing & Isolation** | Verified bounded search and reversible live visual feedback against Godot 4.5.1. |
-| **Phase 5 (COMPLETE)** | **C# / Shaders, Project Export, GridMap MeshLibrary, UI Hit-Testing** | Verified bounded diagnostics, guarded delivery, deterministic asset conversion, and live UI inspection against Godot 4.5.1. |
+| **Phase 4 (COMPLETE)** | **Symbol Search, Asset Reimport, Viewport Diffing & Isolation** | Historical verification covered bounded search and reversible live visual feedback against Godot 4.5.1. |
+| **Phase 5 (COMPLETE)** | **C# / Shaders, Project Export, GridMap MeshLibrary, UI Hit-Testing** | Historical verification covered bounded diagnostics, guarded delivery, deterministic asset conversion, and live UI inspection against Godot 4.5.1. |
 | **Phase 6 (COMPLETE)** | **Project Isolation, Session Locks, Dry-Run, Confirm-Before-Write** | Verified fail-closed project selection, project-keyed endpoints, one-client leases, and context-bound single-use confirmations. |
 | **Phase 7 (BLOCKED_AT_FEASIBILITY)** | **Canonical Surface Completion** | 15/18 implementation-feasible and 3/18 API-blocked; all 18 remain unimplemented pending governance. |
 

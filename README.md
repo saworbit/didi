@@ -2,7 +2,7 @@
 
 [![Didi Fast & Efficient CI](https://github.com/saworbit/didi/actions/workflows/ci.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Godot Engine](https://img.shields.io/badge/Godot-4.5%2B-478cbf?logo=godotengine&logoColor=white)](https://godotengine.org/)
+[![Godot Engine](https://img.shields.io/badge/Godot-4.7%2B-478cbf?logo=godotengine&logoColor=white)](https://godotengine.org/)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=c%2B%2B&logoColor=white)](https://isocpp.org/)
 [![MCP Standard](https://img.shields.io/badge/MCP-2024--11--05-8A2BE2)](https://modelcontextprotocol.io/)
 
@@ -10,7 +10,7 @@
 > 
 > *Didi keeps the bridge native, local, and explicit about what it can actually execute.*
 
-**Didi** (`godot-mcp-native`) is a high-performance, native [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for **Godot 4.5+**, engineered in **C++20** as a standalone executable (`didi.exe` on Windows, `didi` on POSIX) and an in-engine GDExtension library for the target platform.
+**Didi** (`godot-mcp-native`) is a high-performance, native [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for **Godot 4.7+**, engineered in **C++20** as a standalone executable (`didi.exe` on Windows, `didi` on POSIX) and an in-engine GDExtension library for the target platform.
 
 The current documented release is **1.4.0**.
 
@@ -24,7 +24,7 @@ The current documented release is **1.4.0**.
 | 🤖 [**LLM Agent Instructions**](docs/LLM_INSTRUCTIONS.md) | **AI Assistants / LLMs** | Dedicated system prompt & decision tree for Claude, Cursor, Windsurf, Antigravity. |
 | ✅ [**Current Capability Matrix**](docs/CAPABILITIES.md) | **Everyone** | Authoritative live, offline, unavailable, and unimplemented behavior. |
 | 🗺️ [**Roadmap & 78-Tool Surface**](docs/ROADMAP.md) | **Developers / Contributors** | Completed phases and technical build order. |
-| 🧪 [**Phase 7 API Feasibility Evidence**](docs/PHASE_7_API_FEASIBILITY.md) | **Developers / Governance** | Reproducible Godot 4.5.1/4.7.2 feasibility results and the exact three blocked contracts. |
+| 🧪 [**Historical Phase 7 API Feasibility Evidence**](docs/PHASE_7_API_FEASIBILITY.md) | **Developers / Governance** | Historical Godot 4.5.1/4.7.2 feasibility results and the exact three blocked contracts. |
 | 📋 [**Phase 7 Approved Executable Plan**](docs/PHASE_7_IMPLEMENTATION_PLAN.md) | **Developers / Governance** | Approved atomic 78/78 plan, stopped at its feasibility gate. |
 | 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 78 canonical tools plus 10 legacy names. |
 | 🏛️ [**Architecture & System Topology**](docs/ARCHITECTURE.md) | **Engineers / Architects** | Deep-dive into C++20 design, dual execution topology, threading safety, and named-pipe IPC. |
@@ -70,7 +70,7 @@ The current documented release is **1.4.0**.
                                │  Authenticated process-unique local IPC endpoint
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│        Godot 4.5+ Process (Didi extension library)          │
+│        Godot 4.7+ Process (Didi extension library)          │
 │  ┌───────────────────────┬───────────────────────────────┐  │
 │  │ EditorInterface Hook  │ Editor ViewportTexture        │  │
 │  │ (Main-thread Dispatch)│ (RGBA8 → PNG capture)         │  │
@@ -120,7 +120,7 @@ Every successful live viewport capture returns a 32-lowercase-hex `capture_id` b
 
 ### Phase 5 deep-domain contract
 
-Process-backed Phase 5 tools launch argv directly without a command shell, enforce per-request deadlines, cap combined output at 1 MiB, and terminate the child process group on timeout. Godot-backed checks require a discoverable Godot 4.5+ executable (or `GODOT_BIN`); C# checks require `dotnet`. Export and MeshLibrary outputs must be normalized project-contained `res://` paths and preserve existing files unless `overwrite: true`. Export-preset listing exposes only public preset identity and routing fields, never option values. `ui_hit_test` traverses at most 10,000 live nodes, applies visibility, clipping, transforms, canvas layer, z-order, draw order, and mouse-filter rules, returns at most 256 hits, and never injects input.
+Process-backed Phase 5 tools launch argv directly without a command shell, enforce per-request deadlines, cap combined output at 1 MiB, and terminate the child process group on timeout. Godot-backed checks require a discoverable Godot 4.7+ executable (or `GODOT_BIN`); C# checks require `dotnet`. Export and MeshLibrary outputs must be normalized project-contained `res://` paths and preserve existing files unless `overwrite: true`. Export-preset listing exposes only public preset identity and routing fields, never option values. `ui_hit_test` traverses at most 10,000 live nodes, applies visibility, clipping, transforms, canvas layer, z-order, draw order, and mouse-filter rules, returns at most 256 hits, and never injects input.
 
 ### Phase 6 enterprise-safety contract
 
@@ -137,9 +137,9 @@ Didi now refuses startup without `--project <root>` or `DIDI_PROJECT_ROOT`, and 
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phases 1-6 established the current implementation baseline. Phase 7 is `BLOCKED_AT_FEASIBILITY`: the 2026-08-29 gate on Godot 4.5.1 and 4.7.2 found 15/18 names implementation-feasible and 3/18 API-blocked under the approved contracts. Feasibility is not implementation; the implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The approved all-or-nothing 78/78 activation gate prevented Tasks 2-13, so no production implementation started.
+Phases 1-6 established the current implementation baseline. Phase 7 is `BLOCKED_AT_FEASIBILITY`: the historical 2026-08-29 gate on Godot 4.5.1 and 4.7.2 found 15/18 names implementation-feasible and 3/18 API-blocked under the approved contracts. Feasibility is not implementation; the implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The approved all-or-nothing 78/78 activation gate prevented Tasks 2-13, so no production implementation started.
 
-Work can proceed only after governance chooses one of three paths: **A)** authorize partial delivery of the 15 feasible tools, targeting 75/78 while retaining three honest unimplemented names; **B)** retain atomic 78/78 and wait for supported engine capabilities; or **C)** explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. Under Option C, all three blockers must re-enter Task 1 and prove `GO` on both Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening is a separate explicit contract amendment and is not implied by Option C. Phase 8 remains dependent on resolving this gate.
+Work can proceed only after governance chooses one of three paths: **A)** authorize partial delivery of the 15 feasible tools, targeting 75/78 while retaining three honest unimplemented names; **B)** retain atomic 78/78 and wait for supported engine capabilities; or **C)** explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. Under Option C, all three blockers must re-enter Task 1 and prove `GO` on Godot 4.7.2 before Task 2 may begin. Contract weakening is a separate explicit contract amendment and is not implied by Option C. Phase 8 remains dependent on resolving this gate.
 
 See the [Roadmap](docs/ROADMAP.md), [Phase 7 feasibility evidence](docs/PHASE_7_API_FEASIBILITY.md), [approved executable plan](docs/PHASE_7_IMPLEMENTATION_PLAN.md), and [Future Phases Design](docs/FUTURE_PHASES_DESIGN.md).
 

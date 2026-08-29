@@ -144,7 +144,7 @@ GDE_EXPORT GDExtensionBool didi_library_init(GDExtensionInterfaceGetProcAddress 
     main_loop_callbacks.frame_func = didi::godot::didi_main_loop_frame;
     main_loop_callbacks.shutdown_func = didi::godot::didi_main_loop_shutdown;
     if (!didi::godot::GodotApi::instance().registerMainLoop(main_loop_callbacks)) {
-        DIDI_LOG_ERROR("GDEXTENSION", "Godot 4.5+ register_main_loop_callbacks API is required for live execution");
+        DIDI_LOG_ERROR("GDEXTENSION", "Godot 4.7+ register_main_loop_callbacks API is required for live execution");
     }
 
     r_initialization->initialize = didi::godot::initialize_didi_module;

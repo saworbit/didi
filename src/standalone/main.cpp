@@ -33,7 +33,7 @@ int main(int argc, char* argv[]) {
             std::cout << "didi (godot-mcp-native) v1.4.0" << std::endl;
             return 0;
         } else if (arg == "--help" || arg == "-h") {
-            std::cout << "Didi - Native Model Context Protocol (MCP) Server for Godot 4.5+\n\n"
+            std::cout << "Didi - Native Model Context Protocol (MCP) Server for Godot 4.7+\n\n"
                       << "Usage:\n"
                       << "  didi [options]\n\n"
                       << "Options:\n"
@@ -45,7 +45,7 @@ int main(int argc, char* argv[]) {
                       << "\n"
                       << "MCP Protocol:\n"
                       << "  Communicates over standard I/O (JSON-RPC 2.0) with AI coding assistants.\n"
-                      << "  Connects to Godot 4.5+ editor via native named pipes.\n";
+                      << "  Connects to Godot 4.7+ editor via native named pipes.\n";
             return 0;
         } else if ((arg == "--project" || arg == "-p") && i + 1 < argc) {
             project_root = argv[++i];
@@ -80,7 +80,7 @@ int main(int argc, char* argv[]) {
         return 2;
     }
 
-    DIDI_LOG_INFO("MAIN", "Starting Didi MCP Native Server v1.4.0 for Godot 4.5+...");
+    DIDI_LOG_INFO("MAIN", "Starting Didi MCP Native Server v1.4.0 for Godot 4.7+...");
 
     didi::mcp::McpServer server;
     g_server = &server;

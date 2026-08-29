@@ -2147,7 +2147,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto path = stringFromVariant(path_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
             if (path.isErr()) return errorJson(path.error().code, path.error().message);
             if (!params.value("discard_unsaved", false)) {
-                return errorJson(409, "Godot 4.5 cannot expose active-scene dirty state; pass discard_unsaved: true to close explicitly");
+                return errorJson(409, "Godot 4.7 cannot expose active-scene dirty state; pass discard_unsaved: true to close explicitly");
             }
             auto closed = callObject(editor, "EditorInterface", "close_scene", 166280745LL);
             if (closed.isErr()) return errorJson(closed.error().code, closed.error().message);

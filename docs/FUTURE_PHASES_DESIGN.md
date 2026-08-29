@@ -40,7 +40,7 @@ Complete the existing 78-tool canonical surface, then extend Didi through projec
 
 ### Feasibility outcome
 
-The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (15/18) are implementation-feasible:
+The historical gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (15/18) are implementation-feasible:
 
 - `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`
 - `viewport_set_camera_transform`, `viewport_toggle_debug_draw`
@@ -57,7 +57,7 @@ Work can proceed only after governance chooses one path:
 
 - **A)** Authorize partial delivery of the 15 feasible tools, targeting 75/78 and retaining three honest unimplemented names.
 - **B)** Retain atomic 78/78 and wait for supported engine capabilities.
-- **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.
+- **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.
 
 The detailed 7A-7C requirements below remain approved contract design, not delivered behavior.
 

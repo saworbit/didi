@@ -1,5 +1,7 @@
 # Changelog
 
+> **Historical release record:** Older Godot version references below describe the release or evidence available at that time; they are not the current support matrix. Current support begins at Godot 4.7.
+
 All notable changes to **Didi** (`godot-mcp-native`) will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
@@ -10,6 +12,8 @@ Historical entries describe the surface advertised by those releases. For the ex
 ---
 
 ## [Unreleased]
+
+- Raised the current minimum supported Godot version to 4.7, moved active CI, probes, runtime discovery, and integration to Godot 4.7.2 only, and retained older release/evidence references only as explicitly historical records.
 
 <!-- phase7-current-status:start -->
 **Status:** `BLOCKED_AT_FEASIBILITY`

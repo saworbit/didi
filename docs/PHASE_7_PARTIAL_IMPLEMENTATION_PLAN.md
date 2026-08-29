@@ -1,5 +1,11 @@
 # Phase 7 Partial Delivery Implementation Plan
 
+## Godot 4.7 minimum-version migration
+
+Current Phase 7 work uses Godot 4.7.2 as its sole engine and extension API baseline. The 4.7.2 `extension_api.json` SHA-256 is `d0e4c08c03b165156dabe6bfb6a906baf0069189f62035341230a246c86d6986`, reproduced on 2026-08-29 with `Godot_v4.7.2-stable_win64_console.exe`. The selected Phase 7 binds and enum values in the historical evidence remain valid on 4.7.2; the unused direct `AnimationPlayer.get_current_animation` bind remains deliberately excluded in favor of stable `Object.get("current_animation")`. No active generated or pinned API hash changed during this migration.
+
+The completed 4.5.1/4.7.2 feasibility report and superseded plan are historical evidence only. Their conclusions remain unchanged: 15/18 contracts are `GO`, and `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack` remain the exact three `BLOCKED` contracts. This migration does not begin Task 2.
+
 ## Red-team closure: binding, generation, admission, and history
 
 This section is normative for every task below. No later task may weaken it.
@@ -41,7 +47,7 @@ The alias matrix test covers all 10 legacy rows across schema source, capability
 
 ### Admitted signal flags
 
-`signal_connect.flags` has default `2` and enum `[2]` only. `CONNECT_REFERENCE_COUNTED` and every combination containing it are rejected because exact reference counts cannot be reconstructed. `CONNECT_ONE_SHOT` and every combination containing it are rejected because a firing between apply and rollback destroys state that UndoRedo cannot safely reconstruct. Deferred and zero-flag variants are not admitted because the tracked evidence does not prove exact dual-engine restoration. The tracked contract probe exercises flag `2` on Godot 4.5.1 and 4.7.2 through connect, duplicate-connect rejection, disconnect, reconnect, apply, undo, and redo. Rollback stores and restores the exact callable, bind array, and observed flag value before mutation; a one-shot connection is never created by this delivery.
+`signal_connect.flags` has default `2` and enum `[2]` only. `CONNECT_REFERENCE_COUNTED` and every combination containing it are rejected because exact reference counts cannot be reconstructed. `CONNECT_ONE_SHOT` and every combination containing it are rejected because a firing between apply and rollback destroys state that UndoRedo cannot safely reconstruct. Deferred and zero-flag variants are not admitted because the tracked evidence does not prove exact restoration. The current contract probe exercises flag `2` on Godot 4.7.2 through connect, duplicate-connect rejection, disconnect, reconnect, apply, undo, and redo. Rollback stores and restores the exact callable, bind array, and observed flag value before mutation; a one-shot connection is never created by this delivery.
 
 ### Runtime key identity
 
@@ -55,7 +61,7 @@ The canonical `runtime_inject_input` key-event schema replaces the historical ex
 ]
 ```
 
-Thus one, two, or all three identity fields are accepted. All supplied values are preserved. Construction calls setters in the fixed order `unicode`, `physical_keycode`, `keycode`; the primary identity used in preview, validation messages, and audit summaries is the first present in precedence `keycode > physical_keycode > unicode`. Tests cover the seven non-empty field combinations and prove getters retain every supplied value. The dual-engine tracked contract probe must pass all seven combinations before runtime implementation begins.
+Thus one, two, or all three identity fields are accepted. All supplied values are preserved. Construction calls setters in the fixed order `unicode`, `physical_keycode`, `keycode`; the primary identity used in preview, validation messages, and audit summaries is the first present in precedence `keycode > physical_keycode > unicode`. Tests cover the seven non-empty field combinations and prove getters retain every supplied value. The Godot 4.7.2 contract probe must pass all seven combinations before runtime implementation begins.
 
 ### RED sequencing and forced rebuilds
 
@@ -146,16 +152,16 @@ Single-owner clarification, not a handoff: Task 8 alone owns new runtime-only In
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Deliver exactly the 15 Phase 7 tools proven feasible on Godot 4.5.1 and 4.7.2, move the canonical implementation atomically from 60/78 to 75/78, and retain the three exact blocked contracts as honest registered-but-unimplemented tools.
+**Goal:** Deliver exactly the 15 Phase 7 tools proven feasible for the current Godot 4.7.2 baseline, move the canonical implementation atomically from 60/78 to 75/78, and retain the three exact blocked contracts as honest registered-but-unimplemented tools.
 
-**Architecture:** Keep public capability metadata at 60 implemented and 18 unimplemented while shared schemas, alias resolution, mutation safety, exact tool/method session policy, domain handlers, main-thread bridge behavior, and dual-engine integration are built behind the capability gate. The tracked feasibility runner is the immutable prerequisite. After all 15 raw methods pass both engines, admit exactly those methods, then activate registry metadata, public documentation, validator assertions, and CI smoke together at 75 implemented and 3 unimplemented.
+**Architecture:** Keep public capability metadata at 60 implemented and 18 unimplemented while shared schemas, alias resolution, mutation safety, exact tool/method session policy, domain handlers, main-thread bridge behavior, and Godot 4.7.2 integration are built behind the capability gate. The historical feasibility record and current 4.7.2 contract probe are the immutable prerequisites. After all 15 raw methods pass Godot 4.7.2, admit exactly those methods, then activate registry metadata, public documentation, validator assertions, and CI smoke together at 75 implemented and 3 unimplemented.
 
-**Tech Stack:** C++20, nlohmann JSON, CMake 3.20+, Ninja, MSVC through `VsDevCmd.bat`, Didi authenticated local IPC, atomic `RuntimeRouteLease` routing, Godot 4.5.1 raw GDExtension C API, Godot 4.7.2 forward verification, PowerShell 7 integration, Python `unittest`, pinned `jsonschema==4.25.1`, standard-library schema generation, GitHub Actions, and GitHub CLI.
+**Tech Stack:** C++20, nlohmann JSON, CMake 3.20+, Ninja, MSVC through `VsDevCmd.bat`, Didi authenticated local IPC, atomic `RuntimeRouteLease` routing, Godot 4.7.2 raw GDExtension C API and integration, PowerShell 7, Python `unittest`, pinned `jsonschema==4.25.1`, standard-library schema generation, GitHub Actions, and GitHub CLI.
 
 ## Governance Decision and Immutable Scope
 
 - Governance Option A is approved. This partial plan supersedes [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md) in exactly three respects and no others: `(1)` delivery accounting may activate the 15 feasible tools as 75/78 while retaining 3 registered blockers; `(2)` `signal_connect.flags` is enum `[2]` with default `2`; `(3)` the `runtime_inject_input` key identity constraint is the stated `anyOf`. Every other feasible request/default/cap/error/outcome contract remains governed byte-for-byte by the original plan, and all three blocked schemas remain byte-for-byte unchanged.
-- The prerequisite evidence is [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md), including extension API hashes `ac9573a7db7f7efffeed4cf927fd61774dabbdaa5a87ca05af10755c0a7c16e5` for 4.5.1 and `d0e4c08c03b165156dabe6bfb6a906baf0069189f62035341230a246c86d6986` for 4.7.2, normalized result hash `f6da31c9794f21ea0facaff5c714beb52892619326bb33b107de04283f6ed11b` on both engines, 18 distinct rows, 15 `GO`, and exactly 3 `BLOCKED`.
+- The current API prerequisite is the Godot 4.7.2 `extension_api.json` hash `d0e4c08c03b165156dabe6bfb6a906baf0069189f62035341230a246c86d6986`. [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) preserves the historical dual-engine result, including 18 distinct rows, 15 `GO`, and exactly 3 `BLOCKED`; it is evidence, not a current execution matrix.
 - Implement exactly: `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `runtime_inject_input`, and `runtime_read_profiler`.
 - Keep `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack` registered with their exact approved schemas, `implemented:false`, `executionModes:["unimplemented"]`, public call rejection, and extension `501` rejection.
 - Do not substitute frame waiting or tick-rate changes for `physics_simulate_step`, partial or uncancellable baking for `nav_bake_mesh`, or constant unavailable data, extension stack frames, expression evaluation, or log scraping for `runtime_get_call_stack`.
@@ -167,15 +173,14 @@ Single-owner clarification, not a handoff: Task 8 alone owns new runtime-only In
 
 ## Mandatory Prerequisite and Local Commands
 
-Before Task 1 changes any test or production file, rerun the tracked prerequisite:
+Before Task 1 changes any test or production file, rerun the current Godot 4.7.2 contract prerequisite:
 
 ```powershell
-.\tests\phase7_feasibility\run_phase7_feasibility.ps1 `
-  -Godot451 C:\Godot\Godot_v4.5.1-stable_win64_console.exe `
+.\tests\phase7_contract_probe\run_phase7_contract_probe.ps1 `
   -Godot472 C:\Godot\Godot_v4.7.2-stable_win64_console.exe
 ```
 
-Expected: exit `0`; each engine reports `rows=18|distinct=18|go=15|blocked=3`, the blocker list `nav_bake_mesh,physics_simulate_step,runtime_get_call_stack`, and result hash `f6da31c9794f21ea0facaff5c714beb52892619326bb33b107de04283f6ed11b`. Any mismatch stops implementation and requires correcting feasibility evidence without weakening a contract.
+Expected: exit `0` and exactly one `ENGINE_CONTRACT|4.7.2|signal_flag_combinations=1|key_identity_combinations=7` line. Any mismatch stops implementation. The historical 15/3 feasibility result and exact blocker list remain immutable unless new supported 4.7.2 evidence proves otherwise.
 
 Every native RED and GREEN uses this exact local baseline:
 
@@ -348,7 +353,7 @@ Add all tool/method session rows from the table, including private `profiler.sam
 
 - [ ] **Step 7: Wire clean CI bootstrap.**
 
-Add schema/generator/manifest/contract-probe/ownership-test paths to workflow filters. Select Python before CMake, install `requirements-dev.txt`, assert 4.25.1, run `python -m unittest tests.test_phase7_schema_contract tests.test_phase7_plan_ownership -v`, and run the dual-engine contract probe on the Windows integration job before repository-native configure/build. Do not change final 60/18 smoke in this task.
+Add schema/generator/manifest/contract-probe/ownership-test paths to workflow filters. Select Python before CMake, install `requirements-dev.txt`, assert 4.25.1, run `python -m unittest tests.test_phase7_schema_contract tests.test_phase7_plan_ownership -v`, and run the Godot 4.7.2 contract probe on the Windows integration job before repository-native configure/build. Do not change final 60/18 smoke in this task.
 
 - [ ] **Step 8: Run GREEN.**
 
@@ -361,11 +366,11 @@ New-Item -ItemType Directory -Path $empty | Out-Null
 Push-Location $empty
 & "$repo\build-ninja\didi_tests.exe" --test-case="phase7 generated schemas"
 Pop-Location
-.\tests\phase7_contract_probe\run_phase7_contract_probe.ps1 -Godot451 C:\Godot\Godot_v4.5.1-stable_win64_console.exe -Godot472 C:\Godot\Godot_v4.7.2-stable_win64_console.exe
+.\tests\phase7_contract_probe\run_phase7_contract_probe.ps1 -Godot472 C:\Godot\Godot_v4.7.2-stable_win64_console.exe
 Remove-Item -LiteralPath .\build-ninja -Recurse -Force
 ```
 
-Then run the exact VsDevCmd/Ninja baseline to force regeneration and relinking. Expected: Python and native suites pass; every generated ref resolves from an empty CWD; recursive and vector payloads validate; the probe reports `signal_flag_combinations=1` and `key_identity_combinations=7` for each engine; generated files exist only under `build-ninja/generated`; `tools/list` remains 60/18/10/88; all 18 Phase 7 public calls remain rejected.
+Then run the exact VsDevCmd/Ninja baseline to force regeneration and relinking. Expected: Python and native suites pass; every generated ref resolves from an empty CWD; recursive and vector payloads validate; the probe reports `signal_flag_combinations=1` and `key_identity_combinations=7` for Godot 4.7.2; generated files exist only under `build-ninja/generated`; `tools/list` remains 60/18/10/88; all 18 Phase 7 public calls remain rejected.
 
 - [ ] **Step 9: Commit.**
 
@@ -681,24 +686,23 @@ git commit -m "feat: implement phase 7 runtime profiler"
 
 The harness opens the tracked editor scenes, authenticates raw extension requests, and asserts literal successes/post-state for the 15 methods plus literal `501` for the three blockers. It also checks wrong-kind/auth/stale-route/quarantine rejections before queue, UndoRedo restoration, signal confirmation path, no partial tile/grid mutation, debug restoration, known ray hit/miss, path without bake, animation resource unchanged, explicit input observation, profiler zero validity/contention/cancellation, bounded envelopes, and token redaction.
 
-- [ ] **Step 2: Build and observe dual-engine RED.**
+- [ ] **Step 2: Build and observe Godot 4.7.2 RED.**
 
 Run the exact VsDevCmd/Ninja baseline, then:
 
 ```powershell
-.\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.5.1-stable_win64_console.exe -McpExecutable .\build-ninja\didi.exe -Phase7RawMethods
 .\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe -McpExecutable .\build-ninja\didi.exe -Phase7RawMethods
 ```
 
-Expected: both fail specifically because the first feasible raw method returns `501`. The three blocked `501` assertions must pass.
+Expected: the run fails specifically because the first feasible raw method returns `501`. The three blocked `501` assertions must pass.
 
 - [ ] **Step 3: Admit exactly 15 after the observed RED.**
 
 Remove exactly those 15 method names from `registered_but_unimplemented` and add them to exact dispatch. Delete the `runtime.*` prefix exception. Keep Task 1's pre-queue method policy authoritative and defense identical. Integrate profiler callback processing/cancellation. Do not change `ToolRegistry` capabilities.
 
-- [ ] **Step 4: Run native and dual-engine GREEN.**
+- [ ] **Step 4: Run native and Godot 4.7.2 GREEN.**
 
-Run the exact VsDevCmd/Ninja baseline and both exact commands above. Expected: all existing and Phase 7 raw assertions pass on both engines; all 15 return native-derived behavior; all three blockers return `501`; checked-in fixtures acquire no generated artifacts; public `tools/list` remains 60/18.
+Run the exact VsDevCmd/Ninja baseline and the exact command above. Expected: all existing and Phase 7 raw assertions pass on Godot 4.7.2; all 15 return native-derived behavior; all three blockers return `501`; checked-in fixtures acquire no generated artifacts; public `tools/list` remains 60/18.
 
 - [ ] **Step 5: Commit.**
 
@@ -733,7 +737,6 @@ Run the exact baseline, then:
 python -m unittest tests.test_phase7_schema_contract -v
 python -m unittest tests.test_documentation_validator -v
 python tools/validate_documentation.py
-.\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.5.1-stable_win64_console.exe -McpExecutable .\build-ninja\didi.exe -PublicMcpPartialState
 .\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe -McpExecutable .\build-ninja\didi.exe -PublicMcpPartialState
 ```
 
@@ -802,14 +805,13 @@ python tools/validate_documentation.py
 
 Expected: zero native failures; schema and documentation suites pass; validator reports 78 canonical, 75 implemented, 3 unimplemented, 10 legacy, 88 total, and the exact blocker set.
 
-- [ ] **Step 2: Run both real engines in public mode.**
+- [ ] **Step 2: Run the real Godot 4.7.2 engine in public mode.**
 
 ```powershell
-.\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.5.1-stable_win64_console.exe -McpExecutable .\build-ninja\didi.exe -PublicMcpPartialState
 .\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe -McpExecutable .\build-ninja\didi.exe -PublicMcpPartialState
 ```
 
-Expected: both pass all old and 15 new public assertions, alias parity, exact three blockers, cleanup, and token redaction with no API skip.
+Expected: Godot 4.7.2 passes all old and 15 new public assertions, alias parity, exact three blockers, cleanup, and token redaction with no API skip.
 
 - [ ] **Step 3: Obtain an independent red-team PASS.**
 
@@ -821,7 +823,7 @@ The reviewer writes `.superpowers\sdd\phase7-partial-red-team.md` with reviewed 
 
 ```powershell
 git push -u origin codex/phase-7-partial-delivery
-gh pr create --title "feat: deliver phase 7 feasible tools" --body "Implements exactly the 15 Phase 7 tools proven feasible on Godot 4.5.1 and 4.7.2, activates 75/78 canonical tools atomically, preserves 10 legacy and 88 total registrations, and retains physics_simulate_step, nav_bake_mesh, and runtime_get_call_stack as exact registered blockers. Merge requires independent red-team PASS and green Windows, Linux, and macOS checks."
+gh pr create --title "feat: deliver phase 7 feasible tools" --body "Implements exactly the 15 Phase 7 tools proven feasible for the current Godot 4.7.2 baseline, activates 75/78 canonical tools atomically, preserves 10 legacy and 88 total registrations, and retains physics_simulate_step, nav_bake_mesh, and runtime_get_call_stack as exact registered blockers. Merge requires independent red-team PASS and green Windows, Linux, and macOS checks."
 ```
 
 - [ ] **Step 5: Wait for CI and review.**

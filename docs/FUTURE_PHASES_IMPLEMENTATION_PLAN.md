@@ -1,5 +1,7 @@
 # Future Phases Documentation Integration Implementation Plan
 
+> **Historical plan:** This completed documentation-integration plan preserves its original wording and evidence references; it is not a current engine verification workflow.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make Phases 7-12 and the rules for every later phase part of the repository's authoritative, validated documentation surface.

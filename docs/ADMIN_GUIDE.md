@@ -11,8 +11,8 @@ This guide covers deployment, security controls, system configuration, monitorin
 | **Operating System** | Windows 10 (64-bit), Ubuntu 20.04+, macOS 12+ | Windows 11 (64-bit) for the currently verified live matrix |
 | **CPU Architecture** | x86_64 / ARM64 (Apple Silicon) | Multi-core x86_64 / Apple Silicon M-series |
 | **RAM** | 4 GB | 16 GB+ (for large Godot 3D scenes) |
-| **Engine Target** | Godot 4.5+ (Standard / .NET) | Godot 4.5+ or 4.7+ |
-| **Dependencies** | None for the core MCP server | Godot 4.5+ for Godot-backed checks/exports; `dotnet` for C# build diagnostics |
+| **Engine Target** | Godot 4.7+ (Standard / .NET) | Godot 4.7+ |
+| **Dependencies** | None for the core MCP server | Godot 4.7+ for Godot-backed checks/exports; `dotnet` for C# build diagnostics |
 
 ---
 
@@ -62,7 +62,7 @@ Administrators can configure Didi globally or per-service using standard environ
 
 `DIDI_PIPE_NAME` remains available for legacy/direct IPC configuration. Phase 6 session routing uses project-keyed process-unique descriptor endpoints and owner-only `.lock` files in the session directory. Do not share `DIDI_SESSION_DIR` across OS users. Start one MCP client per editor/game session; a second explicit attach returns `423 Locked`.
 
-Godot discovery recognizes common 4.5.1, 4.6.2, and 4.7.2 Windows console/editor filenames under `GODOT_PATH` or `C:\Godot`, plus `godot`, `godot4`, standard `/usr` and `/usr/local` binary paths, `/opt/godot/godot`, and the standard macOS app bundle. Set `GODOT_BIN` to the exact executable when installations use another name or layout; Windows `.cmd` and `.bat` wrappers are launched through the trusted System32 `cmd.exe`, including when the wrapper path contains non-ASCII characters.
+Godot discovery recognizes Godot 4.7.2 Windows console/editor filenames under `GODOT_PATH` or `C:\Godot`, plus `godot`, `godot4`, standard `/usr` and `/usr/local` binary paths, `/opt/godot/godot`, and the standard macOS app bundle. The current minimum supported engine is Godot 4.7+. Set `GODOT_BIN` to the exact executable when installations use another name or layout; Windows `.cmd` and `.bat` wrappers are launched through the trusted System32 `cmd.exe`, including when the wrapper path contains non-ASCII characters.
 
 ---
 

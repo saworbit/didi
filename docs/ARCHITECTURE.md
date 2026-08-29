@@ -1,6 +1,6 @@
 # Didi Architecture & Technical Design Document
 
-**Didi** (`godot-mcp-native`) is a native Model Context Protocol (MCP) server engineered in modern C++20 for Godot 4.5+.
+**Didi** (`godot-mcp-native`) is a native Model Context Protocol (MCP) server engineered in modern C++20 for Godot 4.7+.
 
 ---
 
@@ -37,7 +37,7 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
                                │  Process-unique authenticated local IPC endpoint
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│        Godot 4.5+ Process (Didi extension library)          │
+│        Godot 4.7+ Process (Didi extension library)          │
 │  ┌───────────────────────┬───────────────────────────────┐  │
 │  │ EditorInterface Hook  │ Editor ViewportTexture        │  │
 │  │ (Main-thread Dispatch)│ (RGBA8 → PNG capture)         │  │

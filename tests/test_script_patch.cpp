@@ -280,7 +280,7 @@ struct RegisterScriptPatchTests {
         registerTest("GDScript.ElseTokenColonRule", test_gdscript_colon_rule_requires_else_as_a_complete_token);
         registerTest("GDScript.StringAwareBalance", test_gdscript_diagnostics_ignore_brackets_in_strings_and_comments);
         registerTest("GDScript.EscapedTripleDelimiter", test_gdscript_diagnostics_ignore_escaped_triple_delimiters);
-        registerTest("GDScript.Godot45CompilerOutput", test_godot_45_multiline_compiler_output_is_preserved);
+        registerTest("GDScript.HistoricalGodot45CompilerOutput", test_godot_45_multiline_compiler_output_is_preserved);
         registerTest("GDScript.PatchFunction", test_gdscript_symbol_patch_function);
         registerTest("GDScript.PatchSignal", test_gdscript_symbol_patch_signal);
         registerTest("GDScript.PatchPreservesOrdinaryComments", test_gdscript_symbol_patch_preserves_ordinary_comments);

@@ -1,13 +1,14 @@
 param(
-    [Parameter(Mandatory = $true)][string]$Godot451,
     [Parameter(Mandatory = $true)][string]$Godot472
 )
 
 $ErrorActionPreference = 'Stop'
 $fixture = Split-Path -Parent $MyInvocation.MyCommand.Path
 $expected = 'PHASE7_CONTRACT|signal_flag_combinations=1|key_identity_combinations=7'
+. (Join-Path (Split-Path -Parent $fixture) 'assert_godot_472.ps1')
+$Godot472 = Assert-Godot472Executable -Executable $Godot472
 
-foreach ($entry in @(@('4.5.1', $Godot451), @('4.7.2', $Godot472))) {
+foreach ($entry in ,@('4.7.2', $Godot472)) {
     $label = $entry[0]
     $executable = $entry[1]
     if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {

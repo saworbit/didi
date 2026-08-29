@@ -9,7 +9,7 @@ This guide explains how to build, test, and extend Didi (`godot-mcp-native`).
 ### Windows (MSVC)
 - Visual Studio 2022 / Build Tools with C++20 support
 - CMake 3.20+
-- Godot 4.5+
+- Godot 4.7+
 - PowerShell 7+ for the Windows live integration harness
 
 ```powershell
@@ -70,10 +70,10 @@ The Windows live integration harness copies the tracked fixture into `build/` an
 
 ```powershell
 .\tests\run_godot_integration.ps1 `
-  -GodotExecutable C:\Godot\Godot_v4.5.1-stable_win64_console.exe
+  -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe
 ```
 
-The Phase 1 substrate has also been run against Godot 4.6.2 and 4.7.2. Phase 2's compatibility floor and CI integration target are Godot 4.5.1; bridge method hashes must be taken from that version's extension API.
+Historical compatibility evidence includes Phase 1 runs on Godot 4.6.2 and 4.7.2. The current compatibility floor is Godot 4.7, the current CI integration target is Godot 4.7.2, and bridge method hashes must be taken from the 4.7.2 extension API.
 
 ---
 
@@ -142,14 +142,14 @@ The standalone router starts detached, then may auto-attach on first availabilit
 
 ## Phase 4 tests and release gate
 
-The v1.4.0 release gate runs the complete native suite; the runner's reported total remains authoritative as cases evolve. Focused suites cover the existing session/routing/evaluation contracts plus search containment and lexical filtering, two-idle-frame reimport progress, exact diff arithmetic, cache eviction, public response completeness, and restoration guards. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and also verifies the Phase 4 search/reimport/isolation/diff loop against Godot 4.5.1.
+The v1.4.0 release gate runs the complete native suite; the runner's reported total remains authoritative as cases evolve. Focused suites cover the existing session/routing/evaluation contracts plus search containment and lexical filtering, two-idle-frame reimport progress, exact diff arithmetic, cache eviction, public response completeness, and restoration guards. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and verifies the current integration matrix on Godot 4.7.2 only.
 
 Run from a clean worktree:
 
 ```powershell
 cmake --build build --config Release
 .\build\Release\didi_tests.exe
-.\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.5.1-stable_win64_console.exe
+.\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe
 .\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe
 ```
 
@@ -166,11 +166,11 @@ The CI MCP smoke must start Didi with an explicit fixture project and continue t
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `BLOCKED_AT_FEASIBILITY`. The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2: 15/18 names are implementation-feasible, while exactly 3/18 are API-blocked under their approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Do not broaden that result into a permanent impossibility claim.
+Phase 7 is `BLOCKED_AT_FEASIBILITY`. The historical gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2: 15/18 names are implementation-feasible, while exactly 3/18 are API-blocked under their approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Do not broaden that result into a permanent impossibility claim.
 
 Feasibility is design evidence, not production behavior. The implementation remains 60/78, all 18 names remain registered but unimplemented, and the approved all-or-nothing 78/78 activation gate prevented Tasks 2-13. No production implementation started.
 
-Further work requires governance to authorize partial delivery of the 15 feasible tools toward 75/78, retain atomic 78/78 and wait for supported engine capabilities, or explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. The third option requires all three blockers to re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 begins. Any contract weakening is a separate explicit contract amendment, not an effect of that option. Use [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) for reproducible evidence and [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md) for the approved executable plan.
+Further work requires governance to authorize partial delivery of the 15 feasible tools toward 75/78, retain atomic 78/78 and wait for supported engine capabilities, or explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. The third option requires all three blockers to re-enter Task 1 and prove `GO` on Godot 4.7.2 before Task 2 begins. Any contract weakening is a separate explicit contract amendment, not an effect of that option. Use [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) for historical reproducible evidence and [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md) for the historical approved executable plan.
 
 ## Phase 5 and Phase 6 implementation map
 

@@ -1,5 +1,7 @@
 # Phase 7 Godot API Feasibility Gate
 
+> **Historical evidence:** This completed 2026-08-29 record preserves the engines tested and the exact 15/3 conclusions. It is not the current support or verification matrix.
+
 ## Decision
 
 <!-- phase7-current-status:start -->

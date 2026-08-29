@@ -49,6 +49,57 @@ VERSION_SOURCES = (
 TRACKED_ONLY_ARTIFACT_PATHS = (".superpowers",)
 FILESYSTEM_FORBIDDEN_ARTIFACT_PATHS = ("docs/superpowers",)
 
+GODOT_MINIMUM_VERSION = "4.7"
+GODOT_VERIFICATION_VERSION = "4.7.2"
+GODOT_SUPPORT_DOCUMENTS = (
+    "README.md",
+    "CONTRIBUTING.md",
+    "docs/ADMIN_GUIDE.md",
+    "docs/ARCHITECTURE.md",
+    "docs/CAPABILITIES.md",
+    "docs/DEVELOPER_GUIDE.md",
+    "docs/INTEGRATION_GUIDE.md",
+    "docs/LLM_INSTRUCTIONS.md",
+    "docs/QUICKSTART.md",
+    "docs/TOOL_REFERENCE.md",
+)
+GODOT_CURRENT_POLICY_FILES = GODOT_SUPPORT_DOCUMENTS + (
+    ".github/pull_request_template.md",
+    ".github/workflows/ci.yml",
+    "addons/didi/plugin.cfg",
+    "demo/addons/didi/plugin.cfg",
+    "docs/FUTURE_PHASES_DESIGN.md",
+    "docs/PHASE_7_PARTIAL_IMPLEMENTATION_PLAN.md",
+    "docs/ROADMAP.md",
+    "src/gdextension/gdextension_entry.cpp",
+    "src/gdextension/godot_bridge.cpp",
+    "src/mcp/prompt_registry.cpp",
+    "src/offline/test_runner.cpp",
+    "src/standalone/main.cpp",
+    "tests/godot_smoke/project.godot",
+    "tests/phase7_contract_probe/run_phase7_contract_probe.ps1",
+    "tests/run_godot_integration.ps1",
+)
+GODOT_CURRENT_VERIFICATION_FILES = (
+    ".github/workflows/ci.yml",
+    "tests/phase7_contract_probe/run_phase7_contract_probe.ps1",
+    "tests/run_godot_integration.ps1",
+)
+GODOT_HISTORICAL_FILES = (
+    "CHANGELOG.md",
+    "docs/FUTURE_PHASES_IMPLEMENTATION_PLAN.md",
+    "docs/GOGO_DESIGN.md",
+    "docs/PHASE_7_API_FEASIBILITY.md",
+    "docs/PHASE_7_IMPLEMENTATION_PLAN.md",
+    "tests/phase7_feasibility/run_phase7_feasibility.ps1",
+)
+GODOT_OLD_VERSION_PATTERN = re.compile(
+    r"(?<!\d)4\.(?:5(?:\.1)?|6(?:\.\d+)?)(?!\d)", re.IGNORECASE
+)
+GODOT_CURRENT_MINIMUM_PATTERN = re.compile(
+    r"\bGodot\s+4\.7(?:\+|\s+or\s+(?:newer|later)\b)", re.IGNORECASE
+)
+
 FUTURE_PHASE_RANGE = range(7, 13)
 PHASE7_STATUS = "BLOCKED_AT_FEASIBILITY"
 VALID_PHASE_STATUSES = {"PLANNED", "IN PROGRESS", "COMPLETE", PHASE7_STATUS}
@@ -1018,6 +1069,85 @@ def _tracked_paths(
     return {path for path in paths if path}, None
 
 
+def validate_godot_version_policy(root: Path) -> list[str]:
+    errors: list[str] = []
+
+    for manifest in sorted(root.rglob("*.gdextension")):
+        relative_parts = manifest.relative_to(root).parts
+        if any(
+            part in {".git", ".worktrees", ".superpowers"}
+            or part.startswith("build")
+            for part in relative_parts
+        ):
+            continue
+        try:
+            text = manifest.read_text(encoding="utf-8", errors="strict")
+        except (OSError, UnicodeError) as error:
+            errors.append(f"{manifest.relative_to(root).as_posix()}: cannot read manifest: {error}")
+            continue
+        if not re.search(
+            r'^\s*compatibility_minimum\s*=\s*"4\.7"\s*$', text, flags=re.MULTILINE
+        ):
+            errors.append(
+                f"{manifest.relative_to(root).as_posix()}: compatibility_minimum must be 4.7"
+            )
+
+    for relative_path in GODOT_SUPPORT_DOCUMENTS:
+        path = root / relative_path
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="strict")
+        if GODOT_CURRENT_MINIMUM_PATTERN.search(text) is None:
+            errors.append(f"{relative_path}: current Godot minimum must be 4.7+")
+
+    for relative_path in GODOT_HISTORICAL_FILES:
+        path = root / relative_path
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="strict")
+        if GODOT_OLD_VERSION_PATTERN.search(text) and not re.search(
+            r"\bhistorical\b", text[:1200], flags=re.IGNORECASE
+        ):
+            errors.append(
+                f"{relative_path}: older Godot evidence must be explicitly labelled historical"
+            )
+
+    for relative_path in GODOT_CURRENT_POLICY_FILES:
+        path = root / relative_path
+        if not path.is_file():
+            continue
+        heading = ""
+        for line_number, line in enumerate(
+            path.read_text(encoding="utf-8", errors="strict").splitlines(), start=1
+        ):
+            if line.lstrip().startswith("#"):
+                heading = line
+            if GODOT_OLD_VERSION_PATTERN.search(line) is None:
+                continue
+            if "historical" in f"{heading}\n{line}".lower():
+                continue
+            if relative_path in GODOT_CURRENT_VERIFICATION_FILES:
+                errors.append(
+                    f"{relative_path}:{line_number}: current verification must use Godot 4.7.2 only"
+                )
+            else:
+                errors.append(
+                    f"{relative_path}:{line_number}: stale current Godot 4.5/4.6 reference"
+                )
+
+    for relative_path in GODOT_CURRENT_VERIFICATION_FILES:
+        path = root / relative_path
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="strict")
+        if "godot" in text.lower() and GODOT_VERIFICATION_VERSION not in text:
+            errors.append(
+                f"{relative_path}: current verification must use Godot 4.7.2 only"
+            )
+
+    return errors
+
+
 def validate_repository(root: Path) -> list[str]:
     root = root.resolve()
     errors: list[str] = []
@@ -1120,6 +1250,7 @@ def validate_repository(root: Path) -> list[str]:
             if not re.search(pattern, text, flags=re.IGNORECASE):
                 errors.append(f"{relative_path}: missing current release fact: {label}")
 
+    errors.extend(validate_godot_version_policy(root))
     errors.extend(validate_canonical_implementation_counts(texts))
     errors.extend(validate_phase7_reconciliation(texts))
 

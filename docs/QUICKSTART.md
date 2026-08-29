@@ -1,6 +1,6 @@
 # Didi 5-Minute Quickstart Guide 🚀
 
-Get **Didi** (`godot-mcp-native`) running with Godot 4.5+ and an MCP client.
+Get **Didi** (`godot-mcp-native`) running with Godot 4.7+ and an MCP client.
 
 ---
 

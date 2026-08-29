@@ -17,6 +17,9 @@ on:
       - 'schemas/phase7/**'
       - 'tests/test_phase7_schema_contract.py'
       - 'tests/test_phase7_plan_ownership.py'
+      - 'tests/test_documentation_validator.py'
+      - 'tests/test_godot_version_policy.py'
+      - 'tests/assert_godot_472.ps1'
       - 'tests/phase7_contract_probe/**'
       - '.github/workflows/ci.yml'
   pull_request:
@@ -35,6 +38,9 @@ on:
       - 'schemas/phase7/**'
       - 'tests/test_phase7_schema_contract.py'
       - 'tests/test_phase7_plan_ownership.py'
+      - 'tests/test_documentation_validator.py'
+      - 'tests/test_godot_version_policy.py'
+      - 'tests/assert_godot_472.ps1'
       - 'tests/phase7_contract_probe/**'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
@@ -108,26 +114,23 @@ jobs:
           "$DIDI_PYTHON" -m pip install -r requirements-dev.txt
           "$DIDI_PYTHON" -c "import jsonschema; assert jsonschema.__version__ == '4.25.1', jsonschema.__version__"
 
-      - name: Run Phase 7 schema and ownership contracts
+      - name: Run schema, ownership, documentation, and Godot version contracts
         shell: bash
-        run: "$DIDI_PYTHON" -m unittest tests.test_phase7_schema_contract tests.test_phase7_plan_ownership -v
+        run: "$DIDI_PYTHON" -m unittest tests.test_phase7_schema_contract tests.test_phase7_plan_ownership tests.test_documentation_validator tests.test_godot_version_policy -v
 
-      - name: Download dual Godot contract engines
+      - name: Download Godot 4.7.2 contract engine
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path build/godot/4.5.1,build/godot/4.7.2 -Force | Out-Null
-          curl.exe -L --fail --retry 3 https://github.com/godotengine/godot/releases/download/4.5.1-stable/Godot_v4.5.1-stable_win64.exe.zip -o build/godot/4.5.1.zip
+          New-Item -ItemType Directory -Path build/godot/4.7.2 -Force | Out-Null
           curl.exe -L --fail --retry 3 https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_win64.exe.zip -o build/godot/4.7.2.zip
-          Expand-Archive build/godot/4.5.1.zip build/godot/4.5.1
           Expand-Archive build/godot/4.7.2.zip build/godot/4.7.2
 
-      - name: Run dual-engine Phase 7 contract probe
+      - name: Run Godot 4.7.2 Phase 7 contract probe
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           ./tests/phase7_contract_probe/run_phase7_contract_probe.ps1 `
-            -Godot451 build/godot/4.5.1/Godot_v4.5.1-stable_win64_console.exe `
             -Godot472 build/godot/4.7.2/Godot_v4.7.2-stable_win64_console.exe
 
       - name: Configure CMake (Windows)

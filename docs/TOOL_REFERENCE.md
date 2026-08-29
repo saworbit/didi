@@ -11,14 +11,14 @@ The `_meta.didi` object returned by `tools/list` is authoritative. A registered 
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `BLOCKED_AT_FEASIBILITY`. The implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `BLOCKED_AT_FEASIBILITY`. The implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The historical 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [historical evidence](PHASE_7_API_FEASIBILITY.md) and the [historical approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
 | Status | Meaning |
 | :--- | :--- |
 | Live + offline | Selects real editor execution when connected and an attributed file/synthetic fallback otherwise. |
-| Live | Requires Godot 4.5+ with the Didi addon enabled. |
+| Live | Requires Godot 4.7+ with the Didi addon enabled. |
 | Offline | Operates on project files or launches a separate Godot process. |
 | Unimplemented | Schema reserved for compatibility; calls are rejected. |
 
@@ -319,7 +319,7 @@ Group mutations use UndoRedo.
 
 - `scene_create`: requires normalized `scene_path` ending in `.tscn`; accepts `root_type` (`Node2D`, `Node3D`, or `Control`), `root_name`, and `overwrite`. It saves and verifies the active scene.
 - `scene_open`: validates and opens an existing `PackedScene`, then verifies its active resource path.
-- `scene_close`: refuses unless `discard_unsaved: true` on Godot 4.5 because that API version cannot expose dirty-state status safely.
+- `scene_close`: refuses unless `discard_unsaved: true` on Godot 4.7 because that API version cannot expose dirty-state status safely.
 - `scene_pack_branch`: requires `target_node` and `scene_path`; duplicates the branch, normalizes descendant ownership, packs it, and protects existing targets unless `overwrite: true`.
 
 Scene paths reject absolute filesystem paths, backslashes, and parent-relative segments.

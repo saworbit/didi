@@ -77,7 +77,7 @@ void test_runtime_launch_rejects_timeout_outside_public_range() {
     ASSERT_TRUE(result.isError);
 }
 
-void test_resolver_finds_documented_godot_451_layout() {
+void test_resolver_finds_documented_godot_472_layout() {
     ScopedEnvironmentVariable godot_bin("GODOT_BIN");
     ScopedEnvironmentVariable godot_path("GODOT_PATH");
     godot_bin.set(std::nullopt);
@@ -86,15 +86,39 @@ void test_resolver_finds_documented_godot_451_layout() {
                           std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(root);
 #if defined(_WIN32)
-    const auto candidate = root / "Godot_v4.5.1-stable_win64_console.exe";
+    const auto candidate = root / "Godot_v4.7.2-stable_win64_console.exe";
 #else
-    const auto candidate = root / "Godot_v4.5.1-stable_linux.x86_64";
+    const auto candidate = root / "Godot_v4.7.2-stable_linux.x86_64";
 #endif
     std::ofstream(candidate).put('\n');
     godot_path.set(root.string());
     const auto resolved = didi::offline::resolveGodotExecutable();
     std::filesystem::remove_all(root);
     ASSERT_EQ(std::filesystem::path(resolved), candidate);
+}
+
+void test_resolver_does_not_advertise_godot_45_or_46_layouts() {
+    ScopedEnvironmentVariable godot_bin("GODOT_BIN");
+    ScopedEnvironmentVariable godot_path("GODOT_PATH");
+    godot_bin.set(std::nullopt);
+    const auto root = std::filesystem::temp_directory_path() /
+                      ("didi-old-godot-discovery-" + std::to_string(
+                          std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(root);
+#if defined(_WIN32)
+    const auto godot_45 = root / "Godot_v4.5.1-stable_win64_console.exe";
+    const auto godot_46 = root / "Godot_v4.6.2-stable_win64_console.exe";
+#else
+    const auto godot_45 = root / "Godot_v4.5.1-stable_linux.x86_64";
+    const auto godot_46 = root / "Godot_v4.6.2-stable_linux.x86_64";
+#endif
+    std::ofstream(godot_45).put('\n');
+    std::ofstream(godot_46).put('\n');
+    godot_path.set(root.string());
+    const auto resolved = std::filesystem::path(didi::offline::resolveGodotExecutable());
+    std::filesystem::remove_all(root);
+    ASSERT_TRUE(resolved != godot_45);
+    ASSERT_TRUE(resolved != godot_46);
 }
 
 #if defined(_WIN32)
@@ -180,7 +204,8 @@ struct RegisterTestRunnerTests {
     RegisterTestRunnerTests() {
         registerTest("RuntimeLaunch.TimeoutSchema", test_runtime_launch_schema_bounds_timeout);
         registerTest("RuntimeLaunch.TimeoutValidation", test_runtime_launch_rejects_timeout_outside_public_range);
-        registerTest("RuntimeLaunch.Godot451Discovery", test_resolver_finds_documented_godot_451_layout);
+        registerTest("RuntimeLaunch.Godot472Discovery", test_resolver_finds_documented_godot_472_layout);
+        registerTest("RuntimeLaunch.OldVersionDiscoveryRejected", test_resolver_does_not_advertise_godot_45_or_46_layouts);
 #if defined(_WIN32)
         registerTest("RuntimeLaunch.WindowsExit259", test_windows_exit_code_259_is_completed_not_timed_out);
         registerTest("RuntimeLaunch.WindowsBoundedOutputDrain", test_windows_completed_parent_does_not_wait_for_inherited_stdout);

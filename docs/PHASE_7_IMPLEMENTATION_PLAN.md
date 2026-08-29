@@ -1,5 +1,7 @@
 # Phase 7 Canonical Completion Implementation Plan
 
+> **Historical plan:** This superseded all-or-nothing plan preserves its original dual-engine requirements. Current work is governed by `PHASE_7_PARTIAL_IMPLEMENTATION_PLAN.md` with Godot 4.7.2 as the sole active baseline.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement the remaining 18 registered canonical tools with native Godot-derived behavior so Didi moves atomically from 60/78 implemented to 78/78 without changing the 78 canonical names or 10 compatibility aliases.

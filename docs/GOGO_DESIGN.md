@@ -323,7 +323,7 @@ Workspace copy + `--path`. Fail if copy exceeds byte cap. Integration: two bench
 
 ### Slice D — Public Gogo tools
 
-`gogo_status` / `gogo_acquire` / `gogo_release` / `gogo_run`. Documentation, capability metadata, changelog, tool count bump in the same change. Godot integration on 4.5.1 at least two headless benches.
+`gogo_status` / `gogo_acquire` / `gogo_release` / `gogo_run`. Documentation, capability metadata, changelog, tool count bump in the same change. Godot integration on 4.7.2 with at least two headless benches.
 
 ### Slice E — Optional A2A facade
 

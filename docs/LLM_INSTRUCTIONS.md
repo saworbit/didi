@@ -1,6 +1,6 @@
 # Didi LLM Operating Instructions
 
-Use these instructions when an MCP client is connected to Didi for a Godot 4.5+ project.
+Use these instructions when an MCP client is connected to Didi for a Godot 4.7+ project.
 
 ## Establish the project boundary
 
@@ -67,7 +67,7 @@ Project-wide mutations are persisted immediately. Re-read the corresponding list
 - Use `scene_create` for empty Node2D, Node3D, or Control scenes.
 - Use `scene_pack_branch` to serialize an owned duplicate of a live branch without detaching the source.
 - Use `scene_open` and verify with `scene_get_hierarchy`.
-- On Godot 4.5, `scene_close` always requires explicit `discard_unsaved: true` because the engine does not expose dirty state to GDExtension. Ask for or infer this intent only when discarding is genuinely authorized.
+- On Godot 4.7, `scene_close` always requires explicit `discard_unsaved: true` because the engine does not expose dirty state to GDExtension. Ask for or infer this intent only when discarding is genuinely authorized.
 - Use only normalized `res://*.tscn` paths; never send filesystem paths or `..` segments.
 
 ### Inspect a viewport
@@ -127,7 +127,7 @@ Treat `eval_gdscript` as a small read-only expression language. Prefer literals,
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `BLOCKED_AT_FEASIBILITY`. The implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
+Phase 7 is `BLOCKED_AT_FEASIBILITY`. The implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The historical 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
 Do not call or advertise any of the 15 feasible names as available; feasibility is not implementation. Work can proceed only after governance authorizes partial 75/78 delivery, retains atomic 78/78 while waiting for supported engine capabilities, or explicitly approves and maintains engine changes or private adapters sufficient for all three exact blocked contracts. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2 begins. Contract weakening requires a separate explicit contract amendment and is not implied. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 

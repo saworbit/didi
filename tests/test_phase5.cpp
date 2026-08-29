@@ -113,7 +113,7 @@ TEST(Phase5, ParsesGodotShaderDiagnosticsAndBoundsContinuation) {
     ASSERT_EQ(diagnostics[1].line, 3);
 }
 
-TEST(Phase5, ParsesGodot45DummyRendererShaderDiagnostic) {
+TEST(Phase5, ParsesHistoricalGodot45DummyRendererShaderDiagnostic) {
     const auto diagnostics = parseGodotDiagnostics(
         "SHADER ERROR: Expected expression, found: 'PARENTHESIS_CLOSE'.\r\n"
         "   at: (null) (:4)\r\n"

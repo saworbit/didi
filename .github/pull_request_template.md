@@ -14,7 +14,7 @@
 - [ ] My code adheres to the project's coding style guidelines (C++20, 4 spaces).
 - [ ] I have added automated tests in `tests/` covering new functionality.
 - [ ] All native unit tests pass (`./build/Release/didi_tests.exe` or `ctest`).
-- [ ] Live bridge changes pass `tests/run_godot_integration.ps1` on Godot 4.5.1.
+- [ ] Live bridge changes pass `tests/run_godot_integration.ps1` on Godot 4.7.2.
 - [ ] Runtime-session changes cover editor and game descriptors, authentication, attach rollback, pause/step/stop, cursor polling, cleanup, and token redaction.
 - [ ] Expression changes cover the strict read-only grammar, receiver allowlist, output/depth bounds, and cooperative-timeout wording.
 - [ ] The exact MCP smoke starts with an explicit Godot project, returns 78 canonical tools / 88 registrations, preserves the Phase 4/5/6 contracts, and keeps reserved runtime debugger tools marked unimplemented.

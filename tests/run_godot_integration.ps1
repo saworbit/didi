@@ -6,6 +6,8 @@ param(
     [int]$StartupTimeoutSeconds = 30
 )
 
+# Current editor/runtime integration is pinned to Godot 4.7.2.
+
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $sourceFixtureRoot = Join-Path $PSScriptRoot "godot_smoke"
@@ -26,10 +28,9 @@ $shutdownGameStdoutPath = Join-Path $repoRoot "build\godot_shutdown_game_integra
 $shutdownGameStderrPath = Join-Path $repoRoot "build\godot_shutdown_game_integration.err"
 $shutdownGameEngineLogPath = Join-Path $repoRoot "build\godot_shutdown_game_engine.log"
 $previousGodotBin = $env:GODOT_BIN
+. (Join-Path $PSScriptRoot 'assert_godot_472.ps1')
 
-if (-not (Test-Path -LiteralPath $GodotExecutable)) {
-    throw "Godot executable not found: $GodotExecutable"
-}
+$GodotExecutable = Assert-Godot472Executable -Executable $GodotExecutable
 $env:GODOT_BIN = [IO.Path]::GetFullPath($GodotExecutable)
 if (-not (Test-Path -LiteralPath $didiExecutable)) {
     throw "Didi executable not found: $didiExecutable"

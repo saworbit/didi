@@ -55,9 +55,18 @@ class DocumentationValidatorTests(unittest.TestCase):
         )
         self.write(
             "src/standalone/main.cpp",
-            'std::cout << "didi (godot-mcp-native) v1.4.0";\n',
+            'std::cout << "didi (godot-mcp-native) v1.4.0 for Godot 4.7+";\n',
         )
-        self.write("addons/didi/plugin.cfg", 'version="1.4.0"\n')
+        self.write(
+            "addons/didi/plugin.cfg",
+            'version="1.4.0"\ndescription="Native MCP server for Godot 4.7+"\n',
+        )
+        for manifest in (
+            "addons/didi/didi.gdextension",
+            "demo/addons/didi/didi.gdextension",
+            "tests/godot_smoke/addons/didi/didi.gdextension",
+        ):
+            self.write(manifest, '[configuration]\ncompatibility_minimum = "4.7"\n')
 
         self.write(
             "README.md",
@@ -67,9 +76,11 @@ Current documented release: **1.4.0**.
 
 Didi exposes 78 canonical tools plus 10 legacy names (88 total).
 
+The current minimum supported engine is Godot 4.7+.
+
 Startup requires --project or DIDI_PROJECT_ROOT. Mutations expose dry_run and protected writes use confirmation_token.
 
-Phase 7 status is BLOCKED_AT_FEASIBILITY after the 2026-08-29 Godot 4.5.1 and Godot 4.7.2 feasibility gate. The implementation remains 60/78 canonical tools, with all 18 Phase 7 names registered but unimplemented. The gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts.
+Historical feasibility evidence records the 2026-08-29 Godot 4.5.1 and Godot 4.7.2 gate. Phase 7 status is BLOCKED_AT_FEASIBILITY. The implementation remains 60/78 canonical tools, with all 18 Phase 7 names registered but unimplemented. The gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts.
 
 [Phase 7 feasibility evidence](docs/PHASE_7_API_FEASIBILITY.md) | [Phase 7 approved executable plan](docs/PHASE_7_IMPLEMENTATION_PLAN.md)
 
@@ -79,6 +90,8 @@ Phase 7 status is BLOCKED_AT_FEASIBILITY after the 2026-08-29 Godot 4.5.1 and Go
         self.write(
             "CHANGELOG.md",
             """# Changelog
+
+This document contains historical release notes. Current support begins at Godot 4.7.
 
 ## [Unreleased]
 
@@ -104,16 +117,16 @@ Current release: 1.4.0.
 | <=1.2.x | :x: |
 """,
         )
-        self.write("CONTRIBUTING.md", "# Contributing\n")
+        self.write("CONTRIBUTING.md", "# Contributing\n\nTest against Godot 4.7+.\n")
 
         generic_docs = {
-            "ADMIN_GUIDE.md": "# Admin Guide\n",
+            "ADMIN_GUIDE.md": "# Admin Guide\n\nCurrent support requires Godot 4.7+.\n",
             "API_SPECIFICATION.md": "# API Specification\n\n423 Locked. Mutations expose dry_run and confirmation_token. Live IPC includes ui.hitTest.\n",
-            "ARCHITECTURE.md": "# Architecture\n",
-            "DEVELOPER_GUIDE.md": "# Developer Guide\n\nPhase 7 is BLOCKED_AT_FEASIBILITY at 60/78 implemented; 15/18 names are implementation-feasible and 3/18 are API-blocked.\n",
-            "INTEGRATION_GUIDE.md": "# Integration Guide\n",
-            "LLM_INSTRUCTIONS.md": "# LLM Instructions\n\nStart with --project or DIDI_PROJECT_ROOT. Preview with dry_run and use confirmation_token when returned. Phase 7 is BLOCKED_AT_FEASIBILITY at 60/78 implemented; all 18 names remain unimplemented, including the 15/18 implementation-feasible names and the 3/18 API-blocked names.\n",
-            "QUICKSTART.md": "# Quickstart\n\nStart with --project. Preview mutations with dry_run and use confirmation_token when required.\n",
+            "ARCHITECTURE.md": "# Architecture\n\nThe live bridge targets Godot 4.7+.\n",
+            "DEVELOPER_GUIDE.md": "# Developer Guide\n\nUse Godot 4.7+. Phase 7 is BLOCKED_AT_FEASIBILITY at 60/78 implemented; 15/18 names are implementation-feasible and 3/18 are API-blocked.\n",
+            "INTEGRATION_GUIDE.md": "# Integration Guide\n\nInstall Godot 4.7 or newer.\n",
+            "LLM_INSTRUCTIONS.md": "# LLM Instructions\n\nUse Godot 4.7+. Start with --project or DIDI_PROJECT_ROOT. Preview with dry_run and use confirmation_token when returned. Phase 7 is BLOCKED_AT_FEASIBILITY at 60/78 implemented; all 18 names remain unimplemented, including the 15/18 implementation-feasible names and the 3/18 API-blocked names.\n",
+            "QUICKSTART.md": "# Quickstart\n\nGodot 4.7+ is required. Start with --project. Preview mutations with dry_run and use confirmation_token when required.\n",
             "RESOURCES_AND_PROMPTS.md": "# Resources And Prompts\n",
             "ROADMAP.md": "# Roadmap\n\n## Phase 6: Enterprise Safety (COMPLETE)\n\n| **13. Phase 5 Deep Domains (6)** | Implemented |\n",
         }
@@ -123,6 +136,8 @@ Current release: 1.4.0.
         self.write(
             "docs/CAPABILITIES.md",
             """# Current Capability Matrix
+
+Live tools require Godot 4.7+.
 
 Didi v1.4.0 registers 78 canonical tool names. Sixty are implemented in at least one mode; 18 remain reserved. Ten legacy names are registered separately, for exactly 88 tools/list entries.
 
@@ -134,6 +149,8 @@ Startup requires --project or DIDI_PROJECT_ROOT. A second session owner receives
         self.write(
             "docs/TOOL_REFERENCE.md",
             """# Tool Reference
+
+Live tools require Godot 4.7+.
 
 Didi exposes 78 canonical tool names plus 10 legacy names (88 registrations).
 
@@ -155,6 +172,8 @@ Session lock conflicts return 423. Mutations expose dry_run and protected writes
         self.write(
             "docs/PHASE_7_IMPLEMENTATION_PLAN.md",
             """# Phase 7 Canonical Completion Implementation Plan
+
+**Historical plan:** This superseded plan preserves its original engine matrix.
 
 **Status:** `BLOCKED_AT_FEASIBILITY`
 
@@ -350,6 +369,8 @@ Second section.
         )
         lines = [
             "# Phase 7 Godot API Feasibility Gate",
+            "",
+            "**Historical evidence:** This completed gate is not a current support matrix.",
             "",
             "**Status:** `BLOCKED_AT_FEASIBILITY`",
             "",
@@ -1168,6 +1189,96 @@ Historical vocabulary example: Phase 7 is planned.
         errors = VALIDATOR.validate_repository(root)
 
         self.assertTrue(any("missing target" in error for error in errors), errors)
+
+    def test_requires_every_shipped_gdextension_to_declare_godot_47(self):
+        root = self.make_valid_repository()
+        self.write(
+            "demo/addons/didi/didi.gdextension",
+            '[configuration]\ncompatibility_minimum = "4.6"\n',
+        )
+
+        errors = validate_repository(root)
+
+        self.assertTrue(
+            any(
+                "demo/addons/didi/didi.gdextension" in error
+                and "compatibility_minimum must be 4.7" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_requires_current_documentation_to_state_godot_47_or_newer(self):
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        self.write("README.md", readme.replace("Godot 4.7+", "Godot 4.6+", 1))
+
+        errors = validate_repository(root)
+
+        self.assertTrue(
+            any(
+                "README.md" in error and "current Godot minimum must be 4.7+" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_rejects_old_godot_claims_in_current_support_context(self):
+        root = self.make_valid_repository()
+        admin = (root / "docs/ADMIN_GUIDE.md").read_text(encoding="utf-8")
+        self.write(
+            "docs/ADMIN_GUIDE.md",
+            admin + "\nCurrent discovery supports Godot 4.5.1 and 4.6.2.\n",
+        )
+
+        errors = validate_repository(root)
+
+        self.assertTrue(
+            any(
+                "docs/ADMIN_GUIDE.md" in error
+                and "stale current Godot 4.5/4.6 reference" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_old_godot_evidence_requires_explicit_historical_context(self):
+        root = self.make_valid_repository()
+        evidence_path = root / "docs/PHASE_7_API_FEASIBILITY.md"
+        evidence = evidence_path.read_text(encoding="utf-8")
+        self.write(
+            "docs/PHASE_7_API_FEASIBILITY.md",
+            evidence.replace("**Historical evidence:**", "**Evidence:**", 1),
+        )
+
+        errors = validate_repository(root)
+
+        self.assertTrue(
+            any(
+                "docs/PHASE_7_API_FEASIBILITY.md" in error
+                and "must be explicitly labelled historical" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_rejects_old_godot_engine_from_current_ci_workflow(self):
+        root = self.make_valid_repository()
+        self.write(
+            ".github/workflows/ci.yml",
+            "jobs:\n  verify:\n    steps:\n      - run: Godot_v4.6.2-stable_win64_console.exe --version\n",
+        )
+
+        errors = validate_repository(root)
+
+        self.assertTrue(
+            any(
+                ".github/workflows/ci.yml" in error
+                and "current verification must use Godot 4.7.2 only" in error
+                for error in errors
+            ),
+            errors,
+        )
 
     def test_gdextension_declares_explicit_macos_architectures(self):
         required_keys = {

@@ -51,7 +51,7 @@ void PromptRegistry::registerAllDefaultPrompts() {
         std::string symptom = args.value("symptom_description", "Inspect for visual or transform anomalies");
 
         std::string prompt_text =
-            "You are diagnosing a visual or spatial anomaly in Godot 4.5+ for resource: " + res_path + "\n"
+            "You are diagnosing a visual or spatial anomaly in Godot 4.7+ for resource: " + res_path + "\n"
             "Reported Issue: " + symptom + "\n\n"
             "Capability-aware workflow:\n"
             "1. Inspect `tools/list` and do not call entries with `implemented: false`; require live mode for editor state.\n"
@@ -61,7 +61,7 @@ void PromptRegistry::registerAllDefaultPrompts() {
             "5. Apply only supported focused `scene_*` scalar/node changes or `script_patch_method`, re-read the affected state, and report any unsupported camera, debug-draw, shader, or composite-property step.";
 
         json result = {
-            {"description", "Capability-aware visual anomaly workflow for Godot 4.5+"},
+            {"description", "Capability-aware visual anomaly workflow for Godot 4.7+"},
             {"messages", json::array({
                 {
                     {"role", "user"},
@@ -86,7 +86,7 @@ void PromptRegistry::registerAllDefaultPrompts() {
         std::string reqs = args.value("requirements", "Implement core mechanics");
 
         std::string prompt_text =
-            "You are implementing the supported portion of a Godot 4.5+ gameplay slice: " + feature + "\n"
+            "You are implementing the supported portion of a Godot 4.7+ gameplay slice: " + feature + "\n"
             "Requirements:\n" + reqs + "\n\n"
             "Capability-aware workflow:\n"
             "1. Inspect `tools/list`; do not call entries with `implemented: false`, and require live mode for editor mutations.\n"
@@ -97,7 +97,7 @@ void PromptRegistry::registerAllDefaultPrompts() {
             "6. Explicitly report unimplemented script attachment, signal wiring, input injection, or runtime introspection instead of claiming those steps succeeded.";
 
         json result = {
-            {"description", "Capability-aware gameplay slice workflow for Godot 4.5+"},
+            {"description", "Capability-aware gameplay slice workflow for Godot 4.7+"},
             {"messages", json::array({
                 {
                     {"role", "user"},
