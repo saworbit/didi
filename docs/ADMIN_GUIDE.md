@@ -12,7 +12,7 @@ This guide covers deployment, security controls, system configuration, monitorin
 | **CPU Architecture** | x86_64 / ARM64 (Apple Silicon) | Multi-core x86_64 / Apple Silicon M-series |
 | **RAM** | 4 GB | 16 GB+ (for large Godot 3D scenes) |
 | **Engine Target** | Godot 4.5+ (Standard / .NET) | Godot 4.5+ or 4.7+ |
-| **Dependencies** | None (Static/Self-Contained C++ Binary) | None |
+| **Dependencies** | None for the core MCP server | Godot 4.5+ for Godot-backed checks/exports; `dotnet` for C# build diagnostics |
 
 ---
 
@@ -40,6 +40,10 @@ Phase 4 live capture IDs and raw RGBA buffers exist only inside the selected ext
 - **Viewport Bounds**: Live captures reject non-positive dimensions and dimensions above `2048` before pixel extraction or PNG encoding; offline preview dimensions are clamped to `16`–`1024`.
 - **Session descriptors**: Exact schema/field/endpoint validation, 64 KiB file cap, opened-handle regular-file checks, PID plus process-start identity, and a 3-second handshake prevent stale/PID-reuse and path-substitution attachment.
 - **Expression bounds**: 2,048-byte source, 1,024-byte context, depth 16, 4,096 container elements, 256 KiB response, and a strict receiver-aware read-only grammar. Timeouts are cooperative rather than native-thread preemption.
+
+### 4. Phase 6 Mutation Capabilities
+
+Every implemented mutation exposes `dry_run`. A dry-run stops before tool handlers, subprocesses, filesystem writers, or Godot main-thread commands and returns a structured preview. Editor reload, script patching, and overwrite-enabled offline writers additionally require the preview's 64-hex `confirmation_token`. Tokens expire after 120 seconds, are single-use, and are bound to the exact tool, arguments, canonical project, execution mode, session, and route generation. Treat them as short-lived secrets: never persist them in CI artifacts or logs, and never retry an `unknown_outcome` mutation automatically.
 
 ---
 
@@ -76,15 +80,15 @@ jobs:
   test:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup CMake
-        uses: jwlawson/actions-setup-cmake@v2
+      - uses: actions/checkout@v7
       - name: Build Didi
         run: |
-          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -S .
           cmake --build build --config Release
       - name: Run Test Suite
         run: .\build\Release\didi_tests.exe
+      - name: Validate Documentation
+        run: python tools/validate_documentation.py
 ```
 
 ---

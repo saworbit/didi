@@ -2,6 +2,10 @@
 
 Use these instructions when an MCP client is connected to Didi for a Godot 4.5+ project.
 
+## Establish the project boundary
+
+Didi starts only with `--project <root>` or `DIDI_PROJECT_ROOT`, and that directory must contain `project.godot`. Treat the selected canonical project as the filesystem and session-isolation boundary. Do not attempt to recover a missing project by searching parent directories, `demo/`, or unrelated workspaces.
+
 ## Treat discovery as authoritative
 
 Before planning work, call `tools/list` and inspect `_meta.didi` on every candidate tool.
@@ -37,6 +41,10 @@ When live, use focused tools:
 - `editor_undo` and `editor_redo` to verify reversibility.
 - `editor_save_scene` only when persistence is intended.
 - `editor_reload_project` to request a resource-filesystem source rescan.
+
+Before executing any implemented mutation, call the exact tool and arguments with `dry_run: true`, inspect `mutation_preview`, and verify the intended project and route. Dry-runs do not enter handlers. If the preview includes `confirmation_token`, repeat the exact original arguments without `dry_run` and add that token only after the destructive intent is authorized. Never combine `dry_run: true` and `confirmation_token`, alter arguments between preview and execution, persist a token, or retry it: tokens are 64 lowercase hex characters, expire after 120 seconds, and are consumed on the first validation attempt.
+
+Confirmation is mandatory for `editor_reload_project`, `script_patch_method`/`patch_script_symbols`, and overwrite-enabled `resource_create`, visual-test-lab creation, `project_export`, and `gridmap_export_mesh_library`. Other implemented mutations still support dry-run even when execution does not require a token.
 
 Use logical paths shaped like `/root/<edited-scene-root>/Child`. `/root` by itself resolves to the active edited-scene root.
 

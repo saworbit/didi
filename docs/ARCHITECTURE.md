@@ -30,7 +30,7 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
 │        Didi (C++ MCP Core Engine - didi / didi.exe)         │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2024-11-05 standard)       │
 │  - Registry (78 canonical tools + 10 legacy names)          │
-│  - Dynamic Resources (godot://project/tree, editor/state)   │
+│  - Dynamic Resources (project tree, editor state, logs)     │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
 │  - Offline file/process tools and capability metadata       │
 └──────────────────────────────┬──────────────────────────────┘
@@ -174,8 +174,14 @@ Descriptors bind identity to PID plus process start time, preventing PID reuse f
 
 The standalone `RuntimeSessionClient` starts detached. On first availability it considers only live canonical-project matches: a sole session is selected, a unique editor is preferred over games, and editor or game same-kind ambiguity remains detached. Explicit attach performs a 3-second authenticated handshake before atomically replacing a previous route; explicit attach/detach or route quarantine disables later auto-selection. `runtime_get_session` performs a fresh bounded authoritative handshake and quarantines a route on transport, authentication, or identity failure. A concurrently superseding explicit route wins the race and is retained while the stale refresh returns `409`. These operations report `local_session_management`; public metadata never contains the token.
 
+Phase 6 makes the standalone project boundary mandatory: startup resolves `--project` or `DIDI_PROJECT_ROOT` to a canonical directory containing `project.godot` before MCP initialization. Endpoint names add a stable 16-hex project key; Windows retains the complete 32-hex session ID while POSIX uses a 12-hex prefix to stay within socket-path limits. Before attaching, the client acquires an OS-backed `<session-id>.lock`; a second owner receives `423`, while process exit or crash releases the kernel lock.
+
 The runtime bridge resolves `Engine.get_main_loop()` as `SceneTree`, supports both editor and game tree inspection, and labels every response with `session_kind`. Tree traversal caps nodes at 10,000; UTF-8 names, types, and paths at 1,024, 256, and 4,096 bytes; and the complete payload at 256 KiB. Field and child truncation are explicit. Pause, frame step, and stop are game controls. A step holds one pending main-thread command across exactly 1–60 callbacks and resolves only after re-pause verification or shutdown cancellation.
 
 The 2,000-record sequence ring is structured Didi telemetry. Cursor reads advance across filtered records and disclose retention gaps. It is not a hook for arbitrary Godot/external `print()` output; offline `runtime_launch` remains the bounded child stdout/stderr capture path.
 
 `eval_gdscript` scans a deliberately small expression grammar before Godot parses with `const_calls_only=true`. Exact native scalar `node.get(<literal>)` reads are ClassDB-resolved and prebound so project script getters cannot execute. Object traversal, dynamic/indexed property access, callbacks, reflection, mutation, and unbounded live operations are rejected. Conversion enforces depth 16, 4,096 container elements, finite numbers, in-subtree Nodes, and a 256 KiB full-response bound. The timeout is cooperative rather than thread-preemptive, so the accepted call surface remains conservative.
+
+## 8. Phase 6 mutation boundary
+
+The MCP registry decorates every implemented mutation with `dry_run` and evaluates safety before selecting a handler. Preview requests return a conservative plan without entering Godot, spawning a process, or touching the filesystem. Confirmed operations bind a cryptographically random 64-hex token to exact tool arguments, canonical project, execution mode, session ID, and route generation. Tokens expire after 120 seconds and are consumed on first validation, including failed mismatch attempts, so replay and cross-route reuse fail closed.

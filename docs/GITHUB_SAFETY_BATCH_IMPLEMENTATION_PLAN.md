@@ -1,5 +1,7 @@
 # GitHub Safety Batch Implementation Plan
 
+> **Status:** Completed historical implementation plan. Branch, issue, command, and test-count details below record delivery at that time and are not current operating instructions.
+
 > **For Codex:** Execute this plan inline with test-driven development and review checkpoints. Preserve one independently reviewable commit per issue.
 
 **Goal:** Resolve the first prioritized GitHub safety batch by closing false-positive issue #10 with evidence and fixing reproducible issues #12 and #14 without broadening behavior.
