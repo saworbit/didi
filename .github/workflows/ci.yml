@@ -271,6 +271,19 @@ jobs:
               assert by_name[name]['_meta']['didi']['implemented'] is False, name
           for name in manifest['names']['implemented']:
               assert by_name[name]['_meta']['didi']['implemented'] is True, name
+
+          # Annotations decide what a client may auto-approve, so the safety
+          # invariant is asserted on the wire: no tool that advertises dry_run
+          # may ever claim to be read-only.
+          for name, tool in by_name.items():
+              annotations = tool['annotations']
+              for hint in ('readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint'):
+                  assert isinstance(annotations[hint], bool), (name, hint)
+              assert annotations['openWorldHint'] is False, name
+              if 'dry_run' in tool['inputSchema'].get('properties', {}):
+                  assert annotations['readOnlyHint'] is False, name
+                  assert annotations['destructiveHint'] is True, name
+          assert any(t['annotations']['readOnlyHint'] for t in by_name.values())
           assert by_name['scene_get_hierarchy']['_meta']['didi']['implemented'] is True
           assert by_name['script_attach_to_node']['_meta']['didi']['implemented'] is True
           assert by_name['script_attach_to_node']['_meta']['didi']['executionModes'] == ['live']

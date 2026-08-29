@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <string>
 #include <vector>
 #include <functional>
@@ -58,6 +59,10 @@ struct ContentItem {
 struct CallToolResult {
     std::vector<ContentItem> content;
     bool isError{false};
+    // Server-produced result data. Emitted alongside the text block, never
+    // instead of it, so clients that do not read structuredContent are
+    // unaffected.
+    std::optional<json> structuredContent;
 
     json toJson() const {
         json j;
@@ -67,6 +72,9 @@ struct CallToolResult {
         }
         j["content"] = arr;
         j["isError"] = isError;
+        if (structuredContent.has_value() && !isError) {
+            j["structuredContent"] = structuredContent.value();
+        }
         return j;
     }
 
@@ -78,7 +86,9 @@ struct CallToolResult {
     }
 
     static CallToolResult successJson(const json& data) {
-        return success(data.dump(2));
+        auto result = success(data.dump(2));
+        result.structuredContent = data;
+        return result;
     }
 
     static CallToolResult successImage(std::string base64_png, std::string text_desc = "") {
@@ -143,6 +153,31 @@ inline bool isLegacyToolName(const std::string& name) {
     return false;
 }
 
+// Specification tool annotations. Clients use these to decide what may be
+// auto-approved, so they are derived in registerTool from the same
+// MutationSafety classification that drives dry-run and confirmation. They
+// cannot be set by hand and cannot drift from that contract.
+//
+// The defaults are the conservative direction: not read-only, and destructive.
+// Under-claiming safety costs a client prompt; over-claiming it would let a
+// mutation be auto-approved.
+struct ToolAnnotations {
+    bool read_only{false};
+    bool destructive{true};
+    bool idempotent{false};
+    // Didi's world is one local Godot project. No tool reaches the network.
+    bool open_world{false};
+
+    json toJson() const {
+        return {
+            {"readOnlyHint", read_only},
+            {"destructiveHint", destructive},
+            {"idempotentHint", idempotent},
+            {"openWorldHint", open_world}
+        };
+    }
+};
+
 struct ToolDefinition {
     std::string name;
     std::string description;
@@ -151,12 +186,15 @@ struct ToolDefinition {
     ExecutionCapability capability;
     // Set by ToolRegistry::registerTool from kLegacyToolNames. Never set by hand.
     bool legacy{false};
+    // Set by ToolRegistry::registerTool from MutationSafety. Never set by hand.
+    ToolAnnotations annotations;
 
     json toJson() const {
         return {
             {"name", name},
             {"description", description},
             {"inputSchema", inputSchema},
+            {"annotations", annotations.toJson()},
             {"_meta", {{"didi", capability.toJson()}}}
         };
     }

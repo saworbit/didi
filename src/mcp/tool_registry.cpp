@@ -312,6 +312,14 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
     std::string name = tool.name;
     tool.capability = capabilityForTool(name);
     tool.legacy = isLegacyToolName(name);
+    // Derived, never hand-set: a tool that can change the project is never
+    // advertised as read-only, and every mutation is treated as potentially
+    // destructive rather than asserting it is merely additive.
+    const bool is_mutation = MutationSafety::isMutation(name);
+    tool.annotations.read_only = !is_mutation;
+    tool.annotations.destructive = is_mutation;
+    tool.annotations.idempotent = !is_mutation;
+    tool.annotations.open_world = false;
     MutationSafety::decorateSchema(name, tool.inputSchema);
     if (!tool.capability.implemented) {
         tool.description = "UNIMPLEMENTED: Reserved schema; calls are rejected. Intended contract: " +
@@ -469,6 +477,7 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
         const std::string execution_mode = live ? "live" : (supports_offline ? "offline_fallback" : "");
 
         if (!execution_mode.empty()) {
+            bool structured_captured = false;
             for (auto& item : result.content) {
                 if (item.type != "text") continue;
                 try {
@@ -480,6 +489,14 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
                         payload["session"] = lease->descriptor->toJson();
                     }
                     item.text = payload.dump(2);
+                    // Attribution is added to the text here, so structuredContent
+                    // has to be re-taken from the attributed payload. Otherwise the
+                    // two halves of the same result disagree, and the structured
+                    // half is the one missing execution_mode.
+                    if (!structured_captured) {
+                        result.structuredContent = std::move(payload);
+                        structured_captured = true;
+                    }
                 } catch (const json::exception&) {
                     // Human-readable text is allowed for errors and descriptions; only JSON payloads are attributed here.
                 }
