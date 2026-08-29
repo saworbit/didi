@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(didi VERSION 1.4.0 LANGUAGES C CXX)
 
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -12,6 +14,30 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include/didi/mcp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/didi/offline
     ${CMAKE_CURRENT_SOURCE_DIR}/include/didi/gdextension
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
+)
+
+set(PHASE7_SCHEMA_NAMES
+    anim_list_tracks anim_play_track gridmap_set_cells nav_bake_mesh nav_query_path
+    physics_raycast_query physics_simulate_step runtime_get_call_stack runtime_inject_input
+    runtime_read_profiler signal_connect signal_disconnect signal_emit signal_list_connections
+    tilemap_get_used_rect tilemap_set_cells viewport_set_camera_transform
+    viewport_toggle_debug_draw
+)
+set(PHASE7_SCHEMA_FILES)
+foreach(name IN LISTS PHASE7_SCHEMA_NAMES)
+    list(APPEND PHASE7_SCHEMA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/schemas/phase7/${name}.schema.json")
+endforeach()
+set(PHASE7_GENERATED_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/didi/mcp/phase7_schemas.hpp")
+set(PHASE7_GENERATED_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/generated/didi/mcp/phase7_schemas.cpp")
+add_custom_command(
+    OUTPUT "${PHASE7_GENERATED_HEADER}" "${PHASE7_GENERATED_SOURCE}"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_phase7_schemas.py"
+            --schema-dir "${CMAKE_CURRENT_SOURCE_DIR}/schemas/phase7"
+            --header "${PHASE7_GENERATED_HEADER}"
+            --source "${PHASE7_GENERATED_SOURCE}"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_phase7_schemas.py" ${PHASE7_SCHEMA_FILES}
+    VERBATIM
 )
 
 if(MSVC)
@@ -38,6 +64,8 @@ set(CORE_SOURCES
     src/runtime/session_client.cpp
     src/runtime/session_lock.cpp
     src/mcp/mutation_safety.cpp
+    src/tools/phase7_live_forward.cpp
+    ${PHASE7_GENERATED_SOURCE}
     src/gdextension/session_host.cpp
     src/gdextension/runtime_log.cpp
     src/gdextension/runtime_request_router.cpp
@@ -116,7 +144,16 @@ set(TEST_SOURCES
     tests/test_test_runner.cpp
     tests/test_phase5.cpp
     tests/test_phase6.cpp
+    tests/test_phase7_contract.cpp
+    tests/test_phase7a_signals.cpp
+    tests/test_phase7a_viewport.cpp
+    tests/test_phase7a_tile_grid.cpp
+    tests/test_phase7b_physics.cpp
+    tests/test_phase7b_navigation.cpp
+    tests/test_phase7b_animation.cpp
+    tests/test_phase7c_input.cpp
+    tests/test_phase7c_diagnostics.cpp
 )
 
-add_executable(didi_tests ${TEST_SOURCES})
+add_executable(didi_tests ${TEST_SOURCES} ${GDEXT_SOURCES})
 target_link_libraries(didi_tests PRIVATE didi_core)

@@ -3,6 +3,7 @@
 #include "didi/common/types.hpp"
 #include "didi/common/json.hpp"
 #include "didi/gdextension/runtime_log.hpp"
+#include "didi/runtime/session_kind_policy.hpp"
 #include <queue>
 #include <mutex>
 #include <future>
@@ -12,6 +13,12 @@
 
 namespace didi {
 namespace godot {
+
+class EditorHook;
+class EditorHookTestAccess;
+
+std::optional<json> validateSessionKindForMethod(
+    std::string_view method, std::optional<runtime::SessionKind> session_kind);
 
 enum class CommandState {
     Pending,
@@ -127,6 +134,7 @@ public:
     RuntimeLogRing& runtimeLogs();
 
 private:
+    friend class EditorHookTestAccess;
     EditorHook();
     ~EditorHook();
 
@@ -159,9 +167,24 @@ private:
     RuntimeStepGate m_runtimeStepGate;
     std::optional<PendingRuntimeStep> m_pendingRuntimeStep;
     std::optional<PendingAssetReimport> m_pendingAssetReimport;
-    std::string m_sessionKind{"editor"};
+    std::optional<runtime::SessionKind> m_sessionKind;
 
     std::shared_ptr<RuntimeLogRing> m_runtimeLogs{std::make_shared<RuntimeLogRing>()};
+};
+
+class EditorHookTestAccess {
+public:
+    static json executeOnMainThread(EditorHook& hook, const std::string& method,
+                                    const json& params);
+    static void setSessionKind(EditorHook& hook,
+                               std::optional<runtime::SessionKind> session_kind);
+    static std::optional<runtime::SessionKind> sessionKind(const EditorHook& hook);
+    static size_t queueDepth(EditorHook& hook);
+    static CommandTicket enqueue(EditorHook& hook, const std::string& method,
+                                 const json& params = json::object());
+    static bool runtimeStepActive(EditorHook& hook);
+    static bool hasPendingRuntimeStep(EditorHook& hook);
+    static bool hasPendingAssetReimport(EditorHook& hook);
 };
 
 } // namespace godot

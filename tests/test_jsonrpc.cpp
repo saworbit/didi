@@ -9,6 +9,7 @@
 #define ASSERT_EQ(a, b) ASSERT_TRUE((a) == (b))
 
 void registerTest(const std::string& name, std::function<void()> fn);
+static void initializeServer(didi::mcp::McpServer& server);
 
 static void test_jsonrpc_parse_valid() {
     std::string valid_req = R"({"jsonrpc": "2.0", "id": 42, "method": "tools/list", "params": {}})";
@@ -86,6 +87,76 @@ static void test_mcp_tool_list_reports_current_availability() {
     ASSERT_EQ(by_name["scene_instantiate_node"]["_meta"]["didi"]["currentMode"], "unavailable");
     ASSERT_EQ(by_name["signal_connect"]["_meta"]["didi"]["currentMode"], "unimplemented");
     ASSERT_EQ(by_name["scene_instantiate_node"]["_meta"]["didi"]["liveAvailable"], false);
+}
+
+static void test_mcp_phase7_parent_gate_and_alias_identity() {
+    // Break caught: public MCP leaks a Phase 7 capability before activation or
+    // canonicalizes the compatibility spelling in schemas and dry-run envelopes.
+    didi::mcp::McpServer server;
+    initializeServer(server);
+
+    didi::mcp::JsonRpcRequest list;
+    list.id = 70;
+    list.method = "tools/list";
+    list.params = didi::json::object();
+    const auto listed = server.handleRequest(list);
+    ASSERT_TRUE(!listed.error.has_value());
+
+    didi::json by_name = didi::json::object();
+    for (const auto& tool : listed.result["tools"]) {
+        by_name[tool["name"].get<std::string>()] = tool;
+    }
+    ASSERT_TRUE(by_name.contains("runtime_inject_input"));
+    ASSERT_TRUE(by_name.contains("inject_input_event"));
+    ASSERT_EQ(by_name["runtime_inject_input"]["inputSchema"],
+              by_name["inject_input_event"]["inputSchema"]);
+    ASSERT_TRUE(by_name["runtime_inject_input"]["inputSchema"].contains(
+        "additionalProperties"));
+    ASSERT_EQ(by_name["runtime_inject_input"]["inputSchema"]["additionalProperties"],
+              false);
+
+    const std::array<const char*, 18> phase7 = {
+        "signal_list_connections", "signal_connect", "signal_disconnect", "signal_emit",
+        "viewport_set_camera_transform", "viewport_toggle_debug_draw",
+        "tilemap_set_cells", "tilemap_get_used_rect", "gridmap_set_cells",
+        "physics_raycast_query", "physics_simulate_step", "nav_bake_mesh",
+        "nav_query_path", "anim_list_tracks", "anim_play_track",
+        "runtime_inject_input", "runtime_get_call_stack", "runtime_read_profiler"
+    };
+    for (const auto* name : phase7) {
+        ASSERT_EQ(by_name[name]["_meta"]["didi"]["implemented"], false);
+        didi::mcp::JsonRpcRequest call;
+        call.id = 71;
+        call.method = "tools/call";
+        call.params = {{"name", name}, {"arguments", didi::json::object()}};
+        const auto response = server.handleRequest(call);
+        ASSERT_TRUE(!response.error.has_value());
+        ASSERT_EQ(response.result["isError"], true);
+        ASSERT_TRUE(response.result["content"][0]["text"].get<std::string>().find(name) !=
+                    std::string::npos);
+    }
+
+    const auto dry_run = [&server](const char* name, int id) {
+        didi::mcp::JsonRpcRequest call;
+        call.id = id;
+        call.method = "tools/call";
+        call.params = {
+            {"name", name},
+            {"arguments", {{"file_path", "res://player.gd"},
+                           {"method_name", "tick"},
+                           {"new_definition", "func tick():\n\tpass"},
+                           {"dry_run", true}}}
+        };
+        const auto response = server.handleRequest(call);
+        ASSERT_TRUE(!response.error.has_value());
+        ASSERT_EQ(response.result["isError"], false);
+        return didi::json::parse(
+            response.result["content"][0]["text"].get<std::string>());
+    };
+    ASSERT_EQ(dry_run("script_patch_method", 72)["mutation_preview"]["tool"],
+              "script_patch_method");
+    ASSERT_EQ(dry_run("patch_script_symbols", 73)["mutation_preview"]["tool"],
+              "patch_script_symbols");
 }
 
 static void initializeServer(didi::mcp::McpServer& server) {
@@ -305,6 +376,8 @@ struct RegisterJsonRpcTests {
         registerTest("JsonRpc.NullResultSerialization", test_jsonrpc_null_result_serialization);
         registerTest("McpServer.Initialize", test_mcp_initialize);
         registerTest("McpServer.ToolAvailability", test_mcp_tool_list_reports_current_availability);
+        registerTest("McpServer.Phase7ParentGateAndAliasIdentity",
+                     test_mcp_phase7_parent_gate_and_alias_identity);
         registerTest("McpServer.RejectsWrongParameterTypes", test_mcp_rejects_wrong_parameter_types);
         registerTest("McpServer.RejectsNonObjectArguments", test_mcp_rejects_non_object_arguments);
         registerTest("McpServer.RequestNotificationDoesNotExecuteTool",
