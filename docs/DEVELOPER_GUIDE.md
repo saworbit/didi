@@ -153,6 +153,21 @@ cmake --build build --config Release
 .\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe
 ```
 
+The native runner accepts `--list` to print every registered case and
+`--filter=<substring>` to run a subset:
+
+```powershell
+.\build\Release\didi_tests.exe --list
+.\build\Release\didi_tests.exe --filter=Tools.CaptureViewportWithIpc
+```
+
+Run a test in isolation whenever it fails intermittently. The suite executes in a
+single process and shares the tool registry, the resource registry, and the
+working directory, so a case that does not register what it calls will pass only
+because an earlier case registered it, and will fail at a different assertion as
+the ordering changes. A test that passes in the full suite but fails alone is
+depending on a predecessor, not on the code under test.
+
 For expression-policy changes, add a failing native scanner test and a real editor/game integration probe before changing implementation. A new accepted Node operation must prove it cannot dispatch script callbacks, traverse outside the active subtree, allocate unbounded data before a check, leak source/token text, or turn the cooperative timeout into a hard-preemption claim.
 
 The CI MCP smoke must start Didi with an explicit fixture project and continue to assert exactly 78 canonical/88 total registrations, offline-only search/deep-domain metadata, live-only reimport/diff/UI-hit-test metadata, strict Phase 4/5/6 schemas, local metadata for the four session tools, live metadata for the six routed runtime tools, cursor-shaped logs, and `implemented: false` for `runtime_inject_input`, `runtime_get_call_stack`, and `runtime_read_profiler`.

@@ -40,14 +40,37 @@ void registerTest(const std::string& name, std::function<void()> fn) {
 int main(int argc, char* argv[]) {
     didi::Logger::instance().setLevel(didi::LogLevel::Warn);
 
+    // Optional substring filter, so a single test can be run in isolation.
+    // Tests share process-global state (the tool and resource registries, the
+    // session directory, the capture cache); running one alone is how you tell
+    // a genuine failure from a leak left by an earlier test.
+    std::string filter;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg.rfind("--filter=", 0) == 0) {
+            filter = arg.substr(9);
+        } else if (arg == "--list") {
+            for (const auto& test : getTestRegistry()) {
+                std::cout << test.name << std::endl;
+            }
+            return 0;
+        }
+    }
+
     std::cout << "========================================" << std::endl;
     std::cout << " Running Didi Native MCP Test Suite" << std::endl;
+    if (!filter.empty()) {
+        std::cout << " Filter: " << filter << std::endl;
+    }
     std::cout << "========================================" << std::endl;
 
     int passed = 0;
     int failed = 0;
 
     for (const auto& test : getTestRegistry()) {
+        if (!filter.empty() && test.name.find(filter) == std::string::npos) {
+            continue;
+        }
         std::cout << "[ RUN      ] " << test.name << std::endl;
         try {
             test.test_fn();

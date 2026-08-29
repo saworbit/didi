@@ -8,6 +8,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <unordered_set>
 
@@ -699,7 +700,14 @@ static void test_tool_capture_viewport_with_ipc() {
     std::shared_ptr<didi::ipc::IIpcClient> client = didi::ipc::createIpcClient();
     ASSERT_TRUE(client->connect(test_pipe, 2000));
 
+    // Establish this test's own state. The suite shares one process, one tool
+    // registry, one resource registry and one working directory, so a test that
+    // relies on a predecessor having registered tools or set a usable project
+    // root fails at whichever assertion first touches the state it did not set
+    // up -- and which assertion that is depends on test ordering.
+    ScopedToolProject project("capture-viewport-live");
     auto& reg = didi::mcp::ToolRegistry::instance();
+    reg.registerAllDefaultTools();
     reg.setIpcClient(client);
 
     auto result = reg.callTool("capture_viewport", {{"camera_identifier", "active_editor_view"}});
@@ -752,14 +760,23 @@ static void test_tool_capture_viewport_with_ipc() {
     ASSERT_EQ(reflected_json["execution_mode"], "offline_fallback");
 
     auto& resources = didi::mcp::ResourceRegistry::instance();
+    resources.registerAllDefaultResources();
     resources.setIpcClient(client);
     auto project_tree = resources.readResource("godot://project/tree");
+    if (!project_tree.isOk()) {
+        std::cerr << "project/tree error: " << project_tree.error().code << " "
+                  << project_tree.error().message << std::endl;
+    }
     ASSERT_TRUE(project_tree.isOk());
     auto project_tree_json = didi::json::parse(project_tree.value());
     ASSERT_EQ(project_tree_json["execution_mode"], "offline_fallback");
     ASSERT_TRUE(project_tree_json.contains("total_resources"));
 
     auto runtime_logs = resources.readResource("godot://runtime/logs");
+    if (!runtime_logs.isOk()) {
+        std::cerr << "runtime/logs error: " << runtime_logs.error().code << " "
+                  << runtime_logs.error().message << std::endl;
+    }
     ASSERT_TRUE(runtime_logs.isOk());
     ASSERT_EQ(didi::json::parse(runtime_logs.value())["execution_mode"], "live");
 
@@ -804,6 +821,7 @@ static void test_tool_capture_viewport_with_ipc() {
 
 static void test_tool_capture_viewport_offline_is_attributed() {
     auto& reg = didi::mcp::ToolRegistry::instance();
+    reg.registerAllDefaultTools();
     reg.setIpcClient(nullptr);
     auto result = reg.callTool("viewport_capture_frame", {
         {"camera_identifier", "active_editor_view"},
@@ -915,6 +933,7 @@ static void test_runtime_step_gate_rejects_a_second_pending_step() {
 
 static void test_class_reflection() {
     auto& reg = didi::mcp::ToolRegistry::instance();
+    reg.registerAllDefaultTools();
     auto res = reg.callTool("script_reflect_class", {{"class_name", "CharacterBody3D"}});
     ASSERT_TRUE(!res.isError);
     ASSERT_TRUE(!res.content.empty());
@@ -927,6 +946,7 @@ static void test_class_reflection() {
 
 static void test_symbol_extraction() {
     auto& reg = didi::mcp::ToolRegistry::instance();
+    reg.registerAllDefaultTools();
     std::string script =
         "extends CharacterBody3D\n\n"
         "@export_range(0, 20)\n"
