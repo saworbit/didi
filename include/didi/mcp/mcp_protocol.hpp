@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <string>
 #include <vector>
 #include <functional>
@@ -117,12 +118,39 @@ struct ExecutionCapability {
     }
 };
 
+// The v1.0 tool names retained only for protocol compatibility. This array is
+// the single source of truth for which registrations are legacy: the registry
+// marks tools from it, tests assert the registry agrees with it, and the
+// generated tool manifest derives the legacy count from it. Prefer the
+// canonical names in new integrations.
+inline constexpr std::array<const char*, 10> kLegacyToolNames{
+    "analyze_script_diagnostics",
+    "capture_viewport",
+    "create_visual_test_lab",
+    "execute_test_session",
+    "get_scene_hierarchy",
+    "inject_input_event",
+    "instantiate_asset",
+    "mutate_scene_tree",
+    "patch_script_symbols",
+    "query_project_resources"
+};
+
+inline bool isLegacyToolName(const std::string& name) {
+    for (const char* legacy : kLegacyToolNames) {
+        if (name == legacy) return true;
+    }
+    return false;
+}
+
 struct ToolDefinition {
     std::string name;
     std::string description;
     json inputSchema;
     ToolHandler handler;
     ExecutionCapability capability;
+    // Set by ToolRegistry::registerTool from kLegacyToolNames. Never set by hand.
+    bool legacy{false};
 
     json toJson() const {
         return {

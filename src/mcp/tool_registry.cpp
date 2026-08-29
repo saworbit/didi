@@ -311,6 +311,7 @@ ToolRegistry& ToolRegistry::instance() {
 void ToolRegistry::registerTool(ToolDefinition tool) {
     std::string name = tool.name;
     tool.capability = capabilityForTool(name);
+    tool.legacy = isLegacyToolName(name);
     MutationSafety::decorateSchema(name, tool.inputSchema);
     if (!tool.capability.implemented) {
         tool.description = "UNIMPLEMENTED: Reserved schema; calls are rejected. Intended contract: " +
@@ -335,6 +336,48 @@ std::vector<ToolDefinition> ToolRegistry::listTools() const {
         list.push_back(kv.second);
     }
     return list;
+}
+
+json ToolManifest::toJson() const {
+    return {
+        {"schema", 1},
+        {"counts", {
+            {"canonical", canonical.size()},
+            {"legacy", legacy.size()},
+            {"implemented", implemented.size()},
+            {"unimplemented", unimplemented.size()},
+            {"total", canonical.size() + legacy.size()}
+        }},
+        {"names", {
+            {"canonical", canonical},
+            {"legacy", legacy},
+            {"implemented", implemented},
+            {"unimplemented", unimplemented}
+        }}
+    };
+}
+
+ToolManifest ToolRegistry::buildManifest() const {
+    ToolManifest manifest;
+    for (const auto& kv : m_tools) {
+        const ToolDefinition& tool = kv.second;
+        if (tool.legacy) {
+            manifest.legacy.push_back(tool.name);
+            continue;
+        }
+        manifest.canonical.push_back(tool.name);
+        if (tool.capability.implemented) {
+            manifest.implemented.push_back(tool.name);
+        } else {
+            manifest.unimplemented.push_back(tool.name);
+        }
+    }
+    // Sorted so the emitted artifact is byte-stable and diffable in CI.
+    std::sort(manifest.canonical.begin(), manifest.canonical.end());
+    std::sort(manifest.legacy.begin(), manifest.legacy.end());
+    std::sort(manifest.implemented.begin(), manifest.implemented.end());
+    std::sort(manifest.unimplemented.begin(), manifest.unimplemented.end());
+    return manifest;
 }
 
 CallToolResult ToolRegistry::callTool(const std::string& name, const json& arguments) {

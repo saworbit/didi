@@ -114,6 +114,16 @@ jobs:
             ./build/didi_tests
           fi
 
+      - name: Validate Documentation Against Built Tool Surface
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ./build/Release/didi.exe --dump-tool-manifest > build/tool_manifest.json
+          else
+            ./build/didi --dump-tool-manifest > build/tool_manifest.json
+          fi
+          "$DIDI_PYTHON" tools/validate_documentation.py --tool-manifest build/tool_manifest.json
+
       - name: Validate Internal Markdown Links
         shell: bash
         run: |

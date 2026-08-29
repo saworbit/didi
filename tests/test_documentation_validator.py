@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -376,6 +377,85 @@ Second section.
 
     def test_valid_repository_has_no_errors(self):
         self.assertEqual(VALIDATOR.validate_repository(self.make_valid_repository()), [])
+
+    # --- tool manifest: documentation is validated against the built binary ---
+
+    def write_manifest(self, **overrides) -> Path:
+        """Write a manifest matching the synthetic fixture's documented counts."""
+        counts = {
+            "canonical": 78, "legacy": 10,
+            "implemented": 60, "unimplemented": 18, "total": 88,
+        }
+        counts.update(overrides)
+        path = self.root / "tool_manifest.json"
+        path.write_text(
+            json.dumps({"schema": 1, "counts": counts, "names": {}}), encoding="utf-8"
+        )
+        return path
+
+    def test_manifest_matching_documentation_passes(self):
+        root = self.make_valid_repository()
+        self.assertEqual(VALIDATOR.validate_repository(root, self.write_manifest()), [])
+
+    def test_manifest_disagreeing_with_documentation_fails(self):
+        # The point of the manifest: implementing a reserved tool must fail
+        # validation until the documentation is updated to match.
+        root = self.make_valid_repository()
+        errors = VALIDATOR.validate_repository(
+            root, self.write_manifest(implemented=61, unimplemented=17)
+        )
+        self.assertTrue(
+            any("must state 61 implemented tools" in e for e in errors), errors
+        )
+
+    def test_manifest_drives_the_canonical_count_check(self):
+        # The structured canonical/implemented/remaining check must follow the
+        # manifest rather than the hard-coded fallback tuple.
+        root = self.make_valid_repository()
+        errors = VALIDATOR.validate_repository(
+            root, self.write_manifest(implemented=61, unimplemented=17)
+        )
+        self.assertTrue(
+            any("must be 78 canonical, 61 implemented, and 17 remaining" in e for e in errors),
+            errors,
+        )
+
+    def test_missing_manifest_fails_with_actionable_message(self):
+        root = self.make_valid_repository()
+        errors = VALIDATOR.validate_repository(root, self.root / "absent.json")
+        self.assertTrue(any("--dump-tool-manifest" in e for e in errors), errors)
+
+    def test_internally_inconsistent_manifest_is_rejected(self):
+        root = self.make_valid_repository()
+        errors = VALIDATOR.validate_repository(root, self.write_manifest(total=999))
+        self.assertTrue(
+            any("total does not equal canonical + legacy" in e for e in errors), errors
+        )
+
+    def test_manifest_split_inconsistency_is_rejected(self):
+        root = self.make_valid_repository()
+        errors = VALIDATOR.validate_repository(root, self.write_manifest(implemented=1))
+        self.assertTrue(
+            any("canonical does not equal implemented + unimplemented" in e for e in errors),
+            errors,
+        )
+
+    def test_malformed_manifest_is_rejected(self):
+        root = self.make_valid_repository()
+        path = self.root / "tool_manifest.json"
+        path.write_text("{not json", encoding="utf-8")
+        errors = VALIDATOR.validate_repository(root, path)
+        self.assertTrue(any("cannot read tool manifest" in e for e in errors), errors)
+
+    def test_published_counts_are_not_hardcoded_in_fact_patterns(self):
+        # Guards the regression this mechanism exists to prevent.
+        source = Path(VALIDATOR.__file__).read_text(encoding="utf-8")
+        start = source.index("FACT_PATTERNS = {")
+        block = source[start:source.index(chr(10) + "}", start)]
+        for count in ("78", "88", "60", "18"):
+            self.assertNotIn(
+                count, block, f"published count {count} is hard-coded in FACT_PATTERNS"
+            )
 
     def test_reports_mismatched_version_source(self):
         root = self.make_valid_repository()
