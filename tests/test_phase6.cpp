@@ -99,6 +99,14 @@ didi::json dryRun(didi::json arguments) {
     return arguments;
 }
 
+didi::mcp::MutationDecision evaluateBinding(didi::mcp::MutationSafety& safety,
+                                            std::string_view invoked_name,
+                                            const didi::json& arguments,
+                                            const didi::mcp::MutationContext& context) {
+    const auto binding = didi::mcp::resolveAliasBinding(invoked_name, arguments);
+    return safety.evaluate(binding, arguments, context);
+}
+
 } // namespace
 
 TEST(Phase6, ExplicitProjectRootRequiresGodotProject) {
@@ -190,24 +198,24 @@ TEST(Phase6, MutationPreviewIsNonExecutingAndBindsSingleUseConfirmation) {
         [&] { return token_index++ == 0 ? std::string(64, 'a') : std::string(64, 'b'); });
     const auto context = offlineContext(directory.root);
 
-    auto preview = safety.evaluate("editor_reload_project", {{"dry_run", true}}, context);
+    auto preview = evaluateBinding(safety, "editor_reload_project", {{"dry_run", true}}, context);
     ASSERT_FALSE(preview.execute);
     ASSERT_FALSE(preview.is_error);
     ASSERT_TRUE(preview.payload["mutation_preview"]["requires_confirmation"]);
     const auto token = preview.payload["mutation_preview"]["confirmation_token"].get<std::string>();
     ASSERT_EQ(token, std::string(64, 'a'));
 
-    auto missing = safety.evaluate("editor_reload_project", didi::json::object(), context);
+    auto missing = evaluateBinding(safety, "editor_reload_project", didi::json::object(), context);
     ASSERT_FALSE(missing.execute);
     ASSERT_TRUE(missing.is_error);
     ASSERT_EQ(missing.payload["error"]["code"], 428);
 
-    auto confirmed = safety.evaluate(
+    auto confirmed = evaluateBinding(safety,
         "editor_reload_project", {{"confirmation_token", token}}, context);
     ASSERT_TRUE(confirmed.execute);
     ASSERT_TRUE(confirmed.arguments.empty());
 
-    auto replay = safety.evaluate(
+    auto replay = evaluateBinding(safety,
         "editor_reload_project", {{"confirmation_token", token}}, context);
     ASSERT_FALSE(replay.execute);
     ASSERT_TRUE(replay.is_error);
@@ -224,30 +232,30 @@ TEST(Phase6, MutationConfirmationRejectsTamperingExpiryAndContextChanges) {
     auto context = offlineContext(directory.root);
     const didi::json arguments = {{"file_path", "res://player.gd"}, {"method_name", "tick"}};
 
-    auto preview = safety.evaluate("script_patch_method", dryRun(arguments), context);
+    auto preview = evaluateBinding(safety, "script_patch_method", dryRun(arguments), context);
     const auto token = preview.payload["mutation_preview"]["confirmation_token"].get<std::string>();
     auto changed_arguments = arguments;
     changed_arguments["method_name"] = "other";
     changed_arguments["confirmation_token"] = token;
-    auto tampered = safety.evaluate("script_patch_method", changed_arguments, context);
+    auto tampered = evaluateBinding(safety, "script_patch_method", changed_arguments, context);
     ASSERT_TRUE(tampered.is_error);
     ASSERT_EQ(tampered.payload["error"]["code"], 409);
 
-    auto context_preview = safety.evaluate("script_patch_method", dryRun(arguments), context);
+    auto context_preview = evaluateBinding(safety, "script_patch_method", dryRun(arguments), context);
     const auto context_token = context_preview.payload["mutation_preview"]["confirmation_token"].get<std::string>();
     auto other_context = context;
     other_context.project_root += "-other";
     auto context_changed = arguments;
     context_changed["confirmation_token"] = context_token;
-    auto rejected_context = safety.evaluate("script_patch_method", context_changed, other_context);
+    auto rejected_context = evaluateBinding(safety, "script_patch_method", context_changed, other_context);
     ASSERT_TRUE(rejected_context.is_error);
 
-    auto expiry_preview = safety.evaluate("script_patch_method", dryRun(arguments), context);
+    auto expiry_preview = evaluateBinding(safety, "script_patch_method", dryRun(arguments), context);
     const auto expiry_token = expiry_preview.payload["mutation_preview"]["confirmation_token"].get<std::string>();
     now += didi::mcp::MutationSafety::kConfirmationTtlMs + 1;
     auto expired_arguments = arguments;
     expired_arguments["confirmation_token"] = expiry_token;
-    auto expired = safety.evaluate("script_patch_method", expired_arguments, context);
+    auto expired = evaluateBinding(safety, "script_patch_method", expired_arguments, context);
     ASSERT_TRUE(expired.is_error);
     ASSERT_EQ(expired.payload["error"]["code"], 410);
 }
@@ -278,4 +286,72 @@ TEST(Phase6, RegistryDryRunNeverDispatchesMutationHandler) {
     ASSERT_FALSE(result.isError);
     ASSERT_EQ(client->requests, 0);
     registry.setIpcClient(nullptr);
+}
+
+TEST(Phase6, AliasConfirmationTokensRejectCrossNameUseBothDirections) {
+    ScopedPhase6Directory directory("alias-token-identity");
+    int token_index = 0;
+    didi::mcp::MutationSafety safety(
+        [] { return int64_t{50'000}; },
+        [&] { return std::string(63, 'd') + static_cast<char>('0' + token_index++); });
+    const auto context = offlineContext(directory.root);
+    const didi::json arguments = {
+        {"file_path", "res://player.gd"}, {"method_name", "tick"},
+        {"new_definition", "func tick():\n\tpass"}
+    };
+
+    const auto canonical_preview = evaluateBinding(
+        safety, "script_patch_method", dryRun(arguments), context);
+    ASSERT_FALSE(canonical_preview.is_error);
+    ASSERT_EQ(canonical_preview.payload["mutation_preview"]["tool"],
+              "script_patch_method");
+    const auto canonical_token = canonical_preview.payload["mutation_preview"]
+        ["confirmation_token"].get<std::string>();
+    auto alias_use = arguments;
+    alias_use["confirmation_token"] = canonical_token;
+    const auto alias_rejected = evaluateBinding(
+        safety, "patch_script_symbols", alias_use, context);
+    ASSERT_TRUE(alias_rejected.is_error);
+    ASSERT_EQ(alias_rejected.payload["tool"], "patch_script_symbols");
+    ASSERT_EQ(alias_rejected.payload["error"]["code"], 409);
+
+    const auto alias_preview = evaluateBinding(
+        safety, "patch_script_symbols", dryRun(arguments), context);
+    ASSERT_FALSE(alias_preview.is_error);
+    ASSERT_EQ(alias_preview.payload["mutation_preview"]["tool"],
+              "patch_script_symbols");
+    const auto alias_token = alias_preview.payload["mutation_preview"]
+        ["confirmation_token"].get<std::string>();
+    auto canonical_use = arguments;
+    canonical_use["confirmation_token"] = alias_token;
+    const auto canonical_rejected = evaluateBinding(
+        safety, "script_patch_method", canonical_use, context);
+    ASSERT_TRUE(canonical_rejected.is_error);
+    ASSERT_EQ(canonical_rejected.payload["tool"], "script_patch_method");
+    ASSERT_EQ(canonical_rejected.payload["error"]["code"], 409);
+}
+
+TEST(Phase6, RuntimeInputAliasDryRunKeepsInvokedIdentity) {
+    ScopedPhase6Directory directory("input-alias-identity");
+    didi::mcp::MutationSafety safety;
+    auto context = offlineContext(directory.root);
+    context.execution_mode = "live";
+    context.session_id = "0123456789abcdef0123456789abcdef";
+    context.route_generation = 7;
+    const didi::json arguments = {
+        {"events", didi::json::array({{{"type", "action"},
+                                        {"action_name", "jump"}, {"pressed", true}}})}
+    };
+    const auto canonical = evaluateBinding(
+        safety, "runtime_inject_input", dryRun(arguments), context);
+    const auto alias = evaluateBinding(
+        safety, "inject_input_event", dryRun(arguments), context);
+    ASSERT_FALSE(canonical.is_error);
+    ASSERT_FALSE(alias.is_error);
+    ASSERT_EQ(canonical.payload["mutation_preview"]["tool"], "runtime_inject_input");
+    ASSERT_EQ(alias.payload["mutation_preview"]["tool"], "inject_input_event");
+    ASSERT_NE(canonical.payload["mutation_preview"]["binding_hash"],
+              alias.payload["mutation_preview"]["binding_hash"]);
+    ASSERT_EQ(canonical.payload["mutation_preview"]["arguments"],
+              alias.payload["mutation_preview"]["arguments"]);
 }

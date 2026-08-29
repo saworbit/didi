@@ -1326,6 +1326,123 @@ void test_extension_rejects_wrong_kind_methods_before_main_thread_dispatch() {
         "vision.diffViewport", editor).has_value());
 }
 
+void test_phase7_method_policy_rejects_wrong_kind_before_dispatch() {
+    // Break caught: a Phase 7 raw method reaches queue/interception under a missing
+    // or wrong authenticated session kind, especially profiler.sample.
+    struct MethodPolicyCase {
+        const char* method;
+        didi::runtime::LiveSessionKindPolicy policy;
+    };
+    const std::array<MethodPolicyCase, 16> cases = {{
+        {"signal.listConnections", didi::runtime::LiveSessionKindPolicy::editor_only},
+        {"signal.connect", didi::runtime::LiveSessionKindPolicy::editor_only},
+        {"signal.disconnect", didi::runtime::LiveSessionKindPolicy::editor_only},
+        {"signal.emit", didi::runtime::LiveSessionKindPolicy::editor_only},
+        {"vision.setCameraTransform", didi::runtime::LiveSessionKindPolicy::editor_only},
+        {"vision.toggleDebugDraw", didi::runtime::LiveSessionKindPolicy::editor_only},
+        {"tilemap.setCells", didi::runtime::LiveSessionKindPolicy::editor_only},
+        {"tilemap.getUsedRect", didi::runtime::LiveSessionKindPolicy::editor_only},
+        {"gridmap.setCells", didi::runtime::LiveSessionKindPolicy::editor_only},
+        {"physics.raycast", didi::runtime::LiveSessionKindPolicy::editor_or_game},
+        {"nav.queryPath", didi::runtime::LiveSessionKindPolicy::editor_or_game},
+        {"anim.listTracks", didi::runtime::LiveSessionKindPolicy::editor_or_game},
+        {"anim.playTrack", didi::runtime::LiveSessionKindPolicy::game_only},
+        {"runtime.injectInput", didi::runtime::LiveSessionKindPolicy::game_only},
+        {"runtime.readProfiler", didi::runtime::LiveSessionKindPolicy::editor_or_game},
+        {"profiler.sample", didi::runtime::LiveSessionKindPolicy::editor_or_game},
+    }};
+
+    for (const auto& entry : cases) {
+        const auto editor = descriptorFor("editor");
+        const auto game = descriptorFor("game");
+        const auto missing = descriptorFor("");
+        const auto invalid = descriptorFor("worker");
+        ASSERT_TRUE(didi::godot::rejectDisallowedSessionMethod(entry.method, missing).has_value());
+        ASSERT_TRUE(didi::godot::rejectDisallowedSessionMethod(entry.method, invalid).has_value());
+        const bool editor_allowed = entry.policy != didi::runtime::LiveSessionKindPolicy::game_only;
+        const bool game_allowed = entry.policy != didi::runtime::LiveSessionKindPolicy::editor_only;
+        ASSERT_EQ(!didi::godot::rejectDisallowedSessionMethod(entry.method, editor).has_value(),
+                  editor_allowed);
+        ASSERT_EQ(!didi::godot::rejectDisallowedSessionMethod(entry.method, game).has_value(),
+                  game_allowed);
+    }
+}
+
+void test_phase7_queue_and_direct_guards_reject_before_engine_work() {
+    // Break caught: queue interception or direct dispatch runs before the shared
+    // authenticated session-kind guard, including private profiler.sample.
+    struct MethodPolicyCase {
+        const char* method;
+        didi::runtime::SessionKindPolicy policy;
+    };
+    const std::array<MethodPolicyCase, 16> cases = {{
+        {"signal.listConnections", didi::runtime::SessionKindPolicy::editor_only},
+        {"signal.connect", didi::runtime::SessionKindPolicy::editor_only},
+        {"signal.disconnect", didi::runtime::SessionKindPolicy::editor_only},
+        {"signal.emit", didi::runtime::SessionKindPolicy::editor_only},
+        {"vision.setCameraTransform", didi::runtime::SessionKindPolicy::editor_only},
+        {"vision.toggleDebugDraw", didi::runtime::SessionKindPolicy::editor_only},
+        {"tilemap.setCells", didi::runtime::SessionKindPolicy::editor_only},
+        {"tilemap.getUsedRect", didi::runtime::SessionKindPolicy::editor_only},
+        {"gridmap.setCells", didi::runtime::SessionKindPolicy::editor_only},
+        {"physics.raycast", didi::runtime::SessionKindPolicy::editor_or_game},
+        {"nav.queryPath", didi::runtime::SessionKindPolicy::editor_or_game},
+        {"anim.listTracks", didi::runtime::SessionKindPolicy::editor_or_game},
+        {"anim.playTrack", didi::runtime::SessionKindPolicy::game_only},
+        {"runtime.injectInput", didi::runtime::SessionKindPolicy::game_only},
+        {"runtime.readProfiler", didi::runtime::SessionKindPolicy::editor_or_game},
+        {"profiler.sample", didi::runtime::SessionKindPolicy::editor_or_game},
+    }};
+    auto& hook = didi::godot::EditorHook::instance();
+    hook.cancelPendingCommands("test reset");
+
+    const auto assert_rejected = [&](const MethodPolicyCase& entry,
+                                     std::optional<didi::runtime::SessionKind> kind) {
+        didi::godot::EditorHookTestAccess::setSessionKind(hook, kind);
+        ASSERT_EQ(didi::godot::EditorHookTestAccess::queueDepth(hook), 0u);
+        auto queued = didi::godot::EditorHookTestAccess::enqueue(hook, entry.method);
+        ASSERT_EQ(didi::godot::EditorHookTestAccess::queueDepth(hook), 1u);
+        hook.processQueue();
+        const auto queued_response = queued.response.get();
+        ASSERT_EQ(queued_response["error"]["code"], 409);
+        ASSERT_EQ(queued_response["error"]["message"], "session_kind_rejected");
+        ASSERT_EQ(queued_response["error"]["data"]["retryable"], false);
+        ASSERT_EQ(didi::godot::EditorHookTestAccess::queueDepth(hook), 0u);
+        ASSERT_FALSE(didi::godot::EditorHookTestAccess::runtimeStepActive(hook));
+        ASSERT_FALSE(didi::godot::EditorHookTestAccess::hasPendingRuntimeStep(hook));
+        ASSERT_FALSE(didi::godot::EditorHookTestAccess::hasPendingAssetReimport(hook));
+
+        const auto direct = didi::godot::EditorHookTestAccess::executeOnMainThread(
+            hook, entry.method, didi::json::object());
+        ASSERT_EQ(direct["error"]["code"], 409);
+        ASSERT_EQ(direct["error"]["message"], "session_kind_rejected");
+        ASSERT_FALSE(didi::godot::EditorHookTestAccess::runtimeStepActive(hook));
+        ASSERT_FALSE(didi::godot::EditorHookTestAccess::hasPendingRuntimeStep(hook));
+        ASSERT_FALSE(didi::godot::EditorHookTestAccess::hasPendingAssetReimport(hook));
+    };
+
+    for (const auto& entry : cases) {
+        assert_rejected(entry, std::nullopt);
+        if (entry.policy == didi::runtime::SessionKindPolicy::editor_only) {
+            assert_rejected(entry, didi::runtime::SessionKind::game);
+        } else if (entry.policy == didi::runtime::SessionKindPolicy::game_only) {
+            assert_rejected(entry, didi::runtime::SessionKind::editor);
+        }
+
+        for (const auto allowed : {didi::runtime::SessionKind::editor,
+                                   didi::runtime::SessionKind::game}) {
+            if ((allowed == didi::runtime::SessionKind::editor &&
+                 entry.policy == didi::runtime::SessionKindPolicy::game_only) ||
+                (allowed == didi::runtime::SessionKind::game &&
+                 entry.policy == didi::runtime::SessionKindPolicy::editor_only)) {
+                continue;
+            }
+            ASSERT_FALSE(didi::godot::validateSessionKindForMethod(
+                entry.method, allowed).has_value());
+        }
+    }
+}
+
 void test_local_session_validation_errors_are_structured() {
     // Break caught: session-management validation bypasses the local execution/error envelope.
     auto sessions = std::make_shared<RoutedFake>("editor");
@@ -1451,6 +1568,10 @@ struct RegisterRuntimeRoutingTests {
                      test_nested_offline_call_cannot_inherit_outer_route_lease);
         registerTest("RuntimeRouting.WrongKindExtensionDispatch",
                      test_extension_rejects_wrong_kind_methods_before_main_thread_dispatch);
+        registerTest("RuntimeRouting.Phase7PrequeueMethodPolicy",
+                     test_phase7_method_policy_rejects_wrong_kind_before_dispatch);
+        registerTest("RuntimeRouting.Phase7QueueAndDirectGuards",
+                     test_phase7_queue_and_direct_guards_reject_before_engine_work);
         registerTest("RuntimeRouting.StructuredLocalSessionErrors",
                      test_local_session_validation_errors_are_structured);
         registerTest("RuntimeRouting.FreshSessionHandshake",

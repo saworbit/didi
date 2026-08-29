@@ -3,6 +3,8 @@
 #include "didi/common/logger.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/tools/resolved_tool_binding.hpp"
+#include "didi/mcp/phase7_schemas.hpp"
 #include <algorithm>
 #include <unordered_set>
 #include <utility>
@@ -303,6 +305,78 @@ CallToolResult structuredLiveToolError(const Error& error,
 
 } // namespace
 
+ResolvedToolBinding resolveAliasBinding(std::string_view invoked_name, const json& arguments) {
+    struct CanonicalLiveBinding {
+        std::string_view name;
+        std::string_view ipc_method;
+    };
+    static constexpr CanonicalLiveBinding phase7_bindings[] = {
+        {"signal_list_connections", "signal.listConnections"},
+        {"signal_connect", "signal.connect"},
+        {"signal_disconnect", "signal.disconnect"},
+        {"signal_emit", "signal.emit"},
+        {"viewport_set_camera_transform", "vision.setCameraTransform"},
+        {"viewport_toggle_debug_draw", "vision.toggleDebugDraw"},
+        {"tilemap_set_cells", "tilemap.setCells"},
+        {"tilemap_get_used_rect", "tilemap.getUsedRect"},
+        {"gridmap_set_cells", "gridmap.setCells"},
+        {"physics_raycast_query", "physics.raycast"},
+        {"physics_simulate_step", "physics.simulateStep"},
+        {"nav_bake_mesh", "nav.bakeMesh"},
+        {"nav_query_path", "nav.queryPath"},
+        {"anim_list_tracks", "anim.listTracks"},
+        {"anim_play_track", "anim.playTrack"},
+        {"runtime_inject_input", "runtime.injectInput"},
+        {"runtime_get_call_stack", "runtime.getCallStack"},
+        {"runtime_read_profiler", "runtime.readProfiler"},
+    };
+    for (const auto& entry : phase7_bindings) {
+        if (entry.name != invoked_name) continue;
+        return {invoked_name, invoked_name, invoked_name, invoked_name, invoked_name,
+                invoked_name, entry.ipc_method, runtime::livePolicyForTool(invoked_name)};
+    }
+
+    struct DirectAlias {
+        std::string_view invoked;
+        std::string_view canonical;
+        std::string_view ipc_method;
+    };
+    static constexpr DirectAlias aliases[] = {
+        {"get_scene_hierarchy", "scene_get_hierarchy", "scene.getHierarchy"},
+        {"capture_viewport", "viewport_capture_frame", "vision.captureViewport"},
+        {"analyze_script_diagnostics", "script_check_syntax", "script.checkSyntax"},
+        {"patch_script_symbols", "script_patch_method", "script.patchMethod"},
+        {"create_visual_test_lab", "viewport_create_test_lab", ""},
+        {"query_project_resources", "project_list_resources", ""},
+        {"execute_test_session", "runtime_launch", ""},
+        {"inject_input_event", "runtime_inject_input", "runtime.injectInput"},
+    };
+    for (const auto& alias : aliases) {
+        if (alias.invoked != invoked_name) continue;
+        return {invoked_name, alias.canonical, alias.canonical, alias.canonical,
+                alias.canonical, alias.canonical, alias.ipc_method,
+                runtime::livePolicyForTool(alias.canonical)};
+    }
+    if (invoked_name == "mutate_scene_tree") {
+        std::string_view policy = "mutate_scene_tree";
+        std::string_view method;
+        const auto action = arguments.value("action", std::string{});
+        if (action == "instantiate") { policy = "scene_instantiate_node"; method = "scene.instantiateNode"; }
+        else if (action == "remove") { policy = "scene_remove_node"; method = "scene.removeNode"; }
+        else if (action == "reparent") { policy = "scene_reparent_node"; method = "scene.reparentNode"; }
+        else if (action == "set_property") { policy = "scene_set_property"; method = "scene.setProperty"; }
+        else if (action == "duplicate") { policy = "scene_duplicate_node"; method = "scene.duplicateNode"; }
+        return {invoked_name, policy, invoked_name, invoked_name, policy,
+                "mutate_scene_tree", method, runtime::livePolicyForTool(policy)};
+    }
+    if (invoked_name == "instantiate_asset") {
+        return {invoked_name, invoked_name, invoked_name, invoked_name, invoked_name,
+                invoked_name, "asset.instantiate", runtime::livePolicyForTool(invoked_name)};
+    }
+    return {invoked_name, invoked_name, invoked_name, invoked_name, invoked_name,
+            invoked_name, {}, runtime::livePolicyForTool(invoked_name)};
+}
+
 ToolRegistry& ToolRegistry::instance() {
     static ToolRegistry s_instance;
     return s_instance;
@@ -321,6 +395,14 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
     tool.annotations.idempotent = !is_mutation;
     tool.annotations.open_world = false;
     MutationSafety::decorateSchema(name, tool.inputSchema);
+    const auto binding = resolveAliasBinding(name, json::object());
+    tool.capability = capabilityForTool(std::string(binding.capability_source));
+    const auto phase7_names = phase7::canonicalNames();
+    if (std::find(phase7_names.begin(), phase7_names.end(), binding.schema_source) !=
+        phase7_names.end()) {
+        tool.inputSchema = phase7::standaloneRequestSchema(binding.schema_source);
+    }
+    MutationSafety::decorateSchema(binding, tool.inputSchema);
     if (!tool.capability.implemented) {
         tool.description = "UNIMPLEMENTED: Reserved schema; calls are rejected. Intended contract: " +
                            tool.description;
@@ -389,6 +471,7 @@ ToolManifest ToolRegistry::buildManifest() const {
 }
 
 CallToolResult ToolRegistry::callTool(const std::string& name, const json& arguments) {
+    const auto binding = resolveAliasBinding(name, arguments);
     const auto* tool = getTool(name);
     if (!tool) {
         return CallToolResult::error("Tool not found: " + name);
@@ -414,7 +497,7 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
                                   ? lease->descriptor
                                   : std::optional<runtime::SessionDescriptor>{};
         if (managed_route && selected.has_value()) {
-            const auto policy = runtime::livePolicyForTool(name);
+            const auto policy = binding.session_policy;
             if (!runtime::allowsSessionKind(policy, selected->kind)) {
                 json allowed = policy == runtime::LiveSessionKindPolicy::editor_only
                                    ? json::array({"editor"})
@@ -452,7 +535,7 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
         safety_context.route_generation = lease->generation;
         if (lease->descriptor.has_value()) safety_context.session_id = lease->descriptor->session_id;
     }
-    auto safety = m_mutationSafety.evaluate(name, arguments, safety_context);
+    auto safety = m_mutationSafety.evaluate(binding, arguments, safety_context);
     if (!safety.execute) {
         auto response = CallToolResult::successJson(std::move(safety.payload));
         response.isError = safety.is_error;

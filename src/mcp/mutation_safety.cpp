@@ -12,28 +12,29 @@
 namespace didi::mcp {
 namespace {
 
-const std::unordered_set<std::string> kMutations = {
+const std::unordered_set<std::string_view> kMutations = {
     "scene_instantiate_node", "scene_remove_node", "scene_reparent_node",
     "scene_set_property", "scene_duplicate_node", "scene_add_to_group",
     "scene_remove_from_group", "scene_create", "scene_open", "scene_close",
     "scene_pack_branch", "signal_connect", "signal_disconnect", "signal_emit",
     "script_patch_method", "patch_script_symbols", "script_attach_to_node",
     "script_detach_from_node", "physics_simulate_step", "nav_bake_mesh",
-    "anim_play_track", "tilemap_set_cells", "gridmap_set_cells", "resource_create",
-    "asset_instantiate", "asset_reimport", "runtime_launch", "execute_test_session",
-    "runtime_set_paused", "runtime_step", "runtime_stop", "editor_undo", "editor_redo",
-    "editor_save_scene", "editor_reload_project", "project_set_autoload",
-    "project_remove_autoload", "project_set_input_action", "project_remove_input_action",
-    "project_set_setting", "viewport_set_camera_transform", "viewport_create_test_lab",
-    "create_visual_test_lab", "viewport_toggle_debug_draw", "project_export",
-    "gridmap_export_mesh_library"
+    "anim_play_track", "anim_state_set", "tilemap_set_cells", "tilemap_set_region",
+    "gridmap_set_cells", "resource_create", "asset_instantiate", "instantiate_asset",
+    "asset_reimport", "runtime_launch", "execute_test_session", "runtime_set_paused",
+    "runtime_step", "runtime_stop", "runtime_inject_input", "input_map_set_action",
+    "editor_undo", "editor_redo", "editor_save_scene", "editor_reload_project",
+    "project_set_autoload", "project_remove_autoload", "project_set_input_action",
+    "project_remove_input_action", "project_set_setting", "viewport_set_camera_transform",
+    "viewport_create_test_lab", "create_visual_test_lab", "viewport_toggle_debug_draw",
+    "project_export", "gridmap_export_mesh_library"
 };
 
-const std::unordered_set<std::string> kAlwaysConfirmed = {
-    "editor_reload_project", "script_patch_method", "patch_script_symbols"
+const std::unordered_set<std::string_view> kAlwaysConfirmed = {
+    "editor_reload_project", "script_patch_method", "patch_script_symbols", "signal_emit"
 };
 
-const std::unordered_set<std::string> kOverwriteConfirmed = {
+const std::unordered_set<std::string_view> kOverwriteConfirmed = {
     "resource_create", "viewport_create_test_lab", "create_visual_test_lab",
     "project_export", "gridmap_export_mesh_library"
 };
@@ -52,29 +53,32 @@ MutationSafety::MutationSafety(Clock clock, TokenGenerator token_generator)
           return token.isOk() ? token.value() : std::string{};
       })) {}
 
-bool MutationSafety::isMutation(const std::string& tool_name) {
-    return kMutations.count(tool_name) != 0;
+bool MutationSafety::isMutation(const ResolvedToolBinding& binding) {
+    return kMutations.count(binding.policy_source) != 0;
 }
 
-bool MutationSafety::canRequireConfirmation(const std::string& tool_name) {
-    return kAlwaysConfirmed.count(tool_name) != 0 || kOverwriteConfirmed.count(tool_name) != 0;
+bool MutationSafety::canRequireConfirmation(const ResolvedToolBinding& binding) {
+    return kAlwaysConfirmed.count(binding.policy_source) != 0 ||
+           kOverwriteConfirmed.count(binding.policy_source) != 0;
 }
 
-bool MutationSafety::requiresConfirmation(const std::string& tool_name, const json& arguments) {
-    if (kAlwaysConfirmed.count(tool_name) != 0) return true;
-    return kOverwriteConfirmed.count(tool_name) != 0 && arguments.value("overwrite", false);
+bool MutationSafety::requiresConfirmation(const ResolvedToolBinding& binding,
+                                          const json& arguments) {
+    if (kAlwaysConfirmed.count(binding.policy_source) != 0) return true;
+    return kOverwriteConfirmed.count(binding.policy_source) != 0 &&
+           arguments.value("overwrite", false);
 }
 
-void MutationSafety::decorateSchema(const std::string& tool_name, json& schema) {
-    if (!isMutation(tool_name) || !schema.is_object()) return;
+void MutationSafety::decorateSchema(const ResolvedToolBinding& binding, json& schema) {
+    if (!isMutation(binding) || !schema.is_object()) return;
     if (!schema.contains("properties") || !schema["properties"].is_object()) {
         schema["properties"] = json::object();
     }
     schema["properties"]["dry_run"] = {
         {"type", "boolean"}, {"default", false},
-        {"description", "Return a non-mutating Phase 6 change preview instead of executing."}
+        {"description", "Return a non-mutating change preview instead of executing."}
     };
-    if (canRequireConfirmation(tool_name)) {
+    if (canRequireConfirmation(binding)) {
         schema["properties"]["confirmation_token"] = {
             {"type", "string"}, {"minLength", 64}, {"maxLength", 64},
             {"pattern", "^[0-9a-f]{64}$"},
@@ -105,9 +109,10 @@ json MutationSafety::previewArguments(const json& arguments) {
     return preview;
 }
 
-std::string MutationSafety::bindingHash(const std::string& tool_name, const json& arguments,
+std::string MutationSafety::bindingHash(const ResolvedToolBinding& binding,
+                                        const json& arguments,
                                         const MutationContext& context) {
-    const auto serialized = tool_name + "\n" + arguments.dump() + "\n" +
+    const auto serialized = std::string(binding.invoked_name) + "\n" + arguments.dump() + "\n" +
                             context.project_root + "\n" + context.execution_mode + "\n" +
                             context.session_id.value_or("") + "\n" +
                             std::to_string(context.route_generation);
@@ -121,13 +126,15 @@ std::string MutationSafety::bindingHash(const std::string& tool_name, const json
     return output.str();
 }
 
-MutationDecision MutationSafety::errorDecision(int code, const std::string& message,
+MutationDecision MutationSafety::errorDecision(const ResolvedToolBinding& binding, int code,
+                                               const std::string& message,
                                                const MutationContext& context) const {
     MutationDecision decision;
     decision.execute = false;
     decision.is_error = true;
     decision.payload = {
         {"execution_mode", context.execution_mode},
+        {"tool", binding.invoked_name},
         {"error", {{"code", code}, {"message", message}}}
     };
     return decision;
@@ -149,24 +156,45 @@ void MutationSafety::prune(int64_t now) {
     }
 }
 
-MutationDecision MutationSafety::evaluate(const std::string& tool_name, const json& arguments,
+MutationDecision MutationSafety::preview(const ResolvedToolBinding& binding,
+                                         const json& arguments,
+                                         const MutationContext& context) {
+    auto preview_arguments = arguments;
+    if (preview_arguments.is_object()) preview_arguments["dry_run"] = true;
+    return evaluate(binding, preview_arguments, context);
+}
+
+MutationDecision MutationSafety::authorize(const ResolvedToolBinding& binding,
+                                           const json& arguments,
+                                           const MutationContext& context) {
+    auto authorized_arguments = arguments;
+    if (authorized_arguments.is_object()) authorized_arguments["dry_run"] = false;
+    return evaluate(binding, authorized_arguments, context);
+}
+
+MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
+                                          const json& arguments,
                                           const MutationContext& context) {
-    if (!arguments.is_object()) return errorDecision(400, "Tool arguments must be an object", context);
+    if (!arguments.is_object()) {
+        return errorDecision(binding, 400, "Tool arguments must be an object", context);
+    }
     const bool has_dry_run = arguments.contains("dry_run");
     const bool has_confirmation = arguments.contains("confirmation_token");
-    if (!isMutation(tool_name)) {
+    if (!isMutation(binding)) {
         if (has_dry_run || has_confirmation) {
-            return errorDecision(400, "Mutation safety controls are not valid for a read-only tool", context);
+            return errorDecision(binding, 400,
+                                 "Mutation safety controls are not valid for a read-only tool",
+                                 context);
         }
         MutationDecision decision;
         decision.arguments = arguments;
         return decision;
     }
     if (has_dry_run && !arguments["dry_run"].is_boolean()) {
-        return errorDecision(400, "dry_run must be a boolean", context);
+        return errorDecision(binding, 400, "dry_run must be a boolean", context);
     }
     if (has_confirmation && !arguments["confirmation_token"].is_string()) {
-        return errorDecision(400, "confirmation_token must be a string", context);
+        return errorDecision(binding, 400, "confirmation_token must be a string", context);
     }
 
     const bool dry_run = arguments.value("dry_run", false);
@@ -176,20 +204,21 @@ MutationDecision MutationSafety::evaluate(const std::string& tool_name, const js
     auto sanitized = arguments;
     sanitized.erase("dry_run");
     sanitized.erase("confirmation_token");
-    const bool requires_confirmation = requiresConfirmation(tool_name, sanitized);
+    const bool requires_confirmation = requiresConfirmation(binding, sanitized);
     const auto now = m_clock();
 
     if (dry_run) {
         if (has_confirmation) {
-            return errorDecision(400, "dry_run and confirmation_token cannot be combined", context);
+            return errorDecision(binding, 400,
+                                 "dry_run and confirmation_token cannot be combined", context);
         }
-        json preview = {
-            {"tool", tool_name}, {"project_root", context.project_root},
+        json preview_payload = {
+            {"tool", binding.invoked_name}, {"project_root", context.project_root},
             {"execution_mode", context.execution_mode},
             {"session_id", context.session_id.has_value() ? json(*context.session_id) : json(nullptr)},
             {"route_generation", context.route_generation},
             {"arguments", previewArguments(sanitized)},
-            {"binding_hash", bindingHash(tool_name, sanitized, context)},
+            {"binding_hash", bindingHash(binding, sanitized, context)},
             {"changes", json::array({{{"kind", "planned_mutation"},
                                        {"target", previewArguments(sanitized)},
                                        {"before", "not read or modified during dry-run"}}})},
@@ -198,33 +227,38 @@ MutationDecision MutationSafety::evaluate(const std::string& tool_name, const js
         if (requires_confirmation) {
             const auto token = m_tokenGenerator();
             if (token.size() != 64) {
-                return errorDecision(500, "Unable to create a secure confirmation token", context);
+                return errorDecision(binding, 500,
+                                     "Unable to create a secure confirmation token", context);
             }
             const auto expires_at = now + kConfirmationTtlMs;
             {
                 std::lock_guard<std::mutex> lock(m_mutex);
                 prune(now);
-                m_confirmations[token] = {tool_name, sanitized, context, expires_at};
+                m_confirmations[token] = {
+                    std::string(binding.invoked_name), sanitized, context, expires_at};
             }
-            preview["confirmation_token"] = token;
-            preview["expires_at_ms"] = expires_at;
+            preview_payload["confirmation_token"] = token;
+            preview_payload["expires_at_ms"] = expires_at;
         }
         MutationDecision decision;
         decision.execute = false;
-        decision.payload = {{"dry_run", true}, {"mutation_preview", std::move(preview)}};
+        decision.payload = {{"dry_run", true}, {"mutation_preview", std::move(preview_payload)}};
         return decision;
     }
 
     if (!requires_confirmation) {
         if (has_confirmation) {
-            return errorDecision(400, "This mutation does not require a confirmation token", context);
+            return errorDecision(binding, 400,
+                                 "This mutation does not require a confirmation token", context);
         }
         MutationDecision decision;
         decision.arguments = std::move(sanitized);
         return decision;
     }
     if (confirmation_token.empty()) {
-        return errorDecision(428, "This mutation requires an exact dry-run preview and confirmation token", context);
+        return errorDecision(binding, 428,
+                             "This mutation requires an exact dry-run preview and confirmation token",
+                             context);
     }
 
     Confirmation confirmation;
@@ -232,17 +266,22 @@ MutationDecision MutationSafety::evaluate(const std::string& tool_name, const js
         std::lock_guard<std::mutex> lock(m_mutex);
         const auto found = m_confirmations.find(confirmation_token);
         if (found == m_confirmations.end()) {
-            return errorDecision(409, "Confirmation token is unknown or already used", context);
+            return errorDecision(binding, 409,
+                                 "Confirmation token is unknown or already used", context);
         }
         confirmation = std::move(found->second);
         m_confirmations.erase(found);
     }
     if (confirmation.expires_at_ms < now) {
-        return errorDecision(410, "Confirmation token has expired", context);
+        return errorDecision(binding, 410, "Confirmation token has expired", context);
     }
-    if (confirmation.tool_name != tool_name || confirmation.arguments != sanitized ||
+    if (confirmation.invoked_name != binding.invoked_name ||
+        confirmation.arguments != sanitized ||
         !sameContext(confirmation.context, context)) {
-        return errorDecision(409, "Confirmation token does not match this tool, arguments, project, or session", context);
+        return errorDecision(
+            binding, 409,
+            "Confirmation token does not match this tool, arguments, project, or session",
+            context);
     }
     MutationDecision decision;
     decision.arguments = std::move(sanitized);

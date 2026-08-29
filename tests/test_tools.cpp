@@ -285,6 +285,40 @@ static void test_tool_registry_default_tools() {
     }
 }
 
+static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract() {
+    // Break caught: the compatibility spelling drifts from runtime_inject_input or
+    // loses its own public name while Phase 7 remains capability-gated.
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto* canonical = registry.getTool("runtime_inject_input");
+    const auto* alias = registry.getTool("inject_input_event");
+    ASSERT_TRUE(canonical != nullptr);
+    ASSERT_TRUE(alias != nullptr);
+    ASSERT_EQ(canonical->name, "runtime_inject_input");
+    ASSERT_EQ(alias->name, "inject_input_event");
+    ASSERT_EQ(alias->inputSchema, canonical->inputSchema);
+    ASSERT_EQ(alias->capability.implemented, canonical->capability.implemented);
+    ASSERT_EQ(alias->capability.modes, canonical->capability.modes);
+    ASSERT_TRUE(canonical->inputSchema.contains("additionalProperties"));
+    ASSERT_EQ(canonical->inputSchema["additionalProperties"], false);
+
+    const std::unordered_set<std::string> legacy_names = {
+        "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
+        "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
+        "execute_test_session", "mutate_scene_tree", "instantiate_asset",
+        "inject_input_event"
+    };
+    size_t implemented = 0;
+    size_t unimplemented = 0;
+    for (const auto& tool : registry.listTools()) {
+        if (legacy_names.count(tool.name) != 0) continue;
+        tool.capability.implemented ? ++implemented : ++unimplemented;
+    }
+    ASSERT_EQ(implemented, 60u);
+    ASSERT_EQ(unimplemented, 18u);
+}
+
 static void test_offline_writer_schemas_require_explicit_overwrite() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
@@ -1050,6 +1084,8 @@ static void test_project_paths_accept_utf8_names() {
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.DefaultRegistration", test_tool_registry_default_tools);
+        registerTest("Tools.Phase7InputAliasPublicContract",
+                     test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract);
         registerTest("Tools.OfflineWriterOverwriteSchemas",
                      test_offline_writer_schemas_require_explicit_overwrite);
         registerTest("Tools.ResourceCreateOverwriteGuard",

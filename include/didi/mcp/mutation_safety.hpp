@@ -1,6 +1,7 @@
 #pragma once
 
 #include "didi/common/types.hpp"
+#include "didi/tools/resolved_tool_binding.hpp"
 
 #include <cstdint>
 #include <functional>
@@ -33,27 +34,34 @@ public:
 
     explicit MutationSafety(Clock clock = {}, TokenGenerator token_generator = {});
 
-    MutationDecision evaluate(const std::string& tool_name, const json& arguments,
+    MutationDecision preview(const ResolvedToolBinding& binding, const json& arguments,
+                             const MutationContext& context);
+    MutationDecision authorize(const ResolvedToolBinding& binding, const json& arguments,
+                               const MutationContext& context);
+    MutationDecision evaluate(const ResolvedToolBinding& binding, const json& arguments,
                               const MutationContext& context);
 
-    static bool isMutation(const std::string& tool_name);
-    static bool canRequireConfirmation(const std::string& tool_name);
-    static void decorateSchema(const std::string& tool_name, json& schema);
+    static bool isMutation(const ResolvedToolBinding& binding);
+    static bool canRequireConfirmation(const ResolvedToolBinding& binding);
+    static void decorateSchema(const ResolvedToolBinding& binding, json& schema);
 
 private:
     struct Confirmation {
-        std::string tool_name;
+        std::string invoked_name;
         json arguments;
         MutationContext context;
         int64_t expires_at_ms{0};
     };
 
-    static bool requiresConfirmation(const std::string& tool_name, const json& arguments);
+    static bool requiresConfirmation(const ResolvedToolBinding& binding,
+                                     const json& arguments);
     static bool sameContext(const MutationContext& left, const MutationContext& right);
     static json previewArguments(const json& arguments);
-    static std::string bindingHash(const std::string& tool_name, const json& arguments,
+    static std::string bindingHash(const ResolvedToolBinding& binding,
+                                   const json& arguments,
                                    const MutationContext& context);
-    MutationDecision errorDecision(int code, const std::string& message,
+    MutationDecision errorDecision(const ResolvedToolBinding& binding, int code,
+                                   const std::string& message,
                                    const MutationContext& context) const;
     void prune(int64_t now);
 

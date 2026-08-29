@@ -1,0 +1,5 @@
+[application]
+config/name="Didi Phase 7 Contract Probe"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
