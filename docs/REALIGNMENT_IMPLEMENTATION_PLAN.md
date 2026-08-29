@@ -74,7 +74,7 @@ counts in `tools/validate_documentation.py` were scaffolding that turned hostile
 
 | Rule | Verdict | Note |
 | :--- | :--- | :--- |
-| Counts 78/10/88/60/18 as doc regexes | **RETIRED** | Workstream 0. Blocked Phase 7 |
+| Counts 78/10/88/60/18 as doc regexes | **RETIRED** | Workstream 0. Blocked Phase 7 completion |
 | `FUTURE_PHASE_RANGE = range(7,13)` | AMEND | Freezes roadmap shape in CI |
 | 17 fixed `REQUIRED_DOCUMENTS` paths | AMEND | Blocks doc consolidation (D1) |
 | Version consistency across 8 files | KEEP | Checks code, not just prose |
@@ -112,6 +112,31 @@ versions lack the API and that Didi does not yet consume the 4.7 call. Adopting 
 is a version-gated behavior change to a data-loss guard, so it is filed as a
 proposed [Surface Amendment](SURFACE_AMENDMENTS.md) with a per-version proving
 test, not slipped in here.
+
+---
+
+## Relationship to the Phase 7 feasibility gate
+
+This plan was written before the 2026-08-29 Phase 7 API feasibility gate landed
+on `main`. That gate gives Phase 7 the status `BLOCKED_AT_FEASIBILITY`: of the 18
+reserved names, 15 are implementation-feasible and 3 are API-blocked on both
+Godot 4.5.1 and 4.7.2 under their approved contracts — `physics_simulate_step`,
+`nav_bake_mesh`, and `runtime_get_call_stack`. See
+[PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md).
+
+Two consequences for this plan:
+
+- Workstream B's `runtime_inject_input` (B3) is one of the 15 feasible names, so
+  it is not blocked. `runtime_get_call_stack` is one of the 3 blocked ones, so
+  B8 narrows to `Performance` monitors and debugger locals and must not claim a
+  call-stack path.
+- The all-or-nothing 78/78 activation gate is exactly the kind of rule this
+  plan's audit flags. It is now a governance decision, not an engineering one,
+  and it is tracked on the roadmap rather than here.
+
+The gate's method — dump `extension_api.json` per engine and compare identifiers
+across pinned versions — is the same evidence standard used for the `scene_close`
+recheck below, and should be the standard for every future capability claim.
 
 ---
 
