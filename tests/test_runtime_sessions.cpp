@@ -938,6 +938,151 @@ void test_session_discovery_closes_validated_handle_when_hook_throws() {
 #endif
 }
 
+// ---------------------------------------------------------------------------
+// Orphaned tombstone reaping
+//
+// Retirement is move-then-delete. If the owning process dies between the two
+// steps the tombstone is left behind with nobody to finish cleanup, and nothing
+// ever removed it. These cover that crash window and the refusals that keep the
+// reaper from deleting on a guess.
+// ---------------------------------------------------------------------------
+
+std::filesystem::path writeTombstone(const std::filesystem::path& directory,
+                                     const std::string& named_session_id,
+                                     const didi::json& descriptor,
+                                     const std::string& nonce = std::string(32, 'b')) {
+    const auto name =
+        named_session_id + ".json.didi-retired-" + named_session_id + "-" + nonce;
+    writeDescriptor(directory, name, descriptor);
+    return directory / name;
+}
+
+// A descriptor whose pid is live but whose recorded start time cannot belong to
+// that pid, so the owner is provably a different, finished process.
+didi::json provenGoneDescriptor(const std::string& session_id) {
+    auto descriptor = validDescriptor(session_id, endpointFor(session_id));
+    descriptor["started_at_ms"] = 1;
+    return descriptor;
+}
+
+void test_reaper_removes_tombstone_whose_owner_is_proven_gone() {
+    const auto directory = makeSessionDirectory();
+    const auto session_id = std::string("aaaaaaaabbbbbbbbccccccccdddddddd");
+    const auto tombstone =
+        writeTombstone(directory, session_id, provenGoneDescriptor(session_id));
+    ASSERT_TRUE(std::filesystem::exists(tombstone));
+
+    const auto outcome = didi::runtime::reapOrphanedDescriptorTombstone(directory, tombstone);
+
+#if defined(_WIN32)
+    // Deletion is bound to the verified open handle, so no window exists in
+    // which the name could be substituted.
+    ASSERT_TRUE(outcome == didi::runtime::TombstoneReapOutcome::reaped);
+    ASSERT_FALSE(std::filesystem::exists(tombstone));
+#else
+    // POSIX has no portable unlink primitive bound to a verified open file, so
+    // the tombstone is retained for the same reason retirement retains it.
+    ASSERT_TRUE(outcome == didi::runtime::TombstoneReapOutcome::retained_unavailable);
+    ASSERT_TRUE(std::filesystem::exists(tombstone));
+#endif
+    std::filesystem::remove_all(directory);
+}
+
+void test_reaper_retains_tombstone_whose_owner_is_still_running() {
+    // Break caught: reaping a tombstone that belongs to a live session.
+    const auto directory = makeSessionDirectory();
+    const auto session_id = std::string("11111111222222223333333344444444");
+    const auto tombstone = writeTombstone(
+        directory, session_id, validDescriptor(session_id, endpointFor(session_id)));
+
+    const auto outcome = didi::runtime::reapOrphanedDescriptorTombstone(directory, tombstone);
+
+    ASSERT_TRUE(outcome == didi::runtime::TombstoneReapOutcome::retained_owner_not_proven_gone);
+    ASSERT_TRUE(std::filesystem::exists(tombstone));
+    std::filesystem::remove_all(directory);
+}
+
+void test_reaper_retains_tombstone_it_cannot_verify() {
+    // Never delete on a guess: unparseable content proves nothing about ownership.
+    const auto directory = makeSessionDirectory();
+    const auto session_id = std::string("55555555666666667777777788888888");
+    const auto name =
+        session_id + ".json.didi-retired-" + session_id + "-" + std::string(32, 'c');
+    {
+        std::ofstream output(directory / name, std::ios::binary);
+        output << "{not a descriptor";
+    }
+    const auto tombstone = directory / name;
+
+    const auto outcome = didi::runtime::reapOrphanedDescriptorTombstone(directory, tombstone);
+
+    ASSERT_TRUE(outcome == didi::runtime::TombstoneReapOutcome::retained_unverifiable);
+    ASSERT_TRUE(std::filesystem::exists(tombstone));
+    std::filesystem::remove_all(directory);
+}
+
+void test_reaper_retains_tombstone_whose_name_disagrees_with_its_contents() {
+    // Break caught: a tombstone named for one session but holding another
+    // session's descriptor is reaped on the strength of the contents alone.
+    const auto directory = makeSessionDirectory();
+    const auto named_id = std::string("99999999aaaaaaaabbbbbbbbcccccccc");
+    const auto other_id = std::string("ddddddddeeeeeeeeffffffff00000000");
+    const auto tombstone = writeTombstone(directory, named_id, provenGoneDescriptor(other_id));
+
+    const auto outcome = didi::runtime::reapOrphanedDescriptorTombstone(directory, tombstone);
+
+    ASSERT_TRUE(outcome == didi::runtime::TombstoneReapOutcome::retained_unverifiable);
+    ASSERT_TRUE(std::filesystem::exists(tombstone));
+    std::filesystem::remove_all(directory);
+}
+
+void test_reaper_ignores_files_that_are_not_tombstones() {
+    // The reaper must never touch a live descriptor or an unrelated file.
+    const auto directory = makeSessionDirectory();
+    const auto session_id = std::string("0123456789abcdef0123456789abcdef");
+    writeDescriptor(directory, session_id + ".json",
+                    validDescriptor(session_id, endpointFor(session_id)));
+    {
+        std::ofstream output(directory / "unrelated.txt", std::ios::binary);
+        output << "not ours";
+    }
+
+    ASSERT_TRUE(didi::runtime::reapOrphanedDescriptorTombstone(
+                    directory, directory / (session_id + ".json")) ==
+                didi::runtime::TombstoneReapOutcome::not_a_tombstone);
+    ASSERT_TRUE(didi::runtime::reapOrphanedDescriptorTombstone(
+                    directory, directory / "unrelated.txt") ==
+                didi::runtime::TombstoneReapOutcome::not_a_tombstone);
+    ASSERT_TRUE(std::filesystem::exists(directory / (session_id + ".json")));
+    ASSERT_TRUE(std::filesystem::exists(directory / "unrelated.txt"));
+    std::filesystem::remove_all(directory);
+}
+
+void test_discovery_reaps_orphaned_tombstones_without_listing_them() {
+    // The crash-between-move-and-delete case, end to end through discovery.
+    const auto directory = makeSessionDirectory();
+    setSessionDirectory(directory);
+    const auto session_id = std::string("abcdefabcdefabcdefabcdefabcdefab");
+    const auto tombstone =
+        writeTombstone(directory, session_id, provenGoneDescriptor(session_id));
+
+    auto client = didi::runtime::createRuntimeSessionClient(
+        std::filesystem::current_path().string(), [] { return std::make_unique<FakeIpcClient>(); });
+    const auto listed = client->listSessions(std::nullopt);
+
+    ASSERT_TRUE(listed.isOk());
+    ASSERT_TRUE(listed.value()["sessions"].empty());
+#if defined(_WIN32)
+    ASSERT_FALSE(std::filesystem::exists(tombstone));
+#else
+    ASSERT_TRUE(std::filesystem::exists(tombstone));
+#endif
+
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
+
 struct RegisterRuntimeSessionTests {
     RegisterRuntimeSessionTests() {
         registerTest("RuntimeSessions.DescriptorRejectsWrongTokenLength",
@@ -976,6 +1121,18 @@ struct RegisterRuntimeSessionTests {
                      test_session_host_retained_file_survives_replacement_after_verification);
         registerTest("RuntimeSessions.DiscoveryIgnoresRetainedRetirementFiles",
                      test_runtime_session_discovery_ignores_retained_retirement_files);
+        registerTest("RuntimeSessions.ReaperRemovesProvenGoneTombstone",
+                     test_reaper_removes_tombstone_whose_owner_is_proven_gone);
+        registerTest("RuntimeSessions.ReaperRetainsLiveOwnerTombstone",
+                     test_reaper_retains_tombstone_whose_owner_is_still_running);
+        registerTest("RuntimeSessions.ReaperRetainsUnverifiableTombstone",
+                     test_reaper_retains_tombstone_it_cannot_verify);
+        registerTest("RuntimeSessions.ReaperRetainsNameContentMismatch",
+                     test_reaper_retains_tombstone_whose_name_disagrees_with_its_contents);
+        registerTest("RuntimeSessions.ReaperIgnoresNonTombstones",
+                     test_reaper_ignores_files_that_are_not_tombstones);
+        registerTest("RuntimeSessions.DiscoveryReapsOrphanedTombstones",
+                     test_discovery_reaps_orphaned_tombstones_without_listing_them);
 #if !defined(_WIN32)
         registerTest("RuntimeSessions.RegistryUsesXdgRuntimeDirectory",
                      test_session_registry_prefers_xdg_runtime_directory);

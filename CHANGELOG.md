@@ -43,6 +43,7 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Fixed
 
+- Reaped orphaned session descriptor tombstones. Retirement is move-then-delete, so an owner that died between the two steps left a `.didi-retired-*` file that nothing ever removed and the registry grew without bound. Discovery now removes such an entry only when its contents parse as a descriptor, the session id in the filename matches the session id inside it, and the owning process is provably gone; an alive or unverifiable owner, unreadable contents, or a name that disagrees with its contents all retain it. POSIX still always retains, because no portable unlink primitive is bound to a verified open file.
 - Reconciled all current operating documentation with Phase 6: completed the roadmap's 78-tool table, documented project-root startup, session lock `423`, mutation preview/confirmation semantics, and labeled historical design records so they are not mistaken for current behavior.
 - Gave four order-dependent native tests their own setup. `Tools.CaptureViewportWithIpc` was intermittently failing because it registered none of the tools or resources it called and borrowed them from whichever test ran before it; the assertion that failed depended on execution order. All 178 native tests now pass in isolation.
 - Preserved ordinary comments when replacing GDScript symbols.
