@@ -155,6 +155,45 @@ The approved all-or-nothing 78/78 activation gate prevented Tasks 2-13; no produ
 
 See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
+**Governance decision (2026-08-30): option A, partial delivery to 75/78.**
+
+Option B holds fifteen working tools hostage to three that are blocked on public
+Godot APIs which may never exist. That is not a safety control: the project
+already has the mechanism for shipping an incomplete surface honestly, which is
+`implemented: false` capability metadata and a call that is rejected before any
+handler runs. A name reserved that way is not a stub, and the no-stub rule is
+fully satisfied by option A. Option B adds no safety over option A; it only adds
+delay, and it is the same shape as the retired canonical-count freeze -- a rule
+that was correct when written and became a block on real work once its reason
+expired.
+
+Option C is rejected. Private adapters or engine changes for
+`physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack` mean
+maintaining behavior against Godot internals that the engine does not support,
+re-proving it on every engine release, and doing so for the three contracts with
+the weakest evidence. The roadmap already forbids a second plugin architecture
+for the same reason.
+
+The three blocked names stay registered, `implemented: false`, and honest.
+Adopting option A does not weaken any approved contract; a contract change
+remains a separate explicit amendment.
+
+**The Godot 4.7 minimum-version change is decoupled from this decision and is
+not authorized by it.** The feasibility gate's own audit records `18 distinct
+rows, 15 GO, 3 BLOCKED` on Godot 4.5.1 and the identical result on 4.7.2, so
+every one of the fifteen feasible tools is feasible on the current 4.5 floor.
+Raising the floor therefore buys nothing for Phase 7 while dropping 4.5 and 4.6
+users, and it must be justified on its own merits -- for example
+`EditorInterface.get_unsaved_scenes()`, which arrives in 4.7 and would let
+`scene_close` read real dirty state -- through a separate decision recorded in
+[Surface Amendments](SURFACE_AMENDMENTS.md). Work that assumes 4.7.2 as its sole
+baseline is carrying an unauthorized second decision.
+
+This decision authorizes Task 2. It does not change the phase status: the
+implementation on `main` remains 60/78 and Phase 7 stays
+`BLOCKED_AT_FEASIBILITY` until the first delivery slice lands, at which point the
+status and every published count move together.
+
 **Delivery slices:**
 - 7A: signals, viewport camera/debug, and tile/grid operations (9 tools)
 - 7B: physics, navigation, and animation operations (6 tools)
@@ -162,7 +201,7 @@ See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved execut
 
 **Exclusions:** No public tool names are added. No tool claims arbitrary debugger control or engine-output streaming beyond implemented Godot APIs.
 
-**Exit gate:** All 78 canonical tools have real implementations and cross-platform, native bridge, Godot, security, mutation-policy, and documentation evidence. Successful placeholders do not satisfy this gate. The 10 legacy registrations remain compatibility-only and do not change the canonical count.
+**Exit gate (option A):** The fifteen feasible canonical tools have real implementations, and the three API-blocked names remain registered with `implemented: false` and reject calls. Each delivered tool carries cross-platform, native bridge, Godot, security, mutation-policy, and documentation evidence. The superseded atomic gate required that all 78 canonical tools have real implementations and cross-platform, native bridge, Godot, security, mutation-policy, and documentation evidence. Successful placeholders do not satisfy this gate. The 10 legacy registrations remain compatibility-only and do not change the canonical count.
 
 ## Phase 8: Deep Project Intelligence and Asset Pipeline (`PLANNED`)
 

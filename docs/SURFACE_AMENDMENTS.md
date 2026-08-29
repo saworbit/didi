@@ -58,6 +58,25 @@ August 2026 competitive review and are proposed, not accepted, in
 `runtime_read_output`, `ui_list_controls`, `godot_api_reference`, and an `until`
 parameter on the existing `runtime_step` (a change, not a new name).
 
+### PROPOSED: raise the minimum Godot version to 4.7
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | No tool name. A change to the supported engine floor, currently 4.5+. |
+| **Failing workflow** | None on its own. This exists as a record because Phase 7 partial-delivery work adopted Godot 4.7.2 as its sole baseline without a separate decision, and because the `scene_close` amendment above becomes free rather than version-gated if the floor moves. |
+| **Execution modes** | Unchanged. |
+| **Safety class** | Not a mutation. It is a user-facing breaking change: 4.5 and 4.6 users lose support. |
+| **Proving test** | CI drops 4.5.1 and 4.6.2 from the verified matrix; every claim currently qualified by engine version is re-checked against 4.7 alone. |
+| **Reviewer** | Unassigned. |
+
+Evidence against bundling this with Phase 7: the feasibility gate's own audit
+records `18 distinct rows, 15 GO, 3 BLOCKED` on Godot 4.5.1 and the identical
+result on 4.7.2. All fifteen feasible tools are feasible on the existing floor,
+so Phase 7 supplies no argument for raising it. The real argument is
+`EditorInterface.get_unsaved_scenes()`, which arrives in 4.7 — a genuine but
+small benefit that has to be weighed against dropping two engine versions at
+v1.4.x. Decide it on that basis, not as a side effect.
+
 ### PROPOSED: `scene_close` reads real dirty state on Godot 4.7+
 
 | Field | Value |
