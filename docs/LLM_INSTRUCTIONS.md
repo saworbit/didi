@@ -67,7 +67,7 @@ Project-wide mutations are persisted immediately. Re-read the corresponding list
 - Use `scene_create` for empty Node2D, Node3D, or Control scenes.
 - Use `scene_pack_branch` to serialize an owned duplicate of a live branch without detaching the source.
 - Use `scene_open` and verify with `scene_get_hierarchy`.
-- On Godot 4.5, `scene_close` always requires explicit `discard_unsaved: true` because the engine does not expose dirty state to GDExtension. Ask for or infer this intent only when discarding is genuinely authorized.
+- `scene_close` always requires explicit `discard_unsaved: true` on every supported Godot version. Godot 4.5 and 4.6 do not expose dirty state to GDExtension at all, and Didi does not yet read the `get_unsaved_scenes()` call added in 4.7. Ask for or infer this intent only when discarding is genuinely authorized.
 - Use only normalized `res://*.tscn` paths; never send filesystem paths or `..` segments.
 
 ### Inspect a viewport

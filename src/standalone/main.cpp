@@ -1,4 +1,5 @@
 #include "didi/mcp/mcp_server.hpp"
+#include "didi/mcp/tool_registry.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
 #include <iostream>
@@ -32,6 +33,18 @@ int main(int argc, char* argv[]) {
         if (arg == "--version" || arg == "-v") {
             std::cout << "didi (godot-mcp-native) v1.4.0" << std::endl;
             return 0;
+        } else if (arg == "--dump-tool-manifest") {
+            // Emits the registered tool surface as JSON so documentation can be
+            // validated against the software rather than against other
+            // documentation. Introspection only: it registers no handlers'
+            // side effects, needs no Godot project, and never opens IPC.
+            didi::mcp::ToolRegistry::instance().registerAllDefaultTools();
+            std::cout << didi::mcp::ToolRegistry::instance()
+                             .buildManifest()
+                             .toJson()
+                             .dump(2)
+                      << std::endl;
+            return 0;
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "Didi - Native Model Context Protocol (MCP) Server for Godot 4.5+\n\n"
                       << "Usage:\n"
@@ -42,6 +55,7 @@ int main(int argc, char* argv[]) {
                       << "  -p, --project <dir>   Set Godot project root directory (or use DIDI_PROJECT_ROOT)\n"
                       << "  --pipe-name <name>    Override Named Pipe / Unix domain socket name (or DIDI_PIPE_NAME)\n"
                       << "  --log-level <level>   Set log level (DEBUG, INFO, WARN, ERROR, NONE)\n"
+                      << "  --dump-tool-manifest  Print the registered tool surface as JSON and exit\n"
                       << "\n"
                       << "MCP Protocol:\n"
                       << "  Communicates over standard I/O (JSON-RPC 2.0) with AI coding assistants.\n"

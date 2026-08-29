@@ -26,15 +26,25 @@ Historical entries describe the surface advertised by those releases. For the ex
 - Added the approved Phase 7-12 roadmap, including canonical-surface completion and governance requirements for all future phases.
 - Completed the 2026-08-29 Phase 7 feasibility gate on Godot 4.5.1 and 4.7.2. The reproducible [evidence](docs/PHASE_7_API_FEASIBILITY.md) found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts; the [executable plan](docs/PHASE_7_IMPLEMENTATION_PLAN.md) stopped before Tasks 2-13.
 
+- Added `didi --dump-tool-manifest`, which emits the registered tool surface as sorted, byte-stable JSON with counts and names. Documentation and the CI MCP smoke are now validated against it, so a published count can never disagree with the software.
+- Added `kLegacyToolNames` as the single declaration of which registrations are legacy. The canonical/legacy split previously existed only in prose and could not be verified.
+- Added `--list` and `--filter=<substring>` to the native test runner, so a single case can be run in isolation.
+- Added [docs/SURFACE_AMENDMENTS.md](docs/SURFACE_AMENDMENTS.md), the record through which the canonical tool surface may grow.
+
 ### Changed
 
 - Mutating tool schemas now advertise `dry_run`; editor reload, script patching, and overwrite-enabled offline writers require a 120-second single-use token bound to the exact arguments, project, and runtime route.
+- The documentation validator derives every published tool count from the tool manifest instead of matching hard-coded numbers in prose. It previously enforced that documents agreed with each other rather than with the binary, and implementing any reserved tool would have failed CI until the validator itself was edited.
+- The CI MCP smoke verifies the live `tools/list` surface against the manifest emitted by the same build, and now asserts every `implemented` flag rather than a sample.
+- Split the fused surface rule: "no success stubs" remains absolute, while new tool names are added through a recorded surface amendment.
+- Documented that Godot 4.5 and 4.6 expose no read-side scene dirty state through GDExtension and that `EditorInterface.get_unsaved_scenes()` arrives in 4.7, which Didi does not yet consume. The previous wording named only 4.5 and read as a permanent engine limitation.
 - Discovery now exposes 78 canonical tools plus 10 legacy registrations (88 total). Sixty canonical tools are implemented and 18 remain unimplemented.
 - Phase 7 status is `BLOCKED_AT_FEASIBILITY`. All 18 names remain registered but unimplemented, including the 15/18 implementation-feasible names. For `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Work now requires an explicit governance choice between partial 75/78 delivery, retaining atomic 78/78, or explicitly approving and maintaining engine changes or private adapters sufficient for all three exact blocked contracts. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2; weakening a contract requires a separate explicit contract amendment.
 
 ### Fixed
 
 - Reconciled all current operating documentation with Phase 6: completed the roadmap's 78-tool table, documented project-root startup, session lock `423`, mutation preview/confirmation semantics, and labeled historical design records so they are not mistaken for current behavior.
+- Gave four order-dependent native tests their own setup. `Tools.CaptureViewportWithIpc` was intermittently failing because it registered none of the tools or resources it called and borrowed them from whichever test ran before it; the assertion that failed depended on execution order. All 178 native tests now pass in isolation.
 - Preserved ordinary comments when replacing GDScript symbols.
 - Preserved explicit `null` JSON-RPC success results.
 - Failed closed before creating a Windows session pipe when the owner-and-Administrators security descriptor cannot be built.

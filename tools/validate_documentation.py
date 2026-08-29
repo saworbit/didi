@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -64,7 +65,43 @@ FUTURE_PHASE_COMPLETION_FIELDS = (
     "pull request",
     "verification evidence",
 )
+# Fallback used only when no tool manifest is supplied (local runs without a
+# build). CI always passes --tool-manifest, so the built binary is authoritative
+# and implementing a reserved tool never requires editing this file.
 CANONICAL_IMPLEMENTATION_COUNTS = (78, 60, 18)
+
+TOOL_MANIFEST_COUNT_KEYS = ("canonical", "legacy", "implemented", "unimplemented", "total")
+
+# Which published counts each document must state, keyed by manifest count.
+COUNT_FACTS = {
+    "README.md": (
+        ("canonical", r"\b{n}[- ]canonical", "canonical tools"),
+        ("legacy", r"\b{n} (?:additional )?legacy", "legacy names"),
+        ("total", r"\b{n} total|\({n} total\)|{n} registrations", "total registrations"),
+    ),
+    "docs/CAPABILITIES.md": (
+        ("canonical", r"\b{n} canonical", "canonical tools"),
+        ("legacy", r"\b{n} legacy|{w} legacy", "legacy names"),
+        ("total", r"\b{n} [`\w/-]* ?entries|exactly {n}", "total registrations"),
+        ("implemented", r"\b{n} (?:canonical )?tools? (?:are )?implemented|{w} (?:canonical tools? )?are implemented", "implemented tools"),
+        ("unimplemented", r"\b{n} (?:canonical )?(?:tools? )?(?:remain )?(?:reserved|unimplemented)", "unimplemented tools"),
+    ),
+    "docs/TOOL_REFERENCE.md": (
+        ("canonical", r"\b{n} canonical", "canonical tools"),
+        ("legacy", r"\b{n} legacy", "legacy names"),
+        ("total", r"\b{n} registrations", "total registrations"),
+    ),
+    "CHANGELOG.md": (
+        ("canonical", r"\b{n} canonical", "canonical tools"),
+        ("legacy", r"\b{n} legacy", "legacy names"),
+        ("total", r"\b{n} total|{n}-registration", "total registrations"),
+        ("implemented", r"\b{n} (?:canonical )?tools? (?:are )?implemented|{w} (?:canonical )?tools? are implemented", "implemented tools"),
+        ("unimplemented", r"\b{n} (?:canonical )?(?:tools? )?(?:remain )?(?:reserved|honestly unimplemented|unimplemented)", "unimplemented tools"),
+    ),
+}
+
+# Documentation may spell a count in words; the number still comes from the manifest.
+NUMBER_WORDS = {10: "ten", 18: "eighteen", 60: "sixty", 78: "seventy-eight", 88: "eighty-eight"}
 PHASE7_CANONICAL_TOOLS = (
     "signal_list_connections",
     "signal_connect",
@@ -120,38 +157,22 @@ PHASE7_FEASIBLE_NAMES_END = "<!-- phase7-feasible-names:end -->"
 
 FACT_PATTERNS = {
     "README.md": (
-        (r"\b78[- ]canonical|\b78 canonical", "78 canonical"),
-        (r"\b10 (?:additional )?legacy", "10 legacy"),
-        (r"\b88 total|\(88 total\)|88 registrations", "88 total"),
         (r"--project[\s\S]*DIDI_PROJECT_ROOT|DIDI_PROJECT_ROOT[\s\S]*--project", "explicit project root"),
         (r"\bdry_run\b", "mutation dry-run"),
         (r"\bconfirmation_token\b", "mutation confirmation"),
     ),
     "docs/CAPABILITIES.md": (
-        (r"\b78 canonical", "78 canonical"),
-        (r"\b10 legacy|Ten legacy", "10 legacy"),
-        (r"\b88 [`\w/-]* ?entries|exactly 88", "88 total"),
-        (r"\b60 (?:canonical )?tools? (?:are )?implemented|Sixty (?:canonical )?tools? are implemented|Sixty are implemented", "60 implemented"),
-        (r"\b18 (?:canonical )?(?:tools? )?(?:remain )?(?:reserved|unimplemented)", "18 unimplemented"),
         (r"--project[\s\S]*DIDI_PROJECT_ROOT|DIDI_PROJECT_ROOT[\s\S]*--project", "explicit project root"),
         (r"\b423\b", "one-client session lock"),
         (r"\bdry_run\b", "mutation dry-run"),
         (r"\bconfirmation_token\b", "mutation confirmation"),
     ),
     "docs/TOOL_REFERENCE.md": (
-        (r"\b78 canonical", "78 canonical"),
-        (r"\b10 legacy", "10 legacy"),
-        (r"\b88 registrations", "88 total"),
         (r"\b423\b", "one-client session lock"),
         (r"\bdry_run\b", "mutation dry-run"),
         (r"\bconfirmation_token\b", "mutation confirmation"),
     ),
     "CHANGELOG.md": (
-        (r"\b78 canonical", "78 canonical"),
-        (r"\b10 legacy", "10 legacy"),
-        (r"\b88 total|88-registration", "88 total"),
-        (r"\b60 (?:canonical )?tools? (?:are )?implemented|Sixty (?:canonical )?tools? are implemented", "60 implemented"),
-        (r"\b18 (?:canonical )?(?:tools? )?(?:remain )?(?:reserved|honestly unimplemented|unimplemented)", "18 unimplemented"),
     ),
     "docs/API_SPECIFICATION.md": (
         (r"\b423\b", "one-client session lock"),
@@ -942,7 +963,9 @@ def _parse_count(value: str) -> int:
     return 60 if value.lower() == "sixty" else int(value)
 
 
-def validate_canonical_implementation_counts(texts: dict[str, str]) -> list[str]:
+def validate_canonical_implementation_counts(
+    texts: dict[str, str], expected: tuple[int, int, int] = CANONICAL_IMPLEMENTATION_COUNTS
+) -> list[str]:
     errors: list[str] = []
     observed: dict[str, tuple[int, int, int]] = {}
     for relative_path, pattern in CANONICAL_COUNT_PATTERNS.items():
@@ -967,10 +990,11 @@ def validate_canonical_implementation_counts(texts: dict[str, str]) -> list[str]
                 f"{relative_path}: canonical implementation counts do not add up: "
                 f"{implemented} implemented + {remaining} remaining != {canonical} canonical"
             )
-        if counts != CANONICAL_IMPLEMENTATION_COUNTS:
+        if counts != expected:
             errors.append(
-                f"{relative_path}: canonical implementation counts must be 78 canonical, "
-                f"60 implemented, and 18 remaining; found {canonical}, {implemented}, {remaining}"
+                f"{relative_path}: canonical implementation counts must be {expected[0]} canonical, "
+                f"{expected[1]} implemented, and {expected[2]} remaining; "
+                f"found {canonical}, {implemented}, {remaining}"
             )
         if "target" in match.groupdict() and (
             int(match.group("target")) != canonical
@@ -1018,7 +1042,59 @@ def _tracked_paths(
     return {path for path in paths if path}, None
 
 
-def validate_repository(root: Path) -> list[str]:
+def load_tool_manifest(path: Path) -> tuple[dict[str, int] | None, list[str]]:
+    """Read the counts emitted by `didi --dump-tool-manifest`.
+
+    The documentation contract is validated against the software, so a missing
+    or malformed manifest is a hard failure rather than a reason to skip the
+    count checks.
+    """
+    if not path.is_file():
+        return None, [
+            f"{path}: tool manifest not found. Build didi and generate it with: "
+            f"didi --dump-tool-manifest > {path}"
+        ]
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        return None, [f"{path}: cannot read tool manifest: {error}"]
+
+    counts = document.get("counts")
+    if not isinstance(counts, dict):
+        return None, [f"{path}: tool manifest has no 'counts' object"]
+    missing = [k for k in TOOL_MANIFEST_COUNT_KEYS if not isinstance(counts.get(k), int)]
+    if missing:
+        return None, [f"{path}: tool manifest is missing integer counts: {', '.join(missing)}"]
+    if counts["canonical"] + counts["legacy"] != counts["total"]:
+        return None, [f"{path}: tool manifest total does not equal canonical + legacy"]
+    if counts["implemented"] + counts["unimplemented"] != counts["canonical"]:
+        return None, [
+            f"{path}: tool manifest canonical does not equal implemented + unimplemented"
+        ]
+    return counts, []
+
+
+def validate_tool_surface_counts(
+    texts: dict[str, str], counts: dict[str, int]
+) -> list[str]:
+    """Assert every document states the counts the built binary actually has."""
+    errors: list[str] = []
+    for relative_path, requirements in COUNT_FACTS.items():
+        text = texts.get(relative_path)
+        if text is None:
+            continue
+        for count_key, template, label in requirements:
+            number = counts[count_key]
+            pattern = template.format(n=number, w=NUMBER_WORDS.get(number, str(number)))
+            if not re.search(pattern, text, flags=re.IGNORECASE):
+                errors.append(
+                    f"{relative_path}: must state {number} {label} "
+                    "to match the built tool surface"
+                )
+    return errors
+
+
+def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[str]:
     root = root.resolve()
     errors: list[str] = []
     texts: dict[str, str] = {}
@@ -1120,7 +1196,18 @@ def validate_repository(root: Path) -> list[str]:
             if not re.search(pattern, text, flags=re.IGNORECASE):
                 errors.append(f"{relative_path}: missing current release fact: {label}")
 
-    errors.extend(validate_canonical_implementation_counts(texts))
+    expected_counts = CANONICAL_IMPLEMENTATION_COUNTS
+    if tool_manifest is not None:
+        manifest_counts, manifest_errors = load_tool_manifest(tool_manifest)
+        errors.extend(manifest_errors)
+        if manifest_counts is not None:
+            expected_counts = (
+                manifest_counts["canonical"],
+                manifest_counts["implemented"],
+                manifest_counts["unimplemented"],
+            )
+            errors.extend(validate_tool_surface_counts(texts, manifest_counts))
+    errors.extend(validate_canonical_implementation_counts(texts, expected_counts))
     errors.extend(validate_phase7_reconciliation(texts))
 
     roadmap_text = texts.get("docs/ROADMAP.md")
@@ -1148,8 +1235,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=Path(__file__).resolve().parents[1],
         help="repository root (defaults to the validator's parent repository)",
     )
+    parser.add_argument(
+        "--tool-manifest",
+        type=Path,
+        default=None,
+        help=(
+            "JSON emitted by `didi --dump-tool-manifest`. When supplied, every "
+            "published tool count is validated against the built binary instead "
+            "of against other documentation."
+        ),
+    )
     arguments = parser.parse_args(argv)
-    errors = validate_repository(arguments.root)
+    errors = validate_repository(arguments.root, arguments.tool_manifest)
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1

@@ -74,7 +74,7 @@ Phase 2 completes the normal create, wire, persist, and reopen loop:
 - Scenes can be created, opened, explicitly closed, and packed from owned node branches through Godot resource APIs.
 - Integration runs in a disposable project copy and covers 119 ordered live requests, overwrite guards, unsafe paths, duplicates, malformed values, forced persistence failure and rollback, runtime reload, and cleanup.
 
-Godot 4.5 cannot report editor dirty state through GDExtension, so `scene_close` deliberately requires `discard_unsaved: true`. This is a conservative data-loss guard, not a success stub.
+Godot 4.5 and 4.6 cannot report editor dirty state through GDExtension, so `scene_close` deliberately requires `discard_unsaved: true`. This is a conservative data-loss guard, not a success stub. Godot 4.7 adds `EditorInterface.get_unsaved_scenes()`; consuming it behind a version check is tracked as a proposed surface amendment.
 
 ---
 
@@ -240,7 +240,8 @@ These are missing capabilities that an AI agent actually requires to complete fu
 
 ## 🚫 What NOT to Add Yet
 
-- ❌ **Do NOT add more domain stubs** (e.g. `audio_bus_*`, `multiplayer_*`, `particle_*`, `xr_*`) while existing reserved signal, physics/navigation, TileMap/GridMap, camera/debug, and runtime-debugger schemas remain unimplemented.
+- ❌ **Do NOT add success stubs.** A registered name that cannot execute must report `implemented: false` and reject calls. This rule is absolute.
+- ⚠️ **Do NOT add speculative domain families** (e.g. `audio_bus_*`, `multiplayer_*`, `particle_*`, `xr_*`) while existing reserved signal, physics/navigation, TileMap/GridMap, camera/debug, and runtime-debugger schemas remain unimplemented. A single name that an agent workflow provably needs is added through a [Surface Amendment](SURFACE_AMENDMENTS.md), not blocked by this rule.
 - ❌ **Do NOT create a second plugin architecture or network transport** — local named pipes and UNIX domain sockets are optimal.
 - ❌ **Do NOT build a custom GDScript language server** — extend the existing symbol extractor and headless Godot compiler check only where evidence requires it.
 - ❌ **Do NOT expand the limited static ClassDB map** — replace it with live Godot `ClassDB` or generated `extension_api.json` data.
