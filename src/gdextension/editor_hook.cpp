@@ -468,7 +468,11 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "scene.listGroups", "scene.addToGroup", "scene.removeFromGroup",
         "scene.getGroupMembers", "scene.create", "scene.open", "scene.close",
         "scene.packBranch", "runtime.getTree", "runtime.setPaused", "runtime.stop",
-        "runtime.evalGdscript", "ui.hitTest"
+        "runtime.evalGdscript", "ui.hitTest", "signal.listConnections", "signal.connect",
+        "signal.disconnect", "signal.emit"
+#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
+        , "phase7SignalTest.configure"
+#endif
     };
     if (live_bridge_methods.count(method)) {
         if (m_sessionKind == runtime::SessionKind::game && method.rfind("runtime.", 0) != 0) {

@@ -116,6 +116,16 @@ set(GDEXT_SOURCES
 add_library(didi_extension SHARED ${GDEXT_SOURCES})
 target_link_libraries(didi_extension PRIVATE didi_core)
 
+# Test-only build of the real extension. It shares every production source but enables
+# deterministic failure seams used by the Godot 4.7.2 raw-bridge fixture.
+add_library(didi_extension_signal_tests SHARED ${GDEXT_SOURCES})
+target_link_libraries(didi_extension_signal_tests PRIVATE didi_core)
+target_compile_definitions(didi_extension_signal_tests PRIVATE DIDI_PHASE7_SIGNAL_TEST_SEAMS=1)
+set_target_properties(didi_extension_signal_tests PROPERTIES OUTPUT_NAME didi_extension_signal_tests)
+
+add_executable(phase7_signal_bridge_probe tests/phase7_signal_bridge_probe.cpp)
+target_link_libraries(phase7_signal_bridge_probe PRIVATE didi_core)
+
 # Copy DLL to addons/didi/bin after build
 add_custom_command(TARGET didi_extension POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/bin"
@@ -146,6 +156,7 @@ set(TEST_SOURCES
     tests/test_phase6.cpp
     tests/test_phase7_contract.cpp
     tests/test_phase7a_signals.cpp
+    tests/test_phase7_signal_followup.cpp
     tests/test_phase7a_viewport.cpp
     tests/test_phase7a_tile_grid.cpp
     tests/test_phase7b_physics.cpp

@@ -75,7 +75,10 @@ class Godot47FollowupPolicyTests(unittest.TestCase):
             "demo/project.godot",
             "tests/godot_smoke/project.godot",
         }
-        expected_fixtures = {"tests/phase7_contract_probe/project.godot"}
+        expected_fixtures = {
+            "tests/phase7_contract_probe/project.godot",
+            "tests/phase7_signal_bridge/project.godot",
+        }
         expected_historical = {"tests/phase7_feasibility/project.godot"}
         self.assertEqual(
             set(validate_documentation.CURRENT_PROJECT_MANIFESTS),

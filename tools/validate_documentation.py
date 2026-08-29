@@ -1075,6 +1075,7 @@ CURRENT_PROJECT_MANIFESTS = (
 )
 CURRENT_PROJECT_FIXTURE_EXCEPTIONS = (
     "tests/phase7_contract_probe/project.godot",
+    "tests/phase7_signal_bridge/project.godot",
 )
 HISTORICAL_PROJECT_MANIFESTS = (
     "tests/phase7_feasibility/project.godot",
