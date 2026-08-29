@@ -31,6 +31,14 @@ func receive_float(value: float) -> void:
 	if typeof(value) == TYPE_FLOAT and value == 7.0:
 		_mark(&"marker_float")
 
+func receive_float_negative(value: float) -> void:
+	if typeof(value) == TYPE_FLOAT and value == -3.0:
+		_mark(&"marker_float_negative")
+
+func receive_float_preflight(value: float) -> void:
+	if typeof(value) == TYPE_FLOAT and value == 11.0:
+		_mark(&"marker_float_preflight")
+
 func receive_string(value: String) -> void:
 	if typeof(value) == TYPE_STRING and value == "utf8-✓":
 		_mark(&"marker_string")

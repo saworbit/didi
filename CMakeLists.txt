@@ -158,6 +158,7 @@ set(TEST_SOURCES
     tests/test_phase7_contract.cpp
     tests/test_phase7a_signals.cpp
     tests/test_phase7_signal_followup.cpp
+    tests/test_phase7_signal_admission.cpp
     tests/test_phase7a_viewport.cpp
     tests/test_phase7a_tile_grid.cpp
     tests/test_phase7b_physics.cpp
