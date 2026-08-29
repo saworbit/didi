@@ -109,16 +109,95 @@ Godot Engine v4.7.2.stable.official.ed1daf0bf
 GODOT_EXIT=0
 ```
 
-Headers, hashes, methods, constructors, enums, singletons, class construction flags, and blocker-pattern scans were extracted with `Get-Content -Raw ... | ConvertFrom-Json`, and dump hashes were computed with `Get-FileHash -Algorithm SHA256`. The complete ignored slices are `build/api-4.5.1/phase7-api-slice.json` and `build/api-4.7.2/phase7-api-slice.json`, pinned above.
+### Deterministic custom API-slice extraction
+
+The pinned slices are intentionally broader than the plan's example class-only filter: they also contain built-in constructors, global enums, singleton availability, class construction flags, and full blocker-pattern scans. They were generated from the worktree root with PowerShell `7.6.4` by the exact command below. `ConvertTo-Json` and `Set-Content` formatting are therefore part of the byte-level evidence format.
+
+```powershell
+$versions = @('4.5.1','4.7.2')
+$classMethods = @{
+  Object=@('get_signal_list','get_signal_connection_list','has_signal','has_method','get_method_list','connect','disconnect','is_connected','emit_signal')
+  Node=@('get_path','is_inside_tree','get_child_count','get_child','is_ancestor_of')
+  Node3D=@('get_position','set_position','get_rotation_degrees','set_rotation_degrees','get_global_transform')
+  Camera3D=@('get_fov','set_fov')
+  SceneTree=@('is_debugging_collisions_hint','set_debug_collisions_hint','is_debugging_navigation_hint','set_debug_navigation_hint')
+  TileMapLayer=@('get_tile_set','set_cell','erase_cell','get_cell_source_id','get_cell_atlas_coords','get_cell_alternative_tile','get_used_rect')
+  TileSet=@('has_source','get_source'); TileSetAtlasSource=@('has_tile','has_alternative_tile')
+  GridMap=@('get_mesh_library','set_cell_item','get_cell_item','get_cell_item_orientation'); MeshLibrary=@('has_item')
+  Viewport=@('get_world_2d','get_world_3d'); World2D=@('get_direct_space_state','get_navigation_map'); World3D=@('get_direct_space_state','get_navigation_map')
+  PhysicsDirectSpaceState2D=@('intersect_ray'); PhysicsDirectSpaceState3D=@('intersect_ray')
+  PhysicsRayQueryParameters2D=@('create','set_from','set_to','set_collision_mask','set_collide_with_bodies','set_collide_with_areas','set_hit_from_inside')
+  PhysicsRayQueryParameters3D=@('create','set_from','set_to','set_collision_mask','set_collide_with_bodies','set_collide_with_areas','set_hit_from_inside','set_hit_back_faces')
+  NavigationServer2D=@('map_get_path'); NavigationServer3D=@('map_get_path','parse_source_geometry_data','bake_from_source_geometry_data','bake_from_source_geometry_data_async','source_geometry_parser_create','source_geometry_parser_set_callback','source_geometry_parser_free')
+  NavigationRegion3D=@('get_navigation_mesh','set_navigation_mesh')
+  NavigationMeshSourceGeometryData3D=@('clear','has_data','add_mesh','add_mesh_array','add_faces','get_vertices','get_indices')
+  Resource=@('duplicate'); MeshInstance3D=@('get_mesh','get_skin','get_skeleton_path'); Mesh=@('get_surface_count','surface_get_arrays','get_blend_shape_count','get_aabb')
+  AnimationPlayer=@('get_animation_list','has_animation','get_animation','play','is_playing','get_current_animation')
+  Animation=@('get_length','get_loop_mode','get_track_count','track_get_type','track_get_path','track_get_key_count','track_get_key_time')
+  Input=@('parse_input_event')
+  InputEventAction=@('set_action','set_pressed','set_strength'); InputEventKey=@('set_keycode','set_physical_keycode','set_unicode','set_pressed','set_echo','set_shift_pressed','set_alt_pressed','set_ctrl_pressed','set_meta_pressed','set_device')
+  InputEventMouseButton=@('set_button_index','set_pressed','set_double_click','set_factor','set_device'); InputEventJoypadButton=@('set_button_index','set_pressed','set_pressure','set_device'); InputEventJoypadMotion=@('set_axis','set_axis_value','set_device')
+  Performance=@('get_monitor'); Script=@('get_language')
+  ScriptLanguage=@('debug_get_stack_level_count','debug_get_stack_level_function','debug_get_stack_level_source','debug_get_stack_level_line','debug_get_current_stack_info')
+  EngineDebugger=@('is_active','register_message_capture','unregister_message_capture','send_message','debug','script_debug')
+  EditorDebuggerPlugin=@('get_session','get_sessions','has_capture','register_message_capture'); EditorDebuggerSession=@('send_message','is_breaked','is_debuggable','stop','break_debugger','continue_debugger')
+}
+$builtinNames = @('Callable','Vector2','Vector3','Vector2i','Vector3i','Transform3D','Rect2i','AABB','RID','StringName','Array','Dictionary')
+$classNames = @($classMethods.Keys) + @('PhysicsServer2D','PhysicsServer3D','NavigationMesh','ArrayMesh','PrimitiveMesh','MultiMeshInstance3D','CSGShape3D','CollisionObject3D','CollisionShape3D','InputEvent','GDScript')
+$globalEnumNames = @('MouseButton','JoyButton','JoyAxis','Key')
+
+foreach ($version in $versions) {
+  $path = "build/api-$version/extension_api.json"
+  $api = Get-Content -Raw $path | ConvertFrom-Json
+  $classes = foreach ($c in $api.classes | Where-Object { $classNames -contains $_.name }) {
+    $wanted = $classMethods[$c.name]
+    [ordered]@{
+      name=$c.name; inherits=$c.inherits; is_instantiable=$c.is_instantiable; api_type=$c.api_type
+      methods=@($c.methods | Where-Object { $wanted -contains $_.name }); enums=@($c.enums); signals=@($c.signals)
+    }
+  }
+  $scan = foreach ($c in $api.classes) {
+    foreach ($m in @($c.methods)) {
+      if ($m.name -match '(stack|debug_get|step|simulate|bake|source_geometry|parse_source|parse_input_event|get_monitor)') {
+        [ordered]@{class=$c.name;method=$m}
+      }
+    }
+  }
+  $slice = [ordered]@{
+    header=$api.header
+    extension_api_sha256=(Get-FileHash -Algorithm SHA256 $path).Hash.ToLowerInvariant()
+    singletons=@($api.singletons | Where-Object { $classNames -contains $_.name -or $classNames -contains $_.type })
+    builtin_classes=@($api.builtin_classes | Where-Object { $builtinNames -contains $_.name } | ForEach-Object {
+      [ordered]@{name=$_.name;constructors=@($_.constructors);methods=@($_.methods);operators=@($_.operators)}
+    })
+    global_enums=@($api.global_enums | Where-Object { $globalEnumNames -contains $_.name })
+    classes=@($classes)
+    semantic_risk_scan=@($scan)
+  }
+  $out = "build/api-$version/phase7-api-slice.json"
+  $slice | ConvertTo-Json -Depth 100 | Set-Content -Encoding utf8 $out
+  (Get-FileHash -Algorithm SHA256 $out).Hash.ToLowerInvariant()
+}
+```
+
+The command was rerun without overwriting the originals by changing only `$out` to `phase7-api-slice.reproduced.json`, then comparing SHA-256 values:
+
+```text
+POWERSHELL=7.6.4
+SLICE|4.5.1|original=1a02f67618135d4cc932cf4e0c3c9c13746c592b9a2c7b10a6b58eefa3365be5|reproduced=1a02f67618135d4cc932cf4e0c3c9c13746c592b9a2c7b10a6b58eefa3365be5|match=True
+SLICE|4.7.2|original=4deebb48063ed5e0599edf9619cbdc9d52b4a837386f6dfc33c6dccee3752b09|reproduced=4deebb48063ed5e0599edf9619cbdc9d52b4a837386f6dfc33c6dccee3752b09|match=True
+```
 
 ### Dual-engine semantic probe
 
 ```powershell
 Push-Location build/phase7-feasibility
 & C:\Godot\Godot_v4.5.1-stable_win64_console.exe --headless --log-file .\godot-4.5.1.log --path . --script .\probe.gd
-$LASTEXITCODE
+$exit451 = $LASTEXITCODE
+if ($exit451 -ne 0) { exit $exit451 }
 & C:\Godot\Godot_v4.7.2-stable_win64_console.exe --headless --log-file .\godot-4.7.2.log --path . --script .\probe.gd
-$LASTEXITCODE
+$exit472 = $LASTEXITCODE
+if ($exit472 -ne 0) { exit $exit472 }
 Pop-Location
 ```
 
@@ -129,6 +208,15 @@ AUDIT|4.5.1|rows=18|distinct=18|duplicate_groups=0|go=15|blocked=3
 BLOCKED|4.5.1|nav_bake_mesh,physics_simulate_step,runtime_get_call_stack
 AUDIT|4.7.2|rows=18|distinct=18|duplicate_groups=0|go=15|blocked=3
 BLOCKED|4.7.2|nav_bake_mesh,physics_simulate_step,runtime_get_call_stack
+```
+
+A focused evidence-quality rerun used separate PowerShell processes and asserted each exit and row set independently:
+
+```text
+ENGINE_EXIT|4.5.1|0
+ROW_ASSERT|4.5.1|rows=18|distinct=18|go=15|blocked=3
+ENGINE_EXIT|4.7.2|0
+ROW_ASSERT|4.7.2|rows=18|distinct=18|go=15|blocked=3
 ```
 
 Godot reported a Windows root-certificate-store warning in the sandbox. It did not affect engine initialization, API behavior, row counts, or exit status. No network operation is part of the probe.
