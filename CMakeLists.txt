@@ -116,6 +116,7 @@ set(TEST_SOURCES
     tests/test_test_runner.cpp
     tests/test_phase5.cpp
     tests/test_phase6.cpp
+    tests/test_tool_manifest.cpp
 )
 
 add_executable(didi_tests ${TEST_SOURCES})

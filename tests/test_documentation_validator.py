@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import re
 from pathlib import Path
 import tempfile
@@ -203,6 +204,87 @@ Second section.
 
     def test_valid_repository_has_no_errors(self):
         self.assertEqual(VALIDATOR.validate_repository(self.make_valid_repository()), [])
+
+    # --- tool manifest: documentation is validated against the built binary ---
+
+    def write_manifest(self, **overrides) -> Path:
+        """Write a tool manifest matching the synthetic fixture's documented counts."""
+        counts = {
+            "canonical": 78,
+            "legacy": 10,
+            "implemented": 60,
+            "unimplemented": 18,
+            "total": 88,
+        }
+        counts.update(overrides)
+        path = self.root / "tool_manifest.json"
+        path.write_text(
+            json.dumps({"schema": 1, "counts": counts, "names": {}}), encoding="utf-8"
+        )
+        return path
+
+    def test_manifest_matching_documentation_passes(self):
+        root = self.make_valid_repository()
+        self.assertEqual(VALIDATOR.validate_repository(root, self.write_manifest()), [])
+
+    def test_manifest_disagreeing_with_documentation_fails(self):
+        # The whole point of the manifest: implementing a reserved tool must
+        # fail validation until the documentation is updated to match.
+        root = self.make_valid_repository()
+        manifest = self.write_manifest(implemented=61, unimplemented=17)
+        errors = VALIDATOR.validate_repository(root, manifest)
+        self.assertTrue(
+            any("must state 61 implemented tools" in error for error in errors), errors
+        )
+        self.assertTrue(
+            any("must state 17 unimplemented tools" in error for error in errors), errors
+        )
+
+    def test_missing_manifest_fails_with_actionable_message(self):
+        root = self.make_valid_repository()
+        errors = VALIDATOR.validate_repository(root, self.root / "absent.json")
+        self.assertTrue(any("--dump-tool-manifest" in error for error in errors), errors)
+
+    def test_internally_inconsistent_manifest_is_rejected(self):
+        root = self.make_valid_repository()
+        errors = VALIDATOR.validate_repository(root, self.write_manifest(total=999))
+        self.assertTrue(
+            any("total does not equal canonical + legacy" in error for error in errors),
+            errors,
+        )
+
+    def test_manifest_split_inconsistency_is_rejected(self):
+        root = self.make_valid_repository()
+        errors = VALIDATOR.validate_repository(root, self.write_manifest(implemented=1))
+        self.assertTrue(
+            any(
+                "canonical does not equal implemented + unimplemented" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_malformed_manifest_is_rejected(self):
+        root = self.make_valid_repository()
+        path = self.root / "tool_manifest.json"
+        path.write_text("{not json", encoding="utf-8")
+        errors = VALIDATOR.validate_repository(root, path)
+        self.assertTrue(any("cannot read tool manifest" in error for error in errors), errors)
+
+    def test_counts_are_not_hardcoded_in_the_validator(self):
+        # Guards the regression this mechanism exists to prevent: a published
+        # count must never be a literal in the validator again.
+        source = Path(VALIDATOR.__file__).read_text(encoding="utf-8")
+        fact_patterns = re.search(
+            r"FACT_PATTERNS = \{.*?\n\}\n", source, flags=re.DOTALL
+        )
+        self.assertIsNotNone(fact_patterns)
+        for count in ("78", "88", "60", "18"):
+            self.assertNotIn(
+                count,
+                fact_patterns.group(0),
+                f"published count {count} is hard-coded in FACT_PATTERNS",
+            )
 
     def test_repository_requires_future_phase_roadmap(self):
         errors = VALIDATOR.validate_repository(self.make_valid_repository())
@@ -762,13 +844,31 @@ Pull request: #1234
         self.assertTrue(any("unsupported release 1.3.x" in error for error in errors), errors)
 
     def test_reports_missing_current_release_fact(self):
+        # Published counts are now checked against the manifest, so this drift
+        # is caught by comparing the document to the built binary.
         root = self.make_valid_repository()
         readme = (root / "README.md").read_text(encoding="utf-8")
         self.write("README.md", readme.replace("78 canonical", "77 canonical"))
 
+        errors = VALIDATOR.validate_repository(root, self.write_manifest())
+
+        self.assertTrue(
+            any("README.md" in error and "78 canonical tools" in error for error in errors),
+            errors,
+        )
+
+    def test_reports_missing_non_count_release_fact(self):
+        # Non-count facts stay in FACT_PATTERNS and need no manifest.
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        self.write("README.md", readme.replace("dry_run", "preview_only"))
+
         errors = VALIDATOR.validate_repository(root)
 
-        self.assertTrue(any("README.md" in error and "78 canonical" in error for error in errors), errors)
+        self.assertTrue(
+            any("README.md" in error and "mutation dry-run" in error for error in errors),
+            errors,
+        )
 
     def test_reports_missing_phase6_safety_fact(self):
         root = self.make_valid_repository()

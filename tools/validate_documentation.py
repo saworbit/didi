@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import re
 import sys
@@ -47,40 +48,25 @@ FORBIDDEN_ARTIFACT_PATHS = (
     "docs/superpowers",
 )
 
+# Facts that are properties of the software, not of the prose. Every published
+# count is derived from the tool manifest emitted by `didi --dump-tool-manifest`
+# and never hard-coded here; see COUNT_FACTS and validate_tool_surface_counts.
 FACT_PATTERNS = {
     "README.md": (
-        (r"\b78[- ]canonical|\b78 canonical", "78 canonical"),
-        (r"\b10 (?:additional )?legacy", "10 legacy"),
-        (r"\b88 total|\(88 total\)|88 registrations", "88 total"),
         (r"--project[\s\S]*DIDI_PROJECT_ROOT|DIDI_PROJECT_ROOT[\s\S]*--project", "explicit project root"),
         (r"\bdry_run\b", "mutation dry-run"),
         (r"\bconfirmation_token\b", "mutation confirmation"),
     ),
     "docs/CAPABILITIES.md": (
-        (r"\b78 canonical", "78 canonical"),
-        (r"\b10 legacy|Ten legacy", "10 legacy"),
-        (r"\b88 [`\w/-]* ?entries|exactly 88", "88 total"),
-        (r"\b60 (?:canonical )?tools? (?:are )?implemented|Sixty (?:canonical )?tools? are implemented|Sixty are implemented", "60 implemented"),
-        (r"\b18 (?:canonical )?(?:tools? )?(?:remain )?(?:reserved|unimplemented)", "18 unimplemented"),
         (r"--project[\s\S]*DIDI_PROJECT_ROOT|DIDI_PROJECT_ROOT[\s\S]*--project", "explicit project root"),
         (r"\b423\b", "one-client session lock"),
         (r"\bdry_run\b", "mutation dry-run"),
         (r"\bconfirmation_token\b", "mutation confirmation"),
     ),
     "docs/TOOL_REFERENCE.md": (
-        (r"\b78 canonical", "78 canonical"),
-        (r"\b10 legacy", "10 legacy"),
-        (r"\b88 registrations", "88 total"),
         (r"\b423\b", "one-client session lock"),
         (r"\bdry_run\b", "mutation dry-run"),
         (r"\bconfirmation_token\b", "mutation confirmation"),
-    ),
-    "CHANGELOG.md": (
-        (r"\b78 canonical", "78 canonical"),
-        (r"\b10 legacy", "10 legacy"),
-        (r"\b88 total|88-registration", "88 total"),
-        (r"\b60 (?:canonical )?tools? (?:are )?implemented|Sixty (?:canonical )?tools? are implemented", "60 implemented"),
-        (r"\b18 (?:canonical )?(?:tools? )?(?:remain )?(?:reserved|honestly unimplemented|unimplemented)", "18 unimplemented"),
     ),
     "docs/API_SPECIFICATION.md": (
         (r"\b423\b", "one-client session lock"),
@@ -103,6 +89,52 @@ FACT_PATTERNS = {
         (r"Phase 5 Deep Domains \(6\)", "six-tool Phase 5 canonical row"),
     ),
 }
+
+# Which published counts each document must state, keyed by manifest count.
+# The expected number comes from the built binary, so implementing a reserved
+# tool updates every one of these automatically instead of breaking CI.
+COUNT_FACTS = {
+    "README.md": (
+        ("canonical", r"\b{n}[- ]canonical", "canonical tools"),
+        ("legacy", r"\b{n} (?:additional )?legacy", "legacy names"),
+        ("total", r"\b{n} total|\({n} total\)|{n} registrations", "total registrations"),
+    ),
+    "docs/CAPABILITIES.md": (
+        ("canonical", r"\b{n} canonical", "canonical tools"),
+        ("legacy", r"\b{n} legacy|{w} legacy", "legacy names"),
+        ("total", r"\b{n} [`\w/-]* ?entries|exactly {n}", "total registrations"),
+        ("implemented",
+         r"\b{n} (?:canonical )?tools? (?:are )?implemented|{w} (?:canonical tools? )?are implemented",
+         "implemented tools"),
+        ("unimplemented",
+         r"\b{n} (?:canonical )?(?:tools? )?(?:remain )?(?:reserved|unimplemented)",
+         "unimplemented tools"),
+    ),
+    "docs/TOOL_REFERENCE.md": (
+        ("canonical", r"\b{n} canonical", "canonical tools"),
+        ("legacy", r"\b{n} legacy", "legacy names"),
+        ("total", r"\b{n} registrations", "total registrations"),
+    ),
+    "CHANGELOG.md": (
+        ("canonical", r"\b{n} canonical", "canonical tools"),
+        ("legacy", r"\b{n} legacy", "legacy names"),
+        ("total", r"\b{n} total|{n}-registration", "total registrations"),
+        ("implemented",
+         r"\b{n} (?:canonical )?tools? (?:are )?implemented|{w} (?:canonical )?tools? are implemented",
+         "implemented tools"),
+        ("unimplemented",
+         r"\b{n} (?:canonical )?(?:tools? )?(?:remain )?(?:reserved|honestly unimplemented|unimplemented)",
+         "unimplemented tools"),
+    ),
+}
+
+# Documentation may spell a count in words. The number still comes from the
+# manifest; this only lets prose read naturally.
+NUMBER_WORDS = {
+    10: "ten", 18: "eighteen", 60: "sixty", 78: "seventy-eight", 88: "eighty-eight",
+}
+
+TOOL_MANIFEST_COUNT_KEYS = ("canonical", "legacy", "implemented", "unimplemented", "total")
 
 FUTURE_PHASE_RANGE = range(7, 13)
 VALID_PHASE_STATUSES = {"PLANNED", "IN PROGRESS", "COMPLETE"}
@@ -629,7 +661,60 @@ def _include_markdown(root: Path, path: Path) -> bool:
     )
 
 
-def validate_repository(root: Path) -> list[str]:
+def load_tool_manifest(path: Path) -> tuple[dict[str, int] | None, list[str]]:
+    """Read the counts emitted by `didi --dump-tool-manifest`.
+
+    Returns (counts, errors). The documentation contract is validated against
+    the software, so a missing or malformed manifest is a hard failure rather
+    than a reason to skip the count checks.
+    """
+    if not path.is_file():
+        return None, [
+            f"{path}: tool manifest not found. Build didi and generate it with:\n"
+            f"  didi --dump-tool-manifest > {path}"
+        ]
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        return None, [f"{path}: cannot read tool manifest: {error}"]
+
+    counts = document.get("counts")
+    if not isinstance(counts, dict):
+        return None, [f"{path}: tool manifest has no 'counts' object"]
+
+    missing = [key for key in TOOL_MANIFEST_COUNT_KEYS if not isinstance(counts.get(key), int)]
+    if missing:
+        return None, [f"{path}: tool manifest is missing integer counts: {', '.join(missing)}"]
+
+    if counts["canonical"] + counts["legacy"] != counts["total"]:
+        return None, [f"{path}: tool manifest total does not equal canonical + legacy"]
+    if counts["implemented"] + counts["unimplemented"] != counts["canonical"]:
+        return None, [
+            f"{path}: tool manifest canonical does not equal implemented + unimplemented"
+        ]
+    return counts, []
+
+
+def validate_tool_surface_counts(
+    texts: dict[str, str], counts: dict[str, int]
+) -> list[str]:
+    """Assert every document states the counts the built binary actually has."""
+    errors: list[str] = []
+    for relative_path, requirements in COUNT_FACTS.items():
+        text = texts.get(relative_path)
+        if text is None:
+            continue
+        for count_key, template, label in requirements:
+            number = counts[count_key]
+            pattern = template.format(n=number, w=NUMBER_WORDS.get(number, str(number)))
+            if not re.search(pattern, text, flags=re.IGNORECASE):
+                errors.append(
+                    f"{relative_path}: must state {number} {label} to match the built tool surface"
+                )
+    return errors
+
+
+def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[str]:
     root = root.resolve()
     errors: list[str] = []
     texts: dict[str, str] = {}
@@ -716,6 +801,12 @@ def validate_repository(root: Path) -> list[str]:
             if not re.search(pattern, text, flags=re.IGNORECASE):
                 errors.append(f"{relative_path}: missing current release fact: {label}")
 
+    if tool_manifest is not None:
+        counts, manifest_errors = load_tool_manifest(tool_manifest)
+        errors.extend(manifest_errors)
+        if counts is not None:
+            errors.extend(validate_tool_surface_counts(texts, counts))
+
     roadmap_text = texts.get("docs/ROADMAP.md")
     if roadmap_text is not None:
         errors.extend(validate_future_phase_roadmap(roadmap_text))
@@ -744,8 +835,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=Path(__file__).resolve().parents[1],
         help="repository root (defaults to the validator's parent repository)",
     )
+    parser.add_argument(
+        "--tool-manifest",
+        type=Path,
+        default=None,
+        help=(
+            "JSON emitted by `didi --dump-tool-manifest`. When supplied, every "
+            "published tool count is validated against the built binary instead "
+            "of against other documentation."
+        ),
+    )
     arguments = parser.parse_args(argv)
-    errors = validate_repository(arguments.root)
+    errors = validate_repository(arguments.root, arguments.tool_manifest)
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1

@@ -10,7 +10,8 @@ Complete the existing 78-tool canonical surface, then extend Didi through projec
 
 - Every phase has `PLANNED`, `IN PROGRESS`, or `COMPLETE` status.
 - A phase is complete only when its implementation, documentation, native tests, Godot integration tests, and required cross-platform CI are complete.
-- Registered tool names must describe working behavior. Do not add success stubs or increase the canonical count before implementation lands.
+- Registered tool names must describe working behavior. Never add a success stub: a name that cannot execute must report `implemented: false` and reject calls.
+- The canonical surface grows only through a recorded Surface Amendment in [Surface Amendments](SURFACE_AMENDMENTS.md). Adding a name without one is prohibited; adding one with an accepted amendment is normal work.
 - Every new or reclassified mutation must define dry-run behavior, confirmation policy, route/session policy, unknown-outcome handling, and rollback expectations.
 - Every phase states explicit exclusions so deferred behavior cannot be mistaken for delivered behavior.
 - Completion records include the date, pull request, release impact, and verification evidence.
