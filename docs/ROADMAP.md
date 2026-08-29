@@ -7,7 +7,7 @@
 
 ## Phase Status
 
-Roadmap phases use exactly three states: `PLANNED`, `IN PROGRESS`, and `COMPLETE`.
+Roadmap phases normally use `PLANNED`, `IN PROGRESS`, and `COMPLETE`. `BLOCKED_AT_FEASIBILITY` is reserved for a phase stopped by an approved hard feasibility gate.
 Detailed scope and acceptance gates for all post-Phase-6 work are defined in
 [Future Phases Design](FUTURE_PHASES_DESIGN.md).
 
@@ -132,9 +132,21 @@ The native red-team contract covers invalid roots, project-key isolation, lock e
 
 ---
 
-## Phase 7: Canonical Surface Completion (`PLANNED`)
+## Phase 7: Canonical Surface Completion (`BLOCKED_AT_FEASIBILITY`)
 
-**Objective:** Implement the remaining 18 canonical tools, moving the protocol surface from 60/78 to 78/78 without adding public tool names.
+**Objective:** The implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The approved objective was atomic 78/78 without adding public tool names.
+
+**Feasibility result:** The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (15/18) are implementation-feasible: `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `runtime_inject_input`, and `runtime_read_profiler`.
+
+Exactly three names (3/18) are API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility is not implementation, so none of the 15 feasible names is callable.
+
+The approved all-or-nothing 78/78 activation gate prevented Tasks 2-13; no production implementation started. Work can proceed only after governance chooses:
+
+- **A)** Authorize partial delivery of the 15 feasible tools, targeting 75/78 and retaining three honest unimplemented names.
+- **B)** Retain atomic 78/78 and wait for supported engine capabilities.
+- **C)** Explicitly approve an engine fork/private debugger adapter, with new support and security obligations.
+
+See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 **Delivery slices:**
 - 7A: signals, viewport camera/debug, and tile/grid operations (9 tools)
@@ -148,6 +160,8 @@ The native red-team contract covers invalid roots, project-key isolation, lock e
 ## Phase 8: Deep Project Intelligence and Asset Pipeline (`PLANNED`)
 
 **Objective:** Add dependency-aware project analysis, import health, asset provenance, and safe bulk asset workflows after canonical completion.
+
+**Dependency:** Phase 8 remains planned and cannot start until governance resolves the Phase 7 feasibility block and either revises or satisfies the canonical-completion prerequisite.
 
 **Exclusions:** No custom GDScript language server, unbounded whole-project semantic analysis, or silent import-setting mutation.
 
@@ -236,6 +250,7 @@ These are missing capabilities that an AI agent actually requires to complete fu
 | **Phase 4 (COMPLETE)** | **Symbol Search, Asset Reimport, Viewport Diffing & Isolation** | Verified bounded search and reversible live visual feedback against Godot 4.5.1. |
 | **Phase 5 (COMPLETE)** | **C# / Shaders, Project Export, GridMap MeshLibrary, UI Hit-Testing** | Verified bounded diagnostics, guarded delivery, deterministic asset conversion, and live UI inspection against Godot 4.5.1. |
 | **Phase 6 (COMPLETE)** | **Project Isolation, Session Locks, Dry-Run, Confirm-Before-Write** | Verified fail-closed project selection, project-keyed endpoints, one-client leases, and context-bound single-use confirmations. |
+| **Phase 7 (BLOCKED_AT_FEASIBILITY)** | **Canonical Surface Completion** | 15/18 implementation-feasible and 3/18 API-blocked; all 18 remain unimplemented pending governance. |
 
 ---
 

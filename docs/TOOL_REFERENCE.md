@@ -4,6 +4,8 @@ Didi exposes 78 canonical tool names plus 10 legacy names (88 registrations). Th
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
+Phase 7 is `BLOCKED_AT_FEASIBILITY`. The implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+
 ## Status legend
 
 | Status | Meaning |
@@ -84,6 +86,8 @@ The following schemas are reserved but unimplemented:
 - `signal_emit`
 
 Calls return an MCP tool error; they do not inspect or mutate Godot signals.
+
+All four signal tools are among the 15 implementation-feasible names, but no production implementation started and they remain unavailable.
 
 ## 3. Scripts and diagnostics
 
@@ -169,6 +173,8 @@ All six schemas are unimplemented:
 - `anim_list_tracks`
 - `anim_play_track`
 
+`physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, and `anim_play_track` are implementation-feasible. `physics_simulate_step` and `nav_bake_mesh` are API-blocked under the approved contracts. None is callable.
+
 ## 6. TileMap and GridMap
 
 All three schemas are unimplemented:
@@ -176,6 +182,8 @@ All three schemas are unimplemented:
 - `tilemap_set_cells`
 - `tilemap_get_used_rect`
 - `gridmap_set_cells`
+
+All three are implementation-feasible, but no production implementation started and they remain unavailable.
 
 ## 7. Resources and project files
 
@@ -240,6 +248,8 @@ Launches a separate Godot process, optionally headless, captures stdout/stderr, 
 - `runtime_inject_input` (legacy alias: `inject_input_event`)
 - `runtime_get_call_stack`
 - `runtime_read_profiler`
+
+`runtime_inject_input` and `runtime_read_profiler` are implementation-feasible. `runtime_get_call_stack` is API-blocked under the approved contract. None is callable.
 
 ## 9. Editor lifecycle
 

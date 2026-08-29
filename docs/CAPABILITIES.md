@@ -47,9 +47,17 @@ Didi v1.4.0 registers 78 canonical tool names. Sixty are implemented in at least
 | `offline_fallback` | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method`, `viewport_create_test_lab`, `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map`, `project_search_text`, `project_search_symbols`, `runtime_launch`, `csharp_check_build`, `shader_check_compile`, `project_list_export_presets`, `project_export`, `gridmap_export_mesh_library` | Operates on bounded project files or launches a separate Godot/dotnet process. Results are not live editor state. |
 | `unimplemented` | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `physics_raycast_query`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Registered schema only. Calls are rejected before legacy handlers execute. |
 
+## Phase 7 feasibility status
+
+Phase 7 is `BLOCKED_AT_FEASIBILITY`. The 2026-08-29 gate on Godot 4.5.1 and 4.7.2 classified 15/18 names as implementation-feasible and exactly 3/18 as API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three contracts, no supported public API/semantics satisfying the exact approved contract was found on either tested version. This is a versioned feasibility result, not a claim that the contracts are impossible forever.
+
+Feasibility does not make a tool callable. The implementation remains 60/78 canonical tools; all 18 Phase 7 names remain registered with `implemented: false` and reject calls. The approved all-or-nothing 78/78 activation gate prevented Tasks 2-13, so no production implementation started.
+
+Work can proceed only after governance authorizes partial delivery of the 15 feasible tools toward 75/78, retains atomic 78/78 while waiting for supported engine capabilities, or explicitly approves an engine fork/private debugger adapter with new support and security obligations. See the [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+
 ## Planned Capability Growth
 
-The capability matrix describes current behavior only. Planned work is tracked separately in [ROADMAP.md](ROADMAP.md), with detailed post-Phase-6 scope in [FUTURE_PHASES_DESIGN.md](FUTURE_PHASES_DESIGN.md). A planned capability must not appear as supported in this document until its implementation and acceptance evidence are complete.
+The capability matrix describes current behavior only. Delivery and governance status are tracked in [ROADMAP.md](ROADMAP.md), with detailed post-Phase-6 scope in [FUTURE_PHASES_DESIGN.md](FUTURE_PHASES_DESIGN.md). A feasible or planned capability must not appear as supported until its implementation and acceptance evidence are complete.
 
 ## Legacy names
 

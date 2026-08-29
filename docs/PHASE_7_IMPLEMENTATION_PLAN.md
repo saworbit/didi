@@ -8,6 +8,22 @@
 
 **Tech Stack:** C++20, nlohmann JSON, CMake 3.20+, Ninja, MSVC via `VsDevCmd.bat`, Didi authenticated local IPC and runtime route leases, Godot 4.5.1 raw GDExtension C API, PowerShell 7 integration harness, Python `unittest`, pinned `jsonschema==4.25.1`, a deterministic standard-library schema generator, GitHub Actions, and GitHub CLI.
 
+## Execution status
+
+**Status:** `BLOCKED_AT_FEASIBILITY`
+
+Task 1 completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. The gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
+
+The approved all-or-nothing 78/78 activation gate prevented Tasks 2-13; no production implementation started. The implementation remains 60/78, and all 18 Phase 7 names remain registered but unimplemented. The original approved plan below is preserved as the executable contract, not as evidence of delivered behavior.
+
+Work can proceed only after governance chooses one path:
+
+- **A)** Authorize partial delivery of the 15 feasible tools, targeting 75/78 and retaining three honest unimplemented names.
+- **B)** Retain atomic 78/78 and wait for supported engine capabilities.
+- **C)** Explicitly approve an engine fork/private debugger adapter, with new support and security obligations.
+
+See [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) for reproducible evidence.
+
 ## Global Constraints
 
 - Preserve exactly 78 canonical tool names and exactly 10 legacy compatibility aliases, for 88 `tools/list` registrations; add, remove, rename, or alias no public tool.

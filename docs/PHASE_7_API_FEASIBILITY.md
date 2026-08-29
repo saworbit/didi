@@ -2,7 +2,20 @@
 
 ## Decision
 
-**BLOCKED: 15/18 rows are GO; 3/18 rows are BLOCKED. Task 2 must not begin.**
+**Status:** `BLOCKED_AT_FEASIBILITY`
+
+**Decision:** 15/18 are implementation-feasible; 3/18 are API-blocked under the approved contracts. The approved all-or-nothing gate stopped the plan before Task 2.
+
+The feasibility gate completed on 2026-08-29 against Godot 4.5.1 and Godot 4.7.2. For each blocked row, no supported public API/semantics satisfying the exact approved contract was found on either tested version. This is a result for the tested versions and approved contracts, not a claim that implementation is impossible forever.
+
+The 15 implementation-feasible names are:
+
+- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`
+- `viewport_set_camera_transform`, `viewport_toggle_debug_draw`
+- `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`
+- `physics_raycast_query`, `nav_query_path`
+- `anim_list_tracks`, `anim_play_track`
+- `runtime_inject_input`, `runtime_read_profiler`
 
 The blocking rows are:
 
@@ -10,7 +23,7 @@ The blocking rows are:
 - `nav_bake_mesh`: both engines expose detached source data and asynchronous bake callbacks, but the complete frozen-source contract is not proven. The public parse/bake calls return `void`, expose no cancellation/request handle, and do not provide a supported way to enumerate or exclude globally registered custom source parsers. The probe could guard a late callback from publication, but could not prove the required parser exclusion, pre-parse aggregate enforcement, source revalidation, bounded completion, and detached output contract as one operation.
 - `runtime_get_call_stack`: neither pinned engine exposes a supported getter for another paused target script's frames. `ScriptLanguageExtension._debug_get_*` entries are virtual hooks implemented by a language extension, not callable target-stack getters. `EditorDebuggerSession` and `EngineDebugger` expose debugger state/message/control methods but no frame retrieval API.
 
-This is the single hard Phase 7 feasibility gate from `docs/PHASE_7_IMPLEMENTATION_PLAN.md` at commit `fa951a3e2172b24fa8a38d7b69f92c9ec8fff757`. A fixed unavailable payload, extension stack, log scraping, frame waiting, global tick-rate mutation, or weaker navigation contract was not accepted as an implementation.
+This is the single hard Phase 7 feasibility gate from [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md) at commit `fa951a3e2172b24fa8a38d7b69f92c9ec8fff757`. A fixed unavailable payload, extension stack, log scraping, frame waiting, global tick-rate mutation, or weaker navigation contract was not accepted as an implementation.
 
 ## Pinned inputs and evidence
 
@@ -236,4 +249,10 @@ No C or C++ compilation was needed for Task 1: ClassDB identifiers came from the
 
 ## Gate consequence
 
-Task 1 is complete as a blocked feasibility gate. The 18 tools remain disabled. No production source, registry, tests, schemas, fixture, build system, or CI file may be edited under this Phase 7 plan, and Task 2 must not start unless the plan is explicitly replaced with contracts that do not weaken the current requirements.
+Task 1 is complete as a blocked feasibility gate. The implementation remains 60/78 canonical tools; all 18 names remain registered but unimplemented. The all-or-nothing 78/78 activation gate prevented Tasks 2-13, and no production implementation started.
+
+Work can proceed only after a governance decision:
+
+- **A)** Authorize partial delivery of the 15 feasible tools, targeting 75/78 and retaining three honest unimplemented names.
+- **B)** Retain atomic 78/78 and wait for supported engine capabilities.
+- **C)** Explicitly approve an engine fork/private debugger adapter, with new support and security obligations.

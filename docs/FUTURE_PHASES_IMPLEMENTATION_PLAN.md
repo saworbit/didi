@@ -8,6 +8,12 @@
 
 **Tech Stack:** Markdown, Python 3 standard library, `unittest`, existing `tools/validate_documentation.py` validation framework.
 
+## Execution note
+
+This is the approved historical plan that integrated the future-phases documentation. Its original task wording is preserved below. Current Phase 7 status is `BLOCKED_AT_FEASIBILITY`: the 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts. All 18 names remain registered but unimplemented at 60/78, and the all-or-nothing activation gate prevented Tasks 2-13 of the separate Phase 7 implementation plan; no production implementation started.
+
+Current evidence is [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md), and the approved executable plan is [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md). Further work requires governance to authorize partial 75/78 delivery, retain atomic 78/78, or approve an engine fork/private debugger adapter with new support and security obligations.
+
 ## Global Constraints
 
 - Phase 7 closes the canonical MCP surface from 60 implemented tools to all 78; it adds no new public tool names.
@@ -378,4 +384,3 @@ If no correction is required, do not create an empty commit.
 - README, capabilities, changelog, roadmap, and design documents agree on status and ownership.
 - The validator rejects missing future phases, invalid phase statuses, and absent future-phase governance.
 - Documentation tests, repository validation, and whitespace validation pass.
-

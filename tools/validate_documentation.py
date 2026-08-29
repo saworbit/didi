@@ -29,6 +29,9 @@ REQUIRED_DOCUMENTS = (
     "docs/RESOURCES_AND_PROMPTS.md",
     "docs/ROADMAP.md",
     "docs/FUTURE_PHASES_DESIGN.md",
+    "docs/FUTURE_PHASES_IMPLEMENTATION_PLAN.md",
+    "docs/PHASE_7_API_FEASIBILITY.md",
+    "docs/PHASE_7_IMPLEMENTATION_PLAN.md",
     "docs/TOOL_REFERENCE.md",
 )
 
@@ -47,7 +50,8 @@ TRACKED_ONLY_ARTIFACT_PATHS = (".superpowers",)
 FILESYSTEM_FORBIDDEN_ARTIFACT_PATHS = ("docs/superpowers",)
 
 FUTURE_PHASE_RANGE = range(7, 13)
-VALID_PHASE_STATUSES = {"PLANNED", "IN PROGRESS", "COMPLETE"}
+PHASE7_STATUS = "BLOCKED_AT_FEASIBILITY"
+VALID_PHASE_STATUSES = {"PLANNED", "IN PROGRESS", "COMPLETE", PHASE7_STATUS}
 FUTURE_PHASE_GOVERNANCE_FIELDS = (
     "scope",
     "explicit exclusions",
@@ -61,6 +65,54 @@ FUTURE_PHASE_COMPLETION_FIELDS = (
     "verification evidence",
 )
 CANONICAL_IMPLEMENTATION_COUNTS = (78, 60, 18)
+PHASE7_CANONICAL_TOOLS = (
+    "signal_list_connections",
+    "signal_connect",
+    "signal_disconnect",
+    "signal_emit",
+    "viewport_set_camera_transform",
+    "viewport_toggle_debug_draw",
+    "tilemap_set_cells",
+    "tilemap_get_used_rect",
+    "gridmap_set_cells",
+    "physics_raycast_query",
+    "physics_simulate_step",
+    "nav_bake_mesh",
+    "nav_query_path",
+    "anim_list_tracks",
+    "anim_play_track",
+    "runtime_inject_input",
+    "runtime_get_call_stack",
+    "runtime_read_profiler",
+)
+PHASE7_BLOCKED_TOOLS = {
+    "physics_simulate_step",
+    "nav_bake_mesh",
+    "runtime_get_call_stack",
+}
+PHASE7_STATUS_DOCUMENTS = (
+    "README.md",
+    "CHANGELOG.md",
+    "docs/CAPABILITIES.md",
+    "docs/DEVELOPER_GUIDE.md",
+    "docs/FUTURE_PHASES_DESIGN.md",
+    "docs/FUTURE_PHASES_IMPLEMENTATION_PLAN.md",
+    "docs/LLM_INSTRUCTIONS.md",
+    "docs/PHASE_7_API_FEASIBILITY.md",
+    "docs/PHASE_7_IMPLEMENTATION_PLAN.md",
+    "docs/ROADMAP.md",
+    "docs/TOOL_REFERENCE.md",
+)
+PHASE7_CURRENT_STATE_DOCUMENTS = (
+    "README.md",
+    "CHANGELOG.md",
+    "docs/CAPABILITIES.md",
+    "docs/DEVELOPER_GUIDE.md",
+    "docs/FUTURE_PHASES_DESIGN.md",
+    "docs/LLM_INSTRUCTIONS.md",
+    "docs/ROADMAP.md",
+    "docs/TOOL_REFERENCE.md",
+)
 
 FACT_PATTERNS = {
     "README.md": (
@@ -137,6 +189,11 @@ FENCED_CODE_PATTERN = re.compile(
     r"^\s{0,3}(`{3,}|~{3,}).*?^\s{0,3}\1\s*$", re.MULTILINE | re.DOTALL
 )
 INLINE_CODE_PATTERN = re.compile(r"(?<!`)`[^`\n]*`(?!`)")
+PHASE7_MATRIX_ROW_PATTERN = re.compile(
+    r"^\|\s*`(?P<tool>[a-z0-9_]+)`\s*\|"
+    r"(?:[^|\n]*\|)*\s*\*\*(?P<decision>GO|BLOCKED)\*\*\s*\|\s*$",
+    re.MULTILINE,
+)
 
 MINIMUM_NODE24_ACTION_VERSIONS = {
     "actions/checkout": (5,),
@@ -542,6 +599,11 @@ def validate_future_phase_roadmap(roadmap_text: str) -> list[str]:
     for phase in FUTURE_PHASE_RANGE:
         if phase not in declarations:
             errors.append(f"docs/ROADMAP.md must declare Phase {phase}")
+    if declarations.get(7) != [PHASE7_STATUS]:
+        errors.append(
+            "docs/ROADMAP.md Phase 7 must declare status "
+            f"'{PHASE7_STATUS}'"
+        )
     return errors
 
 
@@ -594,6 +656,19 @@ def validate_future_phase_governance(
                     f"required governance field: {field}"
                 )
 
+        status_match = re.search(
+            r"^\*\*Status:\*\*\s+`?([^`\n]+)`?\s*$",
+            section,
+            flags=re.MULTILINE,
+        )
+        if phase == 7 and (
+            status_match is None or status_match.group(1).strip() != PHASE7_STATUS
+        ):
+            errors.append(
+                "docs/FUTURE_PHASES_DESIGN.md Phase 7 must declare status "
+                f"'{PHASE7_STATUS}'"
+            )
+
         phase_is_complete = "COMPLETE" in roadmap_declarations.get(phase, [])
         if phase_is_complete:
             for field in FUTURE_PHASE_COMPLETION_FIELDS:
@@ -607,9 +682,9 @@ def validate_future_phase_governance(
 
 CANONICAL_COUNT_PATTERNS = {
     "README.md": re.compile(
-        r"Phase 7 is planned to implement the remaining (?P<remaining>\d+) canonical tools, "
-        r"completing the canonical surface from (?P<implemented>\d+)/(?P<canonical>\d+) "
-        r"to (?P<target>\d+)/(?P<target_canonical>\d+) tools",
+        r"implementation remains (?P<implemented>\d+)/(?P<canonical>\d+) canonical tools"
+        r"[^.\n]*all (?P<remaining>\d+) Phase 7 names "
+        r"(?:remain(?:ing)? )?registered but unimplemented",
         re.IGNORECASE,
     ),
     "docs/CAPABILITIES.md": re.compile(
@@ -619,15 +694,17 @@ CANONICAL_COUNT_PATTERNS = {
         re.IGNORECASE,
     ),
     "docs/ROADMAP.md": re.compile(
-        r"\*\*Objective:\*\* Implement the remaining (?P<remaining>\d+) canonical tools, "
-        r"moving the protocol surface from (?P<implemented>\d+)/(?P<canonical>\d+) "
-        r"to (?P<target>\d+)/(?P<target_canonical>\d+)",
+        r"\*\*Objective:\*\*[^\n]*implementation remains "
+        r"(?P<implemented>\d+)/(?P<canonical>\d+) canonical tools"
+        r"[^.\n]*all (?P<remaining>\d+) Phase 7 names "
+        r"(?:remain(?:ing)? )?registered but unimplemented",
         re.IGNORECASE,
     ),
     "docs/FUTURE_PHASES_DESIGN.md": re.compile(
-        r"\*\*Goal:\*\* Implement the remaining (?P<remaining>\d+) canonical tools, "
-        r"moving from (?P<implemented>\d+)/(?P<canonical>\d+) "
-        r"to (?P<target>\d+)/(?P<target_canonical>\d+)",
+        r"\*\*Goal:\*\*[^\n]*implementation remains "
+        r"(?P<implemented>\d+)/(?P<canonical>\d+) canonical tools"
+        r"[^.\n]*all (?P<remaining>\d+) Phase 7 names "
+        r"(?:remain(?:ing)? )?registered but unimplemented",
         re.IGNORECASE,
     ),
     "CHANGELOG.md": re.compile(
@@ -646,6 +723,114 @@ def _current_changelog_section(text: str) -> str:
     remainder = text[start.end():]
     end = re.search(r"^## \[", remainder, flags=re.MULTILINE)
     return remainder[:end.start()] if end is not None else remainder
+
+
+def validate_phase7_reconciliation(texts: dict[str, str]) -> list[str]:
+    errors: list[str] = []
+
+    for relative_path in PHASE7_STATUS_DOCUMENTS:
+        text = texts.get(relative_path)
+        if text is None:
+            continue
+        source = _current_changelog_section(text) if relative_path == "CHANGELOG.md" else text
+        if PHASE7_STATUS not in source:
+            errors.append(
+                f"{relative_path}: Phase 7 status must be {PHASE7_STATUS}"
+            )
+        if "15/18" not in source or "3/18" not in source:
+            errors.append(
+                f"{relative_path}: Phase 7 feasibility summary must report "
+                "15 feasible and 3 blocked"
+            )
+
+    for relative_path in PHASE7_CURRENT_STATE_DOCUMENTS:
+        text = texts.get(relative_path)
+        if text is None:
+            continue
+        source = _current_changelog_section(text) if relative_path == "CHANGELOG.md" else text
+        if re.search(r"\bPhase\s+7\s+is\s+planned\b", source, flags=re.IGNORECASE):
+            errors.append(
+                f"{relative_path}: stale Phase 7 planned prose in current-state documentation"
+            )
+
+    readme = texts.get("README.md")
+    if readme is not None and not all(
+        target in readme
+        for target in (
+            "(docs/PHASE_7_API_FEASIBILITY.md)",
+            "(docs/PHASE_7_IMPLEMENTATION_PLAN.md)",
+        )
+    ):
+        errors.append("README.md must link both Phase 7 records")
+
+    evidence = texts.get("docs/PHASE_7_API_FEASIBILITY.md")
+    if evidence is not None:
+        if not re.search(
+            r"15/18\s+(?:are\s+)?implementation-feasible"
+            r"[\s\S]*?3/18\s+(?:are\s+)?API-blocked",
+            evidence,
+            flags=re.IGNORECASE,
+        ):
+            errors.append(
+                "docs/PHASE_7_API_FEASIBILITY.md: Phase 7 feasibility summary "
+                "must report 15 feasible and 3 blocked"
+            )
+        for required in (
+            "2026-08-29",
+            "Godot 4.5.1",
+            "Godot 4.7.2",
+            "no supported public API/semantics satisfying the exact approved "
+            "contract was found on either tested version",
+        ):
+            if required.lower() not in evidence.lower():
+                errors.append(
+                    "docs/PHASE_7_API_FEASIBILITY.md: missing feasibility fact: "
+                    f"{required}"
+                )
+
+        rows = list(PHASE7_MATRIX_ROW_PATTERN.finditer(evidence))
+        row_names = [match.group("tool") for match in rows]
+        if (
+            len(rows) != len(PHASE7_CANONICAL_TOOLS)
+            or len(set(row_names)) != len(PHASE7_CANONICAL_TOOLS)
+            or set(row_names) != set(PHASE7_CANONICAL_TOOLS)
+        ):
+            errors.append(
+                "docs/PHASE_7_API_FEASIBILITY.md: matrix must contain exactly "
+                "the 18 Phase 7 canonical names once each"
+            )
+        decisions = {
+            match.group("tool"): match.group("decision")
+            for match in rows
+        }
+        feasible_count = sum(
+            decision == "GO" for decision in decisions.values()
+        )
+        blocked = {
+            name for name, decision in decisions.items() if decision == "BLOCKED"
+        }
+        if feasible_count != 15 or len(blocked) != 3:
+            errors.append(
+                "docs/PHASE_7_API_FEASIBILITY.md: matrix must report "
+                "15 feasible and 3 blocked"
+            )
+        if blocked != PHASE7_BLOCKED_TOOLS:
+            expected = ", ".join(sorted(PHASE7_BLOCKED_TOOLS))
+            errors.append(
+                f"Phase 7 blocked set must be exactly: {expected}"
+            )
+
+    plan = texts.get("docs/PHASE_7_IMPLEMENTATION_PLAN.md")
+    if plan is not None and not re.search(
+        r"Tasks 2-13[^\n]*no production implementation started",
+        plan,
+        flags=re.IGNORECASE,
+    ):
+        errors.append(
+            "docs/PHASE_7_IMPLEMENTATION_PLAN.md must record that Tasks 2-13 "
+            "did not start and no production implementation started"
+        )
+    return errors
 
 
 def _parse_count(value: str) -> int:
@@ -831,6 +1016,7 @@ def validate_repository(root: Path) -> list[str]:
                 errors.append(f"{relative_path}: missing current release fact: {label}")
 
     errors.extend(validate_canonical_implementation_counts(texts))
+    errors.extend(validate_phase7_reconciliation(texts))
 
     roadmap_text = texts.get("docs/ROADMAP.md")
     if roadmap_text is not None:

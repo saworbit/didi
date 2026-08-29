@@ -17,11 +17,13 @@ Historical entries describe the surface advertised by those releases. For the ex
 - Closed Phase 5 with six canonical tools: C# build diagnostics, real shader compilation diagnostics, secret-redacted export-preset discovery, guarded headless export, deterministic GridMap MeshLibrary generation, and live non-injecting UI hit-testing.
 - Added a cross-platform argv-only process runner with finite deadlines, child-group termination, a 1 MiB combined-output cap, and Windows command-line quoting coverage.
 - Added the approved Phase 7-12 roadmap, including canonical-surface completion and governance requirements for all future phases.
+- Completed the 2026-08-29 Phase 7 feasibility gate on Godot 4.5.1 and 4.7.2. The reproducible [evidence](docs/PHASE_7_API_FEASIBILITY.md) found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts; the [executable plan](docs/PHASE_7_IMPLEMENTATION_PLAN.md) stopped before Tasks 2-13.
 
 ### Changed
 
 - Mutating tool schemas now advertise `dry_run`; editor reload, script patching, and overwrite-enabled offline writers require a 120-second single-use token bound to the exact arguments, project, and runtime route.
 - Discovery now exposes 78 canonical tools plus 10 legacy registrations (88 total). Sixty canonical tools are implemented and 18 remain unimplemented.
+- Phase 7 status is `BLOCKED_AT_FEASIBILITY`. All 18 names remain registered but unimplemented, including the 15/18 implementation-feasible names. For `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Work now requires an explicit governance choice between partial 75/78 delivery, retaining atomic 78/78, or approving an engine fork/private debugger adapter with new support and security obligations.
 
 ### Fixed
 
