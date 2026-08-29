@@ -11,7 +11,8 @@ Complete the existing 78-tool canonical surface, then extend Didi through projec
 - Scope: every phase has `PLANNED`, `IN PROGRESS`, or `COMPLETE` status and defines its capability boundary. `BLOCKED_AT_FEASIBILITY` is reserved for a phase stopped by an approved hard feasibility gate.
 - Exit evidence: a phase is complete only when its implementation, documentation, native tests, Godot integration tests, and required cross-platform CI are complete.
 - Security: preserve the local authenticated safety boundary.
-- Registered tool names must describe working behavior. Do not add success stubs or increase the canonical count before implementation lands.
+- Registered tool names must describe working behavior. Never add a success stub: a name that cannot execute must report `implemented: false` and reject calls.
+- The canonical surface grows only through a recorded amendment in [Surface Amendments](SURFACE_AMENDMENTS.md). Adding a name without one is prohibited; adding one with an accepted amendment is normal work.
 - Mutation classification: every new or reclassified mutation must define dry-run behavior, confirmation policy, route/session policy, unknown-outcome handling, and rollback expectations.
 - Explicit exclusions: every phase states exact exclusions so deferred behavior cannot be mistaken for delivered behavior.
 - Completion date and pull request: completion records include the date, pull request, release impact, and verification evidence.

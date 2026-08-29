@@ -240,7 +240,8 @@ These are missing capabilities that an AI agent actually requires to complete fu
 
 ## 🚫 What NOT to Add Yet
 
-- ❌ **Do NOT add more domain stubs** (e.g. `audio_bus_*`, `multiplayer_*`, `particle_*`, `xr_*`) while existing reserved signal, physics/navigation, TileMap/GridMap, camera/debug, and runtime-debugger schemas remain unimplemented.
+- ❌ **Do NOT add success stubs.** A registered name that cannot execute must report `implemented: false` and reject calls. This rule is absolute.
+- ⚠️ **Do NOT add speculative domain families** (e.g. `audio_bus_*`, `multiplayer_*`, `particle_*`, `xr_*`) while existing reserved signal, physics/navigation, TileMap/GridMap, camera/debug, and runtime-debugger schemas remain unimplemented. A single name that an agent workflow provably needs is added through a [Surface Amendment](SURFACE_AMENDMENTS.md), not blocked by this rule.
 - ❌ **Do NOT create a second plugin architecture or network transport** — local named pipes and UNIX domain sockets are optimal.
 - ❌ **Do NOT build a custom GDScript language server** — extend the existing symbol extractor and headless Godot compiler check only where evidence requires it.
 - ❌ **Do NOT expand the limited static ClassDB map** — replace it with live Godot `ClassDB` or generated `extension_api.json` data.
