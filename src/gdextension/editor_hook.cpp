@@ -468,10 +468,10 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "scene.listGroups", "scene.addToGroup", "scene.removeFromGroup",
         "scene.getGroupMembers", "scene.create", "scene.open", "scene.close",
         "scene.packBranch", "runtime.getTree", "runtime.setPaused", "runtime.stop",
-        "runtime.evalGdscript", "ui.hitTest", "signal.listConnections", "signal.connect",
-        "signal.disconnect", "signal.emit"
+        "runtime.evalGdscript", "ui.hitTest"
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
-        , "phase7SignalTest.configure"
+        , "signal.listConnections", "signal.connect", "signal.disconnect", "signal.emit",
+        "phase7SignalTest.configure"
 #endif
     };
     if (live_bridge_methods.count(method)) {

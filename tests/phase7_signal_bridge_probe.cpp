@@ -167,13 +167,14 @@ void run(Probe& probe) {
 
     const std::vector<std::pair<std::string, json>> supported = {
         {"bool_value", json::array({true})}, {"int_value", json::array({9})},
-        {"float_value", json::array({7})}, {"string_value", json::array({"utf8-✓"})},
+        {"float_value", json::array({7})}, {"float_negative_value", json::array({-3})},
+        {"string_value", json::array({"utf8-✓"})},
         {"array_value", json::array({json::array({1, json{{"nested", true}}, nullptr})})},
         {"dictionary_value", json::array({json{{"alpha", json::array({1, 2})}, {"null", nullptr}}})},
         {"nullable_node", json::array({nullptr})},
     };
     const std::vector<std::string> markers = {"marker_bool", "marker_int", "marker_float",
-        "marker_string", "marker_array", "marker_dictionary", "marker_null"};
+        "marker_float_negative", "marker_string", "marker_array", "marker_dictionary", "marker_null"};
     for (size_t index = 0; index < supported.size(); ++index) {
         auto emitted = probe.request("signal.emit", {{"target_node", "ValueEmitter"},
             {"signal_name", supported[index].first}, {"arguments", supported[index].second}});
@@ -196,6 +197,18 @@ void run(Probe& probe) {
     auto configure = [&](const std::string& seam) {
         Probe::success(probe.request("phase7SignalTest.configure", {{"seam", seam}}));
     };
+    configure("missing_destination_float_constructor");
+    Probe::error(probe.request("signal.emit", {{"target_node", "ValueEmitter"},
+        {"signal_name", "float_preflight_value"}, {"arguments", json::array({11})}}),
+        501, "required_bind_unavailable");
+    Probe::require(!Probe::connection(probe.list("ValueEmitter"), "marker_float_preflight",
+                                      "Receiver", "marker", 2),
+                   "missing destination FLOAT constructor dispatched callback");
+    Probe::success(probe.request("signal.emit", {{"target_node", "ValueEmitter"},
+        {"signal_name", "float_preflight_value"}, {"arguments", json::array({11})}}));
+    Probe::require(Probe::connection(probe.list("ValueEmitter"), "marker_float_preflight",
+                                     "Receiver", "marker", 2),
+                   "destination FLOAT widening did not preserve runtime FLOAT type");
     configure("malformed_metadata");
     Probe::error(probe.request("signal.listConnections", {{"target_node", "OrderingEmitter"}}),
                  500, "extension_protocol_error");

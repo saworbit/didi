@@ -21,6 +21,8 @@ func _configure() -> void:
 	values.connect(&"bool_value", Callable(receiver, "receive_bool"), Object.CONNECT_PERSIST)
 	values.connect(&"int_value", Callable(receiver, "receive_int"), Object.CONNECT_PERSIST)
 	values.connect(&"float_value", Callable(receiver, "receive_float"), Object.CONNECT_PERSIST)
+	values.connect(&"float_negative_value", Callable(receiver, "receive_float_negative"), Object.CONNECT_PERSIST)
+	values.connect(&"float_preflight_value", Callable(receiver, "receive_float_preflight"), Object.CONNECT_PERSIST)
 	values.connect(&"string_value", Callable(receiver, "receive_string"), Object.CONNECT_PERSIST)
 	values.connect(&"array_value", Callable(receiver, "receive_array"), Object.CONNECT_PERSIST)
 	values.connect(&"dictionary_value", Callable(receiver, "receive_dictionary"), Object.CONNECT_PERSIST)

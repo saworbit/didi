@@ -1360,6 +1360,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         static const std::set<std::string> admitted = {
             "malformed_metadata", "missing_required_api", "conversion_failure",
             "connect_postcondition_mismatch", "disconnect_postcondition_mismatch",
+            "missing_destination_float_constructor",
             "connect_postcondition_mismatch_rollback_failure"};
         if (!hasOnlyKeys(params, {"seam"}) || !params.contains("seam") ||
             !params["seam"].is_string() || !admitted.count(params["seam"].get<std::string>())) {
@@ -2281,35 +2282,52 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 default: return false;
             }
         };
-        std::function<bool(const json&)> preflight_json_variant;
-        preflight_json_variant = [&](const json& value) {
+        bool missing_destination_float_constructor = false;
+#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
+        missing_destination_float_constructor =
+            takePhase7SignalTestSeam("missing_destination_float_constructor");
+#endif
+        std::function<bool(const json&, std::optional<GDExtensionVariantType>)>
+            preflight_json_variant;
+        preflight_json_variant = [&](const json& value,
+                                     std::optional<GDExtensionVariantType> destination_type) {
             auto& api = GodotApi::instance();
             if (!api.variant_new_nil || !api.variant_destroy ||
                 !api.get_variant_from_type_constructor) return false;
             if (value.is_null()) return true;
             GDExtensionVariantType type = GDEXTENSION_VARIANT_TYPE_NIL;
-            if (value.is_boolean()) type = GDEXTENSION_VARIANT_TYPE_BOOL;
+            if (destination_type.has_value() &&
+                *destination_type != GDEXTENSION_VARIANT_TYPE_NIL) {
+                type = *destination_type;
+            } else if (value.is_boolean()) type = GDEXTENSION_VARIANT_TYPE_BOOL;
             else if (value.is_number_integer() || value.is_number_unsigned()) {
                 type = GDEXTENSION_VARIANT_TYPE_INT;
             } else if (value.is_number_float()) type = GDEXTENSION_VARIANT_TYPE_FLOAT;
-            else if (value.is_string()) {
-                if (!api.string_new_with_utf8_chars) return false;
-                type = GDEXTENSION_VARIANT_TYPE_STRING;
-            } else if (value.is_array()) {
-                type = GDEXTENSION_VARIANT_TYPE_ARRAY;
+            else if (value.is_string()) type = GDEXTENSION_VARIANT_TYPE_STRING;
+            else if (value.is_array()) type = GDEXTENSION_VARIANT_TYPE_ARRAY;
+            else if (value.is_object()) type = GDEXTENSION_VARIANT_TYPE_DICTIONARY;
+            else return false;
+
+            if (type == GDEXTENSION_VARIANT_TYPE_FLOAT &&
+                missing_destination_float_constructor) return false;
+            if (type == GDEXTENSION_VARIANT_TYPE_STRING &&
+                !api.string_new_with_utf8_chars) return false;
+            if (type == GDEXTENSION_VARIANT_TYPE_ARRAY) {
+                if (!value.is_array()) return false;
                 if (!api.variant_get_ptr_constructor(type, 0) || !api.variant_call) return false;
                 for (const auto& child : value) {
-                    if (!preflight_json_variant(child)) return false;
+                    if (!preflight_json_variant(child, std::nullopt)) return false;
                 }
-            } else if (value.is_object()) {
-                type = GDEXTENSION_VARIANT_TYPE_DICTIONARY;
+            } else if (type == GDEXTENSION_VARIANT_TYPE_DICTIONARY) {
+                if (!value.is_object()) return false;
                 if (!api.variant_get_ptr_constructor(type, 0) || !api.variant_call ||
-                    !api.string_new_with_utf8_chars) return false;
-                for (auto it = value.begin(); it != value.end(); ++it) {
-                    if (!preflight_json_variant(it.value())) return false;
+                    !api.string_new_with_utf8_chars ||
+                    !api.get_variant_from_type_constructor(GDEXTENSION_VARIANT_TYPE_STRING)) {
+                    return false;
                 }
-            } else {
-                return false;
+                for (auto it = value.begin(); it != value.end(); ++it) {
+                    if (!preflight_json_variant(it.value(), std::nullopt)) return false;
+                }
             }
             return api.get_variant_from_type_constructor(type) != nullptr;
         };
@@ -2323,8 +2341,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
             return errorJson(501, "required_bind_unavailable");
         }
 #endif
-        for (const auto& argument : emit_arguments) {
-            if (!preflight_json_variant(argument)) {
+        for (size_t index = 0; index < emit_arguments.size(); ++index) {
+            if (!preflight_json_variant(
+                    emit_arguments[index],
+                    static_cast<GDExtensionVariantType>(metadata.value().arguments[index].type))) {
                 return errorJson(501, "required_bind_unavailable");
             }
         }
