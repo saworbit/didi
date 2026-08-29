@@ -1,100 +1,39 @@
 #include "didi/mcp/mcp_protocol.hpp"
+#include "didi/tools/phase7_live_forward.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
 
 namespace didi {
 namespace mcp {
 
-CallToolResult handlePhysicsRaycastQuery(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (!args.contains("from") || !args.contains("to")) {
-        return CallToolResult::error("Parameters 'from' (vector3/2) and 'to' (vector3/2) are required.");
-    }
-
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("physics.raycast", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
-        return CallToolResult::error("Physics raycast query failed: " + res.error().message);
-    }
-
-    return CallToolResult::error("Godot Editor is offline. Launch Godot Editor or game instance with Didi plugin to query live 2D/3D physics raycasts.");
+CallToolResult handlePhysicsRaycastQuery(const ResolvedToolBinding& binding, const json& args,
+                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    return sendPhase7LiveRequest(binding, args, ipc);
 }
 
-CallToolResult handlePhysicsSimulateStep(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("physics.simulateStep", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
-        return CallToolResult::error("Physics simulation step failed: " + res.error().message);
-    }
-
-    return CallToolResult::error("Godot Editor is offline. Launch Godot with Didi plugin to step physics deterministically.");
+CallToolResult handlePhysicsSimulateStep(const ResolvedToolBinding& binding, const json& args,
+                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    return sendPhase7LiveRequest(binding, args, ipc);
 }
 
-CallToolResult handleNavBakeMesh(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("nav.bakeMesh", args, 30000);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
-        return CallToolResult::error("Navmesh baking failed: " + res.error().message);
-    }
-
-    return CallToolResult::error("Godot Editor is offline. Launch Godot Editor to bake NavigationMesh dynamically.");
+CallToolResult handleNavBakeMesh(const ResolvedToolBinding& binding, const json& args,
+                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    return sendPhase7LiveRequest(binding, args, ipc);
 }
 
-CallToolResult handleNavQueryPath(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (!args.contains("start_point") || !args.contains("end_point")) {
-        return CallToolResult::error("Parameters 'start_point' and 'end_point' are required.");
-    }
-
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("nav.queryPath", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
-        return CallToolResult::error("Navigation path query failed: " + res.error().message);
-    }
-
-    return CallToolResult::error("Godot Editor is offline. Launch Godot Editor with Didi plugin to query live NavigationMesh paths.");
+CallToolResult handleNavQueryPath(const ResolvedToolBinding& binding, const json& args,
+                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    return sendPhase7LiveRequest(binding, args, ipc);
 }
 
-CallToolResult handleAnimListTracks(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    std::string player_path = args.value("animation_player_path", "");
-    if (player_path.empty()) {
-        return CallToolResult::error("Parameter 'animation_player_path' is required.");
-    }
-
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("anim.listTracks", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
-        return CallToolResult::error("Failed to query animation tracks: " + res.error().message);
-    }
-
-    return CallToolResult::error("Godot Editor is offline. Launch Godot to inspect live AnimationPlayer tracks and keyframes.");
+CallToolResult handleAnimListTracks(const ResolvedToolBinding& binding, const json& args,
+                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    return sendPhase7LiveRequest(binding, args, ipc);
 }
 
-CallToolResult handleAnimPlayTrack(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    std::string player_path = args.value("animation_player_path", "");
-    std::string anim_name = args.value("animation_name", "");
-
-    if (player_path.empty() || anim_name.empty()) {
-        return CallToolResult::error("Parameters 'animation_player_path' and 'animation_name' are required.");
-    }
-
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("anim.playTrack", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
-        return CallToolResult::error("Failed to play animation track: " + res.error().message);
-    }
-
-    return CallToolResult::error("Godot Editor is offline. Launch Godot to preview live animation playback.");
+CallToolResult handleAnimPlayTrack(const ResolvedToolBinding& binding, const json& args,
+                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    return sendPhase7LiveRequest(binding, args, ipc);
 }
 
 } // namespace mcp

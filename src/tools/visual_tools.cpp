@@ -1,4 +1,5 @@
 #include "didi/mcp/mcp_protocol.hpp"
+#include "didi/tools/phase7_live_forward.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/offline/test_runner.hpp"
@@ -146,15 +147,9 @@ CallToolResult handleViewportDiffCapture(const json& args, std::shared_ptr<ipc::
     return CallToolResult::successImage(b64, result_data.dump(2));
 }
 
-CallToolResult handleViewportSetCameraTransform(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("vision.setCameraTransform", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
-        return CallToolResult::error("Failed to set camera transform: " + res.error().message);
-    }
-    return CallToolResult::error("Godot Editor is offline. Launch Godot Editor to position editor camera.");
+CallToolResult handleViewportSetCameraTransform(const ResolvedToolBinding& binding, const json& args,
+                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    return sendPhase7LiveRequest(binding, args, ipc);
 }
 
 CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -216,15 +211,9 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
     return CallToolResult::error("Failed to generate visual test lab sandbox scene file.");
 }
 
-CallToolResult handleViewportToggleDebugDraw(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("vision.toggleDebugDraw", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
-        return CallToolResult::error("Failed to toggle debug draw: " + res.error().message);
-    }
-    return CallToolResult::error("Godot Editor is offline. Launch Godot Editor to toggle debug draw modes.");
+CallToolResult handleViewportToggleDebugDraw(const ResolvedToolBinding& binding, const json& args,
+                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    return sendPhase7LiveRequest(binding, args, ipc);
 }
 
 } // namespace mcp

@@ -60,7 +60,9 @@ class CommandControl {
 public:
     bool tryStart() {
         CommandState expected = CommandState::Pending;
-        return m_state.compare_exchange_strong(expected, CommandState::Running);
+        if (!m_state.compare_exchange_strong(expected, CommandState::Running)) return false;
+        m_everStarted.store(true);
+        return true;
     }
 
     bool tryCancelPending() {
@@ -75,6 +77,7 @@ public:
 
     void markCompleted() { m_state.store(CommandState::Completed); }
     CommandState state() const { return m_state.load(); }
+    bool hasEverStarted() const { return m_everStarted.load(); }
 
     bool tryClaimResponse() {
         bool expected = false;
@@ -83,6 +86,7 @@ public:
 
 private:
     std::atomic<CommandState> m_state{CommandState::Pending};
+    std::atomic<bool> m_everStarted{false};
     std::atomic<bool> m_responseClaimed{false};
 };
 

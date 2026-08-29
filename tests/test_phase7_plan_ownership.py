@@ -10,6 +10,34 @@ PLAN = ROOT / "docs" / "PHASE_7_PARTIAL_IMPLEMENTATION_PLAN.md"
 PATH_SUFFIXES = (".cpp", ".hpp", ".py", ".ps1", ".gd", ".tscn", ".json",
                  ".yml", ".md", ".txt", ".godot")
 SPECIAL_PATHS = {"CMakeLists.txt", "README.md", "CHANGELOG.md", "SECURITY.md"}
+EXACT_PROSE_BOUNDARIES = {
+    "optional session kind, shared guard declaration, test access",
+    "profiler state and scheduler declarations",
+    "top-of-queue and direct-dispatch guards",
+    "profiler scheduler/interception",
+    "external method admission table only",
+    "generated schema and alias resolution",
+    "enable exactly 15 capability rows only",
+    "historical 60/18 and alias/schema assertions",
+    "current 75/3 capability assertions only",
+    "parent-compatible registry and identity RED",
+    "public list-tools 75/3 assertions only",
+    "session guard/zero-dispatch matrix",
+    "authenticated admission and route matrix",
+    "raw authenticated method matrix",
+    "public registered-tool matrix and count assertions",
+    "generator/contract-probe jobs and path filters",
+    "activation validator/public integration gates only",
+}
+GODOT_BRIDGE_METHODS = {
+    2: {"signal.listConnections", "signal.connect", "signal.disconnect", "signal.emit"},
+    3: {"vision.setCameraTransform", "vision.toggleDebugDraw"},
+    4: {"tilemap.setCells", "tilemap.getUsedRect", "gridmap.setCells"},
+    5: {"physics.raycast"},
+    6: {"nav.queryPath"},
+    7: {"anim.listTracks", "anim.playTrack"},
+    9: {"profiler.sample"},
+}
 
 
 def is_path(token: str) -> bool:
@@ -70,9 +98,30 @@ def authoritative_rows(text: str):
         path = cells[0].strip("`")
         owners = []
         for cell in cells[1:]:
-            owners.extend(int(value) for value in re.findall(r"Task (\d+):", cell))
             if "*" in cell or "glob" in cell.lower() or "family" in cell.lower():
                 raise ValueError("non_exact_handoff_boundary")
+            matches = list(re.finditer(r"Task (\d+):", cell))
+            for index, match in enumerate(matches):
+                task = int(match.group(1))
+                end = matches[index + 1].start() if index + 1 < len(matches) else len(cell)
+                boundary = cell[match.end():end].strip()
+                boundary = re.sub(r"(?:;\s*)?then\s*$", "", boundary).strip(" ;")
+                if not boundary:
+                    raise ValueError("empty_handoff_boundary")
+                tokens = re.findall(r"`([^`]+)`", boundary)
+                if path == "src/gdextension/godot_bridge.cpp":
+                    required = GODOT_BRIDGE_METHODS.get(task, set())
+                    if not required.issubset(tokens):
+                        raise ValueError("non_exact_handoff_boundary")
+                    if task == 9 and "Performance bind/sample block" not in boundary:
+                        raise ValueError("non_exact_handoff_boundary")
+                elif path.startswith("tests/test_phase7") and task != 1:
+                    if (len(tokens) != 2 or "BEGIN" not in tokens[0] or
+                            "END" not in tokens[1] or " through " not in boundary):
+                        raise ValueError("non_exact_handoff_boundary")
+                elif not tokens and boundary not in EXACT_PROSE_BOUNDARIES:
+                    raise ValueError("non_exact_handoff_boundary")
+                owners.append(task)
         if not owners:
             raise ValueError("empty_handoff_boundary")
         if path in rows:
@@ -126,6 +175,84 @@ class Phase7PlanOwnershipTests(unittest.TestCase):
                             "Task 1: * file preamble, fixtures, and `TEST_CASE", 1)
         with self.assertRaisesRegex(ValueError, "non_exact_handoff_boundary"):
             audit_plan(text)
+
+    def test_empty_task_handoff_boundary_is_rejected(self):
+        text = PLAN.read_text(encoding="utf-8")
+        text = re.sub(
+            r"(\| `tests/test_phase7a_signals\.cpp`[^\n]*?\|) Task 1: [^|]*",
+            r"\1 Task 1: ", text, count=1)
+        with self.assertRaisesRegex(ValueError, "empty_handoff_boundary"):
+            audit_plan(text)
+
+    def test_prose_only_handoff_boundary_is_rejected(self):
+        text = PLAN.read_text(encoding="utf-8")
+        text = re.sub(
+            r"(\| `tests/test_phase7a_signals\.cpp`[^\n]*?\|) Task 1: [^|]*",
+            r"\1 Task 1: some changes ", text, count=1)
+        with self.assertRaisesRegex(ValueError, "non_exact_handoff_boundary"):
+            audit_plan(text)
+
+    def test_domain_handoff_requires_both_begin_and_end_markers(self):
+        text = PLAN.read_text(encoding="utf-8")
+        text = text.replace(
+            "Task 2: append-only section `// TASK 2 SIGNAL BEHAVIOR BEGIN` through "
+            "`// TASK 2 SIGNAL BEHAVIOR END`",
+            "Task 2: append-only section `// TASK 2 SIGNAL BEHAVIOR BEGIN`", 1)
+        with self.assertRaisesRegex(ValueError, "non_exact_handoff_boundary"):
+            audit_plan(text)
+
+    def test_godot_bridge_handoff_rejects_incomplete_method_list(self):
+        text = PLAN.read_text(encoding="utf-8")
+        table_start = text.index("### Authoritative Multi-Owner Handoff Table")
+        table_end = text.index("## Governance Decision", table_start)
+        table = text[table_start:table_end].replace(
+            "`signal.emit`", "`signal.emit.removed`", 1)
+        text = text[:table_start] + table + text[table_end:]
+        with self.assertRaisesRegex(ValueError, "non_exact_handoff_boundary"):
+            audit_plan(text)
+
+    def test_phase7_domain_handlers_have_one_binding_aware_forwarding_path(self):
+        handlers = {
+            "src/tools/signal_tools.cpp": [
+                "handleSignalListConnections", "handleSignalConnect",
+                "handleSignalDisconnect", "handleSignalEmit"],
+            "src/tools/visual_tools.cpp": [
+                "handleViewportSetCameraTransform", "handleViewportToggleDebugDraw"],
+            "src/tools/tilemap_grid_tools.cpp": [
+                "handleTilemapSetCells", "handleTilemapGetUsedRect", "handleGridmapSetCells"],
+            "src/tools/physics_nav_tools.cpp": [
+                "handlePhysicsRaycastQuery", "handlePhysicsSimulateStep", "handleNavBakeMesh",
+                "handleNavQueryPath", "handleAnimListTracks", "handleAnimPlayTrack"],
+            "src/tools/runtime_tools.cpp": [
+                "handleInjectInputEvent", "handleRuntimeGetCallStack",
+                "handleRuntimeReadProfiler"],
+        }
+        for path, names in handlers.items():
+            source = (ROOT / path).read_text(encoding="utf-8")
+            self.assertNotRegex(
+                source,
+                r"sendRequest\(\s*\"(?:signal\.(?:listConnections|connect|disconnect|emit)|"
+                r"vision\.(?:setCameraTransform|toggleDebugDraw)|"
+                r"tilemap\.(?:setCells|getUsedRect)|gridmap\.setCells|physics\.raycast|"
+                r"nav\.queryPath|anim\.(?:listTracks|playTrack)|"
+                r"runtime\.(?:injectInput|getCallStack|readProfiler))\"")
+            for name in names:
+                self.assertRegex(
+                    source,
+                    rf"{name}\s*\(\s*const\s+ResolvedToolBinding&\s+binding[\s\S]*?sendPhase7LiveRequest\(\s*binding",
+                    path + ":" + name)
+
+    def test_process_queue_validates_session_before_dequeue_or_start(self):
+        source = (ROOT / "src/gdextension/editor_hook.cpp").read_text(encoding="utf-8")
+        process_queue = source[source.index("void EditorHook::processQueue()"):
+                               source.index("void EditorHook::cancelPendingCommands")]
+        validation_match = re.search(
+            r"validateSessionKindForMethod\(\s*m_commandQueue\.front\(\)\.method",
+            process_queue)
+        self.assertIsNotNone(validation_match)
+        validation = validation_match.start()
+        self.assertLess(validation, process_queue.index("m_commandQueue.pop()"))
+        self.assertLess(validation, process_queue.index("tryStart()"))
 
 
 if __name__ == "__main__":
