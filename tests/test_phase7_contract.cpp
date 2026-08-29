@@ -32,13 +32,14 @@ public:
         last_method = method;
         last_params = params;
         last_timeout_ms = timeout_ms;
-        return didi::json{{"status", "ok"}, {"observed", true}};
+        return response;
     }
     bool connected{true};
     int requests{0};
     int last_timeout_ms{0};
     std::string last_method;
     didi::json last_params;
+    didi::json response{{"status", "ok"}, {"observed", true}};
 };
 
 class LeaseAwareClient final : public didi::ipc::IIpcClient,
@@ -87,6 +88,26 @@ public:
     didi::json wrapper_response{{"error", {{"code", 409},
                                              {"message", "session_kind_rejected"}}}};
     std::shared_ptr<RecordingClient> raw_client{std::make_shared<RecordingClient>()};
+};
+
+class MissingLeaseClient final : public didi::ipc::IIpcClient,
+                                 public didi::runtime::IRuntimeRouteLeaseProvider {
+public:
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override {}
+    bool isConnected() const override { return true; }
+    didi::Result<didi::json> sendRequest(const std::string&, const didi::json&, int) override {
+        ++requests;
+        return didi::json{{"status", "ok"}};
+    }
+    std::optional<didi::runtime::RuntimeRouteLease> acquireRouteLease() override {
+        ++lease_acquisitions;
+        return std::nullopt;
+    }
+    bool quarantineRoute(const didi::runtime::RuntimeRouteLease&) override { return false; }
+
+    int requests{0};
+    int lease_acquisitions{0};
 };
 
 struct ScopedEmptyCwd {
@@ -199,16 +220,22 @@ void test_phase7_generated_schemas() {
         ASSERT_EQ(tool->inputSchema["$id"],
                   "https://didi.local/schemas/phase7/generated/" +
                       std::string(name) + ".request.schema.json");
+        ASSERT_TRUE(static_cast<bool>(tool->boundHandler));
+        ASSERT_TRUE(!tool->handler);
     }
+    const auto* alias = registry.getTool("inject_input_event");
+    ASSERT_TRUE(alias != nullptr);
+    ASSERT_TRUE(static_cast<bool>(alias->boundHandler));
+    ASSERT_TRUE(!alias->handler);
 }
 
 void test_phase7_live_forwarding_uses_exact_method_and_deadline() {
     auto client = std::make_shared<RecordingClient>();
-    const auto result = didi::mcp::sendPhase7LiveRequest(
-        "inject_input_event", "runtime_inject_input", "runtime.injectInput",
+    const didi::json arguments =
         {{"events", didi::json::array({{{"type", "action"},
-                                         {"action_name", "jump"}, {"pressed", true}}})}},
-        client);
+                                         {"action_name", "jump"}, {"pressed", true}}})}};
+    const auto binding = didi::mcp::resolveAliasBinding("inject_input_event", arguments);
+    const auto result = didi::mcp::sendPhase7LiveRequest(binding, arguments, client);
     ASSERT_TRUE(!result.isError);
     ASSERT_EQ(client->requests, 1);
     ASSERT_EQ(client->last_method, "runtime.injectInput");
@@ -218,14 +245,16 @@ void test_phase7_live_forwarding_uses_exact_method_and_deadline() {
 
 void test_phase7_live_forwarding_preserves_bound_dispatch_and_error_identity() {
     auto client = std::make_shared<LeaseAwareClient>();
-    const auto result = didi::mcp::sendPhase7LiveRequest(
-        "inject_input_event", "runtime_inject_input", "runtime.injectInput",
-        {{"events", didi::json::array()}}, client);
+    client->raw_client->response = client->wrapper_response;
+    const didi::json arguments = {{"events", didi::json::array()}};
+    const auto binding = didi::mcp::resolveAliasBinding("inject_input_event", arguments);
+    const auto result = didi::mcp::sendPhase7LiveRequest(binding, arguments, client);
 
     ASSERT_EQ(client->lease_acquisitions, 1);
-    ASSERT_EQ(client->wrapper_requests, 1);
-    ASSERT_EQ(client->raw_client->requests, 0);
-    ASSERT_EQ(client->last_timeout_ms, 17000);
+    ASSERT_EQ(client->wrapper_requests, 0);
+    ASSERT_EQ(client->raw_client->requests, 1);
+    ASSERT_EQ(client->raw_client->last_method, "runtime.injectInput");
+    ASSERT_EQ(client->raw_client->last_timeout_ms, 17000);
     ASSERT_TRUE(result.isError);
     const auto payload = didi::json::parse(result.content.at(0).text);
     ASSERT_EQ(payload["error"]["code"], 409);
@@ -235,20 +264,79 @@ void test_phase7_live_forwarding_preserves_bound_dispatch_and_error_identity() {
 
 void test_phase7_live_forwarding_quarantines_exact_malformed_route() {
     auto client = std::make_shared<LeaseAwareClient>();
-    client->wrapper_response = didi::json::array({"malformed"});
+    client->raw_client->response = didi::json::array({"malformed"});
+    const auto binding = didi::mcp::resolveAliasBinding("signal_connect", didi::json::object());
     const auto result = didi::mcp::sendPhase7LiveRequest(
-        "signal_connect", "signal_connect", "signal.connect", didi::json::object(),
-        client);
+        binding, didi::json::object(), client);
 
     ASSERT_TRUE(result.isError);
-    ASSERT_EQ(client->wrapper_requests, 1);
-    ASSERT_EQ(client->raw_client->requests, 0);
+    ASSERT_EQ(client->wrapper_requests, 0);
+    ASSERT_EQ(client->raw_client->requests, 1);
     ASSERT_EQ(client->quarantines, 1);
     ASSERT_EQ(client->quarantined_generation, client->generation);
     const auto payload = didi::json::parse(result.content.at(0).text);
     ASSERT_EQ(payload["error"]["code"], 500);
     ASSERT_EQ(payload["error"]["data"]["tool"], "signal_connect");
     ASSERT_EQ(payload["error"]["data"]["route_quarantine"], true);
+}
+
+void test_phase7_live_forwarding_rejects_malformed_error_members() {
+    const std::array<didi::json, 4> malformed_errors = {
+        didi::json("error"), didi::json(nullptr), didi::json::array(),
+        didi::json{{"code", 409}}};
+    for (const auto& malformed_error : malformed_errors) {
+        auto client = std::make_shared<LeaseAwareClient>();
+        client->raw_client->response = didi::json{{"error", malformed_error}};
+        const auto binding = didi::mcp::resolveAliasBinding(
+            "signal_connect", didi::json::object());
+        const auto result = didi::mcp::sendPhase7LiveRequest(
+            binding, didi::json::object(), client);
+
+        ASSERT_TRUE(result.isError);
+        ASSERT_EQ(client->wrapper_requests, 0);
+        ASSERT_EQ(client->raw_client->requests, 1);
+        ASSERT_EQ(client->quarantines, 1);
+        ASSERT_EQ(client->quarantined_generation, client->generation);
+        const auto payload = didi::json::parse(result.content.at(0).text);
+        ASSERT_EQ(payload["error"]["code"], 500);
+        ASSERT_EQ(payload["error"]["message"], "extension_protocol_error");
+        ASSERT_EQ(payload["error"]["data"]["tool"], "signal_connect");
+    }
+}
+
+void test_phase7_live_forwarding_fails_closed_without_managed_lease() {
+    auto client = std::make_shared<MissingLeaseClient>();
+    const auto binding = didi::mcp::resolveAliasBinding(
+        "runtime_read_profiler", didi::json::object());
+    const auto result = didi::mcp::sendPhase7LiveRequest(
+        binding, didi::json::object(), client);
+
+    ASSERT_TRUE(result.isError);
+    ASSERT_EQ(client->lease_acquisitions, 1);
+    ASSERT_EQ(client->requests, 0);
+    const auto payload = didi::json::parse(result.content.at(0).text);
+    ASSERT_EQ(payload["error"]["code"], 503);
+    ASSERT_EQ(payload["error"]["data"]["tool"], "runtime_read_profiler");
+}
+
+void test_phase7_blockers_never_acquire_or_dispatch_a_route() {
+    const std::array<const char*, 3> blockers = {
+        "physics_simulate_step", "nav_bake_mesh", "runtime_get_call_stack"};
+    for (const auto* blocker : blockers) {
+        auto client = std::make_shared<LeaseAwareClient>();
+        const auto binding = didi::mcp::resolveAliasBinding(
+            blocker, didi::json::object());
+        const auto result = didi::mcp::sendPhase7LiveRequest(
+            binding, didi::json::object(), client);
+
+        ASSERT_TRUE(result.isError);
+        ASSERT_EQ(client->lease_acquisitions, 0);
+        ASSERT_EQ(client->wrapper_requests, 0);
+        ASSERT_EQ(client->raw_client->requests, 0);
+        const auto payload = didi::json::parse(result.content.at(0).text);
+        ASSERT_EQ(payload["error"]["code"], 501);
+        ASSERT_EQ(payload["error"]["data"]["tool"], blocker);
+    }
 }
 
 void test_phase7_live_forwarding_enforces_exact_serialized_caps() {
@@ -268,13 +356,15 @@ void test_phase7_live_forwarding_enforces_exact_serialized_caps() {
     }};
     for (const auto& row : rows) {
         auto client = std::make_shared<LeaseAwareClient>();
-        client->wrapper_response = didi::json{{"blob", std::string(row.cap, 'x')}};
+        client->raw_client->response = didi::json{{"blob", std::string(row.cap, 'x')}};
+        const auto binding = didi::mcp::resolveAliasBinding(
+            row.invoked, didi::json::object());
         const auto result = didi::mcp::sendPhase7LiveRequest(
-            row.invoked, row.canonical, row.method, didi::json::object(), client);
+            binding, didi::json::object(), client);
 
         ASSERT_TRUE(result.isError);
-        ASSERT_EQ(client->wrapper_requests, 1);
-        ASSERT_EQ(client->raw_client->requests, 0);
+        ASSERT_EQ(client->wrapper_requests, 0);
+        ASSERT_EQ(client->raw_client->requests, 1);
         ASSERT_EQ(client->quarantines, 1);
         ASSERT_EQ(client->quarantined_generation, client->generation);
         const auto payload = didi::json::parse(result.content.at(0).text);
@@ -296,6 +386,12 @@ struct RegisterPhase7ContractTests {
                      test_phase7_live_forwarding_preserves_bound_dispatch_and_error_identity);
         registerTest("Phase7Contract.LiveForwardingMalformedQuarantine",
                      test_phase7_live_forwarding_quarantines_exact_malformed_route);
+        registerTest("Phase7Contract.LiveForwardingMalformedErrorMembers",
+                     test_phase7_live_forwarding_rejects_malformed_error_members);
+        registerTest("Phase7Contract.LiveForwardingMissingManagedLease",
+                     test_phase7_live_forwarding_fails_closed_without_managed_lease);
+        registerTest("Phase7Contract.BlockersNeverDispatch",
+                     test_phase7_blockers_never_acquire_or_dispatch_a_route);
         registerTest("Phase7Contract.LiveForwardingSerializedCaps",
                      test_phase7_live_forwarding_enforces_exact_serialized_caps);
     }

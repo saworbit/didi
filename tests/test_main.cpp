@@ -1,7 +1,10 @@
+#include <algorithm>
 #include <iostream>
 #include <vector>
 #include <functional>
+#include <optional>
 #include <string>
+#include <string_view>
 #include "didi/common/logger.hpp"
 
 struct TestCase {
@@ -40,6 +43,27 @@ void registerTest(const std::string& name, std::function<void()> fn) {
 int main(int argc, char* argv[]) {
     didi::Logger::instance().setLevel(didi::LogLevel::Warn);
 
+    std::optional<std::string> exact_test_case;
+    constexpr std::string_view prefix = "--test-case=";
+    for (int index = 1; index < argc; ++index) {
+        const std::string_view argument = argv[index];
+        if (!argument.starts_with(prefix) || argument.size() == prefix.size() ||
+            exact_test_case.has_value()) {
+            std::cerr << "Usage: didi_tests [--test-case=<exact-name>]" << std::endl;
+            return 2;
+        }
+        exact_test_case = std::string(argument.substr(prefix.size()));
+    }
+    if (exact_test_case.has_value()) {
+        const auto found = std::find_if(
+            getTestRegistry().begin(), getTestRegistry().end(),
+            [&](const TestCase& test) { return test.name == *exact_test_case; });
+        if (found == getTestRegistry().end()) {
+            std::cerr << "Unknown test case: " << *exact_test_case << std::endl;
+            return 2;
+        }
+    }
+
     std::cout << "========================================" << std::endl;
     std::cout << " Running Didi Native MCP Test Suite" << std::endl;
     std::cout << "========================================" << std::endl;
@@ -48,6 +72,7 @@ int main(int argc, char* argv[]) {
     int failed = 0;
 
     for (const auto& test : getTestRegistry()) {
+        if (exact_test_case.has_value() && test.name != *exact_test_case) continue;
         std::cout << "[ RUN      ] " << test.name << std::endl;
         try {
             test.test_fn();

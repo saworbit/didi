@@ -110,26 +110,33 @@ void EditorHook::setSessionKind(const std::string& session_kind) {
 }
 
 void EditorHook::processQueue() {
-    std::vector<EngineCommand> commands;
+    struct QueuedCommand {
+        EngineCommand command;
+        std::optional<json> session_rejection;
+    };
+    std::vector<QueuedCommand> commands;
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
         constexpr size_t kMaxCommandsPerFrame = 64;
         while (!m_commandQueue.empty() && commands.size() < kMaxCommandsPerFrame) {
-            commands.push_back(std::move(m_commandQueue.front()));
+            auto session_rejection = validateSessionKindForMethod(
+                m_commandQueue.front().method, m_sessionKind);
+            commands.push_back(
+                {std::move(m_commandQueue.front()), std::move(session_rejection)});
             m_commandQueue.pop();
         }
     }
 
-    for (auto& cmd : commands) {
+    for (auto& queued : commands) {
+        auto& cmd = queued.command;
+        if (queued.session_rejection.has_value()) {
+            fulfillCommand(cmd.response_promise, cmd.control,
+                           std::move(*queued.session_rejection));
+            continue;
+        }
         if (!cmd.control || !cmd.control->tryStart()) {
             fulfillCommand(cmd.response_promise, cmd.control,
                            {{"error", {{"code", 504}, {"message", "Command cancelled before execution"}}}});
-            continue;
-        }
-        if (auto rejected = validateSessionKindForMethod(cmd.method, m_sessionKind);
-            rejected.has_value()) {
-            cmd.control->markCompleted();
-            fulfillCommand(cmd.response_promise, cmd.control, std::move(*rejected));
             continue;
         }
         try {

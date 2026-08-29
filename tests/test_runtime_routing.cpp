@@ -1411,6 +1411,17 @@ void test_phase7_queue_and_direct_guards_reject_before_engine_work() {
         ASSERT_FALSE(didi::godot::EditorHookTestAccess::runtimeStepActive(hook));
         ASSERT_FALSE(didi::godot::EditorHookTestAccess::hasPendingRuntimeStep(hook));
         ASSERT_FALSE(didi::godot::EditorHookTestAccess::hasPendingAssetReimport(hook));
+        ASSERT_FALSE(queued.control->hasEverStarted());
+        ASSERT_EQ(queued.control->state(), didi::godot::CommandState::Pending);
+
+        auto timeout_race = didi::godot::EditorHookTestAccess::enqueue(hook, entry.method);
+        ASSERT_TRUE(timeout_race.control->tryCancelPending());
+        hook.processQueue();
+        const auto raced_response = timeout_race.response.get();
+        ASSERT_EQ(raced_response["error"]["code"], 409);
+        ASSERT_EQ(raced_response["error"]["message"], "session_kind_rejected");
+        ASSERT_FALSE(timeout_race.control->hasEverStarted());
+        ASSERT_EQ(timeout_race.control->state(), didi::godot::CommandState::Cancelled);
 
         const auto direct = didi::godot::EditorHookTestAccess::executeOnMainThread(
             hook, entry.method, didi::json::object());

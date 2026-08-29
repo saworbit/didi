@@ -60,9 +60,9 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
 // External handler forward declarations
 CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleViewportDiffCapture(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
-CallToolResult handleViewportSetCameraTransform(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleViewportSetCameraTransform(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
-CallToolResult handleViewportToggleDebugDraw(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleViewportToggleDebugDraw(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
 CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleSceneInstantiateNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -81,10 +81,10 @@ CallToolResult handleSceneOpen(const json& args, std::shared_ptr<ipc::IIpcClient
 CallToolResult handleSceneClose(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleScenePackBranch(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
-CallToolResult handleSignalListConnections(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
-CallToolResult handleSignalConnect(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
-CallToolResult handleSignalDisconnect(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
-CallToolResult handleSignalEmit(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleSignalListConnections(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleSignalConnect(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleSignalDisconnect(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleSignalEmit(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
 CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleScriptReflectClass(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -93,16 +93,16 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
 CallToolResult handleScriptAttachToNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleScriptDetachFromNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
-CallToolResult handlePhysicsRaycastQuery(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
-CallToolResult handlePhysicsSimulateStep(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
-CallToolResult handleNavBakeMesh(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
-CallToolResult handleNavQueryPath(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
-CallToolResult handleAnimListTracks(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
-CallToolResult handleAnimPlayTrack(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handlePhysicsRaycastQuery(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handlePhysicsSimulateStep(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleNavBakeMesh(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleNavQueryPath(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleAnimListTracks(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleAnimPlayTrack(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
-CallToolResult handleTilemapSetCells(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
-CallToolResult handleTilemapGetUsedRect(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
-CallToolResult handleGridmapSetCells(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleTilemapSetCells(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleTilemapGetUsedRect(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleGridmapSetCells(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
 CallToolResult handleQueryProjectResources(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -118,9 +118,9 @@ CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<
 CallToolResult handleUiHitTest(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
 CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
-CallToolResult handleInjectInputEvent(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
-CallToolResult handleRuntimeGetCallStack(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
-CallToolResult handleRuntimeReadProfiler(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleInjectInputEvent(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleRuntimeGetCallStack(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleRuntimeReadProfiler(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleRuntimeListSessions(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
 CallToolResult handleRuntimeAttachSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
 CallToolResult handleRuntimeDetachSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
@@ -423,7 +423,7 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
     if (!tool) {
         return CallToolResult::error("Tool not found: " + name);
     }
-    if (!tool->handler) {
+    if (!tool->handler && !tool->boundHandler) {
         return CallToolResult::error("Tool handler not set for: " + name);
     }
     if (!tool->capability.implemented) {
@@ -491,9 +491,11 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
     auto authorized_arguments = std::move(safety.arguments);
     try {
         const auto dispatcher = std::dynamic_pointer_cast<LeaseDispatchClient>(m_ipcClient);
-        std::optional<LeaseDispatchClient::Binding> binding;
-        if (dispatcher) binding.emplace(dispatcher->bind(lease));
-        auto result = tool->handler(authorized_arguments);
+        std::optional<LeaseDispatchClient::Binding> route_binding;
+        if (dispatcher) route_binding.emplace(dispatcher->bind(lease));
+        auto result = tool->boundHandler
+                          ? tool->boundHandler(binding, authorized_arguments)
+                          : tool->handler(authorized_arguments);
         if (result.isError) {
             if (dispatcher) {
                 if (const auto error = dispatcher->lastError(); error.has_value()) {
@@ -833,7 +835,9 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"target_node"}}
         };
-        t.handler = [this](const json& args) { return handleSignalListConnections(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleSignalListConnections(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
     {
@@ -850,7 +854,9 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"emitter_node", "signal_name", "target_node", "target_method"}}
         };
-        t.handler = [this](const json& args) { return handleSignalConnect(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleSignalConnect(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
     {
@@ -867,7 +873,9 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"emitter_node", "signal_name", "target_node", "target_method"}}
         };
-        t.handler = [this](const json& args) { return handleSignalDisconnect(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleSignalDisconnect(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
     {
@@ -883,7 +891,9 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"target_node", "signal_name"}}
         };
-        t.handler = [this](const json& args) { return handleSignalEmit(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleSignalEmit(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
 
@@ -1017,7 +1027,9 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"position"}}
         };
-        t.handler = [this](const json& args) { return handleViewportSetCameraTransform(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleViewportSetCameraTransform(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
     {
@@ -1055,7 +1067,9 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"wireframe", {{"type", "boolean"}, {"default", false}}}
             }}
         };
-        t.handler = [this](const json& args) { return handleViewportToggleDebugDraw(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleViewportToggleDebugDraw(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
 
@@ -1075,7 +1089,9 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"from", "to"}}
         };
-        t.handler = [this](const json& args) { return handlePhysicsRaycastQuery(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handlePhysicsRaycastQuery(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
     {
@@ -1089,7 +1105,9 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"delta", {{"type", "number"}, {"default", 0.0166667}}}
             }}
         };
-        t.handler = [this](const json& args) { return handlePhysicsSimulateStep(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handlePhysicsSimulateStep(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
     {
@@ -1102,7 +1120,9 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"nav_node_path", {{"type", "string"}, {"description", "Path to NavigationRegion3D / NavigationMesh"}}}
             }}
         };
-        t.handler = [this](const json& args) { return handleNavBakeMesh(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleNavBakeMesh(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
     {
@@ -1117,7 +1137,9 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"start_point", "end_point"}}
         };
-        t.handler = [this](const json& args) { return handleNavQueryPath(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleNavQueryPath(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
     {
@@ -1131,7 +1153,9 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"animation_player_path"}}
         };
-        t.handler = [this](const json& args) { return handleAnimListTracks(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleAnimListTracks(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
     {
@@ -1147,7 +1171,9 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"animation_player_path", "animation_name"}}
         };
-        t.handler = [this](const json& args) { return handleAnimPlayTrack(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleAnimPlayTrack(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
 
@@ -1166,7 +1192,9 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"tilemap_path", "cells"}}
         };
-        t.handler = [this](const json& args) { return handleTilemapSetCells(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleTilemapSetCells(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
     {
@@ -1180,7 +1208,9 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"tilemap_path"}}
         };
-        t.handler = [this](const json& args) { return handleTilemapGetUsedRect(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleTilemapGetUsedRect(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
     {
@@ -1195,7 +1225,9 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"gridmap_path", "cells"}}
         };
-        t.handler = [this](const json& args) { return handleGridmapSetCells(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleGridmapSetCells(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
 
@@ -1321,12 +1353,16 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"event_type"}}
         };
-        t.handler = [this](const json& args) { return handleInjectInputEvent(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleInjectInputEvent(binding, args, m_ipcClient);
+        };
         registerTool(t);
 
         // Alias
         t.name = "inject_input_event";
-        t.handler = [this](const json& args) { return handleInjectInputEvent(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleInjectInputEvent(binding, args, m_ipcClient);
+        };
         registerTool(t);
     }
     {
@@ -1334,7 +1370,9 @@ void ToolRegistry::registerAllDefaultTools() {
         t.name = "runtime_get_call_stack";
         t.description = "Fetches current debugger call stack and variable scopes on engine break/crash.";
         t.inputSchema = {{"type", "object"}};
-        t.handler = [this](const json& args) { return handleRuntimeGetCallStack(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleRuntimeGetCallStack(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
     {
@@ -1342,7 +1380,9 @@ void ToolRegistry::registerAllDefaultTools() {
         t.name = "runtime_read_profiler";
         t.description = "Pulls frame times, draw calls, draw passes, and physics tick metrics.";
         t.inputSchema = {{"type", "object"}};
-        t.handler = [this](const json& args) { return handleRuntimeReadProfiler(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleRuntimeReadProfiler(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
 

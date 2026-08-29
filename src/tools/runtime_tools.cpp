@@ -1,4 +1,5 @@
 #include "didi/mcp/mcp_protocol.hpp"
+#include "didi/tools/phase7_live_forward.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/gdextension/expression_sandbox.hpp"
@@ -338,41 +339,19 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
     return CallToolResult::successJson(session_res.toJson());
 }
 
-CallToolResult handleInjectInputEvent(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    std::string event_type = args.value("event_type", "action");
-
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("runtime.injectInput", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
-        return CallToolResult::error("Failed to inject input event: " + res.error().message);
-    }
-
-    return CallToolResult::error("Godot Editor/Game instance is offline. Launch Godot to inject interactive inputs.");
+CallToolResult handleInjectInputEvent(const ResolvedToolBinding& binding, const json& args,
+                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    return sendPhase7LiveRequest(binding, args, ipc);
 }
 
-CallToolResult handleRuntimeGetCallStack(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("runtime.getCallStack", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
-        return CallToolResult::error("Failed to fetch debugger call stack: " + res.error().message);
-    }
-    return CallToolResult::error("Godot Editor is offline. Launch Godot in debug mode to inspect live call stacks.");
+CallToolResult handleRuntimeGetCallStack(const ResolvedToolBinding& binding, const json& args,
+                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    return sendPhase7LiveRequest(binding, args, ipc);
 }
 
-CallToolResult handleRuntimeReadProfiler(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("runtime.readProfiler", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
-        return CallToolResult::error("Failed to read profiler telemetry from Godot: " + res.error().message);
-    }
-
-    return CallToolResult::error("Godot Editor / game instance is offline. Launch Godot to inspect live profiler metrics (FPS, frame time, draw calls).");
+CallToolResult handleRuntimeReadProfiler(const ResolvedToolBinding& binding, const json& args,
+                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    return sendPhase7LiveRequest(binding, args, ipc);
 }
 
 } // namespace mcp

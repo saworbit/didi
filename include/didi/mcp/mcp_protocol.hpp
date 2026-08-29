@@ -9,6 +9,8 @@
 namespace didi {
 namespace mcp {
 
+struct ResolvedToolBinding;
+
 inline const char* kProtocolVersion = "2024-11-05";
 inline const char* kServerName = "didi";
 inline const char* kServerVersion = "1.4.0";
@@ -99,6 +101,8 @@ struct CallToolResult {
 };
 
 using ToolHandler = std::function<CallToolResult(const json& arguments)>;
+using BoundToolHandler =
+    std::function<CallToolResult(const ResolvedToolBinding&, const json& arguments)>;
 
 struct ExecutionCapability {
     std::vector<std::string> modes{"unimplemented"};
@@ -122,6 +126,7 @@ struct ToolDefinition {
     std::string description;
     json inputSchema;
     ToolHandler handler;
+    BoundToolHandler boundHandler;
     ExecutionCapability capability;
 
     json toJson() const {
