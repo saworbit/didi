@@ -148,7 +148,7 @@ This is the sole authoritative ownership table. It contains exactly every path e
 
 Single-owner clarification, not a handoff: Task 8 alone owns new runtime-only InputEvent constructors in `src/gdextension/runtime_bridge.cpp`; it does not edit `src/gdextension/godot_bridge.cpp`. There are no conditional helper edits.
 
-`tests/test_phase7_plan_ownership.py`, created in Task 1, is the plan-level equality and authoritative-handoff audit. It parses Tasks 1-11, collects path-like backtick tokens only from `Create:`, `Modify:`, `Modify only`, and `Test:` bullets in each `**Files:**` block, and separately records `Do not modify:` paths as a deny set. It collects the one literal `git add` line in that task, expands a staged directory token such as `schemas/phase7` to declared descendants, and ignores only `build-ninja/` and `generated/` outputs. It parses only the Authoritative Multi-Owner Handoff Table; the explanatory symbol index is ignored. It asserts exact modified-set/staged-set equality, no denied path staged, exactly one staging command and one commit command per task, and no staged path absent from the owning task's Files block. It derives every path present in more than one task Files block and requires exactly one authoritative row for that path, no authoritative row for a single-owner path, owners in strictly ascending task order matching the derived owner list, and a non-empty exact symbol/test-case or begin/end section boundary for every owner. A handoff boundary containing `*`, a glob, a namespace/family prefix, or an unexpanded family label is rejected as `non_exact_handoff_boundary`; the nine `godot_bridge.cpp` branches above must appear literally. Self-tests `test_omitted_task1_domain_handoff_is_rejected`, `test_declared_task1_domain_handoff_is_accepted`, and `test_wildcard_handoff_is_rejected` cover missing, exact, and wildcard rows respectively. Task 12 is excluded because it has no planned change/commit. This audit runs in Task 1 GREEN, Task 11 GREEN, Task 12 baseline, and CI; any plan edit that changes ownership must update Files, the authoritative table, and `git add` in the same plan commit.
+`tests/test_phase7_plan_ownership.py`, created in Task 1, is the plan-level equality and authoritative-handoff audit. It parses Tasks 1-11, collects path-like backtick tokens only from `Create:`, `Modify:`, `Modify only`, and `Test:` bullets in each `**Files:**` block, and separately records `Do not modify:` paths as a deny set. It collects the one literal `git add` line in that task, expands a staged directory token such as `schemas/phase7` to declared descendants, and ignores only `build-godot47-followup/` and `generated/` outputs. It parses only the Authoritative Multi-Owner Handoff Table; the explanatory symbol index is ignored. It asserts exact modified-set/staged-set equality, no denied path staged, exactly one staging command and one commit command per task, and no staged path absent from the owning task's Files block. It derives every path present in more than one task Files block and requires exactly one authoritative row for that path, no authoritative row for a single-owner path, owners in strictly ascending task order matching the derived owner list, and a non-empty exact symbol/test-case or begin/end section boundary for every owner. A handoff boundary containing `*`, a glob, a namespace/family prefix, or an unexpanded family label is rejected as `non_exact_handoff_boundary`; the nine `godot_bridge.cpp` branches above must appear literally. Self-tests `test_omitted_task1_domain_handoff_is_rejected`, `test_declared_task1_domain_handoff_is_accepted`, and `test_wildcard_handoff_is_rejected` cover missing, exact, and wildcard rows respectively. Task 12 is excluded because it has no planned change/commit. This audit runs in Task 1 GREEN, Task 11 GREEN, Task 12 baseline, and CI; any plan edit that changes ownership must update Files, the authoritative table, and `git add` in the same plan commit.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -167,7 +167,7 @@ Single-owner clarification, not a handoff: Task 8 alone owns new runtime-only In
 - Do not substitute frame waiting or tick-rate changes for `physics_simulate_step`, partial or uncancellable baking for `nav_bake_mesh`, or constant unavailable data, extension stack frames, expression evaluation, or log scraping for `runtime_get_call_stack`.
 - Preserve exactly 78 canonical registrations, exactly 10 legacy registrations, and 88 total `tools/list` registrations.
 - `inject_input_event` becomes a direct alias of `runtime_inject_input` on schema, capability, mutation class, session policy, handler behavior, IPC method, errors, result, and deadline. The invoked spelling remains in dry-run, audit, and confirmation digest binding, so cross-name token use is `409`.
-- Public state remains 60/18 until Task 11. There is no 61/17 through 74/4 public state. Task 11 changes all current facts to 75/3 in one commit after Task 10 passes both engines.
+- Public state remains 60/18 until Task 11. There is no 61/17 through 74/4 public state. Task 11 changes all current facts to 75/3 in one commit after Task 10 passes the sole current Godot 4.7.2 integration baseline.
 - Phase 7 remains `BLOCKED_AT_FEASIBILITY` after partial delivery because canonical completion still lacks three contracts. Public documents must distinguish “partial delivery complete” from “Phase 7 canonical completion blocked.”
 - Do not edit [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md) or [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md). They remain the original contract and tracked feasibility evidence.
 
@@ -186,11 +186,11 @@ Every native RED and GREEN uses this exact local baseline:
 
 ```powershell
 $repo = (Resolve-Path -LiteralPath .).Path
-$build = [IO.Path]::GetFullPath((Join-Path $repo "build-ninja"))
+$build = [IO.Path]::GetFullPath((Join-Path $repo "build-godot47-followup"))
 if (-not $build.StartsWith($repo + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw "unsafe build path" }
 if (Test-Path -LiteralPath $build) { Remove-Item -LiteralPath $build -Recurse -Force }
-$vsdev = (& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find Common7\Tools\VsDevCmd.bat)[0]
-cmd.exe /d /s /c "`"$vsdev`" -no_logo -arch=x64 -host_arch=x64 && cmake -S . -B build-ninja -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-ninja --parallel && build-ninja\didi_tests.exe"
+$vsdev = @(& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find Common7\Tools\VsDevCmd.bat)[0]
+cmd.exe /d /s /c "`"$vsdev`" -no_logo -arch=x64 -host_arch=x64 && cmake -S . -B build-godot47-followup -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-godot47-followup --parallel && build-godot47-followup\didi_tests.exe"
 ```
 
 The RED run must execute after the task's tests exist and before any task-owned production file changes. It must fail for the named missing behavior, not compilation, fixture setup, or an unrelated regression. Capture the failing test names and cause in the ignored `.superpowers\sdd\phase7-partial-red-log.md`. The GREEN run is the same command and must exit `0`.
@@ -281,11 +281,11 @@ This table is a navigation aid for implementation symbols and single-task blocks
 - Create: `tests/test_phase7_schema_contract.py`, `tests/test_phase7_contract.cpp`, `tests/test_phase7a_signals.cpp`, `tests/test_phase7a_viewport.cpp`, `tests/test_phase7a_tile_grid.cpp`, `tests/test_phase7b_physics.cpp`, `tests/test_phase7b_navigation.cpp`, `tests/test_phase7b_animation.cpp`, `tests/test_phase7c_input.cpp`, `tests/test_phase7c_diagnostics.cpp`
 - Create: `tests/test_phase7_plan_ownership.py`
 - Create: `include/didi/tools/resolved_tool_binding.hpp`
-- Create: `tests/phase7_contract_probe/project.godot`, `tests/phase7_contract_probe/probe.gd`, `tests/phase7_contract_probe/run_phase7_contract_probe.ps1` as tracked dual-engine evidence fixtures
+- Create: `tests/phase7_contract_probe/project.godot`, `tests/phase7_contract_probe/probe.gd`, `tests/phase7_contract_probe/run_phase7_contract_probe.ps1` as tracked Godot 4.7.2 evidence fixtures
 
 **Interfaces:**
 - Generated header `generated/didi/mcp/phase7_schemas.hpp` declares `std::span<const std::string_view> canonicalNames()` and `const json& standaloneRequestSchema(std::string_view canonical_name)` in `didi::mcp::phase7`. Unknown lookup throws a fail-closed programmer error. Each returned document is the standalone transitive-closure schema defined above, including recursive `json_value` where reachable.
-- Generator command is `python tools/generate_phase7_schemas.py --schema-dir schemas/phase7 --header build-ninja/generated/didi/mcp/phase7_schemas.hpp --source build-ninja/generated/didi/mcp/phase7_schemas.cpp`. It requires the exact 18 names and IDs, local refs only, root `$ref:"#/$defs/request"`, object request schemas, complete reachable `$defs`, sorted names/keys/definitions, compact ASCII-escaped JSON, escaped deterministic C++, UTF-8 input, and LF output.
+- Generator command is `python tools/generate_phase7_schemas.py --schema-dir schemas/phase7 --header build-godot47-followup/generated/didi/mcp/phase7_schemas.hpp --source build-godot47-followup/generated/didi/mcp/phase7_schemas.cpp`. It requires the exact 18 names and IDs, local refs only, root `$ref:"#/$defs/request"`, object request schemas, complete reachable `$defs`, sorted names/keys/definitions, compact ASCII-escaped JSON, escaped deterministic C++, UTF-8 input, and LF output.
 - `ResolvedToolBinding resolveAliasBinding(std::string_view invoked_name, const json& arguments)` returns the exact struct above. MutationSafety receives this binding object, never a bare name.
 - `CallToolResult sendPhase7LiveRequest(std::string_view invoked_name, std::string_view canonical_name, std::string_view method, const json& arguments, const std::shared_ptr<ipc::IIpcClient>& client)` acquires the bound route and forwards once at 17,000 ms.
 
@@ -298,7 +298,7 @@ This table is a navigation aid for implementation symbols and single-task blocks
 
 - [ ] **Step 1: Re-run the tracked feasibility prerequisite.**
 
-Run the exact prerequisite command above. Record both engine row counts, blocker set, and hash in `.superpowers\sdd\phase7-partial-red-log.md`. Stop on any mismatch.
+Run the exact prerequisite command above. Record the sole Godot 4.7.2 row count, blocker set, and hash in `.superpowers\sdd\phase7-partial-red-log.md`. Stop on any mismatch.
 
 - [ ] **Step 2: Write Slice A tests against parent public APIs only.**
 
@@ -307,9 +307,9 @@ Modify only the three existing test files and their existing CMake source entrie
 - [ ] **Step 3: Observe Slice A behavioral RED.**
 
 ```powershell
-Remove-Item -LiteralPath .\build-ninja -Recurse -Force -ErrorAction SilentlyContinue
-$vsdev = (& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find Common7\Tools\VsDevCmd.bat)[0]
-cmd.exe /d /s /c "`"$vsdev`" -no_logo -arch=x64 -host_arch=x64 && cmake -S . -B build-ninja -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-ninja --parallel && build-ninja\didi_tests.exe"
+Remove-Item -LiteralPath .\build-godot47-followup -Recurse -Force -ErrorAction SilentlyContinue
+$vsdev = @(& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find Common7\Tools\VsDevCmd.bat)[0]
+cmd.exe /d /s /c "`"$vsdev`" -no_logo -arch=x64 -host_arch=x64 && cmake -S . -B build-godot47-followup -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-godot47-followup --parallel && build-godot47-followup\didi_tests.exe"
 ```
 
 Expected: configure, compile, and link succeed. Only the named alias identity/parity and pre-interception zero-counter assertions fail. Missing files, symbols, fixtures, generated outputs, and validator behavior are not part of this RED.
@@ -322,11 +322,11 @@ Compile the scaffold without executing tests:
 
 ```powershell
 $repo = (Resolve-Path -LiteralPath .).Path
-$build = [IO.Path]::GetFullPath((Join-Path $repo "build-ninja"))
+$build = [IO.Path]::GetFullPath((Join-Path $repo "build-godot47-followup"))
 if (-not $build.StartsWith($repo + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw "unsafe build path" }
 if (Test-Path -LiteralPath $build) { Remove-Item -LiteralPath $build -Recurse -Force }
-$vsdev = (& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find Common7\Tools\VsDevCmd.bat)[0]
-cmd.exe /d /s /c "`"$vsdev`" -no_logo -arch=x64 -host_arch=x64 && cmake -S . -B build-ninja -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-ninja --parallel"
+$vsdev = @(& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find Common7\Tools\VsDevCmd.bat)[0]
+cmd.exe /d /s /c "`"$vsdev`" -no_logo -arch=x64 -host_arch=x64 && cmake -S . -B build-godot47-followup -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-godot47-followup --parallel"
 ```
 
 Expected: configure, compile, and link exit `0`; every newly declared symbol and generated output exists. This checkpoint is permitted interface scaffolding, not the behavior implementation.
@@ -364,13 +364,13 @@ $repo = (Get-Location).Path
 $empty = Join-Path $env:TEMP ("didi-phase7-schema-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $empty | Out-Null
 Push-Location $empty
-& "$repo\build-ninja\didi_tests.exe" --test-case="phase7 generated schemas"
+& "$repo\build-godot47-followup\didi_tests.exe" --test-case="phase7 generated schemas"
 Pop-Location
 .\tests\phase7_contract_probe\run_phase7_contract_probe.ps1 -Godot472 C:\Godot\Godot_v4.7.2-stable_win64_console.exe
-Remove-Item -LiteralPath .\build-ninja -Recurse -Force
+Remove-Item -LiteralPath .\build-godot47-followup -Recurse -Force
 ```
 
-Then run the exact VsDevCmd/Ninja baseline to force regeneration and relinking. Expected: Python and native suites pass; every generated ref resolves from an empty CWD; recursive and vector payloads validate; the probe reports `signal_flag_combinations=1` and `key_identity_combinations=7` for Godot 4.7.2; generated files exist only under `build-ninja/generated`; `tools/list` remains 60/18/10/88; all 18 Phase 7 public calls remain rejected.
+Then run the exact VsDevCmd/Ninja baseline to force regeneration and relinking. Expected: Python and native suites pass; every generated ref resolves from an empty CWD; recursive and vector payloads validate; the probe reports `signal_flag_combinations=1` and `key_identity_combinations=7` for Godot 4.7.2; generated files exist only under `build-godot47-followup/generated`; `tools/list` remains 60/18/10/88; all 18 Phase 7 public calls remain rejected.
 
 - [ ] **Step 9: Commit.**
 
@@ -396,7 +396,7 @@ git commit -m "test: lock phase 7 partial contracts"
 
 - [ ] **Step 1: Write failing tests.**
 
-Cover exact schema validation; rejection of every integer except flag `2`; rejection without mutation of existing connections with any non-`2` flags; dual-engine apply/undo/redo restoration for flag `2`; paths/names/callable arity; duplicate/missing relationships; deterministic bounded list serialization; no object IDs; full preflight before one UndoRedo action; observed post-state; supported JSON-to-Variant conversion; confirmation no-dispatch; and exact forward methods/deadline.
+Cover exact schema validation; rejection of every integer except flag `2`; rejection without mutation of existing connections with any non-`2` flags; Godot 4.7.2 apply/undo/redo restoration for flag `2`; paths/names/callable arity; duplicate/missing relationships; deterministic bounded list serialization; no object IDs; full preflight before one UndoRedo action; observed post-state; supported JSON-to-Variant conversion; confirmation no-dispatch; and exact forward methods/deadline.
 
 - [ ] **Step 2: Run RED.**
 
@@ -691,7 +691,7 @@ The harness opens the tracked editor scenes, authenticates raw extension request
 Run the exact VsDevCmd/Ninja baseline, then:
 
 ```powershell
-.\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe -McpExecutable .\build-ninja\didi.exe -Phase7RawMethods
+.\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe -McpExecutable .\build-godot47-followup\didi.exe -Phase7RawMethods
 ```
 
 Expected: the run fails specifically because the first feasible raw method returns `501`. The three blocked `501` assertions must pass.
@@ -729,7 +729,7 @@ git commit -m "test: prove phase 7 partial delivery against Godot"
 
 Add public MCP assertions that start `didi`, attach the correct editor/game route, inspect `tools/list`, and call all 15 canonical names plus `inject_input_event` through ToolRegistry, resolved-binding MutationSafety, lease, authenticated IPC, exact method policy, EditorHook, and bridge. Assert 75/3/10/88, alias parity with invoked identity, exact post-state, and all three public blockers rejected as unimplemented. Validator RED tests call only the existing public validator entry point against temporary repository copies; they do not import proposed constants or reference missing symbols. The desired mixed fixture keeps both historical files at 60/18, changes the nine existing current blocks to 75/3, inserts the SECURITY block at the exact location below, and expects validation success; the current validator behavior rejects or ignores that state, producing a behavioral RED. Adversarial fixtures expect failure for 75/3 in either immutable historical block; 60/18 in any current delivery block; blocker set/name/status drift; cross-set membership; counts outside but absent inside the governed marker; zero/duplicate/malformed markers; a SECURITY block outside `## Security Boundary`; and either historical SHA mismatch.
 
-- [ ] **Step 2: Observe activation RED on both engines and docs.**
+- [ ] **Step 2: Observe activation RED on the sole current Godot 4.7.2 baseline and docs.**
 
 Run the exact baseline, then:
 
@@ -737,14 +737,14 @@ Run the exact baseline, then:
 python -m unittest tests.test_phase7_schema_contract -v
 python -m unittest tests.test_documentation_validator -v
 python tools/validate_documentation.py
-.\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe -McpExecutable .\build-ninja\didi.exe -PublicMcpPartialState
+.\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe -McpExecutable .\build-godot47-followup\didi.exe -PublicMcpPartialState
 ```
 
 Expected: raw integration remains green; new public calls fail at `implemented:false`; docs/validator fail at 60/18. No production/doc activation edit occurs before this RED.
 
 - [ ] **Step 3: Audit Task 10 evidence.**
 
-Require both engine raw runs at the current Task 10 commit, no skipped feasible method, the exact three `501` blockers, and clean fixture artifact checks. A missing result returns to Task 10; it does not permit partial activation below 75.
+Require the sole current Godot 4.7.2 raw run at the current Task 10 commit, no skipped feasible method, the exact three `501` blockers, and clean fixture artifact checks. A missing result returns to Task 10; it does not permit partial activation below 75.
 
 - [ ] **Step 4: Activate exactly 15 and publish 75/3 atomically.**
 
@@ -768,7 +768,7 @@ Implement `PHASE7_HISTORICAL_STATUS_DOCUMENTS` and `PHASE7_CURRENT_STATUS_DOCUME
 
 - [ ] **Step 6: Run full GREEN before the activation commit.**
 
-Run the exact VsDevCmd/Ninja baseline and every command in Step 2. Expected: every command exits `0`; both engines pass the public 75/3 path; no source fixture artifact or token appears.
+Run the exact VsDevCmd/Ninja baseline and every command in Step 2. Expected: every command exits `0`; Godot 4.7.2 passes the public 75/3 path; no source fixture artifact or token appears.
 
 Run `python -m unittest tests.test_phase7_plan_ownership -v` in this GREEN gate; it must prove Task 11's Files block and literal `git add` set are equal and that the removed `include/didi/mcp/tool_registry.hpp` handoff is not staged.
 
@@ -785,7 +785,7 @@ git commit -m "feat: activate phase 7 partial delivery"
 
 **Interfaces:** consumes Task 11's 75/3 commit and produces local evidence, independent red-team `PASS`, approved PR, green Windows/Linux/macOS CI, and merge.
 
-**RED command:** no RED run exists on the all-green verification path because this task owns no production change. If any gate or red-team case exposes a defect, add the smallest real regression test in the owning Task 1-11 test file and run that task's exact VsDevCmd/Ninja or dual-engine command to observe the expected failure before changing production.
+**RED command:** no RED run exists on the all-green verification path because this task owns no production change. If any gate or red-team case exposes a defect, add the smallest real regression test in the owning Task 1-11 test file and run that task's exact VsDevCmd/Ninja or Godot 4.7.2 integration command to observe the expected failure before changing production.
 
 **Implementation and GREEN:** make no implementation change when gates pass. A defect fix uses the owning task's minimal production path, reruns its GREEN command, then reruns every command in Steps 1-3 below.
 
@@ -794,9 +794,9 @@ git commit -m "feat: activate phase 7 partial delivery"
 - [ ] **Step 1: Run a clean native/schema/documentation baseline.**
 
 ```powershell
-Remove-Item -LiteralPath .\build-ninja -Recurse -Force
-$vsdev = (& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find Common7\Tools\VsDevCmd.bat)[0]
-cmd.exe /d /s /c "`"$vsdev`" -no_logo -arch=x64 -host_arch=x64 && cmake -S . -B build-ninja -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-ninja --parallel && build-ninja\didi_tests.exe"
+Remove-Item -LiteralPath .\build-godot47-followup -Recurse -Force
+$vsdev = @(& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find Common7\Tools\VsDevCmd.bat)[0]
+cmd.exe /d /s /c "`"$vsdev`" -no_logo -arch=x64 -host_arch=x64 && cmake -S . -B build-godot47-followup -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-godot47-followup --parallel && build-godot47-followup\didi_tests.exe"
 python -m unittest tests.test_phase7_schema_contract -v
 python -m unittest tests.test_phase7_plan_ownership -v
 python -m unittest tests.test_documentation_validator -v
@@ -808,7 +808,7 @@ Expected: zero native failures; schema and documentation suites pass; validator 
 - [ ] **Step 2: Run the real Godot 4.7.2 engine in public mode.**
 
 ```powershell
-.\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe -McpExecutable .\build-ninja\didi.exe -PublicMcpPartialState
+.\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe -McpExecutable .\build-godot47-followup\didi.exe -PublicMcpPartialState
 ```
 
 Expected: Godot 4.7.2 passes all old and 15 new public assertions, alias parity, exact three blockers, cleanup, and token redaction with no API skip.

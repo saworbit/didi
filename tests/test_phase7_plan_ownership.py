@@ -98,8 +98,6 @@ def authoritative_rows(text: str):
         path = cells[0].strip("`")
         owners = []
         for cell in cells[1:]:
-            if "*" in cell or "glob" in cell.lower() or "family" in cell.lower():
-                raise ValueError("non_exact_handoff_boundary")
             matches = list(re.finditer(r"Task (\d+):", cell))
             for index, match in enumerate(matches):
                 task = int(match.group(1))
@@ -109,6 +107,17 @@ def authoritative_rows(text: str):
                 if not boundary:
                     raise ValueError("empty_handoff_boundary")
                 tokens = re.findall(r"`([^`]+)`", boundary)
+                prose = re.sub(r"`[^`]+`", "", boundary)
+                if (re.search(r"[*?\[\]{}]", prose) or
+                        re.search(r"\b(?:glob|family)\b", boundary, re.IGNORECASE)):
+                    raise ValueError("non_exact_handoff_boundary")
+                task1_test_case = (
+                    path.startswith("tests/test_phase7") and task == 1 and
+                    len(tokens) == 1 and tokens[0].startswith("TEST_CASE("))
+                for token in tokens:
+                    if (re.search(r"[*?{}]", token) or
+                            (not task1_test_case and re.search(r"[\[\]]", token))):
+                        raise ValueError("non_exact_handoff_boundary")
                 if path == "src/gdextension/godot_bridge.cpp":
                     required = GODOT_BRIDGE_METHODS.get(task, set())
                     if not required.issubset(tokens):

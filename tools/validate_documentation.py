@@ -1069,8 +1069,70 @@ def _tracked_paths(
     return {path for path in paths if path}, None
 
 
-def validate_godot_version_policy(root: Path) -> list[str]:
+CURRENT_PROJECT_MANIFESTS = (
+    "demo/project.godot",
+    "tests/godot_smoke/project.godot",
+)
+CURRENT_PROJECT_FIXTURE_EXCEPTIONS = (
+    "tests/phase7_contract_probe/project.godot",
+)
+HISTORICAL_PROJECT_MANIFESTS = (
+    "tests/phase7_feasibility/project.godot",
+)
+CURRENT_PHASE7_PLANS = (
+    "docs/PHASE_7_PARTIAL_IMPLEMENTATION_PLAN.md",
+)
+
+
+def validate_project_manifests(root: Path) -> list[str]:
     errors: list[str] = []
+    classified = set(CURRENT_PROJECT_MANIFESTS)
+    classified.update(CURRENT_PROJECT_FIXTURE_EXCEPTIONS)
+    classified.update(HISTORICAL_PROJECT_MANIFESTS)
+    discovered = set()
+    for manifest in root.rglob("project.godot"):
+        relative = manifest.relative_to(root)
+        if (relative.parts and relative.parts[0].startswith("build")) or ".superpowers" in relative.parts:
+            continue
+        discovered.add(relative.as_posix())
+    for relative in sorted(discovered - classified):
+        errors.append(f"unclassified Godot project manifest: {relative}")
+    for relative in CURRENT_PROJECT_MANIFESTS:
+        path = root / relative
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if not re.search(
+                r'^config/features=PackedStringArray\([^\n]*"4\.7"',
+                text, re.MULTILINE):
+            errors.append(
+                f'{relative}: current shipped project must declare Godot 4.7 in config/features')
+    return errors
+
+
+def validate_current_plan_engine_language(relative: str, text: str) -> list[str]:
+    errors: list[str] = []
+    stale = re.compile(
+        r"\b(?:(?:both|either|each|every)\s+engines?|dual[- ]engines?|"
+        r"two[- ]engines?|engine\s+(?:pair|matrix))\b",
+        re.IGNORECASE,
+    )
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if "historical" in line.lower():
+            continue
+        if stale.search(line):
+            errors.append(
+                f"{relative}:{line_number}: current plan must use the sole Godot 4.7.2 baseline")
+    return errors
+
+
+def validate_godot_version_policy(root: Path) -> list[str]:
+    errors: list[str] = validate_project_manifests(root)
+    for relative in CURRENT_PHASE7_PLANS:
+        path = root / relative
+        if path.exists():
+            errors.extend(validate_current_plan_engine_language(
+                relative, path.read_text(encoding="utf-8")))
 
     for manifest in sorted(root.rglob("*.gdextension")):
         relative_parts = manifest.relative_to(root).parts

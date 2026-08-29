@@ -19,6 +19,7 @@ on:
       - 'tests/test_phase7_plan_ownership.py'
       - 'tests/test_documentation_validator.py'
       - 'tests/test_godot_version_policy.py'
+      - 'tests/test_godot47_followup_policy.py'
       - 'tests/assert_godot_472.ps1'
       - 'tests/phase7_contract_probe/**'
       - '.github/workflows/ci.yml'
@@ -40,6 +41,7 @@ on:
       - 'tests/test_phase7_plan_ownership.py'
       - 'tests/test_documentation_validator.py'
       - 'tests/test_godot_version_policy.py'
+      - 'tests/test_godot47_followup_policy.py'
       - 'tests/assert_godot_472.ps1'
       - 'tests/phase7_contract_probe/**'
       - '.github/workflows/ci.yml'
@@ -116,7 +118,7 @@ jobs:
 
       - name: Run schema, ownership, documentation, and Godot version contracts
         shell: bash
-        run: "$DIDI_PYTHON" -m unittest tests.test_phase7_schema_contract tests.test_phase7_plan_ownership tests.test_documentation_validator tests.test_godot_version_policy -v
+        run: "$DIDI_PYTHON" -m unittest tests.test_phase7_schema_contract tests.test_phase7_plan_ownership tests.test_documentation_validator tests.test_godot_version_policy tests.test_godot47_followup_policy -v
 
       - name: Download Godot 4.7.2 contract engine
         if: runner.os == 'Windows'
