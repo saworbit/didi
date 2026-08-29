@@ -113,6 +113,19 @@ class Phase7SchemaContractTests(unittest.TestCase):
         connect = json.loads((SCHEMA_DIR / "signal_connect.schema.json").read_text())
         self.assertEqual(connect["$defs"]["request"]["properties"]["flags"]["enum"], [2])
         self.assertEqual(connect["$defs"]["request"]["properties"]["flags"]["default"], 2)
+        for name, success_key in (("signal_connect", "connected"),
+                                  ("signal_disconnect", "disconnected")):
+            document = json.loads((SCHEMA_DIR / f"{name}.schema.json").read_text())
+            success = document["$defs"]["success"]
+            self.assertEqual(success["properties"]["flags"], {"const": 2})
+            validator = Draft202012Validator(success)
+            valid = {success_key: True, "flags": 2, "undo_redo_registered": True,
+                     "outcome": "completed", "rollback": "undo_redo"}
+            validator.validate(valid)
+            for rejected in (0, 1, 3, 4, 8, 10):
+                invalid = dict(valid, flags=rejected)
+                with self.assertRaises(ValidationError):
+                    validator.validate(invalid)
         input_schema = json.loads((SCHEMA_DIR / "runtime_inject_input.schema.json").read_text())
         variants = input_schema["$defs"]["request"]["properties"]["events"]["items"]["oneOf"]
         key = next(item for item in variants if item["properties"]["type"].get("const") == "key")

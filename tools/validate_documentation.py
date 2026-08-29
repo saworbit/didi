@@ -1072,6 +1072,20 @@ def load_tool_manifest(path: Path) -> tuple[dict[str, int] | None, list[str]]:
             f"{path}: tool manifest canonical does not equal implemented + unimplemented"
         ]
     return counts, []
+CURRENT_PROJECT_MANIFESTS = (
+    "demo/project.godot",
+    "tests/godot_smoke/project.godot",
+)
+CURRENT_PROJECT_FIXTURE_EXCEPTIONS = (
+    "tests/phase7_contract_probe/project.godot",
+    "tests/phase7_signal_bridge/project.godot",
+)
+HISTORICAL_PROJECT_MANIFESTS = (
+    "tests/phase7_feasibility/project.godot",
+)
+CURRENT_PHASE7_PLANS = (
+    "docs/PHASE_7_PARTIAL_IMPLEMENTATION_PLAN.md",
+)
 
 
 def validate_tool_surface_counts(

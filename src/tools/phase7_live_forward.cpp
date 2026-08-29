@@ -65,9 +65,16 @@ CallToolResult sendPhase7LiveRequest(const ResolvedToolBinding& binding,
     const auto response = lease->client->sendRequest(
         std::string(binding.ipc_method), arguments, 17000);
     if (response.isErr()) {
-        runtime::quarantineRuntimeRoute(client, *lease);
+        const bool quarantined = runtime::quarantineRuntimeRoute(client, *lease);
+        const auto transport = ipc::transportFailureState(response.error());
+        if (binding.canonical_name == "signal_emit" && transport.has_value() &&
+            transport->request_started && transport->outcome_unknown) {
+            return phase7Error(binding, 504, "unknown_outcome",
+                               {{"retryable", false}, {"outcome", "unknown"},
+                                {"route_quarantine", quarantined}});
+        }
         return phase7Error(binding, 503, "runtime_route_request_failed",
-                           {{"retryable", true}, {"route_quarantine", true}});
+                           {{"retryable", false}, {"route_quarantine", quarantined}});
     }
 
     json payload = response.value();

@@ -13,6 +13,7 @@
 #include <cstring>
 #include <filesystem>
 #include <limits>
+#include <optional>
 #include <set>
 #include <utility>
 
@@ -26,6 +27,20 @@ using Opaque = std::array<std::byte, kOpaqueBytes>;
 json errorJson(int code, const std::string& message) {
     return {{"error", {{"code", code}, {"message", message}}}};
 }
+
+json errorJson(int code, const std::string& message, json data) {
+    return {{"error", {{"code", code}, {"message", message}, {"data", std::move(data)}}}};
+}
+
+#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
+std::string g_phase7SignalTestSeam;
+
+bool takePhase7SignalTestSeam(std::string_view expected) {
+    if (g_phase7SignalTestSeam != expected) return false;
+    g_phase7SignalTestSeam.clear();
+    return true;
+}
+#endif
 
 class NativeValue {
 public:
@@ -1340,6 +1355,20 @@ Result<void> GodotBridge::forceDraw() {
 
 json GodotBridge::execute(const std::string& method, const json& params,
                           const std::string& session_kind) {
+#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
+    if (method == "phase7SignalTest.configure") {
+        static const std::set<std::string> admitted = {
+            "malformed_metadata", "missing_required_api", "conversion_failure",
+            "connect_postcondition_mismatch", "disconnect_postcondition_mismatch",
+            "connect_postcondition_mismatch_rollback_failure"};
+        if (!hasOnlyKeys(params, {"seam"}) || !params.contains("seam") ||
+            !params["seam"].is_string() || !admitted.count(params["seam"].get<std::string>())) {
+            return errorJson(400, "invalid_phase7_signal_test_seam");
+        }
+        g_phase7SignalTestSeam = params["seam"].get<std::string>();
+        return liveResult({{"status", "configured"}});
+    }
+#endif
     if (method == "runtime.evalGdscript") {
         return executeExpression(params, session_kind);
     }
@@ -1487,18 +1516,68 @@ json GodotBridge::execute(const std::string& method, const json& params,
                        : "unknown";
         };
 
+        constexpr int64_t kSignalNativeWorkCeiling = 1024;
+        constexpr int64_t kSignalArgumentWorkCeiling = 64;
+        auto utf8_less = [](const std::string& left, const std::string& right) {
+            return std::lexicographical_compare(
+                left.begin(), left.end(), right.begin(), right.end(),
+                [](char a, char b) {
+                    return static_cast<unsigned char>(a) < static_cast<unsigned char>(b);
+                });
+        };
+        struct SignalArgumentMetadata {
+            std::string name;
+            int64_t type{GDEXTENSION_VARIANT_TYPE_NIL};
+            int64_t hint{0};
+            std::string hint_string;
+            int64_t usage{0};
+            std::string class_name;
+        };
+        auto parse_argument_metadata = [](const json& argument)
+            -> Result<SignalArgumentMetadata> {
+            if (!argument.is_object() || !argument.contains("name") ||
+                !argument["name"].is_string() || !argument.contains("type") ||
+                !argument["type"].is_number_integer() || !argument.contains("hint") ||
+                !argument["hint"].is_number_integer() || !argument.contains("hint_string") ||
+                !argument["hint_string"].is_string() || !argument.contains("usage") ||
+                !argument["usage"].is_number_integer() || !argument.contains("class_name") ||
+                !argument["class_name"].is_string()) {
+                return Error::internal("Godot PropertyInfo metadata is malformed");
+            }
+            const auto type = argument["type"].get<int64_t>();
+            if (type < GDEXTENSION_VARIANT_TYPE_NIL ||
+                type > GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR4_ARRAY) {
+                return Error::internal("Godot PropertyInfo Variant type is invalid");
+            }
+            return SignalArgumentMetadata{
+                argument["name"].get<std::string>(), type,
+                argument["hint"].get<int64_t>(),
+                argument["hint_string"].get<std::string>(),
+                argument["usage"].get<int64_t>(),
+                argument["class_name"].get<std::string>()};
+        };
         struct SignalMetadata {
-            std::vector<int64_t> argument_types;
+            std::vector<SignalArgumentMetadata> arguments;
         };
         auto signal_metadata = [&](GDExtensionObjectPtr object,
                                    const std::string& signal_name) -> Result<SignalMetadata> {
             auto signals = callObject(object, "Object", "get_signal_list", 3995934104LL);
             if (signals.isErr()) return signals.error();
-            auto serialized = variantToJson(signals.value());
-            if (serialized.isErr() || !serialized.value().is_array()) {
+            auto signal_count = array_size(signals.value());
+            if (signal_count.isErr() || signal_count.value() < 0) {
                 return Error::internal("Godot signal metadata is malformed");
             }
-            for (const auto& descriptor : serialized.value()) {
+            if (signal_count.value() > kSignalNativeWorkCeiling) {
+                return Error(413, "signal_metadata_work_limit");
+            }
+            for (int64_t index = 0; index < signal_count.value(); ++index) {
+                auto native_descriptor = array_at(signals.value(), index);
+                if (native_descriptor.isErr()) return native_descriptor.error();
+                auto serialized = variantToJson(native_descriptor.value());
+                if (serialized.isErr()) {
+                    return Error::internal("Godot signal metadata is malformed");
+                }
+                const auto& descriptor = serialized.value();
                 if (!descriptor.is_object() || !descriptor.contains("name") ||
                     !descriptor["name"].is_string()) {
                     return Error::internal("Godot signal descriptor is malformed");
@@ -1508,14 +1587,15 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 if (!arguments.is_array()) {
                     return Error::internal("Godot signal arguments are malformed");
                 }
+                if (arguments.size() > static_cast<size_t>(kSignalArgumentWorkCeiling)) {
+                    return Error(413, "signal_argument_metadata_work_limit");
+                }
                 SignalMetadata metadata;
-                metadata.argument_types.reserve(arguments.size());
+                metadata.arguments.reserve(arguments.size());
                 for (const auto& argument : arguments) {
-                    if (!argument.is_object() || !argument.contains("type") ||
-                        !argument["type"].is_number_integer()) {
-                        return Error::internal("Godot signal argument metadata is malformed");
-                    }
-                    metadata.argument_types.push_back(argument["type"].get<int64_t>());
+                    auto parsed = parse_argument_metadata(argument);
+                    if (parsed.isErr()) return parsed.error();
+                    metadata.arguments.push_back(std::move(parsed.value()));
                 }
                 return metadata;
             }
@@ -1581,16 +1661,47 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (root.isErr()) return errorJson(root.error().code, root.error().message);
             auto target = resolveNode(root.value(), params["target_node"].get<std::string>());
             if (target.isErr()) return errorJson(target.error().code, target.error().message);
-            auto signals = callObject(target.value(), "Object", "get_signal_list", 3995934104LL);
-            if (signals.isErr()) return errorJson(500, signals.error().message);
-            auto descriptors = variantToJson(signals.value());
-            if (descriptors.isErr() || !descriptors.value().is_array()) {
+#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
+            if (takePhase7SignalTestSeam("malformed_metadata")) {
                 return errorJson(500, "extension_protocol_error");
             }
-            std::sort(descriptors.value().begin(), descriptors.value().end(),
-                      [](const json& left, const json& right) {
-                          return left.value("name", std::string{}) <
-                                 right.value("name", std::string{});
+#endif
+            auto signals = callObject(target.value(), "Object", "get_signal_list", 3995934104LL);
+            if (signals.isErr()) return errorJson(500, signals.error().message);
+            auto native_signal_count = array_size(signals.value());
+            if (native_signal_count.isErr() || native_signal_count.value() < 0) {
+                return errorJson(500, "extension_protocol_error");
+            }
+            if (native_signal_count.value() > kSignalNativeWorkCeiling) {
+                return errorJson(413, "signal_metadata_work_limit");
+            }
+            struct SignalRecord { std::string name; json arguments; };
+            std::vector<SignalRecord> descriptors;
+            descriptors.reserve(static_cast<size_t>(native_signal_count.value()));
+            for (int64_t index = 0; index < native_signal_count.value(); ++index) {
+                auto native_descriptor = array_at(signals.value(), index);
+                if (native_descriptor.isErr()) return errorJson(500, "extension_protocol_error");
+                auto serialized = variantToJson(native_descriptor.value());
+                if (serialized.isErr() || !serialized.value().is_object() ||
+                    !serialized.value().contains("name") ||
+                    !serialized.value()["name"].is_string()) {
+                    return errorJson(500, "extension_protocol_error");
+                }
+                auto arguments = serialized.value().value("args", json::array());
+                if (!arguments.is_array()) return errorJson(500, "extension_protocol_error");
+                if (arguments.size() > static_cast<size_t>(kSignalArgumentWorkCeiling)) {
+                    return errorJson(413, "signal_argument_metadata_work_limit");
+                }
+                const auto name = serialized.value()["name"].get<std::string>();
+                auto validated = utf8_prefix(name, name.size());
+                if (validated.isErr() || validated.value().size() != name.size()) {
+                    return errorJson(500, "extension_protocol_error");
+                }
+                descriptors.push_back({name, std::move(arguments)});
+            }
+            std::sort(descriptors.begin(), descriptors.end(),
+                      [&](const SignalRecord& left, const SignalRecord& right) {
+                          return utf8_less(left.name, right.name);
                       });
 
             bool truncated = false;
@@ -1600,44 +1711,38 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 if (truncated_at.is_null()) truncated_at = location;
             };
             json output_signals = json::array();
-            const size_t signal_count = std::min<size_t>(descriptors.value().size(), 256);
-            if (descriptors.value().size() > signal_count) mark_truncated("signals");
+            const size_t signal_count = std::min<size_t>(descriptors.size(), 256);
+            if (descriptors.size() > signal_count) mark_truncated("signals");
             for (size_t signal_index = 0; signal_index < signal_count; ++signal_index) {
-                const auto& descriptor = descriptors.value()[signal_index];
-                if (!descriptor.is_object() || !descriptor.contains("name") ||
-                    !descriptor["name"].is_string()) {
-                    return errorJson(500, "extension_protocol_error");
-                }
-                const auto raw_name = descriptor["name"].get<std::string>();
+                const auto& descriptor = descriptors[signal_index];
+                const auto& raw_name = descriptor.name;
                 auto name = utf8_prefix(raw_name, 256);
                 if (name.isErr()) return errorJson(500, "extension_protocol_error");
                 if (name.value().size() != raw_name.size()) {
-                    mark_truncated("signal_name:" + std::to_string(signal_index));
+                    mark_truncated("bytes");
                 }
-                const auto raw_arguments = descriptor.value("args", json::array());
-                if (!raw_arguments.is_array()) return errorJson(500, "extension_protocol_error");
+                const auto& raw_arguments = descriptor.arguments;
                 json arguments = json::array();
                 const size_t argument_count = std::min<size_t>(raw_arguments.size(), 16);
                 if (raw_arguments.size() > argument_count) {
-                    mark_truncated("arguments:" + name.value());
+                    mark_truncated("arguments");
                 }
                 for (size_t argument_index = 0; argument_index < argument_count; ++argument_index) {
-                    const auto& argument = raw_arguments[argument_index];
-                    if (!argument.is_object() || !argument.contains("name") ||
-                        !argument["name"].is_string() || !argument.contains("type") ||
-                        !argument["type"].is_number_integer()) {
+                    auto parsed = parse_argument_metadata(raw_arguments[argument_index]);
+                    if (parsed.isErr()) return errorJson(500, "extension_protocol_error");
+                    const auto& raw_argument_name = parsed.value().name;
+                    auto validated = utf8_prefix(raw_argument_name, raw_argument_name.size());
+                    if (validated.isErr() || validated.value().size() != raw_argument_name.size()) {
                         return errorJson(500, "extension_protocol_error");
                     }
-                    const auto raw_argument_name = argument["name"].get<std::string>();
                     auto argument_name = utf8_prefix(raw_argument_name, 256);
                     if (argument_name.isErr()) return errorJson(500, "extension_protocol_error");
                     if (argument_name.value().size() != raw_argument_name.size()) {
-                        mark_truncated("argument_name:" + name.value());
+                        mark_truncated("bytes");
                     }
-                    const int64_t type = argument["type"].get<int64_t>();
                     arguments.push_back({{"name", argument_name.value()},
-                                         {"type_id", type},
-                                         {"type_name", type_name(type)}});
+                                         {"type_id", parsed.value().type},
+                                         {"type_name", type_name(parsed.value().type)}});
                 }
 
                 auto signal_name_value = makeStringName(raw_name);
@@ -1650,14 +1755,19 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 if (connection_count_result.isErr() || connection_count_result.value() < 0) {
                     return errorJson(500, "extension_protocol_error");
                 }
-                json connections = json::array();
-                const int64_t connection_count = std::min<int64_t>(
-                    connection_count_result.value(), 256);
-                if (connection_count_result.value() > connection_count) {
-                    mark_truncated("connections:" + name.value());
+                if (connection_count_result.value() > kSignalNativeWorkCeiling) {
+                    return errorJson(413, "signal_connection_metadata_work_limit");
                 }
+                struct ConnectionRecord {
+                    std::optional<std::string> target_node;
+                    std::string target_method;
+                    int64_t flags{0};
+                };
+                std::vector<ConnectionRecord> normalized_connections;
+                normalized_connections.reserve(
+                    static_cast<size_t>(connection_count_result.value()));
                 for (int64_t connection_index = 0;
-                     connection_index < connection_count; ++connection_index) {
+                     connection_index < connection_count_result.value(); ++connection_index) {
                     auto connection = array_at(connection_values.value(), connection_index);
                     if (connection.isErr()) return errorJson(500, "extension_protocol_error");
                     auto callable = dictionary_field(connection.value(), "callable");
@@ -1675,6 +1785,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
                         callable_method_value.isErr()) {
                         return errorJson(500, "extension_protocol_error");
                     }
+                    if (flags.value() < 0 || flags.value() > 15) {
+                        return errorJson(500, "extension_protocol_error");
+                    }
                     auto callable_object = objectFromVariant(callable_object_value.value());
                     const auto callable_method_type = GodotApi::instance().variant_get_type(
                         callable_method_value.value().ptr());
@@ -1683,12 +1796,13 @@ json GodotBridge::execute(const std::string& method, const json& params,
                     if (callable_object.isErr() || callable_method.isErr()) {
                         return errorJson(500, "extension_protocol_error");
                     }
-                    auto bounded_method = utf8_prefix(callable_method.value(), 128);
-                    if (bounded_method.isErr()) return errorJson(500, "extension_protocol_error");
-                    if (bounded_method.value().size() != callable_method.value().size()) {
-                        mark_truncated("target_method:" + name.value());
+                    auto validated_method = utf8_prefix(
+                        callable_method.value(), callable_method.value().size());
+                    if (validated_method.isErr() ||
+                        validated_method.value().size() != callable_method.value().size()) {
+                        return errorJson(500, "extension_protocol_error");
                     }
-                    json target_path = nullptr;
+                    std::optional<std::string> target_path;
                     if (callable_object.value()) {
                         auto node_name = makeString("Node");
                         if (node_name.isErr()) return errorJson(500, node_name.error().message);
@@ -1702,25 +1816,59 @@ json GodotBridge::execute(const std::string& method, const json& params,
                         if (is_node.value()) {
                             auto path = logicalPathFromEditedRoot(root.value(), callable_object.value());
                             if (path.isOk()) {
-                                auto bounded_path = utf8_prefix(path.value(), 1024);
-                                if (bounded_path.isErr()) {
+                                auto validated_path = utf8_prefix(path.value(), path.value().size());
+                                if (validated_path.isErr() ||
+                                    validated_path.value().size() != path.value().size()) {
                                     return errorJson(500, "extension_protocol_error");
                                 }
-                                if (bounded_path.value().size() != path.value().size()) {
-                                    mark_truncated("target_node:" + name.value());
-                                }
-                                target_path = bounded_path.value();
+                                target_path = path.value();
                             }
                         }
                     }
-                    connections.push_back({{"target_node", target_path},
-                                           {"target_method", bounded_method.value()},
-                                           {"flags", flags.value()}});
+                    normalized_connections.push_back(
+                        {std::move(target_path), callable_method.value(), flags.value()});
                 }
-                std::sort(connections.begin(), connections.end(),
-                          [](const json& left, const json& right) {
-                              return left.dump() < right.dump();
+                std::sort(normalized_connections.begin(), normalized_connections.end(),
+                          [&](const ConnectionRecord& left, const ConnectionRecord& right) {
+                              if (left.target_node.has_value() != right.target_node.has_value()) {
+                                  return !left.target_node.has_value();
+                              }
+                              if (left.target_node != right.target_node) {
+                                  return left.target_node.has_value() &&
+                                         utf8_less(*left.target_node, *right.target_node);
+                              }
+                              if (left.target_method != right.target_method) {
+                                  return utf8_less(left.target_method, right.target_method);
+                              }
+                              return left.flags < right.flags;
                           });
+                json connections = json::array();
+                const size_t connection_count = std::min<size_t>(
+                    normalized_connections.size(), 256);
+                if (normalized_connections.size() > connection_count) {
+                    mark_truncated("connections");
+                }
+                for (size_t connection_index = 0;
+                     connection_index < connection_count; ++connection_index) {
+                    const auto& record = normalized_connections[connection_index];
+                    auto bounded_method = utf8_prefix(record.target_method, 128);
+                    if (bounded_method.isErr()) return errorJson(500, "extension_protocol_error");
+                    if (bounded_method.value().size() != record.target_method.size()) {
+                        mark_truncated("bytes");
+                    }
+                    json target_path = nullptr;
+                    if (record.target_node.has_value()) {
+                        auto bounded_path = utf8_prefix(*record.target_node, 1024);
+                        if (bounded_path.isErr()) return errorJson(500, "extension_protocol_error");
+                        if (bounded_path.value().size() != record.target_node->size()) {
+                            mark_truncated("bytes");
+                        }
+                        target_path = bounded_path.value();
+                    }
+                    connections.push_back({{"target_node", std::move(target_path)},
+                                           {"target_method", bounded_method.value()},
+                                           {"flags", record.flags}});
+                }
                 json signal = {{"name", name.value()}, {"arguments", std::move(arguments)},
                                {"connections", std::move(connections)}};
                 output_signals.push_back(std::move(signal));
@@ -1730,7 +1878,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                   {"truncated_at", truncated_at}};
                 if (liveResult(candidate).dump().size() > 63u * 1024u) {
                     output_signals.erase(output_signals.end() - 1);
-                    mark_truncated("response_bytes");
+                    mark_truncated("bytes");
                     break;
                 }
             }
@@ -1781,6 +1929,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 !GodotApi::instance().variant_call) {
                 return errorJson(501, "required_bind_unavailable");
             }
+            if (requireMethodBind("EditorUndoRedoManager", "get_object_history_id",
+                                  1107568780LL).isErr() ||
+                requireMethodBind("EditorUndoRedoManager", "get_history_undo_redo",
+                                  2417974513LL).isErr() ||
+                requireMethodBind("UndoRedo", "has_undo", 36873697LL).isErr() ||
+                requireMethodBind("UndoRedo", "undo", 2240911060LL).isErr()) {
+                return errorJson(501, "required_bind_unavailable");
+            }
 
             auto root = editedSceneRoot(editor);
             if (root.isErr()) return errorJson(root.error().code, root.error().message);
@@ -1822,7 +1978,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 return errorJson(target_metadata.error().code, target_metadata.error().message);
             }
             const int64_t signal_arity = static_cast<int64_t>(
-                signal.value().argument_types.size());
+                signal.value().arguments.size());
             if (signal_arity < target_metadata.value().required_arguments ||
                 (!target_metadata.value().vararg &&
                  signal_arity > target_metadata.value().total_arguments)) {
@@ -1939,29 +2095,113 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto committed = commitAction(manager.value());
             if (committed.isErr()) return errorJson(500, committed.error().message);
 
+            bool force_postcondition_mismatch = false;
+            bool force_rollback_failure = false;
+#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
+            if (is_connect) {
+                force_postcondition_mismatch =
+                    takePhase7SignalTestSeam("connect_postcondition_mismatch");
+                if (!force_postcondition_mismatch &&
+                    takePhase7SignalTestSeam(
+                        "connect_postcondition_mismatch_rollback_failure")) {
+                    force_postcondition_mismatch = true;
+                    force_rollback_failure = true;
+                }
+            } else {
+                force_postcondition_mismatch =
+                    takePhase7SignalTestSeam("disconnect_postcondition_mismatch");
+            }
+#endif
+
             auto observed_connected_value = callObject(
                 emitter.value(), "Object", "is_connected", 768136979LL,
                 {&signal_name_value.value(), &callable.value()});
-            if (observed_connected_value.isErr()) {
-                return errorJson(500, observed_connected_value.error().message);
-            }
-            auto observed_connected = scalarFromVariant<GDExtensionBool>(
-                observed_connected_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
             auto observed_matches = exact_connections();
-            if (observed_connected.isErr() || observed_matches.isErr()) {
-                return errorJson(500, "extension_protocol_error");
+            bool postcondition_ok = false;
+            if (observed_connected_value.isOk() && observed_matches.isOk()) {
+                auto observed_connected = scalarFromVariant<GDExtensionBool>(
+                    observed_connected_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                if (observed_connected.isOk()) {
+                    postcondition_ok = is_connect
+                        ? observed_connected.value() && observed_matches.value().size() == 1 &&
+                              observed_matches.value().front().flags == 2
+                        : !observed_connected.value() && observed_matches.value().empty();
+                }
+            }
+            if (force_postcondition_mismatch) postcondition_ok = false;
+            if (!postcondition_ok) {
+                auto root_value = makeObject(root.value());
+                Result<void> rolled_back = Result<void>::ok();
+                if (root_value.isErr()) {
+                    rolled_back = root_value.error();
+                } else {
+                    auto history_id = callObject(
+                        manager.value(), "EditorUndoRedoManager", "get_object_history_id",
+                        1107568780LL, {&root_value.value()});
+                    if (history_id.isErr()) {
+                        rolled_back = history_id.error();
+                    } else {
+                        auto history = callObject(
+                            manager.value(), "EditorUndoRedoManager", "get_history_undo_redo",
+                            2417974513LL, {&history_id.value()});
+                        if (history.isErr()) {
+                            rolled_back = history.error();
+                        } else {
+                            auto undo_redo = objectFromVariant(history.value());
+                            if (undo_redo.isErr() || !undo_redo.value()) {
+                                rolled_back = Error::internal(
+                                    "Committed signal history is unavailable");
+                            } else {
+                                auto has_undo_value = callObject(
+                                    undo_redo.value(), "UndoRedo", "has_undo", 36873697LL);
+                                if (has_undo_value.isErr()) {
+                                    rolled_back = has_undo_value.error();
+                                } else {
+                                    auto has_undo = scalarFromVariant<GDExtensionBool>(
+                                        has_undo_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                                    if (has_undo.isErr() || !has_undo.value()) {
+                                        rolled_back = Error::internal(
+                                            "Committed signal action is not active");
+                                    } else {
+                                        auto undone = callObject(
+                                            undo_redo.value(), "UndoRedo", "undo", 2240911060LL);
+                                        if (undone.isErr()) rolled_back = undone.error();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                bool restored = false;
+                if (rolled_back.isOk()) {
+                    auto restored_connected_value = callObject(
+                        emitter.value(), "Object", "is_connected", 768136979LL,
+                        {&signal_name_value.value(), &callable.value()});
+                    auto restored_matches = exact_connections();
+                    if (restored_connected_value.isOk() && restored_matches.isOk()) {
+                        auto restored_connected = scalarFromVariant<GDExtensionBool>(
+                            restored_connected_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                        if (restored_connected.isOk()) {
+                            restored = is_connect
+                                ? !restored_connected.value() && restored_matches.value().empty()
+                                : restored_connected.value() &&
+                                      restored_matches.value().size() == 1 &&
+                                      restored_matches.value().front().flags == 2;
+                        }
+                    }
+                }
+                if (force_rollback_failure) restored = false;
+                return errorJson(
+                    500, "signal_postcondition_mismatch",
+                    {{"retryable", false},
+                     {"rollback", restored ? "completed" : "failed"},
+                     {"outcome", restored ? "rolled_back" : "unknown"},
+                     {"restoration_observed", restored}});
             }
             if (is_connect) {
-                if (!observed_connected.value() || observed_matches.value().size() != 1 ||
-                    observed_matches.value().front().flags != 2) {
-                    return errorJson(500, "signal_connect_post_state_mismatch");
-                }
                 return liveResult({{"connected", true}, {"flags", 2},
                                    {"undo_redo_registered", true},
                                    {"outcome", "completed"}, {"rollback", "undo_redo"}});
-            }
-            if (observed_connected.value() || !observed_matches.value().empty()) {
-                return errorJson(500, "signal_disconnect_post_state_mismatch");
             }
             return liveResult({{"disconnected", true}, {"flags", 2},
                                {"undo_redo_registered", true},
@@ -2014,11 +2254,17 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (!has_signal.value()) return errorJson(404, "declared_signal_not_found");
         auto metadata = signal_metadata(target.value(), signal_name);
         if (metadata.isErr()) return errorJson(metadata.error().code, metadata.error().message);
-        if (metadata.value().argument_types.size() != emit_arguments.size()) {
+        if (metadata.value().arguments.size() != emit_arguments.size()) {
             return errorJson(409, "signal_emit_arity_mismatch");
         }
-        auto compatible_argument = [](const json& argument, int64_t type) {
-            switch (type) {
+        auto compatible_argument = [](const json& argument,
+                                      const SignalArgumentMetadata& metadata) {
+            const bool typed_container =
+                (metadata.type == GDEXTENSION_VARIANT_TYPE_ARRAY ||
+                 metadata.type == GDEXTENSION_VARIANT_TYPE_DICTIONARY) &&
+                (metadata.hint != 0 || !metadata.hint_string.empty());
+            if (typed_container) return false;
+            switch (metadata.type) {
                 case GDEXTENSION_VARIANT_TYPE_NIL: return true;
                 case GDEXTENSION_VARIANT_TYPE_BOOL: return argument.is_boolean();
                 case GDEXTENSION_VARIANT_TYPE_INT:
@@ -2029,18 +2275,79 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 case GDEXTENSION_VARIANT_TYPE_STRING: return argument.is_string();
                 case GDEXTENSION_VARIANT_TYPE_DICTIONARY: return argument.is_object();
                 case GDEXTENSION_VARIANT_TYPE_ARRAY: return argument.is_array();
+                case GDEXTENSION_VARIANT_TYPE_OBJECT:
+                    return argument.is_null() &&
+                           (!metadata.class_name.empty() || !metadata.hint_string.empty());
                 default: return false;
             }
         };
+        std::function<bool(const json&)> preflight_json_variant;
+        preflight_json_variant = [&](const json& value) {
+            auto& api = GodotApi::instance();
+            if (!api.variant_new_nil || !api.variant_destroy ||
+                !api.get_variant_from_type_constructor) return false;
+            if (value.is_null()) return true;
+            GDExtensionVariantType type = GDEXTENSION_VARIANT_TYPE_NIL;
+            if (value.is_boolean()) type = GDEXTENSION_VARIANT_TYPE_BOOL;
+            else if (value.is_number_integer() || value.is_number_unsigned()) {
+                type = GDEXTENSION_VARIANT_TYPE_INT;
+            } else if (value.is_number_float()) type = GDEXTENSION_VARIANT_TYPE_FLOAT;
+            else if (value.is_string()) {
+                if (!api.string_new_with_utf8_chars) return false;
+                type = GDEXTENSION_VARIANT_TYPE_STRING;
+            } else if (value.is_array()) {
+                type = GDEXTENSION_VARIANT_TYPE_ARRAY;
+                if (!api.variant_get_ptr_constructor(type, 0) || !api.variant_call) return false;
+                for (const auto& child : value) {
+                    if (!preflight_json_variant(child)) return false;
+                }
+            } else if (value.is_object()) {
+                type = GDEXTENSION_VARIANT_TYPE_DICTIONARY;
+                if (!api.variant_get_ptr_constructor(type, 0) || !api.variant_call ||
+                    !api.string_new_with_utf8_chars) return false;
+                for (auto it = value.begin(); it != value.end(); ++it) {
+                    if (!preflight_json_variant(it.value())) return false;
+                }
+            } else {
+                return false;
+            }
+            return api.get_variant_from_type_constructor(type) != nullptr;
+        };
+        for (size_t index = 0; index < emit_arguments.size(); ++index) {
+            if (!compatible_argument(emit_arguments[index], metadata.value().arguments[index])) {
+                return errorJson(400, "signal_emit_argument_type_mismatch");
+            }
+        }
+#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
+        if (takePhase7SignalTestSeam("missing_required_api")) {
+            return errorJson(501, "required_bind_unavailable");
+        }
+#endif
+        for (const auto& argument : emit_arguments) {
+            if (!preflight_json_variant(argument)) {
+                return errorJson(501, "required_bind_unavailable");
+            }
+        }
+#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
+        if (takePhase7SignalTestSeam("conversion_failure")) {
+            return errorJson(500, "extension_protocol_error");
+        }
+#endif
         std::vector<VariantValue> native_arguments;
         native_arguments.reserve(emit_arguments.size());
         for (size_t index = 0; index < emit_arguments.size(); ++index) {
-            if (!compatible_argument(emit_arguments[index],
-                                     metadata.value().argument_types[index])) {
-                return errorJson(400, "signal_emit_argument_type_mismatch");
-            }
-            auto converted = makeJsonVariant(emit_arguments[index]);
-            if (converted.isErr()) return errorJson(400, converted.error().message);
+            const auto& argument_metadata = metadata.value().arguments[index];
+            Result<VariantValue> converted =
+                argument_metadata.type == GDEXTENSION_VARIANT_TYPE_FLOAT &&
+                        (emit_arguments[index].is_number_integer() ||
+                         emit_arguments[index].is_number_unsigned())
+                    ? makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT,
+                                 static_cast<double>(emit_arguments[index].get<int64_t>()))
+                    : (argument_metadata.type == GDEXTENSION_VARIANT_TYPE_OBJECT &&
+                               emit_arguments[index].is_null()
+                           ? Result<VariantValue>(VariantValue{})
+                           : makeJsonVariant(emit_arguments[index]));
+            if (converted.isErr()) return errorJson(500, "extension_protocol_error");
             native_arguments.push_back(std::move(converted.value()));
         }
         std::vector<const VariantValue*> call_arguments{&signal_name_value.value()};
