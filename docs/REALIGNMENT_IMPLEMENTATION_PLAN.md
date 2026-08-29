@@ -51,13 +51,52 @@ Didi is not out of compliance because of the decisions you made. Didi is complia
 
 ---
 
-## Two decisions to confirm before execution
+## Two decisions, now made
 
-**Decision 1 — Dual-era, not a jump.** Recommended: implement `2026-07-28` alongside `2024-11-05` and advertise both from `server/discover`. Rationale: the spec explicitly sanctions dual-era servers, and the "Legacy client / Modern server" row of the compatibility matrix is `Fails` — a clean jump would break every client on the market today until they migrate. Confirm before Task A1.
+**Decision 1 — dual-era, staged by observable payoff.** `2026-07-28` is implemented
+alongside `2024-11-05`, and both are advertised from `server/discover`. A clean
+jump is not available: the specification's own compatibility matrix rates
+"legacy client / modern server" as `Fails`, which is every client shipping today.
 
-**Decision 2 — The 78-name freeze gets a controlled amendment process, not an exception.** Recommended: keep the rule that names cannot be added casually, but replace "never" with a Surface Amendment record requiring a workflow justification, an execution mode, and a test before a name is registered. Six of the eight competitive gaps have no canonical name today, and under the current rule they can never acquire one. Confirm before Task C1.
+Didi is not broken in the meantime. A modern client probes with `server/discover`,
+receives an error, correctly concludes the server is legacy, and falls back to
+`initialize` — which Didi handles correctly, including rejecting pre-`initialize`
+calls with `-32002`, the case the specification notes many legacy servers get
+wrong. The cost today is one ambiguous round trip, not a failure.
 
----
+So dual-era is the destination, but it is three pieces of very different value
+and they are sequenced by what a client can observe, not by specification order:
+
+| Row | Work | Pays off on |
+| :--- | :--- | :--- |
+| 1 | Tool `annotations`, `structuredContent`, `outputSchema` | **Today's clients.** Era-independent |
+| 2 | `server/discover`, `resultType`, `ttlMs`/`cacheScope` | Modern clients, when they arrive |
+| 3 | Stateless `_meta` dispatch, MRTR, `subscriptions/listen` | Nothing yet. No client exercises it |
+
+Row 1 is **delivered**. Row 3 is deliberately deferred: building MRTR before any
+client speaks it is speculative work that will need rewriting when reality lands.
+
+Empirical basis, checked 2026-08-30: Anthropic's own current `build-mcp-server`
+skill targets `2025-11-25` — a legacy, initialization-based revision — and does
+not mention `server/discover` at all, while referencing `annotations`,
+`structuredContent`, and `outputSchema` throughout. The ecosystem is still
+legacy-era, and Row 1 is what current tooling actually asks for. Recheck this
+before starting Row 2; if a client begins probing with `server/discover`, pull
+Row 2 ahead of the rest of Row 1.
+
+**Decision 2 — the name freeze is retired, replaced by a recorded amendment.**
+Implemented: see [Surface Amendments](SURFACE_AMENDMENTS.md). The freeze was
+provably broken rather than merely restrictive — it blocked Phase 7 in CI, and
+six of the eight capability gaps have no canonical name and could never acquire
+one under it.
+
+The freeze was never what protected the surface. Four other controls do, and all
+four still stand: the absolute no-stub rule, the phase exit gates, visible
+`implemented: false` capability metadata, and now the manifest that verifies
+counts against the binary. The amendment record is also stricter than the freeze
+in one specific way: it requires naming the agent workflow that fails without the
+tool. The freeze allowed that question to be avoided by refusing everything.
+
 
 ## Foundational rules audit
 

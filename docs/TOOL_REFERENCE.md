@@ -423,6 +423,13 @@ Timeout checks run before/after policy, context resolution, parse, execution, an
 
 `runtime_inject_input`, `runtime_get_call_stack`, and `runtime_read_profiler` remain registered with `implemented: false`; Phase 3 does not synthesize input, debugger stacks, or profiler telemetry.
 
+
+## Tool annotations and structured results
+
+Every tool definition carries specification `annotations`. `readOnlyHint` is derived from the same mutation classification that drives `dry_run` and confirmation, so a tool that can change the project is never advertised as read-only and clients can safely auto-approve the read-only set. `destructiveHint` is true for every mutation rather than asserting that any of them are merely additive; under-claiming safety costs a prompt, while over-claiming it would let a mutation be approved silently. `openWorldHint` is false for every tool, because Didi's world is one local project and no tool reaches the network.
+
+Successful JSON results also carry `structuredContent` alongside the existing text block. It holds the same payload after execution-mode and session attribution, so the two halves of a result can never disagree. The text block is unchanged for clients that do not read `structuredContent`.
+
 ## 12. Phase 5 deep domains
 
 All Phase 5 subprocess tools launch an executable with an argv array, never through a command shell. Combined stdout/stderr is capped at 1 MiB, output reports truncation, deadlines terminate the child process group, and paths are confined to the current project. Godot-backed operations use `GODOT_BIN` when set or normal Godot discovery; C# diagnostics require `dotnet` on `PATH`.
