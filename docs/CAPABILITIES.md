@@ -2,6 +2,8 @@
 
 This page describes what the current Didi build can execute. The runtime response from `tools/list` or `resources/list` is always authoritative if it differs from this snapshot.
 
+Didi must start with `--project <root>` or `DIDI_PROJECT_ROOT`; the selected canonical directory must contain `project.godot`. Missing or invalid project selection fails before MCP initialization.
+
 ## Reading capability metadata
 
 Every tool and resource definition includes `_meta.didi`:
@@ -45,6 +47,10 @@ Didi v1.4.0 registers 78 canonical tool names. Sixty are implemented in at least
 | `offline_fallback` | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method`, `viewport_create_test_lab`, `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map`, `project_search_text`, `project_search_symbols`, `runtime_launch`, `csharp_check_build`, `shader_check_compile`, `project_list_export_presets`, `project_export`, `gridmap_export_mesh_library` | Operates on bounded project files or launches a separate Godot/dotnet process. Results are not live editor state. |
 | `unimplemented` | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `physics_raycast_query`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Registered schema only. Calls are rejected before legacy handlers execute. |
 
+## Planned Capability Growth
+
+The capability matrix describes current behavior only. Planned work is tracked separately in [ROADMAP.md](ROADMAP.md), with detailed post-Phase-6 scope in [FUTURE_PHASES_DESIGN.md](FUTURE_PHASES_DESIGN.md). A planned capability must not appear as supported in this document until its implementation and acceptance evidence are complete.
+
 ## Legacy names
 
 Ten v1.0 names remain registered. Prefer canonical names in new integrations.
@@ -66,12 +72,15 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 
 | URI | Modes | Current behavior |
 | :--- | :--- | :--- |
-| `godot://project/tree` | `offline_fallback` | Filesystem/resource-index snapshot rooted at the Didi project working directory. |
+| `godot://project/tree` | `offline_fallback` | Filesystem/resource-index snapshot rooted at the explicit canonical Godot project. |
 | `godot://editor/state` | `live`, `offline_fallback` | Live mode reports connection status and active edited-scene root; offline mode reports that no editor is connected. |
 | `godot://runtime/logs` | `live`, `offline_fallback` | Returns Didi's cursor-shaped extension ring when attached, or a schema-compatible server-status record offline. It does not capture arbitrary Godot/external `print()` output. |
 
 ## Current limits and safety rules
 
+- A runtime session has one MCP owner at a time. Attach acquires an OS-backed `<session-id>.lock`; another client receives `423`, and owner process exit/crash releases the kernel lock. Lock metadata contains no authentication token.
+- Every implemented mutation advertises `dry_run`. Dry-run requests stop before handlers and return a structured `mutation_preview` bound to the canonical project and live route context.
+- `editor_reload_project`, script patching, and overwrite-enabled `resource_create`, visual-test-lab creation, `project_export`, and `gridmap_export_mesh_library` require the preview's 64-hex `confirmation_token`. Tokens expire after 120 seconds, are single-use, and reject tool, argument, project, mode, session, generation, expiry, and replay mismatches.
 - Live node paths use `/root/<edited-scene-root>/...`; `/root` resolves to the active edited-scene root.
 - Live hierarchy output contains names, classes, logical paths, and children. Bulk properties, scripts, and signals are listed in `omitted_fields` rather than fabricated.
 - Property get/set supports JSON null, boolean, signed integer, real, and string values. Unknown properties, incompatible JSON types, and non-scalar Godot Variants are rejected.

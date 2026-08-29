@@ -16,6 +16,7 @@ Historical entries describe the surface advertised by those releases. For the ex
 - Closed Phase 6 without expanding the protocol surface: mandatory explicit Godot project selection, project-keyed runtime endpoints, one-client OS session locks, mutation dry-runs, and exact confirm-before-write tokens.
 - Closed Phase 5 with six canonical tools: C# build diagnostics, real shader compilation diagnostics, secret-redacted export-preset discovery, guarded headless export, deterministic GridMap MeshLibrary generation, and live non-injecting UI hit-testing.
 - Added a cross-platform argv-only process runner with finite deadlines, child-group termination, a 1 MiB combined-output cap, and Windows command-line quoting coverage.
+- Added the approved Phase 7-12 roadmap, including canonical-surface completion and governance requirements for all future phases.
 
 ### Changed
 
@@ -24,6 +25,7 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Fixed
 
+- Reconciled all current operating documentation with Phase 6: completed the roadmap's 78-tool table, documented project-root startup, session lock `423`, mutation preview/confirmation semantics, and labeled historical design records so they are not mistaken for current behavior.
 - Preserved ordinary comments when replacing GDScript symbols.
 - Preserved explicit `null` JSON-RPC success results.
 - Failed closed before creating a Windows session pipe when the owner-and-Administrators security descriptor cannot be built.
@@ -151,7 +153,7 @@ Historical entries describe the surface advertised by those releases. For the ex
 ### Added
 - **Unified C++20 Dual Architecture**: Single CMake build producing standalone stdio executable (`didi.exe`) and in-engine GDExtension shared library (`didi_extension.dll`).
 - **MCP 2024-11-05 Protocol Support**: Fully compliant JSON-RPC 2.0 transport supporting newline-delimited messages and HTTP-style `Content-Length` headers over `stdin`/`stdout`.
-- **High-Throughput IPC**: Ultra-low-latency OS Named Pipe transport (`\\.\pipe\godot_didi_ipc` on Windows, UNIX domain sockets on POSIX) with 4-byte little-endian length framing.
+- **Historical v1.0 IPC**: Ultra-low-latency OS Named Pipe transport (`\\.\pipe\godot_didi_ipc` on Windows, UNIX domain sockets on POSIX) with 4-byte little-endian length framing. Phase 3 and Phase 6 later replaced the fixed endpoint name with authenticated, project-keyed, process/session-unique endpoints.
 - **10 Domain Tools Across 5 Functional Areas**:
   - *Visual & Vision*: `capture_viewport` (SubViewport off-screen PNG memory blit + RFC 4648 Base64 output), `create_visual_test_lab` (multi-camera sandbox generator).
   - *Scene Tree*: `get_scene_hierarchy` (hierarchical AST parser and live tree reflection), `mutate_scene_tree` (with Godot `EditorUndoRedoManager` transaction safety).

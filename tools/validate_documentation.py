@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import re
+import subprocess
 import sys
 from typing import Sequence
 from urllib.parse import unquote, urlparse
@@ -27,6 +28,7 @@ REQUIRED_DOCUMENTS = (
     "docs/QUICKSTART.md",
     "docs/RESOURCES_AND_PROMPTS.md",
     "docs/ROADMAP.md",
+    "docs/FUTURE_PHASES_DESIGN.md",
     "docs/TOOL_REFERENCE.md",
 )
 
@@ -41,16 +43,33 @@ VERSION_SOURCES = (
     "SECURITY.md",
 )
 
-FORBIDDEN_ARTIFACT_PATHS = (
-    ".superpowers",
-    "docs/superpowers",
+TRACKED_ONLY_ARTIFACT_PATHS = (".superpowers",)
+FILESYSTEM_FORBIDDEN_ARTIFACT_PATHS = ("docs/superpowers",)
+
+FUTURE_PHASE_RANGE = range(7, 13)
+VALID_PHASE_STATUSES = {"PLANNED", "IN PROGRESS", "COMPLETE"}
+FUTURE_PHASE_GOVERNANCE_FIELDS = (
+    "scope",
+    "explicit exclusions",
+    "security classification",
+    "mutation classification",
+    "exit evidence",
 )
+FUTURE_PHASE_COMPLETION_FIELDS = (
+    "completion date",
+    "pull request",
+    "verification evidence",
+)
+CANONICAL_IMPLEMENTATION_COUNTS = (78, 60, 18)
 
 FACT_PATTERNS = {
     "README.md": (
         (r"\b78[- ]canonical|\b78 canonical", "78 canonical"),
         (r"\b10 (?:additional )?legacy", "10 legacy"),
         (r"\b88 total|\(88 total\)|88 registrations", "88 total"),
+        (r"--project[\s\S]*DIDI_PROJECT_ROOT|DIDI_PROJECT_ROOT[\s\S]*--project", "explicit project root"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
     ),
     "docs/CAPABILITIES.md": (
         (r"\b78 canonical", "78 canonical"),
@@ -58,11 +77,18 @@ FACT_PATTERNS = {
         (r"\b88 [`\w/-]* ?entries|exactly 88", "88 total"),
         (r"\b60 (?:canonical )?tools? (?:are )?implemented|Sixty (?:canonical )?tools? are implemented|Sixty are implemented", "60 implemented"),
         (r"\b18 (?:canonical )?(?:tools? )?(?:remain )?(?:reserved|unimplemented)", "18 unimplemented"),
+        (r"--project[\s\S]*DIDI_PROJECT_ROOT|DIDI_PROJECT_ROOT[\s\S]*--project", "explicit project root"),
+        (r"\b423\b", "one-client session lock"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
     ),
     "docs/TOOL_REFERENCE.md": (
         (r"\b78 canonical", "78 canonical"),
         (r"\b10 legacy", "10 legacy"),
         (r"\b88 registrations", "88 total"),
+        (r"\b423\b", "one-client session lock"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
     ),
     "CHANGELOG.md": (
         (r"\b78 canonical", "78 canonical"),
@@ -71,10 +97,42 @@ FACT_PATTERNS = {
         (r"\b60 (?:canonical )?tools? (?:are )?implemented|Sixty (?:canonical )?tools? are implemented", "60 implemented"),
         (r"\b18 (?:canonical )?(?:tools? )?(?:remain )?(?:reserved|honestly unimplemented|unimplemented)", "18 unimplemented"),
     ),
+    "docs/API_SPECIFICATION.md": (
+        (r"\b423\b", "one-client session lock"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
+        (r"ui\.hitTest", "live UI hit-test IPC method"),
+    ),
+    "docs/LLM_INSTRUCTIONS.md": (
+        (r"--project[\s\S]*DIDI_PROJECT_ROOT|DIDI_PROJECT_ROOT[\s\S]*--project", "explicit project root"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
+    ),
+    "docs/QUICKSTART.md": (
+        (r"--project", "explicit project argument"),
+        (r"\bdry_run\b", "mutation dry-run"),
+        (r"\bconfirmation_token\b", "mutation confirmation"),
+    ),
+    "docs/ROADMAP.md": (
+        (r"Phase 6[^\n]*COMPLETE", "completed Phase 6"),
+        (r"Phase 5 Deep Domains \(6\)", "six-tool Phase 5 canonical row"),
+    ),
 }
 
 LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 HEADING_PATTERN = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
+ROADMAP_PHASE_HEADING_PATTERN = re.compile(
+    r"^##\s+.*?\bPhase\s+(?P<number>\d+):(?P<title>[^\n]*)$",
+    re.MULTILINE,
+)
+ROADMAP_SEQUENCE_STATUS_PATTERN = re.compile(
+    r"^\|\s*\*\*Phase\s+(?P<number>\d+)\s+\((?P<status>[^)]+)\)\*\*\s*\|",
+    re.MULTILINE,
+)
+DESIGN_PHASE_HEADING_PATTERN = re.compile(
+    r"^## Phase (?P<number>\d+):[^\n]*$",
+    re.MULTILINE,
+)
 FENCED_CODE_PATTERN = re.compile(
     r"^\s{0,3}(`{3,}|~{3,}).*?^\s{0,3}\1\s*$", re.MULTILINE | re.DOTALL
 )
@@ -440,6 +498,209 @@ def _read_required(root: Path, relative_path: str, errors: list[str]) -> str | N
         return None
 
 
+def _normalized_phase_status(title: str) -> str | None:
+    match = re.search(r"\((?P<status>[^()]*)\)\s*$", title)
+    if match is None:
+        return None
+    status = match.group("status").strip().strip("`").strip()
+    return re.split(r"\s+(?:—|-)\s+", status, maxsplit=1)[0].strip()
+
+
+def _roadmap_phase_declarations(roadmap_text: str) -> dict[int, list[str | None]]:
+    declarations: dict[int, list[str | None]] = {}
+    for match in ROADMAP_PHASE_HEADING_PATTERN.finditer(roadmap_text):
+        phase = int(match.group("number"))
+        declarations.setdefault(phase, []).append(
+            _normalized_phase_status(match.group("title"))
+        )
+    return declarations
+
+
+def validate_future_phase_roadmap(roadmap_text: str) -> list[str]:
+    errors: list[str] = []
+    declarations = _roadmap_phase_declarations(roadmap_text)
+
+    for phase, statuses in sorted(declarations.items()):
+        if len(statuses) > 1:
+            errors.append(f"docs/ROADMAP.md declares Phase {phase} more than once")
+        for status in statuses:
+            if status is None:
+                errors.append(f"docs/ROADMAP.md Phase {phase} must declare a status")
+            elif status not in VALID_PHASE_STATUSES:
+                message = f"docs/ROADMAP.md Phase {phase} has invalid status '{status}'"
+                if message not in errors:
+                    errors.append(message)
+
+    for match in ROADMAP_SEQUENCE_STATUS_PATTERN.finditer(roadmap_text):
+        phase = int(match.group("number"))
+        status = match.group("status").strip().strip("`").strip()
+        if status not in VALID_PHASE_STATUSES:
+            message = f"docs/ROADMAP.md Phase {phase} has invalid status '{status}'"
+            if message not in errors:
+                errors.append(message)
+
+    for phase in FUTURE_PHASE_RANGE:
+        if phase not in declarations:
+            errors.append(f"docs/ROADMAP.md must declare Phase {phase}")
+    return errors
+
+
+def _phase_sections(
+    text: str,
+    heading_pattern: re.Pattern[str],
+) -> dict[int, list[str]]:
+    matches = list(heading_pattern.finditer(text))
+    sections: dict[int, list[str]] = {}
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        sections.setdefault(int(match.group("number")), []).append(text[match.end():end])
+    return sections
+
+
+def _section_has_field(section: str, field: str) -> bool:
+    return bool(
+        re.search(
+            rf"^\*\*{re.escape(field)}:\*\*(?:\s+\S|\s*$)",
+            section,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+    )
+
+
+def validate_future_phase_governance(
+    design_text: str,
+    roadmap_text: str | None = None,
+) -> list[str]:
+    errors: list[str] = []
+    sections = _phase_sections(design_text, DESIGN_PHASE_HEADING_PATTERN)
+    roadmap_declarations = (
+        _roadmap_phase_declarations(roadmap_text) if roadmap_text is not None else {}
+    )
+
+    for phase in FUTURE_PHASE_RANGE:
+        phase_sections = sections.get(phase, [])
+        if not phase_sections:
+            errors.append(f"docs/FUTURE_PHASES_DESIGN.md must define Phase {phase}")
+            continue
+        if len(phase_sections) > 1:
+            errors.append(
+                f"docs/FUTURE_PHASES_DESIGN.md defines Phase {phase} more than once"
+            )
+        section = phase_sections[0]
+        for field in FUTURE_PHASE_GOVERNANCE_FIELDS:
+            if not _section_has_field(section, field):
+                errors.append(
+                    f"docs/FUTURE_PHASES_DESIGN.md Phase {phase} is missing "
+                    f"required governance field: {field}"
+                )
+
+        phase_is_complete = "COMPLETE" in roadmap_declarations.get(phase, [])
+        if phase_is_complete:
+            for field in FUTURE_PHASE_COMPLETION_FIELDS:
+                if not _section_has_field(section, field):
+                    errors.append(
+                        f"docs/FUTURE_PHASES_DESIGN.md Phase {phase} is COMPLETE but "
+                        f"missing completion field: {field}"
+                    )
+    return errors
+
+
+CANONICAL_COUNT_PATTERNS = {
+    "README.md": re.compile(
+        r"Phase 7 is planned to implement the remaining (?P<remaining>\d+) canonical tools, "
+        r"completing the canonical surface from (?P<implemented>\d+)/(?P<canonical>\d+) "
+        r"to (?P<target>\d+)/(?P<target_canonical>\d+) tools",
+        re.IGNORECASE,
+    ),
+    "docs/CAPABILITIES.md": re.compile(
+        r"registers (?P<canonical>\d+) canonical tool names\.\s+"
+        r"(?P<implemented>Sixty|\d+) are implemented[^;]*;\s+"
+        r"(?P<remaining>\d+) remain",
+        re.IGNORECASE,
+    ),
+    "docs/ROADMAP.md": re.compile(
+        r"\*\*Objective:\*\* Implement the remaining (?P<remaining>\d+) canonical tools, "
+        r"moving the protocol surface from (?P<implemented>\d+)/(?P<canonical>\d+) "
+        r"to (?P<target>\d+)/(?P<target_canonical>\d+)",
+        re.IGNORECASE,
+    ),
+    "docs/FUTURE_PHASES_DESIGN.md": re.compile(
+        r"\*\*Goal:\*\* Implement the remaining (?P<remaining>\d+) canonical tools, "
+        r"moving from (?P<implemented>\d+)/(?P<canonical>\d+) "
+        r"to (?P<target>\d+)/(?P<target_canonical>\d+)",
+        re.IGNORECASE,
+    ),
+    "CHANGELOG.md": re.compile(
+        r"Discovery now exposes (?P<canonical>\d+) canonical tools[^\n]*\.\s+"
+        r"(?P<implemented>Sixty|\d+) canonical tools are implemented and "
+        r"(?P<remaining>\d+) remain",
+        re.IGNORECASE,
+    ),
+}
+
+
+def _current_changelog_section(text: str) -> str:
+    start = re.search(r"^## \[Unreleased\]\s*$", text, flags=re.MULTILINE)
+    if start is None:
+        return ""
+    remainder = text[start.end():]
+    end = re.search(r"^## \[", remainder, flags=re.MULTILINE)
+    return remainder[:end.start()] if end is not None else remainder
+
+
+def _parse_count(value: str) -> int:
+    return 60 if value.lower() == "sixty" else int(value)
+
+
+def validate_canonical_implementation_counts(texts: dict[str, str]) -> list[str]:
+    errors: list[str] = []
+    observed: dict[str, tuple[int, int, int]] = {}
+    for relative_path, pattern in CANONICAL_COUNT_PATTERNS.items():
+        text = texts.get(relative_path)
+        if text is None:
+            continue
+        source = _current_changelog_section(text) if relative_path == "CHANGELOG.md" else text
+        match = pattern.search(source)
+        if match is None:
+            errors.append(
+                f"{relative_path}: cannot parse canonical implementation counts"
+            )
+            continue
+
+        canonical = int(match.group("canonical"))
+        implemented = _parse_count(match.group("implemented"))
+        remaining = int(match.group("remaining"))
+        counts = (canonical, implemented, remaining)
+        observed[relative_path] = counts
+        if implemented + remaining != canonical:
+            errors.append(
+                f"{relative_path}: canonical implementation counts do not add up: "
+                f"{implemented} implemented + {remaining} remaining != {canonical} canonical"
+            )
+        if counts != CANONICAL_IMPLEMENTATION_COUNTS:
+            errors.append(
+                f"{relative_path}: canonical implementation counts must be 78 canonical, "
+                f"60 implemented, and 18 remaining; found {canonical}, {implemented}, {remaining}"
+            )
+        if "target" in match.groupdict() and (
+            int(match.group("target")) != canonical
+            or int(match.group("target_canonical")) != canonical
+        ):
+            errors.append(
+                f"{relative_path}: canonical completion target must equal {canonical}/{canonical}"
+            )
+
+    if len(set(observed.values())) > 1:
+        details = ", ".join(
+            f"{path}={counts[0]}/{counts[1]}/{counts[2]}"
+            for path, counts in observed.items()
+        )
+        errors.append(
+            f"canonical implementation counts disagree across current documents: {details}"
+        )
+    return errors
+
+
 def _include_markdown(root: Path, path: Path) -> bool:
     relative_parts = path.relative_to(root).parts
     return not any(part in {".git", ".worktrees", ".superpowers"} for part in relative_parts) and not any(
@@ -447,15 +708,50 @@ def _include_markdown(root: Path, path: Path) -> bool:
     )
 
 
+def _tracked_paths(
+    root: Path,
+    relative_paths: tuple[str, ...],
+) -> tuple[set[str], str | None]:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--", *relative_paths],
+            check=False,
+            capture_output=True,
+        )
+    except OSError as error:
+        return set(), f"git ls-files failed while checking forbidden artifacts: {error}"
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        suffix = f": {detail}" if detail else f" with exit code {result.returncode}"
+        return set(), f"git ls-files failed while checking forbidden artifacts{suffix}"
+    paths = result.stdout.decode("utf-8", errors="surrogateescape").split("\0")
+    return {path for path in paths if path}, None
+
+
 def validate_repository(root: Path) -> list[str]:
     root = root.resolve()
     errors: list[str] = []
     texts: dict[str, str] = {}
 
-    for relative_path in FORBIDDEN_ARTIFACT_PATHS:
-        if (root / relative_path).exists():
+    tracked_paths, tracked_paths_error = _tracked_paths(
+        root,
+        TRACKED_ONLY_ARTIFACT_PATHS,
+    )
+    if tracked_paths_error is not None:
+        errors.append(f"documentation validator: {tracked_paths_error}")
+    for relative_path in TRACKED_ONLY_ARTIFACT_PATHS:
+        if any(
+            path == relative_path or path.startswith(f"{relative_path}/")
+            for path in tracked_paths
+        ):
             errors.append(
                 f"{relative_path}: agent workflow artifacts must not be committed to the project"
+            )
+
+    for relative_path in FILESYSTEM_FORBIDDEN_ARTIFACT_PATHS:
+        if (root / relative_path).exists():
+            errors.append(
+                f"{relative_path}: agent workflow artifacts must not exist in the project"
             )
 
     workflow_root = root / ".github" / "workflows"
@@ -533,6 +829,16 @@ def validate_repository(root: Path) -> list[str]:
         for pattern, label in requirements:
             if not re.search(pattern, text, flags=re.IGNORECASE):
                 errors.append(f"{relative_path}: missing current release fact: {label}")
+
+    errors.extend(validate_canonical_implementation_counts(texts))
+
+    roadmap_text = texts.get("docs/ROADMAP.md")
+    if roadmap_text is not None:
+        errors.extend(validate_future_phase_roadmap(roadmap_text))
+
+    design_text = texts.get("docs/FUTURE_PHASES_DESIGN.md")
+    if design_text is not None:
+        errors.extend(validate_future_phase_governance(design_text, roadmap_text))
 
     markdown = sorted(
         path

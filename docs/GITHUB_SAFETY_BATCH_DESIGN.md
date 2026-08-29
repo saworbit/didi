@@ -1,5 +1,7 @@
 # GitHub Safety-Issue Batch Design
 
+> **Status:** Completed historical design record. Current runtime behavior is documented in [Current Capability Matrix](CAPABILITIES.md), [Tool Reference](TOOL_REFERENCE.md), and the [Changelog](../CHANGELOG.md).
+
 ## Context
 
 The post-Phase 4 GitHub backlog contains eight open reports. Repository audit
