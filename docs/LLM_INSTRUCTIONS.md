@@ -118,6 +118,19 @@ Only game sessions accept pause/step/stop. Pause and verify before stepping; `fr
 
 Treat `eval_gdscript` as a small read-only expression language. Prefer literals, arithmetic/boolean comparisons, direct scalar `node.get('<native-property>')`, `node.get_child_count()`, `node.get_path()`, `node.get_class()`, string/class/group/method/meta predicates, bounded literal-container queries, and numeric constructors/functions. Do not generate traversal, property/index syntax, chained calls, metadata values, callbacks, reflection, mutation, statements, `str(object)`, file/process/network APIs, or unsafe singletons. Source is 1–2048 UTF-8 bytes; context remains in the active subtree; timeout is 1–5000 ms and cooperative, not preemptive; result depth is 16 and the full response is 256 KiB.
 
+## Phase 7 status
+
+<!-- phase7-current-status:start -->
+**Status:** `BLOCKED_AT_FEASIBILITY`
+**Canonical implementation:** `60/78`
+**Phase 7 registrations:** `18/18` unimplemented
+**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
+<!-- phase7-current-status:end -->
+
+Phase 7 is `BLOCKED_AT_FEASIBILITY`. The implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
+
+Do not call or advertise any of the 15 feasible names as available; feasibility is not implementation. Work can proceed only after governance authorizes partial 75/78 delivery, retains atomic 78/78 while waiting for supported engine capabilities, or explicitly approves and maintains engine changes or private adapters sufficient for all three exact blocked contracts. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2 begins. Contract weakening requires a separate explicit contract amendment and is not implied. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+
 ## Unimplemented domains
 
 Do not call these names while `implemented` is false:

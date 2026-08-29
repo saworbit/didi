@@ -69,7 +69,9 @@ Didi exposes 78 canonical tools plus 10 legacy names (88 total).
 
 Startup requires --project or DIDI_PROJECT_ROOT. Mutations expose dry_run and protected writes use confirmation_token.
 
-Phase 7 is planned to implement the remaining 18 canonical tools, completing the canonical surface from 60/78 to 78/78 tools.
+Phase 7 status is BLOCKED_AT_FEASIBILITY after the 2026-08-29 Godot 4.5.1 and Godot 4.7.2 feasibility gate. The implementation remains 60/78 canonical tools, with all 18 Phase 7 names registered but unimplemented. The gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts.
+
+[Phase 7 feasibility evidence](docs/PHASE_7_API_FEASIBILITY.md) | [Phase 7 approved executable plan](docs/PHASE_7_IMPLEMENTATION_PLAN.md)
 
 [Guide](docs/GUIDE.md#details-1) | [Security](SECURITY.md) | [Overview](#didi)
 """,
@@ -81,6 +83,8 @@ Phase 7 is planned to implement the remaining 18 canonical tools, completing the
 ## [Unreleased]
 
 Discovery now exposes 78 canonical tools plus 10 legacy registrations (88 total). Sixty canonical tools are implemented and 18 remain unimplemented.
+
+Phase 7 is BLOCKED_AT_FEASIBILITY: 15/18 names are implementation-feasible and 3/18 are API-blocked under the approved contracts.
 
 ## [1.4.0] - 2026-08-28
 
@@ -106,9 +110,9 @@ Current release: 1.4.0.
             "ADMIN_GUIDE.md": "# Admin Guide\n",
             "API_SPECIFICATION.md": "# API Specification\n\n423 Locked. Mutations expose dry_run and confirmation_token. Live IPC includes ui.hitTest.\n",
             "ARCHITECTURE.md": "# Architecture\n",
-            "DEVELOPER_GUIDE.md": "# Developer Guide\n",
+            "DEVELOPER_GUIDE.md": "# Developer Guide\n\nPhase 7 is BLOCKED_AT_FEASIBILITY at 60/78 implemented; 15/18 names are implementation-feasible and 3/18 are API-blocked.\n",
             "INTEGRATION_GUIDE.md": "# Integration Guide\n",
-            "LLM_INSTRUCTIONS.md": "# LLM Instructions\n\nStart with --project or DIDI_PROJECT_ROOT. Preview with dry_run and use confirmation_token when returned.\n",
+            "LLM_INSTRUCTIONS.md": "# LLM Instructions\n\nStart with --project or DIDI_PROJECT_ROOT. Preview with dry_run and use confirmation_token when returned. Phase 7 is BLOCKED_AT_FEASIBILITY at 60/78 implemented; all 18 names remain unimplemented, including the 15/18 implementation-feasible names and the 3/18 API-blocked names.\n",
             "QUICKSTART.md": "# Quickstart\n\nStart with --project. Preview mutations with dry_run and use confirmation_token when required.\n",
             "RESOURCES_AND_PROMPTS.md": "# Resources And Prompts\n",
             "ROADMAP.md": "# Roadmap\n\n## Phase 6: Enterprise Safety (COMPLETE)\n\n| **13. Phase 5 Deep Domains (6)** | Implemented |\n",
@@ -122,6 +126,8 @@ Current release: 1.4.0.
 
 Didi v1.4.0 registers 78 canonical tool names. Sixty are implemented in at least one mode; 18 remain reserved. Ten legacy names are registered separately, for exactly 88 tools/list entries.
 
+Phase 7 is BLOCKED_AT_FEASIBILITY at 15/18 implementation-feasible and 3/18 API-blocked; feasibility is not implementation and all 18 remain unimplemented.
+
 Startup requires --project or DIDI_PROJECT_ROOT. A second session owner receives 423. Mutations expose dry_run and protected writes use confirmation_token.
 """,
         )
@@ -131,11 +137,30 @@ Startup requires --project or DIDI_PROJECT_ROOT. A second session owner receives
 
 Didi exposes 78 canonical tool names plus 10 legacy names (88 registrations).
 
+Phase 7 is BLOCKED_AT_FEASIBILITY at 60/78 implemented. All 18 Phase 7 names remain unimplemented; 15/18 are implementation-feasible and 3/18 are API-blocked under the approved contracts.
+
 Session lock conflicts return 423. Mutations expose dry_run and protected writes use confirmation_token.
 """,
         )
         self.write("docs/ROADMAP.md", self.make_future_phase_roadmap())
         self.write("docs/FUTURE_PHASES_DESIGN.md", self.make_future_phase_governance())
+        self.write(
+            "docs/FUTURE_PHASES_IMPLEMENTATION_PLAN.md",
+            "# Future Phases Documentation Plan\n\nHistorical approved plan. Current Phase 7 status: BLOCKED_AT_FEASIBILITY, with 15/18 implementation-feasible and 3/18 API-blocked.\n",
+        )
+        self.write(
+            "docs/PHASE_7_API_FEASIBILITY.md",
+            self.make_phase7_feasibility_record(),
+        )
+        self.write(
+            "docs/PHASE_7_IMPLEMENTATION_PLAN.md",
+            """# Phase 7 Canonical Completion Implementation Plan
+
+**Status:** `BLOCKED_AT_FEASIBILITY`
+
+Task 1 completed on 2026-08-29 with 15/18 implementation-feasible and 3/18 API-blocked. The approved all-or-nothing 78/78 gate prevented Tasks 2-13; no production implementation started. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md).
+""",
+        )
         self.write(
             "docs/GUIDE.md",
             """# Guide
@@ -157,6 +182,28 @@ Second section.
 [External](https://example.com/docs#anchor)
 """,
         )
+        phase7_status_documents = (
+            "README.md",
+            "CHANGELOG.md",
+            "docs/CAPABILITIES.md",
+            "docs/DEVELOPER_GUIDE.md",
+            "docs/FUTURE_PHASES_DESIGN.md",
+            "docs/FUTURE_PHASES_IMPLEMENTATION_PLAN.md",
+            "docs/LLM_INSTRUCTIONS.md",
+            "docs/PHASE_7_API_FEASIBILITY.md",
+            "docs/PHASE_7_IMPLEMENTATION_PLAN.md",
+            "docs/ROADMAP.md",
+            "docs/TOOL_REFERENCE.md",
+        )
+        for relative_path in phase7_status_documents:
+            path = self.root / relative_path
+            text = path.read_text(encoding="utf-8")
+            block = self.phase7_current_status_block()
+            if relative_path == "CHANGELOG.md":
+                text = text.replace("## [1.4.0]", block + "\n## [1.4.0]", 1)
+            else:
+                text += "\n" + block
+            self.write(relative_path, text)
         self.init_git()
         return self.root
 
@@ -176,6 +223,7 @@ Second section.
             12: "Structured Engine Logging",
         }
         statuses = {phase: "PLANNED" for phase in phase_names}
+        statuses[7] = "BLOCKED_AT_FEASIBILITY"
         if phase_statuses:
             statuses.update(phase_statuses)
         implementation_statuses = {phase: "COMPLETE" for phase in range(1, 7)}
@@ -202,7 +250,7 @@ Second section.
             if phase == 7:
                 lines.extend(
                     [
-                        "**Objective:** Implement the remaining 18 canonical tools, moving the protocol surface from 60/78 to 78/78.",
+                        "**Objective:** The implementation remains 60/78 canonical tools, with all 18 Phase 7 names registered but unimplemented. The feasibility gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts.",
                         "",
                     ]
                 )
@@ -246,10 +294,16 @@ Second section.
         lines = ["# Future Phase Governance", ""]
         for phase in range(7, 13):
             lines.extend([f"## Phase {phase}: Future Work", ""])
+            lines.extend(
+                [
+                    f"**Status:** `{'BLOCKED_AT_FEASIBILITY' if phase == 7 else 'PLANNED'}`",
+                    "",
+                ]
+            )
             if phase == 7:
                 lines.extend(
                     [
-                        "**Goal:** Implement the remaining 18 canonical tools, moving from 60/78 to 78/78.",
+                        "**Goal:** The implementation remains 60/78 canonical tools, with all 18 Phase 7 names registered but unimplemented; 15/18 are implementation-feasible and 3/18 are API-blocked under the approved contracts.",
                         "",
                     ]
                 )
@@ -260,6 +314,64 @@ Second section.
                 for field, line in completion_fields.items():
                     if field != omitted_completion_field:
                         lines.extend([line, ""])
+        return "\n".join(lines) + "\n"
+
+    def phase7_current_status_block(self) -> str:
+        return """<!-- phase7-current-status:start -->
+**Status:** `BLOCKED_AT_FEASIBILITY`
+**Canonical implementation:** `60/78`
+**Phase 7 registrations:** `18/18` unimplemented
+**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
+<!-- phase7-current-status:end -->
+"""
+
+    def make_phase7_feasibility_record(self) -> str:
+        feasible = (
+            "signal_list_connections",
+            "signal_connect",
+            "signal_disconnect",
+            "signal_emit",
+            "viewport_set_camera_transform",
+            "viewport_toggle_debug_draw",
+            "tilemap_set_cells",
+            "tilemap_get_used_rect",
+            "gridmap_set_cells",
+            "physics_raycast_query",
+            "nav_query_path",
+            "anim_list_tracks",
+            "anim_play_track",
+            "runtime_inject_input",
+            "runtime_read_profiler",
+        )
+        blocked = (
+            "physics_simulate_step",
+            "nav_bake_mesh",
+            "runtime_get_call_stack",
+        )
+        lines = [
+            "# Phase 7 Godot API Feasibility Gate",
+            "",
+            "**Status:** `BLOCKED_AT_FEASIBILITY`",
+            "",
+            "The feasibility gate completed 2026-08-29 on Godot 4.5.1 and Godot 4.7.2.",
+            "",
+            "**Decision:** 15/18 implementation-feasible; 3/18 API-blocked under the approved contracts.",
+            "",
+            "For each blocked row, no supported public API/semantics satisfying the exact approved contract was found on either tested version.",
+            "",
+            "<!-- phase7-feasible-names:start -->",
+        ]
+        lines.extend(f"- `{name}`" for name in feasible)
+        lines.extend(
+            [
+                "<!-- phase7-feasible-names:end -->",
+                "",
+                "| Canonical tool | Decision |",
+                "| --- | --- |",
+            ]
+        )
+        lines.extend(f"| `{name}` | **GO** |" for name in feasible)
+        lines.extend(f"| `{name}` | **BLOCKED** |" for name in blocked)
         return "\n".join(lines) + "\n"
 
     def test_valid_repository_has_no_errors(self):
@@ -803,14 +915,193 @@ Second section.
             errors,
         )
 
+    def test_requires_phase7_blocked_at_feasibility_status(self):
+        root = self.make_valid_repository()
+        roadmap = (root / "docs/ROADMAP.md").read_text(encoding="utf-8")
+        self.write(
+            "docs/ROADMAP.md",
+            roadmap.replace("BLOCKED_AT_FEASIBILITY", "PLANNED", 1),
+        )
+
+        errors = validate_repository(root)
+
+        self.assertIn(
+            "docs/ROADMAP.md Phase 7 must declare status 'BLOCKED_AT_FEASIBILITY'",
+            errors,
+        )
+
+    def test_requires_phase7_15_3_feasibility_counts(self):
+        root = self.make_valid_repository()
+        evidence = (root / "docs/PHASE_7_API_FEASIBILITY.md").read_text(
+            encoding="utf-8"
+        )
+        self.write(
+            "docs/PHASE_7_API_FEASIBILITY.md",
+            evidence.replace(
+                "15/18 implementation-feasible; 3/18 API-blocked",
+                "14/18 implementation-feasible; 4/18 API-blocked",
+            ),
+        )
+
+        errors = validate_repository(root)
+
+        self.assertTrue(
+            any("PHASE_7_API_FEASIBILITY.md" in error and "15 feasible and 3 blocked" in error for error in errors),
+            errors,
+        )
+
+    def test_requires_exact_phase7_blocker_set(self):
+        root = self.make_valid_repository()
+        evidence = (root / "docs/PHASE_7_API_FEASIBILITY.md").read_text(
+            encoding="utf-8"
+        )
+        evidence = evidence.replace(
+            "| `signal_list_connections` | **GO** |",
+            "| `signal_list_connections` | **BLOCKED** |",
+        ).replace(
+            "| `physics_simulate_step` | **BLOCKED** |",
+            "| `physics_simulate_step` | **GO** |",
+        )
+        self.write("docs/PHASE_7_API_FEASIBILITY.md", evidence)
+
+        errors = validate_repository(root)
+
+        self.assertTrue(
+            any("Phase 7 blocked set must be exactly" in error for error in errors),
+            errors,
+        )
+
+    def test_requires_links_to_both_phase7_records(self):
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        readme = readme.replace("(docs/PHASE_7_API_FEASIBILITY.md)", "")
+        readme = readme.replace("(docs/PHASE_7_IMPLEMENTATION_PLAN.md)", "")
+        self.write("README.md", readme)
+
+        errors = validate_repository(root)
+
+        self.assertTrue(
+            any("README.md must link both Phase 7 records" in error for error in errors),
+            errors,
+        )
+
+    def test_rejects_stale_phase7_planned_current_state(self):
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        self.write("README.md", readme + "\nPhase 7 is planned to complete the surface.\n")
+
+        errors = validate_repository(root)
+
+        self.assertTrue(
+            any("README.md" in error and "stale Phase 7 planned prose" in error for error in errors),
+            errors,
+        )
+
+    def test_rejects_primary_phase7_status_when_expected_literal_is_elsewhere(self):
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        readme = readme.replace(
+            "**Status:** `BLOCKED_AT_FEASIBILITY`",
+            "**Status:** `PLANNED`",
+            1,
+        )
+        readme += "\n## Glossary\n\n`BLOCKED_AT_FEASIBILITY` is a status token.\n"
+        self.write("README.md", readme)
+
+        errors = validate_repository(root)
+
+        self.assertTrue(
+            any(
+                "README.md" in error
+                and "current status block must report status" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_ignores_phase7_status_literals_in_glossary_and_code_fence(self):
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        readme += """
+
+## Glossary
+
+Historical vocabulary example: Phase 7 is planned.
+
+```markdown
+<!-- phase7-current-status:start -->
+**Status:** `PLANNED`
+<!-- phase7-current-status:end -->
+```
+"""
+        self.write("README.md", readme)
+
+        errors = validate_repository(root)
+
+        self.assertFalse(
+            any(
+                "README.md" in error
+                and (
+                    "stale Phase 7 planned prose" in error
+                    or "current status block" in error
+                )
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_rejects_primary_phase7_counts_when_expected_literals_are_elsewhere(self):
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        readme = readme.replace(
+            "**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked",
+            "**Feasibility:** `14/18` implementation-feasible; `4/18` API-blocked",
+            1,
+        )
+        readme += "\n## Audit literals\n\nExpected tokens: `15/18` and `3/18`.\n"
+        self.write("README.md", readme)
+
+        errors = validate_repository(root)
+
+        self.assertTrue(
+            any(
+                "README.md" in error
+                and "current status block must report feasibility" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_rejects_feasible_prose_list_that_disagrees_with_matrix(self):
+        root = self.make_valid_repository()
+        evidence_path = root / "docs/PHASE_7_API_FEASIBILITY.md"
+        evidence = evidence_path.read_text(encoding="utf-8")
+        evidence = evidence.replace(
+            "- `signal_list_connections`",
+            "- `physics_simulate_step`",
+            1,
+        )
+        self.write("docs/PHASE_7_API_FEASIBILITY.md", evidence)
+
+        errors = validate_repository(root)
+
+        self.assertTrue(
+            any(
+                "PHASE_7_API_FEASIBILITY.md" in error
+                and "feasible-name list must exactly equal matrix GO set" in error
+                for error in errors
+            ),
+            errors,
+        )
+
     def test_rejects_canonical_count_mutation_in_each_current_document(self):
         mutations = {
-            "README.md": ("remaining 18 canonical", "remaining 17 canonical"),
+            "README.md": ("all 18 Phase 7 names", "all 17 Phase 7 names"),
             "docs/CAPABILITIES.md": ("18 remain reserved", "17 remain reserved"),
-            "docs/ROADMAP.md": ("remaining 18 canonical", "remaining 17 canonical"),
+            "docs/ROADMAP.md": ("all 18 Phase 7 names", "all 17 Phase 7 names"),
             "docs/FUTURE_PHASES_DESIGN.md": (
-                "remaining 18 canonical",
-                "remaining 17 canonical",
+                "all 18 Phase 7 names",
+                "all 17 Phase 7 names",
             ),
             "CHANGELOG.md": ("18 remain unimplemented", "17 remain unimplemented"),
         }
@@ -838,7 +1129,7 @@ Second section.
         roadmap = (root / "docs/ROADMAP.md").read_text(encoding="utf-8")
         self.write(
             "docs/ROADMAP.md",
-            roadmap.replace("remaining 18 canonical", "remaining 17 canonical", 1),
+            roadmap.replace("all 18 Phase 7 names", "all 17 Phase 7 names", 1),
         )
 
         errors = validate_repository(root)

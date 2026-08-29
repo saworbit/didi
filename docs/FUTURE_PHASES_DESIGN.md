@@ -8,7 +8,7 @@ Complete the existing 78-tool canonical surface, then extend Didi through projec
 
 ## Future-Phase Governance
 
-- Scope: every phase has `PLANNED`, `IN PROGRESS`, or `COMPLETE` status and defines its capability boundary.
+- Scope: every phase has `PLANNED`, `IN PROGRESS`, or `COMPLETE` status and defines its capability boundary. `BLOCKED_AT_FEASIBILITY` is reserved for a phase stopped by an approved hard feasibility gate.
 - Exit evidence: a phase is complete only when its implementation, documentation, native tests, Godot integration tests, and required cross-platform CI are complete.
 - Security: preserve the local authenticated safety boundary.
 - Registered tool names must describe working behavior. Do not add success stubs or increase the canonical count before implementation lands.
@@ -19,11 +19,16 @@ Complete the existing 78-tool canonical surface, then extend Didi through projec
 
 ## Phase 7: Canonical Surface Completion
 
-**Status:** `PLANNED`
+<!-- phase7-current-status:start -->
+**Status:** `BLOCKED_AT_FEASIBILITY`
+**Canonical implementation:** `60/78`
+**Phase 7 registrations:** `18/18` unimplemented
+**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
+<!-- phase7-current-status:end -->
 
-**Goal:** Implement the remaining 18 canonical tools, moving from 60/78 to 78/78 without adding public tool names.
+**Goal:** The implementation remains 60/78 canonical tools, with all 18 Phase 7 names remaining registered but unimplemented. The approved delivery goal was atomic 78/78 without adding public tool names.
 
-**Scope:** Phase 7A-7C complete the registered canonical surface through editor authoring, simulation and animation, and runtime debugging.
+**Scope:** Phase 7A-7C define the approved contracts for editor authoring, simulation and animation, and runtime debugging. Their implementation did not start because the hard feasibility gate blocked the atomic plan.
 
 **Explicit exclusions:** No new public tool names, arbitrary debugger control, or engine-output streaming beyond implemented Godot APIs.
 
@@ -32,6 +37,29 @@ Complete the existing 78-tool canonical surface, then extend Didi through projec
 **Mutation classification:** Mixed read-only and mutating operations; every mutation is bounded, dry-runnable, explicitly classified for confirmation, and transactional where persistent.
 
 **Exit evidence:** The Phase 7 evidence below must prove all canonical implementations, safety policies, tests, documentation, and cross-platform checks.
+
+### Feasibility outcome
+
+The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (15/18) are implementation-feasible:
+
+- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`
+- `viewport_set_camera_transform`, `viewport_toggle_debug_draw`
+- `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`
+- `physics_raycast_query`, `nav_query_path`
+- `anim_list_tracks`, `anim_play_track`
+- `runtime_inject_input`, `runtime_read_profiler`
+
+Exactly three names (3/18) are API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version. This is not a permanent impossibility claim.
+
+Feasibility does not make any Phase 7 name callable. All 18 remain unimplemented, and the all-or-nothing 78/78 activation gate prevented Tasks 2-13; no production implementation started. Reproducible evidence is in [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md), and the approved executable plan is [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md).
+
+Work can proceed only after governance chooses one path:
+
+- **A)** Authorize partial delivery of the 15 feasible tools, targeting 75/78 and retaining three honest unimplemented names.
+- **B)** Retain atomic 78/78 and wait for supported engine capabilities.
+- **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.
+
+The detailed 7A-7C requirements below remain approved contract design, not delivered behavior.
 
 ### Phase 7A: Editor Authoring Completion
 
@@ -97,6 +125,8 @@ Requirements:
 ## Phase 8: Deep Project Intelligence and Asset Pipeline
 
 **Status:** `PLANNED`
+
+**Dependency:** Phase 8 cannot start until governance resolves the Phase 7 feasibility block and either revises or satisfies the canonical-completion prerequisite.
 
 **Goal:** Make project-wide dependencies, UID resolution, and import health inspectable and safely configurable.
 

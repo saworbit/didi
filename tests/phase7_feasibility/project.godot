@@ -1,0 +1,14 @@
+[application]
+config/name="Phase7Feasibility"
+run/main_scene=""
+
+[display]
+window/size/viewport_width=320
+window/size/viewport_height=240
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+
+[physics]
+common/physics_ticks_per_second=60
