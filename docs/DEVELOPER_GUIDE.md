@@ -170,7 +170,7 @@ depending on a predecessor, not on the code under test.
 
 For expression-policy changes, add a failing native scanner test and a real editor/game integration probe before changing implementation. A new accepted Node operation must prove it cannot dispatch script callbacks, traverse outside the active subtree, allocate unbounded data before a check, leak source/token text, or turn the cooperative timeout into a hard-preemption claim.
 
-The CI MCP smoke must start Didi with an explicit fixture project and continue to assert exactly 78 canonical/88 total registrations, offline-only search/deep-domain metadata, live-only reimport/diff/UI-hit-test metadata, strict Phase 4/5/6 schemas, local metadata for the four session tools, live metadata for the six routed runtime tools, cursor-shaped logs, and `implemented: false` for `runtime_inject_input`, `runtime_get_call_stack`, and `runtime_read_profiler`.
+The CI MCP smoke must start Didi with an explicit fixture project. It verifies the live `tools/list` surface against the manifest emitted by `didi --dump-tool-manifest` from the same build, so counts are never written into the workflow, and it asserts every `implemented` flag rather than a sample. It also continues to assert offline-only search/deep-domain metadata, live-only reimport/diff/UI-hit-test metadata, strict Phase 4/5/6 schemas, local metadata for the four session tools, live metadata for the six routed runtime tools, cursor-shaped logs, and `implemented: false` for `runtime_inject_input`, `runtime_get_call_stack`, and `runtime_read_profiler`.
 
 ## Phase 7 feasibility gate
 
