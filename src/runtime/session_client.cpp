@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cmath>
 #include <mutex>
+#include <optional>
 #include <limits>
 #include <sstream>
 #include <set>
