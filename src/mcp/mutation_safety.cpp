@@ -20,7 +20,7 @@ const std::unordered_set<std::string_view> kMutations = {
     "script_patch_method", "patch_script_symbols", "script_attach_to_node",
     "script_detach_from_node", "physics_simulate_step", "nav_bake_mesh",
     "anim_play_track", "anim_state_set", "tilemap_set_cells", "tilemap_set_region",
-    "gridmap_set_cells", "resource_create", "asset_instantiate", "instantiate_asset",
+    "gridmap_set_cells", "resource_create", "instantiate_asset", "mutate_scene_tree",
     "asset_reimport", "runtime_launch", "execute_test_session", "runtime_set_paused",
     "runtime_step", "runtime_stop", "runtime_inject_input", "input_map_set_action",
     "editor_undo", "editor_redo", "editor_save_scene", "editor_reload_project",
@@ -39,6 +39,16 @@ const std::unordered_set<std::string_view> kOverwriteConfirmed = {
     "project_export", "gridmap_export_mesh_library"
 };
 
+// Tools that start a subprocess against the project. Godot runs the project's
+// own scripts, extensions and export plugins on startup, and dotnet build can
+// restore packages and run custom targets, so what these reach is decided by
+// the project, not by Didi. A client that uses openWorldHint to decide what
+// needs a person's eyes has to be told that.
+const std::unordered_set<std::string_view> kRunsProjectCode = {
+    "csharp_check_build", "shader_check_compile", "project_export",
+    "gridmap_export_mesh_library", "runtime_launch", "script_check_syntax"
+};
+
 int64_t currentTimeMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::system_clock::now().time_since_epoch()).count();
@@ -55,6 +65,10 @@ MutationSafety::MutationSafety(Clock clock, TokenGenerator token_generator)
 
 bool MutationSafety::isMutation(const ResolvedToolBinding& binding) {
     return kMutations.count(binding.policy_source) != 0;
+}
+
+bool toolRunsProjectControlledCode(const ResolvedToolBinding& binding) {
+    return kRunsProjectCode.count(binding.canonical_name) != 0;
 }
 
 bool MutationSafety::canRequireConfirmation(const ResolvedToolBinding& binding) {

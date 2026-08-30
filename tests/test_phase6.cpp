@@ -274,6 +274,27 @@ TEST(Phase6, MutationSchemasAdvertiseDryRunAndProtectedConfirmation) {
     ASSERT_TRUE(!hierarchy->inputSchema.value("properties", didi::json::object()).contains("dry_run"));
 }
 
+TEST(Phase6, LegacyMutationAliasesAdvertiseDryRunAndAcceptPreviews) {
+    // Break caught: mutate_scene_tree was missing from the mutation table, so it
+    // advertised no dry_run and rejected a preview pass with 400.
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    ScopedPhase6Directory directory("legacy-mutation-aliases");
+    didi::mcp::MutationSafety safety;
+    const auto context = offlineContext(directory.root);
+
+    for (const char* name : {"mutate_scene_tree", "instantiate_asset", "inject_input_event"}) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        ASSERT_EQ(tool->inputSchema["properties"]["dry_run"]["type"], "boolean");
+
+        const auto decision = evaluateBinding(safety, name, dryRun(didi::json::object()), context);
+        ASSERT_FALSE(decision.is_error);
+        ASSERT_FALSE(decision.execute);
+    }
+}
+
 TEST(Phase6, RegistryDryRunNeverDispatchesMutationHandler) {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
