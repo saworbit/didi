@@ -63,7 +63,7 @@ parameter on the existing `runtime_step` (a change, not a new name).
 | Field | Value |
 | :--- | :--- |
 | **Name** | No tool name. A change to the supported engine floor, currently 4.5+. |
-| **Failing workflow** | None on its own. This exists as a record because Phase 7 partial-delivery work adopted Godot 4.7.2 as its sole baseline without a separate decision, and because the `scene_close` amendment above becomes free rather than version-gated if the floor moves. |
+| **Failing workflow** | None on its own. This exists as a record because Phase 7 partial-delivery work adopted Godot 4.7.2 as its sole baseline without a separate decision, and because the `scene_close` amendment above becomes free rather than version-gated if the floor moves. The migration that assumed the higher floor was not merged; it is preserved at the `archive/phase-7-partial-delivery` tag as a checklist of what a floor change touches, not as reusable work. |
 | **Execution modes** | Unchanged. |
 | **Safety class** | Not a mutation. It is a user-facing breaking change: 4.5 and 4.6 users lose support. |
 | **Proving test** | CI drops 4.5.1 and 4.6.2 from the verified matrix; every claim currently qualified by engine version is re-checked against 4.7 alone. |
