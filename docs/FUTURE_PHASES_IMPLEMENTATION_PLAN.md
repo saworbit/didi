@@ -12,14 +12,14 @@
 
 <!-- phase7-current-status:start -->
 **Status:** `BLOCKED_AT_FEASIBILITY`
-**Canonical implementation:** `60/78`
+**Canonical implementation:** `61/79`
 **Phase 7 registrations:** `18/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-This is the approved historical plan that integrated the future-phases documentation. Its original task wording is preserved below. Current Phase 7 status is `BLOCKED_AT_FEASIBILITY`: the 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts. All 18 names remain registered but unimplemented at 60/78, and the all-or-nothing activation gate prevented Tasks 2-13 of the separate Phase 7 implementation plan; no production implementation started.
+This is the approved historical plan that integrated the future-phases documentation. Its original task wording is preserved below. Current Phase 7 status is `BLOCKED_AT_FEASIBILITY`: the 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts. All 18 names remain registered but unimplemented at 61/79, and the all-or-nothing activation gate prevented Tasks 2-13 of the separate Phase 7 implementation plan; no production implementation started.
 
-Current evidence is [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md), and the approved executable plan is [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md). Further work requires governance to authorize partial 75/78 delivery, retain atomic 78/78, or explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. Under the third path, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2; contract weakening is a separate explicit contract amendment.
+Current evidence is [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md), and the approved executable plan is [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md). Further work requires governance to authorize partial 76/79 delivery, retain atomic 79/79, or explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. Under the third path, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2; contract weakening is a separate explicit contract amendment.
 
 ## Global Constraints
 
@@ -125,14 +125,14 @@ Add a `PLANNED` Phase 7 entry that states:
 ```markdown
 ## Phase 7: Canonical Surface Completion (`PLANNED`)
 
-**Objective:** Implement the remaining 18 canonical tools, moving the protocol surface from 60/78 to 78/78 without adding public tool names.
+**Objective:** Implement the remaining 18 canonical tools, moving the protocol surface from 61/79 to 79/79 without adding public tool names.
 
 **Delivery slices:**
 - 7A: signals, viewport camera/debug, and tile/grid operations (9 tools)
 - 7B: physics, navigation, and animation operations (6 tools)
 - 7C: input injection, call-stack inspection, and profiling (3 tools)
 
-**Exit gate:** All 78 canonical tools have real implementations and cross-platform, native bridge, Godot, security, mutation-policy, and documentation evidence. Successful placeholders do not satisfy this gate.
+**Exit gate:** All 79 canonical tools have real implementations and cross-platform, native bridge, Godot, security, mutation-policy, and documentation evidence. Successful placeholders do not satisfy this gate.
 ```
 
 - [ ] **Step 3: Add concise Phase 8-12 entries**
@@ -195,7 +195,7 @@ Add a short section after the current implementation-status material:
 ```markdown
 ## Delivery Roadmap
 
-Phases 1-6 established the current implementation baseline. Phase 7 is planned to complete the canonical surface from 60/78 to 78/78 tools; Phases 8-12 cover project intelligence, advanced authoring, parallel orchestration, protocol evolution, and ecosystem maturity.
+Phases 1-6 established the current implementation baseline. Phase 7 is planned to complete the canonical surface from 61/79 to 79/79 tools; Phases 8-12 cover project intelligence, advanced authoring, parallel orchestration, protocol evolution, and ecosystem maturity.
 
 See the [Roadmap](docs/ROADMAP.md) for delivery status and the [Future Phases Design](docs/FUTURE_PHASES_DESIGN.md) for approved scope and exit gates.
 ```
@@ -369,7 +369,7 @@ Expected: exit code 0; line-ending conversion warnings are acceptable, whitespac
 
 - [ ] **Step 4: Confirm the canonical count remains unchanged**
 
-Use the existing semantic audit or validator output to confirm the README declares 78 canonical tools, 60 implemented tools, and 18 planned Phase 7 implementations. Do not derive a new canonical count from roadmap prose.
+Use the existing semantic audit or validator output to confirm the README declares 79 canonical tools, 60 implemented tools, and 18 planned Phase 7 implementations. Do not derive a new canonical count from roadmap prose.
 
 - [ ] **Step 5: Commit any integration-only corrections**
 

@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 78 canonical tool names plus 10 legacy names (88 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 79 canonical tool names plus 10 legacy names (89 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `BLOCKED_AT_FEASIBILITY`
-**Canonical implementation:** `60/78`
+**Canonical implementation:** `61/79`
 **Phase 7 registrations:** `18/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `BLOCKED_AT_FEASIBILITY`. The implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `BLOCKED_AT_FEASIBILITY`. The implementation remains 61/79 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -384,7 +384,41 @@ Arguments are `cursor` (default `0`, non-negative), `limit` (default `100`, `1..
 
 The cursor is the next sequence to inspect. Cursor `0` starts at the oldest retained record. `next_cursor` advances over inspected records even if a level filter excludes them, preventing filter starvation. `dropped_before_cursor: true` means retention discarded part of the requested range.
 
-**Important:** this ring contains Didi lifecycle, handshake, command, control, and evaluation events. It does not intercept arbitrary `print()` output from Godot or any external process. `runtime_launch` remains the bounded child-process API that captures stdout/stderr and returns it after the child exits.
+**Important:** this ring contains Didi lifecycle, handshake, command, control, and evaluation events only. For output the engine itself produced, use `runtime_read_output`. `runtime_launch` remains the bounded child-process API that captures stdout/stderr and returns it after the child exits.
+
+### `runtime_read_output` — Live
+
+Reads what the **engine** printed, as opposed to what Didi recorded. Didi subscribes a custom `Logger` through `OS.add_logger`, so `print()` from a running game, `push_warning`, `push_error`, and GDScript parse and runtime errors all arrive here.
+
+Arguments and paging are identical to `runtime_read_logs`: `cursor` (default `0`, non-negative), `limit` (default `100`, `1..500`), and `minimum_level` (`debug`, `info`, `warning`, or `error`). The stream is a separate 2,000-record ring, so heavy engine output never evicts Didi's own diagnostics and the two can be polled independently.
+
+```json
+{
+  "records": [{
+    "sequence": 3,
+    "timestamp_ms": 1788071042548,
+    "level": "error",
+    "source": "godot",
+    "message": "Parse Error: Expected closing \")\" after function parameters.",
+    "details": {
+      "file": "res://broken.gd",
+      "function": "GDScript::reload",
+      "line": 2,
+      "error_type": 2
+    }
+  }],
+  "oldest_cursor": 1,
+  "next_cursor": 4,
+  "dropped_before_cursor": false,
+  "execution_mode": "live",
+  "stream": "engine",
+  "session_kind": "game"
+}
+```
+
+`stream: "engine"` distinguishes this payload from `runtime_read_logs`. Plain messages carry `details: null`; errors and warnings carry the originating `file`, `function`, and `line`, plus Godot's `error_type` (`0` error, `1` warning, `2` script, `3` shader). For a script fault the `file` and `line` are the script's own, which is what makes this usable to diagnose a failing run rather than merely observe that it failed.
+
+Capture depends on the engine exposing the class-registration interface. Where it does not, the extension still loads, logs a warning at startup, and this tool returns no records rather than failing.
 
 ### `runtime_set_paused`, `runtime_step`, and `runtime_stop` — Live
 

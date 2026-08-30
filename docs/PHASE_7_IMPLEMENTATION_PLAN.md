@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement the remaining 18 registered canonical tools with native Godot-derived behavior so Didi moves atomically from 60/78 implemented to 78/78 without changing the 78 canonical names or 10 compatibility aliases.
+**Goal:** Implement the remaining 18 registered canonical tools with native Godot-derived behavior so Didi moves atomically from 61/79 implemented to 79/79 without changing the 79 canonical names or 10 compatibility aliases.
 
 **Architecture:** Keep the public capability gate closed while domain handlers, authenticated IPC routing, main-thread Godot bridge operations, and real-engine tests are built behind it. Central `MutationSafety`, route leases, matching tool/method session policy, per-session contention gates, bounded serializers, and `EditorUndoRedoManager` transactions remain the only safety path. After all 18 vertical paths pass Godot 4.5.1 and 4.7.2 integration, one final shared-file task removes the remaining gates and updates registry metadata, public documentation, validation, and CI from 60/18 to 78/0 together.
 
@@ -12,31 +12,31 @@
 
 <!-- phase7-current-status:start -->
 **Status:** `BLOCKED_AT_FEASIBILITY`
-**Canonical implementation:** `60/78`
+**Canonical implementation:** `61/79`
 **Phase 7 registrations:** `18/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
 Task 1 completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. The gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
-The approved all-or-nothing 78/78 activation gate prevented Tasks 2-13; no production implementation started. The implementation remains 60/78, and all 18 Phase 7 names remain registered but unimplemented. The original approved plan below is preserved as the executable contract, not as evidence of delivered behavior.
+The approved all-or-nothing 79/79 activation gate prevented Tasks 2-13; no production implementation started. The implementation remains 61/79, and all 18 Phase 7 names remain registered but unimplemented. The original approved plan below is preserved as the executable contract, not as evidence of delivered behavior.
 
 Work can proceed only after governance chooses one path:
 
-- **A)** Authorize partial delivery of the 15 feasible tools, targeting 75/78 and retaining three honest unimplemented names.
-- **B)** Retain atomic 78/78 and wait for supported engine capabilities.
+- **A)** Authorize partial delivery of the 15 feasible tools, targeting 76/79 and retaining three honest unimplemented names.
+- **B)** Retain atomic 79/79 and wait for supported engine capabilities.
 - **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.
 
 See [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) for reproducible evidence.
 
 ## Global Constraints
 
-- Preserve exactly 78 canonical tool names and exactly 10 legacy compatibility aliases, for 88 `tools/list` registrations; add, remove, rename, or alias no public tool.
+- Preserve exactly 79 canonical tool names and exactly 10 legacy compatibility aliases, for 88 `tools/list` registrations; add, remove, rename, or alias no public tool.
 - Implement exactly these 18 canonical names: `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `physics_raycast_query`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `runtime_inject_input`, `runtime_get_call_stack`, and `runtime_read_profiler`.
 - Add one central immutable `AliasBinding` table containing exactly the ten rows below. `resolveAliasBinding(invoked_name,args)` returns the invoked registration, direct canonical target or action-adapter target, schema source, capability source, mutation/confirmation class, session policy, handler, and IPC method. All policy lookups consume that resolved binding; no subsystem keeps an independent alias list. Preserve the invoked registration name in discovery, handler dispatch, audit data, dry-run plans, and confirmation-token digest. Direct aliases have canonical behavior/policy parity but never confirmation authority across names: a token or preview digest issued under either name must fail `409` under the other. Adapter names remain adapter registrations and must not be falsely collapsed to a non-equivalent canonical schema or capability.
 - A tool remains `implemented: false`, `executionModes: ["unimplemented"]`, blocked by `ToolRegistry::callTool()`, and present in `EditorHook`'s `registered_but_unimplemented` set until its handler, native API-derived bridge behavior, focused tests, and real Godot evidence exist. Fixed success, IPC echo, synthesized offline output, fixed unavailable output, and state changes without observed post-state are not implementations.
 - The 18 checked-in `schemas/phase7/*.schema.json` roots are the only Phase 7 schema source. `tools/generate_phase7_schemas.py` uses only the Python standard library, requires the exact 18 canonical filenames/IDs, resolves every local ref, extracts `$defs/request`, canonicalizes with UTF-8, sorted keys, compact separators, and LF endings, and emits `${CMAKE_CURRENT_BINARY_DIR}/generated/didi/mcp/phase7_schemas.hpp` plus `phase7_schemas.cpp`. CMake lists the generator and all 18 roots in `DEPENDS`, adds the generated source to `didi_core`, and adds only the build-tree generated include directory. Missing/extra/invalid schemas or generator failure stop the build. Generated files stay in the build tree, are never committed or installed, and are reproducible byte-for-byte. `ToolRegistry` reads only the compiled catalog; installed/copied `didi` and `didi_extension` perform no schema filesystem lookup and remain independent of the source tree.
-- Keep all current public documentation and documentation-validator facts at 78 canonical, 60 implemented, 18 remaining, and 10 legacy until all 18 tools pass on this branch. Do not publish intermediate 69/9, 66/12, or 77/1 states. Move every current-state document and validator assertion to 78/0 in one commit, and mark Phase 7 `COMPLETE` only in that commit.
+- Keep all current public documentation and documentation-validator facts at 79 canonical, 60 implemented, 18 remaining, and 10 legacy until all 18 tools pass on this branch. Do not publish intermediate 69/9, 66/12, or 77/1 states. Move every current-state document and validator assertion to 78/0 in one commit, and mark Phase 7 `COMPLETE` only in that commit.
 - Use Godot 4.5.1 `extension_api.json` as the source for every API identifier. Record evidence by API kind in `docs/PHASE_7_API_FEASIBILITY.md`: ClassDB method bind name/signature/compatibility hash; built-in Variant constructor type/index/signature (constructors do not have method hashes); enum name/numeric value; singleton/class-constructor availability; and observed behavior. Run equivalent probes on Godot 4.7.2. A missing identifier or semantic on either engine fails closed. Task 1 is the single hard feasibility gate: all 18 rows must be `GO` before Task 2 begins; otherwise stop with no production/test/schema/fixture/build/CI edits. Every later feasibility mention is an evidence-integrity audit only and cannot create a second or deferred gate.
 - `runtime_get_call_stack` is complete only if a supported, version-pinned Godot API returns engine-derived frames for the paused target script. A constant `{available:false}` result, the extension's own C++ stack, log scraping, arbitrary expression execution, or fixture-synthesized frames is not implementation. If Task 1 cannot prove the API on Godot 4.5.1 and 4.7.2, mark its row `BLOCKED`; Task 1 then stops the entire plan before Task 2 and no production, test, schema, fixture, build, or CI file may be edited.
 - `ToolRegistry::callTool()` remains the sole public mutation gateway. `MutationSafety::decorateSchema()` and `MutationSafety::evaluate()` own handler-free `dry_run`, normalized argument binding, canonical project binding, selected session identity, route generation, 64-hex single-use confirmation tokens, 120-second expiry, replay rejection, and rejection of mutation controls on read-only tools.
@@ -713,13 +713,13 @@ git commit -m "test: prove phase 7 against Godot"
 - Modify: `tests/run_godot_integration.ps1` to add final public MCP mode before activation.
 
 **Interfaces:**
-- Consumes: all 18 green native/domain/integration paths, unchanged 78 canonical/10 alias registry, and security decisions.
-- Produces: one atomic public state: 78 canonical, 78 implemented, 0 remaining, 10 aliases, Phase 7 `COMPLETE`.
+- Consumes: all 18 green native/domain/integration paths, unchanged 79 canonical/10 alias registry, and security decisions.
+- Produces: one atomic public state: 79 canonical, 78 implemented, 0 remaining, 10 aliases, Phase 7 `COMPLETE`.
 
 - [ ] **Step 1: Write failing final public MCP tests before activation.** Add `-PublicMcpFinalState` assertions that start the standalone server, call public `tools/list`, then `tools/call` through route lease/handler/authenticated IPC/bridge for every canonical tool and `inject_input_event`. Assert canonical/alias parity and fixture post-state. Also add native/docs assertions for 78/0 and Phase 7 complete.
 - [ ] **Step 2: Force rebuild and run the new final-state tests while gates remain closed.** Expected: desired public MCP assertions fail at the capability gate (`implemented:false`/unimplemented call rejection), and docs assertions fail at 60/18. Existing native/raw integration stays green.
 - [ ] **Step 3: Audit prerequisite evidence; do not create a second feasibility gate.** Verify the committed Task 1 artifact still contains the same 18 `GO` rows/checksums and Task 11 passed both engines with engine-derived call-stack frames. Missing or changed evidence invalidates the earlier Task 1 decision and returns work to Task 1; no contract may be weakened and no 78/0 file may be edited until the evidence chain is restored.
-- [ ] **Step 4: Activate canonicalized behavior in one registry change.** Add exactly the 18 canonical names to the live set; the direct `AliasBinding` row makes `inject_input_event` live with canonical schema/capability/mutation/session parity while retaining invoked-name binding. Preserve 78 canonical/10 aliases; no intermediate count.
+- [ ] **Step 4: Activate canonicalized behavior in one registry change.** Add exactly the 18 canonical names to the live set; the direct `AliasBinding` row makes `inject_input_event` live with canonical schema/capability/mutation/session parity while retaining invoked-name binding. Preserve 79 canonical/10 aliases; no intermediate count.
 - [ ] **Step 5: Atomically publish current-state documentation.** Change current public facts from 60 implemented/18 remaining to 78 implemented/0 remaining, document every matrix schema/limit/session/error/rollback caveat, set Phase 7 to `COMPLETE` with the execution date, and preserve historical baseline statements where explicitly historical.
 - [ ] **Step 6: Update validator and CI smoke atomically.** Require 78/0/10, alias parity, exact policies, and all 18 live entries; keep repository-native commands on Windows/Linux/macOS.
 - [ ] **Step 7: Force rebuild before any final-state execution.** Run the exact `VsDevCmd.bat` + Ninja baseline. Expected: changed registry/tests/server/extension rebuild and native suite passes; no stale binary is possible.
@@ -732,7 +732,7 @@ python -m unittest tests.test_documentation_validator -v
 python tools/validate_documentation.py
 ```
 
-Expected: native suite reports zero failures; documentation unit suite passes; validator exits `0` and reports 78 canonical, 78 implemented, 0 remaining, 10 legacy.
+Expected: native suite reports zero failures; documentation unit suite passes; validator exits `0` and reports 79 canonical, 78 implemented, 0 remaining, 10 legacy.
 
 - [ ] **Step 9: Run public MCP end-to-end integration on both engines before commit.**
 
@@ -772,7 +772,7 @@ python -m unittest tests.test_documentation_validator -v
 python tools/validate_documentation.py
 ```
 
-Expected: both exit `0`; all current documents agree on 78/78, 0 remaining, 10 legacy, and Phase 7 complete.
+Expected: both exit `0`; all current documents agree on 79/79, 0 remaining, 10 legacy, and Phase 7 complete.
 
 - [ ] **Step 3: Run both real-engine gates again.**
 

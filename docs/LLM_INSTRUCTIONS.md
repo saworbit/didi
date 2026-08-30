@@ -107,14 +107,14 @@ Use `runtime_launch` to start a separate Godot process, optionally headless, for
 
 ### Observe or control an already-running session
 
-Didi v1.4.0 starts detached and exposes 78 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
+Didi v1.4.0 starts detached and exposes 79 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
 
 1. Call `runtime_list_sessions`, preferably with the canonical project path.
 2. Choose the intended `editor` or `game` descriptor and call `runtime_attach_session` if deterministic auto-selection did not choose it.
 3. Verify the token-free selection with `runtime_get_session`; it performs a fresh bounded handshake and quarantines a route that fails transport, authentication, or identity verification. A concurrent explicit route change wins and the stale refresh returns `409`.
 4. Keep editor edited-state and game runtime-state separate by checking `session_kind` on every live result.
 
-Poll `runtime_read_logs` from cursor `0`, then pass its `next_cursor` on every later call. A true `dropped_before_cursor` means retained history was lost. Filtering still advances the cursor. Never claim the Didi ring contains arbitrary `print()` output: it contains structured Didi events only. Use `runtime_launch` for bounded child stdout/stderr.
+Poll `runtime_read_logs` from cursor `0`, then pass its `next_cursor` on every later call. A true `dropped_before_cursor` means retained history was lost. Filtering still advances the cursor. The Didi ring contains structured Didi events only. For engine output -- `print()` from a running game, `push_warning`, `push_error`, and GDScript parse and runtime errors -- poll `runtime_read_output`, which is a separate stream with the same cursor contract and carries the originating file and line on errors. Use `runtime_launch` for bounded child stdout/stderr.
 
 Only game sessions accept pause/step/stop. Pause and verify before stepping; `frames` is 1–60, only one step may be pending, and success means the game re-paused after exact callbacks. A successful stop is a quit request, not proof of process exit.
 
@@ -124,14 +124,14 @@ Treat `eval_gdscript` as a small read-only expression language. Prefer literals,
 
 <!-- phase7-current-status:start -->
 **Status:** `BLOCKED_AT_FEASIBILITY`
-**Canonical implementation:** `60/78`
+**Canonical implementation:** `61/79`
 **Phase 7 registrations:** `18/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `BLOCKED_AT_FEASIBILITY`. The implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
+Phase 7 is `BLOCKED_AT_FEASIBILITY`. The implementation remains 61/79 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
-Do not call or advertise any of the 15 feasible names as available; feasibility is not implementation. Work can proceed only after governance authorizes partial 75/78 delivery, retains atomic 78/78 while waiting for supported engine capabilities, or explicitly approves and maintains engine changes or private adapters sufficient for all three exact blocked contracts. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2 begins. Contract weakening requires a separate explicit contract amendment and is not implied. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Do not call or advertise any of the 15 feasible names as available; feasibility is not implementation. Work can proceed only after governance authorizes partial 76/79 delivery, retains atomic 79/79 while waiting for supported engine capabilities, or explicitly approves and maintains engine changes or private adapters sufficient for all three exact blocked contracts. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2 begins. Contract weakening requires a separate explicit contract amendment and is not implied. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Unimplemented domains
 

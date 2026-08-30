@@ -15,7 +15,7 @@ inline LiveSessionKindPolicy livePolicyForTool(std::string_view name) {
         name == "runtime_inject_input" || name == "inject_input_event") {
         return LiveSessionKindPolicy::game_only;
     }
-    if (name == "runtime_read_logs" || name == "runtime_get_tree" ||
+    if (name == "runtime_read_logs" || name == "runtime_read_output" || name == "runtime_get_tree" ||
         name == "eval_gdscript" || name == "physics_raycast_query" ||
         name == "nav_query_path" || name == "anim_list_tracks" ||
         name == "runtime_read_profiler") {
@@ -30,7 +30,7 @@ inline LiveSessionKindPolicy livePolicyForMethod(std::string_view method) {
         method == "anim.playTrack" || method == "runtime.injectInput") {
         return LiveSessionKindPolicy::game_only;
     }
-    if (method == "runtime.getLogs" || method == "runtime.getTree" ||
+    if (method == "runtime.getLogs" || method == "runtime.getOutput" || method == "runtime.getTree" ||
         method == "runtime.evalGdscript" || method == "session.handshake" ||
         method == "physics.raycast" || method == "nav.queryPath" ||
         method == "anim.listTracks" || method == "runtime.readProfiler" ||

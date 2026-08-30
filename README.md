@@ -23,10 +23,10 @@ The current documented release is **1.4.0**.
 | 🚀 [**Quickstart Guide**](docs/QUICKSTART.md) | **Developers / Humans** | 5-minute step-by-step setup for Godot, Cursor, Claude, and VS Code. |
 | 🤖 [**LLM Agent Instructions**](docs/LLM_INSTRUCTIONS.md) | **AI Assistants / LLMs** | Dedicated system prompt & decision tree for Claude, Cursor, Windsurf, Antigravity. |
 | ✅ [**Current Capability Matrix**](docs/CAPABILITIES.md) | **Everyone** | Authoritative live, offline, unavailable, and unimplemented behavior. |
-| 🗺️ [**Roadmap & 78-Tool Surface**](docs/ROADMAP.md) | **Developers / Contributors** | Completed phases and technical build order. |
+| 🗺️ [**Roadmap & 79-Tool Surface**](docs/ROADMAP.md) | **Developers / Contributors** | Completed phases and technical build order. |
 | 🧪 [**Phase 7 API Feasibility Evidence**](docs/PHASE_7_API_FEASIBILITY.md) | **Developers / Governance** | Reproducible Godot 4.5.1/4.7.2 feasibility results and the exact three blocked contracts. |
-| 📋 [**Phase 7 Approved Executable Plan**](docs/PHASE_7_IMPLEMENTATION_PLAN.md) | **Developers / Governance** | Approved atomic 78/78 plan, stopped at its feasibility gate. |
-| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 78 canonical tools plus 10 legacy names. |
+| 📋 [**Phase 7 Approved Executable Plan**](docs/PHASE_7_IMPLEMENTATION_PLAN.md) | **Developers / Governance** | Approved atomic 79/79 plan, stopped at its feasibility gate. |
+| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 79 canonical tools plus 10 legacy names. |
 | 🏛️ [**Architecture & System Topology**](docs/ARCHITECTURE.md) | **Engineers / Architects** | Deep-dive into C++20 design, dual execution topology, threading safety, and named-pipe IPC. |
 | 📦 [**Dynamic Resources & Prompts**](docs/RESOURCES_AND_PROMPTS.md) | **Developers / LLMs** | Technical specs for `godot://...` resources and prompt workflows. |
 | 🛡️ [**Administrator & Operations Guide**](docs/ADMIN_GUIDE.md) | **DevOps / Admins** | Security DACL hardening, CI/CD headless execution, observability, and troubleshooting. |
@@ -62,7 +62,7 @@ The current documented release is **1.4.0**.
 ┌─────────────────────────────────────────────────────────────┐
 │        Didi (C++ MCP Core Engine - didi / didi.exe)         │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2024-11-05 standard)       │
-│  - Registry (78 canonical tools + 10 legacy names)          │
+│  - Registry (79 canonical tools + 10 legacy names)          │
 │  - Dynamic Resources (godot://project/tree, editor/state)   │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
 │  - Offline Fallback Engine (GDScript AST, .tscn parser)     │
@@ -85,7 +85,7 @@ The current documented release is **1.4.0**.
 
 ## 🛠️ Protocol Surface (78 Canonical Tools)
 
-The 78 canonical names are the stable protocol surface, with 10 additional legacy registrations (88 total). The implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind` from `tools/list`. `editorConnected` is true only for an editor route, while `liveAvailable` also requires that the selected editor/game kind is allowed for that exact definition. Phase 6 keeps the surface stable while requiring an explicit Godot project, adding project-keyed endpoints and one-client runtime locks, and exposing dry-run/confirmation controls on mutations. Every definition also carries specification `annotations`: `readOnlyHint` is derived from the same classification that drives `dry_run`, so the read-only set is safe for a client to auto-approve, and successful JSON results carry `structuredContent` alongside the text block.
+The 79 canonical names are the stable protocol surface, with 10 additional legacy registrations (89 total). The implementation remains 61/79 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind` from `tools/list`. `editorConnected` is true only for an editor route, while `liveAvailable` also requires that the selected editor/game kind is allowed for that exact definition. Phase 6 keeps the surface stable while requiring an explicit Godot project, adding project-keyed endpoints and one-client runtime locks, and exposing dry-run/confirmation controls on mutations. Every definition also carries specification `annotations`: `readOnlyHint` is derived from the same classification that drives `dry_run`, so the read-only set is safe for a client to auto-approve, and successful JSON results carry `structuredContent` alongside the text block.
 
 | Domain | Key Tools | Current execution |
 | :--- | :--- | :--- |
@@ -132,14 +132,14 @@ Didi now refuses startup without `--project <root>` or `DIDI_PROJECT_ROOT`, and 
 
 <!-- phase7-current-status:start -->
 **Status:** `BLOCKED_AT_FEASIBILITY`
-**Canonical implementation:** `60/78`
+**Canonical implementation:** `61/79`
 **Phase 7 registrations:** `18/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phases 1-6 established the current implementation baseline. Phase 7 is `BLOCKED_AT_FEASIBILITY`: the 2026-08-29 gate on Godot 4.5.1 and 4.7.2 found 15/18 names implementation-feasible and 3/18 API-blocked under the approved contracts. Feasibility is not implementation; the implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The approved all-or-nothing 78/78 activation gate prevented Tasks 2-13, so no production implementation started.
+Phases 1-6 established the current implementation baseline. Phase 7 is `BLOCKED_AT_FEASIBILITY`: the 2026-08-29 gate on Godot 4.5.1 and 4.7.2 found 15/18 names implementation-feasible and 3/18 API-blocked under the approved contracts. Feasibility is not implementation; the implementation remains 61/79 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The approved all-or-nothing 79/79 activation gate prevented Tasks 2-13, so no production implementation started.
 
-Work can proceed only after governance chooses one of three paths: **A)** authorize partial delivery of the 15 feasible tools, targeting 75/78 while retaining three honest unimplemented names; **B)** retain atomic 78/78 and wait for supported engine capabilities; or **C)** explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. Under Option C, all three blockers must re-enter Task 1 and prove `GO` on both Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening is a separate explicit contract amendment and is not implied by Option C. Phase 8 remains dependent on resolving this gate.
+Work can proceed only after governance chooses one of three paths: **A)** authorize partial delivery of the 15 feasible tools, targeting 76/79 while retaining three honest unimplemented names; **B)** retain atomic 79/79 and wait for supported engine capabilities; or **C)** explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. Under Option C, all three blockers must re-enter Task 1 and prove `GO` on both Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening is a separate explicit contract amendment and is not implied by Option C. Phase 8 remains dependent on resolving this gate.
 
 See the [Roadmap](docs/ROADMAP.md), [Phase 7 feasibility evidence](docs/PHASE_7_API_FEASIBILITY.md), [approved executable plan](docs/PHASE_7_IMPLEMENTATION_PLAN.md), and [Future Phases Design](docs/FUTURE_PHASES_DESIGN.md).
 

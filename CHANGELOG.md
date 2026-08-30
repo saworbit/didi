@@ -13,7 +13,7 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 <!-- phase7-current-status:start -->
 **Status:** `BLOCKED_AT_FEASIBILITY`
-**Canonical implementation:** `60/78`
+**Canonical implementation:** `61/79`
 **Phase 7 registrations:** `18/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
@@ -26,30 +26,33 @@ Historical entries describe the surface advertised by those releases. For the ex
 - Added the approved Phase 7-12 roadmap, including canonical-surface completion and governance requirements for all future phases.
 - Completed the 2026-08-29 Phase 7 feasibility gate on Godot 4.5.1 and 4.7.2. The reproducible [evidence](docs/PHASE_7_API_FEASIBILITY.md) found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts; the [executable plan](docs/PHASE_7_IMPLEMENTATION_PLAN.md) stopped before Tasks 2-13.
 
+- Added `runtime_read_output`, which reads what the **engine** printed rather than what Didi recorded: `print()` from a running game, `push_warning`, `push_error`, and GDScript parse and runtime errors, the last carrying the originating script file and line. Didi registers a custom `Logger` class and subscribes it through `OS.add_logger`; this is the first class the extension registers with the engine rather than only calling into. The stream is a separate 2,000-record ring with the same cursor contract as `runtime_read_logs`, so heavy engine output cannot evict Didi's own diagnostics. Verified end to end against Godot 4.5.1, 4.6.2, and 4.7.2. Where an engine does not expose the class-registration interface the extension still loads, warns at startup, and the tool returns no records rather than failing.
 - Added `didi --dump-tool-manifest`, which emits the registered tool surface as sorted, byte-stable JSON with counts and names. Documentation and the CI MCP smoke are now validated against it, so a published count can never disagree with the software.
 - Added `kLegacyToolNames` as the single declaration of which registrations are legacy. The canonical/legacy split previously existed only in prose and could not be verified.
 - Added `--list` and `--filter=<substring>` to the native test runner, so a single case can be run in isolation.
 - Added [docs/SURFACE_AMENDMENTS.md](docs/SURFACE_AMENDMENTS.md), the record through which the canonical tool surface may grow.
-- Added specification tool `annotations` to every registered tool. `readOnlyHint` is derived from the same mutation classification that drives `dry_run` and confirmation, so 43 of the 88 registrations are identifiable as safe to auto-approve without splitting any tool into read and edit pairs. `destructiveHint` is true for every mutation, and `openWorldHint` is false throughout because no tool reaches the network.
+- Added specification tool `annotations` to every registered tool. `readOnlyHint` is derived from the same mutation classification that drives `dry_run` and confirmation, so 41 of the 89 registrations are identifiable as safe to auto-approve without splitting any tool into read and edit pairs. `destructiveHint` is true for every mutation, and `openWorldHint` is false throughout because no tool reaches the network.
 - Added `outputSchema` to the tools whose result shape has been observed, covering script diagnostics, both project searches, resource listing, session listing, viewport capture, scene hierarchy, and their legacy aliases. A contract test exercises each one through the built binary and validates its real payload against the published schema. Tools that cannot be exercised, and every unimplemented name, declare none.
 - Added `structuredContent` to successful JSON tool results, carrying the same payload as the text block after execution-mode and session attribution. The text block is unchanged.
 
 ### Changed
 
 - Mutating tool schemas now advertise `dry_run`; editor reload, script patching, and overwrite-enabled offline writers require a 120-second single-use token bound to the exact arguments, project, and runtime route.
+- The documentation validator now derives the Phase 7 status block's implementation ratio, and the spelled-out forms of published counts, from the tool manifest as well. Both were still literals, so registering any new canonical tool failed CI until the validator itself was edited.
+- Corrected the published read-only registration count. It was stated as 43 and the binary reports 41; the figure had never been checked against the software.
 - The documentation validator derives every published tool count from the tool manifest instead of matching hard-coded numbers in prose. It previously enforced that documents agreed with each other rather than with the binary, and implementing any reserved tool would have failed CI until the validator itself was edited.
 - The CI MCP smoke verifies the live `tools/list` surface against the manifest emitted by the same build, and now asserts every `implemented` flag rather than a sample.
 - Split the fused surface rule: "no success stubs" remains absolute, while new tool names are added through a recorded surface amendment.
 - Documented that Godot 4.5 and 4.6 expose no read-side scene dirty state through GDExtension and that `EditorInterface.get_unsaved_scenes()` arrives in 4.7, which Didi does not yet consume. The previous wording named only 4.5 and read as a permanent engine limitation.
 - The live integration harness runs on Windows PowerShell 5.1. It previously required PowerShell 7 solely because of `ConvertFrom-Json -Depth`, which does not exist on 5.1 and is unnecessary on either host.
-- Discovery now exposes 78 canonical tools plus 10 legacy registrations (88 total). Sixty canonical tools are implemented and 18 remain unimplemented.
-- Phase 7 status is `BLOCKED_AT_FEASIBILITY`. All 18 names remain registered but unimplemented, including the 15/18 implementation-feasible names. For `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Work now requires an explicit governance choice between partial 75/78 delivery, retaining atomic 78/78, or explicitly approving and maintaining engine changes or private adapters sufficient for all three exact blocked contracts. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2; weakening a contract requires a separate explicit contract amendment.
+- Discovery now exposes 79 canonical tools plus 10 legacy registrations (89 total). Sixty-one canonical tools are implemented and 18 remain unimplemented.
+- Phase 7 status is `BLOCKED_AT_FEASIBILITY`. All 18 names remain registered but unimplemented, including the 15/18 implementation-feasible names. For `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Work now requires an explicit governance choice between partial 76/79 delivery, retaining atomic 79/79, or explicitly approving and maintaining engine changes or private adapters sufficient for all three exact blocked contracts. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2; weakening a contract requires a separate explicit contract amendment.
 
 ### Fixed
 
 - Quarantined the runtime route only on transport failure. `sendPhase7LiveRequest` retired the route on any error before classifying it, so an ordinary rejection from the engine left every later live call in the session unable to dispatch, including unrelated tools. Its contract test never covered this: both cases were transport failures and one only looked like one, using a bare `Error(502)` that carries no transport state.
 - Reaped orphaned session descriptor tombstones. Retirement is move-then-delete, so an owner that died between the two steps left a `.didi-retired-*` file that nothing ever removed and the registry grew without bound. Discovery now removes such an entry only when its contents parse as a descriptor, the session id in the filename matches the session id inside it, and the owning process is provably gone; an alive or unverifiable owner, unreadable contents, or a name that disagrees with its contents all retain it. POSIX still always retains, because no portable unlink primitive is bound to a verified open file.
-- Reconciled all current operating documentation with Phase 6: completed the roadmap's 78-tool table, documented project-root startup, session lock `423`, mutation preview/confirmation semantics, and labeled historical design records so they are not mistaken for current behavior.
+- Reconciled all current operating documentation with Phase 6: completed the roadmap's 79-tool table, documented project-root startup, session lock `423`, mutation preview/confirmation semantics, and labeled historical design records so they are not mistaken for current behavior.
 - Gave four order-dependent native tests their own setup. `Tools.CaptureViewportWithIpc` was intermittently failing because it registered none of the tools or resources it called and borrowed them from whichever test ran before it; the assertion that failed depended on execution order. Every native test passes in isolation.
 - Preserved ordinary comments when replacing GDScript symbols.
 - Preserved explicit `null` JSON-RPC success results.
@@ -61,7 +64,7 @@ Historical entries describe the surface advertised by those releases. For the ex
 - Declared explicit x86_64, arm64, and universal macOS GDExtension keys; launched Windows Godot batch wrappers, including non-ASCII paths, through the trusted System32 `cmd.exe`; accepted arithmetic `+`; parsed Godot 4 multiline compiler diagnostics; limited the `else` colon rule to the complete keyword; and stopped advertising the unimplemented MCP logging capability.
 - Made lightweight GDScript diagnostics and both symbol APIs string/comment-aware, recognized annotated/static/inner declarations, added bounded and format-validated Godot `.uid` sidecars across resource types, and removed unsafe `demo/` and recursive scene-path fallbacks in favor of UTF-8-safe project-root-confined files.
 - Parsed Godot 4.5 dummy-renderer shader diagnostics, used the supported four-argument `find_children` API for generated MeshLibrary scripts, restored editor routing after long offline work, and applied Control's documented rectangle fallback when `_has_point` has no callable override.
-- Updated the Linux, macOS, and Windows fast MCP smoke to lock the 78-canonical/88-total Phase 5 surface and all six new execution-mode/schema contracts.
+- Updated the Linux, macOS, and Windows fast MCP smoke to lock the 79-canonical/89-total Phase 5 surface and all six new execution-mode/schema contracts.
 
 ### Verified
 

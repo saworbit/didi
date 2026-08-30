@@ -4,7 +4,7 @@
 
 <!-- phase7-current-status:start -->
 **Status:** `BLOCKED_AT_FEASIBILITY`
-**Canonical implementation:** `60/78`
+**Canonical implementation:** `61/79`
 **Phase 7 registrations:** `18/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
@@ -249,10 +249,10 @@ No C or C++ compilation was needed for Task 1: ClassDB identifiers came from the
 
 ## Gate consequence
 
-Task 1 is complete as a blocked feasibility gate. The implementation remains 60/78 canonical tools; all 18 names remain registered but unimplemented. The all-or-nothing 78/78 activation gate prevented Tasks 2-13, and no production implementation started.
+Task 1 is complete as a blocked feasibility gate. The implementation remains 61/79 canonical tools; all 18 names remain registered but unimplemented. The all-or-nothing 79/79 activation gate prevented Tasks 2-13, and no production implementation started.
 
 Work can proceed only after a governance decision:
 
-- **A)** Authorize partial delivery of the 15 feasible tools, targeting 75/78 and retaining three honest unimplemented names.
-- **B)** Retain atomic 78/78 and wait for supported engine capabilities.
+- **A)** Authorize partial delivery of the 15 feasible tools, targeting 76/79 and retaining three honest unimplemented names.
+- **B)** Retain atomic 79/79 and wait for supported engine capabilities.
 - **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.

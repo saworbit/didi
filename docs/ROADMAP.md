@@ -1,7 +1,7 @@
 # Didi Strategic Roadmap & Technical Build Order 🗺️
 
 > **Core Philosophy**:
-> The 78-tool canonical surface includes completed Phases 1–6: live editor substrate, project wiring, authenticated runtime sessions, autonomous verification, deep-domain workflows, and enterprise safety controls.
+> The 79-tool canonical surface includes completed Phases 1–6: live editor substrate, project wiring, authenticated runtime sessions, autonomous verification, deep-domain workflows, and enterprise safety controls.
 
 ---
 
@@ -136,26 +136,26 @@ The native red-team contract covers invalid roots, project-key isolation, lock e
 
 <!-- phase7-current-status:start -->
 **Status:** `BLOCKED_AT_FEASIBILITY`
-**Canonical implementation:** `60/78`
+**Canonical implementation:** `61/79`
 **Phase 7 registrations:** `18/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-**Objective:** The implementation remains 60/78 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The approved objective was atomic 78/78 without adding public tool names.
+**Objective:** The implementation remains 61/79 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The approved objective was atomic 79/79 without adding public tool names.
 
 **Feasibility result:** The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (15/18) are implementation-feasible: `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `runtime_inject_input`, and `runtime_read_profiler`.
 
 Exactly three names (3/18) are API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility is not implementation, so none of the 15 feasible names is callable.
 
-The approved all-or-nothing 78/78 activation gate prevented Tasks 2-13; no production implementation started. Work can proceed only after governance chooses:
+The approved all-or-nothing 79/79 activation gate prevented Tasks 2-13; no production implementation started. Work can proceed only after governance chooses:
 
-- **A)** Authorize partial delivery of the 15 feasible tools, targeting 75/78 and retaining three honest unimplemented names.
-- **B)** Retain atomic 78/78 and wait for supported engine capabilities.
+- **A)** Authorize partial delivery of the 15 feasible tools, targeting 76/79 and retaining three honest unimplemented names.
+- **B)** Retain atomic 79/79 and wait for supported engine capabilities.
 - **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.
 
 See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
-**Governance decision (2026-08-30): option A, partial delivery to 75/78.**
+**Governance decision (2026-08-30): option A, partial delivery to 76/79.**
 
 Option B holds fifteen working tools hostage to three that are blocked on public
 Godot APIs which may never exist. That is not a safety control: the project
@@ -190,7 +190,7 @@ users, and it must be justified on its own merits -- for example
 baseline is carrying an unauthorized second decision.
 
 This decision authorizes Task 2. It does not change the phase status: the
-implementation on `main` remains 60/78 and Phase 7 stays
+implementation on `main` remains 61/79 and Phase 7 stays
 `BLOCKED_AT_FEASIBILITY` until the first delivery slice lands, at which point the
 status and every published count move together.
 
@@ -201,7 +201,7 @@ status and every published count move together.
 
 **Exclusions:** No public tool names are added. No tool claims arbitrary debugger control or engine-output streaming beyond implemented Godot APIs.
 
-**Exit gate (option A):** The fifteen feasible canonical tools have real implementations, and the three API-blocked names remain registered with `implemented: false` and reject calls. Each delivered tool carries cross-platform, native bridge, Godot, security, mutation-policy, and documentation evidence. The superseded atomic gate required that all 78 canonical tools have real implementations and cross-platform, native bridge, Godot, security, mutation-policy, and documentation evidence. Successful placeholders do not satisfy this gate. The 10 legacy registrations remain compatibility-only and do not change the canonical count.
+**Exit gate (option A):** The fifteen feasible canonical tools have real implementations, and the three API-blocked names remain registered with `implemented: false` and reject calls. Each delivered tool carries cross-platform, native bridge, Godot, security, mutation-policy, and documentation evidence. The superseded atomic gate required that all 79 canonical tools have real implementations and cross-platform, native bridge, Godot, security, mutation-policy, and documentation evidence. Successful placeholders do not satisfy this gate. The 10 legacy registrations remain compatibility-only and do not change the canonical count.
 
 ## Phase 8: Deep Project Intelligence and Asset Pipeline (`PLANNED`)
 
@@ -301,7 +301,7 @@ These are missing capabilities that an AI agent actually requires to complete fu
 
 ---
 
-## 📋 The 78-Tool Canonical Surface
+## 📋 The 79-Tool Canonical Surface
 
 This is the current registered canonical surface, not a claim that every row executes today. See [Current Capability Matrix](CAPABILITIES.md) for per-tool status.
 
