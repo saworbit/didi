@@ -124,6 +124,55 @@ TEST(Phase5, ParsesGodot45DummyRendererShaderDiagnostic) {
     ASSERT_EQ(diagnostics[0].line, 4);
 }
 
+TEST(Phase5, ParsesRoslynFourPartSpansAndVariedDiagnosticCodes) {
+    // Break caught: four part spans and codes that are not letters-then-digits
+    // were dropped, so diagnostics_count read zero next to a non-zero exit code.
+    const auto diagnostics = parseMsBuildDiagnostics(
+        "D:\\game\\Player.cs(45,12,45,28): error CS0103: The name 'foo' does not exist\n"
+        "D:\\game\\Enemy.cs(9,2): warning CA1822: Member can be marked as static\n"
+        "D:\\game\\Game.csproj(1,1): error NETSDK1004: Assets file not found\n"
+        "D:\\game\\Game.csproj(1,1): error NU1605: Detected package downgrade\n"
+        "D:\\game\\Boss.cs(3,4,3,9): warning IDE0051: Private member is unused\n");
+
+    ASSERT_EQ(diagnostics.size(), 5u);
+    ASSERT_EQ(diagnostics[0].code, "CS0103");
+    ASSERT_EQ(diagnostics[0].line, 45);
+    ASSERT_EQ(diagnostics[0].column, 12);
+    ASSERT_EQ(diagnostics[0].message, "The name 'foo' does not exist");
+    ASSERT_EQ(diagnostics[1].code, "CA1822");
+    ASSERT_EQ(diagnostics[2].code, "NETSDK1004");
+    ASSERT_EQ(diagnostics[3].code, "NU1605");
+    ASSERT_EQ(diagnostics[4].code, "IDE0051");
+    ASSERT_EQ(diagnostics[4].line, 3);
+}
+
+TEST(Phase5, ShaderLocationsPreferTheUserShaderOverEngineFrames) {
+    // Break caught: the location pattern required (:N), so a bare "at: :14" or a
+    // named resource left line 0, and an engine C++ frame could be taken as the
+    // user's shader line.
+    const auto bare = parseGodotDiagnostics(
+        "SHADER ERROR: Expected ';'.\n"
+        "   at: :14\n");
+    ASSERT_EQ(bare.size(), 1u);
+    ASSERT_EQ(bare[0].line, 14);
+
+    const auto named = parseGodotDiagnostics(
+        "SHADER ERROR: Expected ';'.\n"
+        "   at: (res://shaders/water.gdshader:22)\n");
+    ASSERT_EQ(named.size(), 1u);
+    ASSERT_EQ(named[0].line, 22);
+    ASSERT_EQ(named[0].path, "res://shaders/water.gdshader");
+
+    // An engine frame arriving first must not become the shader's line.
+    const auto engine_first = parseGodotDiagnostics(
+        "SHADER ERROR: Expected ';'.\n"
+        "   at: finish_compilation (servers/rendering/shader_language.cpp:142)\n"
+        "   at: (res://shaders/water.gdshader:31)\n");
+    ASSERT_EQ(engine_first.size(), 1u);
+    ASSERT_EQ(engine_first[0].line, 31);
+    ASSERT_EQ(engine_first[0].path, "res://shaders/water.gdshader");
+}
+
 TEST(Phase5, IsolatedGodotSubprocessesUseScriptCompatibleHeadlessArguments) {
     const auto arguments = didi::offline::isolatedGodotArguments(
         {"--path", "D:/game", "--script", "probe.gd"});

@@ -38,8 +38,11 @@ json DomainDiagnostic::toJson() const {
 }
 
 std::vector<DomainDiagnostic> parseMsBuildDiagnostics(const std::string& output) {
+    // Roslyn emits both (line,col) and four part (startLine,startCol,endLine,
+    // endCol) spans, and diagnostic codes are not always letters then digits:
+    // NETSDK1004, MSB3073 and analyzer ids all turn up here.
     static const std::regex pattern(
-        R"(^(.+)\(([0-9]+),([0-9]+)\):\s*(error|warning)\s+([A-Za-z]+[0-9]+):\s*(.*?)(?:\s+\[[^\]]+\])?\s*$)",
+        R"(^(.+)\(([0-9]+),([0-9]+)(?:,[0-9]+,[0-9]+)?\):\s*(error|warning)\s+([A-Za-z][A-Za-z0-9_.-]*[0-9][A-Za-z0-9_.-]*):\s*(.*?)(?:\s+\[[^\]]+\])?\s*$)",
         std::regex::icase);
     std::vector<DomainDiagnostic> diagnostics;
     for (const auto& raw : strings::split(output, '\n')) {
@@ -65,8 +68,19 @@ std::vector<DomainDiagnostic> parseGodotDiagnostics(const std::string& output) {
         std::regex::icase);
     static const std::regex shader_pattern(
         R"(^\s*SHADER ERROR:\s*(.+?)\s*$)", std::regex::icase);
+    // Godot 4 prints shader locations several ways: "at: (res://x.gdshader:14)",
+    // "at: (:14)" and a bare "at: :14". The engine also prints its own C++ frames
+    // in the same shape, so a location that names a C++ source file is not the
+    // user's shader line and must not be taken as one.
+    // The leading (?:\S+\s+)* skips whatever Godot puts before the location: a
+    // function name, or the literal "(null)" the dummy renderer prints.
     static const std::regex shader_location_pattern(
-        R"(^\s*at:\s*.*\(:([0-9]+)\)\s*$)", std::regex::icase);
+        R"(^\s*at:\s*(?:\S+\s+)*\(?\s*([^()\s]*?)\s*:\s*([0-9]+)\s*\)?\s*$)",
+        std::regex::icase);
+    const auto isEngineSource = [](const std::string& path) {
+        static const std::regex engine_source(R"(\.(?:cpp|cc|cxx|h|hpp|inl)$)", std::regex::icase);
+        return std::regex_search(path, engine_source);
+    };
     std::vector<DomainDiagnostic> diagnostics;
     for (const auto& raw : strings::split(output, '\n')) {
         if (diagnostics.size() >= kMaxDiagnostics) break;
@@ -82,7 +96,12 @@ std::vector<DomainDiagnostic> parseGodotDiagnostics(const std::string& output) {
         } else if (!diagnostics.empty() && diagnostics.back().code == "GODOT_SHADER" &&
                    diagnostics.back().line == 0 &&
                    std::regex_match(raw, match, shader_location_pattern)) {
-            diagnostics.back().line = std::stoi(match[1].str());
+            const auto path = match[1].str();
+            if (isEngineSource(path)) continue;
+            diagnostics.back().line = std::stoi(match[2].str());
+            if (!path.empty() && diagnostics.back().path.empty()) {
+                diagnostics.back().path = path;
+            }
         }
     }
     return diagnostics;
