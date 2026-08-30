@@ -190,7 +190,12 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& fi
                 if (hash_pos != std::string::npos) {
                     code_part = strings::trim(code_part.substr(0, hash_pos));
                 }
-                if (!code_part.empty() && code_part.back() != ':' && open_paren == 0 && open_bracket == 0) {
+                // A trailing backslash continues the statement on the next line,
+                // and an open brace means a dictionary or match pattern is still
+                // being written, so the colon has not been reached yet.
+                const bool continued = !code_part.empty() && code_part.back() == '\\';
+                if (!code_part.empty() && code_part.back() != ':' && !continued &&
+                    open_paren == 0 && open_bracket == 0 && open_brace == 0) {
                     ScriptDiagnostic d;
                     d.line = line_num;
                     d.column = static_cast<int>(raw_line.size());
@@ -573,8 +578,25 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
     int start_line = -1;
     int end_line = -1;
 
+    // parseDeclaration balances annotation argument lists, so it recognises
+    // declarations the pattern above cannot, such as @export_range(0, 100) var
+    // speed. Fall back to the pattern for symbol types it does not model.
+    const bool parsed_kind = symbol_type == "function" || symbol_type == "variable" ||
+                             symbol_type == "constant" || symbol_type == "signal" ||
+                             symbol_type == "enum";
+    auto declares_symbol = [&](const std::string& line) {
+        const auto declaration = parseDeclaration(line);
+        if (!declaration || declaration->name != symbol_name) return false;
+        if (symbol_type == "variable") {
+            return declaration->kind == "variable" || declaration->kind == "constant";
+        }
+        return declaration->kind == symbol_type;
+    };
+
     for (size_t i = 0; i < lines.size(); ++i) {
-        if (std::regex_search(lines[i], symbol_regex)) {
+        const bool matched = parsed_kind ? declares_symbol(lines[i])
+                                         : std::regex_search(lines[i], symbol_regex);
+        if (matched) {
             // Check previous lines for annotations / doc comments
             int actual_start = static_cast<int>(i);
             while (actual_start > 0) {
@@ -661,12 +683,16 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
     std::vector<std::string> lines = strings::split(source_text, '\n');
     json functions = json::array();
     json variables = json::array();
+    json constants = json::array();
     json signals = json::array();
     json enums = json::array();
     json classes = json::array();
 
-    static const std::regex func_regex(R"re(^(?:static\s+)?func\s+([a-zA-Z0-9_]+)\s*\((.*)\)(?:\s*->\s*([a-zA-Z0-9_]+))?)re");
-    static const std::regex var_regex(R"re(^var\s+([a-zA-Z0-9_]+)(?:\s*:\s*([a-zA-Z0-9_]+))?)re");
+    // Godot 4 container types carry their element type in brackets, so the type
+    // capture has to keep Array[String] and Dictionary[int, Variant] intact.
+    static const std::regex func_regex(R"re(^(?:static\s+)?func\s+([a-zA-Z0-9_]+)\s*\((.*)\)(?:\s*->\s*([a-zA-Z0-9_]+(?:\s*\[[^\]]*\])?))?)re");
+    static const std::regex var_regex(R"re(^var\s+([a-zA-Z0-9_]+)(?:\s*:\s*([a-zA-Z0-9_]+(?:\s*\[[^\]]*\])?))?)re");
+    static const std::regex const_regex(R"re(^const\s+([a-zA-Z0-9_]+)(?:\s*:\s*([a-zA-Z0-9_]+(?:\s*\[[^\]]*\])?))?(?:\s*=\s*(.*))?)re");
     static const std::regex sig_regex(R"re(^signal\s+([a-zA-Z0-9_]+)(?:\((.*)\))?)re");
     static const std::regex enum_regex(R"re(^enum\s+([a-zA-Z0-9_]+))re");
     std::string multiline_delimiter;
@@ -693,14 +719,21 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
             functions.push_back({
                 {"name", match[1].str()},
                 {"parameters", match[2].str()},
-                {"return_type", match[3].matched ? match[3].str() : "void"},
+                {"return_type", match[3].matched ? strings::trim(match[3].str()) : "void"},
                 {"line", i + 1}
             });
         } else if (declaration->kind == "variable" && std::regex_search(line, match, var_regex)) {
             variables.push_back({
                 {"name", match[1].str()},
                 {"exported", exported},
-                {"type", match[2].matched ? match[2].str() : "Variant"},
+                {"type", match[2].matched ? strings::trim(match[2].str()) : "Variant"},
+                {"line", i + 1}
+            });
+        } else if (declaration->kind == "constant" && std::regex_search(line, match, const_regex)) {
+            constants.push_back({
+                {"name", match[1].str()},
+                {"type", match[2].matched ? strings::trim(match[2].str()) : "Variant"},
+                {"value", match[3].matched ? strings::trim(match[3].str()) : ""},
                 {"line", i + 1}
             });
         } else if (declaration->kind == "signal" && std::regex_search(line, match, sig_regex)) {
@@ -725,6 +758,7 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
     return {
         {"functions", functions},
         {"variables", variables},
+        {"constants", constants},
         {"signals", signals},
         {"enums", enums},
         {"classes", classes}

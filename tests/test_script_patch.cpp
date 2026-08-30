@@ -274,6 +274,73 @@ static void test_gdscript_symbol_patch_preserves_next_sibling_preamble() {
     ASSERT_EQ(patch_res.value(), expected);
 }
 
+static void test_gdscript_symbol_patch_parameterized_annotation() {
+    // Break caught: patchSymbol matched annotations with (@\w+\s+)* only, so a
+    // parameterized @export_* declaration was missed and a duplicate var was
+    // prepended at the top of the file.
+    std::string original =
+        "extends Node\n\n"
+        "@export_range(0, 100, 1) var speed: float = 5.0\n\n"
+        "func _ready():\n"
+        "\tpass\n";
+
+    std::string new_var = "@export_range(0, 250, 5) var speed: float = 20.0";
+
+    auto patch_res = didi::offline::GDScriptDiagnostics::patchSymbol(original, "speed", new_var, "variable");
+    ASSERT_TRUE(patch_res.isOk());
+
+    std::string patched = patch_res.value();
+    ASSERT_TRUE(patched.find("@export_range(0, 250, 5) var speed: float = 20.0") != std::string::npos);
+    ASSERT_TRUE(patched.find("@export_range(0, 100, 1)") == std::string::npos);
+    ASSERT_EQ(patched.find("var speed"), patched.rfind("var speed"));
+}
+
+static void test_gdscript_extract_symbols_constants_and_container_types() {
+    // Break caught: const declarations were dropped and Array[String] was
+    // truncated to Array.
+    std::string source =
+        "extends Node\n"
+        "const MAX_PLAYERS: int = 4\n"
+        "const TAGS = [\"a\", \"b\"]\n"
+        "var names: Array[String] = []\n"
+        "var lookup: Dictionary[int, Variant] = {}\n"
+        "func collect() -> Array[String]:\n"
+        "\treturn names\n";
+
+    const auto symbols = didi::offline::GDScriptDiagnostics::extractSymbols(source);
+
+    ASSERT_TRUE(symbols.contains("constants"));
+    ASSERT_EQ(symbols["constants"].size(), 2u);
+    ASSERT_EQ(symbols["constants"][0]["name"], "MAX_PLAYERS");
+    ASSERT_EQ(symbols["constants"][0]["type"], "int");
+    ASSERT_EQ(symbols["constants"][1]["name"], "TAGS");
+
+    ASSERT_EQ(symbols["variables"].size(), 2u);
+    ASSERT_EQ(symbols["variables"][0]["type"], "Array[String]");
+    ASSERT_EQ(symbols["variables"][1]["type"], "Dictionary[int, Variant]");
+    ASSERT_EQ(symbols["functions"][0]["return_type"], "Array[String]");
+}
+
+static void test_gdscript_colon_rule_allows_continuations_and_open_braces() {
+    // Break caught: missing_colon fired on block headers continued with a
+    // trailing backslash or still inside a dictionary literal.
+    std::string source =
+        "extends Node\n"
+        "func check(a: bool, b: bool) -> void:\n"
+        "\tif a \\\n"
+        "\t\t\tand b:\n"
+        "\t\tpass\n"
+        "\tif \"x\" in {\n"
+        "\t\t\t\"x\": 1\n"
+        "\t\t}:\n"
+        "\t\tpass\n";
+
+    const auto diagnostics = didi::offline::GDScriptDiagnostics::analyze("", source);
+    for (const auto& diagnostic : diagnostics) {
+        ASSERT_TRUE(diagnostic.rule != "missing_colon");
+    }
+}
+
 struct RegisterScriptPatchTests {
     RegisterScriptPatchTests() {
         registerTest("GDScript.DiagnosticsDeprecation", test_gdscript_diagnostics_deprecation);
@@ -285,6 +352,9 @@ struct RegisterScriptPatchTests {
         registerTest("GDScript.PatchSignal", test_gdscript_symbol_patch_signal);
         registerTest("GDScript.PatchPreservesOrdinaryComments", test_gdscript_symbol_patch_preserves_ordinary_comments);
         registerTest("GDScript.PatchPreservesSiblingPreamble", test_gdscript_symbol_patch_preserves_next_sibling_preamble);
+        registerTest("GDScript.PatchParameterizedAnnotation", test_gdscript_symbol_patch_parameterized_annotation);
+        registerTest("GDScript.ExtractConstantsAndContainerTypes", test_gdscript_extract_symbols_constants_and_container_types);
+        registerTest("GDScript.ColonRuleAllowsContinuationsAndBraces", test_gdscript_colon_rule_allows_continuations_and_open_braces);
     }
 } g_registerScriptPatchTests;
 
