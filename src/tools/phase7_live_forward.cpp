@@ -65,8 +65,18 @@ CallToolResult sendPhase7LiveRequest(const ResolvedToolBinding& binding,
     const auto response = lease->client->sendRequest(
         std::string(binding.ipc_method), arguments, 17000);
     if (response.isErr()) {
-        const bool quarantined = runtime::quarantineRuntimeRoute(client, *lease);
-        const auto transport = ipc::transportFailureState(response.error());
+        const auto& failure = response.error();
+        const auto transport = ipc::transportFailureState(failure);
+        const bool explicit_quarantine =
+            failure.data.is_object() && failure.data.value("route_quarantine", false);
+        // Quarantine is for a broken transport, not for an engine that
+        // answered. Retiring the route on an ordinary rejection -- a bad node
+        // path, a missing method, a validation failure -- leaves every later
+        // live call in the session unable to dispatch, including tools that
+        // have nothing to do with the one that failed.
+        const bool quarantined = (transport.has_value() || explicit_quarantine)
+                                     ? runtime::quarantineRuntimeRoute(client, *lease)
+                                     : false;
         if (binding.canonical_name == "signal_emit" && transport.has_value() &&
             transport->request_started && transport->outcome_unknown) {
             return phase7Error(binding, 504, "unknown_outcome",

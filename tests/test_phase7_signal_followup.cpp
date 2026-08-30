@@ -96,7 +96,11 @@ TEST_CASE(phase7_signal_forwarder_post_dispatch_contract) {
     ASSERT_EQ(emit_error.at("data").at("route_quarantine"), true);
 
     const auto connect = didi::mcp::resolveAliasBinding("signal_connect");
-    auto failure = std::make_shared<FailingRoute>(didi::Error(502, "transport failed"), false);
+    // A real transport failure, which is what this case was always named for.
+    // It previously used a bare Error(502), which carries no transport state and
+    // so is indistinguishable from an ordinary engine rejection.
+    auto failure = std::make_shared<FailingRoute>(
+        didi::ipc::transportFailure("transport failed", {true, false, false}), false);
     const auto connect_error = errorPayload(
         didi::mcp::sendPhase7LiveRequest(connect, didi::json::object(), failure));
     ASSERT_EQ(failure->calls, 1);
@@ -107,8 +111,32 @@ TEST_CASE(phase7_signal_forwarder_post_dispatch_contract) {
     ASSERT_EQ(connect_error.at("data").at("route_quarantine"), false);
 }
 
+TEST_CASE(phase7_application_error_does_not_quarantine_the_route) {
+    // Break caught: an ordinary rejection from the engine -- a bad node path, a
+    // missing method, a validation failure -- tears down the runtime route, so
+    // every later live call in the same session fails with "no atomic runtime
+    // route is available for live dispatch". Observed against a live Godot
+    // 4.5.1 editor: a signal_connect at request 20 of the integration harness
+    // left scene_get_property at request 24 unable to dispatch, and that tool
+    // is unrelated and already implemented.
+    //
+    // Quarantine is for a broken transport, not for an engine that answered.
+    const auto connect = didi::mcp::resolveAliasBinding("signal_connect");
+    auto rejected = std::make_shared<FailingRoute>(
+        didi::Error(422, "invalid_signal_connect_request"));
+
+    const auto error = errorPayload(
+        didi::mcp::sendPhase7LiveRequest(connect, didi::json::object(), rejected));
+
+    ASSERT_EQ(rejected->calls, 1);
+    ASSERT_EQ(rejected->quarantines, 0);
+    ASSERT_EQ(error.at("data").at("route_quarantine"), false);
+}
+
 struct RegisterPhase7SignalFollowup {
     RegisterPhase7SignalFollowup() {
+        registerTest("Phase7Signals.ApplicationErrorKeepsRoute",
+                     [] { phase7_application_error_does_not_quarantine_the_route(); });
         registerTest("Phase7Signals.PostDispatchForwarderContract",
                      [] { phase7_signal_forwarder_post_dispatch_contract(); });
     }
