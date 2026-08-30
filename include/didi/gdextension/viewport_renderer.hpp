@@ -25,8 +25,17 @@ public:
 
     Result<void> restoreNow() {
         if (!m_active) return Result<void>::ok();
-        m_active = false;
-        return m_restore ? m_restore() : Result<void>::ok();
+        if (!m_restore) {
+            m_active = false;
+            return Result<void>::ok();
+        }
+        auto restored = m_restore();
+        // Stay armed unless the restore actually succeeded. Disarming first
+        // meant a failed restore was never retried, so isolation left the
+        // hidden nodes hidden for good while the caller was handed an error
+        // that read as if nothing had been touched.
+        if (restored.isOk()) m_active = false;
+        return restored;
     }
     void dismiss() { m_active = false; }
 

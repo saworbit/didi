@@ -1060,6 +1060,32 @@ Result<void> commitAction(GDExtensionObjectPtr manager) {
     return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
 }
 
+// Undoes the action just committed for the edited scene. Used when a
+// postcondition fails after the commit, so the tool does not report failure
+// while the scene and the undo stack already carry the change.
+Result<void> undoLastAction(GDExtensionObjectPtr manager, GDExtensionObjectPtr root) {
+    auto root_value = makeObject(root);
+    if (root_value.isErr()) return root_value.error();
+    auto history_id = callObject(manager, "EditorUndoRedoManager", "get_object_history_id",
+                                 1107568780LL, {&root_value.value()});
+    if (history_id.isErr()) return history_id.error();
+    auto history = callObject(manager, "EditorUndoRedoManager", "get_history_undo_redo",
+                              2417974513LL, {&history_id.value()});
+    if (history.isErr()) return history.error();
+    auto undo_redo = objectFromVariant(history.value());
+    if (undo_redo.isErr() || !undo_redo.value()) {
+        return Error::notFound("No UndoRedo history exists for the edited scene");
+    }
+    auto available = callObject(undo_redo.value(), "UndoRedo", "has_undo", 36873697LL);
+    if (available.isErr()) return available.error();
+    auto has_action = scalarFromVariant<GDExtensionBool>(available.value(),
+                                                         GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (has_action.isErr()) return has_action.error();
+    if (!has_action.value()) return Error(409, "Nothing to undo");
+    auto executed = callObject(undo_redo.value(), "UndoRedo", "undo", 2240911060LL);
+    return executed.isOk() ? Result<void>::ok() : Result<void>(executed.error());
+}
+
 // Closes an action that was opened but could not be fully registered.
 // EditorUndoRedoManager has no cancel, so the least bad move is to commit
 // without executing: the manager stops being mid-action, nothing half
@@ -3044,9 +3070,23 @@ json GodotBridge::execute(const std::string& method, const json& params,
             observed_object = converted.value();
         }
         if ((attaching && observed_object != requested_script_object) || (!attaching && observed_object)) {
-            return errorJson(422, attaching
+            // The action is already committed, so the node and the undo stack
+            // may both carry the change. Roll it back the way signal connect
+            // does, and if that also fails say the outcome is unknown rather
+            // than a bare 422, which reads as "nothing happened".
+            const std::string reason = attaching
                 ? "Godot rejected the script assignment; its native base may be incompatible with the target node"
-                : "Godot did not detach the target node's script");
+                : "Godot did not detach the target node's script";
+            auto reverted = undoLastAction(manager.value(), root.value());
+            if (reverted.isErr()) {
+                json failure = errorJson(500, reason + "; the committed action could not be undone: " +
+                                                  reverted.error().message);
+                failure["error"]["data"] = {{"outcome", "unknown"}, {"rolled_back", false}};
+                return failure;
+            }
+            json failure = errorJson(422, reason);
+            failure["error"]["data"] = {{"outcome", "reverted"}, {"rolled_back", true}};
+            return failure;
         }
         return liveResult({{"status", "success"}, {"target_node", params.value("target_node", "")},
                            {"script_path", script_path}, {"attached", attaching}, {"detached", !attaching},
@@ -3400,18 +3440,30 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (save_code.value() != 0) return errorJson(500, "ResourceSaver.save failed with Error " + std::to_string(save_code.value()));
 
         if (method == "scene.create") {
+            // Everything below this point runs after ResourceSaver.save returned
+            // Error 0, so the .tscn is already on disk. A bare error here told
+            // the caller the create failed; the retry with overwrite:false then
+            // hit 409 already exists and the agent concluded nothing had worked.
+            // Carry saved: true through every one of these failures.
+            const auto openFailure = [&](const Error& error) {
+                json failure = errorJson(error.code, "The scene file was written but could not be "
+                                                     "opened in the editor: " + error.message);
+                failure["error"]["data"] = {{"saved", true}, {"opened", false},
+                                            {"scene_path", scene_path}};
+                return failure;
+            };
             if (target_exists.value()) {
                 auto replace_cache = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(4));
-                if (replace_cache.isErr()) return errorJson(replace_cache.error().code, replace_cache.error().message);
+                if (replace_cache.isErr()) return openFailure(replace_cache.error());
                 auto refreshed = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
                                             {&path.value(), &packed_hint.value(), &replace_cache.value()});
-                if (refreshed.isErr()) return errorJson(refreshed.error().code, refreshed.error().message);
+                if (refreshed.isErr()) return openFailure(refreshed.error());
                 auto reloaded = callObject(editor, "EditorInterface", "reload_scene_from_path", 83702148LL,
                                            {&path.value()});
-                if (reloaded.isErr()) return errorJson(reloaded.error().code, reloaded.error().message);
+                if (reloaded.isErr()) return openFailure(reloaded.error());
             }
             auto opened = open_and_verify();
-            if (opened.isErr()) return errorJson(opened.error().code, opened.error().message);
+            if (opened.isErr()) return openFailure(opened.error());
             return liveResult({{"status", "success"}, {"saved", true}, {"opened", true}, {"scene_path", scene_path}});
         }
         return liveResult({{"status", "success"}, {"saved", true}, {"scene_path", scene_path},

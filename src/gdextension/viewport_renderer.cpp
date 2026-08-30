@@ -88,7 +88,24 @@ Result<CapturedFrame> captureSelectedFrame(const json& params) {
     if (capture.isErr()) return capture.error();
     if (guard) {
         auto restored = guard->restoreNow();
-        if (restored.isErr()) return restored.error();
+        if (restored.isErr()) {
+            // One more attempt before giving up, because the alternative is
+            // leaving the user's scene with nodes hidden. Whatever happens, say
+            // which it was: a caller that gets a bare error will reasonably
+            // assume the editor looks the way it did before the call.
+            auto retried = guard->restoreNow();
+            auto failure = retried.isErr() ? retried.error() : restored.error();
+            failure.data = {{"isolated", true},
+                            {"node_isolation_path", isolation->canonical_node_path},
+                            {"temporarily_hidden_count", isolation->visibility.size()},
+                            {"state_restored", retried.isOk()}};
+            if (retried.isErr()) {
+                DIDI_LOG_ERROR("VIEWPORT_RENDERER",
+                               "Viewport isolation could not be restored; nodes remain hidden: ",
+                               failure.message);
+            }
+            return failure;
+        }
     }
 
     CapturedFrame result;
