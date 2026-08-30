@@ -965,7 +965,7 @@ This closes the honesty gap the competitive review found: `liveAvailable` change
 
 Needs its own detailed plan. Scope and order, from the competitive analysis:
 
-- **B1 — `runtime_read_output`.** Engine stdout/stderr from an attached session, with the cursor semantics `runtime_read_logs` already has, plus `category` and source file/line. Largest functional gap; four of six competitors have it.
+- **B1 — `runtime_read_output`.** Engine output from an attached session, with the cursor semantics `runtime_read_logs` already has, plus severity and source. Largest functional gap; four of six competitors have it. **Amendment accepted 2026-08-30** with tri-engine feasibility evidence: Godot exposes an extensible `Logger` and `OS.add_logger`, with identical method hashes on 4.5.1, 4.6.2 and 4.7.2, so no engine-floor change is required. See [Surface Amendments](SURFACE_AMENDMENTS.md). Implementation is the next step: a `Logger` implementation in the extension feeding a bounded ring, and the tool that reads it.
 - **B2 — `runtime_step` gains `until`.** Predicate restricted to the existing `eval_gdscript` read-only subset, with `max_frames` and a cooperative timeout. Same capability as satelliteoflove's `godot_game_time`, on a predicate language that cannot mutate the game.
 - **B3 — `runtime_inject_input` (Phase 7C).** Ship as a bounded batch of `key | mouse_button | mouse_motion | action | wait | step | click_control`, not single events. `click_control` resolves through `ui_hit_test`.
 - **B4 — `ui_list_controls`.** Bounded list of visible Controls with rect, type, and text. Makes B3's `click_control` addressable by name.
