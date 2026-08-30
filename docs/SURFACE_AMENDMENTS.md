@@ -52,11 +52,49 @@ and verification, and it fails visibly wherever the surface has a hole.
 
 ## Amendment log
 
-No amendments have been accepted yet. The first four candidates come from the
+One amendment is accepted: `runtime_read_output`, recorded below with its
+tri-engine feasibility evidence. The remaining candidates come from the
 August 2026 competitive review and are proposed, not accepted, in
 [Realignment Implementation Plan](REALIGNMENT_IMPLEMENTATION_PLAN.md):
 `runtime_read_output`, `ui_list_controls`, `godot_api_reference`, and an `until`
 parameter on the existing `runtime_step` (a change, not a new name).
+
+### ACCEPTED: `runtime_read_output`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `runtime_read_output` |
+| **Failing workflow** | *Make the player double-jump and prove it works.* The agent launches the game, the jump misbehaves, and the script prints why. The agent cannot read it. `runtime_read_logs` returns Didi's own structured ring, which explicitly does not carry engine `print()` output, and `runtime_launch` only surfaces stdout after the child process has exited. So the loop breaks at exactly the step where the evidence exists: the agent must ask a human to read the console and relay it. |
+| **Execution modes** | `live`. Editor and game sessions both, since either may print. |
+| **Safety class** | `read`. No `dry_run`, no confirmation. It observes and never writes. |
+| **Proving test** | Native: bounded ring behaviour, cursor semantics, and a `_log_error` payload surviving truncation. Godot integration: a fixture script prints a known line and pushes a known error, and the tool returns both with source and severity, on Godot 4.5.1 as the supported floor. |
+| **Reviewer** | Unassigned. Read-only, so no security review is required, but the ring is bounded and the payload cap is part of the contract. |
+
+**Why this one.** The August 2026 competitive review found four of six comparable
+servers expose live engine output and Didi does not. It is the largest
+functional gap in the set, and it is the difference between an agent that can
+debug and one that can only guess.
+
+**Feasibility, established 2026-08-30.** Godot exposes a `Logger` class that a
+GDExtension can implement, and `OS.add_logger` accepts it. Verified by dumping
+`extension_api.json` from each installed engine:
+
+| Engine | `Logger` | `_log_message` | `_log_error` | `OS.add_logger` |
+| :--- | :--- | :--- | :--- | :--- |
+| Godot 4.5.1 | instantiable, `RefCounted` | `2678287736` | `27079556` | `4261188958` |
+| Godot 4.6.2 | instantiable, `RefCounted` | `2678287736` | `27079556` | `4261188958` |
+| Godot 4.7.2 | instantiable, `RefCounted` | `2678287736` | `27079556` | `4261188958` |
+
+Every identifier is identical across the supported range, so the capability
+needs no engine-floor change and carries no per-version branch. This is a `GO`
+on the same basis the Phase 7 gate used.
+
+**Explicit exclusions.** No unbounded streaming: the ring is capped and reports
+a retention gap the same way `runtime_read_logs` does. No capture of output from
+processes Didi does not own. No claim to reproduce Godot's debugger; this is
+engine log output, not stack frames or breakpoints. The existing
+`runtime_read_logs` contract is unchanged, and this does not become an alias
+for it: one returns Didi's own records, the other returns the engine's.
 
 ### PROPOSED: raise the minimum Godot version to 4.7
 
