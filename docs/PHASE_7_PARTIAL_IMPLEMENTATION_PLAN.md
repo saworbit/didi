@@ -12,9 +12,18 @@ engine, against the real engines rather than a single pinned one:
 | Godot 4.7.2 | `PHASE7_SIGNAL_BRIDGE_COMPLETE|4.7.2|runs=2` |
 
 Each run reports `PHASE7_SIGNAL_RAW_METHODS|list,connect,disconnect,emit|ok`.
-The signal bridge therefore works on the whole supported range, which is
-independent confirmation that the 4.5 floor retained by the Phase 7 governance
-decision is correct.
+**This measures the test-seam build, not the shipped extension.** The probe
+loads `didi_extension_signal_tests`, which is compiled with
+`DIDI_PHASE7_SIGNAL_TEST_SEAMS=1`. Every signal handler in
+`src/gdextension/godot_bridge.cpp` and `src/gdextension/editor_hook.cpp` sits
+behind that macro, so the production `didi_extension` contains no signal
+handling at all. The result above therefore shows the bridge working on all
+three engines *when signals are compiled in*; it says nothing about the
+extension Didi actually ships, and it is not evidence for activation.
+
+It remains useful for one narrower thing: the handlers behave identically on
+4.5.1, 4.6.2 and 4.7.2, so nothing in the signal implementation requires the
+higher engine floor.
 
 Two harness defects were repaired to obtain this. The runner required exactly
 Godot 4.7.2 through a helper that no longer exists on `main`, so it could not
@@ -25,6 +34,34 @@ reports the version it actually detected.
 
 This is bridge evidence, not activation. All 18 Phase 7 names remain
 `implemented: false`.
+
+## Activation is gated out of the production extension
+
+Established 2026-08-30 by activating the four signal tools and running the
+integration harness against a live Godot 4.5.1 editor with the shipped
+`didi_extension`. The tool dispatches and the route survives, but the call
+fails:
+
+```json
+{"error": {"code": 503, "message": "runtime_route_request_failed",
+           "data": {"route_quarantine": false, "retryable": false}}}
+```
+
+The cause is not a defect. Every signal handler is compiled behind
+`DIDI_PHASE7_SIGNAL_TEST_SEAMS`, and `CMakeLists.txt` defines that only for
+`didi_extension_signal_tests`. The shipped extension has no signal handling,
+which is what `Phase7Signals.ProductionAdmissionClosed` asserts.
+
+Activation therefore cannot proceed by flipping `capabilityForTool`. The
+handlers must first be admitted into the production extension, and that is a
+deliberate decision with its own security review rather than a build-flag
+change: it moves live signal mutation of the edited scene from a test-only
+build into the shipped one. The remaining work is that admission, not the
+capability classification.
+
+The `route_quarantine: false` in the response above confirms the fix from the
+resolved blocker below is working: an engine-side failure no longer retires the
+route, and every later live call in the session still succeeds.
 
 ## Activation blocker found by live trial, 2026-08-30 -- resolved
 
