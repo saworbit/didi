@@ -92,6 +92,8 @@ For API details outside that limited map, inspect the project or use official Go
 ### Work with project resources
 
 - `project_list_resources` indexes project files.
+- Read `annotations.readOnlyHint` to decide what needs confirming. It is true only for tools that cannot change the project, and it is derived from the same classification as `dry_run`, so it can never disagree with it. `destructiveHint` is true for every mutation and `openWorldHint` is false for every tool.
+- Successful JSON results carry `structuredContent` alongside the text block, holding the same payload including `execution_mode`. Prefer it over re-parsing the text.
 - `project_search_text` performs bounded literal matching; `project_search_symbols` is lexical GDScript/C# declaration search, not a language server.
 - After changing a source asset, call live editor-only `asset_reimport` and require `idle: true` before drawing conclusions from a capture.
 - `project_get_uid_map` returns discovered UID mappings.

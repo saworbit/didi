@@ -10,7 +10,7 @@ This guide explains how to build, test, and extend Didi (`godot-mcp-native`).
 - Visual Studio 2022 / Build Tools with C++20 support
 - CMake 3.20+
 - Godot 4.5+
-- PowerShell 7+ for the Windows live integration harness
+- Windows PowerShell 5.1 or newer for the live integration harness (PowerShell 7 also works)
 
 ```powershell
 # Generate CMake solution

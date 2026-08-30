@@ -27,6 +27,8 @@ Every tool and resource definition includes `_meta.didi`:
 - `liveAvailable` is true only when a route is connected, the definition implements `live`, and the selected kind is allowed for that exact tool/resource. Logs, tree inspection, and evaluation allow editor or game; pause/step/stop allow only game; other live tools and resources are editor-only by default.
 - A connected wrong-kind route reports `currentMode: "unavailable"` and `liveAvailable: false`. For a tool that also has an offline fallback, this avoids advertising a path its connected-route handler will not take.
 
+Every tool definition also carries specification `annotations`. `readOnlyHint` is derived from the same mutation classification that drives `dry_run` and confirmation, so a tool that can change the project is never advertised as read-only; the read-only set is safe for a client to auto-approve. `destructiveHint` is true for every mutation rather than claiming any is merely additive, and `openWorldHint` is false for every tool because Didi's world is one local project. Successful JSON results additionally carry `structuredContent` holding the same payload as the text block after execution-mode and session attribution.
+
 Do not infer availability from a tool name or description. Do not call a tool when `implemented` is false. A live-only tool with `currentMode: "unavailable"` requires Godot 4.5+ with the Didi addon enabled.
 
 ## Canonical tools

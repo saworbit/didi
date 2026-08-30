@@ -152,6 +152,8 @@ Request IDs are correlated exactly. A missing or mismatched response ID closes t
 - `runtime.getLogs`, `runtime.getTree`, `runtime.setPaused`, `runtime.step`, `runtime.stop`
 - `runtime.evalGdscript`
 
+Each `tools/list` definition carries specification `annotations` with `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint`. They are derived from the server's mutation classification and are never set by hand. Successful `tools/call` results whose payload is JSON carry `structuredContent` with that payload, emitted alongside the existing text content item rather than replacing it, so clients that read only `content` are unaffected.
+
 These scene/editor/reimport/viewport/UI/log methods execute through the extension's main-thread bridge. Public project search, asset queries, script diagnostics/reflection, visual-test-lab generation, C#/shader checks, export-preset discovery/export, and MeshLibrary generation are standalone filesystem/parser/process handlers and are never routed through extension IPC. If an offline-only helper name is sent to the extension directly, it returns `409`; other reserved internal names return a structured `501` envelope:
 
 ```json
