@@ -3,6 +3,7 @@
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/offline/gdscript_diagnostics.hpp"
+#include "didi/common/atomic_write.hpp"
 #include <fstream>
 #include <sstream>
 #include <filesystem>
@@ -120,12 +121,11 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
     }
 
     std::string patched_content = patch_res.value();
-    std::ofstream out_file(disk_path, std::ios::trunc);
-    if (!out_file.is_open()) {
-        return CallToolResult::error("Cannot write patched file to disk: " + file_path);
+    auto written = files::writeFileAtomically(disk_path, patched_content);
+    if (written.isErr()) {
+        return CallToolResult::error("Cannot write patched file to disk: " + file_path +
+                                     ": " + written.error().message);
     }
-    out_file << patched_content;
-    out_file.close();
 
     // Verify syntax of the patched file
     auto diags = offline::GDScriptDiagnostics::analyze(file_path, patched_content);

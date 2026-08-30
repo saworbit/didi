@@ -1,4 +1,6 @@
 #include "didi/mcp/mcp_protocol.hpp"
+#include "didi/common/atomic_write.hpp"
+#include "didi/common/project_path.hpp"
 #include "didi/tools/phase7_live_forward.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
@@ -8,6 +10,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <vector>
 
 namespace didi {
@@ -173,42 +176,44 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
             lab_scene_path);
     }
 
-    std::ofstream scene_file(disk_path);
-    if (scene_file.is_open()) {
-        scene_file << "[gd_scene format=3 uid=\"uid://didi_test_lab_sandbox\"]\n\n"
-                   << "[node name=\"VisualTestLab\" type=\"Node3D\"]\n\n"
-                   << "[node name=\"DirectionalLight3D\" type=\"DirectionalLight3D\" parent=\".\"]\n"
-                   << "transform = Transform3D(0.866025, -0.25, 0.433013, 0, 0.866025, 0.5, -0.5, -0.433013, 0.75, 0, 5, 0)\n"
-                   << "shadow_enabled = true\n\n"
-                   << "[node name=\"WorldEnvironment\" type=\"WorldEnvironment\" parent=\".\"]\n\n"
-                   << "[node name=\"GroundGrid\" type=\"CSGBox3D\" parent=\".\"]\n"
-                   << "transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.05, 0)\n"
-                   << "size = Vector3(20, 0.1, 20)\n\n"
-                   << "[node name=\"CameraFront\" type=\"Camera3D\" parent=\".\"]\n"
-                   << "transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 3)\n"
-                   << (ortho ? "projection = 1\nsize = 4.0\n\n" : "\n")
-                   << "[node name=\"CameraTop\" type=\"Camera3D\" parent=\".\"]\n"
-                   << "transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 4, 0)\n\n"
-                   << "[node name=\"CameraIsometric\" type=\"Camera3D\" parent=\".\"]\n"
-                   << "transform = Transform3D(0.707107, -0.353553, 0.612372, 0, 0.866025, 0.5, -0.707107, -0.353553, 0.612372, 3, 3, 3)\n\n";
+    std::ostringstream scene_file;
+    scene_file << "[gd_scene format=3 uid=\"uid://didi_test_lab_sandbox\"]\n\n"
+        << "[node name=\"VisualTestLab\" type=\"Node3D\"]\n\n"
+        << "[node name=\"DirectionalLight3D\" type=\"DirectionalLight3D\" parent=\".\"]\n"
+        << "transform = Transform3D(0.866025, -0.25, 0.433013, 0, 0.866025, 0.5, -0.5, -0.433013, 0.75, 0, 5, 0)\n"
+        << "shadow_enabled = true\n\n"
+        << "[node name=\"WorldEnvironment\" type=\"WorldEnvironment\" parent=\".\"]\n\n"
+        << "[node name=\"GroundGrid\" type=\"CSGBox3D\" parent=\".\"]\n"
+        << "transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.05, 0)\n"
+        << "size = Vector3(20, 0.1, 20)\n\n"
+        << "[node name=\"CameraFront\" type=\"Camera3D\" parent=\".\"]\n"
+        << "transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 3)\n"
+        << (ortho ? "projection = 1\nsize = 4.0\n\n" : "\n")
+        << "[node name=\"CameraTop\" type=\"Camera3D\" parent=\".\"]\n"
+        << "transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 4, 0)\n\n"
+        << "[node name=\"CameraIsometric\" type=\"Camera3D\" parent=\".\"]\n"
+        << "transform = Transform3D(0.707107, -0.353553, 0.612372, 0, 0.866025, 0.5, -0.707107, -0.353553, 0.612372, 3, 3, 3)\n\n";
 
-        if (!target_path.empty()) {
-            scene_file << "[node name=\"TargetInstance\" type=\"Node3D\" parent=\".\"]\n";
-        }
-        scene_file.close();
-
-        json res = {
-            {"status", "created_offline"},
-            {"scene_path", lab_scene_path},
-            {"target_resource_path", target_path},
-            {"environment", env},
-            {"camera_rig", rig},
-            {"message", "Created sandbox scene at " + lab_scene_path + ". Open Godot Editor to view live or run `execute_test_session`."}
-        };
-        return CallToolResult::successJson(res);
+    if (!target_path.empty()) {
+        scene_file << "[node name=\"TargetInstance\" type=\"Node3D\" parent=\".\"]\n";
     }
 
-    return CallToolResult::error("Failed to generate visual test lab sandbox scene file.");
+    auto written = files::writeFileAtomically(paths::projectPathFromUtf8(disk_path),
+                                              scene_file.str());
+    if (written.isErr()) {
+        return CallToolResult::error("Failed to generate visual test lab sandbox scene file: " +
+                                     written.error().message);
+    }
+
+    json res = {
+        {"status", "created_offline"},
+        {"scene_path", lab_scene_path},
+        {"target_resource_path", target_path},
+        {"environment", env},
+        {"camera_rig", rig},
+        {"message", "Created sandbox scene at " + lab_scene_path + ". Open Godot Editor to view live or run `execute_test_session`."}
+    };
+    return CallToolResult::successJson(res);
 }
 
 CallToolResult handleViewportToggleDebugDraw(const ResolvedToolBinding& binding, const json& args,
