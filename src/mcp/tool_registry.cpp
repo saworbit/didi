@@ -382,6 +382,104 @@ ToolRegistry& ToolRegistry::instance() {
     return s_instance;
 }
 
+// Output schemas for tools whose real result shape has been observed.
+//
+// A declared outputSchema is a promise about structuredContent, so a schema is
+// added only after the tool's actual output has been seen. Tools that cannot be
+// exercised here, and every unimplemented name, declare nothing rather than
+// asserting a shape nobody has verified.
+//
+// `required` lists only fields guaranteed in every execution mode. Live results
+// carry extra members that offline results do not -- capture identifiers,
+// omitted-field lists, session envelopes -- and additional properties are
+// permitted so those never invalidate a result.
+static json outputSchemaForTool(const std::string& name) {
+    static const json string_type = {{"type", "string"}};
+    static const json integer_type = {{"type", "integer"}};
+    static const json boolean_type = {{"type", "boolean"}};
+
+    auto object_schema = [](json properties, std::vector<std::string> required) {
+        return json{{"type", "object"},
+                    {"properties", std::move(properties)},
+                    {"required", std::move(required)}};
+    };
+    auto array_of = [](json items) {
+        return json{{"type", "array"}, {"items", std::move(items)}};
+    };
+
+    if (name == "script_check_syntax") {
+        return object_schema({{"execution_mode", string_type},
+                              {"has_errors", boolean_type},
+                              {"diagnostics", {{"type", "array"}}},
+                              {"diagnostics_count", integer_type},
+                              {"file_path", string_type}},
+                             {"execution_mode", "has_errors"});
+    }
+    if (name == "project_search_text" || name == "project_search_symbols") {
+        json match_properties = {{"path", string_type},
+                                 {"line", integer_type},
+                                 {"column", integer_type},
+                                 {"preview", string_type}};
+        if (name == "project_search_symbols") {
+            match_properties["name"] = string_type;
+            match_properties["kind"] = string_type;
+            match_properties["language"] = string_type;
+        }
+        return object_schema(
+            {{"execution_mode", string_type},
+             {"matches", array_of(object_schema(std::move(match_properties), {"path"}))},
+             {"truncated", boolean_type},
+             {"lexical", boolean_type},
+             {"search_kind", string_type},
+             {"project_root", string_type},
+             {"scanned_files", integer_type},
+             {"scanned_bytes", integer_type},
+             {"skipped_files", integer_type},
+             {"diagnostics", {{"type", "array"}}}},
+            {"execution_mode", "matches"});
+    }
+    if (name == "project_list_resources") {
+        return object_schema(
+            {{"execution_mode", string_type},
+             {"resources", array_of(object_schema({{"path", string_type},
+                                                   {"filename", string_type},
+                                                   {"type", string_type},
+                                                   {"uid", string_type},
+                                                   {"file_size", integer_type},
+                                                   {"dependencies", {{"type", "array"}}}},
+                                                  {"path"}))},
+             {"total_found", integer_type}},
+            {"execution_mode", "resources"});
+    }
+    if (name == "runtime_list_sessions") {
+        return object_schema({{"execution_mode", string_type},
+                              {"sessions", {{"type", "array"}}},
+                              {"diagnostics", {{"type", "array"}}}},
+                             {"execution_mode", "sessions"});
+    }
+    if (name == "viewport_capture_frame") {
+        return object_schema(
+            {{"execution_mode", string_type},
+             {"is_live_frame", boolean_type},
+             {"camera_identifier", string_type},
+             {"source", string_type},
+             {"status", string_type},
+             {"message", string_type},
+             {"capture_id", string_type},
+             {"resolution", object_schema({{"width", integer_type}, {"height", integer_type}},
+                                          {"width", "height"})}},
+            {"execution_mode", "is_live_frame"});
+    }
+    if (name == "scene_get_hierarchy") {
+        return object_schema({{"execution_mode", string_type},
+                              {"scene_tree", {{"type", "object"}}},
+                              {"source", string_type},
+                              {"file_path", string_type}},
+                             {"execution_mode", "scene_tree"});
+    }
+    return json();
+}
+
 void ToolRegistry::registerTool(ToolDefinition tool) {
     std::string name = tool.name;
     tool.legacy = isLegacyToolName(name);
@@ -403,6 +501,8 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
     tool.annotations.idempotent = !is_mutation;
     tool.annotations.open_world = false;
     MutationSafety::decorateSchema(binding, tool.inputSchema);
+    // Declared from the canonical name, so an alias promises the same shape.
+    tool.outputSchema = outputSchemaForTool(std::string(binding.schema_source));
     if (!tool.capability.implemented) {
         tool.description = "UNIMPLEMENTED: Reserved schema; calls are rejected. Intended contract: " +
                            tool.description;

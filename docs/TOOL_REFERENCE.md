@@ -428,6 +428,8 @@ Timeout checks run before/after policy, context resolution, parse, execution, an
 
 Every tool definition carries specification `annotations`. `readOnlyHint` is derived from the same mutation classification that drives `dry_run` and confirmation, so a tool that can change the project is never advertised as read-only and clients can safely auto-approve the read-only set. `destructiveHint` is true for every mutation rather than asserting that any of them are merely additive; under-claiming safety costs a prompt, while over-claiming it would let a mutation be approved silently. `openWorldHint` is false for every tool, because Didi's world is one local project and no tool reaches the network.
 
+Tools whose result shape has been observed also publish an `outputSchema`, and CI validates each of those tools' real `structuredContent` against the schema the server published for it, so the promise cannot drift from the implementation. A schema is declared only where the shape is known: a tool that cannot be exercised, and every unimplemented name, publishes none rather than asserting a shape nobody has seen. `required` lists only fields present in every execution mode, and additional properties are permitted, so the extra members a live result carries never invalidate it.
+
 Successful JSON results also carry `structuredContent` alongside the existing text block. It holds the same payload after execution-mode and session attribution, so the two halves of a result can never disagree. The text block is unchanged for clients that do not read `structuredContent`.
 
 ## 12. Phase 5 deep domains

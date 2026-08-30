@@ -31,6 +31,7 @@ Historical entries describe the surface advertised by those releases. For the ex
 - Added `--list` and `--filter=<substring>` to the native test runner, so a single case can be run in isolation.
 - Added [docs/SURFACE_AMENDMENTS.md](docs/SURFACE_AMENDMENTS.md), the record through which the canonical tool surface may grow.
 - Added specification tool `annotations` to every registered tool. `readOnlyHint` is derived from the same mutation classification that drives `dry_run` and confirmation, so 43 of the 88 registrations are identifiable as safe to auto-approve without splitting any tool into read and edit pairs. `destructiveHint` is true for every mutation, and `openWorldHint` is false throughout because no tool reaches the network.
+- Added `outputSchema` to the tools whose result shape has been observed, covering script diagnostics, both project searches, resource listing, session listing, viewport capture, scene hierarchy, and their legacy aliases. A contract test exercises each one through the built binary and validates its real payload against the published schema. Tools that cannot be exercised, and every unimplemented name, declare none.
 - Added `structuredContent` to successful JSON tool results, carrying the same payload as the text block after execution-mode and session attribution. The text block is unchanged.
 
 ### Changed

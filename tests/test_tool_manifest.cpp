@@ -225,6 +225,63 @@ static void test_error_results_do_not_carry_structured_content() {
     ASSERT_TRUE(!result.toJson().contains("structuredContent"));
 }
 
+// --- Tool output schemas ---------------------------------------------------
+//
+// A declared outputSchema is a promise about the shape of structuredContent, so
+// it is declared only for tools whose real output has been observed. Inferring
+// a schema for a tool that cannot be exercised would assert a shape nobody has
+// seen, which is the failure mode the capability metadata exists to prevent.
+
+static void test_declared_output_schemas_are_well_formed() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    size_t declared = 0;
+    for (const auto& tool : registry.listTools()) {
+        const auto definition = tool.toJson();
+        if (!definition.contains("outputSchema")) continue;
+        ++declared;
+        const auto& schema = definition.at("outputSchema");
+        ASSERT_TRUE(schema.is_object());
+        ASSERT_EQ(schema.at("type").get<std::string>(), std::string("object"));
+        ASSERT_TRUE(schema.contains("properties"));
+        ASSERT_TRUE(schema.at("properties").is_object());
+        // Every Didi result identifies how it executed, so every schema must
+        // require it. This is the field a client uses to tell a live result
+        // from an offline fallback.
+        ASSERT_TRUE(schema.contains("required"));
+        bool requires_execution_mode = false;
+        for (const auto& entry : schema.at("required")) {
+            if (entry.get<std::string>() == "execution_mode") requires_execution_mode = true;
+        }
+        ASSERT_TRUE(requires_execution_mode);
+        ASSERT_TRUE(schema.at("properties").contains("execution_mode"));
+    }
+    ASSERT_TRUE(declared > 0);
+}
+
+static void test_output_schemas_are_declared_for_the_observed_tools() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    for (const char* name : {"script_check_syntax", "project_search_text",
+                             "project_search_symbols", "project_list_resources",
+                             "runtime_list_sessions", "viewport_capture_frame",
+                             "scene_get_hierarchy"}) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        ASSERT_TRUE(tool->toJson().contains("outputSchema"));
+    }
+}
+
+// A tool that cannot execute has no observed shape, so it must not promise one.
+static void test_unimplemented_tools_declare_no_output_schema() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    for (const auto& tool : registry.listTools()) {
+        if (tool.capability.implemented) continue;
+        ASSERT_TRUE(!tool.toJson().contains("outputSchema"));
+    }
+}
+
 struct RegisterToolManifestTests {
     RegisterToolManifestTests() {
         registerTest("tool_manifest.declared_legacy_marked",
@@ -255,5 +312,11 @@ struct RegisterToolManifestTests {
                      test_tool_results_carry_structured_content);
         registerTest("tool_annotations.errors_have_no_structured_content",
                      test_error_results_do_not_carry_structured_content);
+        registerTest("tool_output_schema.well_formed",
+                     test_declared_output_schemas_are_well_formed);
+        registerTest("tool_output_schema.declared_for_observed_tools",
+                     test_output_schemas_are_declared_for_the_observed_tools);
+        registerTest("tool_output_schema.none_for_unimplemented",
+                     test_unimplemented_tools_declare_no_output_schema);
     }
 } g_register_tool_manifest_tests;
