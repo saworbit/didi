@@ -137,6 +137,12 @@ public:
 
     RuntimeLogRing& runtimeLogs();
 
+    // Output the *engine* produced -- `print()` from a running game, script
+    // errors with their file and line. Kept deliberately separate from
+    // runtimeLogs(), which holds Didi's own diagnostics: they answer different
+    // questions, and merging them would make each one harder to read.
+    RuntimeLogRing& engineOutput();
+
 private:
     friend class EditorHookTestAccess;
     EditorHook();
@@ -174,6 +180,7 @@ private:
     std::optional<runtime::SessionKind> m_sessionKind;
 
     std::shared_ptr<RuntimeLogRing> m_runtimeLogs{std::make_shared<RuntimeLogRing>()};
+    std::shared_ptr<RuntimeLogRing> m_engineOutput{std::make_shared<RuntimeLogRing>()};
 };
 
 class EditorHookTestAccess {

@@ -4,7 +4,7 @@
 
 ## Goal
 
-Complete the existing 78-tool canonical surface, then extend Didi through project intelligence, advanced authoring, parallel Godot orchestration, broader MCP capabilities, and mature distribution without weakening the local authenticated safety boundary.
+Complete the existing 79-tool canonical surface, then extend Didi through project intelligence, advanced authoring, parallel Godot orchestration, broader MCP capabilities, and mature distribution without weakening the local authenticated safety boundary.
 
 ## Future-Phase Governance
 
@@ -22,12 +22,12 @@ Complete the existing 78-tool canonical surface, then extend Didi through projec
 
 <!-- phase7-current-status:start -->
 **Status:** `BLOCKED_AT_FEASIBILITY`
-**Canonical implementation:** `60/78`
+**Canonical implementation:** `61/79`
 **Phase 7 registrations:** `18/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-**Goal:** The implementation remains 60/78 canonical tools, with all 18 Phase 7 names remaining registered but unimplemented. The approved delivery goal was atomic 78/78 without adding public tool names.
+**Goal:** The implementation remains 61/79 canonical tools, with all 18 Phase 7 names remaining registered but unimplemented. The approved delivery goal was atomic 79/79 without adding public tool names.
 
 **Scope:** Phase 7A-7C define the approved contracts for editor authoring, simulation and animation, and runtime debugging. Their implementation did not start because the hard feasibility gate blocked the atomic plan.
 
@@ -52,12 +52,12 @@ The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (1
 
 Exactly three names (3/18) are API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version. This is not a permanent impossibility claim.
 
-Feasibility does not make any Phase 7 name callable. All 18 remain unimplemented, and the all-or-nothing 78/78 activation gate prevented Tasks 2-13; no production implementation started. Reproducible evidence is in [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md), and the approved executable plan is [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md).
+Feasibility does not make any Phase 7 name callable. All 18 remain unimplemented, and the all-or-nothing 79/79 activation gate prevented Tasks 2-13; no production implementation started. Reproducible evidence is in [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md), and the approved executable plan is [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 Work can proceed only after governance chooses one path:
 
-- **A)** Authorize partial delivery of the 15 feasible tools, targeting 75/78 and retaining three honest unimplemented names.
-- **B)** Retain atomic 78/78 and wait for supported engine capabilities.
+- **A)** Authorize partial delivery of the 15 feasible tools, targeting 76/79 and retaining three honest unimplemented names.
+- **B)** Retain atomic 79/79 and wait for supported engine capabilities.
 - **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.
 
 The detailed 7A-7C requirements below remain approved contract design, not delivered behavior.
@@ -115,7 +115,7 @@ Requirements:
 
 ### Phase 7 Exit Gate
 
-- All 78 canonical registrations report `implemented: true`.
+- All 79 canonical registrations report `implemented: true`.
 - The 10 legacy registrations remain compatibility-only and do not change the canonical count.
 - No canonical tool reports `currentMode: "unimplemented"`.
 - Capability, tool-reference, roadmap, LLM, security, and smoke-test facts update together.
@@ -286,7 +286,7 @@ Requirements:
 After this design is accepted for implementation:
 
 - Add Phases 7–12 to [ROADMAP.md](ROADMAP.md) with status and concise scope/exit summaries.
-- Change Phase 6 wording so it cannot imply completion of the 78-tool implementation program.
+- Change Phase 6 wording so it cannot imply completion of the 79-tool implementation program.
 - Keep [CAPABILITIES.md](CAPABILITIES.md) authoritative for what executes now.
 - Keep [TOOL_REFERENCE.md](TOOL_REFERENCE.md) authoritative for current schemas and limits.
 - Update README wording to distinguish completed delivery phases from the still-incomplete canonical surface.

@@ -27,7 +27,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "project_get_setting", "project_set_setting", "scene_list_groups",
         "scene_add_to_group", "scene_remove_from_group", "scene_get_group_members",
         "scene_create", "scene_open", "scene_close", "scene_pack_branch",
-        "runtime_read_logs", "runtime_set_paused", "runtime_step", "runtime_stop",
+        "runtime_read_logs", "runtime_read_output", "runtime_set_paused", "runtime_step", "runtime_stop",
         "runtime_get_tree", "eval_gdscript"
         , "asset_reimport", "viewport_diff_capture", "ui_hit_test"
     };
@@ -126,6 +126,7 @@ CallToolResult handleRuntimeAttachSession(const json& args, std::shared_ptr<runt
 CallToolResult handleRuntimeDetachSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
 CallToolResult handleRuntimeGetSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
 CallToolResult handleRuntimeReadLogs(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleRuntimeReadOutput(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleRuntimeSetPaused(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleRuntimeStep(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleRuntimeStop(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -824,6 +825,13 @@ void ToolRegistry::registerAllDefaultTools() {
             {"limit", {{"type", "integer"}, {"default", 100}, {"minimum", 1}, {"maximum", 500}}},
             {"minimum_level", {{"type", "string"}, {"enum", {"debug", "info", "warning", "error"}}}}
         }}}, handleRuntimeReadLogs);
+    register_live_runtime("runtime_read_output",
+        "Reads output the engine itself produced -- print() from a running game and script errors with their file and line -- as an incremental cursor-paged stream, separate from Didi's own diagnostics.",
+        {{"type", "object"}, {"properties", {
+            {"cursor", {{"type", "integer"}, {"default", 0}, {"minimum", 0}}},
+            {"limit", {{"type", "integer"}, {"default", 100}, {"minimum", 1}, {"maximum", 500}}},
+            {"minimum_level", {{"type", "string"}, {"enum", {"debug", "info", "warning", "error"}}}}
+        }}}, handleRuntimeReadOutput);
     register_live_runtime("runtime_set_paused", "Sets and verifies the active game session pause state.",
         {{"type", "object"}, {"properties", {{"paused", {{"type", "boolean"}}}}}, {"required", {"paused"}}},
         handleRuntimeSetPaused);

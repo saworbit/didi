@@ -3,6 +3,7 @@
 #include "didi/gdextension/gdextension_ipc.hpp"
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/editor_hook.hpp"
+#include "didi/gdextension/engine_output_logger.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/offline/deep_domain_support.hpp"
 
@@ -95,6 +96,9 @@ static void initialize_didi_module(void *userdata, GDExtensionInitializationLeve
                           resolved_project.error().message);
         }
         DIDI_LOG_INFO("GDEXTENSION", "Initializing Didi GDExtension runtime session for Godot ", kind);
+        // Subscribe to engine output before the IPC session starts, so anything
+        // the engine reports while connecting is already being captured.
+        installEngineOutputLogger();
         if (GodotApi::instance().isLiveReady() && !GDExtensionIpc::instance().isRunning()) {
             if (!GDExtensionIpc::instance().start(kind, project_path)) {
                 DIDI_LOG_ERROR("GDEXTENSION", "Unable to start authenticated runtime IPC session");
@@ -110,6 +114,7 @@ static void deinitialize_didi_module(void *userdata, GDExtensionInitializationLe
     if (p_level == GDEXTENSION_INITIALIZATION_SCENE) {
         DIDI_LOG_INFO("GDEXTENSION", "Deinitializing Didi GDExtension module");
         GodotApi::instance().markMainLoopStopped();
+        removeEngineOutputLogger();
         EditorHook::instance().cancelPendingCommands("Godot editor extension is shutting down");
         if (GDExtensionIpc::instance().isRunning()) {
             GDExtensionIpc::instance().stop();

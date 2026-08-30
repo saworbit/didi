@@ -323,6 +323,7 @@ try {
         (Tool-Request 377 "runtime_detach_session" @{}),
         (Tool-Request 378 "runtime_attach_session" @{ session_id = $gameSession.session_id }),
         (Tool-Request 302 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 2 }),
+        (Tool-Request 380 "runtime_read_output" @{ limit = 500 }),
         (Tool-Request 303 "runtime_set_paused" @{ paused = $true }),
         (Tool-Request 304 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 2 }),
         (Tool-Request 322 "eval_gdscript" @{ expression = "node.get('process_priority')" }),
@@ -410,6 +411,19 @@ try {
     Assert-True ($null -eq $selectedGame.session.PSObject.Properties["token"]) "Runtime get-session leaked the game token."
     Assert-True ((Tool-Payload $runtimeById[377]).session.session_id -eq $gameSession.session_id) "Runtime detach did not report the route it released."
     Assert-True ((Tool-Payload $runtimeById[378]).handshake.status -eq "ok") "Runtime reattach did not restore the authenticated game route."
+
+    # Engine output capture: the fixture printed and warned in _ready, so both
+    # Logger virtuals must have reached the ring the tool reads. This is the
+    # only check that proves the custom Logger class is actually registered
+    # and invoked by a real engine.
+    $engineOutput = Tool-Payload $runtimeById[380]
+    $outputMessages = @($engineOutput.records | ForEach-Object { $_.message })
+    Assert-True ($engineOutput.stream -eq "engine") "runtime_read_output did not identify itself as the engine stream."
+    Assert-True ($outputMessages -contains "didi_output_canary_message") "Engine print() was not captured by runtime_read_output."
+    $canaryWarning = @($engineOutput.records | Where-Object { $_.message -eq "didi_output_canary_warning" })
+    Assert-True ($canaryWarning.Count -ge 1) "Engine push_warning() was not captured by runtime_read_output."
+    Assert-True ($canaryWarning[0].level -eq "warning") "Captured engine warning was not recorded at warning level."
+    Assert-True ($canaryWarning[0].details.file -like "*runtime_probe.gd*" -or $canaryWarning[0].details.function -eq "push_warning") "Captured engine warning carried no origin details."
 
     $runtimeTree = Tool-Payload $runtimeById[302]
     Assert-True ($runtimeTree.scene_tree.path -eq "/root/RuntimeRoot") "Runtime tree root was not canonical."

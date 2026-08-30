@@ -101,7 +101,23 @@ COUNT_FACTS = {
 }
 
 # Documentation may spell a count in words; the number still comes from the manifest.
-NUMBER_WORDS = {10: "ten", 18: "eighteen", 60: "sixty", 78: "seventy-eight", 88: "eighty-eight"}
+NUMBER_WORDS = {
+    10: "ten",
+    18: "eighteen",
+    60: "sixty",
+    61: "sixty-one",
+    78: "seventy-eight",
+    79: "seventy-nine",
+    88: "eighty-eight",
+    89: "eighty-nine",
+}
+# Reverse lookup, so a document may spell a count in words without the
+# validator needing a branch for each individual number.
+WORD_NUMBERS = {word: number for number, word in NUMBER_WORDS.items()}
+# Longest first, so a hyphenated word is not truncated to its prefix.
+NUMBER_WORD_PATTERN = "|".join(
+    sorted((re.escape(word) for word in WORD_NUMBERS), key=len, reverse=True)
+)
 PHASE7_CANONICAL_TOOLS = (
     "signal_list_connections",
     "signal_connect",
@@ -721,7 +737,7 @@ CANONICAL_COUNT_PATTERNS = {
     ),
     "docs/CAPABILITIES.md": re.compile(
         r"registers (?P<canonical>\d+) canonical tool names\.\s+"
-        r"(?P<implemented>Sixty|\d+) are implemented[^;]*;\s+"
+        rf"(?P<implemented>{NUMBER_WORD_PATTERN}|\d+) are implemented[^;]*;\s+"
         r"(?P<remaining>\d+) remain",
         re.IGNORECASE,
     ),
@@ -741,7 +757,7 @@ CANONICAL_COUNT_PATTERNS = {
     ),
     "CHANGELOG.md": re.compile(
         r"Discovery now exposes (?P<canonical>\d+) canonical tools[^\n]*\.\s+"
-        r"(?P<implemented>Sixty|\d+) canonical tools are implemented and "
+        rf"(?P<implemented>{NUMBER_WORD_PATTERN}|\d+) canonical tools are implemented and "
         r"(?P<remaining>\d+) remain",
         re.IGNORECASE,
     ),
@@ -796,7 +812,10 @@ def _designated_phase7_block(
     return clean[start:end].strip(), []
 
 
-def validate_phase7_reconciliation(texts: dict[str, str]) -> list[str]:
+def validate_phase7_reconciliation(
+    texts: dict[str, str],
+    expected_counts: tuple[int, int, int] = CANONICAL_IMPLEMENTATION_COUNTS,
+) -> list[str]:
     errors: list[str] = []
 
     for relative_path in PHASE7_STATUS_DOCUMENTS:
@@ -831,10 +850,17 @@ def validate_phase7_reconciliation(texts: dict[str, str]) -> list[str]:
             int(match.group("registered")),
             int(match.group("phase7_total")),
         )
-        if implementation != (60, 78, 18, 18):
+        expected_canonical, expected_implemented, expected_remaining = expected_counts
+        if implementation != (
+            expected_implemented,
+            expected_canonical,
+            expected_remaining,
+            expected_remaining,
+        ):
             errors.append(
                 f"{relative_path}: Phase 7 current status block must report "
-                "60/78 canonical implementation and 18/18 unimplemented registrations"
+                f"{expected_implemented}/{expected_canonical} canonical implementation and "
+                f"{expected_remaining}/{expected_remaining} unimplemented registrations"
             )
         feasibility = (
             int(match.group("feasible")),
@@ -960,7 +986,8 @@ def validate_phase7_reconciliation(texts: dict[str, str]) -> list[str]:
 
 
 def _parse_count(value: str) -> int:
-    return 60 if value.lower() == "sixty" else int(value)
+    word = WORD_NUMBERS.get(value.lower())
+    return word if word is not None else int(value)
 
 
 def validate_canonical_implementation_counts(
@@ -1222,7 +1249,7 @@ def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[s
             )
             errors.extend(validate_tool_surface_counts(texts, manifest_counts))
     errors.extend(validate_canonical_implementation_counts(texts, expected_counts))
-    errors.extend(validate_phase7_reconciliation(texts))
+    errors.extend(validate_phase7_reconciliation(texts, expected_counts))
 
     roadmap_text = texts.get("docs/ROADMAP.md")
     if roadmap_text is not None:

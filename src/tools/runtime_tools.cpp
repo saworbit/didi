@@ -241,6 +241,15 @@ CallToolResult handleRuntimeReadLogs(const json& args, std::shared_ptr<ipc::IIpc
     return forwardLiveRuntime("runtime.getLogs", args, ipc);
 }
 
+// Engine output shares the log query shape, so it shares the validator. What
+// differs is only which stream the editor hook reads.
+CallToolResult handleRuntimeReadOutput(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (const auto error = validateRuntimeLogRequest(args); error.has_value()) {
+        return liveValidationError("Invalid runtime output request: " + *error, ipc);
+    }
+    return forwardLiveRuntime("runtime.getOutput", args, ipc);
+}
+
 CallToolResult handleRuntimeSetPaused(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object() || !args.contains("paused") || !args["paused"].is_boolean()) {
         return liveValidationError("Invalid runtime pause request: paused must be a boolean", ipc);

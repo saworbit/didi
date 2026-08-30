@@ -38,6 +38,15 @@ public:
             object_get_instance_from_id = (GDExtensionInterfaceObjectGetInstanceFromId)p_get_proc_address("object_get_instance_from_id");
             object_get_instance_id = (GDExtensionInterfaceObjectGetInstanceId)p_get_proc_address("object_get_instance_id");
             classdb_construct_object = (GDExtensionInterfaceClassdbConstructObject2)p_get_proc_address("classdb_construct_object2");
+            // Class registration. Didi has only ever called the engine, never
+            // extended it, so these are new. The interface exposes several
+            // variants with different GDExtensionClassCreationInfo layouts;
+            // which are present depends on the running engine, so each is
+            // resolved and the caller selects the newest available.
+            classdb_register_extension_class6 = (GDExtensionInterfaceClassdbRegisterExtensionClass6)p_get_proc_address("classdb_register_extension_class6");
+            classdb_register_extension_class4 = (GDExtensionInterfaceClassdbRegisterExtensionClass4)p_get_proc_address("classdb_register_extension_class4");
+            classdb_unregister_extension_class = (GDExtensionInterfaceClassdbUnregisterExtensionClass)p_get_proc_address("classdb_unregister_extension_class");
+            object_set_instance = (GDExtensionInterfaceObjectSetInstance)p_get_proc_address("object_set_instance");
             mem_alloc = (GDExtensionInterfaceMemAlloc)p_get_proc_address("mem_alloc");
             mem_free = (GDExtensionInterfaceMemFree)p_get_proc_address("mem_free");
             print_warning = (GDExtensionInterfacePrintWarning)p_get_proc_address("print_warning");
@@ -79,6 +88,10 @@ public:
     GDExtensionInterfaceStringToUtf8Chars string_to_utf8_chars{nullptr};
     GDExtensionInterfaceStringNameNewWithUtf8Chars string_name_new_with_utf8_chars{nullptr};
     GDExtensionInterfaceClassdbGetMethodBind classdb_get_method_bind{nullptr};
+    GDExtensionInterfaceClassdbRegisterExtensionClass6 classdb_register_extension_class6{nullptr};
+    GDExtensionInterfaceClassdbRegisterExtensionClass4 classdb_register_extension_class4{nullptr};
+    GDExtensionInterfaceClassdbUnregisterExtensionClass classdb_unregister_extension_class{nullptr};
+    GDExtensionInterfaceObjectSetInstance object_set_instance{nullptr};
     GDExtensionInterfaceObjectMethodBindCall object_method_bind_call{nullptr};
     GDExtensionInterfaceObjectMethodBindPtrcall object_method_bind_ptrcall{nullptr};
     GDExtensionInterfaceGlobalGetSingleton global_get_singleton{nullptr};

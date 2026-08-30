@@ -8,6 +8,10 @@ var observed_pause := false
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# Exercises both Logger virtuals so runtime_read_output is verified
+	# end to end against a real engine rather than only in unit tests.
+	print("didi_output_canary_message")
+	push_warning("didi_output_canary_warning")
 	stop_during_step = OS.get_environment("DIDI_TEST_STOP_DURING_STEP") == "1"
 	set_meta("frame_counter", 0)
 	set_meta("huge_metadata", "x".repeat(300000))

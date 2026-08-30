@@ -497,18 +497,27 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         }
         return ViewportRenderer::instance().diffViewport(params);
     }
-    if (method == "runtime.getLogs") {
+    // Both log streams answer the same query shape, so they share one reader.
+    // Validation living in a single place is what keeps the two tools from
+    // drifting into accepting different cursors or levels.
+    if (method == "runtime.getLogs" || method == "runtime.getOutput") {
+        const bool engine_stream = (method == "runtime.getOutput");
+        const char* subject = engine_stream ? "runtime output" : "runtime log";
+        const auto bad_request = [&](const std::string& detail) {
+            return json{{"error", {{"code", 400},
+                                   {"message", std::string("Invalid ") + subject + " request: " + detail}}}};
+        };
         uint64_t cursor = 0;
         size_t limit = 100;
         std::string minimum_level = "debug";
         if (!params.is_object()) {
-            return {{"error", {{"code", 400}, {"message", "Invalid runtime log request: params must be an object"}}}};
+            return bad_request("params must be an object");
         }
         if (params.contains("cursor")) {
             const auto& value = params["cursor"];
             if ((!value.is_number_integer() && !value.is_number_unsigned()) ||
                 (value.is_number_integer() && value.get<int64_t>() < 0)) {
-                return {{"error", {{"code", 400}, {"message", "Invalid runtime log request: cursor must be a non-negative integer"}}}};
+                return bad_request("cursor must be a non-negative integer");
             }
             cursor = value.get<uint64_t>();
         }
@@ -517,23 +526,25 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
             if ((!value.is_number_integer() && !value.is_number_unsigned()) ||
                 (value.is_number_integer() && value.get<int64_t>() < 1) ||
                 value.get<uint64_t>() > 500) {
-                return {{"error", {{"code", 400}, {"message", "Invalid runtime log request: limit must be an integer from 1 to 500"}}}};
+                return bad_request("limit must be an integer from 1 to 500");
             }
             limit = static_cast<size_t>(value.get<uint64_t>());
         }
         if (params.contains("minimum_level")) {
             if (!params["minimum_level"].is_string() ||
                 !RuntimeLogRing::isValidLevel(params["minimum_level"].get<std::string>())) {
-                return {{"error", {{"code", 400}, {"message", "Invalid runtime log request: minimum_level must be debug, info, warning, or error"}}}};
+                return bad_request("minimum_level must be debug, info, warning, or error");
             }
             minimum_level = params["minimum_level"].get<std::string>();
         }
-        const auto page_result = m_runtimeLogs->read(cursor, limit, minimum_level);
+        const auto& ring = engine_stream ? *m_engineOutput : *m_runtimeLogs;
+        const auto page_result = ring.read(cursor, limit, minimum_level);
         if (page_result.isErr()) {
             return {{"error", {{"code", page_result.error().code}, {"message", page_result.error().message}}}};
         }
         auto page = page_result.value();
         page["execution_mode"] = "live";
+        if (engine_stream) page["stream"] = "engine";
         return page;
     }
 
@@ -564,6 +575,10 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
 
 RuntimeLogRing& EditorHook::runtimeLogs() {
     return *m_runtimeLogs;
+}
+
+RuntimeLogRing& EditorHook::engineOutput() {
+    return *m_engineOutput;
 }
 
 json EditorHookTestAccess::executeOnMainThread(EditorHook& hook,

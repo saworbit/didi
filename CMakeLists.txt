@@ -68,6 +68,7 @@ set(CORE_SOURCES
     ${PHASE7_GENERATED_SOURCE}
     src/gdextension/session_host.cpp
     src/gdextension/runtime_log.cpp
+    src/gdextension/engine_output_logger.cpp
     src/gdextension/runtime_request_router.cpp
     src/gdextension/expression_sandbox.cpp
     src/offline/gdscript_diagnostics.cpp
@@ -145,6 +146,7 @@ set(TEST_SOURCES
     tests/test_runtime_sessions.cpp
     tests/test_runtime_routing.cpp
     tests/test_runtime_logs.cpp
+    tests/test_runtime_output.cpp
     tests/test_expression_sandbox.cpp
     tests/test_tools.cpp
     tests/test_script_patch.cpp

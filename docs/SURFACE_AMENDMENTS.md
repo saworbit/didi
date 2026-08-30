@@ -59,7 +59,7 @@ August 2026 competitive review and are proposed, not accepted, in
 `runtime_read_output`, `ui_list_controls`, `godot_api_reference`, and an `until`
 parameter on the existing `runtime_step` (a change, not a new name).
 
-### ACCEPTED: `runtime_read_output`
+### ACCEPTED (IMPLEMENTED): `runtime_read_output`
 
 | Field | Value |
 | :--- | :--- |
@@ -95,9 +95,25 @@ mechanism needed to implement it. Didi's extension has never registered a class
 with Godot: it loads 27 interface functions, all for calling the engine, and
 none for extending it. Registration requires `classdb_register_extension_class`,
 which the GDExtension header exposes in six versioned variants with different
-`GDExtensionClassCreationInfo` layouts. The implementation must select the
-highest variant the running engine provides, so it does carry a per-version
-concern even though the logging API it targets does not.
+`GDExtensionClassCreationInfo` layouts, so the mechanism is version-sensitive in
+a way the logging API is not.
+
+**Correction to that correction, established by probe 2026-08-30.** The claim
+that the implementation "must select the highest variant the running engine
+provides" was reasoned from the header, not measured. Loading each variant and
+logging which resolved gives:
+
+| Engine | `classdb_register_extension_class6` | `classdb_register_extension_class4` | `classdb_unregister_extension_class` |
+| :--- | :--- | :--- | :--- |
+| Godot 4.5.1 | absent | present | present |
+| Godot 4.6.2 | absent | present | present |
+| Godot 4.7.2 | present | present | present |
+
+Variant 4 is present across the whole supported range, so targeting the common
+denominator rather than the newest removes the per-version branch entirely. The
+shipped implementation uses `classdb_register_extension_class4` on every engine.
+Both earlier statements were inferences from the header; this one is a
+measurement, which is the standard this record is supposed to hold to.
 
 **Implementation constraints, recorded before the work starts.**
 
@@ -116,6 +132,37 @@ concern even though the logging API it targets does not.
 These are the reason the implementation is a separate change from this
 amendment: the risk is concentrated in a threaded engine callback, not in the
 tool that reads the ring.
+
+**Implemented 2026-08-30.** How each constraint was met:
+
+- Class registration uses `classdb_register_extension_class4`, with
+  `object_set_instance` and `classdb_unregister_extension_class` added to the
+  loaded interface functions. `Logger` is `RefCounted`, so the instance is held
+  by an explicit `init_ref` at install and released by `unreference` at
+  shutdown, after `OS.remove_logger` has returned it.
+- The callbacks touch only the ring, which was already mutex-guarded, and call
+  exactly one engine function: `string_to_utf8_chars`, a pure conversion that
+  cannot itself emit output. They never call `DIDI_LOG`, which is what would
+  close the logging loop this record warned about.
+- The sink is `RuntimeLogRing`, as required -- but a *second instance* of it,
+  not the existing one. Sharing the instance would have made
+  `runtime_read_output` return the same records as `runtime_read_logs` and the
+  capability would have been an illusion. The two rings are separate streams
+  with one shared, validated read path; the engine payload is marked
+  `stream: "engine"`. A native test asserts each stream excludes the other's
+  records, because that is the property the whole amendment rests on.
+- Registration failure is non-fatal at every step: the extension loads, warns
+  once at startup, and the tool returns no records.
+
+Verified end to end on Godot 4.5.1, 4.6.2 and 4.7.2: `print()`, `push_warning`,
+`push_error`, and a GDScript parse error all captured, the last carrying
+`file: "res://..."` and the script's own line number rather than the engine's.
+The Godot integration harness now asserts capture end to end -- the fixture
+prints and warns in `_ready`, and the harness requires both records back with
+the right level and origin -- so the capability cannot silently regress to an
+empty stream. That harness is the local pre-merge gate rather than a CI job, so
+the standing CI protection is the native suite; the end-to-end assertion runs
+wherever the harness is run.
 
 **Explicit exclusions.** No unbounded streaming: the ring is capped and reports
 a retention gap the same way `runtime_read_logs` does. No capture of output from
