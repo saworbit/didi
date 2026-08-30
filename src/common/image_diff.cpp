@@ -29,8 +29,13 @@ json ImageDiffResult::toJson() const {
                                       {"b", mean_absolute_error[2]},
                                       {"a", mean_absolute_error[3]}}},
             {"max_channel_delta", max_channel_delta},
+            {"threshold", threshold},
             {"bounding_box", bounds.has_value() ? json(bounds->toJson()) : json(nullptr)},
-            {"identical", changed_pixels == 0}};
+            // Nothing exceeded the threshold. Sub-threshold differences can
+            // still show up in mean_absolute_error and max_channel_delta.
+            {"identical", changed_pixels == 0},
+            // No difference at all, at any magnitude.
+            {"bit_identical", max_channel_delta == 0}};
 }
 
 Result<ImageDiffResult> diffRgba(const RgbaImage& before,
@@ -83,6 +88,7 @@ Result<ImageDiffResult> diffRgba(const RgbaImage& before,
         result.diff_rgba[offset + 3] = 255;
     }
 
+    result.threshold = threshold;
     result.changed_ratio = static_cast<double>(result.changed_pixels) /
                            static_cast<double>(result.total_pixels);
     for (size_t channel = 0; channel < 4; ++channel) {
