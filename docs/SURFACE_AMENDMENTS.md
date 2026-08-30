@@ -86,8 +86,36 @@ GDExtension can implement, and `OS.add_logger` accepts it. Verified by dumping
 | Godot 4.7.2 | instantiable, `RefCounted` | `2678287736` | `27079556` | `4261188958` |
 
 Every identifier is identical across the supported range, so the capability
-needs no engine-floor change and carries no per-version branch. This is a `GO`
-on the same basis the Phase 7 gate used.
+needs no engine-floor change. This is a `GO` on the same basis the Phase 7 gate
+used.
+
+**Correction.** An earlier revision of this entry said the capability "carries
+no per-version branch". That is true of the `Logger` API above and false of the
+mechanism needed to implement it. Didi's extension has never registered a class
+with Godot: it loads 27 interface functions, all for calling the engine, and
+none for extending it. Registration requires `classdb_register_extension_class`,
+which the GDExtension header exposes in six versioned variants with different
+`GDExtensionClassCreationInfo` layouts. The implementation must select the
+highest variant the running engine provides, so it does carry a per-version
+concern even though the logging API it targets does not.
+
+**Implementation constraints, recorded before the work starts.**
+
+- This is the first custom class this extension registers. The interface
+  functions for it are not currently loaded and must be added.
+- A logger is invoked by the engine from arbitrary threads, including while the
+  main thread is blocked. The sink must be safe under that and must never call
+  back into the engine, or a log line can deadlock the editor.
+- `RuntimeLogRing` already provides the bounded, cursor-shaped storage this
+  needs, and is the intended sink rather than a second ring.
+- The logger must be removed through `OS.remove_logger` during shutdown. A
+  logger outliving the extension leaves the engine calling into unloaded code.
+- Godot's own output must not be echoed back into it. A logger that logs is a
+  loop.
+
+These are the reason the implementation is a separate change from this
+amendment: the risk is concentrated in a threaded engine callback, not in the
+tool that reads the ring.
 
 **Explicit exclusions.** No unbounded streaming: the ring is capped and reports
 a retention gap the same way `runtime_read_logs` does. No capture of output from
