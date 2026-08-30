@@ -40,7 +40,11 @@ demo/addons/didi/bin/*
 .godot/
 *.translation
 *.tmp
+# Generated on demand by viewport_create_test_lab, in whichever project the
+# tool is run against. The demo project has its own addon copy, so it has its
+# own path for the same generated scene.
 addons/didi/test_lab_sandbox.tscn
+demo/addons/didi/test_lab_sandbox.tscn
 
 # Root Dump Artifacts
 /extension_api.json

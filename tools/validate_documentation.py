@@ -41,6 +41,10 @@ VERSION_SOURCES = (
     "include/didi/mcp/mcp_protocol.hpp",
     "src/standalone/main.cpp",
     "addons/didi/plugin.cfg",
+    # The demo project ships its own copy of the addon, because a Godot project
+    # cannot reference an addon outside its own res://. It drifted two minor
+    # versions behind unnoticed precisely because nothing checked it.
+    "demo/addons/didi/plugin.cfg",
     "README.md",
     "docs/CAPABILITIES.md",
     "CHANGELOG.md",
@@ -1149,6 +1153,37 @@ def validate_tool_surface_counts(
     return errors
 
 
+def validate_addon_copies_match(root: Path) -> list[str]:
+    """The demo project's addon copy must match the canonical one.
+
+    A Godot project cannot reference an addon outside its own `res://`, so the
+    demo needs its own copy. Nothing checked that copy, and it fell two minor
+    versions behind and kept pre-arch-suffix macOS library paths after the
+    canonical copy gained per-architecture entries. A user opening the demo was
+    running a different addon from the one Didi ships.
+    """
+    errors: list[str] = []
+    for name in ("plugin.cfg", "didi.gdextension", "didi_plugin.gd"):
+        canonical = root / "addons" / "didi" / name
+        demo = root / "demo" / "addons" / "didi" / name
+        if not canonical.is_file():
+            errors.append(f"addons/didi/{name}: canonical addon file is missing")
+            continue
+        if not demo.is_file():
+            errors.append(f"demo/addons/didi/{name}: demo addon copy is missing")
+            continue
+        # Compare content, ignoring line-ending differences between checkouts.
+        canonical_text = canonical.read_text(encoding="utf-8").splitlines()
+        demo_text = demo.read_text(encoding="utf-8").splitlines()
+        if canonical_text != demo_text:
+            errors.append(
+                f"demo/addons/didi/{name} does not match addons/didi/{name}. "
+                "The demo ships a copy of the addon; keep the two identical so the "
+                "demo project exercises what Didi actually distributes."
+            )
+    return errors
+
+
 def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[str]:
     root = root.resolve()
     errors: list[str] = []
@@ -1213,6 +1248,7 @@ def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[s
             "include/didi/mcp/mcp_protocol.hpp": f'kServerVersion = "{version}"',
             "src/standalone/main.cpp": f"v{version}",
             "addons/didi/plugin.cfg": f'version="{version}"',
+            "demo/addons/didi/plugin.cfg": f'version="{version}"',
             "README.md": version,
             "docs/CAPABILITIES.md": version,
             "CHANGELOG.md": f"[{version}]",
@@ -1276,6 +1312,7 @@ def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[s
             errors.extend(validate_tool_surface_counts(texts, manifest_counts))
     errors.extend(validate_canonical_implementation_counts(texts, expected_counts))
     errors.extend(validate_phase7_reconciliation(texts, expected_counts))
+    errors.extend(validate_addon_copies_match(root))
 
     roadmap_text = texts.get("docs/ROADMAP.md")
     if roadmap_text is not None:

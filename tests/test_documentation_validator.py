@@ -59,6 +59,10 @@ class DocumentationValidatorTests(unittest.TestCase):
             'std::cout << "didi (godot-mcp-native) v1.4.0";\n',
         )
         self.write("addons/didi/plugin.cfg", 'version="1.4.0"\n')
+        self.write("demo/addons/didi/plugin.cfg", 'version="1.4.0"\n')
+        for addon_file in ("didi.gdextension", "didi_plugin.gd"):
+            self.write(f"addons/didi/{addon_file}", f"; {addon_file}\n")
+            self.write(f"demo/addons/didi/{addon_file}", f"; {addon_file}\n")
 
         self.write(
             "README.md",
@@ -478,6 +482,35 @@ Second section.
             self.assertNotIn(
                 count, block, f"published count {count} is hard-coded in FACT_PATTERNS"
             )
+
+    def test_demo_addon_copy_must_match_the_canonical_addon(self):
+        # A Godot project cannot reference an addon outside its own res://, so
+        # the demo ships a copy. Nothing checked that copy, and it fell two
+        # minor versions behind while keeping pre-arch-suffix macOS paths.
+        root = self.make_valid_repository()
+        self.write("demo/addons/didi/didi.gdextension", "; drifted\n")
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(
+            any("demo/addons/didi/didi.gdextension" in error and "does not match" in error
+                for error in errors),
+            errors,
+        )
+
+    def test_demo_addon_version_is_a_version_source(self):
+        # The parity rule would also catch this, but the version must fail with
+        # the version message so the fix is obvious from the error alone.
+        root = self.make_valid_repository()
+        self.write("demo/addons/didi/plugin.cfg", 'version="1.2.0"\n')
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(
+            any("demo/addons/didi/plugin.cfg" in error and "1.4.0" in error
+                for error in errors),
+            errors,
+        )
 
     def test_reports_mismatched_version_source(self):
         root = self.make_valid_repository()
