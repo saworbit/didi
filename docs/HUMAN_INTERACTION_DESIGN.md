@@ -1,6 +1,7 @@
 # Human Interaction Design
 
-> **Status:** Proposed. Nothing here is implemented. This supersedes the
+> **Status:** Partly implemented. Steps 1 and 2 of the recommended order have
+> shipped; steps 3 and 4 remain conditional and unstarted. This supersedes the
 > editor-dock proposal previously recorded as `EDITOR_SURFACE_DESIGN.md`, whose
 > central recommendation was wrong; see [What changed and why](#what-changed-and-why).
 > Current runtime behavior is in [Current Capability Matrix](CAPABILITIES.md) and
@@ -105,14 +106,15 @@ client that can reach those does not need the editor.
 reported by users. It is cheap, but it is not urgent, and every line of GDScript
 is a line outside the tested boundary.
 
-## The prerequisite: protocol revision
+## The prerequisite: protocol revision — done
 
-Didi ships MCP revision `2024-11-05`. Elicitation and the modern result shapes
-require a newer revision, so the revision upgrade gates everything above and is
-the highest-leverage next piece of work regardless of which surface is chosen.
+Didi shipped MCP revision `2024-11-05` when this was written, and elicitation
+and the modern result shapes required a newer one, so the revision upgrade
+gated everything above. It has since been done: Didi is dual-era, serving
+`2026-07-28` alongside `2024-11-05`.
 
-The cost is lower than the changelog suggests, because Didi is a **stdio** server
-and several breaking changes are Streamable-HTTP concerns:
+The cost was lower than the changelog suggested, because Didi is a **stdio**
+server and several breaking changes are Streamable-HTTP concerns:
 
 | Change | Applies to Didi |
 | :--- | :--- |
@@ -126,21 +128,30 @@ and several breaking changes are Streamable-HTTP concerns:
 Didi already emits `annotations`, `outputSchema` and `structuredContent`, so it
 is partly modernized already.
 
-Two things to confirm at implementation time rather than assume: which revision
-is current and stable (`2026-07-28` was a release candidate when this was
-written), and whether older revisions remain acceptable for long enough to make
-a staged migration comfortable. Published deprecation windows have been on the
-order of twelve months, which suggests time but not indefinite time.
+Both open questions from the original draft are now answered. `2026-07-28` is
+final, published 28 July 2026 -- it was a release candidate when this was
+written. And it deprecates Roots, Sampling and Logging, none of which Didi uses,
+so that category cost nothing. Deprecated features carry a twelve-month minimum
+window, so a staged migration remains comfortable.
 
-## Recommended order
+## Recommended order, and where it stands
 
-1. **Protocol revision upgrade.** Gates everything else, and closes a growing
-   compatibility gap independent of any UI decision.
-2. **Elicitation for confirmation-gated mutations.** Turns "the agent confirmed
-   to itself" into a human actually seeing the change, using the mechanism the
-   protocol defines rather than one invented here.
-3. **MCP Apps status and log view**, once host support is broad.
-4. **Editor status line**, only if the broken-connection case is reported.
+1. **Protocol revision upgrade.** *Done.* `server/discover`, per-request version
+   negotiation, dual-era gating, and the modern result shapes.
+2. **Elicitation for confirmation-gated mutations.** *Done.* A client that can
+   ask a person is given the real dry-run preview to show them. A client that
+   cannot is not silently downgraded: every mutation records whether it was
+   confirmed by a `human`, by an `agent` echoing a token, or `skipped` entirely
+   under YOLO mode.
+3. **MCP Apps status and log view.** Still conditional on host support being
+   broad enough to be worth it. Not started, and should not start on a schedule
+   -- start it when a client people actually use can render it.
+4. **Editor status line.** Still conditional on the broken-connection case being
+   reported by a real user. Not started.
+
+Steps 3 and 4 were written conditionally on purpose. Neither condition has been
+met, and building them anyway would be manufacturing work rather than following
+the reasoning that produced the list.
 
 ## Explicitly out of scope
 

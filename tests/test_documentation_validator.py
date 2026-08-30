@@ -446,6 +446,45 @@ Second section.
             (79, 65, 14),
         )
 
+    def test_an_unregistered_python_test_module_is_reported(self):
+        # A test file that no workflow names never runs. It passes locally, so
+        # nothing looks wrong, and it provides exactly none of the protection it
+        # appears to. tests/test_phase7_signal_admission.py sat in that state --
+        # asserting the signal test seam never reaches a shipping build, and
+        # executing nowhere.
+        root = self.make_valid_repository()
+        self.write("tests/test_orphaned_suite.py", "def test_nothing():\n    pass\n")
+        # A workflow that runs some other suite, so the repository plainly has
+        # CI and simply never names this file.
+        self.write(
+            ".github/workflows/ci.yml",
+            "jobs:\n  build:\n    steps:\n      - run: |\n"
+            "          python -m unittest tests.test_something_else\n",
+        )
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(
+            any("tests.test_orphaned_suite" in error and "no workflow" in error
+                for error in errors),
+            errors,
+        )
+
+    def test_a_registered_python_test_module_passes(self):
+        root = self.make_valid_repository()
+        self.write("tests/test_registered_suite.py", "def test_nothing():\n    pass\n")
+        self.write(
+            ".github/workflows/ci.yml",
+            "jobs:\n  build:\n    steps:\n      - run: |\n"
+            "          python -m unittest tests.test_registered_suite\n",
+        )
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertFalse(
+            [error for error in errors if "test_registered_suite" in error], errors
+        )
+
     def test_missing_manifest_fails_with_actionable_message(self):
         root = self.make_valid_repository()
         errors = VALIDATOR.validate_repository(root, self.root / "absent.json")

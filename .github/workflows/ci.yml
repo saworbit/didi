@@ -119,7 +119,7 @@ jobs:
       - name: Run Phase 7 schema and ownership contracts
         shell: bash
         run: |
-          "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_phase7_schema_contract tests.test_phase7_plan_ownership -v
+          "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_phase7_schema_contract tests.test_phase7_plan_ownership tests.test_phase7_signal_admission -v
 
       - name: Configure CMake (Windows)
         if: runner.os == 'Windows'

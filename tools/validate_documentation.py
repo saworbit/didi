@@ -1184,6 +1184,38 @@ def validate_addon_copies_match(root: Path) -> list[str]:
     return errors
 
 
+def validate_python_tests_are_registered(root: Path) -> list[str]:
+    """Every Python test module must be named by some workflow.
+
+    CI runs named `unittest` modules rather than discovering the tests
+    directory, so a new file under `tests/` runs nowhere until someone adds a
+    step for it. That failure is silent in the worst way: the suite passes
+    locally, so nothing looks wrong, and it provides none of the protection it
+    appears to.
+
+    `tests/test_phase7_signal_admission.py` sat in exactly that state -- it
+    asserts the Phase 7 signal test seam never reaches a shipping build, and it
+    executed in no job at all.
+    """
+    errors: list[str] = []
+    workflows = root / ".github" / "workflows"
+    if not workflows.is_dir():
+        return errors
+    referenced = "\n".join(
+        path.read_text(encoding="utf-8", errors="replace")
+        for path in sorted(workflows.glob("*.yml"))
+    )
+    for path in sorted((root / "tests").glob("test_*.py")):
+        module = f"tests.{path.stem}"
+        if module not in referenced:
+            errors.append(
+                f"{module} is named by no workflow, so it never runs in CI. "
+                "Add a step that invokes it, or delete it -- a test that does not "
+                "execute is worse than no test, because it looks like coverage."
+            )
+    return errors
+
+
 def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[str]:
     root = root.resolve()
     errors: list[str] = []
@@ -1313,6 +1345,7 @@ def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[s
     errors.extend(validate_canonical_implementation_counts(texts, expected_counts))
     errors.extend(validate_phase7_reconciliation(texts, expected_counts))
     errors.extend(validate_addon_copies_match(root))
+    errors.extend(validate_python_tests_are_registered(root))
 
     roadmap_text = texts.get("docs/ROADMAP.md")
     if roadmap_text is not None:
