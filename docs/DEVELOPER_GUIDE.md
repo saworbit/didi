@@ -73,6 +73,8 @@ The Windows live integration harness copies the tracked fixture into `build/` an
   -GodotExecutable C:\Godot\Godot_v4.5.1-stable_win64_console.exe
 ```
 
+The harness runs to completion on Windows PowerShell 5.1, including the persistence-rollback case that denies write rights through `icacls`. That case previously aborted the run: it selects its platform branch with `$IsWindows`, an automatic variable introduced in PowerShell 6, which is undefined on 5.1 and so took the POSIX branch and called `chmod`.
+
 The Phase 1 substrate has also been run against Godot 4.6.2 and 4.7.2. Phase 2's compatibility floor and CI integration target are Godot 4.5.1; bridge method hashes must be taken from that version's extension API.
 
 ---

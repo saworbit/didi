@@ -7,6 +7,13 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# $IsWindows is an automatic variable introduced in PowerShell 6. On Windows
+# PowerShell 5.1 it does not exist, so it evaluated as $null and the rollback
+# case took the POSIX branch and called chmod, which does not exist here. That
+# aborted the run before its last seventeen assertions. Windows PowerShell only
+# runs on Windows, so its absence is itself the answer.
+if (-not (Test-Path Variable:IsWindows)) { $IsWindows = $true }
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $sourceFixtureRoot = Join-Path $PSScriptRoot "godot_smoke"
 $buildRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot "build"))
