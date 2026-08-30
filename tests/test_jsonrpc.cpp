@@ -423,20 +423,28 @@ static void test_mcp_discover_reports_supported_versions_without_a_handshake() {
     ASSERT_EQ(response.result["cacheScope"].get<std::string>(), std::string("public"));
 }
 
-// Didi must not claim a revision whose result shapes it does not serve. When it
-// gains resultType, ttlMs and cacheScope on every result, the modern version
-// joins this list -- and not before.
-static void test_mcp_discover_advertises_only_revisions_actually_served() {
+// Didi must not claim a revision it does not serve. Rather than name a
+// forbidden string -- which only holds until the day that revision ships -- this
+// asserts the invariant directly: every version discovery advertises must
+// actually be accepted on a real request.
+static void test_mcp_every_advertised_revision_is_actually_served() {
     didi::mcp::McpServer server;
     server.setIpcClient(nullptr);
     didi::mcp::JsonRpcRequest discover;
     discover.id = 1;
     discover.method = "server/discover";
     discover.params = didi::json::object();
-    const auto response = server.handleRequest(discover);
+    const auto advertised = server.handleRequest(discover).result["supportedVersions"];
+    ASSERT_TRUE(advertised.is_array() && !advertised.empty());
 
-    for (const auto& version : response.result["supportedVersions"]) {
-        ASSERT_TRUE(version.get<std::string>() != std::string("2026-07-28"));
+    for (const auto& version : advertised) {
+        didi::mcp::JsonRpcRequest list;
+        list.id = 2;
+        list.method = "tools/list";
+        list.params = {{"_meta", {{"io.modelcontextprotocol/protocolVersion", version}}}};
+        const auto response = server.handleRequest(list);
+        ASSERT_TRUE(!response.error.has_value());
+        ASSERT_EQ(response.result["resultType"].get<std::string>(), std::string("complete"));
     }
 }
 
@@ -447,7 +455,7 @@ static void test_mcp_rejects_an_unsupported_protocol_version_actionably() {
     didi::mcp::JsonRpcRequest list;
     list.id = 2;
     list.method = "tools/list";
-    list.params = {{"_meta", {{"io.modelcontextprotocol/protocolVersion", "2026-07-28"}}}};
+    list.params = {{"_meta", {{"io.modelcontextprotocol/protocolVersion", "1900-01-01"}}}};
     const auto response = server.handleRequest(list);
 
     ASSERT_TRUE(response.error.has_value());
@@ -455,7 +463,7 @@ static void test_mcp_rejects_an_unsupported_protocol_version_actionably() {
     // The client's whole recovery path is this list, so it must be present and
     // must name what the server really speaks.
     ASSERT_TRUE(response.error->data.contains("supported"));
-    ASSERT_EQ(response.error->data["requested"].get<std::string>(), std::string("2026-07-28"));
+    ASSERT_EQ(response.error->data["requested"].get<std::string>(), std::string("1900-01-01"));
     bool names_legacy = false;
     for (const auto& version : response.error->data["supported"]) {
         if (version.get<std::string>() == didi::mcp::kProtocolVersion) names_legacy = true;
@@ -484,6 +492,98 @@ static void test_mcp_legacy_handshake_is_unaffected_by_discovery() {
     ASSERT_TRUE(!server.handleRequest(list).error.has_value());
 }
 
+// Revision 2026-07-28 requires resultType on every result, and freshness hints
+// on the results a client may cache. The hints are the interesting part for
+// Didi: most of its list results embed live session availability, so they
+// cannot honestly claim a freshness window at all.
+
+static void test_mcp_every_result_declares_completeness() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+    initializeServer(server);
+
+    for (const char* method : {"tools/list", "resources/list", "prompts/list", "ping"}) {
+        didi::mcp::JsonRpcRequest request;
+        request.id = 5;
+        request.method = method;
+        request.params = didi::json::object();
+        const auto response = server.handleRequest(request);
+        ASSERT_TRUE(!response.error.has_value());
+        ASSERT_EQ(response.result["resultType"].get<std::string>(), std::string("complete"));
+    }
+}
+
+// The load-bearing one. tools/list and resources/list carry per-session
+// availability -- currentMode, liveAvailable, editorConnected -- which flips
+// when an editor starts or stops. A freshness window on those would let a
+// client keep reporting a tool unavailable long after the editor came up.
+static void test_mcp_session_dependent_lists_are_never_cacheable() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+    initializeServer(server);
+
+    for (const char* method : {"tools/list", "resources/list"}) {
+        didi::mcp::JsonRpcRequest request;
+        request.id = 6;
+        request.method = method;
+        request.params = didi::json::object();
+        const auto response = server.handleRequest(request);
+        ASSERT_EQ(response.result["ttlMs"].get<int64_t>(), 0);
+        ASSERT_EQ(response.result["cacheScope"].get<std::string>(), std::string("private"));
+    }
+}
+
+// Prompts are static definitions with no session state, so they are the one
+// list Didi can honestly let a client keep.
+static void test_mcp_static_lists_carry_a_real_freshness_window() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+    initializeServer(server);
+
+    didi::mcp::JsonRpcRequest request;
+    request.id = 7;
+    request.method = "prompts/list";
+    request.params = didi::json::object();
+    const auto response = server.handleRequest(request);
+    ASSERT_TRUE(response.result["ttlMs"].get<int64_t>() > 0);
+    ASSERT_EQ(response.result["cacheScope"].get<std::string>(), std::string("public"));
+}
+
+// Serving the modern result shapes is what earns the right to name the modern
+// revision. The two must move together, or the advertisement is a claim nobody
+// checked -- which is the defect this file exists to prevent.
+static void test_mcp_discover_now_advertises_the_modern_revision() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+    didi::mcp::JsonRpcRequest discover;
+    discover.id = 8;
+    discover.method = "server/discover";
+    discover.params = didi::json::object();
+    const auto response = server.handleRequest(discover);
+
+    bool modern = false;
+    bool legacy = false;
+    for (const auto& version : response.result["supportedVersions"]) {
+        if (version.get<std::string>() == "2026-07-28") modern = true;
+        if (version.get<std::string>() == didi::mcp::kProtocolVersion) legacy = true;
+    }
+    ASSERT_TRUE(modern);
+    ASSERT_TRUE(legacy);
+}
+
+static void test_mcp_modern_request_is_served_without_a_handshake() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+
+    didi::mcp::JsonRpcRequest list;
+    list.id = 9;
+    list.method = "tools/list";
+    list.params = {{"_meta", {{"io.modelcontextprotocol/protocolVersion", "2026-07-28"}}}};
+    const auto response = server.handleRequest(list);
+    ASSERT_TRUE(!response.error.has_value());
+    ASSERT_EQ(response.result["resultType"].get<std::string>(), std::string("complete"));
+}
+
 struct RegisterJsonRpcTests {
     RegisterJsonRpcTests() {
         registerTest("JsonRpc.ParseValid", test_jsonrpc_parse_valid);
@@ -508,11 +608,21 @@ struct RegisterJsonRpcTests {
                      test_mcp_output_logging_never_copies_response_bodies);
         registerTest("McpServer.DiscoverReportsSupportedVersions",
                      test_mcp_discover_reports_supported_versions_without_a_handshake);
-        registerTest("McpServer.DiscoverAdvertisesOnlyServedRevisions",
-                     test_mcp_discover_advertises_only_revisions_actually_served);
+        registerTest("McpServer.EveryAdvertisedRevisionIsServed",
+                     test_mcp_every_advertised_revision_is_actually_served);
         registerTest("McpServer.UnsupportedProtocolVersionIsActionable",
                      test_mcp_rejects_an_unsupported_protocol_version_actionably);
         registerTest("McpServer.LegacyHandshakeUnaffected",
                      test_mcp_legacy_handshake_is_unaffected_by_discovery);
+        registerTest("McpServer.EveryResultDeclaresCompleteness",
+                     test_mcp_every_result_declares_completeness);
+        registerTest("McpServer.SessionDependentListsAreNotCacheable",
+                     test_mcp_session_dependent_lists_are_never_cacheable);
+        registerTest("McpServer.StaticListsCarryFreshness",
+                     test_mcp_static_lists_carry_a_real_freshness_window);
+        registerTest("McpServer.DiscoverAdvertisesModernRevision",
+                     test_mcp_discover_now_advertises_the_modern_revision);
+        registerTest("McpServer.ModernRequestNeedsNoHandshake",
+                     test_mcp_modern_request_is_served_without_a_handshake);
     }
 } g_registerJsonRpcTests;

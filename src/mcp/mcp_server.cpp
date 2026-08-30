@@ -132,6 +132,38 @@ void McpServer::sendNotification(const std::string& method, const json& params) 
     std::cout.flush();
 }
 
+namespace {
+
+// Revision 2026-07-28 requires `resultType` on every result. Emitting it
+// unconditionally is safe for legacy clients, which ignore members they do not
+// know, and it keeps one result-construction path instead of two.
+json complete(json result) {
+    result["resultType"] = "complete";
+    return result;
+}
+
+// Cacheable operations must additionally carry freshness hints. `ttlMs` is a
+// promise about how long a client may go without re-asking, so it has to be
+// derived from whether the answer can actually change underneath it.
+json cacheable(json result, int64_t ttl_ms, const char* scope) {
+    result = complete(std::move(result));
+    result["ttlMs"] = ttl_ms;
+    result["cacheScope"] = scope;
+    return result;
+}
+
+// Didi's tool and resource listings embed live session availability --
+// currentMode, liveAvailable, editorConnected -- which flips the moment an
+// editor starts or stops. Any freshness window at all would let a client keep
+// reporting a tool unavailable long after it became available, so the honest
+// value is zero: correct per the specification, and the only answer that does
+// not turn a cache into a stale claim.
+constexpr int64_t kSessionDependentTtlMs = 0;
+// Prompt definitions are compile-time constants with no session state.
+constexpr int64_t kStaticTtlMs = 3600000;
+
+} // namespace
+
 JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     DIDI_LOG_DEBUG("MCP_REQ", "Method: ", req.method);
 
@@ -183,10 +215,9 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             // Note this does not generalise: tools/list embeds live session
             // state, so its availability flips when an editor starts or stops
             // and it cannot claim a long freshness window.
-            {"ttlMs", 3600000},
-            {"cacheScope", "public"}
         };
-        return JsonRpcResponse::makeSuccess(req.id, result);
+        return JsonRpcResponse::makeSuccess(
+            req.id, cacheable(std::move(result), kStaticTtlMs, "public"));
     }
 
     if (req.method == "initialize") {
@@ -203,16 +234,16 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                 {"version", kServerVersion}
             }}
         };
-        return JsonRpcResponse::makeSuccess(req.id, result);
+        return JsonRpcResponse::makeSuccess(req.id, complete(std::move(result)));
     }
 
     if (req.method == "notifications/initialized") {
         DIDI_LOG_INFO("MCP_SERVER", "Client initialized session");
-        return JsonRpcResponse::makeSuccess(req.id, json::object());
+        return JsonRpcResponse::makeSuccess(req.id, complete(json::object()));
     }
 
     if (req.method == "ping") {
-        return JsonRpcResponse::makeSuccess(req.id, json::object());
+        return JsonRpcResponse::makeSuccess(req.id, complete(json::object()));
     }
 
     // A request that carries a supported protocol version is self-contained and
@@ -241,7 +272,8 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                                    managed_unavailable);
             tool_list.push_back(std::move(definition));
         }
-        return JsonRpcResponse::makeSuccess(req.id, {{"tools", tool_list}});
+        return JsonRpcResponse::makeSuccess(
+            req.id, cacheable({{"tools", tool_list}}, kSessionDependentTtlMs, "private"));
     }
 
     if (req.method == "tools/call") {
@@ -264,7 +296,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams, "Tool name is required");
         }
         auto result = ToolRegistry::instance().callTool(name, arguments);
-        return JsonRpcResponse::makeSuccess(req.id, result.toJson());
+        return JsonRpcResponse::makeSuccess(req.id, complete(result.toJson()));
     }
 
     // Resources
@@ -286,7 +318,8 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                                    managed_unavailable);
             res_list.push_back(std::move(definition));
         }
-        return JsonRpcResponse::makeSuccess(req.id, {{"resources", res_list}});
+        return JsonRpcResponse::makeSuccess(
+            req.id, cacheable({{"resources", res_list}}, kSessionDependentTtlMs, "private"));
     }
 
     if (req.method == "resources/read") {
@@ -314,7 +347,9 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                 {"text", read_res.value()}
             }
         });
-        return JsonRpcResponse::makeSuccess(req.id, {{"contents", contents}});
+        // Resource contents are live project and editor state.
+        return JsonRpcResponse::makeSuccess(
+            req.id, cacheable({{"contents", contents}}, kSessionDependentTtlMs, "private"));
     }
 
     // Prompts
@@ -324,7 +359,8 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         for (const auto& p : prompts) {
             prompt_list.push_back(p.toJson());
         }
-        return JsonRpcResponse::makeSuccess(req.id, {{"prompts", prompt_list}});
+        return JsonRpcResponse::makeSuccess(
+            req.id, cacheable({{"prompts", prompt_list}}, kStaticTtlMs, "public"));
     }
 
     if (req.method == "prompts/get") {
@@ -350,7 +386,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         if (p_res.isErr()) {
             return makeApplicationError(req.id, p_res.error());
         }
-        return JsonRpcResponse::makeSuccess(req.id, p_res.value());
+        return JsonRpcResponse::makeSuccess(req.id, complete(p_res.value()));
     }
 
     return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::MethodNotFound, "Method not found: " + req.method);

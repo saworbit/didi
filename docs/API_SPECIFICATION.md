@@ -76,21 +76,39 @@ The internal extension and local session envelopes can use `400` (invalid argume
 
 ## 2. MCP Methods
 
-Didi serves MCP revision `2024-11-05` and is **dual-era**: it also answers
-`server/discover`, the discovery method introduced when revision `2026-07-28`
-removed the `initialize` handshake.
+Didi is **dual-era**, serving both `2026-07-28` and `2024-11-05`. A legacy
+client opens with `initialize` and is served legacy semantics; a modern client
+declares its version in `_meta["io.modelcontextprotocol/protocolVersion"]` on
+every request and is served statelessly. A request carrying a supported version
+is self-contained and needs no prior `initialize`.
 
-Discovery advertises only the revisions Didi actually serves, which today means
-`2024-11-05` alone. A modern client that declares `2026-07-28` in
-`_meta["io.modelcontextprotocol/protocolVersion"]` receives
-`-32022 Unsupported protocol version` carrying the list it can retry with, rather
-than silence. That is what the specification tells a modern stdio client to probe
-for, and it is the difference between an actionable error and a hang. The modern
-revision joins the advertised list when Didi serves its result shapes
-(`resultType`, `ttlMs`, `cacheScope`) -- not when it can merely name it.
+`server/discover` reports the supported versions without a handshake, because it
+is the probe a modern stdio client sends first. A version Didi does not serve
+returns `-32022 Unsupported protocol version` carrying the list to retry with,
+rather than silence.
 
-A request carrying a supported protocol version is self-contained and needs no
-prior `initialize`.
+Discovery advertises only revisions Didi actually serves. That is enforced
+rather than asserted: a test drives a real request at every version discovery
+advertises and requires it to succeed, so the list cannot outrun the
+implementation.
+
+### Result shapes and caching
+
+Every result carries `resultType`. Cacheable operations also carry `ttlMs` and
+`cacheScope`, and the values are deliberately conservative:
+
+| Operation | `ttlMs` | `cacheScope` | Why |
+| :--- | :--- | :--- | :--- |
+| `server/discover` | 3600000 | `public` | Supported versions, capabilities and identity are compile-time constants |
+| `prompts/list` | 3600000 | `public` | Prompt definitions carry no session state |
+| `tools/list` | 0 | `private` | Embeds live availability, which flips when an editor starts or stops |
+| `resources/list` | 0 | `private` | Same live availability metadata |
+| `resources/read` | 0 | `private` | Live project and editor state |
+
+A `ttlMs` of `0` means immediately stale, and is the honest value wherever a
+result reflects the current session. A freshness window there would let a client
+keep reporting a tool unavailable long after it became available -- a cache that
+serves a stale claim is worse than no cache.
 
 | Method | Direction | Description |
 | :--- | :--- | :--- |
