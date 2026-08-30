@@ -1,5 +1,31 @@
 # Phase 7 Partial Delivery Implementation Plan
 
+## Live signal bridge evidence
+
+Recorded 2026-08-30 with `tests/run_phase7_signal_bridge.ps1`, two runs per
+engine, against the real engines rather than a single pinned one:
+
+| Engine | Result |
+| :--- | :--- |
+| Godot 4.5.1 | `PHASE7_SIGNAL_BRIDGE_COMPLETE|4.5.1|runs=2` |
+| Godot 4.6.2 | `PHASE7_SIGNAL_BRIDGE_COMPLETE|4.6.2|runs=2` |
+| Godot 4.7.2 | `PHASE7_SIGNAL_BRIDGE_COMPLETE|4.7.2|runs=2` |
+
+Each run reports `PHASE7_SIGNAL_RAW_METHODS|list,connect,disconnect,emit|ok`.
+The signal bridge therefore works on the whole supported range, which is
+independent confirmation that the 4.5 floor retained by the Phase 7 governance
+decision is correct.
+
+Two harness defects were repaired to obtain this. The runner required exactly
+Godot 4.7.2 through a helper that no longer exists on `main`, so it could not
+run at all; it now asserts the documented minimum version instead. Its
+completion marker also hard-coded the string `4.7.2` regardless of which engine
+executed, so any record it produced could name an engine it never ran. It now
+reports the version it actually detected.
+
+This is bridge evidence, not activation. All 18 Phase 7 names remain
+`implemented: false`.
+
 ## Red-team closure: binding, generation, admission, and history
 
 This section is normative for every task below. No later task may weaken it.
