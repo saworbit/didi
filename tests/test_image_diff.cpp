@@ -118,6 +118,46 @@ void test_restoration_guard_runs_once_on_early_exit() {
     ASSERT_EQ(restorations, 2);
 }
 
+void test_restoration_guard_stays_armed_until_restore_succeeds() {
+    // Break caught: restoreNow disarmed before running the callback, so a failed
+    // restore was never retried. Viewport isolation left the hidden nodes hidden
+    // while the caller got an error that read as if nothing had been touched.
+    int attempts = 0;
+    bool succeed = false;
+    {
+        didi::godot::RestorationGuard guard([&]() -> didi::Result<void> {
+            ++attempts;
+            if (!succeed) return didi::Error::internal("restore failed");
+            return didi::Result<void>::ok();
+        });
+
+        ASSERT_TRUE(guard.restoreNow().isErr());
+        ASSERT_EQ(attempts, 1);
+        // Still armed, so a caller can try again.
+        ASSERT_TRUE(guard.restoreNow().isErr());
+        ASSERT_EQ(attempts, 2);
+
+        succeed = true;
+        ASSERT_TRUE(guard.restoreNow().isOk());
+        ASSERT_EQ(attempts, 3);
+        // Disarmed now, so the destructor must not run a fourth time.
+    }
+    ASSERT_EQ(attempts, 3);
+
+    // A guard whose restore never succeeds must still be retried by the
+    // destructor rather than leaving the scene mutated.
+    int failing_attempts = 0;
+    {
+        didi::godot::RestorationGuard guard([&]() -> didi::Result<void> {
+            ++failing_attempts;
+            return didi::Error::internal("restore failed");
+        });
+        ASSERT_TRUE(guard.restoreNow().isErr());
+        ASSERT_EQ(failing_attempts, 1);
+    }
+    ASSERT_EQ(failing_attempts, 2);
+}
+
 void test_sub_threshold_noise_is_reported_without_contradiction() {
     // Break caught: the payload said identical true and changed_pixels zero next
     // to a non-zero max_channel_delta, with nothing to say which was which.
@@ -208,6 +248,8 @@ struct RegisterImageDiffTests {
         registerTest("CaptureCache.LruAndByteBudget", test_capture_cache_lru_and_byte_budget);
         registerTest("CaptureCache.RejectsBadIdsAndOversizeEntries", test_capture_cache_rejects_bad_ids_and_oversize_entries);
         registerTest("ViewportIsolation.RestorationGuard", test_restoration_guard_runs_once_on_early_exit);
+        registerTest("ViewportIsolation.GuardStaysArmedUntilRestoreSucceeds",
+                     test_restoration_guard_stays_armed_until_restore_succeeds);
     }
 } g_register_image_diff_tests;
 
