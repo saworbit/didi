@@ -65,10 +65,12 @@ FUTURE_PHASE_COMPLETION_FIELDS = (
     "pull request",
     "verification evidence",
 )
-# Fallback used only when no tool manifest is supplied (local runs without a
-# build). CI always passes --tool-manifest, so the built binary is authoritative
-# and implementing a reserved tool never requires editing this file.
-CANONICAL_IMPLEMENTATION_COUNTS = (78, 60, 18)
+# Fallback used when no tool manifest is supplied: local runs without a build,
+# and the docs-only CI job, which deliberately does not build the binary. When a
+# manifest IS supplied the built binary is authoritative and this constant is
+# checked against it, so a stale fallback fails the build jobs rather than
+# silently disagreeing with the software it stands in for.
+CANONICAL_IMPLEMENTATION_COUNTS = (79, 61, 18)
 
 TOOL_MANIFEST_COUNT_KEYS = ("canonical", "legacy", "implemented", "unimplemented", "total")
 
@@ -1247,6 +1249,18 @@ def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[s
                 manifest_counts["implemented"],
                 manifest_counts["unimplemented"],
             )
+            manifest_triple = (
+                manifest_counts["canonical"],
+                manifest_counts["implemented"],
+                manifest_counts["unimplemented"],
+            )
+            if manifest_triple != CANONICAL_IMPLEMENTATION_COUNTS:
+                errors.append(
+                    "tools/validate_documentation.py: CANONICAL_IMPLEMENTATION_COUNTS is "
+                    f"{CANONICAL_IMPLEMENTATION_COUNTS} but the built tool surface is "
+                    f"{manifest_triple}. Update the fallback so the docs-only job, which "
+                    "has no binary to read, checks the same numbers as the build jobs."
+                )
             errors.extend(validate_tool_surface_counts(texts, manifest_counts))
     errors.extend(validate_canonical_implementation_counts(texts, expected_counts))
     errors.extend(validate_phase7_reconciliation(texts, expected_counts))
