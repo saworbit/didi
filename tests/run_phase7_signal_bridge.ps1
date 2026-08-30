@@ -8,8 +8,8 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot 'assert_godot_472.ps1')
-$GodotExecutable = Assert-Godot472Executable -Executable $GodotExecutable
+. (Join-Path $PSScriptRoot 'assert_godot_supported.ps1')
+$GodotExecutable = Assert-SupportedGodotExecutable -Executable $GodotExecutable
 
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $source = Join-Path $PSScriptRoot 'phase7_signal_bridge'
@@ -63,4 +63,4 @@ for ($run = 1; $run -le $Repeat; $run++) {
         else { $env:DIDI_SESSION_DIR = $previous }
     }
 }
-Write-Output "PHASE7_SIGNAL_BRIDGE_COMPLETE|4.7.2|runs=$Repeat"
+Write-Output "PHASE7_SIGNAL_BRIDGE_COMPLETE|$script:DidiDetectedGodotVersion|runs=$Repeat"
