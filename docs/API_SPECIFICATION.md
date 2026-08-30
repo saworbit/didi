@@ -92,6 +92,32 @@ rather than asserted: a test drives a real request at every version discovery
 advertises and requires it to succeed, so the list cannot outrun the
 implementation.
 
+### Human confirmation
+
+Didi's confirmation tokens bind intent to exact arguments, project and route.
+That is a real property, but the *agent* receives the token and echoes it back,
+so on its own confirmation means the agent confirming to itself.
+
+When a client declares the `elicitation` capability, a confirmation-gated tool
+called without a token returns an `input_required` result instead of `428`:
+
+- `inputRequests` carries an `elicitation/create` in form mode. The message names
+  the tool and the target, and the schema is a single `confirm` boolean.
+- `_meta.didi.mutation_preview` carries the real dry-run preview, so a client can
+  show a person what will actually change rather than just a tool name.
+- `requestState` binds the offer to the tool it was minted for. A retry naming a
+  different tool is refused, so one approval cannot authorise a different act.
+
+The client reissues the call with `inputResponses`. `accept` executes; `decline`
+and `cancel` both refuse and stay distinguishable, because an agent that cannot
+tell refusal from dismissal will retry the one it should not.
+
+**A client that cannot elicit is not silently downgraded.** The specification
+forbids sending a mode the client did not declare, so the token flow remains and
+still returns `428`. What Didi will not do is let that path look like human
+approval: every confirmed mutation records `_meta.didi.confirmation` as `human`
+or `agent`, so a caller can tell what the confirmation was actually worth.
+
 ### Result shapes and caching
 
 Every result carries `resultType`. Cacheable operations also carry `ttlMs` and

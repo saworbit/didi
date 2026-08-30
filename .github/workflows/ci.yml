@@ -163,6 +163,15 @@ jobs:
           # server publishes for it.
           "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_tool_output_schema_contract -v
 
+      - name: Verify human confirmation reaches a human
+        shell: bash
+        run: |
+          # Drives the real binary: a client that can elicit is asked to approve
+          # a destructive change, decline and cancel stay distinguishable, and a
+          # client that cannot elicit is never silently downgraded into looking
+          # approved.
+          "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_elicitation_confirmation -v
+
       - name: Validate Internal Markdown Links
         shell: bash
         run: |
