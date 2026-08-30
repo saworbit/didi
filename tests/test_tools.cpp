@@ -557,6 +557,46 @@ static void test_resource_create_serializes_colors_quaternions_and_dictionaries(
     ASSERT_TRUE(tres.find("Vector2(0, 0)") == std::string::npos);
 }
 
+static void test_offline_hierarchy_reads_main_scene_and_multiline_properties() {
+    // Break caught: project.godot was opened relative to the process working
+    // directory, and a property whose value spans lines was truncated to its
+    // first line with every continuation silently dropped.
+    ScopedToolProject project("scene-hierarchy-offline");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    std::ofstream("project.godot")
+        << "config_version=5\n\n"
+        << "[application]\n\n"
+        << "run/main_scene=\"res://levels/forest.tscn\"\n";
+
+    std::filesystem::create_directories("levels");
+    std::ofstream("levels/forest.tscn")
+        << "[gd_scene format=3]\n\n"
+        << "[node name=\"Forest\" type=\"Node3D\"]\n"
+        << "spawn_points = [\n"
+        << "Vector3(1, 0, 1),\n"
+        << "Vector3(2, 0, 2)\n"
+        << "]\n"
+        << "label = \"after the array\"\n";
+
+    // No root_path, so the main scene has to be found through project.godot.
+    const auto result = registry.callTool("scene_get_hierarchy", didi::json::object());
+    if (result.isError) {
+        throw std::runtime_error("scene_get_hierarchy failed: " + result.content[0].text);
+    }
+    const auto payload = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(payload["file_path"], "res://levels/forest.tscn");
+
+    const auto& properties = payload["scene_tree"]["properties"];
+    ASSERT_TRUE(properties.contains("spawn_points"));
+    const auto spawn_points = properties["spawn_points"].get<std::string>();
+    ASSERT_TRUE(spawn_points.find("Vector3(1, 0, 1)") != std::string::npos);
+    ASSERT_TRUE(spawn_points.find("Vector3(2, 0, 2)") != std::string::npos);
+    // The line after the array must still be read as its own property.
+    ASSERT_EQ(properties["label"], "\"after the array\"");
+}
+
 static void test_project_search_public_validation_and_schema() {
     // Break caught: public search accepts coercible/unbounded inputs or advertises a live route.
     auto& reg = didi::mcp::ToolRegistry::instance();
@@ -1277,6 +1317,8 @@ struct RegisterToolTests {
                      test_visual_lab_rejects_a_target_outside_the_project);
         registerTest("Tools.ResourceCreateSerializesComplexTypes",
                      test_resource_create_serializes_colors_quaternions_and_dictionaries);
+        registerTest("Tools.OfflineHierarchyMainSceneAndMultilineProperties",
+                     test_offline_hierarchy_reads_main_scene_and_multiline_properties);
         registerTest("Tools.ProjectSearchPublicValidationAndSchema", test_project_search_public_validation_and_schema);
         registerTest("Tools.AssetReimportPublicValidationAndSchema", test_asset_reimport_public_validation_and_schema);
         registerTest("Tools.ViewportDiffPublicValidationAndSchema", test_viewport_diff_public_validation_and_schema);
