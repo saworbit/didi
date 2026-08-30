@@ -74,10 +74,27 @@ The internal extension and local session envelopes can use `400` (invalid argume
 
 ---
 
-## 2. MCP 2024-11-05 Methods
+## 2. MCP Methods
+
+Didi serves MCP revision `2024-11-05` and is **dual-era**: it also answers
+`server/discover`, the discovery method introduced when revision `2026-07-28`
+removed the `initialize` handshake.
+
+Discovery advertises only the revisions Didi actually serves, which today means
+`2024-11-05` alone. A modern client that declares `2026-07-28` in
+`_meta["io.modelcontextprotocol/protocolVersion"]` receives
+`-32022 Unsupported protocol version` carrying the list it can retry with, rather
+than silence. That is what the specification tells a modern stdio client to probe
+for, and it is the difference between an actionable error and a hang. The modern
+revision joins the advertised list when Didi serves its result shapes
+(`resultType`, `ttlMs`, `cacheScope`) -- not when it can merely name it.
+
+A request carrying a supported protocol version is self-contained and needs no
+prior `initialize`.
 
 | Method | Direction | Description |
 | :--- | :--- | :--- |
+| `server/discover` | Client $ightarrow$ Server | Reports supported protocol versions, capabilities, and server identity. Answers without a handshake, since it is the probe a modern client sends first. |
 | `initialize` | Client $\rightarrow$ Server | Initializes the session and advertises implemented tool, resource, and prompt capabilities. Logging is omitted until `logging/setLevel` exists. |
 | `notifications/initialized` | Client $\rightarrow$ Server | Notification acknowledging initialization |
 | `ping` | Client $\rightarrow$ Server | Liveness check; returns `{}` |
