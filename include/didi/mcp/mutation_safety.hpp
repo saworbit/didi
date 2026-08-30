@@ -43,6 +43,12 @@ public:
 
     static bool isMutation(const ResolvedToolBinding& binding);
     static bool canRequireConfirmation(const ResolvedToolBinding& binding);
+    // Whether this exact call needs confirmation, as opposed to whether the tool
+    // ever can. A pure predicate over the binding and arguments, like the two
+    // above; public so the protocol layer can decide whether to ask a person
+    // before it reaches the token flow.
+    static bool requiresConfirmation(const ResolvedToolBinding& binding,
+                                     const json& arguments);
     static void decorateSchema(const ResolvedToolBinding& binding, json& schema);
 
 private:
@@ -53,8 +59,6 @@ private:
         int64_t expires_at_ms{0};
     };
 
-    static bool requiresConfirmation(const ResolvedToolBinding& binding,
-                                     const json& arguments);
     static bool sameContext(const MutationContext& left, const MutationContext& right);
     static json previewArguments(const json& arguments);
     static std::string bindingHash(const ResolvedToolBinding& binding,

@@ -1,6 +1,9 @@
 #include "didi/mcp/mcp_server.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/base64.hpp"
+#include "didi/mcp/mutation_safety.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
+#include "didi/tools/resolved_tool_binding.hpp"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -162,6 +165,77 @@ constexpr int64_t kSessionDependentTtlMs = 0;
 // Prompt definitions are compile-time constants with no session state.
 constexpr int64_t kStaticTtlMs = 3600000;
 
+// --- Human confirmation through elicitation --------------------------------
+//
+// Didi's confirmation tokens bind intent to exact arguments, project and route.
+// That is a real property, but the agent receives the token and echoes it back,
+// so confirmation has meant the agent confirming to itself. Elicitation is the
+// protocol's mechanism for putting a person in that loop: the server returns an
+// input_required result, the client shows it, and the client reissues the call
+// carrying the decision.
+//
+// This lives at the server layer deliberately. It translates a human decision
+// into the existing token, so MutationSafety keeps its single notion of what a
+// confirmed mutation is, and there is no second consent mechanism to keep in
+// step with the first.
+constexpr const char* kConfirmationRequestKey = "didi_confirm_mutation";
+constexpr const char* kClientCapabilitiesMetaKey = "io.modelcontextprotocol/clientCapabilities";
+
+bool clientCanElicitForms(const json& params) {
+    if (!params.is_object() || !params.contains("_meta") || !params["_meta"].is_object()) {
+        return false;
+    }
+    const auto& meta = params["_meta"];
+    if (!meta.contains(kClientCapabilitiesMetaKey) ||
+        !meta[kClientCapabilitiesMetaKey].is_object()) {
+        return false;
+    }
+    const auto& capabilities = meta[kClientCapabilitiesMetaKey];
+    if (!capabilities.contains("elicitation") || !capabilities["elicitation"].is_object()) {
+        return false;
+    }
+    // An empty capabilities object means form mode, for backwards compatibility.
+    const auto& elicitation = capabilities["elicitation"];
+    return elicitation.empty() || elicitation.contains("form");
+}
+
+// What a person needs to see is which thing is about to change, not the whole
+// argument object. These are the arguments that name a target across Didi's
+// mutating tools.
+std::string describeMutationTarget(const json& arguments) {
+    if (!arguments.is_object()) return "this project";
+    for (const char* key : {"save_path", "file_path", "target_node", "emitter_node",
+                            "resource_path", "scene_path", "output_path", "node_path"}) {
+        if (arguments.contains(key) && arguments[key].is_string()) {
+            return arguments[key].get<std::string>();
+        }
+    }
+    return "this project";
+}
+
+std::string encodeRequestState(const std::string& tool, const std::string& token) {
+    return base64::encode(json{{"tool", tool}, {"token", token}}.dump());
+}
+
+std::optional<json> decodeRequestState(const json& value) {
+    if (!value.is_string()) return std::nullopt;
+    const auto raw = base64::decode(value.get<std::string>());
+    if (raw.empty()) return std::nullopt;
+    auto parsed = json::parse(std::string(raw.begin(), raw.end()), nullptr, false);
+    if (parsed.is_discarded() || !parsed.is_object()) return std::nullopt;
+    if (!parsed.contains("tool") || !parsed["tool"].is_string()) return std::nullopt;
+    if (!parsed.contains("token") || !parsed["token"].is_string()) return std::nullopt;
+    return parsed;
+}
+
+// Records which way a mutation was confirmed. A caller that cannot tell a human
+// approval from an agent echoing a token to itself cannot reason about how much
+// the confirmation was worth.
+json withConfirmationProvenance(json result, const char* provenance) {
+    result["_meta"]["didi"]["confirmation"] = provenance;
+    return result;
+}
+
 } // namespace
 
 JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
@@ -295,8 +369,98 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         if (name.empty()) {
             return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams, "Tool name is required");
         }
+        // The client is returning a person's decision on a previous offer.
+        if (req.params.contains("inputResponses") && req.params["inputResponses"].is_object()) {
+            const auto state = decodeRequestState(req.params.value("requestState", json()));
+            const auto& responses = req.params["inputResponses"];
+            if (!state.has_value() || !responses.contains(kConfirmationRequestKey) ||
+                !responses[kConfirmationRequestKey].is_object()) {
+                return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams,
+                                                  "inputResponses must answer the request this server issued");
+            }
+            if (state->at("tool").get<std::string>() != name) {
+                // The state is bound to the tool it was minted for; honouring it
+                // for another would let one approval authorise a different act.
+                return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams,
+                                                  "requestState does not belong to this tool");
+            }
+            const auto action = responses[kConfirmationRequestKey].value("action", "cancel");
+            if (action != "accept") {
+                // Refusal and dismissal are different answers, and an agent that
+                // cannot tell them apart will retry the one it should not.
+                json payload = {{"error", {{"code", 403},
+                                           {"message", "Mutation was not approved"},
+                                           {"data", {{"tool", name}, {"action", action},
+                                                     {"retryable", action == "cancel"}}}}}};
+                return JsonRpcResponse::makeSuccess(
+                    req.id, complete(CallToolResult::error(payload.dump()).toJson()));
+            }
+            json approved = arguments;
+            approved["confirmation_token"] = state->at("token");
+            auto result = ToolRegistry::instance().callTool(name, approved);
+            return JsonRpcResponse::makeSuccess(
+                req.id, withConfirmationProvenance(complete(result.toJson()), "human"));
+        }
+
+        // A destructive tool with no token yet, and a client that can ask a
+        // person: offer the decision rather than telling the agent to confirm
+        // to itself.
+        const bool already_confirmed = arguments.contains("confirmation_token");
+        const bool previewing = arguments.value("dry_run", false);
+        if (!already_confirmed && !previewing && clientCanElicitForms(req.params)) {
+            const auto binding = resolveAliasBinding(name, arguments);
+            if (MutationSafety::requiresConfirmation(binding, arguments)) {
+                json preview_arguments = arguments;
+                preview_arguments["dry_run"] = true;
+                const auto preview = ToolRegistry::instance().callTool(name, preview_arguments);
+                const auto preview_json = preview.toJson();
+                const auto& structured = preview_json.contains("structuredContent")
+                                             ? preview_json["structuredContent"]
+                                             : json::object();
+                const auto token = structured.is_object() &&
+                                           structured.contains("mutation_preview") &&
+                                           structured["mutation_preview"].is_object()
+                                       ? structured["mutation_preview"].value("confirmation_token", "")
+                                       : std::string();
+                // If the preview itself failed there is nothing truthful to show
+                // a person, so fall through and let the ordinary path report why.
+                if (!preview.isError && !token.empty()) {
+                    json input_request = {
+                        {"method", "elicitation/create"},
+                        {"params", {
+                            {"mode", "form"},
+                            {"message", "Didi wants to run " + name + " on " +
+                                            describeMutationTarget(arguments) +
+                                            ". This changes your project. Approve?"},
+                            {"requestedSchema", {
+                                {"type", "object"},
+                                {"properties", {
+                                    {"confirm", {{"type", "boolean"},
+                                                 {"title", "Apply this change"},
+                                                 {"default", false}}}
+                                }},
+                                {"required", json::array({"confirm"})}
+                            }}
+                        }}
+                    };
+                    json result = {
+                        {"resultType", "input_required"},
+                        {"inputRequests", {{kConfirmationRequestKey, std::move(input_request)}}},
+                        {"requestState", encodeRequestState(name, token)},
+                        {"_meta", {{"didi", {{"mutation_preview",
+                                              structured.value("mutation_preview", json::object())}}}}}
+                    };
+                    return JsonRpcResponse::makeSuccess(req.id, std::move(result));
+                }
+            }
+        }
+
         auto result = ToolRegistry::instance().callTool(name, arguments);
-        return JsonRpcResponse::makeSuccess(req.id, complete(result.toJson()));
+        auto encoded = complete(result.toJson());
+        if (already_confirmed && !result.isError) {
+            encoded = withConfirmationProvenance(std::move(encoded), "agent");
+        }
+        return JsonRpcResponse::makeSuccess(req.id, std::move(encoded));
     }
 
     // Resources
