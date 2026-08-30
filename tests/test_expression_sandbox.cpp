@@ -100,8 +100,44 @@ void test_expression_policy_accepts_read_only_containers_math_and_unicode_string
     }
 }
 
+void test_expression_policy_allows_math_on_source_local_vectors_and_colors() {
+    // Break caught: the sandbox advertised Vector2, Vector3 and Color
+    // constructors but forbade every dot after them, so reading a component or
+    // calling a pure geometry method on a value the expression itself built was
+    // rejected as an object property read.
+    for (const auto& source : {
+        "Vector2(10, 20).x", "Vector2(10, 20).y",
+        "Vector3(1, 2, 3).x", "Vector3(1, 2, 3).z",
+        "Color(1, 0.5, 0.25, 1).r", "Color(1, 0.5, 0.25, 1).a",
+        "Vector2(3, 4).length()", "Vector2(3, 4).length_squared()",
+        "Vector3(1, 0, 0).normalized()", "Vector2(-1, 2).abs()",
+        "Vector2(0, 0).distance_to(Vector2(3, 4))",
+        "Vector3(1, 0, 0).dot(Vector3(0, 1, 0))",
+        "Vector2(1, 0).angle_to(Vector2(0, 1))",
+        "Vector2(3, 4).length() > 4", "Vector2(10, 20).x + Vector2(1, 2).y"
+    }) {
+        ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(source).isOk());
+    }
+
+    // Break caught: the relaxation leaks into real object property reads, into
+    // components that do not exist, or lets a dynamic value into an argument.
+    for (const auto& source : {
+        "node.position.x", "node.get_path().x", "node.get_child(0).position.y",
+        "Vector2(1, 2).z", "Vector2(1, 2).w", "Vector3(1, 2, 3).a", "Color(1, 1, 1, 1).x",
+        "Vector2(1, 2).dot(node)", "Vector2(1, 2).distance_to(node.get_path())",
+        "Vector2(node.get_child_count(), 1).x",
+        "Vector2(1, 2).queue_free()", "Vector2(1, 2).set(0, 5)",
+        "Vector2(1, 2).length(3)", "Vector2(1, 2).dot()",
+        "'abc'.x", "[1, 2].x", "{'a': 1}.x"
+    }) {
+        ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(source).isErr());
+    }
+}
+
 struct RegisterExpressionSandboxTests {
     RegisterExpressionSandboxTests() {
+        registerTest("ExpressionSandbox.SourceLocalVectorMath",
+                     test_expression_policy_allows_math_on_source_local_vectors_and_colors);
         registerTest("ExpressionSandbox.DocumentedVocabulary",
                      test_expression_policy_accepts_only_the_documented_read_only_vocabulary);
         registerTest("ExpressionSandbox.StringAndEscapeScanning",
