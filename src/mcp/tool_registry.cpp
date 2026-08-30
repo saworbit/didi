@@ -684,7 +684,7 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
                         lease->descriptor.has_value() && !payload.contains("session")) {
                         payload["session"] = lease->descriptor->toJson();
                     }
-                    item.text = payload.dump(2);
+                    item.text = payload.dump();
                     // Attribution is added to the text here, so structuredContent
                     // has to be re-taken from the attributed payload. Otherwise the
                     // two halves of the same result disagree, and the structured

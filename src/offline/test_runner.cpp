@@ -1,4 +1,5 @@
 #include "didi/offline/test_runner.hpp"
+#include "didi/offline/process_runner.hpp"
 #include "didi/common/logger.hpp"
 #include <algorithm>
 #include <cctype>
@@ -84,9 +85,21 @@ static std::optional<std::string> pathToUtf8(const std::filesystem::path& path) 
 
 std::optional<WindowsProcessCommand> makeWindowsProcessCommand(
     const std::string& executable,
-    const std::string& command_line) {
-    auto wide_command_line = utf8ToWide(command_line);
-    if (!wide_command_line) return std::nullopt;
+    const std::vector<std::string>& arguments) {
+    // Quote with the routine CreateProcessW's parser is specified against, the
+    // same one offline::runProcess uses, rather than wrapping in bare quotes and
+    // dropping anything awkward.
+    auto wide_executable = utf8ToWide(executable);
+    if (!wide_executable) return std::nullopt;
+    std::wstring wide_command_line = offline::detail::quoteWindowsArgument(*wide_executable);
+    for (const auto& argument : arguments) {
+        auto wide_argument = utf8ToWide(argument);
+        if (!wide_argument) return std::nullopt;
+        wide_command_line.push_back(L' ');
+        wide_command_line += offline::detail::quoteWindowsArgument(*wide_argument);
+    }
+    auto wide_command_line_holder = std::optional<std::wstring>(std::move(wide_command_line));
+    const auto& wide_command_line_ref = wide_command_line_holder;
 
     std::string lowercase_executable = executable;
     std::transform(lowercase_executable.begin(), lowercase_executable.end(),
@@ -95,13 +108,19 @@ std::optional<WindowsProcessCommand> makeWindowsProcessCommand(
                    });
     if (!strings::endsWith(lowercase_executable, ".cmd") &&
         !strings::endsWith(lowercase_executable, ".bat")) {
-        return WindowsProcessCommand{{}, std::move(*wide_command_line)};
+        return WindowsProcessCommand{{}, std::move(*wide_command_line_holder)};
     }
 
+    // A batch wrapper goes through cmd.exe, so a shell really is involved here
+    // and its metacharacters matter. Refuse rather than run something other
+    // than what was asked for, and rather than silently dropping the argument.
+    if (wide_command_line_ref->find_first_of(L"&|<>^\r\n") != std::wstring::npos) {
+        return std::nullopt;
+    }
     auto interpreter = trustedWindowsCommandInterpreter();
     if (interpreter.empty()) return std::nullopt;
     std::wstring wrapped = L"\"" + interpreter + L"\" /d /s /c \"" +
-                           *wide_command_line + L"\"";
+                           *wide_command_line_ref + L"\"";
     return WindowsProcessCommand{std::move(interpreter), std::move(wrapped)};
 }
 
@@ -216,39 +235,19 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
     auto start_time = std::chrono::steady_clock::now();
 
     std::string godot_exe = resolveGodotExecutable();
-    std::ostringstream cmd_builder;
-    cmd_builder << "\"" << godot_exe << "\"";
-    if (headless) {
-        cmd_builder << " --headless";
-    }
 
-    // Filter shell metacharacters (allow standard path separators / and \)
-    auto is_safe_arg = [](const std::string& s) {
-        return s.find_first_of("&|;`$<>^%\"'\r\n") == std::string::npos;
-    };
-
-    if (!scene_path.empty()) {
-        if (is_safe_arg(scene_path)) {
-            cmd_builder << " \"" << scene_path << "\"";
-        }
-    }
-
-    for (const auto& arg : extra_args) {
-        if (!is_safe_arg(arg)) {
-            continue; // Skip dangerous arguments
-        }
-        if (arg.find(' ') != std::string::npos) {
-            cmd_builder << " \"" << arg << "\"";
-        } else {
-            cmd_builder << " " << arg;
-        }
-    }
-
-    std::string command_line = cmd_builder.str();
-    DIDI_LOG_INFO("TEST_RUNNER", "Executing: ", command_line);
+    // One argument list for both platforms. POSIX hands it straight to execvp,
+    // and Windows quotes each element with the same routine CreateProcessW
+    // expects. Nothing is silently dropped: the old filter skipped any argument
+    // containing a quote, comma or semicolon on Windows and passed the same
+    // argument through untouched on POSIX.
+    std::vector<std::string> arguments;
+    if (headless) arguments.push_back("--headless");
+    if (!scene_path.empty()) arguments.push_back(scene_path);
+    for (const auto& argument : extra_args) arguments.push_back(argument);
 
 #if defined(_WIN32)
-    auto process_command = detail::makeWindowsProcessCommand(godot_exe, command_line);
+    auto process_command = detail::makeWindowsProcessCommand(godot_exe, arguments);
     if (!process_command) {
         result.success = false;
         result.summary = "Failed to prepare the Windows Godot command line.";

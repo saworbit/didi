@@ -22,7 +22,7 @@ struct WindowsProcessCommand {
 std::wstring trustedWindowsCommandInterpreter();
 std::optional<WindowsProcessCommand> makeWindowsProcessCommand(
     const std::string& executable,
-    const std::string& command_line);
+    const std::vector<std::string>& arguments);
 
 } // namespace detail
 #endif

@@ -49,7 +49,7 @@ CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpc
                 return CallToolResult::error("Live viewport capture returned a missing or malformed capture_id.");
             }
             result_data.erase("image_base64");
-            return CallToolResult::successImage(std::move(b64), result_data.dump(2));
+            return CallToolResult::successImage(std::move(b64), result_data.dump());
         }
         return CallToolResult::error("Failed to capture viewport via Godot GDExtension: " + res.error().message);
     }
@@ -147,7 +147,7 @@ CallToolResult handleViewportDiffCapture(const json& args, std::shared_ptr<ipc::
         return CallToolResult::error("Live viewport diff returned a missing or malformed comparison_capture_id.");
     }
     result_data.erase("image_base64");
-    return CallToolResult::successImage(b64, result_data.dump(2));
+    return CallToolResult::successImage(b64, result_data.dump());
 }
 
 CallToolResult handleViewportSetCameraTransform(const ResolvedToolBinding& binding, const json& args,

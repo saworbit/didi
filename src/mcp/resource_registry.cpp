@@ -118,7 +118,7 @@ Result<std::string> ResourceRegistry::readResource(const std::string& uri) {
                                        res->capability.modes.end();
             const bool live = supports_live && m_ipcClient && m_ipcClient->isConnected();
             payload["execution_mode"] = live ? "live" : "offline_fallback";
-            return payload.dump(2);
+            return payload.dump();
         }
     } catch (const json::exception&) {
         return result;
@@ -141,7 +141,7 @@ void ResourceRegistry::registerAllDefaultResources() {
         offline::ResourceIndexer indexer;
         auto tree = indexer.buildProjectTree(".");
         tree["execution_mode"] = "offline_fallback";
-        return tree.dump(2);
+        return tree.dump();
     };
     registerResource(std::move(proj_tree));
 
@@ -166,7 +166,7 @@ void ResourceRegistry::registerAllDefaultResources() {
             auto res = lease->sendRequest("editor.getState", {},
                                           ipc::kWaitForDefinitiveResponse);
             if (res.isOk()) {
-                return liveResourcePayload(res.value(), session).dump(2);
+                return liveResourcePayload(res.value(), session).dump();
             }
             auto error = res.error();
             (void)conditionallyQuarantineLease(error, m_ipcClient, *lease);
@@ -185,7 +185,7 @@ void ResourceRegistry::registerAllDefaultResources() {
             {"execution_mode", "offline_fallback"},
             {"message", "Godot Editor GDExtension is not actively running. Start Godot Editor with the Didi plugin to inspect live state."}
         };
-        return offline_state.dump(2);
+        return offline_state.dump();
     };
     registerResource(std::move(editor_state));
 
@@ -202,7 +202,7 @@ void ResourceRegistry::registerAllDefaultResources() {
             auto res = lease->sendRequest("runtime.getLogs", {},
                                           runtime::kMaxPublicLiveRequestMs);
             if (res.isOk()) {
-                return liveResourcePayload(res.value(), session).dump(2);
+                return liveResourcePayload(res.value(), session).dump();
             }
             auto error = res.error();
             const bool explicit_quarantine = error.data.is_object() &&
@@ -253,7 +253,7 @@ void ResourceRegistry::registerAllDefaultResources() {
             {"oldest_cursor", 1},
             {"dropped_before_cursor", false}
         };
-        return logs.dump(2);
+        return logs.dump();
     };
     registerResource(std::move(runtime_logs));
 }

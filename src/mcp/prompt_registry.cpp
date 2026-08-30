@@ -93,8 +93,9 @@ void PromptRegistry::registerAllDefaultPrompts() {
             "2. Use `project_list_resources` and `scene_get_hierarchy` to understand existing files and scene structure.\n"
             "3. When live, construct built-in nodes with focused `scene_instantiate_node`, `scene_set_property`, and other implemented `scene_*` tools.\n"
             "4. Edit project scripts through the normal workspace or `script_patch_method`, then run `script_check_syntax`.\n"
-            "5. Use `runtime_launch` for a separate-process test and inspect captured stdout/stderr.\n"
-            "6. Explicitly report unimplemented script attachment, signal wiring, input injection, or runtime introspection instead of claiming those steps succeeded.";
+            "5. Attach scripts with `script_attach_to_node` and `script_detach_from_node`, and wire signals with `signal_connect`, `signal_disconnect` and `signal_list_connections`.\n"
+            "6. Use `runtime_launch` for a separate-process test, then inspect the session with `runtime_read_logs`, `runtime_read_output`, `runtime_get_tree` and `eval_gdscript`.\n"
+            "7. Explicitly report unimplemented input injection, physics stepping, navigation baking, tilemap and gridmap editing, animation control, call stacks and profiler telemetry instead of claiming those steps succeeded.";
 
         json result = {
             {"description", "Capability-aware gameplay slice workflow for Godot 4.5+"},

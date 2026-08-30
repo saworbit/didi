@@ -319,22 +319,17 @@ Result<GDExtensionObjectPtr> resolveRuntimeNode(GDExtensionObjectPtr root,
 
 struct TraversalState {
     size_t node_count{0};
-    size_t estimated_pretty_tree_bytes{0};
+    size_t estimated_tree_bytes{0};
     bool truncated{false};
 };
 
-size_t estimatePrettyNodeBytes(const json& node, int depth, bool needs_separator) {
-    const auto pretty = node.dump(2);
-    const size_t line_count =
-        1 + static_cast<size_t>(std::count(pretty.begin(), pretty.end(), '\n'));
-    // CallToolResult::successJson uses dump(2). Each nested Node adds an object
-    // and a children array, so its absolute indentation grows by four spaces.
-    // Charge every line at that indentation and conservatively assume that its
-    // empty children array expands, even for leaves.
-    const size_t absolute_indent = 4 * static_cast<size_t>(depth) + 2;
-    const size_t children_array_overhead = absolute_indent + 4;
-    return pretty.size() + line_count * absolute_indent + children_array_overhead +
-           (needs_separator ? 1 : 0);
+size_t estimateNodeBytes(const json& node, int depth, bool needs_separator) {
+    (void)depth;
+    // CallToolResult::successJson emits compact JSON, so there is no indentation
+    // to charge for any more. What is left is the node itself, the "children":[]
+    // wrapper each one gains once it is nested, and the comma before a sibling.
+    constexpr size_t kChildrenArrayOverhead = 14;
+    return node.dump().size() + kChildrenArrayOverhead + (needs_separator ? 1 : 0);
 }
 
 Result<json> serializeRuntimeNode(GDExtensionObjectPtr node, int depth,
@@ -373,14 +368,14 @@ Result<json> serializeRuntimeNode(GDExtensionObjectPtr node, int depth,
         result["children_truncated"] = true;
         state.truncated = true;
     }
-    const size_t node_bytes = estimatePrettyNodeBytes(result, depth, needs_separator);
+    const size_t node_bytes = estimateNodeBytes(result, depth, needs_separator);
     const size_t tree_budget = kMaxRuntimeTreeResponseBytes - kRuntimeTreeEnvelopeReserveBytes;
     if (node_bytes > tree_budget -
-                         std::min(state.estimated_pretty_tree_bytes, tree_budget)) {
+                         std::min(state.estimated_tree_bytes, tree_budget)) {
         state.truncated = true;
         return json(nullptr);
     }
-    state.estimated_pretty_tree_bytes += node_bytes;
+    state.estimated_tree_bytes += node_bytes;
     ++state.node_count;
     if (depth >= max_depth) {
         return result;
