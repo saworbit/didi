@@ -70,7 +70,7 @@ Didi exposes 79 canonical tools plus 10 legacy names (89 total).
 
 Startup requires --project or DIDI_PROJECT_ROOT. Mutations expose dry_run and protected writes use confirmation_token.
 
-Phase 7 status is BLOCKED_AT_FEASIBILITY after the 2026-08-29 Godot 4.5.1 and Godot 4.7.2 feasibility gate. The implementation remains 61/79 canonical tools, with all 18 Phase 7 names registered but unimplemented. The gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts.
+Phase 7 status is PARTIAL_DELIVERY after the 2026-08-29 Godot 4.5.1 and Godot 4.7.2 feasibility gate. The implementation remains 65/79 canonical tools, with all 14 Phase 7 names registered but unimplemented. The gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts.
 
 [Phase 7 feasibility evidence](docs/PHASE_7_API_FEASIBILITY.md) | [Phase 7 approved executable plan](docs/PHASE_7_IMPLEMENTATION_PLAN.md)
 
@@ -83,9 +83,9 @@ Phase 7 status is BLOCKED_AT_FEASIBILITY after the 2026-08-29 Godot 4.5.1 and Go
 
 ## [Unreleased]
 
-Discovery now exposes 79 canonical tools plus 10 legacy registrations (89 total). Sixty-one canonical tools are implemented and 18 remain unimplemented.
+Discovery now exposes 79 canonical tools plus 10 legacy registrations (89 total). Sixty-five canonical tools are implemented and 14 remain unimplemented.
 
-Phase 7 is BLOCKED_AT_FEASIBILITY: 15/18 names are implementation-feasible and 3/18 are API-blocked under the approved contracts.
+Phase 7 is PARTIAL_DELIVERY: 15/18 names are implementation-feasible and 3/18 are API-blocked under the approved contracts.
 
 ## [1.4.0] - 2026-08-28
 
@@ -111,9 +111,9 @@ Current release: 1.4.0.
             "ADMIN_GUIDE.md": "# Admin Guide\n",
             "API_SPECIFICATION.md": "# API Specification\n\n423 Locked. Mutations expose dry_run and confirmation_token. Live IPC includes ui.hitTest.\n",
             "ARCHITECTURE.md": "# Architecture\n",
-            "DEVELOPER_GUIDE.md": "# Developer Guide\n\nPhase 7 is BLOCKED_AT_FEASIBILITY at 61/79 implemented; 15/18 names are implementation-feasible and 3/18 are API-blocked.\n",
+            "DEVELOPER_GUIDE.md": "# Developer Guide\n\nPhase 7 is PARTIAL_DELIVERY at 65/79 implemented; 15/18 names are implementation-feasible and 3/18 are API-blocked.\n",
             "INTEGRATION_GUIDE.md": "# Integration Guide\n",
-            "LLM_INSTRUCTIONS.md": "# LLM Instructions\n\nStart with --project or DIDI_PROJECT_ROOT. Preview with dry_run and use confirmation_token when returned. Phase 7 is BLOCKED_AT_FEASIBILITY at 61/79 implemented; all 18 names remain unimplemented, including the 15/18 implementation-feasible names and the 3/18 API-blocked names.\n",
+            "LLM_INSTRUCTIONS.md": "# LLM Instructions\n\nStart with --project or DIDI_PROJECT_ROOT. Preview with dry_run and use confirmation_token when returned. Phase 7 is PARTIAL_DELIVERY at 65/79 implemented; all 14 names remain unimplemented, including the 15/18 implementation-feasible names and the 3/18 API-blocked names.\n",
             "QUICKSTART.md": "# Quickstart\n\nStart with --project. Preview mutations with dry_run and use confirmation_token when required.\n",
             "RESOURCES_AND_PROMPTS.md": "# Resources And Prompts\n",
             "ROADMAP.md": "# Roadmap\n\n## Phase 6: Enterprise Safety (COMPLETE)\n\n| **13. Phase 5 Deep Domains (6)** | Implemented |\n",
@@ -125,9 +125,9 @@ Current release: 1.4.0.
             "docs/CAPABILITIES.md",
             """# Current Capability Matrix
 
-Didi v1.4.0 registers 79 canonical tool names. Sixty-one are implemented in at least one mode; 18 remain reserved. Ten legacy names are registered separately, for exactly 89 tools/list entries.
+Didi v1.4.0 registers 79 canonical tool names. Sixty-five are implemented in at least one mode; 14 remain reserved. Ten legacy names are registered separately, for exactly 89 tools/list entries.
 
-Phase 7 is BLOCKED_AT_FEASIBILITY at 15/18 implementation-feasible and 3/18 API-blocked; feasibility is not implementation and all 18 remain unimplemented.
+Phase 7 is PARTIAL_DELIVERY at 15/18 implementation-feasible and 3/18 API-blocked; feasibility is not implementation and all 14 remain unimplemented.
 
 Startup requires --project or DIDI_PROJECT_ROOT. A second session owner receives 423. Mutations expose dry_run and protected writes use confirmation_token.
 """,
@@ -138,7 +138,7 @@ Startup requires --project or DIDI_PROJECT_ROOT. A second session owner receives
 
 Didi exposes 79 canonical tool names plus 10 legacy names (89 registrations).
 
-Phase 7 is BLOCKED_AT_FEASIBILITY at 61/79 implemented. All 18 Phase 7 names remain unimplemented; 15/18 are implementation-feasible and 3/18 are API-blocked under the approved contracts.
+Phase 7 is PARTIAL_DELIVERY at 65/79 implemented. All 14 Phase 7 names remain unimplemented; 15/18 are implementation-feasible and 3/18 are API-blocked under the approved contracts.
 
 Session lock conflicts return 423. Mutations expose dry_run and protected writes use confirmation_token.
 """,
@@ -147,7 +147,7 @@ Session lock conflicts return 423. Mutations expose dry_run and protected writes
         self.write("docs/FUTURE_PHASES_DESIGN.md", self.make_future_phase_governance())
         self.write(
             "docs/FUTURE_PHASES_IMPLEMENTATION_PLAN.md",
-            "# Future Phases Documentation Plan\n\nHistorical approved plan. Current Phase 7 status: BLOCKED_AT_FEASIBILITY, with 15/18 implementation-feasible and 3/18 API-blocked.\n",
+            "# Future Phases Documentation Plan\n\nHistorical approved plan. Current Phase 7 status: PARTIAL_DELIVERY, with 15/18 implementation-feasible and 3/18 API-blocked.\n",
         )
         self.write(
             "docs/PHASE_7_API_FEASIBILITY.md",
@@ -157,9 +157,9 @@ Session lock conflicts return 423. Mutations expose dry_run and protected writes
             "docs/PHASE_7_IMPLEMENTATION_PLAN.md",
             """# Phase 7 Canonical Completion Implementation Plan
 
-**Status:** `BLOCKED_AT_FEASIBILITY`
+**Status:** `PARTIAL_DELIVERY`
 
-Task 1 completed on 2026-08-29 with 15/18 implementation-feasible and 3/18 API-blocked. The approved all-or-nothing 79/79 gate prevented Tasks 2-13; no production implementation started. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md).
+Task 1 completed on 2026-08-29 with 15/18 implementation-feasible and 3/18 API-blocked. The all-or-nothing 79/79 gate originally prevented Tasks 2-13 and was replaced by an explicit partial-delivery decision. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md).
 """,
         )
         self.write(
@@ -224,7 +224,7 @@ Second section.
             12: "Structured Engine Logging",
         }
         statuses = {phase: "PLANNED" for phase in phase_names}
-        statuses[7] = "BLOCKED_AT_FEASIBILITY"
+        statuses[7] = "PARTIAL_DELIVERY"
         if phase_statuses:
             statuses.update(phase_statuses)
         implementation_statuses = {phase: "COMPLETE" for phase in range(1, 7)}
@@ -251,7 +251,7 @@ Second section.
             if phase == 7:
                 lines.extend(
                     [
-                        "**Objective:** The implementation remains 61/79 canonical tools, with all 18 Phase 7 names registered but unimplemented. The feasibility gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts.",
+                        "**Objective:** The implementation remains 65/79 canonical tools, with all 14 Phase 7 names registered but unimplemented. The feasibility gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts.",
                         "",
                     ]
                 )
@@ -297,14 +297,14 @@ Second section.
             lines.extend([f"## Phase {phase}: Future Work", ""])
             lines.extend(
                 [
-                    f"**Status:** `{'BLOCKED_AT_FEASIBILITY' if phase == 7 else 'PLANNED'}`",
+                    f"**Status:** `{'PARTIAL_DELIVERY' if phase == 7 else 'PLANNED'}`",
                     "",
                 ]
             )
             if phase == 7:
                 lines.extend(
                     [
-                        "**Goal:** The implementation remains 61/79 canonical tools, with all 18 Phase 7 names registered but unimplemented; 15/18 are implementation-feasible and 3/18 are API-blocked under the approved contracts.",
+                        "**Goal:** The implementation remains 65/79 canonical tools, with all 14 Phase 7 names registered but unimplemented; 15/18 are implementation-feasible and 3/18 are API-blocked under the approved contracts.",
                         "",
                     ]
                 )
@@ -319,9 +319,9 @@ Second section.
 
     def phase7_current_status_block(self) -> str:
         return """<!-- phase7-current-status:start -->
-**Status:** `BLOCKED_AT_FEASIBILITY`
-**Canonical implementation:** `61/79`
-**Phase 7 registrations:** `18/18` unimplemented
+**Status:** `PARTIAL_DELIVERY`
+**Canonical implementation:** `65/79`
+**Phase 7 registrations:** `14/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 """
@@ -352,7 +352,7 @@ Second section.
         lines = [
             "# Phase 7 Godot API Feasibility Gate",
             "",
-            "**Status:** `BLOCKED_AT_FEASIBILITY`",
+            "**Status:** `PARTIAL_DELIVERY`",
             "",
             "The feasibility gate completed 2026-08-29 on Godot 4.5.1 and Godot 4.7.2.",
             "",
@@ -384,7 +384,7 @@ Second section.
         """Write a manifest matching the synthetic fixture's documented counts."""
         counts = {
             "canonical": 79, "legacy": 10,
-            "implemented": 61, "unimplemented": 18, "total": 89,
+            "implemented": 65, "unimplemented": 14, "total": 89,
         }
         counts.update(overrides)
         path = self.root / "tool_manifest.json"
@@ -402,10 +402,10 @@ Second section.
         # validation until the documentation is updated to match.
         root = self.make_valid_repository()
         errors = VALIDATOR.validate_repository(
-            root, self.write_manifest(implemented=62, unimplemented=17)
+            root, self.write_manifest(implemented=66, unimplemented=13)
         )
         self.assertTrue(
-            any("must state 62 implemented tools" in e for e in errors), errors
+            any("must state 66 implemented tools" in e for e in errors), errors
         )
 
     def test_manifest_drives_the_canonical_count_check(self):
@@ -413,10 +413,10 @@ Second section.
         # manifest rather than the hard-coded fallback tuple.
         root = self.make_valid_repository()
         errors = VALIDATOR.validate_repository(
-            root, self.write_manifest(implemented=62, unimplemented=17)
+            root, self.write_manifest(implemented=66, unimplemented=13)
         )
         self.assertTrue(
-            any("must be 79 canonical, 62 implemented, and 17 remaining" in e for e in errors),
+            any("must be 79 canonical, 66 implemented, and 13 remaining" in e for e in errors),
             errors,
         )
 
@@ -428,7 +428,7 @@ Second section.
         # fail loudly instead.
         root = self.make_valid_repository()
         errors = VALIDATOR.validate_repository(
-            root, self.write_manifest(canonical=80, implemented=62, total=90)
+            root, self.write_manifest(canonical=80, implemented=66, total=90)
         )
         self.assertTrue(
             any("CANONICAL_IMPLEMENTATION_COUNTS is" in e for e in errors), errors
@@ -439,7 +439,7 @@ Second section.
         # manifest path checks the binary, the fallback path checks a literal.
         self.assertEqual(
             VALIDATOR.CANONICAL_IMPLEMENTATION_COUNTS,
-            (79, 61, 18),
+            (79, 65, 14),
         )
 
     def test_missing_manifest_fails_with_actionable_message(self):
@@ -474,7 +474,7 @@ Second section.
         source = Path(VALIDATOR.__file__).read_text(encoding="utf-8")
         start = source.index("FACT_PATTERNS = {")
         block = source[start:source.index(chr(10) + "}", start)]
-        for count in ("79", "89", "61", "18"):
+        for count in ("79", "89", "65", "14"):
             self.assertNotIn(
                 count, block, f"published count {count} is hard-coded in FACT_PATTERNS"
             )
@@ -1017,18 +1017,18 @@ Second section.
             errors,
         )
 
-    def test_requires_phase7_blocked_at_feasibility_status(self):
+    def test_requires_phase7_partial_delivery_status(self):
         root = self.make_valid_repository()
         roadmap = (root / "docs/ROADMAP.md").read_text(encoding="utf-8")
         self.write(
             "docs/ROADMAP.md",
-            roadmap.replace("BLOCKED_AT_FEASIBILITY", "PLANNED", 1),
+            roadmap.replace("PARTIAL_DELIVERY", "PLANNED", 1),
         )
 
         errors = validate_repository(root)
 
         self.assertIn(
-            "docs/ROADMAP.md Phase 7 must declare status 'BLOCKED_AT_FEASIBILITY'",
+            "docs/ROADMAP.md Phase 7 must declare status 'PARTIAL_DELIVERY'",
             errors,
         )
 
@@ -1103,11 +1103,11 @@ Second section.
         root = self.make_valid_repository()
         readme = (root / "README.md").read_text(encoding="utf-8")
         readme = readme.replace(
-            "**Status:** `BLOCKED_AT_FEASIBILITY`",
+            "**Status:** `PARTIAL_DELIVERY`",
             "**Status:** `PLANNED`",
             1,
         )
-        readme += "\n## Glossary\n\n`BLOCKED_AT_FEASIBILITY` is a status token.\n"
+        readme += "\n## Glossary\n\n`PARTIAL_DELIVERY` is a status token.\n"
         self.write("README.md", readme)
 
         errors = validate_repository(root)
@@ -1198,14 +1198,14 @@ Historical vocabulary example: Phase 7 is planned.
 
     def test_rejects_canonical_count_mutation_in_each_current_document(self):
         mutations = {
-            "README.md": ("all 18 Phase 7 names", "all 17 Phase 7 names"),
-            "docs/CAPABILITIES.md": ("18 remain reserved", "17 remain reserved"),
-            "docs/ROADMAP.md": ("all 18 Phase 7 names", "all 17 Phase 7 names"),
+            "README.md": ("all 14 Phase 7 names", "all 13 Phase 7 names"),
+            "docs/CAPABILITIES.md": ("14 remain reserved", "13 remain reserved"),
+            "docs/ROADMAP.md": ("all 14 Phase 7 names", "all 13 Phase 7 names"),
             "docs/FUTURE_PHASES_DESIGN.md": (
-                "all 18 Phase 7 names",
-                "all 17 Phase 7 names",
+                "all 14 Phase 7 names",
+                "all 13 Phase 7 names",
             ),
-            "CHANGELOG.md": ("18 remain unimplemented", "17 remain unimplemented"),
+            "CHANGELOG.md": ("14 remain unimplemented", "13 remain unimplemented"),
         }
         for relative_path, (original, mutation) in mutations.items():
             with self.subTest(relative_path=relative_path):
@@ -1231,7 +1231,7 @@ Historical vocabulary example: Phase 7 is planned.
         roadmap = (root / "docs/ROADMAP.md").read_text(encoding="utf-8")
         self.write(
             "docs/ROADMAP.md",
-            roadmap.replace("all 18 Phase 7 names", "all 17 Phase 7 names", 1),
+            roadmap.replace("all 14 Phase 7 names", "all 13 Phase 7 names", 1),
         )
 
         errors = validate_repository(root)

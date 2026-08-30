@@ -91,6 +91,9 @@ json relation(const std::string& signal_name, const std::string& method, bool fl
     return value;
 }
 
+// Everything before the seam scenarios is real behaviour: real connects,
+// disconnects, emits and listings against a live engine. A production
+// binary must pass all of it.
 void run(Probe& probe) {
     Probe::error(probe.request("signal.listConnections", {{"target_node", "BasicEmitter"}, {"extra", 1}}), 400);
     Probe::error(probe.request("signal.connect", {{"emitter_node", 7}}), 400);
@@ -194,6 +197,10 @@ void run(Probe& probe) {
             {"signal_name", rejected.first}, {"arguments", rejected.second}}), 400);
     }
 
+}
+
+// Failure paths reachable only through the test-seam build.
+void runSeamScenarios(Probe& probe) {
     auto configure = [&](const std::string& seam) {
         Probe::success(probe.request("phase7SignalTest.configure", {{"seam", seam}}));
     };
@@ -247,14 +254,27 @@ void run(Probe& probe) {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 2) {
-        std::cerr << "usage: phase7_signal_bridge_probe <descriptor.json>\n";
+    // --production runs only what a shipping binary can serve. The seam
+    // scenarios need phase7SignalTest.configure, which is compiled out of the
+    // production extension by design, so requiring them would make it
+    // impossible to trial the binary users actually run.
+    bool production_only = false;
+    std::vector<std::string> positional;
+    for (int index = 1; index < argc; ++index) {
+        const std::string argument = argv[index];
+        if (argument == "--production") production_only = true;
+        else positional.push_back(argument);
+    }
+    if (positional.size() != 1) {
+        std::cerr << "usage: phase7_signal_bridge_probe [--production] <descriptor.json>\n";
         return 2;
     }
     try {
-        Probe probe(argv[1]);
+        Probe probe(positional.front());
         run(probe);
-        std::cout << "PHASE7_SIGNAL_RAW_METHODS|list,connect,disconnect,emit|ok\n";
+        if (!production_only) runSeamScenarios(probe);
+        std::cout << "PHASE7_SIGNAL_RAW_METHODS|list,connect,disconnect,emit|ok"
+                  << (production_only ? "|production" : "|seams") << "\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "PHASE7_SIGNAL_BRIDGE_FAILURE|" << error.what() << "\n";

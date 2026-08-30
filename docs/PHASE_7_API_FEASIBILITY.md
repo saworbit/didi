@@ -3,13 +3,13 @@
 ## Decision
 
 <!-- phase7-current-status:start -->
-**Status:** `BLOCKED_AT_FEASIBILITY`
-**Canonical implementation:** `61/79`
-**Phase 7 registrations:** `18/18` unimplemented
+**Status:** `PARTIAL_DELIVERY`
+**Canonical implementation:** `65/79`
+**Phase 7 registrations:** `14/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-**Decision:** 15/18 are implementation-feasible; 3/18 are API-blocked under the approved contracts. The approved all-or-nothing gate stopped the plan before Task 2.
+**Decision:** 15/18 are implementation-feasible; 3/18 are API-blocked under the approved contracts. The all-or-nothing gate stopped the plan before Task 2; it was later replaced by an explicit partial-delivery decision, under which the four signal names shipped.
 
 The feasibility gate completed on 2026-08-29 against Godot 4.5.1 and Godot 4.7.2. For each blocked row, no supported public API/semantics satisfying the exact approved contract was found on either tested version. This is a result for the tested versions and approved contracts, not a claim that implementation is impossible forever.
 
@@ -249,7 +249,7 @@ No C or C++ compilation was needed for Task 1: ClassDB identifiers came from the
 
 ## Gate consequence
 
-Task 1 is complete as a blocked feasibility gate. The implementation remains 61/79 canonical tools; all 18 names remain registered but unimplemented. The all-or-nothing 79/79 activation gate prevented Tasks 2-13, and no production implementation started.
+Task 1 is complete as a feasibility gate. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. The other 14 names remain registered but unimplemented.
 
 Work can proceed only after a governance decision:
 

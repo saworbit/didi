@@ -468,10 +468,14 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "scene.listGroups", "scene.addToGroup", "scene.removeFromGroup",
         "scene.getGroupMembers", "scene.create", "scene.open", "scene.close",
         "scene.packBranch", "runtime.getTree", "runtime.setPaused", "runtime.stop",
-        "runtime.evalGdscript", "ui.hitTest"
+        "runtime.evalGdscript", "ui.hitTest",
+        // Admission is deliberately separate from the failure-injection seams.
+        // One macro previously controlled both, so the feature could not be
+        // admitted to production without also compiling test seams into a
+        // shipping binary. Only the seam configurator stays gated.
+        "signal.listConnections", "signal.connect", "signal.disconnect", "signal.emit"
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
-        , "signal.listConnections", "signal.connect", "signal.disconnect", "signal.emit",
-        "phase7SignalTest.configure"
+        , "phase7SignalTest.configure"
 #endif
     };
     if (live_bridge_methods.count(method)) {
@@ -559,8 +563,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
     }
 
     static const std::unordered_set<std::string> registered_but_unimplemented = {
-        "scene.mutate", "signal.listConnections", "signal.connect", "signal.disconnect",
-        "signal.emit", "physics.raycast", "physics.simulateStep", "nav.bakeMesh",
+        "scene.mutate", "physics.raycast", "physics.simulateStep", "nav.bakeMesh",
         "nav.queryPath", "anim.listTracks", "anim.playTrack", "tilemap.setCells",
         "tilemap.getUsedRect", "gridmap.setCells", "asset.instantiate",
         "runtime.injectInput", "runtime.getCallStack", "runtime.readProfiler",

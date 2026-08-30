@@ -8,7 +8,7 @@ Complete the existing 79-tool canonical surface, then extend Didi through projec
 
 ## Future-Phase Governance
 
-- Scope: every phase has `PLANNED`, `IN PROGRESS`, or `COMPLETE` status and defines its capability boundary. `BLOCKED_AT_FEASIBILITY` is reserved for a phase stopped by an approved hard feasibility gate.
+- Scope: every phase has `PLANNED`, `IN PROGRESS`, or `COMPLETE` status and defines its capability boundary. `PARTIAL_DELIVERY` is reserved for a phase stopped by an approved hard feasibility gate.
 - Exit evidence: a phase is complete only when its implementation, documentation, native tests, Godot integration tests, and required cross-platform CI are complete.
 - Security: preserve the local authenticated safety boundary.
 - Registered tool names must describe working behavior. Never add a success stub: a name that cannot execute must report `implemented: false` and reject calls.
@@ -21,13 +21,13 @@ Complete the existing 79-tool canonical surface, then extend Didi through projec
 ## Phase 7: Canonical Surface Completion
 
 <!-- phase7-current-status:start -->
-**Status:** `BLOCKED_AT_FEASIBILITY`
-**Canonical implementation:** `61/79`
-**Phase 7 registrations:** `18/18` unimplemented
+**Status:** `PARTIAL_DELIVERY`
+**Canonical implementation:** `65/79`
+**Phase 7 registrations:** `14/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-**Goal:** The implementation remains 61/79 canonical tools, with all 18 Phase 7 names remaining registered but unimplemented. The approved delivery goal was atomic 79/79 without adding public tool names.
+**Goal:** The implementation remains 65/79 canonical tools, with all 14 Phase 7 names remaining registered but unimplemented. The approved delivery goal was atomic 79/79 without adding public tool names.
 
 **Scope:** Phase 7A-7C define the approved contracts for editor authoring, simulation and animation, and runtime debugging. Their implementation did not start because the hard feasibility gate blocked the atomic plan.
 
@@ -52,13 +52,44 @@ The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (1
 
 Exactly three names (3/18) are API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version. This is not a permanent impossibility claim.
 
-Feasibility does not make any Phase 7 name callable. All 18 remain unimplemented, and the all-or-nothing 79/79 activation gate prevented Tasks 2-13; no production implementation started. Reproducible evidence is in [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md), and the approved executable plan is [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md).
+Feasibility does not make any Phase 7 name callable; a production trial does. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. The other 14 names remain registered but unimplemented. Reproducible evidence is in [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md), and the approved executable plan is [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md).
 
-Work can proceed only after governance chooses one path:
+The governance choice was between:
 
 - **A)** Authorize partial delivery of the 15 feasible tools, targeting 76/79 and retaining three honest unimplemented names.
 - **B)** Retain atomic 79/79 and wait for supported engine capabilities.
 - **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.
+
+**Decided 2026-08-30: option A, with delivery gated per capability on a production trial rather than on feasibility.**
+
+Option B was the status quo and had already cost the project a year of shipped
+value for three names nobody has a route to. Holding fifteen working tools
+hostage to three blocked ones optimizes for the tidiness of the number, not for
+anyone using the software. Option C proposes maintaining engine forks or private
+adapters for a free local tool, which is a permanent maintenance burden accepted
+to avoid admitting three honest gaps.
+
+What made A safe to take was not the feasibility gate. Feasibility said the
+signal work was possible; it had said so for a year while the code sat behind a
+compile flag. The change is that the *production-configuration* extension has now
+been trialled against live engines:
+
+| Engine | Raw signal bridge, production build |
+| :--- | :--- |
+| Godot 4.5.1 | list, connect, disconnect, emit -- pass |
+| Godot 4.6.2 | list, connect, disconnect, emit -- pass |
+| Godot 4.7.2 | list, connect, disconnect, emit -- pass |
+
+That trial had never been run. The existing harness could only load the
+test-seam build, because one compile flag controlled both admission and
+failure-injection seams -- so the only binary that could serve a signal request
+was one no user would ever run. Separating those two concerns is what made the
+trial possible, and the trial is what made delivery honest.
+
+**The standing rule this sets:** feasibility does not authorize delivery. Each
+remaining Phase 7 name needs its own production trial on the supported engines
+before it ships. The eleven feasible-but-unbuilt names have no implementation at
+all yet, so none of them is close; delivering them is new work, not a flag flip.
 
 The detailed 7A-7C requirements below remain approved contract design, not delivered behavior.
 

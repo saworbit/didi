@@ -384,7 +384,11 @@ Result<std::string> stringFromVariant(VariantValue& value, GDExtensionVariantTyp
     return nativeStringToUtf8(native_string.ptr());
 }
 
-Result<json> variantToJson(VariantValue& value, int depth = 0) {
+// `lenient` substitutes null for a Variant type this cannot coerce, instead of
+// failing the whole conversion. Only for callers that read structure and ignore
+// values -- method arity metadata, where a single default argument of an
+// uncoercible type would otherwise make an entire node's method list unreadable.
+Result<json> variantToJson(VariantValue& value, int depth = 0, bool lenient = false) {
     if (depth > 16) return Error::invalidArgument("Godot Variant nesting exceeds the Phase 2 limit of 16 levels");
     auto& api = GodotApi::instance();
     auto type = api.variant_get_type(value.ptr());
@@ -419,7 +423,7 @@ Result<json> variantToJson(VariantValue& value, int depth = 0) {
                 if (index.isErr()) return index.error();
                 auto item = callVariant(value, "get", {&index.value()});
                 if (item.isErr()) return item.error();
-                auto converted = variantToJson(item.value(), depth + 1);
+                auto converted = variantToJson(item.value(), depth + 1, lenient);
                 if (converted.isErr()) return converted.error();
                 output.push_back(converted.value());
             }
@@ -446,13 +450,14 @@ Result<json> variantToJson(VariantValue& value, int depth = 0) {
                 if (key_text.isErr()) return key_text.error();
                 auto item = callVariant(value, "get", {&key.value()});
                 if (item.isErr()) return item.error();
-                auto converted = variantToJson(item.value(), depth + 1);
+                auto converted = variantToJson(item.value(), depth + 1, lenient);
                 if (converted.isErr()) return converted.error();
                 output[key_text.value()] = converted.value();
             }
             return output;
         }
         default:
+            if (lenient) return json(nullptr);
             return Error::invalidArgument("Godot Variant type " + std::to_string(type) + " is not JSON-coercible");
     }
 }
@@ -1611,8 +1616,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                    const std::string& method_name) -> Result<MethodMetadata> {
             auto methods = callObject(object, "Object", "get_method_list", 3995934104LL);
             if (methods.isErr()) return methods.error();
-            auto serialized = variantToJson(methods.value());
-            if (serialized.isErr() || !serialized.value().is_array()) {
+            auto serialized = variantToJson(methods.value(), 0, true);
+            if (serialized.isErr()) return serialized.error();
+            if (!serialized.value().is_array()) {
                 return Error::internal("Godot method metadata is malformed");
             }
             for (const auto& descriptor : serialized.value()) {

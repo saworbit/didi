@@ -62,8 +62,13 @@ CallToolResult sendPhase7LiveRequest(const ResolvedToolBinding& binding,
                            {{"retryable", true}});
     }
 
-    const auto response = lease->client->sendRequest(
-        std::string(binding.ipc_method), arguments, 17000);
+    // Send through the lease, not through its raw client. The lease is what
+    // attaches the session token the extension authenticates against; going
+    // straight to the client produced a 401 on every request. No Phase 7 tool
+    // had ever executed against a real session, so nothing caught it until the
+    // first one shipped.
+    const auto response = lease->sendRequest(
+        std::string(binding.ipc_method), arguments, runtime::kMaxPublicLiveRequestMs);
     if (response.isErr()) {
         const auto& failure = response.error();
         const auto transport = ipc::transportFailureState(failure);
@@ -83,8 +88,15 @@ CallToolResult sendPhase7LiveRequest(const ResolvedToolBinding& binding,
                                {{"retryable", false}, {"outcome", "unknown"},
                                 {"route_quarantine", quarantined}});
         }
+        // Carry what the engine actually said. Collapsing every live failure
+        // into a bare "route request failed" leaves a caller -- human or agent
+        // -- with no way to tell a bad node path from a dead transport, which
+        // is the difference between fixing the request and retrying forever.
         return phase7Error(binding, 503, "runtime_route_request_failed",
-                           {{"retryable", false}, {"route_quarantine", quarantined}});
+                           {{"retryable", false},
+                            {"route_quarantine", quarantined},
+                            {"upstream_code", failure.code},
+                            {"upstream_message", failure.message}});
     }
 
     json payload = response.value();

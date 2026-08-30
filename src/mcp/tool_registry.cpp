@@ -30,6 +30,11 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "runtime_read_logs", "runtime_read_output", "runtime_set_paused", "runtime_step", "runtime_stop",
         "runtime_get_tree", "eval_gdscript"
         , "asset_reimport", "viewport_diff_capture", "ui_hit_test"
+        // Phase 7 partial delivery. Admitted after the production-configuration
+        // extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and
+        // 4.7.2 -- the trial the earlier attempt never ran, having only ever
+        // exercised the test-seam build.
+        , "signal_list_connections", "signal_connect", "signal_disconnect", "signal_emit"
     };
     static const std::unordered_set<std::string> offline = {
         "script_check_syntax", "analyze_script_diagnostics", "script_reflect_class",
