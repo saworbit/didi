@@ -17,6 +17,30 @@ inline const char* kProtocolVersion = "2024-11-05";
 inline const char* kServerName = "didi";
 inline const char* kServerVersion = "1.4.0";
 
+// Revision 2026-07-28 removed the initialize handshake: a modern client
+// declares its protocol version in `_meta` on every request, and servers must
+// implement `server/discover`. Didi still serves legacy result shapes, so it
+// advertises only the legacy revision -- but answering discover lets a modern
+// client fail deterministically with an actionable list rather than meeting
+// silence, which is what the specification tells stdio clients to probe for.
+//
+// A revision joins kSupportedProtocolVersions when Didi actually serves it,
+// not when it can name it.
+inline const char* kProtocolVersionMetaKey = "io.modelcontextprotocol/protocolVersion";
+inline const char* kServerInfoMetaKey = "io.modelcontextprotocol/serverInfo";
+inline constexpr int kUnsupportedProtocolVersionCode = -32022;
+
+inline json supportedProtocolVersions() {
+    return json::array({kProtocolVersion});
+}
+
+inline bool isSupportedProtocolVersion(const std::string& version) {
+    for (const auto& supported : supportedProtocolVersions()) {
+        if (supported.get<std::string>() == version) return true;
+    }
+    return false;
+}
+
 struct ContentItem {
     std::string type; // "text" or "image" or "resource"
     std::string text;

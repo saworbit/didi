@@ -383,6 +383,107 @@ static void test_mcp_output_logging_never_copies_response_bodies() {
     ASSERT_TRUE(diagnostics.str().find(secret) == std::string::npos);
 }
 
+// --- Dual-era protocol discovery -------------------------------------------
+//
+// MCP revision 2026-07-28 removed the initialize handshake: a modern client
+// declares its protocol version in `_meta` on every request, and servers MUST
+// implement `server/discover`. Didi still serves legacy result shapes, so it
+// advertises only the legacy version -- but implementing discover lets a modern
+// client fail deterministically with an actionable list instead of meeting
+// silence, which is what the specification recommends probing for on stdio.
+
+static void test_mcp_discover_reports_supported_versions_without_a_handshake() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+
+    // Deliberately no initialize: discover is the probe a modern client sends
+    // first, so requiring a handshake would defeat its purpose.
+    didi::mcp::JsonRpcRequest discover;
+    discover.id = 1;
+    discover.method = "server/discover";
+    discover.params = {{"_meta", {{"io.modelcontextprotocol/protocolVersion", "2026-07-28"}}}};
+    const auto response = server.handleRequest(discover);
+
+    ASSERT_TRUE(!response.error.has_value());
+    ASSERT_EQ(response.result["resultType"].get<std::string>(), std::string("complete"));
+    ASSERT_TRUE(response.result["supportedVersions"].is_array());
+    bool advertises_legacy = false;
+    for (const auto& version : response.result["supportedVersions"]) {
+        if (version.get<std::string>() == didi::mcp::kProtocolVersion) advertises_legacy = true;
+    }
+    ASSERT_TRUE(advertises_legacy);
+    ASSERT_TRUE(response.result["capabilities"].contains("tools"));
+    ASSERT_EQ(response.result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"]
+                  .get<std::string>(), std::string("didi"));
+    // Caching hints are required on a complete result, and a missing ttlMs is
+    // read as "immediately stale", which silently discards the hint.
+    ASSERT_TRUE(response.result.contains("ttlMs"));
+    ASSERT_TRUE(response.result["ttlMs"].is_number_integer());
+    ASSERT_TRUE(response.result["ttlMs"].get<int64_t>() >= 0);
+    ASSERT_EQ(response.result["cacheScope"].get<std::string>(), std::string("public"));
+}
+
+// Didi must not claim a revision whose result shapes it does not serve. When it
+// gains resultType, ttlMs and cacheScope on every result, the modern version
+// joins this list -- and not before.
+static void test_mcp_discover_advertises_only_revisions_actually_served() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+    didi::mcp::JsonRpcRequest discover;
+    discover.id = 1;
+    discover.method = "server/discover";
+    discover.params = didi::json::object();
+    const auto response = server.handleRequest(discover);
+
+    for (const auto& version : response.result["supportedVersions"]) {
+        ASSERT_TRUE(version.get<std::string>() != std::string("2026-07-28"));
+    }
+}
+
+static void test_mcp_rejects_an_unsupported_protocol_version_actionably() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+
+    didi::mcp::JsonRpcRequest list;
+    list.id = 2;
+    list.method = "tools/list";
+    list.params = {{"_meta", {{"io.modelcontextprotocol/protocolVersion", "2026-07-28"}}}};
+    const auto response = server.handleRequest(list);
+
+    ASSERT_TRUE(response.error.has_value());
+    ASSERT_EQ(static_cast<int>(response.error->code), -32022);
+    // The client's whole recovery path is this list, so it must be present and
+    // must name what the server really speaks.
+    ASSERT_TRUE(response.error->data.contains("supported"));
+    ASSERT_EQ(response.error->data["requested"].get<std::string>(), std::string("2026-07-28"));
+    bool names_legacy = false;
+    for (const auto& version : response.error->data["supported"]) {
+        if (version.get<std::string>() == didi::mcp::kProtocolVersion) names_legacy = true;
+    }
+    ASSERT_TRUE(names_legacy);
+}
+
+// A legacy client must be entirely unaffected: dual-era support is additive.
+static void test_mcp_legacy_handshake_is_unaffected_by_discovery() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+
+    didi::mcp::JsonRpcRequest initialize;
+    initialize.id = 1;
+    initialize.method = "initialize";
+    initialize.params = didi::json::object();
+    const auto handshake = server.handleRequest(initialize);
+    ASSERT_TRUE(!handshake.error.has_value());
+    ASSERT_EQ(handshake.result["protocolVersion"].get<std::string>(),
+              std::string(didi::mcp::kProtocolVersion));
+
+    didi::mcp::JsonRpcRequest list;
+    list.id = 2;
+    list.method = "tools/list";
+    list.params = didi::json::object();
+    ASSERT_TRUE(!server.handleRequest(list).error.has_value());
+}
+
 struct RegisterJsonRpcTests {
     RegisterJsonRpcTests() {
         registerTest("JsonRpc.ParseValid", test_jsonrpc_parse_valid);
@@ -405,5 +506,13 @@ struct RegisterJsonRpcTests {
                      test_mcp_maps_resource_and_prompt_failures_to_server_error_range);
         registerTest("McpServer.OutputLoggingRedactsBodies",
                      test_mcp_output_logging_never_copies_response_bodies);
+        registerTest("McpServer.DiscoverReportsSupportedVersions",
+                     test_mcp_discover_reports_supported_versions_without_a_handshake);
+        registerTest("McpServer.DiscoverAdvertisesOnlyServedRevisions",
+                     test_mcp_discover_advertises_only_revisions_actually_served);
+        registerTest("McpServer.UnsupportedProtocolVersionIsActionable",
+                     test_mcp_rejects_an_unsupported_protocol_version_actionably);
+        registerTest("McpServer.LegacyHandshakeUnaffected",
+                     test_mcp_legacy_handshake_is_unaffected_by_discovery);
     }
 } g_registerJsonRpcTests;

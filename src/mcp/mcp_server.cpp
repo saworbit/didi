@@ -137,6 +137,58 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
 
     try {
 
+    // A modern client declares its protocol version on every request rather
+    // than in a handshake. Reject an unsupported one before doing any work, and
+    // name what this server does speak: that list is the client's entire
+    // recovery path.
+    std::optional<std::string> requested_version;
+    if (req.params.is_object() && req.params.contains("_meta") &&
+        req.params["_meta"].is_object() &&
+        req.params["_meta"].contains(kProtocolVersionMetaKey) &&
+        req.params["_meta"][kProtocolVersionMetaKey].is_string()) {
+        requested_version = req.params["_meta"][kProtocolVersionMetaKey].get<std::string>();
+    }
+    if (requested_version.has_value() && !isSupportedProtocolVersion(*requested_version) &&
+        req.method != "server/discover") {
+        return JsonRpcResponse::makeError(
+            req.id, kUnsupportedProtocolVersionCode, "Unsupported protocol version",
+            {{"supported", supportedProtocolVersions()}, {"requested", *requested_version}});
+    }
+
+    // Servers must implement discover, and it is the probe a modern stdio
+    // client sends first, so it must answer without a handshake and whatever
+    // version was asked for.
+    if (req.method == "server/discover") {
+        json result = {
+            {"resultType", "complete"},
+            {"supportedVersions", supportedProtocolVersions()},
+            {"capabilities", {
+                {"tools", json::object()},
+                {"resources", json::object()},
+                {"prompts", json::object()}
+            }},
+            {"_meta", {
+                {kServerInfoMetaKey, {{"name", kServerName}, {"version", kServerVersion}}}
+            }},
+            {"instructions",
+             "Didi drives a local Godot editor or game over an authenticated session. "
+             "Select a project with --project or DIDI_PROJECT_ROOT, discover sessions "
+             "with runtime_list_sessions, and preview mutations with dry_run before "
+             "supplying a confirmation_token."},
+            // Caching hints are required on a complete result. Everything here
+            // is fixed for the life of the process -- supported versions,
+            // capabilities and identity are compile-time constants -- so it is
+            // honestly cacheable, and carries no user-specific data.
+            //
+            // Note this does not generalise: tools/list embeds live session
+            // state, so its availability flips when an editor starts or stops
+            // and it cannot claim a long freshness window.
+            {"ttlMs", 3600000},
+            {"cacheScope", "public"}
+        };
+        return JsonRpcResponse::makeSuccess(req.id, result);
+    }
+
     if (req.method == "initialize") {
         m_initialized = true;
         json result = {
@@ -163,7 +215,10 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         return JsonRpcResponse::makeSuccess(req.id, json::object());
     }
 
-    if (!m_initialized) {
+    // A request that carries a supported protocol version is self-contained and
+    // needs no prior handshake -- that is the point of the stateless revision.
+    // Requiring initialize here would reject every modern client.
+    if (!m_initialized && !requested_version.has_value()) {
         return JsonRpcResponse::makeError(req.id, static_cast<JsonRpcErrorCode>(-32002), "Server not initialized. Must call 'initialize' first.");
     }
 

@@ -293,6 +293,22 @@ jobs:
                   raise RuntimeError(proc.stderr.read() or f'didi exited with status {proc.poll()}')
               return json.loads(line)
 
+          # Dual-era discovery, asserted on the wire. A modern client probes with
+          # server/discover before any handshake, so this must answer cold.
+          discover = req('server/discover', {}, 900)['result']
+          assert discover['resultType'] == 'complete'
+          assert discover['supportedVersions'] == ['2024-11-05'], discover['supportedVersions']
+          assert discover['_meta']['io.modelcontextprotocol/serverInfo']['name'] == 'didi'
+          # Caching hints are required on a complete result; a missing ttlMs
+          # is read as immediately stale, which discards the hint silently.
+          assert discover['ttlMs'] >= 0 and discover['cacheScope'] == 'public'
+          # Didi must not claim a revision whose result shapes it does not serve,
+          # and must tell a modern client what it can retry with.
+          unsupported = req('tools/list', {'_meta': {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28'}}, 901)
+          assert unsupported['error']['code'] == -32022, unsupported
+          assert '2024-11-05' in unsupported['error']['data']['supported']
+
           assert req('initialize', {'protocolVersion': '2024-11-05'}, 1)['result']['serverInfo']['name'] == 'didi'
           tools = req('tools/list', {}, 2)['result']['tools']
           by_name = {tool['name']: tool for tool in tools}
