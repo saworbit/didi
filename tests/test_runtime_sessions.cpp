@@ -1083,6 +1083,47 @@ void test_discovery_reaps_orphaned_tombstones_without_listing_them() {
 }
 
 
+void test_failed_refresh_releases_the_session_lock() {
+    // Break caught: quarantineIfCurrent retired the route but kept m_activeLock,
+    // unlike quarantineRoute and detachSession. After a failed refresh this
+    // process still held the session lock, so the next attach got 423 from a
+    // lock it owned itself, and so did any other MCP client, until it exited.
+    const auto directory = makeSessionDirectory();
+    const auto session_id = std::string("0123456789abcdef0123456789abcdef");
+    writeDescriptor(directory, session_id + ".json",
+                    validDescriptor(session_id, endpointFor(session_id)));
+    setSessionDirectory(directory);
+
+    std::vector<FakeIpcClient*> created;
+    auto first = didi::runtime::createRuntimeSessionClient(
+        std::filesystem::current_path().string(),
+        [&created]() -> std::unique_ptr<didi::ipc::IIpcClient> {
+            auto fake = std::make_unique<FakeIpcClient>();
+            created.push_back(fake.get());
+            return fake;
+        });
+    ASSERT_TRUE(first->attachSession(session_id).isOk());
+    ASSERT_TRUE(!created.empty());
+
+    // Stand in for the Godot process going away underneath us.
+    created.back()->disconnect();
+    ASSERT_TRUE(first->refreshSession().isErr());
+    ASSERT_TRUE(!first->activeSession().has_value());
+
+    // The lock has to be free now, or no other client can ever take over.
+    auto second = didi::runtime::createRuntimeSessionClient(
+        std::filesystem::current_path().string(),
+        []() -> std::unique_ptr<didi::ipc::IIpcClient> {
+            return std::make_unique<FakeIpcClient>();
+        });
+    ASSERT_TRUE(second->attachSession(session_id).isOk());
+
+    second->disconnect();
+    first->disconnect();
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
 struct RegisterRuntimeSessionTests {
     RegisterRuntimeSessionTests() {
         registerTest("RuntimeSessions.DescriptorRejectsWrongTokenLength",
@@ -1097,6 +1138,8 @@ struct RegisterRuntimeSessionTests {
                      test_session_discovery_does_not_treat_reused_pid_metadata_as_live);
         registerTest("RuntimeSessions.StaleRetirementPreservesReplacement",
                      test_session_discovery_preserves_replacement_at_proven_stale_path);
+        registerTest("RuntimeSessions.FailedRefreshReleasesLock",
+                     test_failed_refresh_releases_the_session_lock);
         registerTest("RuntimeSessions.ReadsValidatedDescriptorObject",
                      test_session_discovery_reads_the_validated_descriptor_object);
         registerTest("RuntimeSessions.ClosesValidatedHandleOnException",

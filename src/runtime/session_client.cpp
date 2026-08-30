@@ -1089,10 +1089,17 @@ private:
 
     void quarantineIfCurrent(const std::shared_ptr<ipc::IIpcClient>& client) {
         std::shared_ptr<ipc::IIpcClient> quarantined;
+        // The session lock has to go with the route, exactly as it does in
+        // quarantineRoute, detachSession and disconnect. Retiring the route but
+        // keeping the lock left this process holding a session it no longer has,
+        // so the next attach got 423 from a lock we ourselves still owned, and
+        // so did any other MCP client, until the process exited.
+        std::shared_ptr<RuntimeSessionLock> quarantined_lock;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             if (m_activeClient != client) return;
             quarantined = std::move(m_activeClient);
+            quarantined_lock = std::move(m_activeLock);
             m_activeDescriptor.reset();
             m_autoAttachEnabled = false;
             ++m_routeGeneration;
