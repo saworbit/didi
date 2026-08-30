@@ -470,7 +470,13 @@ private:
             HANDLE pipe = CreateNamedPipeA(
                 m_pipeName.c_str(),
                 PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                // PIPE_REJECT_REMOTE_CLIENTS is the difference between a local
+                // endpoint and one reachable over SMB as a UNC pipe path.
+                // The DACL still grants local Administrators, so without this a
+                // remote client authenticating as one could connect and start
+                // guessing the session token. The attachment boundary SECURITY.md
+                // documents is local, so say so to the operating system too.
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                 PIPE_UNLIMITED_INSTANCES,
                 64 * 1024,
                 64 * 1024,
@@ -957,20 +963,34 @@ public:
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, m_pipeName.c_str(), sizeof(addr.sun_path) - 1);
 
-        if (bind(m_listenSock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        // bind() creates the socket file with 0777 & ~umask. The old order was
+        // bind, listen, then chmod, so with the common umask of 022 the socket
+        // sat at 0755 under a shared temp directory and was already accepting
+        // connections before the owner-only policy was applied. Narrow the umask
+        // across bind so the file is owner only from the moment it exists.
+        const mode_t previous_umask = umask(S_IRWXG | S_IRWXO);
+        const int bind_result = bind(m_listenSock, (struct sockaddr*)&addr, sizeof(addr));
+        umask(previous_umask);
+        if (bind_result < 0) {
             close(m_listenSock);
             m_listenSock = -1;
+            return false;
+        }
+
+        // Confirm before listening, and fail closed if the endpoint is not owner
+        // only, the same policy the Windows SDDL path already applies. umask
+        // cannot grant permissions, but a filesystem that ignores it can.
+        struct stat socket_status {};
+        if (chmod(m_pipeName.c_str(), 0600) != 0 ||
+            stat(m_pipeName.c_str(), &socket_status) != 0 ||
+            (socket_status.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
+            close(m_listenSock);
+            m_listenSock = -1;
+            unlink(m_pipeName.c_str());
             return false;
         }
 
         if (listen(m_listenSock, 5) < 0) {
-            close(m_listenSock);
-            m_listenSock = -1;
-            return false;
-        }
-
-        // Restrict Unix domain socket permissions to owner only
-        if (chmod(m_pipeName.c_str(), 0600) != 0) {
             close(m_listenSock);
             m_listenSock = -1;
             unlink(m_pipeName.c_str());
