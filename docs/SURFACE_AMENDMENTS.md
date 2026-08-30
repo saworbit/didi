@@ -52,8 +52,10 @@ and verification, and it fails visibly wherever the surface has a hole.
 
 ## Amendment log
 
-One amendment is accepted: `runtime_read_output`, recorded below with its
-tri-engine feasibility evidence. The remaining candidates come from the
+One amendment is implemented: `runtime_read_output`, recorded below with its
+tri-engine feasibility evidence. One is withdrawn: raising the engine floor to
+Godot 4.7, refused in favour of runtime capability detection so that 4.5 and 4.6
+users keep support. The remaining candidates come from the
 August 2026 competitive review and are proposed, not accepted, in
 [Realignment Implementation Plan](REALIGNMENT_IMPLEMENTATION_PLAN.md):
 `runtime_read_output`, `ui_list_controls`, `godot_api_reference`, and an `until`
@@ -171,7 +173,7 @@ engine log output, not stack frames or breakpoints. The existing
 `runtime_read_logs` contract is unchanged, and this does not become an alias
 for it: one returns Didi's own records, the other returns the engine's.
 
-### PROPOSED: raise the minimum Godot version to 4.7
+### WITHDRAWN: raise the minimum Godot version to 4.7
 
 | Field | Value |
 | :--- | :--- |
@@ -189,6 +191,29 @@ so Phase 7 supplies no argument for raising it. The real argument is
 `EditorInterface.get_unsaved_scenes()`, which arrives in 4.7 — a genuine but
 small benefit that has to be weighed against dropping two engine versions at
 v1.4.x. Decide it on that basis, not as a side effect.
+
+**Decided 2026-08-30: withdrawn. The floor stays at 4.5+.**
+
+The whole case for raising it reduces to one method. Set against that, the cost
+is every user on 4.5 or 4.6 losing support from a tool whose value proposition
+is that it is free and works with the engine you already have. A version floor
+is the most expensive kind of change to make and the cheapest to postpone: it
+can be raised later when something genuinely requires it, and until then every
+month that passes moves more users to 4.7 on their own schedule rather than on
+ours.
+
+The benefit is not forgone. `EditorInterface.get_unsaved_scenes()` is detectable
+at runtime, so `scene_close` can use it where it exists and keep the
+conservative refusal where it does not. That amendment already prescribes
+exactly this, so the capability arrives for 4.7 users without being taken away
+from anyone else. A capability check is strictly better than a floor raise
+whenever the capability is optional, which this one is.
+
+This also settles the irregularity that prompted the record. Phase 7
+partial-delivery work adopted 4.7.2 as its sole baseline without a decision;
+that baseline is not adopted, and the tri-engine matrix (4.5.1, 4.6.2, 4.7.2)
+remains the verified set. Reopen this only when a capability Didi actually needs
+is unavailable below 4.7 and cannot be detected at runtime.
 
 ### PROPOSED: `scene_close` reads real dirty state on Godot 4.7+
 
