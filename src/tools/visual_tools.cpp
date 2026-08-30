@@ -176,8 +176,40 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
             lab_scene_path);
     }
 
+    // The sandbox lives under addons/didi, which a clean project does not have.
+    std::error_code directory_error;
+    std::filesystem::create_directories("addons/didi", directory_error);
+    if (directory_error) {
+        return CallToolResult::error(
+            "Failed to create the addons/didi directory for the visual test lab.");
+    }
+
+    // The target has to be a real resource beneath the project root before it
+    // can be referenced from the generated scene.
+    std::string target_resource;
+    std::string target_type;
+    if (!target_path.empty()) {
+        auto resolved = paths::resolveProjectFile(target_path);
+        if (resolved.isErr()) {
+            return CallToolResult::error("Invalid target_resource_path: " +
+                                         resolved.error().message);
+        }
+        target_resource = strings::startsWith(target_path, "res://")
+                              ? target_path
+                              : "res://" + target_path;
+        const auto extension = resolved.value().extension().string();
+        target_type = extension == ".tscn" || extension == ".scn" ? "PackedScene" : "Resource";
+    }
+
     std::ostringstream scene_file;
-    scene_file << "[gd_scene format=3 uid=\"uid://didi_test_lab_sandbox\"]\n\n"
+    scene_file << "[gd_scene";
+    if (!target_resource.empty()) scene_file << " load_steps=2";
+    scene_file << " format=3 uid=\"uid://didi_test_lab_sandbox\"]\n\n";
+    if (!target_resource.empty()) {
+        scene_file << "[ext_resource type=\"" << target_type << "\" path=\""
+                   << target_resource << "\" id=\"1_didi_target\"]\n\n";
+    }
+    scene_file
         << "[node name=\"VisualTestLab\" type=\"Node3D\"]\n\n"
         << "[node name=\"DirectionalLight3D\" type=\"DirectionalLight3D\" parent=\".\"]\n"
         << "transform = Transform3D(0.866025, -0.25, 0.433013, 0, 0.866025, 0.5, -0.5, -0.433013, 0.75, 0, 5, 0)\n"
@@ -194,8 +226,16 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
         << "[node name=\"CameraIsometric\" type=\"Camera3D\" parent=\".\"]\n"
         << "transform = Transform3D(0.707107, -0.353553, 0.612372, 0, 0.866025, 0.5, -0.707107, -0.353553, 0.612372, 3, 3, 3)\n\n";
 
-    if (!target_path.empty()) {
-        scene_file << "[node name=\"TargetInstance\" type=\"Node3D\" parent=\".\"]\n";
+    if (!target_resource.empty()) {
+        if (target_type == "PackedScene") {
+            scene_file << "[node name=\"TargetInstance\" parent=\".\" "
+                       << "instance=ExtResource(\"1_didi_target\")]\n";
+        } else {
+            // A plain Resource cannot be a node, so hang it off a holder the
+            // cameras can still frame.
+            scene_file << "[node name=\"TargetInstance\" type=\"Node3D\" parent=\".\"]\n"
+                       << "metadata/didi_target = ExtResource(\"1_didi_target\")\n";
+        }
     }
 
     auto written = files::writeFileAtomically(paths::projectPathFromUtf8(disk_path),
