@@ -1,4 +1,5 @@
 #include "didi/offline/project_search.hpp"
+#include "didi/common/project_path.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -246,6 +247,22 @@ void test_result_order_and_whole_word_boundary() {
     ASSERT_EQ(result.value().matches[1].path, "res://z.gd");
 }
 
+void test_unicode_paths_round_trip_as_utf8() {
+    // Break caught: Windows narrow conversions mangle res:// paths for non-ASCII file names.
+    const std::string relative_utf8 = "scripts/inimigo_a\xC3\xA7\xC3\xA3o.gd";
+    SearchFixture fixture;
+    fixture.write(didi::paths::projectPathFromUtf8(relative_utf8),
+                  "func atacar():\n\tpass\n");
+
+    didi::offline::ProjectSearch search(fixture.root());
+    didi::offline::SearchOptions text_options;
+    text_options.query = "atacar";
+    const auto text = search.searchText(text_options);
+    ASSERT_TRUE(text.isOk());
+    ASSERT_EQ(text.value().matches.size(), 1u);
+    ASSERT_EQ(text.value().matches[0].path, "res://" + relative_utf8);
+}
+
 struct RegisterProjectSearchTests {
     RegisterProjectSearchTests() {
         registerTest("ProjectSearch.TextAndGdscriptSymbols", test_text_and_gdscript_symbols);
@@ -256,6 +273,7 @@ struct RegisterProjectSearchTests {
         registerTest("ProjectSearch.GdscriptDeclarationForms", test_gdscript_symbols_include_annotations_static_and_inner_classes);
         registerTest("ProjectSearch.BinaryFileIsDiagnosticNotMatch", test_binary_file_is_diagnostic_not_match);
         registerTest("ProjectSearch.ResultOrderAndWholeWordBoundary", test_result_order_and_whole_word_boundary);
+        registerTest("ProjectSearch.UnicodePathsRoundTripAsUtf8", test_unicode_paths_round_trip_as_utf8);
     }
 } g_register_project_search_tests;
 

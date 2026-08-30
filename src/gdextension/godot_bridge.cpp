@@ -4,6 +4,7 @@
 #include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/gdextension/viewport_renderer.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/project_path.hpp"
 #include <array>
 #include <algorithm>
 #include <cctype>
@@ -1082,7 +1083,8 @@ Result<std::vector<std::string>> GodotBridge::beginAssetReimport(
     auto project_path = resolveGodotProjectPath();
     if (project_path.isErr()) return project_path.error();
     std::error_code ec;
-    const auto root = fs::weakly_canonical(project_path.value(), ec);
+    const auto root = fs::weakly_canonical(
+        didi::paths::projectPathFromUtf8(project_path.value()), ec);
     if (ec || !fs::is_directory(root, ec)) return Error::internal("Godot project root is unavailable");
 
     std::set<std::string> unique;
@@ -1095,7 +1097,7 @@ Result<std::vector<std::string>> GodotBridge::beginAssetReimport(
         }
         auto valid = validateResPath(path, "");
         if (valid.isErr()) return valid.error();
-        const auto relative = fs::path(path.substr(6));
+        const auto relative = didi::paths::projectPathFromUtf8(path.substr(6));
         const auto candidate = fs::canonical(root / relative, ec);
         if (ec || !pathWithin(root, candidate) || !fs::is_regular_file(candidate, ec) ||
             fs::is_symlink(fs::symlink_status(root / relative, ec))) {
@@ -1103,7 +1105,7 @@ Result<std::vector<std::string>> GodotBridge::beginAssetReimport(
         }
         auto relative_canonical = fs::relative(candidate, root, ec);
         if (ec) return Error::invalidArgument("Unable to normalize reimport path: " + path);
-        const auto resource_path = "res://" + relative_canonical.generic_string();
+        const auto resource_path = "res://" + didi::paths::projectPathToUtf8(relative_canonical);
         if (!unique.insert(resource_path).second) {
             return Error::invalidArgument("Reimport paths must be unique after normalization");
         }

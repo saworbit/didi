@@ -789,7 +789,8 @@ std::vector<DiscoveredSession> discoverSessions(json& diagnostics,
                 continue;
             }
             auto descriptor = decoded.value();
-            descriptor.project_path = canonicalPath(descriptor.project_path).string();
+            descriptor.project_path =
+                paths::nativePathToUtf8(canonicalPath(paths::projectPathFromUtf8(descriptor.project_path)));
             const auto state = processInstanceState(descriptor.pid, descriptor.started_at_ms);
             if (state == ProcessInstanceState::proven_stale) {
                 const auto retired = retireOwnedSessionDescriptor(path, descriptor);
@@ -814,7 +815,8 @@ class RuntimeSessionClient final : public IRuntimeSessionClient {
 public:
     RuntimeSessionClient(std::string project_root, ipc::IpcClientFactory factory,
                          DescriptorOpenedHook opened_hook)
-        : m_projectRoot(canonicalPath(project_root).string()), m_factory(std::move(factory)),
+        : m_projectRoot(paths::nativePathToUtf8(canonicalPath(paths::projectPathFromUtf8(project_root)))),
+          m_factory(std::move(factory)),
           m_descriptorOpenedHook(std::move(opened_hook)) {
         auto client_id = security::secureRandomHex(16);
         if (client_id.isOk()) m_clientId = std::move(client_id.value());
@@ -856,7 +858,9 @@ public:
 
     Result<json> listSessions(const std::optional<std::string>& project_path) override {
         json diagnostics = json::array();
-        const auto filter = project_path.has_value() ? canonicalPath(*project_path).string() : std::string{};
+        const auto filter = project_path.has_value()
+                                ? paths::nativePathToUtf8(canonicalPath(paths::projectPathFromUtf8(*project_path)))
+                                : std::string{};
         json listed = json::array();
         for (const auto& session : discoverSessions(diagnostics, m_descriptorOpenedHook)) {
             if (!filter.empty() && session.descriptor.project_path != filter) continue;

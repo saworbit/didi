@@ -38,6 +38,14 @@ inline std::string projectPathToUtf8(const std::filesystem::path& path) {
     return {reinterpret_cast<const char*>(value.data()), value.size()};
 }
 
+// UTF-8 encoding of a path in its native separator form. Use this where the
+// separator style is part of an identity that another process also produced,
+// such as a runtime session descriptor. Use projectPathToUtf8 for res:// paths.
+inline std::string nativePathToUtf8(const std::filesystem::path& path) {
+    const auto value = path.u8string();
+    return {reinterpret_cast<const char*>(value.data()), value.size()};
+}
+
 inline bool isWithinProject(const std::filesystem::path& root,
                             const std::filesystem::path& candidate) {
     const auto root_value = normalizedProjectPath(root);
