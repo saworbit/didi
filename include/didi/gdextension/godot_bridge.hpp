@@ -37,6 +37,11 @@ public:
     json execute(const std::string& method, const json& params,
                  const std::string& session_kind = "editor");
     Result<ViewportPixels> captureEditorViewport(const std::string& camera_identifier);
+    // Split so the caller can publish its pending request before the reimport
+    // starts. EditorFileSystem.reimport_files re-enters the main-loop callback,
+    // and a nested frame that cannot see the request misses the scanning window.
+    Result<std::vector<std::string>> resolveReimportPaths(const std::vector<std::string>& paths);
+    Result<void> startAssetReimport(const std::vector<std::string>& resolved_paths);
     Result<std::vector<std::string>> beginAssetReimport(const std::vector<std::string>& paths);
     Result<bool> isEditorFilesystemScanning();
     Result<ViewportIsolationState> beginViewportIsolation(const std::string& node_path,
