@@ -368,6 +368,30 @@ static void test_resource_create_preserves_existing_file_without_overwrite() {
     ASSERT_TRUE(readToolTestFile(path) != original);
 }
 
+static void test_resource_create_writes_unicode_file_names() {
+    // Break caught: the writer opened the stream through a narrow ANSI path, so
+    // non-ASCII resource names failed or landed on disk with damaged text.
+    ScopedToolProject project("resource-unicode");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const std::string save_path = "res://materials/padr\xC3\xA3o_madeira.tres";
+    const didi::json args = {
+        {"save_path", save_path},
+        {"resource_type", "StandardMaterial3D"},
+        {"properties", {{"roughness", 0.25}}}
+    };
+    const auto result = registry.callTool("resource_create", args);
+    if (result.isError) {
+        throw std::runtime_error("Unicode resource_create failed: " + result.content[0].text);
+    }
+
+    const auto expected =
+        didi::paths::projectPathFromUtf8("materials/padr\xC3\xA3o_madeira.tres");
+    ASSERT_TRUE(std::filesystem::exists(expected));
+    ASSERT_TRUE(readToolTestFile(expected).find("StandardMaterial3D") != std::string::npos);
+}
+
 static void test_visual_lab_preserves_existing_file_without_overwrite() {
     ScopedToolProject project("visual-lab-overwrite");
     std::filesystem::create_directories("addons/didi");
@@ -1104,6 +1128,8 @@ struct RegisterToolTests {
                      test_offline_writer_schemas_require_explicit_overwrite);
         registerTest("Tools.ResourceCreateOverwriteGuard",
                      test_resource_create_preserves_existing_file_without_overwrite);
+        registerTest("Tools.ResourceCreateUnicodeFileNames",
+                     test_resource_create_writes_unicode_file_names);
         registerTest("Tools.VisualLabOverwriteGuard",
                      test_visual_lab_preserves_existing_file_without_overwrite);
         registerTest("Tools.ProjectSearchPublicValidationAndSchema", test_project_search_public_validation_and_schema);

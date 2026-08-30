@@ -1,5 +1,6 @@
 #include "didi/offline/project_search.hpp"
 #include "didi/offline/gdscript_diagnostics.hpp"
+#include "didi/common/project_path.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -217,7 +218,7 @@ Result<std::vector<FileRecord>> collectFiles(const fs::path& root,
             ec.clear();
             continue;
         }
-        files.push_back({canonical, "res://" + relative.generic_string(), size});
+        files.push_back({canonical, "res://" + paths::projectPathToUtf8(relative), size});
         response.scanned_bytes += size;
     }
     std::sort(files.begin(), files.end(), [](const auto& left, const auto& right) {

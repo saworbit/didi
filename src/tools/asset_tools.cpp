@@ -2,6 +2,7 @@
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/offline/resource_indexer.hpp"
+#include "didi/common/project_path.hpp"
 #include <fstream>
 #include <set>
 
@@ -51,7 +52,7 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     std::string disk_path = save_path;
     if (strings::startsWith(disk_path, "res://")) disk_path = disk_path.substr(6);
 
-    fs::path target_p(disk_path);
+    fs::path target_p = paths::projectPathFromUtf8(disk_path);
     fs::path current_root = fs::current_path();
     try {
         auto canon_root = fs::weakly_canonical(current_root);
@@ -87,7 +88,7 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         return out;
     };
 
-    std::ofstream out(disk_path);
+    std::ofstream out(target_p);
     if (out.is_open()) {
         out << "[gd_resource type=\"" << resource_type << "\" format=3]\n\n"
             << "[resource]\n";
