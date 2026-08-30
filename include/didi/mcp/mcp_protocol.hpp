@@ -193,15 +193,22 @@ struct ToolDefinition {
     bool legacy{false};
     // Set by ToolRegistry::registerTool from MutationSafety. Never set by hand.
     ToolAnnotations annotations;
+    // Optional. Declared only for tools whose real result shape is known; see
+    // outputSchemaForTool. Absent means no promise is made about the payload.
+    json outputSchema;
 
     json toJson() const {
-        return {
+        json definition = {
             {"name", name},
             {"description", description},
             {"inputSchema", inputSchema},
             {"annotations", annotations.toJson()},
             {"_meta", {{"didi", capability.toJson()}}}
         };
+        if (outputSchema.is_object() && !outputSchema.empty()) {
+            definition["outputSchema"] = outputSchema;
+        }
+        return definition;
     }
 };
 

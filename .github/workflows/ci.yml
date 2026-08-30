@@ -155,6 +155,14 @@ jobs:
           fi
           "$DIDI_PYTHON" tools/validate_documentation.py --tool-manifest build/tool_manifest.json
 
+      - name: Verify declared output schemas describe real results
+        shell: bash
+        run: |
+          # Runs after the build because it exercises the tools through the
+          # built binary and validates each payload against the schema the
+          # server publishes for it.
+          "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_tool_output_schema_contract -v
+
       - name: Validate Internal Markdown Links
         shell: bash
         run: |
