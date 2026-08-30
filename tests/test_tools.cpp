@@ -4,6 +4,7 @@
 #include "didi/mcp/mcp_server.hpp"
 #include "didi/gdextension/editor_hook.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/common/atomic_write.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -390,6 +391,64 @@ static void test_resource_create_writes_unicode_file_names() {
         didi::paths::projectPathFromUtf8("materials/padr\xC3\xA3o_madeira.tres");
     ASSERT_TRUE(std::filesystem::exists(expected));
     ASSERT_TRUE(readToolTestFile(expected).find("StandardMaterial3D") != std::string::npos);
+}
+
+static void test_atomic_write_keeps_the_destination_when_the_replace_fails() {
+    // Break caught: the writers truncated the destination first, so a failure
+    // partway through destroyed the file and could still report success.
+    ScopedToolProject project("atomic-write-failure");
+    const std::filesystem::path target = "occupied.tres";
+
+    // A non-empty directory cannot be replaced by a file, so the temporary file
+    // is written and the swap is what fails.
+    std::filesystem::create_directories(target);
+    std::filesystem::create_directories(target / "child");
+
+    const auto written = didi::files::writeFileAtomically(target, "replacement bytes");
+    ASSERT_TRUE(written.isErr());
+    ASSERT_TRUE(std::filesystem::is_directory(target));
+    ASSERT_TRUE(std::filesystem::is_directory(target / "child"));
+
+    for (const auto& entry : std::filesystem::directory_iterator(".")) {
+        const auto name = entry.path().filename().string();
+        ASSERT_TRUE(name.find(".didi-tmp-") == std::string::npos);
+    }
+}
+
+static void test_script_patch_replaces_without_leaving_temporary_files() {
+    // Break caught: a leaked sibling temporary would be indexed as a project
+    // resource and would survive a failed replace.
+    ScopedToolProject project("atomic-write-success");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    std::filesystem::create_directories("scripts");
+    const std::filesystem::path script = "scripts/player.gd";
+    std::ofstream(script) << "extends Node\n\nfunc jump():\n\tpass\n";
+
+    didi::json args = {
+        {"file_path", "res://scripts/player.gd"},
+        {"method_name", "jump"},
+        {"new_definition", "func jump():\n\tvelocity.y = 10.0"}
+    };
+    auto preview_args = args;
+    preview_args["dry_run"] = true;
+    const auto preview = registry.callTool("script_patch_method", preview_args);
+    if (preview.isError) {
+        throw std::runtime_error("script_patch_method preview failed: " + preview.content[0].text);
+    }
+    args["confirmation_token"] =
+        didi::json::parse(preview.content[0].text)["mutation_preview"]["confirmation_token"];
+    const auto result = registry.callTool("script_patch_method", args);
+    if (result.isError) {
+        throw std::runtime_error("script_patch_method failed: " + result.content[0].text);
+    }
+    ASSERT_TRUE(readToolTestFile(script).find("velocity.y = 10.0") != std::string::npos);
+
+    for (const auto& entry : std::filesystem::directory_iterator("scripts")) {
+        const auto name = entry.path().filename().string();
+        ASSERT_TRUE(name.find(".didi-tmp-") == std::string::npos);
+    }
 }
 
 static void test_visual_lab_preserves_existing_file_without_overwrite() {
@@ -1130,6 +1189,10 @@ struct RegisterToolTests {
                      test_resource_create_preserves_existing_file_without_overwrite);
         registerTest("Tools.ResourceCreateUnicodeFileNames",
                      test_resource_create_writes_unicode_file_names);
+        registerTest("Tools.AtomicWriteKeepsDestinationOnFailure",
+                     test_atomic_write_keeps_the_destination_when_the_replace_fails);
+        registerTest("Tools.ScriptPatchLeavesNoTemporaryFiles",
+                     test_script_patch_replaces_without_leaving_temporary_files);
         registerTest("Tools.VisualLabOverwriteGuard",
                      test_visual_lab_preserves_existing_file_without_overwrite);
         registerTest("Tools.ProjectSearchPublicValidationAndSchema", test_project_search_public_validation_and_schema);

@@ -3,6 +3,7 @@
 #include "didi/common/logger.hpp"
 #include "didi/offline/resource_indexer.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/common/atomic_write.hpp"
 #include <fstream>
 #include <set>
 
@@ -88,52 +89,52 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         return out;
     };
 
-    std::ofstream out(target_p);
-    if (out.is_open()) {
-        out << "[gd_resource type=\"" << resource_type << "\" format=3]\n\n"
-            << "[resource]\n";
-        for (auto it = properties.begin(); it != properties.end(); ++it) {
-            out << it.key() << " = ";
-            if (it.value().is_string()) {
-                out << "\"" << escape_tres_str(it.value().get<std::string>()) << "\"\n";
-            } else if (it.value().is_boolean()) {
-                out << (it.value().get<bool>() ? "true" : "false") << "\n";
-            } else if (it.value().is_number()) {
-                out << it.value().dump() << "\n";
-            } else if (it.value().is_array()) {
-                out << "[";
-                bool first = true;
-                for (const auto& elem : it.value()) {
-                    if (!first) out << ", ";
-                    first = false;
-                    if (elem.is_string()) {
-                        out << "\"" << escape_tres_str(elem.get<std::string>()) << "\"";
-                    } else if (elem.is_boolean()) {
-                        out << (elem.get<bool>() ? "true" : "false");
-                    } else {
-                        out << elem.dump();
-                    }
-                }
-                out << "]\n";
-            } else if (it.value().is_object() && it.value().contains("x") && it.value().contains("y")) {
-                if (it.value().contains("z")) {
-                    out << "Vector3(" << it.value()["x"] << ", " << it.value()["y"] << ", " << it.value()["z"] << ")\n";
+    std::ostringstream out;
+    out << "[gd_resource type=\"" << resource_type << "\" format=3]\n\n"
+        << "[resource]\n";
+    for (auto it = properties.begin(); it != properties.end(); ++it) {
+        out << it.key() << " = ";
+        if (it.value().is_string()) {
+            out << "\"" << escape_tres_str(it.value().get<std::string>()) << "\"\n";
+        } else if (it.value().is_boolean()) {
+            out << (it.value().get<bool>() ? "true" : "false") << "\n";
+        } else if (it.value().is_number()) {
+            out << it.value().dump() << "\n";
+        } else if (it.value().is_array()) {
+            out << "[";
+            bool first = true;
+            for (const auto& elem : it.value()) {
+                if (!first) out << ", ";
+                first = false;
+                if (elem.is_string()) {
+                    out << "\"" << escape_tres_str(elem.get<std::string>()) << "\"";
+                } else if (elem.is_boolean()) {
+                    out << (elem.get<bool>() ? "true" : "false");
                 } else {
-                    out << "Vector2(" << it.value()["x"] << ", " << it.value()["y"] << ")\n";
+                    out << elem.dump();
                 }
-            } else {
-                out << it.value().dump() << "\n";
             }
+            out << "]\n";
+        } else if (it.value().is_object() && it.value().contains("x") && it.value().contains("y")) {
+            if (it.value().contains("z")) {
+                out << "Vector3(" << it.value()["x"] << ", " << it.value()["y"] << ", " << it.value()["z"] << ")\n";
+            } else {
+                out << "Vector2(" << it.value()["x"] << ", " << it.value()["y"] << ")\n";
+            }
+        } else {
+            out << it.value().dump() << "\n";
         }
-        out.close();
-        return CallToolResult::successJson({
-            {"status", "created_offline"},
-            {"save_path", save_path},
-            {"resource_type", resource_type}
-        });
     }
-
-    return CallToolResult::error("Failed to write resource file to disk: " + disk_path);
+    auto written = files::writeFileAtomically(target_p, out.str());
+    if (written.isErr()) {
+        return CallToolResult::error("Failed to write resource file to disk: " +
+                                     written.error().message);
+    }
+    return CallToolResult::successJson({
+        {"status", "created_offline"},
+        {"save_path", save_path},
+        {"resource_type", resource_type}
+    });
 }
 
 CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
