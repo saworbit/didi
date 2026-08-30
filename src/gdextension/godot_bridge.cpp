@@ -1060,6 +1060,18 @@ Result<void> commitAction(GDExtensionObjectPtr manager) {
     return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
 }
 
+// Closes an action that was opened but could not be fully registered.
+// EditorUndoRedoManager has no cancel, so the least bad move is to commit
+// without executing: the manager stops being mid-action, nothing half
+// registered is applied to the scene, and the next mutation cannot merge into
+// our abandoned action or fail outright because one is still open.
+void abandonAction(GDExtensionObjectPtr manager) {
+    auto execute = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    if (execute.isErr()) return;
+    (void)callObject(manager, "EditorUndoRedoManager", "commit_action", 3216645846LL,
+                     {&execute.value()});
+}
+
 json liveResult(const json& fields) {
     json result = fields;
     result["execution_mode"] = "live";
@@ -2914,10 +2926,21 @@ json GodotBridge::execute(const std::string& method, const json& params,
             return errorJson(500, "ProjectSettings.save failed; InputMap mutation was rolled back");
         }
         auto reloaded = callObject(input_map.value(), "InputMap", "load_from_project_settings", 3218959716LL);
-        if (reloaded.isErr()) return errorJson(reloaded.error().code, reloaded.error().message);
-        return liveResult({{"status", "success"}, {"action", action}, {"deadzone", deadzone},
-                           {"event_count", event_count}, {"removed", removing}, {"persisted", true},
-                           {"runtime_reloaded", true}});
+        // The setting is already on disk by this point, and rolling back after a
+        // successful save means a second write that can fail the same way.
+        // Returning a bare error here told the caller nothing had happened, so a
+        // retry with replace:false came back with "already exists" and the agent
+        // concluded the write had failed. The durable fact is that it persisted.
+        // Report that, and report separately that the live InputMap did not
+        // pick it up.
+        json result = {{"status", "success"}, {"action", action}, {"deadzone", deadzone},
+                       {"event_count", event_count}, {"removed", removing}, {"persisted", true},
+                       {"runtime_reloaded", reloaded.isOk()}};
+        if (reloaded.isErr()) {
+            result["warning"] = "The input action was saved to project.godot but the live "
+                                "InputMap did not reload: " + reloaded.error().message;
+        }
+        return liveResult(result);
     }
 
     if (method == "script.attachToNode" || method == "script.detachFromNode") {
@@ -3560,12 +3583,30 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                  {&child.value(), &readable.value(), &internal.value()});
         auto own = managerMethod(manager.value(), "add_do_method", node, "set_owner", {&owner.value()});
         auto remove = managerMethod(manager.value(), "add_undo_method", parent.value(), "remove_child", {&child.value()});
-        if (keep.isErr() || add.isErr() || own.isErr() || remove.isErr()) return errorJson(500, "Failed to register instantiate UndoRedo transaction");
+        if (keep.isErr() || add.isErr() || own.isErr() || remove.isErr()) {
+            abandonAction(manager.value());
+            // add_do_reference hands the node to the undo history, which then
+            // owns it. Destroying it after that would double free when the
+            // history is cleared, so only clean up when the history never
+            // took it. Node is not RefCounted, so nothing else will.
+            if (keep.isErr()) GodotApi::instance().object_destroy(node);
+            return errorJson(500, "Failed to register instantiate UndoRedo transaction");
+        }
         auto committed = commitAction(manager.value());
         if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
-        return liveResult({{"status", "success"}, {"action", "instantiate_node"},
-                           {"node_type", node_type}, {"node_path", logical_parent.value() + "/" + logical_name},
-                           {"undo_redo_registered", true}});
+        // Godot uniquifies names on insert: a second Enemy becomes Enemy2. The
+        // name was set before add_child, so the path built from it is a guess.
+        // Read the real one back now that the node is actually in the tree,
+        // otherwise the caller's next scene_set_property hits a sibling.
+        auto actual_path = logicalPathFromEditedRoot(root.value(), node);
+        json result = {{"status", "success"}, {"action", "instantiate_node"},
+                       {"node_type", node_type},
+                       {"node_path", actual_path.isOk()
+                                         ? actual_path.value()
+                                         : logical_parent.value() + "/" + logical_name},
+                       {"undo_redo_registered", true}};
+        if (actual_path.isErr()) result["node_path_verified"] = false;
+        return liveResult(result);
     }
 
     if (method == "scene.removeNode" || method == "scene.duplicateNode" || method == "scene.reparentNode") {
@@ -3600,6 +3641,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto restore_index = managerMethod(manager.value(), "add_undo_method", parent.value(), "move_child",
                                                {&child.value(), &old_index.value()});
             if (action.isErr() || keep.isErr() || remove.isErr() || restore_index.isErr() || restore.isErr()) {
+                if (action.isOk()) abandonAction(manager.value());
                 return errorJson(500, "Failed to register remove UndoRedo transaction");
             }
             auto committed = commitAction(manager.value());
@@ -3644,7 +3686,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                          {&old_parent_value.value(), &keep_global.value()});
             auto restore_index = managerMethod(manager.value(), "add_undo_method", parent.value(), "move_child",
                                                {&child.value(), &old_index.value()});
-            if (action.isErr() || move.isErr() || restore.isErr() || restore_index.isErr()) {
+            if (move.isErr() || restore.isErr() || restore_index.isErr()) {
+                abandonAction(manager.value());
                 return errorJson(500, "Failed to register reparent UndoRedo transaction");
             }
             auto committed = commitAction(manager.value());
@@ -3704,12 +3747,24 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                  {&duplicate_value.value(), &readable.value(), &internal.value()});
         auto own = managerMethod(manager.value(), "add_do_method", duplicate_node.value(), "set_owner", {&owner.value()});
         auto remove = managerMethod(manager.value(), "add_undo_method", parent.value(), "remove_child", {&duplicate_value.value()});
-        if (keep.isErr() || add.isErr() || own.isErr() || remove.isErr()) return errorJson(500, "Failed to register duplicate UndoRedo transaction");
+        if (keep.isErr() || add.isErr() || own.isErr() || remove.isErr()) {
+            abandonAction(manager.value());
+            if (keep.isErr()) GodotApi::instance().object_destroy(duplicate_node.value());
+            return errorJson(500, "Failed to register duplicate UndoRedo transaction");
+        }
         auto committed = commitAction(manager.value());
         if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
-        return liveResult({{"status", "success"}, {"action", "duplicate_node"},
-                           {"duplicated_node", logical_parent.value() + "/" + duplicate_name.value()},
-                           {"undo_redo_registered", true}});
+        // duplicate_name was read before add_child, so it is the requested name
+        // rather than the one Godot settled on. Read the path back from the tree.
+        auto duplicate_path = logicalPathFromEditedRoot(root.value(), duplicate_node.value());
+        json result = {{"status", "success"}, {"action", "duplicate_node"},
+                       {"duplicated_node",
+                        duplicate_path.isOk()
+                            ? duplicate_path.value()
+                            : logical_parent.value() + "/" + duplicate_name.value()},
+                       {"undo_redo_registered", true}};
+        if (duplicate_path.isErr()) result["node_path_verified"] = false;
+        return liveResult(result);
     }
 
     if (method == "editor.undo" || method == "editor.redo") {
