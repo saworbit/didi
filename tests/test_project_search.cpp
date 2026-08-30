@@ -6,6 +6,7 @@
 #include <fstream>
 #include <functional>
 #include <stdexcept>
+#include <set>
 #include <string>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond)
@@ -125,6 +126,52 @@ void test_csharp_symbols_ignore_comments_and_strings() {
     const auto fake_result = search.searchSymbols(fakes);
     ASSERT_TRUE(fake_result.isOk());
     ASSERT_TRUE(fake_result.value().matches.empty());
+}
+
+void test_csharp_call_sites_are_not_function_declarations() {
+    // Break caught: any line with an opening paren became a function
+    // declaration, so every call site in a C# file was reported as a symbol.
+    SearchFixture fixture;
+    fixture.write("scripts/Spawner.cs",
+                  "public partial class Spawner : Node3D {\n"
+                  "  public override void _Ready() {\n"
+                  "    GD.Print(\"Loaded\");\n"
+                  "    AddChild(node);\n"
+                  "    var limit = Math.Min(a, b);\n"
+                  "    _items.Clear();\n"
+                  "    base.Configure(this);\n"
+                  "    var enemy = new Enemy(hp);\n"
+                  "    return;\n"
+                  "  }\n"
+                  "  private int Score(int hits) { return hits * 2; }\n"
+                  "  public abstract void Draw();\n"
+                  "}\n");
+    didi::offline::ProjectSearch search(fixture.root());
+
+    const auto functionsNamed = [&](const std::string& query) {
+        didi::offline::SymbolSearchOptions options;
+        options.query = query;
+        const auto result = search.searchSymbols(options);
+        ASSERT_TRUE(result.isOk());
+        size_t functions = 0;
+        for (const auto& match : result.value().matches) {
+            if (match.kind == "function") ++functions;
+        }
+        return functions;
+    };
+
+    // Call sites, not declarations.
+    ASSERT_EQ(functionsNamed("Print"), 0u);
+    ASSERT_EQ(functionsNamed("AddChild"), 0u);
+    ASSERT_EQ(functionsNamed("Min"), 0u);
+    ASSERT_EQ(functionsNamed("Clear"), 0u);
+    ASSERT_EQ(functionsNamed("Configure"), 0u);
+    ASSERT_EQ(functionsNamed("Enemy"), 0u);
+
+    // Real declarations, including the bodiless abstract member.
+    ASSERT_EQ(functionsNamed("_Ready"), 1u);
+    ASSERT_EQ(functionsNamed("Score"), 1u);
+    ASSERT_EQ(functionsNamed("Draw"), 1u);
 }
 
 void test_csharp_symbols_ignore_multiline_strings() {
@@ -268,6 +315,7 @@ struct RegisterProjectSearchTests {
         registerTest("ProjectSearch.TextAndGdscriptSymbols", test_text_and_gdscript_symbols);
         registerTest("ProjectSearch.RejectsEscapeAndInvalidLimits", test_rejects_escape_and_invalid_limits);
         registerTest("ProjectSearch.CSharpSymbolsIgnoreCommentsAndStrings", test_csharp_symbols_ignore_comments_and_strings);
+        registerTest("ProjectSearch.CSharpCallSitesAreNotDeclarations", test_csharp_call_sites_are_not_function_declarations);
         registerTest("ProjectSearch.CSharpSymbolsIgnoreMultilineStrings", test_csharp_symbols_ignore_multiline_strings);
         registerTest("ProjectSearch.GdscriptSymbolsIgnoreMultilineStrings", test_gdscript_symbols_ignore_multiline_strings);
         registerTest("ProjectSearch.GdscriptDeclarationForms", test_gdscript_symbols_include_annotations_static_and_inner_classes);

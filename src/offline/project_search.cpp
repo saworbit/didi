@@ -206,19 +206,17 @@ Result<std::vector<FileRecord>> collectFiles(const fs::path& root,
             ec.clear();
             continue;
         }
-        const auto canonical = fs::canonical(iterator->path(), ec);
-        if (ec || !isWithin(root, canonical)) {
+        // The root is already canonical and both file and directory symlinks are
+        // skipped above, so every entry reached here is a real path beneath it.
+        // Containment and the relative path are therefore pure string work, and
+        // do not need a canonical() and a relative() syscall pair per file.
+        const auto& entry_path = iterator->path();
+        const auto relative = entry_path.lexically_relative(root);
+        if (relative.empty() || *relative.begin() == ".." || !isWithin(root, entry_path)) {
             ++response.skipped_files;
-            ec.clear();
             continue;
         }
-        auto relative = fs::relative(canonical, root, ec);
-        if (ec) {
-            ++response.skipped_files;
-            ec.clear();
-            continue;
-        }
-        files.push_back({canonical, "res://" + paths::projectPathToUtf8(relative), size});
+        files.push_back({entry_path, "res://" + paths::projectPathToUtf8(relative), size});
         response.scanned_bytes += size;
     }
     std::sort(files.begin(), files.end(), [](const auto& left, const auto& right) {
@@ -433,10 +431,38 @@ std::optional<std::pair<std::string, std::string>> csharpDeclaration(std::string
     }
     const auto open_paren = line.find('(');
     if (open_paren != std::string_view::npos) {
-        const auto before = identifiers(line.substr(0, open_paren));
-        if (!before.empty()) {
-            static const std::set<std::string> controls = {"if", "for", "foreach", "while", "switch", "catch", "using"};
-            if (!controls.count(before.back().value)) {
+        const auto head = line.substr(0, open_paren);
+        const auto before = identifiers(head);
+        // A declaration reads "[modifiers] ReturnType Name(", so at least two
+        // identifiers precede the paren, none of them a keyword that starts an
+        // expression, and the name is not reached through a member access. That
+        // is what separates it from GD.Print("x"), AddChild(node) and
+        // var hit = Raycast(from, to), which are call sites, not declarations.
+        static const std::set<std::string> non_declaration_leads = {
+            "if", "for", "foreach", "while", "switch", "catch", "using", "lock",
+            "do", "else", "return", "throw", "await", "yield", "new", "fixed"
+        };
+        const bool member_access =
+            !before.empty() &&
+            head.find_last_not_of(" \t") != std::string_view::npos &&
+            head.rfind('.') != std::string_view::npos &&
+            head.rfind('.') > head.rfind(' ');
+        bool expression_lead = false;
+        for (const auto& token : before) {
+            if (non_declaration_leads.count(token.value)) { expression_lead = true; break; }
+        }
+        if (before.size() >= 2 && !member_access && !expression_lead) {
+            const auto trimmed = strings::trim(std::string(line));
+            const bool statement = !trimmed.empty() && trimmed.back() == ';';
+            // A statement-terminated line is a call unless it is a bodiless
+            // declaration: an abstract, extern or partial member, or an
+            // interface member, which carries no modifier and no extra tokens.
+            static const std::set<std::string> bodiless = {"abstract", "extern", "partial"};
+            bool bodiless_member = before.size() == 2;
+            for (const auto& token : before) {
+                if (bodiless.count(token.value)) { bodiless_member = true; break; }
+            }
+            if (!statement || bodiless_member) {
                 return std::pair<std::string, std::string>{before.back().value, "function"};
             }
         }
