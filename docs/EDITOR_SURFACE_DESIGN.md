@@ -28,7 +28,13 @@ It exists so Godot has a `plugin.cfg` to enable, and does nothing else. The
 evidence that it is unowned is that it has quietly rotted: `addons/didi/plugin.cfg`
 reads `1.4.0` while `demo/addons/didi/plugin.cfg` reads `1.2.0`, and the
 documentation validator checks only the first. The demo copy also carries
-pre-arch-suffix macOS library entries and is missing `test_lab_sandbox.tscn`.
+pre-arch-suffix macOS library entries, from before the canonical copy gained
+per-architecture paths.
+
+(`test_lab_sandbox.tscn` appears only under the canonical addon, but that is
+not drift: it is generated on demand by `viewport_create_test_lab` and is
+gitignored. Worth noting only because the ignore rule covers the canonical path
+and not the demo one.)
 
 So the question is not whether to go hybrid. It is whether to surface the half
 that already runs inside the editor, and if so, how much.
