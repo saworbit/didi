@@ -26,6 +26,37 @@ reports the version it actually detected.
 This is bridge evidence, not activation. All 18 Phase 7 names remain
 `implemented: false`.
 
+## Activation blocker found by live trial, 2026-08-30
+
+Signals were activated experimentally and the live integration harness was run
+against Godot 4.5.1. Activation must not proceed until the following is
+resolved, and it is not visible to the native suite.
+
+With `signal_list_connections`, `signal_connect`, `signal_disconnect` and
+`signal_emit` moved into the live capability set, request 20 of
+`tests/run_godot_integration.ps1` dispatches a real `signal_connect` against
+the live editor. The next request that needs the live route, request 24
+`scene_get_property`, then fails:
+
+```
+"code": 503, "message": "No atomic runtime route is available for live dispatch"
+```
+
+Request 24 is an already-implemented Phase 1 tool that passes today. The live
+`signal_connect` therefore leaves the runtime route unusable for every
+subsequent live call in the same session, which would break far more than the
+tools being activated.
+
+The five native tests that assert the fail-closed contract also fail on
+activation, as designed. They are guards, not obstacles: they exist so that
+activation cannot be declared on native evidence alone. Both they and the
+harness assertion at request 20 must be rewritten to assert real live
+behaviour, but only after the route defect above is fixed.
+
+The manifest machinery needs no change. Activation moved the published counts
+from 60/18 to 64/14 automatically, and documentation validation reported every
+document that still claimed the old numbers.
+
 ## Red-team closure: binding, generation, admission, and history
 
 This section is normative for every task below. No later task may weaken it.
