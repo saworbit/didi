@@ -5,13 +5,13 @@ Didi exposes 79 canonical tool names plus 10 legacy names (89 registrations). Th
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
-**Status:** `BLOCKED_AT_FEASIBILITY`
-**Canonical implementation:** `61/79`
-**Phase 7 registrations:** `18/18` unimplemented
+**Status:** `PARTIAL_DELIVERY`
+**Canonical implementation:** `65/79`
+**Phase 7 registrations:** `14/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `BLOCKED_AT_FEASIBILITY`. The implementation remains 61/79 canonical tools, and all 18 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 65/79 canonical tools, and all 14 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -85,16 +85,50 @@ Use the focused `scene_*` tools instead.
 
 ## 2. Signals and events
 
-The following schemas are reserved but unimplemented:
+All four signal tools are **live**, editor sessions only. Delivered in the Phase 7
+partial delivery after the production-configuration extension passed the raw
+signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2.
 
-- `signal_list_connections`
-- `signal_connect`
-- `signal_disconnect`
-- `signal_emit`
+### `signal_list_connections` — Live
 
-Calls return an MCP tool error; they do not inspect or mutate Godot signals.
+Read-only. Lists a node's signals and their current connections.
 
-All four signal tools are among the 15 implementation-feasible names, but no production implementation started and they remain unavailable.
+- `target_node` (`string`, required). Node path; 1024 bytes maximum.
+
+Signals are returned sorted by name, and connections by target path, so repeated
+calls are comparable. The listing is capped at 256 signals and 256 connections
+per signal; when a cap is reached the payload sets `truncated` and names the cap
+in `truncated_at`. A node whose signal or connection count exceeds the response
+budget returns `413` rather than a partial answer that looks complete.
+
+### `signal_connect` and `signal_disconnect` — Live
+
+Mutations. Both require `emitter_node`, `signal_name`, `target_node` and
+`target_method`.
+
+- `signal_connect` accepts `flags`, which must be `2` (`CONNECT_PERSIST`) when
+  present. No other flag value is accepted, because no other value survives a
+  scene save predictably.
+- `signal_disconnect` takes no `flags`: it removes the exact callable.
+
+Connecting an already-connected callable returns `409`, as does disconnecting one
+that is not connected. Both run through `UndoRedo`, so an editor undo removes the
+exact callable a connect added, and redo restores it.
+
+### `signal_emit` — Live
+
+Mutation, and the one that runs game code: emitting a signal invokes whatever is
+connected to it. Requires `target_node` and `signal_name`; `arguments` is an
+optional array, defaulting to empty.
+
+Arguments are checked against the signal's declared parameter types before
+anything is dispatched, so a type mismatch returns `400` without emitting. Bounds:
+at most 16 arguments, 8 levels of nesting, 64 entries per array or object, and
+4096 bytes per string or key. A request whose compact form exceeds the response
+budget returns `413`.
+
+Like every mutation, all three write operations expose `dry_run` and require a
+`confirmation_token` bound to the exact arguments, project and route.
 
 ## 3. Scripts and diagnostics
 

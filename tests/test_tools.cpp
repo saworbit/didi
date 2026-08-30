@@ -315,8 +315,8 @@ static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract(
         if (legacy_names.count(tool.name) != 0) continue;
         tool.capability.implemented ? ++implemented : ++unimplemented;
     }
-    ASSERT_EQ(implemented, 61u);
-    ASSERT_EQ(unimplemented, 18u);
+    ASSERT_EQ(implemented, 65u);
+    ASSERT_EQ(unimplemented, 14u);
 }
 
 static void test_offline_writer_schemas_require_explicit_overwrite() {
@@ -556,10 +556,18 @@ static void test_tool_capabilities_are_honest() {
     ASSERT_EQ(instantiate_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"live"}));
     ASSERT_EQ(instantiate_json["inputSchema"]["properties"]["node_type"]["default"], "Node");
+    // Delivered in the Phase 7 partial delivery, so it must advertise a real
+    // execution mode. A still-reserved Phase 7 name is checked below, so this
+    // test keeps covering both sides of the split.
     ASSERT_EQ(signal_json["_meta"]["didi"]["executionModes"],
-              didi::json::array({"unimplemented"}));
-    ASSERT_EQ(signal_json["_meta"]["didi"]["implemented"], false);
-    ASSERT_TRUE(signal_json["description"].get<std::string>().rfind("UNIMPLEMENTED:", 0) == 0);
+              didi::json::array({"live"}));
+    ASSERT_EQ(signal_json["_meta"]["didi"]["implemented"], true);
+    // A delivered tool must lose the UNIMPLEMENTED prefix, and a reserved one
+    // must keep it. Checking both is what stops the prefix from becoming
+    // decorative.
+    ASSERT_TRUE(signal_json["description"].get<std::string>().rfind("UNIMPLEMENTED:", 0) != 0);
+    ASSERT_TRUE(reg.getTool("physics_raycast_query")->toJson()["description"]
+                    .get<std::string>().rfind("UNIMPLEMENTED:", 0) == 0);
     ASSERT_EQ(syntax_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"offline_fallback"}));
     ASSERT_EQ(attach_script_json["_meta"]["didi"]["executionModes"],
@@ -600,9 +608,15 @@ static void test_tool_capabilities_are_honest() {
     }
 
     reg.setIpcClient(nullptr);
+    // A delivered live tool with no route must say it has no route. Saying it
+    // has no implementation would be the dishonest answer this test guards.
     auto unavailable = reg.callTool("signal_list_connections", {{"target_node", "/root"}});
     ASSERT_TRUE(unavailable.isError);
-    ASSERT_TRUE(unavailable.content[0].text.find("no trustworthy execution path") != std::string::npos);
+    ASSERT_TRUE(unavailable.content[0].text.find("no trustworthy execution path") == std::string::npos);
+
+    auto reserved_call = reg.callTool("physics_raycast_query", didi::json::object());
+    ASSERT_TRUE(reserved_call.isError);
+    ASSERT_TRUE(reserved_call.content[0].text.find("no trustworthy execution path") != std::string::npos);
 }
 
 static void test_resource_registry() {

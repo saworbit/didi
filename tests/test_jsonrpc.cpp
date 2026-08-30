@@ -85,7 +85,11 @@ static void test_mcp_tool_list_reports_current_availability() {
     for (const auto& tool : response.result["tools"]) by_name[tool["name"].get<std::string>()] = tool;
     ASSERT_EQ(by_name["scene_get_hierarchy"]["_meta"]["didi"]["currentMode"], "offline_fallback");
     ASSERT_EQ(by_name["scene_instantiate_node"]["_meta"]["didi"]["currentMode"], "unavailable");
-    ASSERT_EQ(by_name["signal_connect"]["_meta"]["didi"]["currentMode"], "unimplemented");
+    // Delivered but with no live route in this fixture, so it reports
+    // unavailable rather than unimplemented. The distinction is the point:
+    // "no session" and "no implementation" are different answers.
+    ASSERT_EQ(by_name["signal_connect"]["_meta"]["didi"]["currentMode"], "unavailable");
+    ASSERT_EQ(by_name["physics_raycast_query"]["_meta"]["didi"]["currentMode"], "unimplemented");
     ASSERT_EQ(by_name["scene_instantiate_node"]["_meta"]["didi"]["liveAvailable"], false);
 }
 
@@ -115,8 +119,19 @@ static void test_mcp_phase7_parent_gate_and_alias_identity() {
     ASSERT_EQ(by_name["runtime_inject_input"]["inputSchema"]["additionalProperties"],
               false);
 
-    const std::array<const char*, 18> phase7 = {
-        "signal_list_connections", "signal_connect", "signal_disconnect", "signal_emit",
+    // Phase 7 partial delivery: the four signal names are live, the other
+    // fourteen are still reserved. Keeping the two lists separate is what stops
+    // a future delivery from quietly relaxing the gate on the rest.
+    const std::array<const char*, 4> phase7_delivered = {
+        "signal_list_connections", "signal_connect", "signal_disconnect", "signal_emit"
+    };
+    for (const auto* name : phase7_delivered) {
+        ASSERT_EQ(by_name[name]["_meta"]["didi"]["implemented"], true);
+        ASSERT_EQ(by_name[name]["_meta"]["didi"]["executionModes"],
+                  didi::json::array({"live"}));
+    }
+
+    const std::array<const char*, 14> phase7 = {
         "viewport_set_camera_transform", "viewport_toggle_debug_draw",
         "tilemap_set_cells", "tilemap_get_used_rect", "gridmap_set_cells",
         "physics_raycast_query", "physics_simulate_step", "nav_bake_mesh",

@@ -51,7 +51,7 @@ TRACKED_ONLY_ARTIFACT_PATHS = (".superpowers",)
 FILESYSTEM_FORBIDDEN_ARTIFACT_PATHS = ("docs/superpowers",)
 
 FUTURE_PHASE_RANGE = range(7, 13)
-PHASE7_STATUS = "BLOCKED_AT_FEASIBILITY"
+PHASE7_STATUS = "PARTIAL_DELIVERY"
 VALID_PHASE_STATUSES = {"PLANNED", "IN PROGRESS", "COMPLETE", PHASE7_STATUS}
 FUTURE_PHASE_GOVERNANCE_FIELDS = (
     "scope",
@@ -70,7 +70,12 @@ FUTURE_PHASE_COMPLETION_FIELDS = (
 # manifest IS supplied the built binary is authoritative and this constant is
 # checked against it, so a stale fallback fails the build jobs rather than
 # silently disagreeing with the software it stands in for.
-CANONICAL_IMPLEMENTATION_COUNTS = (79, 61, 18)
+CANONICAL_IMPLEMENTATION_COUNTS = (79, 65, 14)
+
+# How many names Phase 7 reserved in total. Distinct from the unimplemented
+# count above: they were equal only while no Phase 7 tool had been delivered,
+# and conflating them silently breaks the moment one is.
+PHASE7_NAME_COUNT = 18
 
 TOOL_MANIFEST_COUNT_KEYS = ("canonical", "legacy", "implemented", "unimplemented", "total")
 
@@ -107,7 +112,9 @@ NUMBER_WORDS = {
     10: "ten",
     18: "eighteen",
     60: "sixty",
+    14: "fourteen",
     61: "sixty-one",
+    65: "sixty-five",
     78: "seventy-eight",
     79: "seventy-nine",
     88: "eighty-eight",
@@ -857,12 +864,12 @@ def validate_phase7_reconciliation(
             expected_implemented,
             expected_canonical,
             expected_remaining,
-            expected_remaining,
+            PHASE7_NAME_COUNT,
         ):
             errors.append(
                 f"{relative_path}: Phase 7 current status block must report "
                 f"{expected_implemented}/{expected_canonical} canonical implementation and "
-                f"{expected_remaining}/{expected_remaining} unimplemented registrations"
+                f"{expected_remaining}/{PHASE7_NAME_COUNT} unimplemented registrations"
             )
         feasibility = (
             int(match.group("feasible")),
@@ -974,15 +981,20 @@ def validate_phase7_reconciliation(
                     "exactly equal matrix GO set"
                 )
 
+    # The plan must say what actually happened to it. It originally had to record
+    # that the all-or-nothing gate stopped Tasks 2-13; once partial delivery was
+    # authorized and the signal names shipped, that sentence became false, so the
+    # rule now requires the plan to name the decision that superseded the gate.
     plan = texts.get("docs/PHASE_7_IMPLEMENTATION_PLAN.md")
     if plan is not None and not re.search(
-        r"Tasks 2-13[^\n]*no production implementation started",
+        r"Tasks 2-13[^\n]*replaced by an explicit partial-delivery decision",
         plan,
         flags=re.IGNORECASE,
     ):
         errors.append(
-            "docs/PHASE_7_IMPLEMENTATION_PLAN.md must record that Tasks 2-13 "
-            "did not start and no production implementation started"
+            "docs/PHASE_7_IMPLEMENTATION_PLAN.md must record that the all-or-nothing "
+            "gate originally stopped Tasks 2-13 and was replaced by an explicit "
+            "partial-delivery decision"
         )
     return errors
 

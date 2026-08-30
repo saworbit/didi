@@ -263,6 +263,26 @@ void test_phase7_live_forwarding_preserves_bound_dispatch_and_error_identity() {
     ASSERT_EQ(payload["error"]["data"]["retryable"], false);
 }
 
+// Break caught: the forwarder sends through the lease's raw client instead of
+// the lease, so the session token is never attached and the extension answers
+// 401 to every Phase 7 request. Nothing caught this for as long as no Phase 7
+// tool was implemented -- the fakes here were the only callers, and they do not
+// authenticate. The first delivered tool failed on its first real call.
+void test_phase7_live_forwarding_authenticates_with_the_session_token() {
+    auto client = std::make_shared<LeaseAwareClient>();
+    client->raw_client->response = didi::json::object();
+    const didi::json arguments = {{"target_node", "/root/Emitter"}};
+    const auto binding = didi::mcp::resolveAliasBinding("signal_list_connections", arguments);
+    (void)didi::mcp::sendPhase7LiveRequest(binding, arguments, client);
+
+    ASSERT_EQ(client->raw_client->requests, 1);
+    const auto& sent = client->raw_client->last_params;
+    ASSERT_TRUE(sent.contains("_didi_session_token"));
+    ASSERT_EQ(sent["_didi_session_token"], std::string(64, 'a'));
+    // The caller's own arguments must survive the injection untouched.
+    ASSERT_EQ(sent["target_node"], "/root/Emitter");
+}
+
 void test_phase7_live_forwarding_quarantines_exact_malformed_route() {
     auto client = std::make_shared<LeaseAwareClient>();
     client->raw_client->response = didi::json::array({"malformed"});
@@ -385,6 +405,8 @@ struct RegisterPhase7ContractTests {
                      test_phase7_live_forwarding_uses_exact_method_and_deadline);
         registerTest("Phase7Contract.LiveForwardingBoundDispatch",
                      test_phase7_live_forwarding_preserves_bound_dispatch_and_error_identity);
+        registerTest("Phase7Contract.LiveForwardingAuthenticates",
+                     test_phase7_live_forwarding_authenticates_with_the_session_token);
         registerTest("Phase7Contract.LiveForwardingMalformedQuarantine",
                      test_phase7_live_forwarding_quarantines_exact_malformed_route);
         registerTest("Phase7Contract.LiveForwardingMalformedErrorMembers",

@@ -3,6 +3,9 @@ param(
     [Parameter(Mandatory = $true)][string]$GodotExecutable,
     [Parameter(Mandatory = $true)][string]$ExtensionLibrary,
     [Parameter(Mandatory = $true)][string]$ProbeExecutable,
+    # Trial the shipping binary. The seam scenarios need a method that is
+    # compiled out of the production extension, so they are skipped.
+    [switch]$Production,
     [int]$Repeat = 2
 )
 
@@ -50,7 +53,8 @@ for ($run = 1; $run -le $Repeat; $run++) {
         if (-not ((Get-Content -LiteralPath $stdout -Raw) -match 'PHASE7_SIGNAL_FIXTURE_READY')) {
             throw "Run $run did not initialize the edited-scene fixture"
         }
-        & $ProbeExecutable $descriptor.FullName
+        if ($Production) { & $ProbeExecutable --production $descriptor.FullName }
+        else { & $ProbeExecutable $descriptor.FullName }
         if ($LASTEXITCODE -ne 0) { throw "Raw signal bridge probe failed on run $run" }
         Write-Output "PHASE7_SIGNAL_ENGINE_RUN|$run|ok"
     }

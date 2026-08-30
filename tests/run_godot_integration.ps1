@@ -561,7 +561,17 @@ try {
         (Tool-Request 17 "editor_undo" @{}),
         (Tool-Request 18 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 3 }),
         (Tool-Request 19 "viewport_capture_frame" @{ camera_identifier = "active_editor_view" }),
-        (Tool-Request 20 "signal_connect" @{ emitter_node = "/root/SmokeRoot"; signal_name = "tree_entered"; target_node = "/root/SmokeRoot/Subject"; target_method = "queue_free" }),
+        # Signals are delivered, so this now exercises the real cycle: list, connect,
+        # observe the connection, disconnect, observe it gone. The target method is a
+        # harmless zero-arg Node method -- queue_free here would free a node the rest
+        # of this harness depends on.
+        (Tool-Request 910 "signal_list_connections" @{ target_node = "/root/SmokeRoot" }),
+        (Tool-Request 20 "signal_connect" @{ emitter_node = "/root/SmokeRoot"; signal_name = "tree_entered"; target_node = "/root/SmokeRoot/Subject"; target_method = "notify_property_list_changed" }),
+        (Tool-Request 911 "signal_list_connections" @{ target_node = "/root/SmokeRoot" }),
+        (Tool-Request 912 "signal_disconnect" @{ emitter_node = "/root/SmokeRoot"; signal_name = "tree_entered"; target_node = "/root/SmokeRoot/Subject"; target_method = "notify_property_list_changed" }),
+        (Tool-Request 913 "signal_list_connections" @{ target_node = "/root/SmokeRoot" }),
+        # A still-reserved Phase 7 name, so the honest-failure check keeps a subject.
+        (Tool-Request 914 "physics_raycast_query" @{ from = @(0, 0, 0); to = @(0, 0, 1) }),
         (Tool-Request 21 "scene_get_property" @{ target_node = "/root/SmokeRoot/Missing"; property_name = "name" }),
         (Tool-Request 22 "scene_get_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "phase_one_typo" }),
         (Tool-Request 23 "scene_set_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "process_priority"; value = "wrong-type" }),
@@ -859,8 +869,26 @@ try {
         Assert-True ($csharpBuild.success -eq $true -and $csharpBuild.has_errors -eq $false) "C# diagnostic build did not compile the fixture."
     }
 
-    Assert-True $byId[20].result.isError "Unimplemented signal tool returned fake success."
-    Assert-True ($byId[20].result.content[0].text -match "no trustworthy execution path") "Unimplemented tool error is not actionable."
+    # Delivered signal tools, end to end through the MCP surface against a live editor.
+    Assert-True (-not $byId[20].result.isError) "signal_connect failed against a live editor session: $($byId[20].result.content[0].text)"
+    $connectPayload = Tool-Payload $byId[20]
+    Assert-True ($connectPayload.connected -eq $true -and $connectPayload.flags -eq 2) "signal_connect did not report a persistent connection."
+    $beforeConnect = Tool-Payload $byId[910]
+    $afterConnect = Tool-Payload $byId[911]
+    $afterDisconnect = Tool-Payload $byId[913]
+    $connectionCount = {
+        param($payload)
+        $entered = @($payload.signals | Where-Object { $_.name -eq "tree_entered" })
+        if ($entered.Count -eq 0) { return 0 }
+        return @($entered[0].connections | Where-Object { $_.target_method -eq "notify_property_list_changed" }).Count
+    }
+    Assert-True ((& $connectionCount $beforeConnect) -eq 0) "Signal listing showed the connection before it was made."
+    Assert-True ((& $connectionCount $afterConnect) -eq 1) "signal_list_connections did not observe the new connection."
+    Assert-True (-not $byId[912].result.isError) "signal_disconnect failed against a live editor session."
+    Assert-True ((& $connectionCount $afterDisconnect) -eq 0) "signal_disconnect left the connection in place."
+    # A reserved name must still fail honestly.
+    Assert-True $byId[914].result.isError "Unimplemented tool returned fake success."
+    Assert-True ($byId[914].result.content[0].text -match "no trustworthy execution path") "Unimplemented tool error is not actionable."
     Assert-True $byId[21].result.isError "Missing node lookup returned fake success."
     Assert-True $byId[22].result.isError "Unknown property lookup returned fake null success."
     Assert-True $byId[23].result.isError "Incompatible scalar property write returned fake success."
@@ -1098,13 +1126,17 @@ try {
     $shutdownStepError = [string]$shutdownStepById[442].result.content[0].text
     Assert-True ($shutdownStepError -match "cancel|disconnect|closed|503|failed|not connected|terminated|shutting down|shutdown") "Active-step shutdown returned an unactionable error: $shutdownStepError"
 
+    # `\[ERROR\]` matches Didi's own log level field exactly. The looser `\[ERROR`
+    # also matched `[ERROR:` -- which appears when Didi and the engine interleave
+    # writes mid-line on the shared stderr, so an unrelated editor message could
+    # fail the run at random. Match the closing bracket to keep this a real gate.
     $engineErrors = @(
         Get-Content $stderrPath -ErrorAction SilentlyContinue |
-            Where-Object { $_ -match 'UndoRedo history mismatch|Parameter "t" is null|\[ERROR' }
+            Where-Object { $_ -match 'UndoRedo history mismatch|Parameter "t" is null|\[ERROR\s*\]' }
         Get-Content $gameStderrPath -ErrorAction SilentlyContinue |
-            Where-Object { $_ -match "Can't retrieve singleton 'EditorInterface' outside of editor|\[ERROR" }
+            Where-Object { $_ -match "Can't retrieve singleton 'EditorInterface' outside of editor|\[ERROR\s*\]" }
         Get-Content $shutdownGameStderrPath -ErrorAction SilentlyContinue |
-            Where-Object { $_ -match "Can't retrieve singleton 'EditorInterface' outside of editor|\[ERROR" }
+            Where-Object { $_ -match "Can't retrieve singleton 'EditorInterface' outside of editor|\[ERROR\s*\]" }
     )
     Assert-True ($engineErrors.Count -eq 0) "Godot reported bridge errors:`n$($engineErrors -join "`n")"
 

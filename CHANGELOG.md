@@ -12,9 +12,9 @@ Historical entries describe the surface advertised by those releases. For the ex
 ## [Unreleased]
 
 <!-- phase7-current-status:start -->
-**Status:** `BLOCKED_AT_FEASIBILITY`
-**Canonical implementation:** `61/79`
-**Phase 7 registrations:** `18/18` unimplemented
+**Status:** `PARTIAL_DELIVERY`
+**Canonical implementation:** `65/79`
+**Phase 7 registrations:** `14/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
@@ -26,6 +26,8 @@ Historical entries describe the surface advertised by those releases. For the ex
 - Added the approved Phase 7-12 roadmap, including canonical-surface completion and governance requirements for all future phases.
 - Completed the 2026-08-29 Phase 7 feasibility gate on Godot 4.5.1 and 4.7.2. The reproducible [evidence](docs/PHASE_7_API_FEASIBILITY.md) found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts; the [executable plan](docs/PHASE_7_IMPLEMENTATION_PLAN.md) stopped before Tasks 2-13.
 
+- Delivered the four signal tools -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- as Phase 7 partial delivery, taking the surface to 65/79 implemented with 14 names still reserved. They were admitted only after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. That trial had never been run: one compile flag controlled both admission and the failure-injection test seams, so the only binary that could serve a signal request was one no user would ever run. Separating the two is what made the trial possible.
+- The signal test seams remain compiled out of every shipping build, and a test now asserts the seam configurator is absent from production rather than asserting the whole feature is.
 - Added `runtime_read_output`, which reads what the **engine** printed rather than what Didi recorded: `print()` from a running game, `push_warning`, `push_error`, and GDScript parse and runtime errors, the last carrying the originating script file and line. Didi registers a custom `Logger` class and subscribes it through `OS.add_logger`; this is the first class the extension registers with the engine rather than only calling into. The stream is a separate 2,000-record ring with the same cursor contract as `runtime_read_logs`, so heavy engine output cannot evict Didi's own diagnostics. Verified end to end against Godot 4.5.1, 4.6.2, and 4.7.2. Where an engine does not expose the class-registration interface the extension still loads, warns at startup, and the tool returns no records rather than failing.
 - Added `didi --dump-tool-manifest`, which emits the registered tool surface as sorted, byte-stable JSON with counts and names. Documentation and the CI MCP smoke are now validated against it, so a published count can never disagree with the software.
 - Added `kLegacyToolNames` as the single declaration of which registrations are legacy. The canonical/legacy split previously existed only in prose and could not be verified.
@@ -45,8 +47,8 @@ Historical entries describe the surface advertised by those releases. For the ex
 - Split the fused surface rule: "no success stubs" remains absolute, while new tool names are added through a recorded surface amendment.
 - Documented that Godot 4.5 and 4.6 expose no read-side scene dirty state through GDExtension and that `EditorInterface.get_unsaved_scenes()` arrives in 4.7, which Didi does not yet consume. The previous wording named only 4.5 and read as a permanent engine limitation.
 - The live integration harness runs on Windows PowerShell 5.1. It previously required PowerShell 7 solely because of `ConvertFrom-Json -Depth`, which does not exist on 5.1 and is unnecessary on either host.
-- Discovery now exposes 79 canonical tools plus 10 legacy registrations (89 total). Sixty-one canonical tools are implemented and 18 remain unimplemented.
-- Phase 7 status is `BLOCKED_AT_FEASIBILITY`. All 18 names remain registered but unimplemented, including the 15/18 implementation-feasible names. For `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Work now requires an explicit governance choice between partial 76/79 delivery, retaining atomic 79/79, or explicitly approving and maintaining engine changes or private adapters sufficient for all three exact blocked contracts. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2; weakening a contract requires a separate explicit contract amendment.
+- Discovery now exposes 79 canonical tools plus 10 legacy registrations (89 total). Sixty-five canonical tools are implemented and 14 remain unimplemented.
+- Phase 7 status is `PARTIAL_DELIVERY`. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. The other 14 names remain registered but unimplemented. For `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Work now requires an explicit governance choice between partial 76/79 delivery, retaining atomic 79/79, or explicitly approving and maintaining engine changes or private adapters sufficient for all three exact blocked contracts. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2; weakening a contract requires a separate explicit contract amendment.
 
 ### Fixed
 
@@ -81,7 +83,7 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Changed
 
-- Version is now `1.4.0`; discovery exposes 72 canonical tools plus 10 legacy registrations (82 total). Fifty-four canonical tools are implemented and 18 remain unimplemented.
+- Version is now `1.4.0`; discovery exposes 72 canonical tools plus 10 legacy registrations (82 total). Fifty-four canonical tools are implemented and 14 remain unimplemented.
 - Project search enforces canonical containment, allowlisted `.gd`/`.cs`/`.tscn`/`.tres` formats, symlink/generated-tree exclusion, UTF-8 validation, deterministic order, and file/byte/result/preview limits.
 - Asset reimport validates the complete source batch before mutation, permits one active request, and requires two consecutive editor-idle callbacks before success.
 - Carried forward automated version, release-fact, support-policy, and Markdown-link drift validation from the Phase 3 documentation reconciliation.

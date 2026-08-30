@@ -4,15 +4,32 @@
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
 #define TEST_CASE(name, tags) static void phase7_contract_test()
 void registerTest(const std::string& name, std::function<void()> fn);
-TEST_CASE("Phase7Signals fail-closed contract", "[phase7][signals][contract]") {
+// Phase 7 partial delivery. The four signal names are live; the remaining
+// fourteen stay closed. Asserting both halves in one place is what keeps a
+// delivery from silently widening past what was actually trialled.
+TEST_CASE("Phase7Signals partial delivery contract", "[phase7][signals][contract]") {
     auto& registry = didi::mcp::ToolRegistry::instance(); registry.registerAllDefaultTools();
     for (const auto* name : {"signal_list_connections", "signal_connect", "signal_disconnect", "signal_emit"}) {
-        const auto* tool = registry.getTool(name); ASSERT_TRUE(tool != nullptr); ASSERT_TRUE(!tool->capability.implemented);
+        const auto* tool = registry.getTool(name); ASSERT_TRUE(tool != nullptr);
+        ASSERT_TRUE(tool->capability.implemented);
+        // Still an error without a live route -- but for want of a session, not
+        // for want of an implementation.
+        const auto result = registry.callTool(name, didi::json::object()); ASSERT_TRUE(result.isError);
+        ASSERT_TRUE(result.content[0].text.find("no trustworthy execution path") == std::string::npos);
+    }
+    for (const auto* name : {"physics_raycast_query", "physics_simulate_step", "nav_bake_mesh",
+                             "nav_query_path", "anim_list_tracks", "anim_play_track",
+                             "tilemap_set_cells", "tilemap_get_used_rect", "gridmap_set_cells",
+                             "viewport_set_camera_transform", "viewport_toggle_debug_draw",
+                             "runtime_inject_input", "runtime_get_call_stack",
+                             "runtime_read_profiler"}) {
+        const auto* tool = registry.getTool(name); ASSERT_TRUE(tool != nullptr);
+        ASSERT_TRUE(!tool->capability.implemented);
         const auto result = registry.callTool(name, didi::json::object()); ASSERT_TRUE(result.isError);
         ASSERT_TRUE(result.content[0].text.find(name) != std::string::npos);
     }
 }
-struct RegisterPhase7Signals { RegisterPhase7Signals() { registerTest("Phase7Signals fail-closed contract", [] { phase7_contract_test(); }); } } g_registerPhase7Signals;
+struct RegisterPhase7Signals { RegisterPhase7Signals() { registerTest("Phase7Signals partial delivery contract", [] { phase7_contract_test(); }); } } g_registerPhase7Signals;
 
 // TASK 2 SIGNAL BEHAVIOR BEGIN
 #include "didi/common/ipc_channel.hpp"
@@ -294,6 +311,9 @@ void test_phase7_signal_emit_confirmation_replay_and_public_gate_do_not_dispatch
     ASSERT_TRUE(!replay.execute && replay.is_error);
     ASSERT_TRUE(replay.payload["error"]["code"] == 409);
 
+    // signal_emit is now publicly callable, so what must still stop this call is
+    // confirmation, not admission: the token above was consumed by the replay
+    // check, and a spent token must never reach the live route.
     auto client = std::make_shared<SignalRecordingClient>();
     auto& registry = ToolRegistry::instance();
     registry.registerAllDefaultTools();
@@ -302,6 +322,9 @@ void test_phase7_signal_emit_confirmation_replay_and_public_gate_do_not_dispatch
     registry.setIpcClient(nullptr);
     ASSERT_TRUE(public_result.isError);
     ASSERT_TRUE(client->requests == 0);
+    const auto public_payload = didi::json::parse(public_result.content.front().text);
+    const auto public_code = public_payload["error"]["code"].get<int>();
+    ASSERT_TRUE(public_code == 428 || public_code == 409);
     for (const auto* blocker : {"physics_simulate_step", "nav_bake_mesh",
                                 "runtime_get_call_stack"}) {
         const auto* tool = registry.getTool(blocker);

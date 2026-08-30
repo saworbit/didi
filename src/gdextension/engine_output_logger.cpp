@@ -142,6 +142,16 @@ void freeInstance(void*, GDExtensionClassInstancePtr) {
     // No per-instance allocation to release -- see g_instance_token.
 }
 
+// Required for the extension to stay reloadable. The .gdextension declares
+// `reloadable = true`, and Godot disables reloading for the *whole* extension
+// if any registered class cannot be recreated -- so omitting this silently
+// costs hot reload for every other part of Didi. There is no per-instance
+// state to carry across a reload, so recreating is just handing back the
+// token again.
+GDExtensionClassInstancePtr recreateInstance(void*, GDExtensionObjectPtr) {
+    return &g_instance_token;
+}
+
 // Logger derives from RefCounted, so the instance lives by reference count
 // rather than by our holding a pointer. These keep that count balanced.
 bool callRefCounted(GDExtensionObjectPtr object, const char* method_name) {
@@ -195,6 +205,7 @@ void installEngineOutputLogger() {
     info.is_runtime = 1;
     info.create_instance_func = createInstance;
     info.free_instance_func = freeInstance;
+    info.recreate_instance_func = recreateInstance;
     info.get_virtual_func = getVirtual;
 
     api.classdb_register_extension_class4(api.getLibrary(), class_name.ptr(), parent_name.ptr(), &info);
