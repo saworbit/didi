@@ -23,6 +23,9 @@ constexpr size_t kMaxContextPathBytes = 1024;
 constexpr size_t kMaxResultBytes = 256 * 1024;
 constexpr size_t kMaxContainerElements = 4096;
 constexpr size_t kMaxClassNameBytes = 256;
+// Godot's deepest built-in chain is well under this; the bound only stops a
+// malformed hierarchy from looping forever.
+constexpr int kMaxClassHierarchyDepth = 64;
 constexpr size_t kResponseTimingReserve = 64;
 constexpr int kMaxResultDepth = 16;
 using Opaque = std::array<std::byte, kOpaqueBytes>;
@@ -279,7 +282,11 @@ enum class ReceiverKind {
     Node,
     StringLiteral,
     ArrayLiteral,
-    DictionaryLiteral
+    DictionaryLiteral,
+    // The result of a Vector2, Vector3 or Color constructor written out in this
+    // expression. There is no object to reach through: the value was built from
+    // source-local numbers a few tokens earlier.
+    MathLiteral
 };
 
 bool isLiteralIdentifier(const Token& token) {
@@ -316,6 +323,43 @@ bool isSourceLocalContainer(const std::vector<Token>& tokens, size_t receiver_en
     return true;
 }
 
+// Names the math constructor whose closing parenthesis sits at receiver_end, or
+// "" when that token does not close one. The constructor's own arguments were
+// already forced to be source-local numerics by the global-callable rule when
+// the loop reached its identifier, so nothing dynamic can hide inside it.
+std::string mathConstructorAt(const std::vector<Token>& tokens, size_t receiver_end) {
+    static const std::unordered_set<std::string> constructors = {"Vector2", "Vector3", "Color"};
+    if (receiver_end >= tokens.size() || tokens[receiver_end].text != ")") return {};
+    int depth = 0;
+    for (size_t index = receiver_end + 1; index-- > 0;) {
+        if (tokens[index].text == ")") {
+            ++depth;
+        } else if (tokens[index].text == "(") {
+            if (--depth == 0) {
+                if (index == 0) return {};
+                const auto& name = tokens[index - 1];
+                if (name.kind == TokenKind::Identifier && constructors.count(name.text) != 0) {
+                    return name.text;
+                }
+                return {};
+            }
+        }
+        if (index == 0) break;
+    }
+    return {};
+}
+
+bool isMathComponent(const std::string& constructor, const std::string& component) {
+    if (constructor == "Vector2") return component == "x" || component == "y";
+    if (constructor == "Vector3") {
+        return component == "x" || component == "y" || component == "z";
+    }
+    if (constructor == "Color") {
+        return component == "r" || component == "g" || component == "b" || component == "a";
+    }
+    return false;
+}
+
 ReceiverKind receiverKind(const std::vector<Token>& tokens, size_t call_index) {
     if (call_index < 2 || tokens[call_index - 1].text != ".") return ReceiverKind::None;
     const size_t receiver_end = call_index - 2;
@@ -331,6 +375,9 @@ ReceiverKind receiverKind(const std::vector<Token>& tokens, size_t call_index) {
     if (receiver.text == "}" &&
         isSourceLocalContainer(tokens, receiver_end, "{", "}")) {
         return ReceiverKind::DictionaryLiteral;
+    }
+    if (!mathConstructorAt(tokens, receiver_end).empty()) {
+        return ReceiverKind::MathLiteral;
     }
     return ReceiverKind::None;
 }
@@ -351,6 +398,30 @@ bool hasOneScalarLiteralArgument(const std::vector<Token>& tokens, size_t call_i
             tokens[call_index + 2].kind == TokenKind::Number ||
             isLiteralIdentifier(tokens[call_index + 2])) &&
            tokens[call_index + 3].text == ")";
+}
+
+// Exactly one argument, itself a math constructor written out here, as in
+// Vector2(0, 0).distance_to(Vector2(3, 4)).
+bool hasOneMathConstructorArgument(const std::vector<Token>& tokens, size_t call_index) {
+    // call_index names the method, call_index + 1 is its opening parenthesis, so
+    // the argument starts at call_index + 2 and must read Name ( ... ) ).
+    const size_t argument_start = call_index + 2;
+    if (argument_start + 1 >= tokens.size()) return false;
+    if (tokens[argument_start].kind != TokenKind::Identifier) return false;
+    if (tokens[argument_start + 1].text != "(") return false;
+
+    int depth = 0;
+    for (size_t index = argument_start + 1; index < tokens.size(); ++index) {
+        if (tokens[index].text == "(") {
+            ++depth;
+        } else if (tokens[index].text == ")" && --depth == 0) {
+            // The argument closed here. It has to be a constructor, and it has
+            // to be the only argument.
+            return !mathConstructorAt(tokens, index).empty() &&
+                   index + 1 < tokens.size() && tokens[index + 1].text == ")";
+        }
+    }
+    return false;
 }
 
 bool hasOnlySourceLocalNumericArguments(const std::vector<Token>& tokens,
@@ -379,7 +450,14 @@ Result<void> validateTokens(const std::vector<Token>& tokens) {
             const bool method_call = index + 2 < tokens.size() &&
                                      tokens[index + 1].kind == TokenKind::Identifier &&
                                      tokens[index + 2].text == "(";
-            if (!method_call) {
+            // Vector2(10, 20).x reads a scalar off a value this expression just
+            // built from source-local numbers. There is no object to reach
+            // through, so the rule against object property reads does not apply.
+            const bool component_read =
+                !method_call && index > 0 && index + 1 < tokens.size() &&
+                tokens[index + 1].kind == TokenKind::Identifier &&
+                isMathComponent(mathConstructorAt(tokens, index - 1), tokens[index + 1].text);
+            if (!method_call && !component_read) {
                 return Error::invalidArgument(
                     "Object member/property reads are forbidden in read-only expressions");
             }
@@ -490,6 +568,31 @@ Result<void> validateTokens(const std::vector<Token>& tokens) {
             if (receiver == ReceiverKind::DictionaryLiteral && token.text == "has" &&
                 hasOneStringLiteralArgument(tokens, index)) {
                 continue;
+            }
+            if (receiver == ReceiverKind::MathLiteral) {
+                // Pure geometry on a value built from source-local numbers.
+                // Every one of these returns a scalar or a vector of fixed size,
+                // so the result stays in constant space, and none of them can
+                // reach an object, the filesystem or the scene tree.
+                static const std::unordered_set<std::string> zero_argument_methods = {
+                    "length", "length_squared", "normalized", "abs", "sign",
+                    "floor", "ceil", "round", "angle", "aspect", "is_normalized",
+                    "is_finite", "min_axis_index", "max_axis_index"
+                };
+                static const std::unordered_set<std::string> vector_argument_methods = {
+                    "dot", "cross", "distance_to", "distance_squared_to",
+                    "angle_to", "angle_to_point"
+                };
+                if (zero_argument_methods.count(token.text) != 0 &&
+                    hasNoArguments(tokens, index)) {
+                    continue;
+                }
+                if (vector_argument_methods.count(token.text) != 0 &&
+                    hasOneMathConstructorArgument(tokens, index)) {
+                    continue;
+                }
+                return Error::invalidArgument(
+                    "Only pure geometry calls on source-local Vector or Color literals are permitted");
             }
             return Error::invalidArgument(
                 "Method calls require an exact direct Node receiver or a source-local literal receiver");
@@ -898,15 +1001,42 @@ Result<void> prepareNativePropertyReads(const std::string& source,
         const auto& read = reads.value()[index];
         auto property_name = makeStringName(read.property);
         if (property_name.isErr()) return property_name.error();
-        auto getter_value = callObject(class_db.value(), "ClassDB",
-                                       "class_get_property_getter", 3770832642LL,
-                                       {&class_name.value(), &property_name.value()});
-        if (getter_value.isErr()) return getter_value.error();
-        auto getter = stringFromVariant(getter_value.value(),
-                                        GDEXTENSION_VARIANT_TYPE_STRING_NAME,
-                                        kMaxClassNameBytes);
-        if (getter.isErr()) return getter.error();
-        if (getter.value().empty()) {
+        // class_get_property_getter looks at the exact class only. visible,
+        // position and name are declared on Node, CanvasItem and Node2D rather
+        // than on Sprite2D, so a derived node has to walk its ancestors before
+        // the property can be called undeclared. The walk stops at Object, and
+        // is bounded so a broken hierarchy cannot spin here.
+        std::string getter_name;
+        auto current_class = makeStringName(class_text.value());
+        if (current_class.isErr()) return current_class.error();
+        for (int depth = 0; depth < kMaxClassHierarchyDepth; ++depth) {
+            auto getter_value = callObject(class_db.value(), "ClassDB",
+                                           "class_get_property_getter", 3770832642LL,
+                                           {&current_class.value(), &property_name.value()});
+            if (getter_value.isErr()) return getter_value.error();
+            auto getter = stringFromVariant(getter_value.value(),
+                                            GDEXTENSION_VARIANT_TYPE_STRING_NAME,
+                                            kMaxClassNameBytes);
+            if (getter.isErr()) return getter.error();
+            if (!getter.value().empty()) {
+                getter_name = std::move(getter.value());
+                break;
+            }
+
+            auto parent_value = callObject(class_db.value(), "ClassDB",
+                                           "get_parent_class", 1965194235LL,
+                                           {&current_class.value()});
+            if (parent_value.isErr()) return parent_value.error();
+            auto parent = stringFromVariant(parent_value.value(),
+                                            GDEXTENSION_VARIANT_TYPE_STRING_NAME,
+                                            kMaxClassNameBytes);
+            if (parent.isErr()) return parent.error();
+            if (parent.value().empty()) break;
+            auto next_class = makeStringName(parent.value());
+            if (next_class.isErr()) return next_class.error();
+            current_class = std::move(next_class);
+        }
+        if (getter_name.empty()) {
             return Error(403,
                          "node.get is limited to native ClassDB-defined properties");
         }
