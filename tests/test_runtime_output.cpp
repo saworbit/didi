@@ -106,6 +106,52 @@ static void test_runtime_read_output_is_registered_as_a_read_only_tool() {
     ASSERT_EQ(definition["annotations"]["destructiveHint"].get<bool>(), false);
 }
 
+// A nested main-loop pump must observe progress and start nothing new.
+// EditorFileSystem.reimport_files and RenderingServer.force_draw both re-enter
+// the callback synchronously, and dequeuing there ran unrelated scene and
+// runtime commands against a tree that was mid-reimport or had nodes hidden for
+// an isolated capture.
+static void test_nested_pump_observes_progress_without_dequeuing() {
+    auto& hook = didi::godot::EditorHook::instance();
+    hook.cancelPendingCommands("test reset");
+    didi::godot::EditorHookTestAccess::setSessionKind(hook, didi::runtime::SessionKind::editor);
+    ASSERT_FALSE(didi::godot::EditorHookTestAccess::pumping(hook));
+
+    auto queued = didi::godot::EditorHookTestAccess::enqueue(
+        hook, "runtime.getOutput", {{"cursor", 0}, {"limit", 1}});
+    ASSERT_EQ(didi::godot::EditorHookTestAccess::queueDepth(hook), 1u);
+
+    // Stand in for the engine re-entering the callback from inside a command.
+    didi::godot::EditorHookTestAccess::setPumping(hook, true);
+    hook.processQueue();
+    ASSERT_EQ(didi::godot::EditorHookTestAccess::queueDepth(hook), 1u);
+    didi::godot::EditorHookTestAccess::setPumping(hook, false);
+
+    // The ordinary pump still drains, and clears the flag on the way out.
+    hook.processQueue();
+    ASSERT_EQ(didi::godot::EditorHookTestAccess::queueDepth(hook), 0u);
+    ASSERT_FALSE(didi::godot::EditorHookTestAccess::pumping(hook));
+    ASSERT_FALSE(queued.response.get().contains("error"));
+}
+
+// runtime.stop must answer before the main loop is allowed to exit, or the
+// client sees a broken pipe instead of the exit code it asked for.
+static void test_scene_tree_quit_is_deferred_past_the_response_frame() {
+    auto& hook = didi::godot::EditorHook::instance();
+    hook.cancelPendingCommands("test reset");
+    ASSERT_FALSE(didi::godot::EditorHookTestAccess::hasPendingQuit(hook));
+
+    hook.requestSceneTreeQuit(3);
+    ASSERT_TRUE(didi::godot::EditorHookTestAccess::hasPendingQuit(hook));
+
+    // The frame that answered the request must not be the frame that quits.
+    hook.processQueue();
+    ASSERT_TRUE(didi::godot::EditorHookTestAccess::hasPendingQuit(hook));
+
+    hook.processQueue();
+    ASSERT_FALSE(didi::godot::EditorHookTestAccess::hasPendingQuit(hook));
+}
+
 struct RegisterRuntimeOutputTests {
     RegisterRuntimeOutputTests() {
         registerTest("RuntimeOutput.SeparateFromDidiRecords", test_engine_output_is_a_separate_stream_from_didi_records);
@@ -113,5 +159,9 @@ struct RegisterRuntimeOutputTests {
         registerTest("RuntimeOutput.CursorPaging", test_engine_output_pages_by_cursor);
         registerTest("RuntimeOutput.RejectsMalformedQueries", test_engine_output_rejects_malformed_queries);
         registerTest("RuntimeOutput.ToolIsReadOnly", test_runtime_read_output_is_registered_as_a_read_only_tool);
+        registerTest("EditorHook.NestedPumpStartsNoWork",
+                     test_nested_pump_observes_progress_without_dequeuing);
+        registerTest("EditorHook.SceneTreeQuitIsDeferred",
+                     test_scene_tree_quit_is_deferred_past_the_response_frame);
     }
 } g_registerRuntimeOutputTests;

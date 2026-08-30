@@ -110,6 +110,22 @@ void EditorHook::setSessionKind(const std::string& session_kind) {
 }
 
 void EditorHook::processQueue() {
+    // EditorFileSystem.reimport_files and RenderingServer.force_draw both
+    // re-enter the main-loop callback synchronously. A nested pump must observe
+    // progress and nothing else: dequeuing there would run unrelated scene and
+    // runtime commands against a tree that is mid-reimport, or one with
+    // unrelated nodes hidden for an isolated viewport capture.
+    if (m_pumping) {
+        processRuntimeStepFrame();
+        processAssetReimportFrame();
+        return;
+    }
+    m_pumping = true;
+    struct PumpGuard {
+        bool& pumping;
+        ~PumpGuard() { pumping = false; }
+    } pump_guard{m_pumping};
+
     struct QueuedCommand {
         EngineCommand command;
         std::optional<json> session_rejection;
@@ -186,6 +202,28 @@ void EditorHook::processQueue() {
     }
     processRuntimeStepFrame();
     processAssetReimportFrame();
+    processPendingQuitFrame();
+}
+
+void EditorHook::requestSceneTreeQuit(int64_t exit_code) {
+    m_pendingQuitExitCode = exit_code;
+    // One full frame of margin. The response is framed and written by the IPC
+    // worker as soon as this command's handler returns, which is microseconds;
+    // a frame is milliseconds. This does not make the ordering certain, only
+    // very likely, and the comment on processPendingQuitFrame says why.
+    m_pendingQuitFrames = 2;
+}
+
+void EditorHook::processPendingQuitFrame() {
+    if (!m_pendingQuitExitCode.has_value()) return;
+    if (--m_pendingQuitFrames > 0) return;
+    const int64_t exit_code = *m_pendingQuitExitCode;
+    m_pendingQuitExitCode.reset();
+    DIDI_LOG_INFO("EDITOR_HOOK", "Quitting the scene tree with exit code ", exit_code);
+    auto requested = quitSceneTree(exit_code);
+    if (requested.isErr()) {
+        DIDI_LOG_ERROR("EDITOR_HOOK", "Deferred SceneTree.quit failed: ", requested.error().message);
+    }
 }
 
 void EditorHook::scheduleAssetReimport(
@@ -241,20 +279,36 @@ void EditorHook::scheduleAssetReimport(
                                     {"message", "An asset reimport request is already active"}}}});
         return;
     }
-    auto started = GodotBridge::instance().beginAssetReimport(paths);
+    auto resolved = GodotBridge::instance().resolveReimportPaths(paths);
+    if (resolved.isErr()) {
+        control->markCompleted();
+        fulfillCommand(promise, control,
+                       {{"error", {{"code", resolved.error().code},
+                                    {"message", resolved.error().message}}}});
+        return;
+    }
+
+    // Publish the request before starting the reimport. reimport_files
+    // re-enters the main-loop callback, and a nested frame that cannot see a
+    // pending request skips straight past the scanning window, so the request
+    // later either times out or reports idle without ever having observed the
+    // scan it was waiting for.
+    const auto now = std::chrono::steady_clock::now();
+    m_pendingAssetReimport.emplace(PendingAssetReimport{
+        resolved.value(), ReimportProgress(now, std::chrono::milliseconds(timeout_ms)),
+        promise, control
+    });
+
+    auto started = GodotBridge::instance().startAssetReimport(resolved.value());
     if (started.isErr()) {
+        m_pendingAssetReimport.reset();
         control->markCompleted();
         fulfillCommand(promise, control,
                        {{"error", {{"code", started.error().code},
                                     {"message", started.error().message}}}});
         return;
     }
-    const auto now = std::chrono::steady_clock::now();
-    m_pendingAssetReimport.emplace(PendingAssetReimport{
-        started.value(), ReimportProgress(now, std::chrono::milliseconds(timeout_ms)),
-        promise, control
-    });
-    DIDI_LOG_INFO("EDITOR_HOOK", "Started bounded asset reimport for ", started.value().size(), " path(s)");
+    DIDI_LOG_INFO("EDITOR_HOOK", "Started bounded asset reimport for ", resolved.value().size(), " path(s)");
 }
 
 void EditorHook::processAssetReimportFrame() {
@@ -630,6 +684,18 @@ bool EditorHookTestAccess::hasPendingRuntimeStep(EditorHook& hook) {
 bool EditorHookTestAccess::hasPendingAssetReimport(EditorHook& hook) {
     std::lock_guard<std::recursive_mutex> lock(hook.m_reimportMutex);
     return hook.m_pendingAssetReimport.has_value();
+}
+
+bool EditorHookTestAccess::pumping(const EditorHook& hook) {
+    return hook.m_pumping;
+}
+
+void EditorHookTestAccess::setPumping(EditorHook& hook, bool pumping) {
+    hook.m_pumping = pumping;
+}
+
+bool EditorHookTestAccess::hasPendingQuit(const EditorHook& hook) {
+    return hook.m_pendingQuitExitCode.has_value();
 }
 
 } // namespace godot

@@ -1088,6 +1088,15 @@ GodotBridge& GodotBridge::instance() {
 
 Result<std::vector<std::string>> GodotBridge::beginAssetReimport(
     const std::vector<std::string>& paths) {
+    auto resolved = resolveReimportPaths(paths);
+    if (resolved.isErr()) return resolved.error();
+    auto started = startAssetReimport(resolved.value());
+    if (started.isErr()) return started.error();
+    return resolved;
+}
+
+Result<std::vector<std::string>> GodotBridge::resolveReimportPaths(
+    const std::vector<std::string>& paths) {
     namespace fs = std::filesystem;
     if (paths.empty() || paths.size() > 256) {
         return Error::invalidArgument("paths must contain 1 to 256 source assets");
@@ -1124,19 +1133,23 @@ Result<std::vector<std::string>> GodotBridge::beginAssetReimport(
         normalized.push_back(resource_path);
     }
 
+    return normalized;
+}
+
+Result<void> GodotBridge::startAssetReimport(const std::vector<std::string>& resolved_paths) {
     auto editor = editorInterface();
     if (editor.isErr()) return editor.error();
     auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
     if (filesystem.isErr()) return filesystem.error();
     auto object = objectFromVariant(filesystem.value());
     if (object.isErr() || !object.value()) return Error::notConnected("EditorFileSystem is unavailable");
-    json path_array = normalized;
+    json path_array = resolved_paths;
     auto godot_paths = makeJsonVariant(path_array);
     if (godot_paths.isErr()) return godot_paths.error();
     auto started = callObject(object.value(), "EditorFileSystem", "reimport_files", 4015028928LL,
                               {&godot_paths.value()});
     if (started.isErr()) return started.error();
-    return normalized;
+    return Result<void>::ok();
 }
 
 Result<bool> GodotBridge::isEditorFilesystemScanning() {

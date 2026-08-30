@@ -131,6 +131,11 @@ public:
                                const std::shared_ptr<std::promise<json>>& promise,
                                const std::shared_ptr<CommandControl>& control);
 
+    // Asks for SceneTree.quit on a later frame instead of right now. runtime.stop
+    // has to return its response over IPC before the main loop is allowed to
+    // exit, or the client sees a broken pipe rather than the exit code.
+    void requestSceneTreeQuit(int64_t exit_code);
+
     // Pumping queue
     void processQueue();
     void cancelPendingCommands(const std::string& reason);
@@ -151,6 +156,7 @@ private:
     json executeOnMainThread(const std::string& method, const json& params);
     void processRuntimeStepFrame();
     void processAssetReimportFrame();
+    void processPendingQuitFrame();
 
     struct PendingRuntimeStep {
         int requested_frames{0};
@@ -178,6 +184,11 @@ private:
     std::optional<PendingRuntimeStep> m_pendingRuntimeStep;
     std::optional<PendingAssetReimport> m_pendingAssetReimport;
     std::optional<runtime::SessionKind> m_sessionKind;
+    // Main-thread only. Set while processQueue is dequeuing, so a nested pump
+    // triggered from inside a command observes progress without starting work.
+    bool m_pumping{false};
+    std::optional<int64_t> m_pendingQuitExitCode;
+    int m_pendingQuitFrames{0};
 
     std::shared_ptr<RuntimeLogRing> m_runtimeLogs{std::make_shared<RuntimeLogRing>()};
     std::shared_ptr<RuntimeLogRing> m_engineOutput{std::make_shared<RuntimeLogRing>()};
@@ -196,6 +207,9 @@ public:
     static bool runtimeStepActive(EditorHook& hook);
     static bool hasPendingRuntimeStep(EditorHook& hook);
     static bool hasPendingAssetReimport(EditorHook& hook);
+    static bool pumping(const EditorHook& hook);
+    static void setPumping(EditorHook& hook, bool pumping);
+    static bool hasPendingQuit(const EditorHook& hook);
 };
 
 } // namespace godot

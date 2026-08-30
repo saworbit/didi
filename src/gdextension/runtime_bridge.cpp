@@ -1,4 +1,5 @@
 #include "didi/gdextension/runtime_bridge.hpp"
+#include "didi/gdextension/editor_hook.hpp"
 #include "didi/gdextension/gdextension_api.hpp"
 #include "didi/common/logger.hpp"
 
@@ -433,6 +434,14 @@ bool integerInRange(const json& value, int64_t minimum, int64_t maximum) {
 
 } // namespace
 
+Result<void> quitSceneTree(int64_t exit_code) {
+    auto tree = activeSceneTree();
+    if (tree.isErr()) return tree.error();
+    const void* args[] = {&exit_code};
+    auto requested = callVoid(tree.value(), "SceneTree", "quit", 1995695955LL, args);
+    return requested.isOk() ? Result<void>::ok() : Result<void>(requested.error());
+}
+
 json executeRuntimeBridge(const std::string& method, const json& params,
                           const std::string& session_kind) {
     if (!params.is_object()) return errorJson(400, "Runtime params must be an object");
@@ -502,9 +511,12 @@ json executeRuntimeBridge(const std::string& method, const json& params,
             return errorJson(400, "exit_code must be an integer from 0 to 255");
         }
         const int64_t exit_code = params.value("exit_code", 0);
-        const void* args[] = {&exit_code};
-        auto requested = callVoid(tree.value(), "SceneTree", "quit", 1995695955LL, args);
-        if (requested.isErr()) return errorJson(requested.error().code, requested.error().message);
+        // Deliberately not calling quit here. SceneTree.quit exits the main loop
+        // at the end of the current iteration, which can tear the process down
+        // before the IPC worker has framed and written this response, so the
+        // caller sees a broken pipe instead of the exit code. Hand it to the
+        // frame pump instead and answer now.
+        EditorHook::instance().requestSceneTreeQuit(exit_code);
         DIDI_LOG_INFO("RUNTIME_BRIDGE", "Game shutdown requested with exit code ", exit_code);
         return liveResult({{"status", "success"}, {"shutdown_requested", true},
                            {"exit_code", exit_code}}, session_kind);
