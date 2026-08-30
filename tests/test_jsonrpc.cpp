@@ -1,9 +1,13 @@
 #include "didi/mcp/jsonrpc.hpp"
 #include "didi/mcp/mcp_server.hpp"
+#include "didi/runtime/session_client.hpp"
 #include "didi/common/logger.hpp"
 #include <cassert>
 #include <iostream>
 #include <sstream>
+#include <memory>
+#include <optional>
+#include <vector>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
 #define ASSERT_EQ(a, b) ASSERT_TRUE((a) == (b))
@@ -249,6 +253,104 @@ static std::string runStdioWithInput(didi::mcp::McpServer& server, const std::st
     std::cin.rdbuf(const_cast<std::streambuf*>(old_input));
     std::cout.rdbuf(const_cast<std::streambuf*>(old_output));
     return output.str();
+}
+
+namespace {
+
+// Reports one attached session until it is detached, and counts the detaches.
+class DetachCountingSessionClient final : public didi::runtime::IRuntimeSessionClient {
+public:
+    bool connect(const std::string&, int) override { return false; }
+    void disconnect() override {}
+    bool isConnected() const override { return attached; }
+    didi::Result<didi::json> sendRequest(const std::string&, const didi::json&, int) override {
+        return didi::Error::notConnected();
+    }
+    didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
+        return didi::json::array();
+    }
+    didi::Result<didi::json> attachSession(const std::string&) override {
+        return didi::Error::notConnected();
+    }
+    didi::Result<didi::json> detachSession() override {
+        ++detaches;
+        attached = false;
+        return didi::json::object();
+    }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override {
+        if (!attached) return std::nullopt;
+        return didi::runtime::SessionDescriptor{
+            1, "0123456789abcdef0123456789abcdef", std::string(64, 'a'), 1,
+            "editor", "C:/project", "\\\\.\\pipe\\godot_didi_1", 1, "1.3"};
+    }
+
+    bool attached{true};
+    int detaches{0};
+};
+
+} // namespace
+
+static void test_mcp_releases_its_runtime_session_on_stdio_eof() {
+    // Break caught: stdio EOF returned straight out of the loop, leaving the
+    // session lock and the IPC route for process exit to clean up.
+    auto sessions = std::make_shared<DetachCountingSessionClient>();
+    {
+        didi::mcp::McpServer server;
+        server.setIpcClient(sessions);
+        const auto output = runStdioWithInput(
+            server, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n");
+        ASSERT_TRUE(!output.empty());
+        ASSERT_EQ(sessions->detaches, 1);
+        ASSERT_TRUE(!sessions->activeSession().has_value());
+    }
+    // The destructor runs stop() again; nothing is attached, so it stays at one.
+    ASSERT_EQ(sessions->detaches, 1);
+
+    didi::mcp::ToolRegistry::instance().setIpcClient(nullptr);
+    didi::mcp::ToolRegistry::instance().setRuntimeSessionClient(nullptr);
+}
+
+static void test_mcp_handles_jsonrpc_batches() {
+    // Break caught: an array payload was rejected as one Invalid Request, so a
+    // client could not pipeline calls in a single round trip.
+    didi::mcp::McpServer server;
+    const auto output = runStdioWithInput(
+        server,
+        "[]\n"
+        "[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"},"
+        "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"},"
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\",\"params\":{}},"
+        "{\"id\":3,\"method\":\"ping\"}]\n"
+        "[{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}]\n"
+        "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"ping\"}\n");
+
+    std::istringstream lines(output);
+    std::vector<didi::json> payloads;
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (!line.empty()) payloads.push_back(didi::json::parse(line));
+    }
+
+    // Empty batch, the mixed batch, then the plain request. The
+    // notification-only batch produces nothing at all.
+    ASSERT_EQ(payloads.size(), 3u);
+
+    ASSERT_TRUE(payloads[0].is_object());
+    ASSERT_EQ(payloads[0]["error"]["code"], didi::mcp::JsonRpcErrorCode::InvalidRequest);
+    ASSERT_TRUE(payloads[0]["id"].is_null());
+
+    ASSERT_TRUE(payloads[1].is_array());
+    ASSERT_EQ(payloads[1].size(), 3u);
+    ASSERT_EQ(payloads[1][0]["id"], 1);
+    ASSERT_TRUE(payloads[1][0].contains("result"));
+    ASSERT_EQ(payloads[1][1]["id"], 2);
+    ASSERT_TRUE(payloads[1][1].contains("result"));
+    ASSERT_EQ(payloads[1][2]["id"], 3);
+    ASSERT_EQ(payloads[1][2]["error"]["code"], didi::mcp::JsonRpcErrorCode::InvalidRequest);
+
+    ASSERT_TRUE(payloads[2].is_object());
+    ASSERT_EQ(payloads[2]["id"], 4);
+    ASSERT_TRUE(payloads[2].contains("result"));
 }
 
 static void test_mcp_distinguishes_parse_errors_from_invalid_requests() {
@@ -602,6 +704,9 @@ struct RegisterJsonRpcTests {
                      test_mcp_content_length_header_cannot_smuggle_request);
         registerTest("McpServer.ParseVsInvalidRequest",
                      test_mcp_distinguishes_parse_errors_from_invalid_requests);
+        registerTest("McpServer.JsonRpcBatchRequests", test_mcp_handles_jsonrpc_batches);
+        registerTest("McpServer.ReleasesRuntimeSessionOnEof",
+                     test_mcp_releases_its_runtime_session_on_stdio_eof);
         registerTest("McpServer.ApplicationErrorRange",
                      test_mcp_maps_resource_and_prompt_failures_to_server_error_range);
         registerTest("McpServer.OutputLoggingRedactsBodies",

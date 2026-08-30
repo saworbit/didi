@@ -658,7 +658,12 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
         if (result.isError) {
             if (dispatcher) {
                 if (const auto error = dispatcher->lastError(); error.has_value()) {
-                    return structuredLiveToolError(*error, lease->descriptor);
+                    // An offline-only tool, or a live tool with no route, has no
+                    // lease. A dispatcher error recorded by an earlier call must
+                    // not be reported against a session that was never selected.
+                    return structuredLiveToolError(
+                        *error, lease.has_value() ? lease->descriptor
+                                                  : std::optional<runtime::SessionDescriptor>{});
                 }
             }
             return result;
