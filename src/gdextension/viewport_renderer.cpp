@@ -29,7 +29,7 @@ std::string makeCaptureId() {
 Result<std::string> makeUniqueCaptureId(CaptureCache& cache) {
     for (int attempt = 0; attempt < 32; ++attempt) {
         auto candidate = makeCaptureId();
-        if (!cache.find(candidate).has_value()) return candidate;
+        if (!cache.contains(candidate)) return candidate;
     }
     return Error::internal("Unable to allocate a unique live capture ID");
 }
@@ -190,7 +190,7 @@ json ViewportRenderer::diffViewport(const json& params) {
         if (b64_png.empty()) return rendererError(Error::internal("Failed to encode viewport diff pixels"));
         auto comparison_id = makeUniqueCaptureId(m_captureCache);
         if (comparison_id.isErr()) return rendererError(comparison_id.error());
-        auto cached = m_captureCache.store(comparison_id.value(), frame.value().pixels);
+        auto cached = m_captureCache.store(comparison_id.value(), std::move(frame.value().pixels));
         if (cached.isErr()) return rendererError(cached.error());
 
         json result = diff.value().toJson();

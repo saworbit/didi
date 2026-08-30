@@ -1,6 +1,7 @@
 #include "didi/gdextension/viewport_renderer.hpp"
 
 #include <algorithm>
+#include <utility>
 
 namespace didi::godot {
 namespace {
@@ -16,6 +17,15 @@ bool validCaptureId(const std::string& value) {
 
 Result<void> CaptureCache::store(const std::string& capture_id,
                                  const image::RgbaImage& pixels) {
+    return storeFrame(capture_id, image::RgbaImage(pixels));
+}
+
+Result<void> CaptureCache::store(const std::string& capture_id, image::RgbaImage&& pixels) {
+    return storeFrame(capture_id, std::move(pixels));
+}
+
+Result<void> CaptureCache::storeFrame(const std::string& capture_id,
+                                      image::RgbaImage&& pixels) {
     if (!validCaptureId(capture_id)) {
         return Error::invalidArgument("capture_id must contain exactly 32 lowercase hexadecimal characters");
     }
@@ -39,17 +49,21 @@ Result<void> CaptureCache::store(const std::string& capture_id,
         m_bytes -= oldest->second.pixels.rgba.size();
         m_entries.erase(oldest);
     }
-    m_entries.emplace(capture_id, Entry{pixels, ++m_clock});
+    m_entries.emplace(capture_id, Entry{std::move(pixels), ++m_clock});
     m_bytes += expected.value();
     return Result<void>::ok();
 }
 
-std::optional<image::RgbaImage> CaptureCache::find(const std::string& capture_id) {
-    if (!validCaptureId(capture_id)) return std::nullopt;
+const image::RgbaImage* CaptureCache::find(const std::string& capture_id) {
+    if (!validCaptureId(capture_id)) return nullptr;
     const auto found = m_entries.find(capture_id);
-    if (found == m_entries.end()) return std::nullopt;
+    if (found == m_entries.end()) return nullptr;
     found->second.last_used = ++m_clock;
-    return found->second.pixels;
+    return &found->second.pixels;
+}
+
+bool CaptureCache::contains(const std::string& capture_id) const {
+    return validCaptureId(capture_id) && m_entries.count(capture_id) != 0;
 }
 
 } // namespace didi::godot

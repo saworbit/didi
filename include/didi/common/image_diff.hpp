@@ -27,6 +27,18 @@ struct DiffBounds {
     json toJson() const;
 };
 
+// Two different questions get answered here, and mixing them up is what made
+// "identical: true" sit next to "max_channel_delta: 4" in the same payload.
+//
+//   changed_pixels, changed_ratio, bounds, diff_rgba and the identical flag are
+//   THRESHOLDED. A pixel counts only when some channel differs by more than the
+//   threshold the caller passed.
+//
+//   mean_absolute_error and max_channel_delta are RAW. They accumulate every
+//   delta, including the sub-threshold ones that were deliberately filtered out.
+//
+// The payload now carries the threshold that was applied and a separate
+// bit_identical flag, so a reader can tell the two apart without guessing.
 struct ImageDiffResult {
     int width{0};
     int height{0};
@@ -35,6 +47,7 @@ struct ImageDiffResult {
     double changed_ratio{0.0};
     std::array<double, 4> mean_absolute_error{};
     uint8_t max_channel_delta{0};
+    uint8_t threshold{0};
     std::optional<DiffBounds> bounds;
     std::vector<uint8_t> diff_rgba;
 

@@ -1,5 +1,7 @@
 #include "didi/common/base64.hpp"
 
+#include <array>
+
 namespace didi {
 namespace base64 {
 
@@ -40,8 +42,17 @@ std::vector<uint8_t> decode(std::string_view input) {
     std::vector<uint8_t> out;
     if (input.empty()) return out;
 
-    std::vector<int> T(256, -1);
-    for (int i = 0; i < 64; i++) T[static_cast<uint8_t>(kEncodeTable[i])] = i;
+    // Built once. Rebuilding a 256 entry table on the heap for every call cost
+    // an allocation per decode, and decode runs per captured frame and per
+    // resource payload.
+    static const std::array<int8_t, 256> T = [] {
+        std::array<int8_t, 256> table{};
+        table.fill(-1);
+        for (int i = 0; i < 64; i++) {
+            table[static_cast<uint8_t>(kEncodeTable[i])] = static_cast<int8_t>(i);
+        }
+        return table;
+    }();
 
     int val = 0, valb = -8;
     for (char c : input) {
