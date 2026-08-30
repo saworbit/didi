@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 #endif
@@ -833,6 +834,25 @@ static void test_posix_client_rejects_mismatched_response_id() {
 }
 #endif
 
+#if !defined(_WIN32)
+static void test_posix_socket_is_owner_only_before_it_listens() {
+    // Break caught: bind created the socket at 0777 & ~umask, commonly 0755, and
+    // the old order was bind, listen, then chmod. The endpoint was accepting
+    // connections under a shared temp directory before the owner-only policy
+    // was applied.
+    const auto path = rawSocketPath("owner-only");
+    auto server = didi::ipc::createIpcServer();
+    ASSERT_TRUE(server->start(path));
+
+    struct stat socket_status {};
+    ASSERT_TRUE(stat(path.c_str(), &socket_status) == 0);
+    ASSERT_EQ(socket_status.st_mode & (S_IRWXU | S_IRWXG | S_IRWXO), S_IRUSR | S_IWUSR);
+
+    server->stop();
+    unlink(path.c_str());
+}
+#endif
+
 struct RegisterIpcTests {
     RegisterIpcTests() {
         registerTest("IPC.Framing", test_ipc_framing);
@@ -861,6 +881,7 @@ struct RegisterIpcTests {
         registerTest("IPC.PosixReconnectSharesDeadline", test_posix_reconnect_and_io_share_request_deadline);
         registerTest("IPC.PosixQueuedIoDeadline", test_posix_expired_deadline_rejects_synchronous_io);
         registerTest("IPC.PosixResponseIdCorrelation", test_posix_client_rejects_mismatched_response_id);
+        registerTest("IPC.PosixSocketIsOwnerOnly", test_posix_socket_is_owner_only_before_it_listens);
 #endif
     }
 } g_registerIpcTests;
