@@ -19,9 +19,8 @@ CallToolResult handleQueryProjectResources(const json& args, std::shared_ptr<ipc
     std::string fuzzy_query = args.value("fuzzy_query", "");
     bool include_uid = args.value("include_uid", true);
 
-    offline::ResourceIndexer indexer;
-    indexer.scan(".");
-    auto results = indexer.query(search_path, type_filter, fuzzy_query);
+    const auto indexer = offline::ResourceIndexer::sharedIndex(".");
+    auto results = indexer->query(search_path, type_filter, fuzzy_query);
 
     json res_arr = json::array();
     for (const auto& item : results) {
@@ -34,6 +33,7 @@ CallToolResult handleQueryProjectResources(const json& args, std::shared_ptr<ipc
         {"total_found", results.size()},
         {"resources", res_arr}
     };
+    if (indexer->truncated()) out["truncated"] = true;
     return CallToolResult::successJson(out);
 }
 
@@ -192,6 +192,7 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         }
     }
     auto written = files::writeFileAtomically(target_p, out.str());
+    offline::ResourceIndexer::invalidateSharedIndex();
     if (written.isErr()) {
         return CallToolResult::error("Failed to write resource file to disk: " +
                                      written.error().message);
@@ -209,20 +210,20 @@ CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpc
         return CallToolResult::error("Parameter 'resource_path' is required.");
     }
 
-    offline::ResourceIndexer indexer;
-    indexer.scan(".");
-    auto results = indexer.query(resource_path);
-    if (!results.empty()) {
-        return CallToolResult::successJson(results[0].toJson());
+    // Exact match. A prefix match reported res://player.gd.uid or
+    // res://player.gdextension for res://player.gd, and the scan order is
+    // unsorted, so which sibling came back was down to directory order.
+    const auto indexer = offline::ResourceIndexer::sharedIndex(".");
+    if (const auto* found = indexer->findExact(resource_path)) {
+        return CallToolResult::successJson(found->toJson());
     }
 
     return CallToolResult::error("Resource not found: " + resource_path);
 }
 
 CallToolResult handleProjectGetUidMap(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    offline::ResourceIndexer indexer;
-    indexer.scan(".");
-    auto all_res = indexer.query("res://");
+    const auto indexer = offline::ResourceIndexer::sharedIndex(".");
+    auto all_res = indexer->query("res://");
 
     json uid_map = json::object();
     for (const auto& r : all_res) {
@@ -290,6 +291,9 @@ CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcCl
         return CallToolResult::error("Godot Editor is offline. Launch Godot to reimport assets.");
     }
     auto response = ipc->sendRequest("asset.reimport", args, ipc::kWaitForDefinitiveResponse);
+    // A reimport rewrites .import sidecars and can change uids, so the shared
+    // scan is no longer trustworthy whether the call succeeded or not.
+    offline::ResourceIndexer::invalidateSharedIndex();
     if (response.isErr()) {
         return CallToolResult::error("Failed to reimport assets: " + response.error().message);
     }

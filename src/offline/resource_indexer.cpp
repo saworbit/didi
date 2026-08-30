@@ -5,6 +5,10 @@
 #include <regex>
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <memory>
+#include <mutex>
+#include <unordered_map>
 
 namespace didi {
 namespace offline {
@@ -106,23 +110,40 @@ std::vector<std::string> ResourceIndexer::extractDependenciesFromFile(const std:
 void ResourceIndexer::scan(const std::string& root_dir) {
     m_resources.clear();
     m_uidMap.clear();
+    m_truncated = false;
 
     try {
-        fs::path root_path = paths::projectPathFromUtf8(root_dir);
-        if (!fs::exists(root_path)) return;
+        std::error_code root_error;
+        const fs::path root_path = fs::weakly_canonical(
+            paths::projectPathFromUtf8(root_dir), root_error);
+        if (root_error || !fs::exists(root_path)) return;
 
         for (auto it = fs::recursive_directory_iterator(root_path, fs::directory_options::skip_permission_denied);
              it != fs::recursive_directory_iterator(); ++it) {
             const auto& entry = *it;
+            // A res:// symlink pointing outside the project is not a project
+            // resource. project_search already refuses to follow them; the index
+            // has to agree, or a listing can name a file outside the root.
+            std::error_code symlink_error;
+            if (fs::is_symlink(entry.symlink_status(symlink_error)) || symlink_error) {
+                if (entry.is_directory(symlink_error)) it.disable_recursion_pending();
+                continue;
+            }
             if (entry.is_directory()) {
                 const auto name = entry.path().filename();
-                if (name == ".godot" || name == ".git" || name == "build" || name == ".gemini" || name == ".vs" || name == "out" || name == "bin") {
+                if (name == ".godot" || name == ".git" || name == "build" || name == ".gemini" ||
+                    name == ".vs" || name == "out" || name == "bin" || name == ".worktrees" ||
+                    name == "build-clean" || name == "build-vs") {
                     it.disable_recursion_pending();
                 }
                 continue;
             }
 
             if (entry.is_regular_file()) {
+                if (m_resources.size() >= kMaxIndexedResources) {
+                    m_truncated = true;
+                    break;
+                }
                 // Convert to res:// relative path
                 const auto rel = fs::relative(entry.path(), root_path);
                 const std::string rel_path = "res://" + paths::projectPathToUtf8(rel);
@@ -135,7 +156,10 @@ void ResourceIndexer::scan(const std::string& root_dir) {
 
                 if (type == "PackedScene" || type == "Resource" || type == "GDScript") {
                     uid = extractUidFromPath(entry.path());
-                    if (type == "PackedScene") {
+                    // .tres and .res carry [ext_resource] references to
+                    // textures, scripts and shaders exactly as scenes do, so a
+                    // material or theme has a dependency graph too.
+                    if (type == "PackedScene" || type == "Resource") {
                         deps = extractDependenciesFromPath(entry.path());
                     }
                 } else if (ext != ".uid") {
@@ -178,9 +202,16 @@ std::vector<ResourceInfo> ResourceIndexer::query(const std::string& search_path,
     std::string lower_type = type_filter;
     foldAsciiLower(lower_type);
 
+    // A directory filter, not a prefix filter. "res://scenes" must match
+    // res://scenes/player.tscn and res://scenes itself, and must not match
+    // res://scenes_v2/level.tscn.
+    std::string directory = search_path;
+    if (!directory.empty() && directory.back() != '/') directory.push_back('/');
+
     for (const auto& res : m_resources) {
         // Path filter
-        if (search_path != "res://" && !strings::startsWith(res.path, search_path)) {
+        if (search_path != "res://" && res.path != search_path &&
+            !strings::startsWith(res.path, directory)) {
             continue;
         }
 
@@ -209,21 +240,82 @@ std::vector<ResourceInfo> ResourceIndexer::query(const std::string& search_path,
     return results;
 }
 
+const ResourceInfo* ResourceIndexer::findExact(const std::string& resource_path) const {
+    for (const auto& res : m_resources) {
+        if (res.path == resource_path) return &res;
+    }
+    return nullptr;
+}
+
 json ResourceIndexer::buildProjectTree(const std::string& root_dir) const {
-    ResourceIndexer indexer;
-    indexer.scan(root_dir);
-    auto all_res = indexer.query("res://");
+    const auto indexer = sharedIndex(root_dir);
+    auto all_res = indexer->query("res://");
 
     json root = {
         {"project_root", root_dir},
         {"total_resources", all_res.size()},
         {"resources", json::array()}
     };
+    if (indexer->truncated()) root["truncated"] = true;
 
     for (const auto& r : all_res) {
         root["resources"].push_back(r.toJson());
     }
     return root;
+}
+
+// --- Shared scan ------------------------------------------------------------
+//
+// Every read tool used to construct its own indexer and walk the whole project
+// again, so a run of resource_inspect, project_list_resources and
+// project_get_uid_map crawled the tree three times. One scan is kept per root
+// and reused for a short window, and the mutating tools drop it explicitly so
+// our own writes are never served stale.
+//
+// The window is deliberately short. It exists to collapse a burst of sequential
+// MCP calls, not to hold an index across a working session; #112 tracks a real
+// file system watcher.
+namespace {
+
+struct SharedIndexEntry {
+    std::shared_ptr<const ResourceIndexer> index;
+    std::chrono::steady_clock::time_point scanned_at;
+};
+
+std::mutex& sharedIndexMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
+std::unordered_map<std::string, SharedIndexEntry>& sharedIndexCache() {
+    static std::unordered_map<std::string, SharedIndexEntry> cache;
+    return cache;
+}
+
+} // namespace
+
+std::shared_ptr<const ResourceIndexer> ResourceIndexer::sharedIndex(const std::string& root_dir) {
+    const auto now = std::chrono::steady_clock::now();
+    {
+        std::lock_guard<std::mutex> lock(sharedIndexMutex());
+        auto& cache = sharedIndexCache();
+        const auto found = cache.find(root_dir);
+        if (found != cache.end() && now - found->second.scanned_at < kSharedIndexLifetime) {
+            return found->second.index;
+        }
+    }
+
+    auto fresh = std::make_shared<ResourceIndexer>();
+    fresh->scan(root_dir);
+
+    std::lock_guard<std::mutex> lock(sharedIndexMutex());
+    sharedIndexCache()[root_dir] = SharedIndexEntry{fresh, std::chrono::steady_clock::now()};
+    return fresh;
+}
+
+void ResourceIndexer::invalidateSharedIndex() {
+    std::lock_guard<std::mutex> lock(sharedIndexMutex());
+    sharedIndexCache().clear();
 }
 
 } // namespace offline
