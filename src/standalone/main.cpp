@@ -28,6 +28,15 @@ int main(int argc, char* argv[]) {
         project_root = env_root;
     }
 
+    // Confirmations can only be turned off from here -- the launch arguments,
+    // chosen by the person starting the process. Nothing reachable from a tool
+    // call may set this.
+    bool skip_confirmations = false;
+    if (const char* env_yolo = std::getenv("DIDI_YOLO")) {
+        const std::string value = env_yolo;
+        skip_confirmations = value == "1" || value == "true" || value == "TRUE";
+    }
+
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--version" || arg == "-v") {
@@ -56,6 +65,9 @@ int main(int argc, char* argv[]) {
                       << "  --pipe-name <name>    Override Named Pipe / Unix domain socket name (or DIDI_PIPE_NAME)\n"
                       << "  --log-level <level>   Set log level (DEBUG, INFO, WARN, ERROR, NONE)\n"
                       << "  --dump-tool-manifest  Print the registered tool surface as JSON and exit\n"
+                      << "  --yolo                Skip confirmation on destructive tools (or DIDI_YOLO=1)\n"
+                      << "                        For unattended runs. Mutations execute without review,\n"
+                      << "                        and each affected result records confirmation: skipped.\n"
                       << "\n"
                       << "MCP Protocol:\n"
                       << "  Communicates over standard I/O (JSON-RPC 2.0) with AI coding assistants.\n"
@@ -70,6 +82,8 @@ int main(int argc, char* argv[]) {
 #else
             setenv("DIDI_PIPE_NAME", pipe_arg.c_str(), 1);
 #endif
+        } else if (arg == "--yolo") {
+            skip_confirmations = true;
         } else if (arg == "--log-level" && i + 1 < argc) {
             std::string lvl = argv[++i];
             if (lvl == "DEBUG") didi::Logger::instance().setLevel(didi::LogLevel::Debug);
@@ -97,6 +111,14 @@ int main(int argc, char* argv[]) {
     DIDI_LOG_INFO("MAIN", "Starting Didi MCP Native Server v1.4.0 for Godot 4.5+...");
 
     didi::mcp::McpServer server;
+    server.setConfirmationsSkipped(skip_confirmations);
+    if (skip_confirmations) {
+        // Loud, once, at startup. Someone reading a log after a bad afternoon
+        // should be able to see immediately that nothing was asked.
+        DIDI_LOG_WARN("MAIN",
+                      "YOLO mode: confirmation is disabled. Destructive tools will execute "
+                      "without review, and every affected result records confirmation: skipped.");
+    }
     g_server = &server;
 
     server.runStdio();

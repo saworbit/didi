@@ -118,6 +118,29 @@ still returns `428`. What Didi will not do is let that path look like human
 approval: every confirmed mutation records `_meta.didi.confirmation` as `human`
 or `agent`, so a caller can tell what the confirmation was actually worth.
 
+### YOLO mode
+
+An unattended agent cannot answer an elicitation, and the dry-run/echo-token
+dance is friction with no safety value once a human has decided to let it run
+alone. `--yolo` (or `DIDI_YOLO=1`) turns the confirmation requirement off.
+
+It is a **launch flag only**. Nothing reachable from a tool call can set it: an
+agent that can authorise its own bypass makes the confirmation system
+decorative, and a test asserts no tool exposes such an argument.
+
+What it does *not* change: the explicit project root, session authentication,
+mutation classification and `annotations`, or validation. Skipping confirmation
+is not skipping checks -- a call that could not run still reports why.
+
+It is visible in three places, because a gate that is open quietly is worse than
+one that is closed:
+
+- A warning at startup.
+- `server/discover` reports `_meta.didi.confirmationsSkipped`, so a client can
+  see the gate is open *before* it acts rather than after.
+- Every affected result records `_meta.didi.confirmation` as `skipped` --
+  distinct from `human` and `agent`, because nobody confirmed anything.
+
 ### Result shapes and caching
 
 Every result carries `resultType`. Cacheable operations also carry `ttlMs` and
