@@ -384,17 +384,7 @@ ToolRegistry& ToolRegistry::instance() {
 
 void ToolRegistry::registerTool(ToolDefinition tool) {
     std::string name = tool.name;
-    tool.capability = capabilityForTool(name);
     tool.legacy = isLegacyToolName(name);
-    // Derived, never hand-set: a tool that can change the project is never
-    // advertised as read-only, and every mutation is treated as potentially
-    // destructive rather than asserting it is merely additive.
-    const bool is_mutation = MutationSafety::isMutation(name);
-    tool.annotations.read_only = !is_mutation;
-    tool.annotations.destructive = is_mutation;
-    tool.annotations.idempotent = !is_mutation;
-    tool.annotations.open_world = false;
-    MutationSafety::decorateSchema(name, tool.inputSchema);
     const auto binding = resolveAliasBinding(name, json::object());
     tool.capability = capabilityForTool(std::string(binding.capability_source));
     const auto phase7_names = phase7::canonicalNames();
@@ -402,6 +392,16 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
         phase7_names.end()) {
         tool.inputSchema = phase7::standaloneRequestSchema(binding.schema_source);
     }
+    // Derived, never hand-set: a tool that can change the project is never
+    // advertised as read-only, and every mutation is treated as potentially
+    // destructive rather than asserting it is merely additive. Classified from
+    // the resolved binding so an alias cannot be annotated differently from the
+    // canonical tool it resolves to.
+    const bool is_mutation = MutationSafety::isMutation(binding);
+    tool.annotations.read_only = !is_mutation;
+    tool.annotations.destructive = is_mutation;
+    tool.annotations.idempotent = !is_mutation;
+    tool.annotations.open_world = false;
     MutationSafety::decorateSchema(binding, tool.inputSchema);
     if (!tool.capability.implemented) {
         tool.description = "UNIMPLEMENTED: Reserved schema; calls are rejected. Intended contract: " +

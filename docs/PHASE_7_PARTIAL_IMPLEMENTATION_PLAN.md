@@ -359,7 +359,7 @@ $repo = (Get-Location).Path
 $empty = Join-Path $env:TEMP ("didi-phase7-schema-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $empty | Out-Null
 Push-Location $empty
-& "$repo\build-ninja\didi_tests.exe" --test-case="phase7 generated schemas"
+& "$repo\build\Debug\didi_tests.exe" --filter="phase7 generated schemas"
 Pop-Location
 .\tests\phase7_contract_probe\run_phase7_contract_probe.ps1 -Godot451 C:\Godot\Godot_v4.5.1-stable_win64_console.exe -Godot472 C:\Godot\Godot_v4.7.2-stable_win64_console.exe
 Remove-Item -LiteralPath .\build-ninja -Recurse -Force
