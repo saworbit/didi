@@ -261,7 +261,7 @@ Single-owner clarification, not a handoff: Task 8 alone owns new runtime-only In
 
 **Architecture:** Keep public capability metadata at 60 implemented and 18 unimplemented while shared schemas, alias resolution, mutation safety, exact tool/method session policy, domain handlers, main-thread bridge behavior, and dual-engine integration are built behind the capability gate. The tracked feasibility runner is the immutable prerequisite. After all 15 raw methods pass both engines, admit exactly those methods, then activate registry metadata, public documentation, validator assertions, and CI smoke together at 75 implemented and 3 unimplemented.
 
-**Tech Stack:** C++20, nlohmann JSON, CMake 3.20+, Ninja, MSVC through `VsDevCmd.bat`, Didi authenticated local IPC, atomic `RuntimeRouteLease` routing, Godot 4.5.1 raw GDExtension C API, Godot 4.7.2 forward verification, PowerShell 7 integration, Python `unittest`, pinned `jsonschema==4.25.1`, standard-library schema generation, GitHub Actions, and GitHub CLI.
+**Tech Stack:** C++20, nlohmann JSON, CMake 3.20+, Ninja, MSVC through `VsDevCmd.bat`, Didi authenticated local IPC, atomic `RuntimeRouteLease` routing, Godot 4.5.1 raw GDExtension C API, Godot 4.7.2 forward verification, Windows PowerShell 5.1 or newer for the integration harness, Python `unittest`, pinned `jsonschema==4.25.1`, standard-library schema generation, GitHub Actions, and GitHub CLI.
 
 ## Governance Decision and Immutable Scope
 

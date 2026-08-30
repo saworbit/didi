@@ -30,6 +30,8 @@ Historical entries describe the surface advertised by those releases. For the ex
 - Added `kLegacyToolNames` as the single declaration of which registrations are legacy. The canonical/legacy split previously existed only in prose and could not be verified.
 - Added `--list` and `--filter=<substring>` to the native test runner, so a single case can be run in isolation.
 - Added [docs/SURFACE_AMENDMENTS.md](docs/SURFACE_AMENDMENTS.md), the record through which the canonical tool surface may grow.
+- Added specification tool `annotations` to every registered tool. `readOnlyHint` is derived from the same mutation classification that drives `dry_run` and confirmation, so 43 of the 88 registrations are identifiable as safe to auto-approve without splitting any tool into read and edit pairs. `destructiveHint` is true for every mutation, and `openWorldHint` is false throughout because no tool reaches the network.
+- Added `structuredContent` to successful JSON tool results, carrying the same payload as the text block after execution-mode and session attribution. The text block is unchanged.
 
 ### Changed
 
@@ -38,14 +40,16 @@ Historical entries describe the surface advertised by those releases. For the ex
 - The CI MCP smoke verifies the live `tools/list` surface against the manifest emitted by the same build, and now asserts every `implemented` flag rather than a sample.
 - Split the fused surface rule: "no success stubs" remains absolute, while new tool names are added through a recorded surface amendment.
 - Documented that Godot 4.5 and 4.6 expose no read-side scene dirty state through GDExtension and that `EditorInterface.get_unsaved_scenes()` arrives in 4.7, which Didi does not yet consume. The previous wording named only 4.5 and read as a permanent engine limitation.
+- The live integration harness runs on Windows PowerShell 5.1. It previously required PowerShell 7 solely because of `ConvertFrom-Json -Depth`, which does not exist on 5.1 and is unnecessary on either host.
 - Discovery now exposes 78 canonical tools plus 10 legacy registrations (88 total). Sixty canonical tools are implemented and 18 remain unimplemented.
 - Phase 7 status is `BLOCKED_AT_FEASIBILITY`. All 18 names remain registered but unimplemented, including the 15/18 implementation-feasible names. For `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Work now requires an explicit governance choice between partial 75/78 delivery, retaining atomic 78/78, or explicitly approving and maintaining engine changes or private adapters sufficient for all three exact blocked contracts. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2; weakening a contract requires a separate explicit contract amendment.
 
 ### Fixed
 
+- Quarantined the runtime route only on transport failure. `sendPhase7LiveRequest` retired the route on any error before classifying it, so an ordinary rejection from the engine left every later live call in the session unable to dispatch, including unrelated tools. Its contract test never covered this: both cases were transport failures and one only looked like one, using a bare `Error(502)` that carries no transport state.
 - Reaped orphaned session descriptor tombstones. Retirement is move-then-delete, so an owner that died between the two steps left a `.didi-retired-*` file that nothing ever removed and the registry grew without bound. Discovery now removes such an entry only when its contents parse as a descriptor, the session id in the filename matches the session id inside it, and the owning process is provably gone; an alive or unverifiable owner, unreadable contents, or a name that disagrees with its contents all retain it. POSIX still always retains, because no portable unlink primitive is bound to a verified open file.
 - Reconciled all current operating documentation with Phase 6: completed the roadmap's 78-tool table, documented project-root startup, session lock `423`, mutation preview/confirmation semantics, and labeled historical design records so they are not mistaken for current behavior.
-- Gave four order-dependent native tests their own setup. `Tools.CaptureViewportWithIpc` was intermittently failing because it registered none of the tools or resources it called and borrowed them from whichever test ran before it; the assertion that failed depended on execution order. All 178 native tests now pass in isolation.
+- Gave four order-dependent native tests their own setup. `Tools.CaptureViewportWithIpc` was intermittently failing because it registered none of the tools or resources it called and borrowed them from whichever test ran before it; the assertion that failed depended on execution order. Every native test passes in isolation.
 - Preserved ordinary comments when replacing GDScript symbols.
 - Preserved explicit `null` JSON-RPC success results.
 - Failed closed before creating a Windows session pipe when the owner-and-Administrators security descriptor cannot be built.
