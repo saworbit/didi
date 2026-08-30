@@ -415,6 +415,12 @@ static void test_mcp_discover_reports_supported_versions_without_a_handshake() {
     ASSERT_TRUE(response.result["capabilities"].contains("tools"));
     ASSERT_EQ(response.result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"]
                   .get<std::string>(), std::string("didi"));
+    // Caching hints are required on a complete result, and a missing ttlMs is
+    // read as "immediately stale", which silently discards the hint.
+    ASSERT_TRUE(response.result.contains("ttlMs"));
+    ASSERT_TRUE(response.result["ttlMs"].is_number_integer());
+    ASSERT_TRUE(response.result["ttlMs"].get<int64_t>() >= 0);
+    ASSERT_EQ(response.result["cacheScope"].get<std::string>(), std::string("public"));
 }
 
 // Didi must not claim a revision whose result shapes it does not serve. When it

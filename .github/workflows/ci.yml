@@ -299,6 +299,9 @@ jobs:
           assert discover['resultType'] == 'complete'
           assert discover['supportedVersions'] == ['2024-11-05'], discover['supportedVersions']
           assert discover['_meta']['io.modelcontextprotocol/serverInfo']['name'] == 'didi'
+          # Caching hints are required on a complete result; a missing ttlMs
+          # is read as immediately stale, which discards the hint silently.
+          assert discover['ttlMs'] >= 0 and discover['cacheScope'] == 'public'
           # Didi must not claim a revision whose result shapes it does not serve,
           # and must tell a modern client what it can retry with.
           unsupported = req('tools/list', {'_meta': {

@@ -174,7 +174,17 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
              "Didi drives a local Godot editor or game over an authenticated session. "
              "Select a project with --project or DIDI_PROJECT_ROOT, discover sessions "
              "with runtime_list_sessions, and preview mutations with dry_run before "
-             "supplying a confirmation_token."}
+             "supplying a confirmation_token."},
+            // Caching hints are required on a complete result. Everything here
+            // is fixed for the life of the process -- supported versions,
+            // capabilities and identity are compile-time constants -- so it is
+            // honestly cacheable, and carries no user-specific data.
+            //
+            // Note this does not generalise: tools/list embeds live session
+            // state, so its availability flips when an editor starts or stops
+            // and it cannot claim a long freshness window.
+            {"ttlMs", 3600000},
+            {"cacheScope", "public"}
         };
         return JsonRpcResponse::makeSuccess(req.id, result);
     }
