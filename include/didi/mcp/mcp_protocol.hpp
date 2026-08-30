@@ -30,8 +30,14 @@ inline const char* kProtocolVersionMetaKey = "io.modelcontextprotocol/protocolVe
 inline const char* kServerInfoMetaKey = "io.modelcontextprotocol/serverInfo";
 inline constexpr int kUnsupportedProtocolVersionCode = -32022;
 
+inline const char* kModernProtocolVersion = "2026-07-28";
+
+// A revision belongs here only once Didi serves its result shapes. The modern
+// revision joined when every result gained `resultType` and the cacheable
+// operations gained freshness hints -- the two move together, or the
+// advertisement is a claim nobody checked.
 inline json supportedProtocolVersions() {
-    return json::array({kProtocolVersion});
+    return json::array({kModernProtocolVersion, kProtocolVersion});
 }
 
 inline bool isSupportedProtocolVersion(const std::string& version) {

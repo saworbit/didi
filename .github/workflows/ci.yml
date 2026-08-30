@@ -297,17 +297,30 @@ jobs:
           # server/discover before any handshake, so this must answer cold.
           discover = req('server/discover', {}, 900)['result']
           assert discover['resultType'] == 'complete'
-          assert discover['supportedVersions'] == ['2024-11-05'], discover['supportedVersions']
+          # Every advertised version must actually be served. Asserting the
+          # invariant beats asserting the list: the list changes, the rule does not.
+          for version in discover['supportedVersions']:
+              probe = req('tools/list', {'_meta': {
+                  'io.modelcontextprotocol/protocolVersion': version}}, 902)
+              assert 'error' not in probe, (version, probe)
+              assert probe['result']['resultType'] == 'complete', version
           assert discover['_meta']['io.modelcontextprotocol/serverInfo']['name'] == 'didi'
           # Caching hints are required on a complete result; a missing ttlMs
           # is read as immediately stale, which discards the hint silently.
           assert discover['ttlMs'] >= 0 and discover['cacheScope'] == 'public'
-          # Didi must not claim a revision whose result shapes it does not serve,
-          # and must tell a modern client what it can retry with.
+          # A version Didi does not serve must fail actionably.
           unsupported = req('tools/list', {'_meta': {
-              'io.modelcontextprotocol/protocolVersion': '2026-07-28'}}, 901)
+              'io.modelcontextprotocol/protocolVersion': '1900-01-01'}}, 901)
           assert unsupported['error']['code'] == -32022, unsupported
           assert '2024-11-05' in unsupported['error']['data']['supported']
+          # Session-dependent results must never claim a freshness window: a
+          # cached availability answer goes stale the moment an editor starts.
+          modern = {'_meta': {'io.modelcontextprotocol/protocolVersion': '2026-07-28'}}
+          for method in ('tools/list', 'resources/list'):
+              live = req(method, modern, 903)['result']
+              assert live['ttlMs'] == 0 and live['cacheScope'] == 'private', (method, live)
+          static_list = req('prompts/list', modern, 904)['result']
+          assert static_list['ttlMs'] > 0 and static_list['cacheScope'] == 'public'
 
           assert req('initialize', {'protocolVersion': '2024-11-05'}, 1)['result']['serverInfo']['name'] == 'didi'
           tools = req('tools/list', {}, 2)['result']['tools']
