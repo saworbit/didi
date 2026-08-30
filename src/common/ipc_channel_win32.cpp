@@ -29,7 +29,11 @@ namespace {
 
 constexpr uint32_t kMaximumFrameBytes = 128U * 1024U * 1024U;
 constexpr uint32_t kMaximumHandshakeResponseBytes = 64U * 1024U;
+// Applies once a request has started arriving, never to an idle connection.
 constexpr int kServerFrameTimeoutMs = 1000;
+// How long a cancelled overlapped operation gets to settle before we start
+// complaining. Cancellation is near-instant whenever it can happen at all.
+constexpr DWORD kCancelSettleMs = 250;
 
 struct Win32Deadline {
     bool finite{false};
@@ -125,8 +129,29 @@ ExactIoResult exactOverlappedIo(HANDLE pipe,
         const bool completed = wait_result == (stop_event ? WAIT_OBJECT_0 + 1 : WAIT_OBJECT_0);
         if (!completed) {
             (void)CancelIoEx(pipe, &operation);
+            // CancelIoEx only requests cancellation. Until the operation
+            // actually settles the kernel still owns the caller's buffer and
+            // this OVERLAPPED, so returning early would let a late write land
+            // in a stack frame that no longer exists. The old code waited for
+            // that with bWait TRUE, which threw the deadline away entirely and
+            // could park the thread for as long as the peer stayed wedged.
+            // Bound the wait instead: a cancellation settles in microseconds in
+            // every case the operating system is willing to cancel at all.
             DWORD completed_bytes = 0;
-            if (GetOverlappedResult(pipe, &operation, &completed_bytes, TRUE)) {
+            if (WaitForSingleObject(io_event, kCancelSettleMs) == WAIT_OBJECT_0) {
+                if (!GetOverlappedResult(pipe, &operation, &completed_bytes, FALSE)) {
+                    completed_bytes = 0;
+                }
+            } else {
+                // Not safe to return: the buffer is still the kernel's. Say so
+                // rather than corrupting memory to honour the deadline.
+                DIDI_LOG_WARN("IPC", "Cancelled overlapped I/O did not settle within ",
+                              kCancelSettleMs, "ms; holding until the buffer is released");
+                if (!GetOverlappedResult(pipe, &operation, &completed_bytes, TRUE)) {
+                    completed_bytes = 0;
+                }
+            }
+            if (completed_bytes > 0) {
                 offset += completed_bytes;
                 if (offset == length) return {ExactIoStatus::completed, offset};
             }
@@ -504,11 +529,24 @@ private:
 
             // Process requests on this connection
             while (m_running.load()) {
-                const auto request_deadline = win32DeadlineAfter(kServerFrameTimeoutMs);
+                // Waiting for a request to start is not the same as reading one
+                // that has started. A client idle between tool calls, which is
+                // normal while an agent is thinking, was being treated as a
+                // disconnect after one second and forced through a reconnect
+                // and re-handshake on its next call. The idle wait therefore
+                // has no deadline; m_stopEvent still breaks it. The frame
+                // timeout begins at the first byte, so a peer that stalls part
+                // way through a frame still cannot hold the connection.
                 uint8_t len_buf[4] = {0};
-                if (readExactOverlapped(pipe, len_buf, sizeof(len_buf), hIoEvent, m_stopEvent,
-                                        request_deadline).status != ExactIoStatus::completed) {
+                if (readExactOverlapped(pipe, len_buf, 1, hIoEvent, m_stopEvent,
+                                        win32DeadlineAfter(-1)).status != ExactIoStatus::completed) {
                     break; // Disconnected or stop requested
+                }
+                const auto request_deadline = win32DeadlineAfter(kServerFrameTimeoutMs);
+                if (readExactOverlapped(pipe, len_buf + 1, sizeof(len_buf) - 1, hIoEvent,
+                                        m_stopEvent, request_deadline).status !=
+                    ExactIoStatus::completed) {
+                    break;
                 }
 
                 uint32_t req_len = static_cast<uint32_t>(len_buf[0]) |
@@ -627,7 +665,10 @@ namespace {
 
 constexpr uint32_t kMaximumFrameBytes = 128U * 1024U * 1024U;
 constexpr uint32_t kMaximumHandshakeResponseBytes = 64U * 1024U;
+// Applies once a request has started arriving, never to an idle connection.
 constexpr int kServerFrameTimeoutMs = 5000;
+// Slice length for a wait with no deadline, so stop() is still noticed.
+constexpr int kStopPollSliceMs = 100;
 #if defined(MSG_NOSIGNAL)
 constexpr int kNoSignalSendFlag = MSG_NOSIGNAL;
 #else
@@ -677,13 +718,19 @@ bool waitForSocket(int socket_fd,
         const int timeout_ms = remainingPollMilliseconds(deadline);
         if (deadline.finite && timeout_ms == 0) return false;
 
+        // With no deadline, poll in slices instead of blocking forever, so a
+        // stop request is still noticed while an idle connection waits for its
+        // next request.
         pollfd descriptor{socket_fd, events, 0};
-        const int result = poll(&descriptor, 1, timeout_ms);
+        const int result = poll(&descriptor, 1, timeout_ms < 0 ? kStopPollSliceMs : timeout_ms);
         if (result > 0) {
             if ((descriptor.revents & events) != 0) return true;
             return false;
         }
-        if (result == 0) return false;
+        if (result == 0) {
+            if (!deadline.finite) continue;
+            return false;
+        }
         if (errno != EINTR) return false;
     }
     return false;
@@ -976,9 +1023,18 @@ private:
             m_activeClient.store(client);
 
             while (m_running.load()) {
-                const auto request_deadline = deadlineAfter(kServerFrameTimeoutMs);
+                // Waiting for a request to start is not the same as reading one
+                // that has started. A client idle between tool calls, which is
+                // normal while an agent is thinking, was being treated as a
+                // disconnect after five seconds. The idle wait therefore has no
+                // deadline; m_running still breaks it. The frame timeout begins
+                // at the first byte, so a peer that stalls part way through a
+                // frame still cannot hold the connection.
                 uint8_t len_buf[4] = {0};
-                if (!readExact(client, len_buf, sizeof(len_buf), request_deadline, &m_running)) break;
+                if (!readExact(client, len_buf, 1, deadlineAfter(-1), &m_running)) break;
+                const auto request_deadline = deadlineAfter(kServerFrameTimeoutMs);
+                if (!readExact(client, len_buf + 1, sizeof(len_buf) - 1, request_deadline,
+                               &m_running)) break;
 
                 const uint32_t req_len = decodeFrameLength(len_buf);
                 if (req_len == 0 || req_len > kMaximumFrameBytes) break;
