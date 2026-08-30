@@ -4,6 +4,7 @@
 #include <string>
 #include <memory>
 #include <atomic>
+#include <optional>
 #include "didi/mcp/jsonrpc.hpp"
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/mcp/resource_registry.hpp"
@@ -36,8 +37,11 @@ public:
     bool confirmationsSkipped() const { return m_skipConfirmations; }
 
 private:
+    std::optional<JsonRpcResponse> dispatchPayload(const json& payload);
     void sendResponse(const JsonRpcResponse& resp);
+    void sendBatchResponse(const json& responses);
     void sendNotification(const std::string& method, const json& params);
+    void releaseRuntimeSession();
 
     std::atomic<bool> m_running{false};
     bool m_initialized{false};

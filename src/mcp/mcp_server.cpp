@@ -113,12 +113,19 @@ std::shared_ptr<ipc::IIpcClient> McpServer::getIpcClient() const {
 }
 
 void McpServer::stop() {
-    m_running.store(false);
+    releaseRuntimeSession();
 }
 
 void McpServer::sendResponse(const JsonRpcResponse& resp) {
     std::string out = resp.serialize();
     DIDI_LOG_DEBUG("MCP_OUT", "JSON-RPC response bytes=", out.size());
+    std::cout << out << "\n";
+    std::cout.flush();
+}
+
+void McpServer::sendBatchResponse(const json& responses) {
+    const std::string out = responses.dump();
+    DIDI_LOG_DEBUG("MCP_OUT", "JSON-RPC batch responses=", responses.size(), " bytes=", out.size());
     std::cout << out << "\n";
     std::cout.flush();
 }
@@ -597,6 +604,34 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     }
 }
 
+// Handles one JSON-RPC payload. Returns nothing when the payload was a
+// notification, which by the specification gets no reply, whether it arrived on
+// its own or inside a batch.
+std::optional<JsonRpcResponse> McpServer::dispatchPayload(const json& payload) {
+    auto req_opt = JsonRpcRequest::fromJson(payload);
+    if (!req_opt.has_value()) {
+        const json response_id = payload.is_object() && payload.contains("id") &&
+                                         isLegalJsonRpcId(payload["id"])
+                                     ? payload["id"]
+                                     : json(nullptr);
+        DIDI_LOG_WARN("MCP_SERVER", "Invalid JSON-RPC request received");
+        return JsonRpcResponse::makeError(response_id, JsonRpcErrorCode::InvalidRequest,
+                                          "Invalid Request");
+    }
+
+    const auto& req = req_opt.value();
+    if (req.is_notification) {
+        if (strings::startsWith(req.method, "notifications/")) {
+            handleRequest(req);
+        } else {
+            DIDI_LOG_WARN("MCP_SERVER", "Ignoring request-only method without id: ", req.method);
+        }
+        return std::nullopt;
+    }
+
+    return handleRequest(req);
+}
+
 void McpServer::runStdio() {
 #if defined(_WIN32)
     _setmode(_fileno(stdin), _O_BINARY);
@@ -630,33 +665,50 @@ void McpServer::runStdio() {
             continue;
         }
 
-        auto req_opt = JsonRpcRequest::fromJson(payload);
-        if (!req_opt.has_value()) {
-            const json response_id = payload.is_object() && payload.contains("id") &&
-                                             isLegalJsonRpcId(payload["id"])
-                                         ? payload["id"]
-                                         : json(nullptr);
-            DIDI_LOG_WARN("MCP_SERVER", "Invalid JSON-RPC request received");
-            sendResponse(JsonRpcResponse::makeError(response_id, JsonRpcErrorCode::InvalidRequest,
-                                                     "Invalid Request"));
-            continue;
-        }
-
-        const auto& req = req_opt.value();
-        if (req.is_notification) {
-            if (strings::startsWith(req.method, "notifications/")) {
-                handleRequest(req);
-            } else {
-                DIDI_LOG_WARN("MCP_SERVER", "Ignoring request-only method without id: ", req.method);
+        // JSON-RPC 2.0 section 6: an array is a batch. Each member is handled on
+        // its own, notifications produce nothing, and the responses go back as
+        // one array. An empty batch is a single Invalid Request.
+        if (payload.is_array()) {
+            if (payload.empty()) {
+                DIDI_LOG_WARN("MCP_SERVER", "Empty JSON-RPC batch received");
+                sendResponse(JsonRpcResponse::makeError(nullptr, JsonRpcErrorCode::InvalidRequest,
+                                                        "Invalid Request"));
+                continue;
             }
+            json responses = json::array();
+            for (const auto& member : payload) {
+                if (auto response = dispatchPayload(member); response.has_value()) {
+                    responses.push_back(response->toJson());
+                }
+            }
+            if (!responses.empty()) sendBatchResponse(responses);
             continue;
         }
 
-        auto resp = handleRequest(req);
-        sendResponse(resp);
+        if (auto response = dispatchPayload(payload); response.has_value()) {
+            sendResponse(*response);
+        }
     }
 
     DIDI_LOG_INFO("MCP_SERVER", "Didi MCP stdio loop terminated");
+    releaseRuntimeSession();
+}
+
+// Hands back any attached runtime session before the process goes away, so the
+// session lock file and the IPC route are released by us rather than left for
+// the operating system to clean up when the process finally exits.
+void McpServer::releaseRuntimeSession() {
+    m_running.store(false);
+    if (!m_runtimeSessionClient) return;
+    if (!m_runtimeSessionClient->activeSession().has_value()) return;
+
+    const auto detached = m_runtimeSessionClient->detachSession();
+    if (detached.isErr()) {
+        DIDI_LOG_WARN("MCP_SERVER", "Runtime session detach on shutdown failed: ",
+                      detached.error().message);
+        return;
+    }
+    DIDI_LOG_INFO("MCP_SERVER", "Released the attached runtime session on shutdown");
 }
 
 } // namespace mcp
