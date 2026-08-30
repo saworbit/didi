@@ -5,6 +5,8 @@
 #include "didi/common/project_path.hpp"
 #include "didi/common/atomic_write.hpp"
 #include <fstream>
+#include <initializer_list>
+#include <sstream>
 #include <set>
 
 namespace didi {
@@ -34,6 +36,74 @@ CallToolResult handleQueryProjectResources(const json& args, std::shared_ptr<ipc
     };
     return CallToolResult::successJson(out);
 }
+
+namespace {
+
+bool hasNumericKeys(const json& value, std::initializer_list<const char*> keys) {
+    for (const auto* key : keys) {
+        if (!value.contains(key) || !value[key].is_number()) return false;
+    }
+    return true;
+}
+
+// Renders a JSON object as the Godot text-resource literal it actually stands
+// for. Anything that is not a recognised built-in becomes a dictionary, which
+// is what a .tres file expects, rather than a fabricated vector constructor.
+template <typename Escape>
+std::string tresObjectLiteral(const json& value, const Escape& escape) {
+    std::ostringstream out;
+    const auto number = [&](const char* key) { return value[key].dump(); };
+
+    if (value.size() == 4 && hasNumericKeys(value, {"r", "g", "b", "a"})) {
+        out << "Color(" << number("r") << ", " << number("g") << ", "
+            << number("b") << ", " << number("a") << ")";
+        return out.str();
+    }
+    if (value.size() == 3 && hasNumericKeys(value, {"r", "g", "b"})) {
+        out << "Color(" << number("r") << ", " << number("g") << ", "
+            << number("b") << ", 1)";
+        return out.str();
+    }
+    if (hasNumericKeys(value, {"x", "y", "z", "w"})) {
+        // Godot writes rotations as Quaternion and 4D vectors as Vector4. The
+        // caller says which with an explicit type, otherwise Vector4 is the
+        // safer read of four plain components.
+        const auto hint = value.value("type", std::string{});
+        out << (hint == "Quaternion" ? "Quaternion(" : "Vector4(")
+            << number("x") << ", " << number("y") << ", " << number("z")
+            << ", " << number("w") << ")";
+        return out.str();
+    }
+    if (hasNumericKeys(value, {"x", "y", "z"})) {
+        out << "Vector3(" << number("x") << ", " << number("y") << ", " << number("z") << ")";
+        return out.str();
+    }
+    if (hasNumericKeys(value, {"x", "y"})) {
+        out << "Vector2(" << number("x") << ", " << number("y") << ")";
+        return out.str();
+    }
+
+    out << "{";
+    bool first = true;
+    for (auto entry = value.begin(); entry != value.end(); ++entry) {
+        if (!first) out << ", ";
+        first = false;
+        out << "\"" << escape(entry.key()) << "\": ";
+        if (entry.value().is_string()) {
+            out << "\"" << escape(entry.value().template get<std::string>()) << "\"";
+        } else if (entry.value().is_boolean()) {
+            out << (entry.value().template get<bool>() ? "true" : "false");
+        } else if (entry.value().is_object()) {
+            out << tresObjectLiteral(entry.value(), escape);
+        } else {
+            out << entry.value().dump();
+        }
+    }
+    out << "}";
+    return out.str();
+}
+
+} // namespace
 
 CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     std::string resource_type = args.value("resource_type", "StandardMaterial3D");
@@ -115,12 +185,8 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
                 }
             }
             out << "]\n";
-        } else if (it.value().is_object() && it.value().contains("x") && it.value().contains("y")) {
-            if (it.value().contains("z")) {
-                out << "Vector3(" << it.value()["x"] << ", " << it.value()["y"] << ", " << it.value()["z"] << ")\n";
-            } else {
-                out << "Vector2(" << it.value()["x"] << ", " << it.value()["y"] << ")\n";
-            }
+        } else if (it.value().is_object()) {
+            out << tresObjectLiteral(it.value(), escape_tres_str) << "\n";
         } else {
             out << it.value().dump() << "\n";
         }

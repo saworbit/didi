@@ -454,6 +454,8 @@ static void test_script_patch_replaces_without_leaving_temporary_files() {
 static void test_visual_lab_preserves_existing_file_without_overwrite() {
     ScopedToolProject project("visual-lab-overwrite");
     std::filesystem::create_directories("addons/didi");
+    std::filesystem::create_directories("models");
+    std::ofstream("models/hero.glb", std::ios::binary) << "glTF";
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
 
@@ -479,6 +481,80 @@ static void test_visual_lab_preserves_existing_file_without_overwrite() {
         didi::json::parse(lab_preview.content[0].text)["mutation_preview"]["confirmation_token"];
     ASSERT_TRUE(!registry.callTool("create_visual_test_lab", args).isError);
     ASSERT_TRUE(readToolTestFile(path) != original);
+}
+
+static void test_visual_lab_creates_its_directory_and_instances_the_target() {
+    // Break caught: the lab failed outright on a clean project, and when it did
+    // write a scene the target was an empty Node3D with no ext_resource.
+    ScopedToolProject project("visual-lab-target");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    std::filesystem::create_directories("scenes");
+    std::ofstream("scenes/player.tscn") << "[gd_scene format=3]\n\n[node name=\"Player\" type=\"Node3D\"]\n";
+
+    // addons/didi deliberately does not exist yet.
+    ASSERT_TRUE(!std::filesystem::exists("addons/didi"));
+
+    const didi::json args = {{"target_resource_path", "res://scenes/player.tscn"}};
+    const auto result = registry.callTool("viewport_create_test_lab", args);
+    if (result.isError) {
+        throw std::runtime_error("viewport_create_test_lab failed: " + result.content[0].text);
+    }
+
+    const auto scene = readToolTestFile("addons/didi/test_lab_sandbox.tscn");
+    ASSERT_TRUE(scene.find("[ext_resource type=\"PackedScene\" path=\"res://scenes/player.tscn\"") !=
+                std::string::npos);
+    ASSERT_TRUE(scene.find("instance=ExtResource(\"1_didi_target\")") != std::string::npos);
+}
+
+static void test_visual_lab_rejects_a_target_outside_the_project() {
+    // Break caught: target_resource_path was written into the scene unchecked.
+    ScopedToolProject project("visual-lab-escape");
+    // Present, so the only thing that can reject the call is the target itself.
+    std::filesystem::create_directories("addons/didi");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    for (const auto* target : {"res://../outside.tscn", "res://scenes/missing.tscn"}) {
+        const didi::json args = {{"target_resource_path", target}};
+        ASSERT_TRUE(registry.callTool("viewport_create_test_lab", args).isError);
+    }
+    ASSERT_TRUE(!std::filesystem::exists("addons/didi/test_lab_sandbox.tscn"));
+}
+
+static void test_resource_create_serializes_colors_quaternions_and_dictionaries() {
+    // Break caught: Color fell through to Vector2(0, 0), four-component values
+    // were truncated to Vector3, and plain dictionaries became bogus vectors.
+    ScopedToolProject project("resource-tres-types");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const didi::json args = {
+        {"save_path", "res://materials/typed.tres"},
+        {"resource_type", "StandardMaterial3D"},
+        {"properties", {
+            {"albedo_color", {{"r", 0.25}, {"g", 0.5}, {"b", 0.75}, {"a", 1.0}}},
+            {"spin", {{"type", "Quaternion"}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"w", 1.0}}},
+            {"uv_offset", {{"x", 1.0}, {"y", 2.0}, {"z", 3.0}, {"w", 4.0}}},
+            {"scale3d", {{"x", 1.0}, {"y", 2.0}, {"z", 3.0}}},
+            {"scale2d", {{"x", 1.0}, {"y", 2.0}}},
+            {"notes", {{"author", "shane"}, {"revision", 3}}}
+        }}
+    };
+    const auto result = registry.callTool("resource_create", args);
+    if (result.isError) {
+        throw std::runtime_error("resource_create failed: " + result.content[0].text);
+    }
+
+    const auto tres = readToolTestFile("materials/typed.tres");
+    ASSERT_TRUE(tres.find("albedo_color = Color(0.25, 0.5, 0.75, 1.0)") != std::string::npos);
+    ASSERT_TRUE(tres.find("spin = Quaternion(0.0, 0.0, 0.0, 1.0)") != std::string::npos);
+    ASSERT_TRUE(tres.find("uv_offset = Vector4(1.0, 2.0, 3.0, 4.0)") != std::string::npos);
+    ASSERT_TRUE(tres.find("scale3d = Vector3(1.0, 2.0, 3.0)") != std::string::npos);
+    ASSERT_TRUE(tres.find("scale2d = Vector2(1.0, 2.0)") != std::string::npos);
+    ASSERT_TRUE(tres.find("notes = {\"author\": \"shane\", \"revision\": 3}") != std::string::npos);
+    ASSERT_TRUE(tres.find("Vector2(0, 0)") == std::string::npos);
 }
 
 static void test_project_search_public_validation_and_schema() {
@@ -1195,6 +1271,12 @@ struct RegisterToolTests {
                      test_script_patch_replaces_without_leaving_temporary_files);
         registerTest("Tools.VisualLabOverwriteGuard",
                      test_visual_lab_preserves_existing_file_without_overwrite);
+        registerTest("Tools.VisualLabCreatesDirectoryAndInstancesTarget",
+                     test_visual_lab_creates_its_directory_and_instances_the_target);
+        registerTest("Tools.VisualLabRejectsTargetOutsideProject",
+                     test_visual_lab_rejects_a_target_outside_the_project);
+        registerTest("Tools.ResourceCreateSerializesComplexTypes",
+                     test_resource_create_serializes_colors_quaternions_and_dictionaries);
         registerTest("Tools.ProjectSearchPublicValidationAndSchema", test_project_search_public_validation_and_schema);
         registerTest("Tools.AssetReimportPublicValidationAndSchema", test_asset_reimport_public_validation_and_schema);
         registerTest("Tools.ViewportDiffPublicValidationAndSchema", test_viewport_diff_public_validation_and_schema);
