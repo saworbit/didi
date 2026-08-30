@@ -90,7 +90,7 @@ The 79 canonical names are the stable protocol surface, with 10 additional legac
 | Domain | Key Tools | Current execution |
 | :--- | :--- | :--- |
 | **1. Scene Tree & Nodes (7)** | `scene_get_hierarchy`, `scene_instantiate_node`, `scene_remove_node`, `scene_reparent_node`, `scene_set_property`, `scene_get_property`, `scene_duplicate_node` | Implemented live; hierarchy also has an offline `.tscn` fallback. Built-in nodes and scalar properties only. |
-| **2. Signals & Events (4)** | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` | Unimplemented. |
+| **2. Signals & Events (4)** | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` | Implemented live. Connect and disconnect register with the edited scene's UndoRedo history; emit requires confirmation. |
 | **3. Scripting & Reflection (4)** | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method` | Implemented offline/file-based; reflection uses a limited built-in map. |
 | **4. Vision & Render (5)** | `viewport_capture_frame`, `viewport_diff_capture`, `viewport_set_camera_transform`, `viewport_create_test_lab`, `viewport_toggle_debug_draw` | Live capture returns a process-local ID; named-node isolation is reversible; exact-dimension RGBA diffs are live-only. Synthetic capture and test-lab generation remain offline. Camera-transform and debug-draw controls remain unimplemented. |
 | **5. Physics & Navigation (6)** | `physics_raycast_query`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track` | Unimplemented. |
