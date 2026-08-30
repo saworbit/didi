@@ -10,7 +10,11 @@ namespace didi {
 namespace mcp {
 
 static std::string findProjectMainScene() {
-    std::ifstream cfg("project.godot");
+    // Resolve through the configured project root rather than the process
+    // working directory, so --project and DIDI_PROJECT_ROOT are honoured.
+    const auto config = paths::resolveProjectFile("project.godot");
+    if (config.isErr()) return "";
+    std::ifstream cfg(config.value());
     if (cfg.is_open()) {
         std::string line;
         while (std::getline(cfg, line)) {
@@ -122,6 +126,33 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
             auto eq_pos = trimmed.find('=');
             std::string key = strings::trim(trimmed.substr(0, eq_pos));
             std::string val = strings::trim(trimmed.substr(eq_pos + 1));
+
+            // An array, dictionary or multiline string value continues on the
+            // following lines. Read them until the brackets balance, or the
+            // value is truncated to its first line and every continuation line
+            // is silently dropped.
+            auto unbalanced = [](const std::string& text) {
+                int depth = 0;
+                bool in_string = false;
+                for (size_t i = 0; i < text.size(); ++i) {
+                    const char character = text[i];
+                    if (in_string) {
+                        if (character == '\\') { ++i; continue; }
+                        if (character == '"') in_string = false;
+                        continue;
+                    }
+                    if (character == '"') in_string = true;
+                    else if (character == '[' || character == '{' || character == '(') ++depth;
+                    else if (character == ']' || character == '}' || character == ')') --depth;
+                }
+                return depth > 0 || in_string;
+            };
+
+            std::string continuation;
+            while (unbalanced(val) && std::getline(file, continuation)) {
+                val += "\n" + strings::trim(continuation);
+            }
+
             if (key == "transform") {
                 current_node->transform = {{"raw", val}};
             } else if (args.value("include_properties", true)) {
