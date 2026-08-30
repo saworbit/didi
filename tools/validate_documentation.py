@@ -1087,7 +1087,58 @@ def _tracked_paths(
     return {path for path in paths if path}, None
 
 
-def load_tool_manifest(path: Path) -> tuple[dict[str, int] | None, list[str]]:
+
+def validate_capability_name_tables(
+    root: Path, names: dict[str, list[str]]
+) -> list[str]:
+    """Diff the documented unimplemented name list against the tool manifest.
+
+    The count checks alone let a shipped tool keep sitting in the unimplemented
+    table: the four signal names went live and the totals still added up, so CI
+    stayed green while CAPABILITIES.md said calls to them were rejected two
+    paragraphs above saying they were delivered.
+    """
+    errors: list[str] = []
+    unimplemented = names.get("unimplemented")
+    implemented = names.get("implemented")
+    if unimplemented is None or implemented is None:
+        return ["tool manifest has no 'names.unimplemented'/'names.implemented' arrays"]
+
+    expected_unimplemented = set(unimplemented)
+    implemented_set = set(implemented)
+
+    path = root / "docs" / "CAPABILITIES.md"
+    if not path.is_file():
+        return ["docs/CAPABILITIES.md: not found"]
+    text = path.read_text(encoding="utf-8")
+
+    row = None
+    for line in text.splitlines():
+        if line.startswith("| `unimplemented` |"):
+            row = line
+            break
+    if row is None:
+        return ["docs/CAPABILITIES.md: no `unimplemented` row in the execution-mode table"]
+
+    documented = set(re.findall(r"`([a-z0-9_]+)`", row.split("|")[2]))
+    shipped_but_listed = sorted(documented & implemented_set)
+    if shipped_but_listed:
+        errors.append(
+            "docs/CAPABILITIES.md: the unimplemented row lists tools the binary "
+            f"reports as implemented: {', '.join(shipped_but_listed)}"
+        )
+    missing = sorted(expected_unimplemented - documented)
+    if missing:
+        errors.append(
+            "docs/CAPABILITIES.md: the unimplemented row omits reserved tools: "
+            f"{', '.join(missing)}"
+        )
+    return errors
+
+
+def load_tool_manifest(
+    path: Path,
+) -> tuple[dict[str, int] | None, dict[str, list[str]], list[str]]:
     """Read the counts emitted by `didi --dump-tool-manifest`.
 
     The documentation contract is validated against the software, so a missing
@@ -1095,28 +1146,34 @@ def load_tool_manifest(path: Path) -> tuple[dict[str, int] | None, list[str]]:
     count checks.
     """
     if not path.is_file():
-        return None, [
+        return None, {}, [
             f"{path}: tool manifest not found. Build didi and generate it with: "
             f"didi --dump-tool-manifest > {path}"
         ]
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
-        return None, [f"{path}: cannot read tool manifest: {error}"]
+        return None, {}, [f"{path}: cannot read tool manifest: {error}"]
 
     counts = document.get("counts")
     if not isinstance(counts, dict):
-        return None, [f"{path}: tool manifest has no 'counts' object"]
+        return None, {}, [f"{path}: tool manifest has no 'counts' object"]
     missing = [k for k in TOOL_MANIFEST_COUNT_KEYS if not isinstance(counts.get(k), int)]
     if missing:
-        return None, [f"{path}: tool manifest is missing integer counts: {', '.join(missing)}"]
+        return None, {}, [f"{path}: tool manifest is missing integer counts: {', '.join(missing)}"]
     if counts["canonical"] + counts["legacy"] != counts["total"]:
-        return None, [f"{path}: tool manifest total does not equal canonical + legacy"]
+        return None, {}, [f"{path}: tool manifest total does not equal canonical + legacy"]
     if counts["implemented"] + counts["unimplemented"] != counts["canonical"]:
-        return None, [
+        return None, {}, [
             f"{path}: tool manifest canonical does not equal implemented + unimplemented"
         ]
-    return counts, []
+    raw_names = document.get("names")
+    names: dict[str, list[str]] = {}
+    if isinstance(raw_names, dict):
+        for key, value in raw_names.items():
+            if isinstance(value, list) and all(isinstance(item, str) for item in value):
+                names[key] = value
+    return counts, names, []
 CURRENT_PROJECT_MANIFESTS = (
     "demo/project.godot",
     "tests/godot_smoke/project.godot",
@@ -1321,7 +1378,7 @@ def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[s
 
     expected_counts = CANONICAL_IMPLEMENTATION_COUNTS
     if tool_manifest is not None:
-        manifest_counts, manifest_errors = load_tool_manifest(tool_manifest)
+        manifest_counts, manifest_names, manifest_errors = load_tool_manifest(tool_manifest)
         errors.extend(manifest_errors)
         if manifest_counts is not None:
             expected_counts = (
@@ -1334,6 +1391,7 @@ def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[s
                 manifest_counts["implemented"],
                 manifest_counts["unimplemented"],
             )
+            errors.extend(validate_capability_name_tables(root, manifest_names))
             if manifest_triple != CANONICAL_IMPLEMENTATION_COUNTS:
                 errors.append(
                     "tools/validate_documentation.py: CANONICAL_IMPLEMENTATION_COUNTS is "

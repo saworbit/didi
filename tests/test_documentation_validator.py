@@ -16,6 +16,12 @@ VALIDATOR = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(VALIDATOR)
 validate_repository = VALIDATOR.validate_repository
 
+# The four signal names shipped; the other fourteen Phase 7 names are reserved.
+# The synthetic fixture has to say the same thing the real manifest does, or the
+# name-set check has nothing meaningful to compare against.
+DELIVERED_TOOL_NAMES = VALIDATOR.PHASE7_CANONICAL_TOOLS[:4]
+RESERVED_TOOL_NAMES = VALIDATOR.PHASE7_CANONICAL_TOOLS[4:]
+
 
 class DocumentationValidatorTests(unittest.TestCase):
     def setUp(self):
@@ -134,6 +140,11 @@ Didi v1.4.0 registers 79 canonical tool names. Sixty-five are implemented in at 
 Phase 7 is PARTIAL_DELIVERY at 15/18 implementation-feasible and 3/18 API-blocked; feasibility is not implementation and all 14 remain unimplemented.
 
 Startup requires --project or DIDI_PROJECT_ROOT. A second session owner receives 423. Mutations expose dry_run and protected writes use confirmation_token.
+
+| Mode | Tools | Notes |
+| :--- | :--- | :--- |
+| `live` | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` | Delivered. |
+| `unimplemented` | """ + ", ".join(f"`{name}`" for name in RESERVED_TOOL_NAMES) + """ | Registered schema only. |
 """,
         )
         self.write(
@@ -392,14 +403,48 @@ Second section.
         }
         counts.update(overrides)
         path = self.root / "tool_manifest.json"
+        # Names, not just counts. The name lists are what catch a shipped tool
+        # still sitting in the unimplemented table, which the counts cannot see
+        # because they still add up.
+        names = {
+            "unimplemented": list(RESERVED_TOOL_NAMES),
+            "implemented": list(DELIVERED_TOOL_NAMES),
+        }
         path.write_text(
-            json.dumps({"schema": 1, "counts": counts, "names": {}}), encoding="utf-8"
+            json.dumps({"schema": 1, "counts": counts, "names": names}), encoding="utf-8"
         )
         return path
 
     def test_manifest_matching_documentation_passes(self):
         root = self.make_valid_repository()
         self.assertEqual(VALIDATOR.validate_repository(root, self.write_manifest()), [])
+
+    def test_shipped_tool_left_in_the_unimplemented_table_fails(self):
+        # Break caught: the count checks alone let a delivered tool keep sitting
+        # in the unimplemented table, because the totals still add up. That is
+        # how the four signal names stayed documented as rejected for so long.
+        root = self.make_valid_repository()
+        path = root / "docs" / "CAPABILITIES.md"
+        text = path.read_text(encoding="utf-8")
+        path.write_text(
+            text.replace("| `unimplemented` | ", "| `unimplemented` | `signal_connect`, ", 1),
+            encoding="utf-8",
+        )
+        errors = VALIDATOR.validate_repository(root, self.write_manifest())
+        self.assertTrue(
+            any("reports as implemented: signal_connect" in e for e in errors), errors
+        )
+
+    def test_reserved_tool_missing_from_the_unimplemented_table_fails(self):
+        root = self.make_valid_repository()
+        path = root / "docs" / "CAPABILITIES.md"
+        text = path.read_text(encoding="utf-8")
+        dropped = RESERVED_TOOL_NAMES[0]
+        path.write_text(text.replace(f"`{dropped}`, ", "", 1), encoding="utf-8")
+        errors = VALIDATOR.validate_repository(root, self.write_manifest())
+        self.assertTrue(
+            any(f"omits reserved tools: {dropped}" in e for e in errors), errors
+        )
 
     def test_manifest_disagreeing_with_documentation_fails(self):
         # The point of the manifest: implementing a reserved tool must fail
