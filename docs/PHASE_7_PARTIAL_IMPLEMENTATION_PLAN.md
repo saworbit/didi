@@ -26,7 +26,24 @@ reports the version it actually detected.
 This is bridge evidence, not activation. All 18 Phase 7 names remain
 `implemented: false`.
 
-## Activation blocker found by live trial, 2026-08-30
+## Activation blocker found by live trial, 2026-08-30 -- resolved
+
+**Resolved.** The cause was in `sendPhase7LiveRequest`, which retired the
+runtime route on *any* error before classifying it. An ordinary rejection from
+the engine therefore tore down the route for the rest of the session. It now
+quarantines only on a transport failure or an explicit `route_quarantine`
+request, matching the rule the runtime-log resource handler already used.
+
+Re-verified live against Godot 4.5.1 with signals activated: request 24
+`scene_get_property` now succeeds after a live `signal_connect` at request 20,
+and the harness proceeds hundreds of steps further before stopping on an
+unrelated Windows limitation -- the rollback case shells out to `chmod`, which
+does not exist on Windows, so that harness has never run to completion on this
+platform.
+
+The original finding is kept below for the record.
+
+## Original finding
 
 Signals were activated experimentally and the live integration harness was run
 against Godot 4.5.1. Activation must not proceed until the following is
