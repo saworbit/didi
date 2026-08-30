@@ -211,7 +211,10 @@ bool validEndpoint(const std::string& endpoint, uint64_t pid, const std::string&
                    const std::string& project_path) {
     if (endpoint.empty() || endpoint.find_first_of("\r\n") != std::string::npos) return false;
     const auto legacy_stem = "godot_didi_" + std::to_string(pid) + "_" + session_id;
-    const auto project_stem = "godot_didi_" + paths::projectEndpointKey(project_path) + "_" +
+    // Same conversion the publisher uses, or the two hash different bytes for a
+    // non-ASCII project path and the endpoint never validates.
+    const auto project_stem =
+        "godot_didi_" + paths::projectEndpointKey(paths::projectPathFromUtf8(project_path)) + "_" +
                               std::to_string(pid) + "_";
 #if defined(_WIN32)
     return endpoint == "\\\\.\\pipe\\" + legacy_stem ||

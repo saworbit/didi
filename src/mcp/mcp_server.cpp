@@ -1,5 +1,6 @@
 #include "didi/mcp/mcp_server.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/project_path.hpp"
 #include "didi/common/base64.hpp"
 #include "didi/mcp/mutation_safety.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
@@ -81,7 +82,8 @@ static void addCurrentAvailability(json& definition, const ExecutionCapability& 
 }
 
 McpServer::McpServer() {
-    m_runtimeSessionClient = runtime::createRuntimeSessionClient(std::filesystem::current_path().string());
+    m_runtimeSessionClient = runtime::createRuntimeSessionClient(
+        paths::nativePathToUtf8(std::filesystem::current_path()));
     m_ipcClient = m_runtimeSessionClient;
     initializeRegistries();
 }
