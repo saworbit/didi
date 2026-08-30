@@ -3,6 +3,7 @@
 #include "didi/tools/phase7_live_forward.hpp"
 #include "didi/tools/resolved_tool_binding.hpp"
 
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -36,7 +37,8 @@ public:
         descriptor_.endpoint = "\\\\.\\pipe\\godot_didi_1_" + descriptor_.session_id;
 #else
         descriptor_.project_path = "/tmp/phase7-signal-test";
-        descriptor_.endpoint = "/tmp/godot_didi_1_" + descriptor_.session_id + ".sock";
+        descriptor_.endpoint = (std::filesystem::temp_directory_path() /
+                                ("godot_didi_1_" + descriptor_.session_id + ".sock")).string();
 #endif
         descriptor_.started_at_ms = 1;
         descriptor_.protocol_version = "1.3";

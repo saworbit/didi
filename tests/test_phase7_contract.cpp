@@ -65,7 +65,8 @@ public:
 #if defined(_WIN32)
             "\\\\.\\pipe\\godot_didi_77_" + session_id,
 #else
-            "/tmp/godot_didi_77_" + session_id + ".sock",
+            (std::filesystem::temp_directory_path() /
+             ("godot_didi_77_" + session_id + ".sock")).string(),
 #endif
             123456789, "1.3"};
         return didi::runtime::RuntimeRouteLease{raw_client, descriptor, generation};
