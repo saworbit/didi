@@ -7,8 +7,23 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Include directories
-include_directories(
+option(DIDI_BUILD_TESTS "Build the didi test executables" ON)
+option(DIDI_ENABLE_SANITIZERS "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+
+if(DIDI_ENABLE_SANITIZERS)
+    if(MSVC)
+        message(FATAL_ERROR
+            "DIDI_ENABLE_SANITIZERS is for the GCC and Clang builds. MSVC needs "
+            "/fsanitize=address on its own and has no UBSan, so it is not wired up here.")
+    endif()
+    # On the compile side and the link side both, or the runtime is missing.
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=address,undefined)
+endif()
+
+# Carried on didi_core as PUBLIC rather than set globally, so every target that
+# links it inherits the same set and nothing picks these up by accident.
+set(DIDI_INCLUDE_DIRECTORIES
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/include/didi/common
     ${CMAKE_CURRENT_SOURCE_DIR}/include/didi/mcp
@@ -94,6 +109,7 @@ find_package(Threads REQUIRED)
 
 add_library(didi_core STATIC ${CORE_SOURCES})
 set_target_properties(didi_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(didi_core PUBLIC ${DIDI_INCLUDE_DIRECTORIES})
 target_link_libraries(didi_core PUBLIC Threads::Threads)
 if(WIN32)
     target_link_libraries(didi_core PUBLIC bcrypt)
@@ -124,8 +140,10 @@ target_link_libraries(didi_extension_signal_tests PRIVATE didi_core)
 target_compile_definitions(didi_extension_signal_tests PRIVATE DIDI_PHASE7_SIGNAL_TEST_SEAMS=1)
 set_target_properties(didi_extension_signal_tests PROPERTIES OUTPUT_NAME didi_extension_signal_tests)
 
-add_executable(phase7_signal_bridge_probe tests/phase7_signal_bridge_probe.cpp)
-target_link_libraries(phase7_signal_bridge_probe PRIVATE didi_core)
+if(DIDI_BUILD_TESTS)
+    add_executable(phase7_signal_bridge_probe tests/phase7_signal_bridge_probe.cpp)
+    target_link_libraries(phase7_signal_bridge_probe PRIVATE didi_core)
+endif()
 
 # Copy DLL to addons/didi/bin after build
 add_custom_command(TARGET didi_extension POST_BUILD
@@ -137,6 +155,18 @@ add_custom_command(TARGET didi_extension POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:didi_extension>" "${CMAKE_CURRENT_SOURCE_DIR}/tests/godot_smoke/addons/didi/bin/"
     COMMENT "Copying didi_extension library to addon directories..."
 )
+
+# The standalone server and the extension are the installable products. Without
+# these, `cmake --install` did nothing at all.
+include(GNUInstallDirs)
+install(TARGETS didi
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS didi_extension
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/didi/addons/didi/bin
+        RUNTIME DESTINATION ${CMAKE_INSTALL_LIBDIR}/didi/addons/didi/bin)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/plugin.cfg"
+              "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi.gdextension"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/didi/addons/didi)
 
 # 3. Unit Test Suite (didi_tests.exe)
 set(TEST_SOURCES
@@ -170,5 +200,27 @@ set(TEST_SOURCES
     tests/test_phase7c_diagnostics.cpp
 )
 
-add_executable(didi_tests ${TEST_SOURCES} ${GDEXT_SOURCES})
-target_link_libraries(didi_tests PRIVATE didi_core)
+if(DIDI_BUILD_TESTS)
+    add_executable(didi_tests ${TEST_SOURCES} ${GDEXT_SOURCES})
+    target_link_libraries(didi_tests PRIVATE didi_core)
+
+    # ctest --output-on-failure now works instead of the build directory holding
+    # an empty test set while CI ran the binary by hard-coded path.
+    enable_testing()
+    add_test(NAME didi_tests COMMAND didi_tests)
+    # The suite resolves project fixtures relative to the working directory, and
+    # CI runs it from the repository root. Say so rather than depending on where
+    # ctest happens to be invoked from.
+    set_tests_properties(didi_tests PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    if(Python3_Interpreter_FOUND)
+        # Discovery rather than a module list, so this cannot drift from the
+        # list CI names explicitly. tests/ is not a package, so it has to be the
+        # top level directory too.
+        add_test(NAME didi_python_tests
+                 COMMAND "${Python3_EXECUTABLE}" -m unittest discover
+                         -s tests -t tests -p "test_*.py"
+                 WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+    endif()
+endif()
