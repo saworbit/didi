@@ -213,6 +213,27 @@ std::string describeMutationTarget(const json& arguments) {
     return "this project";
 }
 
+// Mints a confirmation token by running the tool's own dry run. Both the
+// elicitation offer and YOLO mode go through this, so neither invents a second
+// way to satisfy MutationSafety -- there stays exactly one notion of what a
+// confirmed mutation is. Returns an empty token when the preview itself fails,
+// because a call that cannot run has nothing to confirm.
+std::pair<std::string, json> mintConfirmationToken(const std::string& name,
+                                                   const json& arguments) {
+    json preview_arguments = arguments;
+    preview_arguments["dry_run"] = true;
+    const auto preview = ToolRegistry::instance().callTool(name, preview_arguments);
+    const auto preview_json = preview.toJson();
+    if (preview.isError || !preview_json.contains("structuredContent")) return {"", json::object()};
+    const auto& structured = preview_json["structuredContent"];
+    if (!structured.is_object() || !structured.contains("mutation_preview") ||
+        !structured["mutation_preview"].is_object()) {
+        return {"", json::object()};
+    }
+    return {structured["mutation_preview"].value("confirmation_token", ""),
+            structured["mutation_preview"]};
+}
+
 std::string encodeRequestState(const std::string& tool, const std::string& token) {
     return base64::encode(json{{"tool", tool}, {"token", token}}.dump());
 }
@@ -274,7 +295,10 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                 {"prompts", json::object()}
             }},
             {"_meta", {
-                {kServerInfoMetaKey, {{"name", kServerName}, {"version", kServerVersion}}}
+                {kServerInfoMetaKey, {{"name", kServerName}, {"version", kServerVersion}}},
+                // A client rendering safety affordances needs to know the
+                // confirmation gate is open before it acts, not after.
+                {"didi", {{"confirmationsSkipped", m_skipConfirmations}}}
             }},
             {"instructions",
              "Didi drives a local Godot editor or game over an authenticated session. "
@@ -407,24 +431,33 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         // to itself.
         const bool already_confirmed = arguments.contains("confirmation_token");
         const bool previewing = arguments.value("dry_run", false);
+
+        // YOLO: the person who launched this process decided not to be asked.
+        // Offering an elicitation nobody intends to honour would be theatre, so
+        // confirm on their behalf and say plainly that is what happened.
+        if (m_skipConfirmations && !already_confirmed && !previewing) {
+            const auto binding = resolveAliasBinding(name, arguments);
+            if (MutationSafety::requiresConfirmation(binding, arguments)) {
+                const auto [token, unused_preview] = mintConfirmationToken(name, arguments);
+                if (!token.empty()) {
+                    json approved = arguments;
+                    approved["confirmation_token"] = token;
+                    auto result = ToolRegistry::instance().callTool(name, approved);
+                    return JsonRpcResponse::makeSuccess(
+                        req.id, withConfirmationProvenance(complete(result.toJson()), "skipped"));
+                }
+                // Skipping confirmation is not skipping validation. A call that
+                // could not run still reports why.
+            }
+        }
+
         if (!already_confirmed && !previewing && clientCanElicitForms(req.params)) {
             const auto binding = resolveAliasBinding(name, arguments);
             if (MutationSafety::requiresConfirmation(binding, arguments)) {
-                json preview_arguments = arguments;
-                preview_arguments["dry_run"] = true;
-                const auto preview = ToolRegistry::instance().callTool(name, preview_arguments);
-                const auto preview_json = preview.toJson();
-                const auto& structured = preview_json.contains("structuredContent")
-                                             ? preview_json["structuredContent"]
-                                             : json::object();
-                const auto token = structured.is_object() &&
-                                           structured.contains("mutation_preview") &&
-                                           structured["mutation_preview"].is_object()
-                                       ? structured["mutation_preview"].value("confirmation_token", "")
-                                       : std::string();
                 // If the preview itself failed there is nothing truthful to show
                 // a person, so fall through and let the ordinary path report why.
-                if (!preview.isError && !token.empty()) {
+                const auto [token, mutation_preview] = mintConfirmationToken(name, arguments);
+                if (!token.empty()) {
                     json input_request = {
                         {"method", "elicitation/create"},
                         {"params", {
@@ -447,8 +480,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                         {"resultType", "input_required"},
                         {"inputRequests", {{kConfirmationRequestKey, std::move(input_request)}}},
                         {"requestState", encodeRequestState(name, token)},
-                        {"_meta", {{"didi", {{"mutation_preview",
-                                              structured.value("mutation_preview", json::object())}}}}}
+                        {"_meta", {{"didi", {{"mutation_preview", mutation_preview}}}}}
                     };
                     return JsonRpcResponse::makeSuccess(req.id, std::move(result));
                 }

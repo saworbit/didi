@@ -172,6 +172,14 @@ jobs:
           # approved.
           "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_elicitation_confirmation -v
 
+      - name: Verify YOLO mode is launch-only and visible
+        shell: bash
+        run: |
+          # The load-bearing assertion is that no tool argument can turn
+          # confirmations off. An agent able to authorise its own bypass would
+          # make the confirmation system decorative.
+          "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_yolo_mode -v
+
       - name: Validate Internal Markdown Links
         shell: bash
         run: |
