@@ -505,7 +505,7 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
     tool.annotations.read_only = !is_mutation;
     tool.annotations.destructive = is_mutation;
     tool.annotations.idempotent = !is_mutation;
-    tool.annotations.open_world = false;
+    tool.annotations.open_world = toolRunsProjectControlledCode(binding);
     MutationSafety::decorateSchema(binding, tool.inputSchema);
     // Declared from the canonical name, so an alias promises the same shape.
     tool.outputSchema = outputSchemaForTool(std::string(binding.schema_source));

@@ -26,6 +26,10 @@ struct MutationDecision {
     json payload{json::object()};
 };
 
+// True when calling this tool starts a subprocess against the project, so the
+// code that ends up running is chosen by the project rather than by Didi.
+bool toolRunsProjectControlledCode(const ResolvedToolBinding& binding);
+
 class MutationSafety {
 public:
     using Clock = std::function<int64_t()>;

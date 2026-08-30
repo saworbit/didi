@@ -364,11 +364,24 @@ jobs:
               annotations = tool['annotations']
               for hint in ('readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint'):
                   assert isinstance(annotations[hint], bool), (name, hint)
-              assert annotations['openWorldHint'] is False, name
               if 'dry_run' in tool['inputSchema'].get('properties', {}):
                   assert annotations['readOnlyHint'] is False, name
                   assert annotations['destructiveHint'] is True, name
           assert any(t['annotations']['readOnlyHint'] for t in by_name.values())
+
+          # openWorldHint is per tool, not a blanket false. A tool that starts
+          # Godot or dotnet against the project runs code the project chose, so
+          # a client cannot treat it as a closed local call.
+          open_world = {
+              'csharp_check_build', 'shader_check_compile', 'project_export',
+              'gridmap_export_mesh_library', 'runtime_launch', 'execute_test_session',
+              'script_check_syntax', 'analyze_script_diagnostics',
+          }
+          for name in open_world:
+              assert by_name[name]['annotations']['openWorldHint'] is True, name
+          for name in ('scene_get_hierarchy', 'project_list_resources', 'resource_create'):
+              assert by_name[name]['annotations']['openWorldHint'] is False, name
+          assert not (open_world - set(by_name)), open_world - set(by_name)
           assert by_name['scene_get_hierarchy']['_meta']['didi']['implemented'] is True
           assert by_name['script_attach_to_node']['_meta']['didi']['implemented'] is True
           assert by_name['script_attach_to_node']['_meta']['didi']['executionModes'] == ['live']

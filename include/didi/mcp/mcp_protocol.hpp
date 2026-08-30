@@ -199,7 +199,11 @@ struct ToolAnnotations {
     bool read_only{false};
     bool destructive{true};
     bool idempotent{false};
-    // Didi's world is one local Godot project. No tool reaches the network.
+    // True for tools that start a subprocess against the project. A local
+    // working directory does not make the code being run closed: Godot runs the
+    // project's scripts, extensions and export plugins, and dotnet build can
+    // restore packages and run custom targets. Derived from the resolved
+    // binding, never hand-set. See toolRunsProjectControlledCode.
     bool open_world{false};
 
     json toJson() const {

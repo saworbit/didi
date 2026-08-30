@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
+#include <utility>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
 #define ASSERT_EQ(a, b) ASSERT_TRUE((a) == (b))
@@ -142,8 +143,40 @@ static void test_read_only_tools_are_annotated_read_only() {
     ASSERT_EQ(annotations["readOnlyHint"].get<bool>(), true);
     ASSERT_EQ(annotations["destructiveHint"].get<bool>(), false);
     ASSERT_EQ(annotations["idempotentHint"].get<bool>(), true);
-    // Didi's world is one local project. No tool reaches the network.
+    // Reading a scene never starts a subprocess, so this one really is closed.
     ASSERT_EQ(annotations["openWorldHint"].get<bool>(), false);
+}
+
+// Break caught: every tool advertised openWorldHint false, including the ones
+// that start Godot or dotnet against the project. A client that uses the hint
+// to decide what needs review would auto-approve a call that runs project code.
+static void test_tools_that_run_project_code_are_open_world() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    for (const char* name : {"csharp_check_build", "shader_check_compile", "project_export",
+                             "gridmap_export_mesh_library", "runtime_launch",
+                             "script_check_syntax"}) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        ASSERT_EQ(tool->toJson()["annotations"]["openWorldHint"].get<bool>(), true);
+    }
+
+    // An alias promises what the canonical tool promises.
+    for (const auto& pair : {std::make_pair("execute_test_session", "runtime_launch"),
+                             std::make_pair("analyze_script_diagnostics", "script_check_syntax")}) {
+        const auto* alias = registry.getTool(pair.first);
+        ASSERT_TRUE(alias != nullptr);
+        ASSERT_EQ(alias->toJson()["annotations"]["openWorldHint"].get<bool>(), true);
+    }
+
+    // Tools whose domain really is closed stay closed.
+    for (const char* name : {"scene_get_hierarchy", "project_list_resources",
+                             "script_get_symbols", "resource_create"}) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        ASSERT_EQ(tool->toJson()["annotations"]["openWorldHint"].get<bool>(), false);
+    }
 }
 
 static void test_mutating_tools_are_not_annotated_read_only() {
@@ -300,6 +333,8 @@ struct RegisterToolManifestTests {
                      test_manifest_names_are_sorted);
         registerTest("tool_annotations.read_only_tools",
                      test_read_only_tools_are_annotated_read_only);
+        registerTest("tool_annotations.project_code_is_open_world",
+                     test_tools_that_run_project_code_are_open_world);
         registerTest("tool_annotations.mutations_not_read_only",
                      test_mutating_tools_are_not_annotated_read_only);
         registerTest("tool_annotations.every_tool_annotated",
