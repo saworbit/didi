@@ -1,0 +1,112 @@
+#include "didi/tools/phase7_live_forward.hpp"
+
+#include "didi/runtime/session_client.hpp"
+
+#include <array>
+#include <string>
+
+namespace didi::mcp {
+namespace {
+
+CallToolResult phase7Error(const ResolvedToolBinding& binding, int code,
+                           std::string_view message, json data = json::object()) {
+    data["tool"] = binding.invoked_name;
+    data["canonical_tool"] = binding.canonical_name;
+    if (!data.contains("retryable")) data["retryable"] = false;
+    return CallToolResult::error(
+        json{{"error", {{"code", code}, {"message", message}, {"data", std::move(data)}}}}.dump());
+}
+
+bool isTask1Blocker(std::string_view canonical_name) {
+    constexpr std::array<std::string_view, 3> blockers = {
+        "physics_simulate_step", "nav_bake_mesh", "runtime_get_call_stack"};
+    for (const auto blocker : blockers) {
+        if (canonical_name == blocker) return true;
+    }
+    return false;
+}
+
+size_t responseLimit(std::string_view canonical_name) {
+    if (canonical_name == "signal_list_connections") return 64u * 1024u;
+    if (canonical_name == "tilemap_get_used_rect") return 16u * 1024u;
+    return 256u * 1024u;
+}
+
+CallToolResult malformedResponse(const ResolvedToolBinding& binding,
+                                 const std::shared_ptr<ipc::IIpcClient>& client,
+                                 const runtime::RuntimeRouteLease& lease) {
+    runtime::quarantineRuntimeRoute(client, lease);
+    return phase7Error(binding, 500, "extension_protocol_error",
+                       {{"route_quarantine", true}});
+}
+
+} // namespace
+
+CallToolResult sendPhase7LiveRequest(const ResolvedToolBinding& binding,
+                                     const json& arguments,
+                                     const std::shared_ptr<ipc::IIpcClient>& client) {
+    if (isTask1Blocker(binding.canonical_name)) {
+        return phase7Error(binding, 501, "phase7_tool_blocked");
+    }
+    if (!client || !client->isConnected()) {
+        return phase7Error(binding, 503, "runtime_route_unavailable", {{"retryable", true}});
+    }
+
+    const bool managed_route =
+        std::dynamic_pointer_cast<runtime::IRuntimeRouteLeaseProvider>(client) != nullptr;
+    const auto lease = runtime::acquireRuntimeRouteLease(client);
+    if (!lease.has_value() || !lease->client || !lease->client->isConnected()) {
+        return phase7Error(binding, 503,
+                           managed_route ? "runtime_route_lease_unavailable"
+                                         : "runtime_route_unavailable",
+                           {{"retryable", true}});
+    }
+
+    const auto response = lease->client->sendRequest(
+        std::string(binding.ipc_method), arguments, 17000);
+    if (response.isErr()) {
+        const bool quarantined = runtime::quarantineRuntimeRoute(client, *lease);
+        const auto transport = ipc::transportFailureState(response.error());
+        if (binding.canonical_name == "signal_emit" && transport.has_value() &&
+            transport->request_started && transport->outcome_unknown) {
+            return phase7Error(binding, 504, "unknown_outcome",
+                               {{"retryable", false}, {"outcome", "unknown"},
+                                {"route_quarantine", quarantined}});
+        }
+        return phase7Error(binding, 503, "runtime_route_request_failed",
+                           {{"retryable", false}, {"route_quarantine", quarantined}});
+    }
+
+    json payload = response.value();
+    if (!payload.is_object()) return malformedResponse(binding, client, *lease);
+
+    const auto limit = responseLimit(binding.canonical_name);
+    if (payload.dump().size() > limit) {
+        runtime::quarantineRuntimeRoute(client, *lease);
+        return phase7Error(binding, 413, "envelope_or_response_limit",
+                           {{"limit_bytes", limit}, {"route_quarantine", true}});
+    }
+
+    if (payload.contains("error")) {
+        const auto& error = payload["error"];
+        if (!error.is_object() || !error.contains("code") ||
+            !error["code"].is_number_integer() || !error.contains("message") ||
+            !error["message"].is_string()) {
+            return malformedResponse(binding, client, *lease);
+        }
+        json data = error.value("data", json::object());
+        if (!data.is_object()) data = json::object();
+        data["tool"] = binding.invoked_name;
+        data["canonical_tool"] = binding.canonical_name;
+        data["retryable"] = false;
+        return CallToolResult::error(
+            json{{"error", {{"code", error["code"]}, {"message", error["message"]},
+                            {"data", std::move(data)}}}}.dump());
+    }
+
+    payload["tool"] = binding.invoked_name;
+    payload["canonical_tool"] = binding.canonical_name;
+    return CallToolResult::successJson(payload);
+}
+
+} // namespace didi::mcp

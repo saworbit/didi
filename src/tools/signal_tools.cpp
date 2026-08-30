@@ -1,110 +1,174 @@
 #include "didi/mcp/mcp_protocol.hpp"
+#include "didi/tools/phase7_live_forward.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
 
+#include <cmath>
+#include <limits>
+#include <string_view>
+
 namespace didi {
 namespace mcp {
+namespace {
 
-CallToolResult handleSignalListConnections(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    std::string target_node = args.value("target_node", "");
-    if (target_node.empty()) {
-        return CallToolResult::error("Parameter 'target_node' is required.");
-    }
+CallToolResult signalRequestError(const ResolvedToolBinding& binding, int code,
+                                  std::string_view message) {
+    return CallToolResult::error(json{{"error", {
+        {"code", code}, {"message", message},
+        {"data", {{"tool", binding.invoked_name},
+                  {"canonical_tool", binding.canonical_name},
+                  {"retryable", false}}}}}}.dump());
+}
 
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("signal.listConnections", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
-        return CallToolResult::error("Failed to query signal connections: " + res.error().message);
-    }
+CallToolResult invalidSignalRequest(const ResolvedToolBinding& binding,
+                                    std::string_view message) {
+    return signalRequestError(binding, 400, message);
+}
 
-    // Offline mode: provide sample signals structure based on node conventions
-    json offline_signals = {
-        {"status", "offline"},
-        {"target_node", target_node},
-        {"signals", json::array({
-            {
-                {"name", "tree_entered"},
-                {"arguments", json::array()},
-                {"connections", json::array()}
-            },
-            {
-                {"name", "tree_exited"},
-                {"arguments", json::array()},
-                {"connections", json::array()}
-            },
-            {
-                {"name", "ready"},
-                {"arguments", json::array()},
-                {"connections", json::array()}
+bool hasOnlySignalKeys(const json& value,
+                       std::initializer_list<std::string_view> allowed) {
+    if (!value.is_object()) return false;
+    for (auto it = value.begin(); it != value.end(); ++it) {
+        bool found = false;
+        for (const auto key : allowed) {
+            if (it.key() == key) {
+                found = true;
+                break;
             }
-        })},
-        {"message", "Godot Editor is offline. Connect Godot with Didi plugin to inspect live signal bindings."}
-    };
-    return CallToolResult::successJson(offline_signals);
+        }
+        if (!found) return false;
+    }
+    return true;
 }
 
-CallToolResult handleSignalConnect(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    std::string emitter = args.value("emitter_node", "");
-    std::string signal_name = args.value("signal_name", "");
-    std::string target = args.value("target_node", "");
-    std::string method = args.value("target_method", "");
-
-    if (emitter.empty() || signal_name.empty() || target.empty() || method.empty()) {
-        return CallToolResult::error("Parameters 'emitter_node', 'signal_name', 'target_node', and 'target_method' are required.");
+bool isBoundedUtf8String(const json& value, size_t minimum, size_t maximum) {
+    if (!value.is_string()) return false;
+    const auto& text = value.get_ref<const std::string&>();
+    if (text.size() < minimum || text.size() > maximum) return false;
+    try {
+        (void)json(text).dump();
+        return true;
+    } catch (const json::exception&) {
+        return false;
     }
-
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("signal.connect", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
-        }
-        return CallToolResult::error("Failed to connect signal: " + res.error().message);
-    }
-
-    return CallToolResult::error("Godot Editor is offline. Launch Godot Editor to bind signals dynamically with EditorUndoRedoManager.");
 }
 
-CallToolResult handleSignalDisconnect(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    std::string emitter = args.value("emitter_node", "");
-    std::string signal_name = args.value("signal_name", "");
-    std::string target = args.value("target_node", "");
-    std::string method = args.value("target_method", "");
-
-    if (emitter.empty() || signal_name.empty() || target.empty() || method.empty()) {
-        return CallToolResult::error("Parameters 'emitter_node', 'signal_name', 'target_node', and 'target_method' are required.");
+bool validateRelationshipRequest(const json& args, bool allow_flags) {
+    if (!hasOnlySignalKeys(args,
+            allow_flags
+                ? std::initializer_list<std::string_view>{
+                      "emitter_node", "signal_name", "target_node", "target_method", "flags"}
+                : std::initializer_list<std::string_view>{
+                      "emitter_node", "signal_name", "target_node", "target_method"})) {
+        return false;
     }
-
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("signal.disconnect", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
+    if (!args.contains("emitter_node") ||
+        !isBoundedUtf8String(args["emitter_node"], 1, 1024) ||
+        !args.contains("signal_name") ||
+        !isBoundedUtf8String(args["signal_name"], 1, 128) ||
+        !args.contains("target_node") ||
+        !isBoundedUtf8String(args["target_node"], 1, 1024) ||
+        !args.contains("target_method") ||
+        !isBoundedUtf8String(args["target_method"], 1, 128)) {
+        return false;
+    }
+    if (allow_flags && args.contains("flags")) {
+        if (!(args["flags"].is_number_integer() || args["flags"].is_number_unsigned()) ||
+            args["flags"] != 2) {
+            return false;
         }
-        return CallToolResult::error("Failed to disconnect signal: " + res.error().message);
     }
-
-    return CallToolResult::error("Godot Editor is offline. Launch Godot Editor to unbind signals.");
+    return true;
 }
 
-CallToolResult handleSignalEmit(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    std::string target_node = args.value("target_node", "");
-    std::string signal_name = args.value("signal_name", "");
-    json signal_args = args.value("arguments", json::array());
-
-    if (target_node.empty() || signal_name.empty()) {
-        return CallToolResult::error("Parameters 'target_node' and 'signal_name' are required.");
+bool validateSignalJsonValue(const json& value, int depth) {
+    if (depth > 8) return false;
+    if (value.is_null() || value.is_boolean()) return true;
+    if (value.is_number_unsigned()) {
+        return value.get<uint64_t>() <=
+               static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
     }
-
-    if (ipc && ipc->isConnected()) {
-        auto res = ipc->sendRequest("signal.emit", args);
-        if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
+    if (value.is_number_integer()) return true;
+    if (value.is_number_float()) return std::isfinite(value.get<double>());
+    if (value.is_string()) return isBoundedUtf8String(value, 0, 4096);
+    if (value.is_array()) {
+        if (value.size() > 64) return false;
+        for (const auto& element : value) {
+            if (!validateSignalJsonValue(element, depth + 1)) return false;
         }
-        return CallToolResult::error("Failed to emit signal: " + res.error().message);
+        return true;
     }
+    if (value.is_object()) {
+        if (value.size() > 64) return false;
+        for (auto it = value.begin(); it != value.end(); ++it) {
+            if (!isBoundedUtf8String(json(it.key()), 0, 4096) ||
+                !validateSignalJsonValue(it.value(), depth + 1)) {
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
 
-    return CallToolResult::error("Godot Editor is offline. Launch Godot Editor or game session to trigger signals dynamically.");
+} // namespace
+
+CallToolResult handleSignalListConnections(const ResolvedToolBinding& binding, const json& args,
+                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!hasOnlySignalKeys(args, {"target_node"}) ||
+        !args.contains("target_node") ||
+        !isBoundedUtf8String(args["target_node"], 1, 1024)) {
+        return invalidSignalRequest(binding, "invalid_signal_list_connections_request");
+    }
+    return sendPhase7LiveRequest(binding, args, ipc);
+}
+
+CallToolResult handleSignalConnect(const ResolvedToolBinding& binding, const json& args,
+                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!validateRelationshipRequest(args, true)) {
+        return invalidSignalRequest(binding, "invalid_signal_connect_request");
+    }
+    auto normalized = args;
+    normalized["flags"] = 2;
+    return sendPhase7LiveRequest(binding, normalized, ipc);
+}
+
+CallToolResult handleSignalDisconnect(const ResolvedToolBinding& binding, const json& args,
+                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!validateRelationshipRequest(args, false)) {
+        return invalidSignalRequest(binding, "invalid_signal_disconnect_request");
+    }
+    return sendPhase7LiveRequest(binding, args, ipc);
+}
+
+CallToolResult handleSignalEmit(const ResolvedToolBinding& binding, const json& args,
+                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!hasOnlySignalKeys(args, {"target_node", "signal_name", "arguments"}) ||
+        !args.contains("target_node") ||
+        !isBoundedUtf8String(args["target_node"], 1, 1024) ||
+        !args.contains("signal_name") ||
+        !isBoundedUtf8String(args["signal_name"], 1, 128) ||
+        (args.contains("arguments") && !args["arguments"].is_array())) {
+        return invalidSignalRequest(binding, "invalid_signal_emit_request");
+    }
+    auto normalized = args;
+    if (!normalized.contains("arguments")) normalized["arguments"] = json::array();
+    if (normalized["arguments"].size() > 16) {
+        return invalidSignalRequest(binding, "signal_emit_argument_count_exceeded");
+    }
+    for (const auto& argument : normalized["arguments"]) {
+        if (!validateSignalJsonValue(argument, 0)) {
+            return invalidSignalRequest(binding, "unsupported_signal_emit_argument");
+        }
+    }
+    try {
+        if (normalized["arguments"].dump().size() > 32u * 1024u) {
+            return signalRequestError(binding, 413, "signal_emit_arguments_too_large");
+        }
+    } catch (const json::exception&) {
+        return invalidSignalRequest(binding, "invalid_signal_emit_argument_encoding");
+    }
+    return sendPhase7LiveRequest(binding, normalized, ipc);
 }
 
 } // namespace mcp

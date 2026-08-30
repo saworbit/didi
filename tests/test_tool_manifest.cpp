@@ -8,6 +8,7 @@
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/mcp/mutation_safety.hpp"
+#include "didi/tools/resolved_tool_binding.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -175,7 +176,10 @@ static void test_no_mutation_is_ever_advertised_as_read_only() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
     for (const auto& tool : registry.listTools()) {
-        const bool is_mutation = didi::mcp::MutationSafety::isMutation(tool.name);
+        // Classify through the resolved binding, the same way registerTool
+        // does, so an alias is judged as the canonical tool it resolves to.
+        const auto binding = didi::mcp::resolveAliasBinding(tool.name, didi::json::object());
+        const bool is_mutation = didi::mcp::MutationSafety::isMutation(binding);
         const bool claims_read_only = tool.toJson()["annotations"]["readOnlyHint"].get<bool>();
         ASSERT_TRUE(!(is_mutation && claims_read_only));
         ASSERT_EQ(claims_read_only, !is_mutation);

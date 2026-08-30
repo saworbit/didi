@@ -59,13 +59,16 @@ std::optional<json> rejectDisallowedSessionMethod(
     if (runtime::allowsSessionKind(policy, session.kind)) return std::nullopt;
     json allowed = policy == runtime::LiveSessionKindPolicy::editor_only
                        ? json::array({"editor"})
-                       : json::array({"game"});
+                       : policy == runtime::LiveSessionKindPolicy::game_only
+                             ? json::array({"game"})
+                             : json::array({"editor", "game"});
     return decorateRuntimeResponse(
         {{"error", {{"code", 409},
-                    {"message", "Live method is unavailable for the selected session kind"},
+                    {"message", "session_kind_rejected"},
                     {"data", {{"method", method},
                               {"selected_session_kind", session.kind},
-                              {"allowed_session_kinds", std::move(allowed)}}}}}},
+                              {"allowed_session_kinds", std::move(allowed)},
+                              {"retryable", false}}}}}},
         session);
 }
 

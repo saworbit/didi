@@ -12,6 +12,11 @@ namespace godot {
 
 namespace {
 
+std::string sessionKindName(std::optional<runtime::SessionKind> kind) {
+    if (!kind.has_value()) return {};
+    return *kind == runtime::SessionKind::editor ? "editor" : "game";
+}
+
 void fulfillCommand(const std::shared_ptr<std::promise<json>>& promise,
                     const std::shared_ptr<CommandControl>& control,
                     json response) {
@@ -21,6 +26,31 @@ void fulfillCommand(const std::shared_ptr<std::promise<json>>& promise,
 }
 
 } // namespace
+
+std::optional<json> validateSessionKindForMethod(
+    std::string_view method, std::optional<runtime::SessionKind> session_kind) {
+    const auto policy = runtime::livePolicyForMethod(method);
+    const auto selected = session_kind == runtime::SessionKind::editor
+                              ? std::optional<std::string_view>("editor")
+                              : session_kind == runtime::SessionKind::game
+                                    ? std::optional<std::string_view>("game")
+                                    : std::nullopt;
+    if (selected.has_value() && runtime::allowsSessionKind(policy, *selected)) {
+        return std::nullopt;
+    }
+    json allowed = policy == runtime::LiveSessionKindPolicy::editor_only
+                       ? json::array({"editor"})
+                       : policy == runtime::LiveSessionKindPolicy::game_only
+                             ? json::array({"game"})
+                             : json::array({"editor", "game"});
+    return json{{"error", {{"code", 409},
+                            {"message", "session_kind_rejected"},
+                            {"data", {{"method", method},
+                                      {"selected_session_kind",
+                                       selected.has_value() ? json(*selected) : json(nullptr)},
+                                      {"allowed_session_kinds", std::move(allowed)},
+                                      {"retryable", false}}}}}};
+}
 
 EditorHook& EditorHook::instance() {
     static EditorHook s_instance;
@@ -74,21 +104,36 @@ CommandTicket EditorHook::postCommand(const std::string& method, const json& par
 }
 
 void EditorHook::setSessionKind(const std::string& session_kind) {
-    m_sessionKind = session_kind;
+    if (session_kind == "editor") m_sessionKind = runtime::SessionKind::editor;
+    else if (session_kind == "game") m_sessionKind = runtime::SessionKind::game;
+    else m_sessionKind.reset();
 }
 
 void EditorHook::processQueue() {
-    std::vector<EngineCommand> commands;
+    struct QueuedCommand {
+        EngineCommand command;
+        std::optional<json> session_rejection;
+    };
+    std::vector<QueuedCommand> commands;
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
         constexpr size_t kMaxCommandsPerFrame = 64;
         while (!m_commandQueue.empty() && commands.size() < kMaxCommandsPerFrame) {
-            commands.push_back(std::move(m_commandQueue.front()));
+            auto session_rejection = validateSessionKindForMethod(
+                m_commandQueue.front().method, m_sessionKind);
+            commands.push_back(
+                {std::move(m_commandQueue.front()), std::move(session_rejection)});
             m_commandQueue.pop();
         }
     }
 
-    for (auto& cmd : commands) {
+    for (auto& queued : commands) {
+        auto& cmd = queued.command;
+        if (queued.session_rejection.has_value()) {
+            fulfillCommand(cmd.response_promise, cmd.control,
+                           std::move(*queued.session_rejection));
+            continue;
+        }
         if (!cmd.control || !cmd.control->tryStart()) {
             fulfillCommand(cmd.response_promise, cmd.control,
                            {{"error", {{"code", 504}, {"message", "Command cancelled before execution"}}}});
@@ -147,7 +192,7 @@ void EditorHook::scheduleAssetReimport(
     const json& params,
     const std::shared_ptr<std::promise<json>>& promise,
     const std::shared_ptr<CommandControl>& control) {
-    if (m_sessionKind != "editor") {
+    if (m_sessionKind != runtime::SessionKind::editor) {
         control->markCompleted();
         fulfillCommand(promise, control,
                        {{"error", {{"code", 409},
@@ -263,7 +308,7 @@ void EditorHook::scheduleRuntimeStep(
     int frames,
     const std::shared_ptr<std::promise<json>>& promise,
     const std::shared_ptr<CommandControl>& control) {
-    if (m_sessionKind != "game") {
+    if (m_sessionKind != runtime::SessionKind::game) {
         control->markCompleted();
         fulfillCommand(promise, control,
                        {{"error", {{"code", 409},
@@ -273,7 +318,7 @@ void EditorHook::scheduleRuntimeStep(
 
     auto state = executeRuntimeBridge("runtime.getTree",
                                       {{"root_path", "/root"}, {"max_depth", 0}},
-                                      m_sessionKind);
+                                      sessionKindName(m_sessionKind));
     if (state.contains("error")) {
         control->markCompleted();
         fulfillCommand(promise, control, std::move(state));
@@ -309,7 +354,8 @@ void EditorHook::scheduleRuntimeStep(
         };
     }
 
-    auto resumed = executeRuntimeBridge("runtime.setPaused", {{"paused", false}}, m_sessionKind);
+    auto resumed = executeRuntimeBridge("runtime.setPaused", {{"paused", false}},
+                                        sessionKindName(m_sessionKind));
     if (resumed.contains("error")) {
         {
             std::lock_guard<std::mutex> lock(m_stepMutex);
@@ -342,7 +388,8 @@ void EditorHook::processRuntimeStepFrame() {
         m_runtimeStepGate.release();
     }
 
-    auto paused = executeRuntimeBridge("runtime.setPaused", {{"paused", true}}, m_sessionKind);
+    auto paused = executeRuntimeBridge("runtime.setPaused", {{"paused", true}},
+                                       sessionKindName(m_sessionKind));
     if (paused.contains("error") || !paused.value("paused", false)) {
         completed->control->markCompleted();
         if (!paused.contains("error")) {
@@ -357,7 +404,7 @@ void EditorHook::processRuntimeStepFrame() {
     fulfillCommand(completed->response_promise, completed->control,
                    {{"status", "success"}, {"frames", completed->requested_frames},
                     {"paused", true}, {"execution_mode", "live"},
-                    {"is_live_engine", true}, {"session_kind", m_sessionKind}});
+                    {"is_live_engine", true}, {"session_kind", sessionKindName(m_sessionKind)}});
 }
 
 void EditorHook::cancelPendingCommands(const std::string& reason) {
@@ -404,6 +451,10 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
 }
 
 json EditorHook::executeOnMainThread(const std::string& method, const json& params) {
+    if (auto rejected = validateSessionKindForMethod(method, m_sessionKind);
+        rejected.has_value()) {
+        return std::move(*rejected);
+    }
     DIDI_LOG_DEBUG("EDITOR_HOOK", "Executing command on Godot main thread: ", method);
 
     static const std::unordered_set<std::string> live_bridge_methods = {
@@ -418,24 +469,29 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "scene.getGroupMembers", "scene.create", "scene.open", "scene.close",
         "scene.packBranch", "runtime.getTree", "runtime.setPaused", "runtime.stop",
         "runtime.evalGdscript", "ui.hitTest"
+#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
+        , "signal.listConnections", "signal.connect", "signal.disconnect", "signal.emit",
+        "phase7SignalTest.configure"
+#endif
     };
     if (live_bridge_methods.count(method)) {
-        if (m_sessionKind == "game" && method.rfind("runtime.", 0) != 0) {
+        if (m_sessionKind == runtime::SessionKind::game && method.rfind("runtime.", 0) != 0) {
             return {{"error", {{"code", 409},
                                 {"message", "Editor-only method is unavailable in a game session: " + method}}}};
         }
-        return GodotBridge::instance().execute(method, params, m_sessionKind);
+        return GodotBridge::instance().execute(method, params, sessionKindName(m_sessionKind));
     }
 
     if (method == "vision.captureViewport") {
-        if (m_sessionKind != "editor" && params.value("node_isolation_path", "") != "") {
+        if (m_sessionKind != runtime::SessionKind::editor &&
+            params.value("node_isolation_path", "") != "") {
             return {{"error", {{"code", 409},
                                 {"message", "Viewport node isolation is unavailable in a game session"}}}};
         }
         return ViewportRenderer::instance().captureViewport(params);
     }
     if (method == "vision.diffViewport") {
-        if (m_sessionKind != "editor") {
+        if (m_sessionKind != runtime::SessionKind::editor) {
             return {{"error", {{"code", 409},
                                 {"message", "Viewport diff capture is unavailable in a game session"}}}};
         }
@@ -508,6 +564,54 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
 
 RuntimeLogRing& EditorHook::runtimeLogs() {
     return *m_runtimeLogs;
+}
+
+json EditorHookTestAccess::executeOnMainThread(EditorHook& hook,
+                                               const std::string& method,
+                                               const json& params) {
+    return hook.executeOnMainThread(method, params);
+}
+
+void EditorHookTestAccess::setSessionKind(
+    EditorHook& hook, std::optional<runtime::SessionKind> session_kind) {
+    hook.m_sessionKind = session_kind;
+}
+
+std::optional<runtime::SessionKind> EditorHookTestAccess::sessionKind(
+    const EditorHook& hook) {
+    return hook.m_sessionKind;
+}
+
+size_t EditorHookTestAccess::queueDepth(EditorHook& hook) {
+    std::lock_guard<std::mutex> lock(hook.m_queueMutex);
+    return hook.m_commandQueue.size();
+}
+
+CommandTicket EditorHookTestAccess::enqueue(EditorHook& hook,
+                                            const std::string& method,
+                                            const json& params) {
+    auto promise = std::make_shared<std::promise<json>>();
+    auto future = promise->get_future();
+    auto control = std::make_shared<CommandControl>();
+    {
+        std::lock_guard<std::mutex> lock(hook.m_queueMutex);
+        hook.m_commandQueue.push({method, params, promise, control});
+    }
+    return {std::move(future), std::move(promise), std::move(control)};
+}
+
+bool EditorHookTestAccess::runtimeStepActive(EditorHook& hook) {
+    return hook.m_runtimeStepGate.active();
+}
+
+bool EditorHookTestAccess::hasPendingRuntimeStep(EditorHook& hook) {
+    std::lock_guard<std::mutex> lock(hook.m_stepMutex);
+    return hook.m_pendingRuntimeStep.has_value();
+}
+
+bool EditorHookTestAccess::hasPendingAssetReimport(EditorHook& hook) {
+    std::lock_guard<std::recursive_mutex> lock(hook.m_reimportMutex);
+    return hook.m_pendingAssetReimport.has_value();
 }
 
 } // namespace godot

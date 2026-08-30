@@ -12,6 +12,12 @@ on:
       - 'README.md'
       - 'CHANGELOG.md'
       - 'CMakeLists.txt'
+      - 'requirements-dev.txt'
+      - 'tools/generate_phase7_schemas.py'
+      - 'schemas/phase7/**'
+      - 'tests/test_phase7_schema_contract.py'
+      - 'tests/test_phase7_plan_ownership.py'
+      - 'tests/phase7_contract_probe/**'
       - '.github/workflows/ci.yml'
   pull_request:
     branches: [ main, master ]
@@ -24,6 +30,12 @@ on:
       - 'README.md'
       - 'CHANGELOG.md'
       - 'CMakeLists.txt'
+      - 'requirements-dev.txt'
+      - 'tools/generate_phase7_schemas.py'
+      - 'schemas/phase7/**'
+      - 'tests/test_phase7_schema_contract.py'
+      - 'tests/test_phase7_plan_ownership.py'
+      - 'tests/phase7_contract_probe/**'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
 
@@ -76,6 +88,39 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ninja
 
+      - name: Select Python Interpreter
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ] && command -v python >/dev/null 2>&1; then
+            echo "DIDI_PYTHON=python" >> "$GITHUB_ENV"
+          elif command -v python3 >/dev/null 2>&1; then
+            echo "DIDI_PYTHON=python3" >> "$GITHUB_ENV"
+          elif command -v python >/dev/null 2>&1; then
+            echo "DIDI_PYTHON=python" >> "$GITHUB_ENV"
+          else
+            echo "No Python interpreter is available" >&2
+            exit 1
+          fi
+
+      - name: Install and verify schema dependencies
+        shell: bash
+        run: |
+          # PEP 668: the macOS runner's Python is externally managed, so a plain
+          # pip install fails. Install into a virtual environment rather than
+          # forcing a global install with --break-system-packages, which the
+          # runner warns can break its own Homebrew Python.
+          "$DIDI_PYTHON" -m venv .venv-dev
+          VENV_PY=".venv-dev/bin/python"
+          [ -x "$VENV_PY" ] || VENV_PY=".venv-dev/Scripts/python.exe"
+          "$VENV_PY" -m pip install --quiet --disable-pip-version-check -r requirements-dev.txt
+          "$VENV_PY" -c "import jsonschema; assert jsonschema.__version__ == '4.25.1', jsonschema.__version__"
+          echo "DIDI_SCHEMA_PYTHON=$VENV_PY" >> "$GITHUB_ENV"
+
+      - name: Run Phase 7 schema and ownership contracts
+        shell: bash
+        run: |
+          "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_phase7_schema_contract tests.test_phase7_plan_ownership -v
+
       - name: Configure CMake (Windows)
         if: runner.os == 'Windows'
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
@@ -90,20 +135,6 @@ jobs:
 
       - name: Compile Targets in Parallel
         run: cmake --build build --config Release --parallel
-
-      - name: Select Python Interpreter
-        shell: bash
-        run: |
-          if [ "$RUNNER_OS" = "Windows" ] && command -v python >/dev/null 2>&1; then
-            echo "DIDI_PYTHON=python" >> "$GITHUB_ENV"
-          elif command -v python3 >/dev/null 2>&1; then
-            echo "DIDI_PYTHON=python3" >> "$GITHUB_ENV"
-          elif command -v python >/dev/null 2>&1; then
-            echo "DIDI_PYTHON=python" >> "$GITHUB_ENV"
-          else
-            echo "No Python interpreter is available" >&2
-            exit 1
-          fi
 
       - name: Run Native Tests (including fake-live cursor routing)
         shell: bash
