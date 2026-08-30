@@ -351,8 +351,8 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const s
     std::string output;
 
 #if defined(_WIN32)
-    std::string win_command_line = "\"" + godot_exe + "\" --headless --check-only -s \"" + actual_path + "\"";
-    auto process_command = detail::makeWindowsProcessCommand(godot_exe, win_command_line);
+    const std::vector<std::string> arguments = {"--headless", "--check-only", "-s", actual_path};
+    auto process_command = detail::makeWindowsProcessCommand(godot_exe, arguments);
     if (!process_command) return diags;
 
     SECURITY_ATTRIBUTES sa;

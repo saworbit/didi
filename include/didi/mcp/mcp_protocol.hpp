@@ -117,8 +117,11 @@ struct CallToolResult {
         return res;
     }
 
+    // Compact, not pretty. This text is read by a model, and indentation is
+    // billed as tokens on every tool call for no benefit. structuredContent
+    // carries the same data for clients that parse rather than read.
     static CallToolResult successJson(const json& data) {
-        auto result = success(data.dump(2));
+        auto result = success(data.dump());
         result.structuredContent = data;
         return result;
     }

@@ -174,6 +174,47 @@ void test_windows_batch_wrapper_supports_non_ascii_path() {
     ASSERT_TRUE(result.success);
     ASSERT_EQ(result.exit_code, 0);
 }
+
+void test_windows_arguments_are_quoted_rather_than_dropped() {
+    // Break caught: the old is_safe_arg filter silently skipped any argument
+    // containing a quote, comma or semicolon on Windows, while POSIX passed the
+    // same argument through untouched.
+    const std::vector<std::string> arguments = {
+        "--headless", "res://scenes/level one.tscn", "--custom=a,b;c", "--label=\"quoted\""
+    };
+    const auto command = didi::offline::detail::makeWindowsProcessCommand(
+        "C:/Program Files/Godot/godot.exe", arguments);
+    ASSERT_TRUE(command.has_value());
+
+    const auto& line = command->command_line;
+    ASSERT_TRUE(line.find(L"\"C:/Program Files/Godot/godot.exe\"") != std::wstring::npos);
+    ASSERT_TRUE(line.find(L"--headless") != std::wstring::npos);
+    ASSERT_TRUE(line.find(L"\"res://scenes/level one.tscn\"") != std::wstring::npos);
+    // Present, not dropped, even though it carries a comma and a semicolon.
+    ASSERT_TRUE(line.find(L"--custom=a,b;c") != std::wstring::npos);
+    // The embedded quotes survive, escaped the way CreateProcessW expects.
+    ASSERT_TRUE(line.find(L"\\\"quoted\\\"") != std::wstring::npos);
+}
+
+void test_batch_wrapper_refuses_shell_metacharacters() {
+    // Break caught: a .cmd wrapper really does go through cmd.exe, so an
+    // unescaped metacharacter would run something other than what was asked.
+    // Refusing is the answer, not quietly discarding the argument.
+    const auto safe = didi::offline::detail::makeWindowsProcessCommand(
+        "C:/tools/godot.cmd", {"--headless"});
+    ASSERT_TRUE(safe.has_value());
+
+    for (const auto& hostile : {"--scene=a&calc", "--scene=a|b", "--scene=a>out"}) {
+        const auto refused = didi::offline::detail::makeWindowsProcessCommand(
+            "C:/tools/godot.cmd", {std::string(hostile)});
+        ASSERT_TRUE(!refused.has_value());
+    }
+
+    // The direct executable path has no shell, so the same argument is fine.
+    const auto direct = didi::offline::detail::makeWindowsProcessCommand(
+        "C:/tools/godot.exe", {"--scene=a&calc"});
+    ASSERT_TRUE(direct.has_value());
+}
 #endif
 
 struct RegisterTestRunnerTests {
@@ -186,6 +227,8 @@ struct RegisterTestRunnerTests {
         registerTest("RuntimeLaunch.WindowsBoundedOutputDrain", test_windows_completed_parent_does_not_wait_for_inherited_stdout);
         registerTest("RuntimeLaunch.WindowsBatchWrapper", test_windows_batch_wrapper_is_launched_through_command_shell);
         registerTest("RuntimeLaunch.WindowsUnicodeBatchWrapper", test_windows_batch_wrapper_supports_non_ascii_path);
+        registerTest("RuntimeLaunch.WindowsArgumentsAreQuoted", test_windows_arguments_are_quoted_rather_than_dropped);
+        registerTest("RuntimeLaunch.BatchWrapperRefusesMetacharacters", test_batch_wrapper_refuses_shell_metacharacters);
 #endif
     }
 } g_register_test_runner_tests;
