@@ -26,8 +26,18 @@ public:
         descriptor_.token = std::string(64, '2');
         descriptor_.pid = 1;
         descriptor_.kind = "editor";
+        // Descriptor validation is platform-specific: acquireRuntimeRouteLease
+        // runs SessionDescriptor::fromJson, whose validEndpoint accepts a named
+        // pipe on Windows and a .sock path elsewhere. A hardcoded pipe made the
+        // lease unobtainable on POSIX, so the forwarder returned early and never
+        // dispatched.
+#if defined(_WIN32)
         descriptor_.project_path = "C:/phase7-signal-test";
         descriptor_.endpoint = "\\\\.\\pipe\\godot_didi_1_" + descriptor_.session_id;
+#else
+        descriptor_.project_path = "/tmp/phase7-signal-test";
+        descriptor_.endpoint = "/tmp/godot_didi_1_" + descriptor_.session_id + ".sock";
+#endif
         descriptor_.started_at_ms = 1;
         descriptor_.protocol_version = "1.3";
     }
