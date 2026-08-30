@@ -41,7 +41,10 @@ Result<fs::path> resolveSearchRoot(const fs::path& project_root, const std::stri
     if (!strings::startsWith(search_path, "res://")) {
         return Error::invalidArgument("search_path must begin with res://");
     }
-    const fs::path relative(search_path.substr(6));
+    // Narrow on Windows would read the bytes as the active code page, so a
+    // res:// directory with non-ASCII characters resolved to the wrong path and
+    // came back as 404.
+    const fs::path relative = paths::projectPathFromUtf8(search_path.substr(6));
     if (relative.is_absolute() || relative.has_root_name()) {
         return Error::invalidArgument("search_path must remain beneath res://");
     }

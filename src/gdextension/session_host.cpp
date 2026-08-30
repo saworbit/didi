@@ -145,7 +145,11 @@ Result<void> writeDescriptorAtomically(const std::filesystem::path& destination,
     const auto contents = descriptor.dump();
 #if defined(_WIN32)
     std::error_code ec;
-    const auto temporary = destination.string() + ".tmp";
+    // Wide throughout. The narrow forms here go through the active code page,
+    // so a Unicode %TEMP%, which is what a non-ASCII Windows user name gives
+    // you, made publishing the descriptor fail before discovery could start.
+    std::filesystem::path temporary = destination;
+    temporary += ".tmp";
     {
         std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
         if (!output) return Error::internal("Unable to create temporary session descriptor");
@@ -156,7 +160,8 @@ Result<void> writeDescriptorAtomically(const std::filesystem::path& destination,
             return Error::internal("Unable to write temporary session descriptor");
         }
     }
-    if (!MoveFileExA(temporary.c_str(), destination.string().c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    if (!MoveFileExW(temporary.c_str(), destination.c_str(),
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         std::filesystem::remove(temporary, ec);
         return Error::internal("Unable to atomically publish session descriptor");
     }
@@ -235,8 +240,10 @@ Result<void> SessionHost::prepare(const std::string& kind, const std::string& pr
                                process_identity.error().message);
     }
     descriptor.kind = kind;
-    descriptor.project_path = canonicalPath(project_path).string();
-    const auto project_key = paths::projectEndpointKey(descriptor.project_path);
+    descriptor.project_path =
+        paths::nativePathToUtf8(canonicalPath(paths::projectPathFromUtf8(project_path)));
+    const auto project_key =
+        paths::projectEndpointKey(paths::projectPathFromUtf8(descriptor.project_path));
 #if defined(_WIN32)
     descriptor.endpoint = "\\\\.\\pipe\\godot_didi_" + project_key + "_" +
                           std::to_string(descriptor.pid) + "_" + descriptor.session_id;

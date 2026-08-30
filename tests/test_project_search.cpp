@@ -310,6 +310,26 @@ void test_unicode_paths_round_trip_as_utf8() {
     ASSERT_EQ(text.value().matches[0].path, "res://" + relative_utf8);
 }
 
+void test_unicode_search_path_resolves_to_its_directory() {
+    // Break caught: resolveSearchRoot built the directory with the narrow path
+    // constructor, so a search scoped to a non-ASCII res:// directory read the
+    // bytes as the active code page on Windows and came back 404.
+    const std::string directory_utf8 = "scripts/a\xC3\xA7\xC3\xA3o";
+    SearchFixture fixture;
+    fixture.write(didi::paths::projectPathFromUtf8(directory_utf8 + "/inimigo.gd"),
+                  "func atacar():\n\tpass\n");
+    fixture.write("scripts/outside.gd", "func atacar():\n\tpass\n");
+
+    didi::offline::ProjectSearch search(fixture.root());
+    didi::offline::SearchOptions options;
+    options.query = "atacar";
+    options.search_path = "res://" + directory_utf8;
+    const auto scoped = search.searchText(options);
+    ASSERT_TRUE(scoped.isOk());
+    ASSERT_EQ(scoped.value().matches.size(), 1u);
+    ASSERT_EQ(scoped.value().matches[0].path, "res://" + directory_utf8 + "/inimigo.gd");
+}
+
 struct RegisterProjectSearchTests {
     RegisterProjectSearchTests() {
         registerTest("ProjectSearch.TextAndGdscriptSymbols", test_text_and_gdscript_symbols);
@@ -322,6 +342,7 @@ struct RegisterProjectSearchTests {
         registerTest("ProjectSearch.BinaryFileIsDiagnosticNotMatch", test_binary_file_is_diagnostic_not_match);
         registerTest("ProjectSearch.ResultOrderAndWholeWordBoundary", test_result_order_and_whole_word_boundary);
         registerTest("ProjectSearch.UnicodePathsRoundTripAsUtf8", test_unicode_paths_round_trip_as_utf8);
+        registerTest("ProjectSearch.UnicodeSearchPathResolves", test_unicode_search_path_resolves_to_its_directory);
     }
 } g_register_project_search_tests;
 

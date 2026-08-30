@@ -5,6 +5,7 @@
 #include "didi/gdextension/editor_hook.hpp"
 #include "didi/gdextension/engine_output_logger.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/project_path.hpp"
 #include "didi/offline/deep_domain_support.hpp"
 
 #include <array>
@@ -71,7 +72,7 @@ std::string fallbackCanonicalProjectPath() {
     const auto current = std::filesystem::current_path(ec);
     if (ec) return {};
     const auto canonical = std::filesystem::weakly_canonical(current, ec);
-    return (ec ? current.lexically_normal() : canonical).string();
+    return paths::nativePathToUtf8(ec ? current.lexically_normal() : canonical);
 }
 
 } // namespace
