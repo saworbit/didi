@@ -55,6 +55,24 @@ add_custom_command(
     VERBATIM
 )
 
+# Offline class reflection answers from Godot's own API surface rather than a
+# hand written snapshot. resources/didi_class_reference.json is the trimmed form
+# of a `godot --dump-extension-api` dump, committed because the dump itself is a
+# local artifact that no build machine has. Refresh it with
+# tools/generate_class_reference.py when the pinned Godot version moves.
+#
+# Read at runtime rather than compiled in: a megabyte and a half of generated
+# C++ would be paid for on every build on every platform, and this changes only
+# when the pinned version does.
+set(DIDI_CLASS_REFERENCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/didi_class_reference.json")
+if(NOT EXISTS "${DIDI_CLASS_REFERENCE}")
+    message(WARNING
+        "resources/didi_class_reference.json is missing. script_reflect_class will "
+        "fall back to its small built-in class map. Regenerate it with "
+        "tools/generate_class_reference.py.")
+    set(DIDI_CLASS_REFERENCE "")
+endif()
+
 if(MSVC)
     add_compile_options(/W3 /utf-8 /EHsc /MP /permissive- /wd4100 /wd4505)
     add_definitions(-D_CRT_SECURE_NO_WARNINGS -DNOMINMAX -DWIN32_LEAN_AND_MEAN)
@@ -78,6 +96,7 @@ set(CORE_SOURCES
     src/mcp/prompt_registry.cpp
     src/runtime/session_client.cpp
     src/runtime/session_lock.cpp
+    src/offline/class_reference.cpp
     src/mcp/mutation_safety.cpp
     src/tools/phase7_live_forward.cpp
     ${PHASE7_GENERATED_SOURCE}
@@ -158,9 +177,21 @@ add_custom_command(TARGET didi_extension POST_BUILD
 
 # The standalone server and the extension are the installable products. Without
 # these, `cmake --install` did nothing at all.
+if(DIDI_CLASS_REFERENCE)
+    add_custom_command(TARGET didi POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${DIDI_CLASS_REFERENCE}" "$<TARGET_FILE_DIR:didi>/didi_class_reference.json"
+        COMMENT "Placing the class reference next to didi"
+        VERBATIM
+    )
+endif()
+
 include(GNUInstallDirs)
 install(TARGETS didi
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if(DIDI_CLASS_REFERENCE)
+    install(FILES "${DIDI_CLASS_REFERENCE}" DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
 install(TARGETS didi_extension
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/didi/addons/didi/bin
         RUNTIME DESTINATION ${CMAKE_INSTALL_LIBDIR}/didi/addons/didi/bin)
@@ -203,6 +234,15 @@ set(TEST_SOURCES
 if(DIDI_BUILD_TESTS)
     add_executable(didi_tests ${TEST_SOURCES} ${GDEXT_SOURCES})
     target_link_libraries(didi_tests PRIVATE didi_core)
+    # The reflection test reads the reference the same way the server does, so
+    # it has to exist next to the test binary even when only this target builds.
+    if(DIDI_CLASS_REFERENCE)
+        add_custom_command(TARGET didi_tests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${DIDI_CLASS_REFERENCE}" "$<TARGET_FILE_DIR:didi_tests>/didi_class_reference.json"
+            VERBATIM
+        )
+    endif()
 
     # ctest --output-on-failure now works instead of the build directory holding
     # an empty test set while CI ran the binary by hard-coded path.

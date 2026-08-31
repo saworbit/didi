@@ -2,6 +2,7 @@
 #include "didi/offline/test_runner.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/offline/class_reference.hpp"
 #include <fstream>
 #include <sstream>
 #include <string_view>
@@ -1124,21 +1125,64 @@ json GDScriptDiagnostics::reflectClass(const std::string& class_name) {
         }}
     };
 
+    // The shipped reference covers the whole engine, so it answers first. The
+    // hand-written snapshot below stays as a fallback for a build or install
+    // where the reference file is not present.
+    const auto& reference = ClassReference::instance();
+    if (const auto* entry = reference.find(class_name)) {
+        json result = {
+            {"class_name", class_name},
+            {"inherits", entry->value("inherits", std::string{})},
+            {"is_known_class", true},
+            {"source", "extension_api"},
+            {"api_version", reference.apiVersion()},
+            {"description", "Godot engine class " + class_name +
+                            " reflected offline from " + reference.apiVersion() +
+                            ". Attach a live editor for the running engine's own state."},
+            {"properties", entry->value("properties", json::object())},
+            {"methods", entry->value("methods", json::object())},
+            {"signals", entry->value("signals", json::array())}
+        };
+        if (entry->contains("enums")) result["enums"] = (*entry)["enums"];
+        if (entry->contains("is_refcounted")) result["is_refcounted"] = (*entry)["is_refcounted"];
+        if (entry->contains("is_instantiable")) {
+            result["is_instantiable"] = (*entry)["is_instantiable"];
+        }
+        return result;
+    }
+
     if (class_db.count(class_name)) {
         json res = class_db.at(class_name);
         res["is_known_class"] = true;
+        res["source"] = "builtin_snapshot";
         return res;
     }
 
-    return {
+    json unknown = {
         {"class_name", class_name},
         {"inherits", "Object"},
         {"is_known_class", false},
-        {"description", "Godot 4 class: " + class_name + " (not in offline snapshot; launch Godot with Didi plugin for live engine reflection)."},
         {"properties", json::object()},
         {"methods", json::object()},
         {"signals", json::array()}
     };
+    // Two different answers, and a caller acting on this deserves to know which
+    // one it got: the class does not exist in this engine, or the reference that
+    // would have said so is not installed.
+    if (reference.loaded()) {
+        unknown["source"] = "extension_api";
+        unknown["api_version"] = reference.apiVersion();
+        unknown["description"] = class_name + " is not a class in " + reference.apiVersion() +
+                                 ". Check the spelling, or attach a live editor if it is a "
+                                 "script class rather than an engine class.";
+    } else {
+        unknown["source"] = "builtin_snapshot";
+        unknown["description"] = "Godot 4 class: " + class_name +
+                                 " (the offline class reference is not installed and this "
+                                 "class is not in the built-in snapshot; launch Godot with "
+                                 "the Didi plugin for live engine reflection).";
+    }
+    return unknown;
 }
 
 } // namespace offline

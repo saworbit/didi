@@ -71,6 +71,7 @@ jobs:
           mkdir -p dist/${{ matrix.artifact_name }}/bin
           mkdir -p dist/${{ matrix.artifact_name }}/addons/didi
           cp build/Release/didi.exe dist/${{ matrix.artifact_name }}/bin/
+          cp build/Release/didi_class_reference.json dist/${{ matrix.artifact_name }}/bin/
           cp -r addons/didi/* dist/${{ matrix.artifact_name }}/addons/didi/
           cp README.md LICENSE dist/${{ matrix.artifact_name }}/
           cd dist
@@ -83,6 +84,7 @@ jobs:
           mkdir -p dist/${{ matrix.artifact_name }}/bin
           mkdir -p dist/${{ matrix.artifact_name }}/addons/didi
           cp build/didi dist/${{ matrix.artifact_name }}/bin/
+          cp build/didi_class_reference.json dist/${{ matrix.artifact_name }}/bin/
           cp -r addons/didi/* dist/${{ matrix.artifact_name }}/addons/didi/
           cp README.md LICENSE dist/${{ matrix.artifact_name }}/
           cd dist

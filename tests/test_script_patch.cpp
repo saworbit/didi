@@ -1,4 +1,5 @@
 #include "didi/offline/gdscript_diagnostics.hpp"
+#include "didi/offline/class_reference.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -341,6 +342,54 @@ static void test_gdscript_colon_rule_allows_continuations_and_open_braces() {
     }
 }
 
+static void test_reflect_class_answers_from_the_shipped_api_reference() {
+    // Break caught: reflection answered from a hand-written snapshot of about
+    // eighteen classes and returned is_known_class false for the rest of the
+    // engine, even though the repository pins Godot's own API dump.
+    const auto& reference = didi::offline::ClassReference::instance();
+    if (!reference.loaded()) {
+        throw std::runtime_error(
+            "The generated class reference was not found next to the test binary. "
+            "Build the didi target so CMake generates and places it.");
+    }
+    ASSERT_TRUE(reference.size() > 800u);
+
+    // The class the issue names, which the old snapshot did not have.
+    const auto rich = didi::offline::GDScriptDiagnostics::reflectClass("RichTextLabel");
+    ASSERT_EQ(rich["is_known_class"], true);
+    ASSERT_EQ(rich["source"], "extension_api");
+    ASSERT_EQ(rich["inherits"], "Control");
+    ASSERT_TRUE(rich["properties"].contains("bbcode_enabled"));
+    ASSERT_EQ(rich["properties"]["bbcode_enabled"]["type"], "bool");
+    ASSERT_TRUE(rich["methods"].contains("append_text"));
+    ASSERT_TRUE(rich["signals"].is_array() && !rich["signals"].empty());
+    ASSERT_TRUE(rich.contains("api_version"));
+
+    // Other names the issue calls out as previously unknown.
+    for (const char* name : {"AudioStreamPlayer2D", "Path3D", "RigidBody3D", "CanvasLayer"}) {
+        const auto reflected = didi::offline::GDScriptDiagnostics::reflectClass(name);
+        ASSERT_EQ(reflected["is_known_class"], true);
+        ASSERT_TRUE(!reflected["inherits"].get<std::string>().empty());
+    }
+
+    // Method signatures carry their arguments and return type, not just names.
+    const auto node = didi::offline::GDScriptDiagnostics::reflectClass("Node");
+    ASSERT_EQ(node["methods"]["add_child"]["returns"], "void");
+    ASSERT_TRUE(node["methods"]["add_child"]["args"].size() >= 1u);
+    ASSERT_TRUE(node["methods"]["get_child"]["const"] == true);
+
+    // Enums come through, which the old snapshot had no room for.
+    ASSERT_TRUE(node.contains("enums"));
+    ASSERT_TRUE(node["enums"].contains("ProcessMode"));
+
+    // A name that is not a class is reported as unknown, and says which source
+    // decided that, so a caller can tell "no such class" from "no reference".
+    const auto unknown = didi::offline::GDScriptDiagnostics::reflectClass("NotARealGodotClass");
+    ASSERT_EQ(unknown["is_known_class"], false);
+    ASSERT_EQ(unknown["source"], "extension_api");
+    ASSERT_TRUE(unknown["properties"].empty());
+}
+
 struct RegisterScriptPatchTests {
     RegisterScriptPatchTests() {
         registerTest("GDScript.DiagnosticsDeprecation", test_gdscript_diagnostics_deprecation);
@@ -355,6 +404,8 @@ struct RegisterScriptPatchTests {
         registerTest("GDScript.PatchParameterizedAnnotation", test_gdscript_symbol_patch_parameterized_annotation);
         registerTest("GDScript.ExtractConstantsAndContainerTypes", test_gdscript_extract_symbols_constants_and_container_types);
         registerTest("GDScript.ColonRuleAllowsContinuationsAndBraces", test_gdscript_colon_rule_allows_continuations_and_open_braces);
+        registerTest("GDScript.ReflectClassUsesShippedApiReference",
+                     test_reflect_class_answers_from_the_shipped_api_reference);
     }
 } g_registerScriptPatchTests;
 
