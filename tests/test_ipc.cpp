@@ -243,19 +243,29 @@ static void test_split_request_across_the_idle_deadline_is_served() {
 
 #if defined(_WIN32)
     const std::string endpoint = "\\\\.\\pipe\\godot_didi_ipc_split_frame_test";
-    const auto quiet_before_header = std::chrono::milliseconds(900);
+    // Frame timeout is 1000 ms here.
+    const auto quiet_before_header = std::chrono::milliseconds(600);
+    const auto gap_before_body = std::chrono::milliseconds(700);
     ASSERT_TRUE(server->start(endpoint));
 
     const HANDLE client = CreateFileA(endpoint.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
                                       OPEN_EXISTING, 0, nullptr);
     ASSERT_TRUE(client != INVALID_HANDLE_VALUE);
 
-    // Idle almost to the deadline, then send the header, then the body a beat
-    // later. Shared deadlines gave the body whatever was left of the idle
-    // window, which is nothing; its own deadline gives it a full frame timeout.
+    // Two facts have to hold at once, and the sleeps are chosen from them
+    // rather than from how close to the deadline they can get:
+    //
+    //   idle + gap > timeout   so a shared deadline would have expired before
+    //                          the body arrived, which is the regression.
+    //   gap < timeout          so the body still lands inside a deadline of
+    //                          its own, which is the fix.
+    //
+    // The first version idled to within 100 ms of the deadline. That is not a
+    // margin on a shared CI runner: a scheduling hiccup pushed the header past
+    // the deadline, the server closed the connection, and the write failed.
     std::this_thread::sleep_for(quiet_before_header);
     ASSERT_TRUE(rawWriteExact(client, frame.data(), 4));
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    std::this_thread::sleep_for(gap_before_body);
     ASSERT_TRUE(rawWriteExact(client, frame.data() + 4, frame.size() - 4));
 
     didi::json response;
@@ -264,7 +274,9 @@ static void test_split_request_across_the_idle_deadline_is_served() {
     server->stop();
 #else
     const auto endpoint = rawSocketPath("split-frame");
-    const auto quiet_before_header = std::chrono::milliseconds(4900);
+    // Frame timeout is 5000 ms here.
+    const auto quiet_before_header = std::chrono::milliseconds(3000);
+    const auto gap_before_body = std::chrono::milliseconds(3500);
     ASSERT_TRUE(server->start(endpoint));
 
     const int client = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -275,12 +287,20 @@ static void test_split_request_across_the_idle_deadline_is_served() {
     std::copy(endpoint.begin(), endpoint.end(), address.sun_path);
     ASSERT_TRUE(connect(client, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
 
-    // Idle almost to the deadline, then send the header, then the body a beat
-    // later. Shared deadlines gave the body whatever was left of the idle
-    // window, which is nothing; its own deadline gives it a full frame timeout.
+    // Two facts have to hold at once, and the sleeps are chosen from them
+    // rather than from how close to the deadline they can get:
+    //
+    //   idle + gap > timeout   so a shared deadline would have expired before
+    //                          the body arrived, which is the regression.
+    //   gap < timeout          so the body still lands inside a deadline of
+    //                          its own, which is the fix.
+    //
+    // The first version idled to within 100 ms of the deadline. That is not a
+    // margin on a shared CI runner: a scheduling hiccup pushed the header past
+    // the deadline, the server closed the connection, and the write failed.
     std::this_thread::sleep_for(quiet_before_header);
     ASSERT_TRUE(rawWriteExact(client, frame.data(), 4));
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    std::this_thread::sleep_for(gap_before_body);
     ASSERT_TRUE(rawWriteExact(client, frame.data() + 4, frame.size() - 4));
 
     didi::json response;
