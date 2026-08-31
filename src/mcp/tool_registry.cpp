@@ -41,7 +41,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "script_get_symbols", "script_patch_method", "patch_script_symbols",
         "viewport_create_test_lab", "create_visual_test_lab", "resource_create",
         "resource_inspect", "project_list_resources", "query_project_resources",
-        "project_get_uid_map", "runtime_launch",
+        "project_get_uid_map", "project_audit_assets", "runtime_launch",
         "execute_test_session", "runtime_list_sessions", "runtime_attach_session",
         "runtime_detach_session", "runtime_get_session"
         , "project_search_text", "project_search_symbols",
@@ -113,6 +113,7 @@ CallToolResult handleQueryProjectResources(const json& args, std::shared_ptr<ipc
 CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectGetUidMap(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleInstantiateAsset(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleCSharpCheckBuild(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -1483,6 +1484,26 @@ void ToolRegistry::registerAllDefaultTools() {
         t.description = "Resolves uid:// references to local filesystem paths.";
         t.inputSchema = {{"type", "object"}};
         t.handler = [this](const json& args) { return handleProjectGetUidMap(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_audit_assets";
+        t.description = "Audits the project for unreferenced assets, references that resolve to nothing, and declared signals nothing emits or connects. Reports evidence, not verdicts.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"include_orphans", {{"type", "boolean"}, {"default", true},
+                                     {"description", "Assets that nothing references. Asset types only: scenes and scripts are excluded because nothing has to reference the level you open by hand."}}},
+                {"include_broken_references", {{"type", "boolean"}, {"default", true},
+                                               {"description", "res:// paths and uid:// references that resolve to no file in the project."}}},
+                {"include_dead_signals", {{"type", "boolean"}, {"default", true},
+                                          {"description", "Signals declared in GDScript that no file emits, connects to, or wires in a scene."}}},
+                {"max_findings", {{"type", "integer"}, {"minimum", 1}, {"maximum", 5000}, {"default", 500}}}
+            }},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleProjectAuditAssets(args, m_ipcClient); };
         registerTool(std::move(t));
     }
     {

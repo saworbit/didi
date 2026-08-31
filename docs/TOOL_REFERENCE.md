@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 79 canonical tool names plus 10 legacy names (89 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 80 canonical tool names plus 10 legacy names (90 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `65/79`
+**Canonical implementation:** `66/80`
 **Phase 7 registrations:** `14/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 65/79 canonical tools, and all 14 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 66/80 canonical tools, and all 14 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -269,6 +269,25 @@ Scans the project working directory for resources.
 ### `project_get_uid_map` — Offline
 
 Returns UID-to-path mappings discovered in indexed project resources. Embedded UIDs take precedence; modern Godot `.uid` sidecars are read for every resource type as a bounded fallback and accepted only when they match Godot's lowercase-alphanumeric textual UID format.
+
+### `project_audit_assets` — Offline
+
+Reads the whole project once and reports three things nothing in a single file can show: assets that nothing references, references that resolve to no file, and signals that nothing emits or connects.
+
+- `include_orphans` (`boolean`, default `true`).
+- `include_broken_references` (`boolean`, default `true`).
+- `include_dead_signals` (`boolean`, default `true`).
+- `max_findings` (`integer`, 1-5000, default `500`).
+
+At least one of the three must stay enabled.
+
+Orphan detection covers asset types only: `Texture2D`, `AudioStream`, `MeshResource`, `Font`, and `Shader`. Scenes and scripts are excluded on purpose, because a scene that nothing references is usually a level you open by hand. `.import` and `.uid` sidecars are excluded too.
+
+References are followed in every form Godot writes and people type: `[ext_resource path="res://..."]`, its `uid="uid://..."` form, `preload()` and `load()` in GDScript, `Load<T>()` in C#, and bare `uid://` string literals. Broken references are reported as `missing_file` or `unresolved_uid`.
+
+A signal counts as alive if any file emits it, connects to it, checks `is_connected`, or wires it through `[connection signal="..."]` in a scene.
+
+The results are evidence, not verdicts. A path a script builds at runtime cannot be followed, so an asset in use can still be listed as an orphan, and a connection made through a variable name cannot be seen. The response repeats both limits in a `limitations` array so a caller reading only the payload still gets them. `orphan_bytes` counts every orphan found, including any beyond `max_findings`.
 
 ### `instantiate_asset` — Unimplemented legacy name
 

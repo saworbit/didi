@@ -108,6 +108,7 @@ set(CORE_SOURCES
     src/gdextension/expression_sandbox.cpp
     src/offline/gdscript_diagnostics.cpp
     src/offline/resource_indexer.cpp
+    src/offline/project_audit.cpp
     src/offline/project_search.cpp
     src/offline/test_runner.cpp
     src/offline/process_runner.cpp
