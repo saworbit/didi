@@ -52,9 +52,9 @@ and verification, and it fails visibly wherever the surface has a hole.
 
 ## Amendment log
 
-Four amendments are implemented: `runtime_read_output` and `audio_list_buses`,
-both recorded below with tri-engine feasibility evidence, plus
-`project_audit_assets` and `project_analyze_impact`. One is withdrawn: raising the engine floor to
+Five amendments are implemented: `runtime_read_output`, `audio_list_buses` and
+`audio_configure_bus`, all recorded below with tri-engine feasibility evidence,
+plus `project_audit_assets` and `project_analyze_impact`. One is withdrawn: raising the engine floor to
 Godot 4.7, refused in favour of runtime capability detection so that 4.5 and 4.6
 users keep support. The remaining candidates come from the
 August 2026 competitive review and are proposed, not accepted, in
@@ -173,6 +173,47 @@ processes Didi does not own. No claim to reproduce Godot's debugger; this is
 engine log output, not stack frames or breakpoints. The existing
 `runtime_read_logs` contract is unchanged, and this does not become an alias
 for it: one returns Didi's own records, the other returns the engine's.
+
+### ACCEPTED (IMPLEMENTED): `audio_configure_bus`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `audio_configure_bus` |
+| **Failing workflow** | *A bus is muted. Unmute it and hear the result.* `audio_list_buses` finds the muted bus, and then the agent stops: it can see the problem and cannot fix it. `eval_gdscript` could reach `AudioServer`, which is the shape this record exists to avoid, an agent writing engine code to work around a missing tool with no validation and no dry run. |
+| **Execution modes** | `live`. Editor sessions. |
+| **Safety class** | `create/set`. Dry run, no confirmation token: the change is reversible and destroys nothing, the same as `scene_set_property`. |
+| **Proving test** | Native: `Tools.AudioConfigureBusGated` covers the offline refusal, that the refusal points at the tool that does work offline, and the dry run producing a preview without reaching an engine; `Tools.AudioConfigureBusAnnotations` requires it to be annotated as a mutation and `audio_list_buses` not to be. Godot integration: requests 931 to 936 mute and attenuate the Master bus, read it back through a separate call rather than trusting the response that made the change, address the same bus by index, restore it, and require a missing bus and an empty change to fail. |
+| **Reviewer** | Unassigned. A mutation, so a security review applies: it writes only to `AudioServer` bus state, takes no path or expression, and validates the bus and the decibel range before writing. |
+
+**Feasibility, established 2026-08-31.** The setters carry the same hash across
+the supported range, as the readers do:
+
+| Method | 4.5.1 | 4.6.2 | 4.7.2 |
+| :--- | :--- | :--- | :--- |
+| `get_bus_index` | 2458036349 | 2458036349 | 2458036349 |
+| `set_bus_volume_db` | 1602489585 | 1602489585 | 1602489585 |
+| `set_bus_mute` | 300928843 | 300928843 | 300928843 |
+| `set_bus_solo` | 300928843 | 300928843 | 300928843 |
+
+The live harness was run end to end against all three, and the write assertion
+was checked by making the mute call a no-op, which fails the run.
+
+**Why live only.** Writing `default_bus_layout.tres` would change what the
+project loads next time and not what anyone is listening to now. Someone
+chasing a silent bus wants the opposite. Offline the tool refuses and names
+`audio_list_buses`, so the answer is a redirection rather than a wall.
+
+**Why no undo entry.** Bus state is not part of the edited scene, so
+`EditorUndoRedoManager` does not carry it and registering an action there would
+put an entry in the scene undo stack that undoes something outside the scene.
+The result reports `undo_redo_registered: false` and returns the values it
+replaced, which are the only way back. Saying that is better than a tool that
+looks undoable and is not.
+
+**Why the decibel range is rejected and not clamped.** The engine bus editor
+spans -80 to 24 dB. A value outside it means the caller is confusing decibels
+with a linear gain or has slipped a digit. Clamping would accept both and make
+the result look correct.
 
 ### ACCEPTED (IMPLEMENTED): `audio_list_buses`
 

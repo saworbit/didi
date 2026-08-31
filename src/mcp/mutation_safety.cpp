@@ -27,7 +27,12 @@ const std::unordered_set<std::string_view> kMutations = {
     "project_set_autoload", "project_remove_autoload", "project_set_input_action",
     "project_remove_input_action", "project_set_setting", "viewport_set_camera_transform",
     "viewport_create_test_lab", "create_visual_test_lab", "viewport_toggle_debug_draw",
-    "project_export", "gridmap_export_mesh_library"
+    "project_export", "gridmap_export_mesh_library",
+    // Reversible and not destructive, so it gets a dry run and no confirmation
+    // token, the same as scene_set_property. The result carries the values it
+    // replaced, because bus state is not in the edited scene and the editor
+    // undo stack does not carry it.
+    "audio_configure_bus"
 };
 
 const std::unordered_set<std::string_view> kAlwaysConfirmed = {

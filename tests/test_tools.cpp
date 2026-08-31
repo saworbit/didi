@@ -184,7 +184,7 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 92u);
+    ASSERT_EQ(tools.size(), 93u);
     const std::unordered_set<std::string> legacy_names = {
         "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
         "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
@@ -196,7 +196,7 @@ static void test_tool_registry_default_tools() {
         if (legacy_names.count(tool.name) == 0) ++canonical_count;
     }
     ASSERT_EQ(legacy_names.size(), 10u);
-    ASSERT_EQ(canonical_count, 82u);
+    ASSERT_EQ(canonical_count, 83u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -317,7 +317,7 @@ static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract(
         if (legacy_names.count(tool.name) != 0) continue;
         tool.capability.implemented ? ++implemented : ++unimplemented;
     }
-    ASSERT_EQ(implemented, 68u);
+    ASSERT_EQ(implemented, 69u);
     ASSERT_EQ(unimplemented, 14u);
 }
 
@@ -405,6 +405,57 @@ static void writeImpactFixture() {
         "tracks/0/path = NodePath(\"Sprite:character_health\")\n"
         "[node name=\"Player\" type=\"Node2D\"]\n"
         "script = ExtResource(\"1\")\n");
+}
+
+static void test_audio_configure_bus_is_gated_and_offline_honest() {
+    // Live only, and the refusal has to say why rather than reading as a
+    // missing feature. Writing the layout file would change what the project
+    // loads next time and not what anyone is listening to now, which is the
+    // opposite of what someone chasing a silent bus wants.
+    ScopedToolProject project("audio-configure");
+    writeAuditFile("project.godot", "config_version=5\n");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+
+    const auto offline = registry.callTool("audio_configure_bus",
+                                           didi::json{{"bus", "Master"}, {"mute", true}});
+    ASSERT_TRUE(offline.isError);
+    ASSERT_TRUE(offline.content[0].text.find("launch") != std::string::npos ||
+                offline.content[0].text.find("Launch") != std::string::npos);
+    // And it points at the tool that does work offline, so the answer is not a
+    // dead end.
+    ASSERT_TRUE(offline.content[0].text.find("audio_list_buses") != std::string::npos);
+
+    // Classified as a mutation, so the safety envelope applies: a preview
+    // instead of a write, and no reaching the engine to produce it.
+    const auto preview = registry.callTool(
+        "audio_configure_bus", didi::json{{"bus", "Master"}, {"mute", true}, {"dry_run", true}});
+    ASSERT_TRUE(!preview.isError);
+    const auto payload = didi::json::parse(preview.content[0].text);
+    ASSERT_TRUE(payload["dry_run"].get<bool>());
+    ASSERT_EQ(payload["mutation_preview"]["tool"], "audio_configure_bus");
+
+    // Reading stays available with no engine, which is what makes the refusal
+    // above honest rather than a wall.
+    ASSERT_TRUE(!registry.callTool("audio_list_buses", didi::json::object()).isError);
+}
+
+static void test_audio_configure_bus_is_annotated_as_a_mutation() {
+    // Derived from the mutation classification, never hand set. A tool that
+    // changes what the engine is doing must not advertise itself as safe to
+    // auto-approve.
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto* configure = registry.getTool("audio_configure_bus");
+    ASSERT_TRUE(configure != nullptr);
+    ASSERT_TRUE(!configure->annotations.read_only);
+    ASSERT_TRUE(configure->annotations.destructive);
+
+    const auto* list = registry.getTool("audio_list_buses");
+    ASSERT_TRUE(list != nullptr);
+    ASSERT_TRUE(list->annotations.read_only);
+    ASSERT_TRUE(!list->annotations.destructive);
 }
 
 static void test_audio_list_buses_reads_the_project_layout_offline() {
@@ -1868,6 +1919,10 @@ struct RegisterToolTests {
         registerTest("Tools.SymbolExtraction", test_symbol_extraction);
         registerTest("Tools.NoDemoPathFallback", test_offline_tools_do_not_fallback_to_demo_paths);
         registerTest("Tools.Utf8ProjectPaths", test_project_paths_accept_utf8_names);
+        registerTest("Tools.AudioConfigureBusGated",
+                     test_audio_configure_bus_is_gated_and_offline_honest);
+        registerTest("Tools.AudioConfigureBusAnnotations",
+                     test_audio_configure_bus_is_annotated_as_a_mutation);
         registerTest("Tools.AudioListBusesOffline",
                      test_audio_list_buses_reads_the_project_layout_offline);
         registerTest("Tools.AudioListBusesNoLayout",

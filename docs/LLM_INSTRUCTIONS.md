@@ -98,6 +98,7 @@ For API details outside that limited map, inspect the project or use official Go
 - After changing a source asset, call live editor-only `asset_reimport` and require `idle: true` before drawing conclusions from a capture.
 - `project_get_uid_map` returns discovered UID mappings.
 - `audio_list_buses` answers why a sound cannot be heard. Check `execution_mode`: offline it reads the project layout file and cannot see effect chains or a runtime change.
+- `audio_configure_bus` changes a bus on the running engine. It returns `before` and `revert_with`, which are the only way back: bus state is not in the edited scene, so `editor_undo` will not restore it.
 - `project_analyze_impact` traces every place a symbol, signal, or `res://` path is named, including the scene connections and animation tracks a text search cannot explain. Run it before renaming or deleting anything. An empty result is not proof that nothing depends on the target.
 - `project_audit_assets` reports unreferenced assets, references that resolve to nothing, and signals nothing uses. Treat the findings as evidence to check, not as a delete list.
 - `resource_inspect` returns indexed metadata and dependencies, not arbitrary inner Resource properties.
@@ -127,12 +128,12 @@ Treat `eval_gdscript` as a small read-only expression language. Prefer literals,
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `68/82`
+**Canonical implementation:** `69/83`
 **Phase 7 registrations:** `14/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 68/82 canonical tools, and all 14 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
+Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 69/83 canonical tools, and all 14 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
 The four signal names are delivered and callable. Do not call or advertise the remaining 14 as available; feasibility is not implementation. Each further name needs its own production trial before delivery. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2 begins. Contract weakening requires a separate explicit contract amendment and is not implied. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 

@@ -603,6 +603,12 @@ try {
         # A still-reserved Phase 7 name, so the honest-failure check keeps a subject.
         (Tool-Request 914 "physics_raycast_query" @{ from = @(0, 0, 0); to = @(0, 0, 1) }),
         (Tool-Request 930 "audio_list_buses" @{}),
+        (Tool-Request 931 "audio_configure_bus" @{ bus = "Master"; volume_db = -12.5; mute = $true }),
+        (Tool-Request 932 "audio_list_buses" @{}),
+        (Tool-Request 933 "audio_configure_bus" @{ bus = 0; volume_db = 0.0; mute = $false }),
+        (Tool-Request 934 "audio_list_buses" @{}),
+        (Tool-Request 935 "audio_configure_bus" @{ bus = "NoSuchBus"; mute = $true }),
+        (Tool-Request 936 "audio_configure_bus" @{ bus = "Master" }),
         (Tool-Request 21 "scene_get_property" @{ target_node = "/root/SmokeRoot/Missing"; property_name = "name" }),
         (Tool-Request 22 "scene_get_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "phase_one_typo" }),
         (Tool-Request 23 "scene_set_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "process_priority"; value = "wrong-type" }),
@@ -928,6 +934,28 @@ try {
     Assert-True ($masterBus.Count -eq 1 -and $masterBus[0].name -eq "Master") "Live bus 0 is not Master."
     Assert-True ($null -ne $masterBus[0].effects) "Live bus reported no effects array, which the offline read cannot produce at all."
     Assert-True ($masterBus[0].mute -is [bool] -and $masterBus[0].solo -is [bool]) "Live bus mute and solo are not booleans."
+
+    # The write half, proven by reading it back through a separate call rather
+    # than trusting the response that made the change.
+    $configured = Tool-Payload $byId[931]
+    Assert-True ($configured.execution_mode -eq "live") "audio_configure_bus did not run live."
+    Assert-True ($configured.before.mute -eq $false) "Master bus was already muted before the harness muted it."
+    Assert-True ($configured.after.mute -eq $true) "audio_configure_bus did not report the bus as muted."
+    Assert-True (@($configured.applied) -contains "volume_db" -and @($configured.applied) -contains "mute") "audio_configure_bus did not report both changes."
+    $afterMute = @((Tool-Payload $byId[932]).buses | Where-Object { $_.index -eq 0 })
+    Assert-True ($afterMute[0].mute -eq $true) "A separate read did not see the mute, so the write did not reach the engine."
+    Assert-True ([math]::Abs([double]$afterMute[0].volume_db + 12.5) -lt 0.01) "A separate read did not see the volume change."
+
+    # Addressing the same bus by index, and putting it back, so the rest of the
+    # harness does not run against a muted engine.
+    $restored = Tool-Payload $byId[933]
+    Assert-True ($restored.before.mute -eq $true -and $restored.after.mute -eq $false) "Restoring the bus by index did not unmute it."
+    $afterRestore = @((Tool-Payload $byId[934]).buses | Where-Object { $_.index -eq 0 })
+    Assert-True ($afterRestore[0].mute -eq $false) "Master bus was left muted."
+    Assert-True ([math]::Abs([double]$afterRestore[0].volume_db) -lt 0.01) "Master bus volume was left changed."
+
+    Assert-True $byId[935].result.isError "Configuring a bus that does not exist reported success."
+    Assert-True $byId[936].result.isError "Configuring a bus with nothing to change reported success."
 
     Assert-True $byId[914].result.isError "Unimplemented tool returned fake success."
     Assert-True ($byId[914].result.content[0].text -match "no trustworthy execution path") "Unimplemented tool error is not actionable."
