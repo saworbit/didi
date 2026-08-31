@@ -32,7 +32,13 @@ Returns a recursive hierarchy. Live results contain node name, class, logical pa
 - `max_depth` (`integer`, default `10`, live maximum `64`).
 - `include_properties` (`boolean`, default `true`): Honored by the offline parser; live bulk properties are omitted.
 - `include_signals` and `include_scripts` (`boolean`, default `true`): Currently reported as omitted in live mode.
+- `max_nodes` (`integer`, 1 to 100000): Stop after this many nodes, depth first, so what comes back is a coherent path from the root rather than an arbitrary slice. A branch that was cut carries `children_omitted` and `children_summary`, a count by type of what went, and the response carries `truncated: true`.
+- `class_filter` (`array` of type names, 1 to 64): Keep only nodes of these types and the ancestors leading to them; matches carry `matched: true` and the response carries `matched_nodes`. Branches with no match anywhere beneath them are dropped whole.
+- `summary` (`boolean`, default `false`): Return `node_count`, `counts_by_type`, and one level of `branches` each with their own counts, and no properties or nested children. Cannot be combined with `max_nodes` or `class_filter`, which shape a tree rather than replace it.
+- All three apply to live and offline results alike. Without them the response is unchanged.
 - Legacy alias: `get_scene_hierarchy`.
+
+The live walk is separately capped at 100000 nodes and 8 MiB so a large edited scene cannot exceed the IPC frame before any of this is applied. That is a safety bound, not a context budget; `max_nodes` and `summary` are the levers for token cost.
 
 ### `scene_instantiate_node` — Live
 

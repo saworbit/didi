@@ -5,6 +5,7 @@
 #include "didi/gdextension/editor_hook.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/atomic_write.hpp"
+#include "didi/tools/hierarchy_view.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -595,6 +596,159 @@ static void test_offline_hierarchy_reads_main_scene_and_multiline_properties() {
     ASSERT_TRUE(spawn_points.find("Vector3(2, 0, 2)") != std::string::npos);
     // The line after the array must still be read as its own property.
     ASSERT_EQ(properties["label"], "\"after the array\"");
+}
+
+static didi::json hierarchyFixtureScene() {
+    // A shape that exercises every option: two branches, a repeated type deep in
+    // one of them, and a leaf type that appears in both.
+    return didi::json::parse(R"({
+      "name": "Level", "type": "Node3D", "path": "/root/Level", "children": [
+        {"name": "Enemies", "type": "Node3D", "path": "/root/Level/Enemies", "children": [
+          {"name": "A", "type": "CharacterBody3D", "path": "/root/Level/Enemies/A", "children": [
+            {"name": "Shape", "type": "CollisionShape3D", "path": "/root/Level/Enemies/A/Shape", "children": []}
+          ]},
+          {"name": "B", "type": "CharacterBody3D", "path": "/root/Level/Enemies/B", "children": [
+            {"name": "Shape", "type": "CollisionShape3D", "path": "/root/Level/Enemies/B/Shape", "children": []}
+          ]}
+        ]},
+        {"name": "Foliage", "type": "Node3D", "path": "/root/Level/Foliage", "children": [
+          {"name": "Tree1", "type": "MeshInstance3D", "path": "/root/Level/Foliage/Tree1", "children": []},
+          {"name": "Tree2", "type": "MeshInstance3D", "path": "/root/Level/Foliage/Tree2", "children": []}
+        ]}
+      ]})");
+}
+
+static void test_hierarchy_class_filter_keeps_only_matching_branches() {
+    // Break caught: the tool returned the whole recursive tree, so asking about
+    // the collision shapes in a production level meant reading the foliage too.
+    didi::mcp::HierarchyViewOptions options;
+    options.class_filter = {"CollisionShape3D"};
+    didi::mcp::HierarchyViewStats stats;
+    const auto shaped = didi::mcp::shapeHierarchy(hierarchyFixtureScene(), options, stats);
+
+    ASSERT_EQ(stats.matched_nodes, 2u);
+    // Foliage has no match anywhere beneath it, so the whole branch is gone.
+    ASSERT_EQ(shaped["children"].size(), 1u);
+    ASSERT_EQ(shaped["children"][0]["name"], "Enemies");
+    // The ancestors that lead to a match are kept, and are not flagged as matches.
+    ASSERT_TRUE(!shaped["children"][0].contains("matched"));
+    const auto& first = shaped["children"][0]["children"][0];
+    ASSERT_EQ(first["name"], "A");
+    ASSERT_EQ(first["children"][0]["type"], "CollisionShape3D");
+    ASSERT_EQ(first["children"][0]["matched"], true);
+}
+
+static void test_hierarchy_node_budget_reports_what_it_cut() {
+    // Break caught: a budget that silently drops nodes is worse than none, so a
+    // cut branch has to say how many went and of what type.
+    didi::mcp::HierarchyViewOptions options;
+    options.max_nodes = 4;
+    didi::mcp::HierarchyViewStats stats;
+    const auto shaped = didi::mcp::shapeHierarchy(hierarchyFixtureScene(), options, stats);
+
+    ASSERT_TRUE(stats.truncated);
+    ASSERT_EQ(stats.node_count, 4u);
+
+    // Depth first, so the kept nodes form a real path from the root.
+    ASSERT_EQ(shaped["name"], "Level");
+    ASSERT_EQ(shaped["children"][0]["name"], "Enemies");
+
+    // Something was cut, and the payload says what.
+    std::function<bool(const didi::json&)> reportsOmission = [&](const didi::json& node) {
+        if (node.contains("children_omitted") && node.contains("children_summary")) return true;
+        for (const auto& child : node["children"]) {
+            if (reportsOmission(child)) return true;
+        }
+        return false;
+    };
+    ASSERT_TRUE(reportsOmission(shaped));
+}
+
+static void test_hierarchy_summary_counts_without_dumping_the_tree() {
+    // Break caught: there was no way to ask what is in a scene without being
+    // handed every node in it.
+    didi::mcp::HierarchyViewOptions options;
+    options.summary = true;
+    didi::mcp::HierarchyViewStats stats;
+    const auto shaped = didi::mcp::shapeHierarchy(hierarchyFixtureScene(), options, stats);
+
+    ASSERT_EQ(stats.node_count, 9u);
+    ASSERT_EQ(shaped["node_count"], 9u);
+    ASSERT_EQ(shaped["counts_by_type"]["CharacterBody3D"], 2u);
+    ASSERT_EQ(shaped["counts_by_type"]["MeshInstance3D"], 2u);
+    ASSERT_EQ(shaped["counts_by_type"]["Node3D"], 3u);
+
+    // One level of branch structure, each with its own counts, and no children
+    // arrays anywhere.
+    ASSERT_EQ(shaped["branches"].size(), 2u);
+    ASSERT_EQ(shaped["branches"][0]["name"], "Enemies");
+    ASSERT_EQ(shaped["branches"][0]["node_count"], 5u);
+    ASSERT_TRUE(!shaped.contains("children"));
+    ASSERT_TRUE(!shaped["branches"][0].contains("children"));
+}
+
+static void test_hierarchy_view_options_reject_malformed_requests() {
+    // Break caught: a mistyped option silently returning the whole tree is how a
+    // caller blows its context without knowing why.
+    ASSERT_TRUE(didi::mcp::parseHierarchyViewOptions(
+        didi::json{{"max_nodes", 0}}).isErr());
+    ASSERT_TRUE(didi::mcp::parseHierarchyViewOptions(
+        didi::json{{"max_nodes", "50"}}).isErr());
+    ASSERT_TRUE(didi::mcp::parseHierarchyViewOptions(
+        didi::json{{"class_filter", didi::json::array()}}).isErr());
+    ASSERT_TRUE(didi::mcp::parseHierarchyViewOptions(
+        didi::json{{"class_filter", didi::json::array({"Camera3D", 7})}}).isErr());
+    ASSERT_TRUE(didi::mcp::parseHierarchyViewOptions(
+        didi::json{{"summary", "yes"}}).isErr());
+    // summary answers for the whole tree, so a budget or a filter alongside it
+    // would be quietly ignored. Say so instead.
+    ASSERT_TRUE(didi::mcp::parseHierarchyViewOptions(
+        didi::json{{"summary", true}, {"max_nodes", 10}}).isErr());
+
+    const auto valid = didi::mcp::parseHierarchyViewOptions(
+        didi::json{{"max_nodes", 10}, {"class_filter", didi::json::array({"Camera3D"})}});
+    ASSERT_TRUE(valid.isOk());
+    ASSERT_EQ(valid.value().max_nodes, 10u);
+    ASSERT_TRUE(valid.value().class_filter.count("Camera3D") == 1);
+}
+
+static void test_offline_hierarchy_applies_the_view_options() {
+    // Break caught: the options had to work on the offline .tscn parse too, not
+    // only on a live editor response.
+    ScopedToolProject project("scene-hierarchy-view");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    std::filesystem::create_directories("levels");
+    std::ofstream("levels/forest.tscn")
+        << "[gd_scene format=3]\n\n"
+        << "[node name=\"Forest\" type=\"Node3D\"]\n"
+        << "[node name=\"Cam\" type=\"Camera3D\" parent=\".\"]\n"
+        << "[node name=\"Tree1\" type=\"MeshInstance3D\" parent=\".\"]\n"
+        << "[node name=\"Tree2\" type=\"MeshInstance3D\" parent=\".\"]\n";
+
+    const auto summarized = registry.callTool("scene_get_hierarchy",
+        {{"root_path", "res://levels/forest.tscn"}, {"summary", true}});
+    if (summarized.isError) {
+        throw std::runtime_error("summary call failed: " + summarized.content[0].text);
+    }
+    const auto summary = didi::json::parse(summarized.content[0].text);
+    ASSERT_EQ(summary["summary"], true);
+    ASSERT_EQ(summary["node_count"], 4u);
+    ASSERT_EQ(summary["scene_tree"]["counts_by_type"]["MeshInstance3D"], 2u);
+
+    const auto filtered = registry.callTool("scene_get_hierarchy",
+        {{"root_path", "res://levels/forest.tscn"},
+         {"class_filter", didi::json::array({"Camera3D"})}});
+    ASSERT_TRUE(!filtered.isError);
+    const auto filtered_payload = didi::json::parse(filtered.content[0].text);
+    ASSERT_EQ(filtered_payload["matched_nodes"], 1u);
+    ASSERT_EQ(filtered_payload["scene_tree"]["children"].size(), 1u);
+    ASSERT_EQ(filtered_payload["scene_tree"]["children"][0]["type"], "Camera3D");
+
+    // A malformed option is refused rather than silently returning everything.
+    ASSERT_TRUE(registry.callTool("scene_get_hierarchy",
+        {{"root_path", "res://levels/forest.tscn"}, {"max_nodes", 0}}).isError);
 }
 
 static void test_project_search_public_validation_and_schema() {
@@ -1319,6 +1473,16 @@ struct RegisterToolTests {
                      test_resource_create_serializes_colors_quaternions_and_dictionaries);
         registerTest("Tools.OfflineHierarchyMainSceneAndMultilineProperties",
                      test_offline_hierarchy_reads_main_scene_and_multiline_properties);
+        registerTest("Hierarchy.ClassFilterKeepsMatchingBranches",
+                     test_hierarchy_class_filter_keeps_only_matching_branches);
+        registerTest("Hierarchy.NodeBudgetReportsWhatItCut",
+                     test_hierarchy_node_budget_reports_what_it_cut);
+        registerTest("Hierarchy.SummaryCountsWithoutTheTree",
+                     test_hierarchy_summary_counts_without_dumping_the_tree);
+        registerTest("Hierarchy.ViewOptionsRejectMalformed",
+                     test_hierarchy_view_options_reject_malformed_requests);
+        registerTest("Hierarchy.OfflineAppliesViewOptions",
+                     test_offline_hierarchy_applies_the_view_options);
         registerTest("Tools.ProjectSearchPublicValidationAndSchema", test_project_search_public_validation_and_schema);
         registerTest("Tools.AssetReimportPublicValidationAndSchema", test_asset_reimport_public_validation_and_schema);
         registerTest("Tools.ViewportDiffPublicValidationAndSchema", test_viewport_diff_public_validation_and_schema);

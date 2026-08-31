@@ -929,8 +929,29 @@ Result<bool> objectHasProperty(GDExtensionObjectPtr object, const std::string& p
     return false;
 }
 
+// A safety cap, not a usability budget, and the difference matters. The walk had
+// no bound at all, so a large enough edited scene could exceed the IPC frame
+// before the tool layer saw a byte of it. These numbers exist only to stop that,
+// and are set far above any ordinary scene: the smoke fixture's edited scene is
+// already about 1700 nodes and 225 KiB, so a tight cap here would silently cut
+// scenes people actually work on.
+//
+// Callers who want a small answer ask for one, with max_nodes, class_filter or
+// summary on scene_get_hierarchy. That is the lever for context cost. This is
+// the lever for not losing the response entirely.
+constexpr size_t kMaxHierarchyNodes = 100000;
+constexpr size_t kMaxHierarchyResponseBytes = 8 * 1024 * 1024;
+constexpr size_t kHierarchyEnvelopeReserveBytes = 256 * 1024;
+
+struct HierarchyBudget {
+    size_t node_count{0};
+    size_t estimated_bytes{0};
+    bool truncated{false};
+};
+
 Result<json> buildHierarchy(GDExtensionObjectPtr node, int depth, int max_depth,
-                            const std::string& logical_path = {}) {
+                            const std::string& logical_path,
+                            HierarchyBudget& budget) {
     auto name = nodeString(node, "get_name", 2002593661LL);
     auto type = nodeString(node, "get_class", 201670096LL);
     if (name.isErr()) return name.error();
@@ -940,6 +961,19 @@ Result<json> buildHierarchy(GDExtensionObjectPtr node, int depth, int max_depth,
         {"name", name.value()}, {"type", type.value()}, {"path", path},
         {"properties", json::object()}, {"children", json::array()}
     };
+
+    // Charged before descending, so the node that crosses the limit is the one
+    // that stops rather than the one after it.
+    const size_t node_bytes = result.dump().size() + 2;
+    const size_t tree_budget = kMaxHierarchyResponseBytes - kHierarchyEnvelopeReserveBytes;
+    if (budget.node_count >= kMaxHierarchyNodes ||
+        budget.estimated_bytes + node_bytes > tree_budget) {
+        budget.truncated = true;
+        return json(nullptr);
+    }
+    budget.estimated_bytes += node_bytes;
+    ++budget.node_count;
+
     if (depth >= max_depth) return result;
     auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
     if (include_internal.isErr()) return include_internal.error();
@@ -959,8 +993,12 @@ Result<json> buildHierarchy(GDExtensionObjectPtr node, int depth, int max_depth,
         auto child_name = nodeString(child.value(), "get_name", 2002593661LL);
         if (child_name.isErr()) return child_name.error();
         auto child_json = buildHierarchy(child.value(), depth + 1, max_depth,
-                                         path + "/" + child_name.value());
+                                         path + "/" + child_name.value(), budget);
         if (child_json.isErr()) return child_json.error();
+        if (child_json.value().is_null()) {
+            result["children_truncated"] = true;
+            break;
+        }
         result["children"].push_back(child_json.value());
     }
     return result;
@@ -3486,16 +3524,25 @@ json GodotBridge::execute(const std::string& method, const json& params,
         int max_depth = std::clamp(params.value("max_depth", 10), 0, 64);
         auto logical_root = logicalPathFromEditedRoot(root, target.value());
         if (logical_root.isErr()) return errorJson(logical_root.error().code, logical_root.error().message);
-        auto hierarchy = buildHierarchy(target.value(), 0, max_depth, logical_root.value());
+        HierarchyBudget budget;
+        auto hierarchy = buildHierarchy(target.value(), 0, max_depth, logical_root.value(), budget);
         if (hierarchy.isErr()) return errorJson(hierarchy.error().code, hierarchy.error().message);
+        if (hierarchy.value().is_null()) {
+            return errorJson(413, "The edited scene root alone exceeds the hierarchy response budget");
+        }
         json omitted = json::array();
         if (params.value("include_properties", true)) omitted.push_back("bulk_properties");
         if (params.value("include_signals", true)) omitted.push_back("signals");
         if (params.value("include_scripts", true)) omitted.push_back("scripts");
-        return liveResult({{"root_path", params.value("root_path", "/root")},
-                           {"source", "live_scene_tree"}, {"scene_tree", hierarchy.value()},
-                           {"omitted_fields", omitted},
-                           {"message", "Use focused property/signal tools for fields omitted from hierarchy traversal."}});
+        json hierarchy_result = {{"root_path", params.value("root_path", "/root")},
+                                 {"source", "live_scene_tree"}, {"scene_tree", hierarchy.value()},
+                                 {"omitted_fields", omitted},
+                                 {"node_count", budget.node_count},
+                                 {"max_nodes", kMaxHierarchyNodes},
+                                 {"max_response_bytes", kMaxHierarchyResponseBytes},
+                                 {"message", "Use focused property/signal tools for fields omitted from hierarchy traversal."}};
+        if (budget.truncated) hierarchy_result["truncated"] = true;
+        return liveResult(hierarchy_result);
     }
 
     if (method == "scene.getProperty" || method == "scene.setProperty") {
