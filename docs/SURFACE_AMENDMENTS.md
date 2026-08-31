@@ -52,8 +52,8 @@ and verification, and it fails visibly wherever the surface has a hole.
 
 ## Amendment log
 
-One amendment is implemented: `runtime_read_output`, recorded below with its
-tri-engine feasibility evidence. One is withdrawn: raising the engine floor to
+Two amendments are implemented: `runtime_read_output`, recorded below with its
+tri-engine feasibility evidence, and `project_audit_assets`. One is withdrawn: raising the engine floor to
 Godot 4.7, refused in favour of runtime capability detection so that 4.5 and 4.6
 users keep support. The remaining candidates come from the
 August 2026 competitive review and are proposed, not accepted, in
@@ -172,6 +172,32 @@ processes Didi does not own. No claim to reproduce Godot's debugger; this is
 engine log output, not stack frames or breakpoints. The existing
 `runtime_read_logs` contract is unchanged, and this does not become an alias
 for it: one returns Didi's own records, the other returns the engine's.
+
+### ACCEPTED (IMPLEMENTED): `project_audit_assets`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `project_audit_assets` |
+| **Failing workflow** | *Change the character sprite and prove nothing else broke.* The agent finds five files named like the sprite and cannot tell which one is wired up, because the answer is spread across scenes it has not opened. `project_search_text` finds the string; it cannot say what references what. `project_list_resources` lists files; it does not know which are reachable. So the agent either edits the wrong file or asks a human which one is live. The same hole hides the reverse case: after a rename, the reference that now points at nothing is invisible until the game runs. |
+| **Execution modes** | `offline_fallback`. It is a static read of files on disk and needs no editor. |
+| **Safety class** | `read`. No `dry_run`, no confirmation. It never writes. |
+| **Proving test** | Native: `Tools.ProjectAuditFindings` builds one project holding every case at once (an orphan asset, an asset referenced only by uid, a missing path, an unresolved uid, a signal wired in a scene, a signal emitted by name, a signal emitted through the member form, and one dead signal) and asserts each is classified correctly. `Tools.ProjectAuditOptions` covers the switches, the cap, and rejection of an all-off request. |
+| **Reviewer** | Unassigned. Read-only, so no security review is required. The findings are bounded by `max_findings` and the scan by the existing resource-index limits. |
+
+**Why this one.** Every reference form is already written down in the project;
+none of it is queryable. The agent's alternative is a lexical search, which is
+exactly the tool that misses a uid-only `ext_resource` and an editor-wired
+signal.
+
+**What it deliberately does not do.** It does not say an asset is safe to
+delete. A path a script builds at runtime cannot be followed, and a connection
+made through a variable name cannot be seen. Both limits ship inside the
+response rather than only in the docs, because a caller that reads only the
+payload is the one who will act on it.
+
+**Orphan detection is restricted to asset types on purpose.** A scene that
+nothing references is usually a level you open by hand. Reporting those would
+make the list mostly noise, and a noisy list is one people stop reading.
 
 ### WITHDRAWN: raise the minimum Godot version to 4.7
 
