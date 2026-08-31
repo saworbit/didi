@@ -156,6 +156,10 @@ void test_perceptual_metrics_are_exact_for_identical_frames() {
     const auto frame = patternImage(32, 32, 0, 0);
     const auto diff = didi::image::diffRgba(frame, frame, 0);
     ASSERT_TRUE(diff.isOk());
+    // Exactly 1.0, not near it. The general path is an ulp either side of 1.0
+    // depending on the compiler, which clang on macOS demonstrated, and a
+    // caller comparing against 1.0 would then see identical frames score below
+    // it. structuralSimilarity says 1.0 outright for identical planes.
     ASSERT_EQ(diff.value().ssim, 1.0);
     ASSERT_EQ(diff.value().perceptual_distance, 0);
     ASSERT_EQ(diff.value().perceptual_hash_before, diff.value().perceptual_hash_after);
@@ -171,6 +175,8 @@ void test_perceptual_metrics_are_exact_for_identical_frames() {
 void test_structural_similarity_falls_as_structure_diverges() {
     const auto baseline = patternImage(64, 64, 0, 0);
     // Increasing displacement must not score better than a smaller one.
+    // Not identical planes, so this exercises the computed path rather than the
+    // exact-match short circuit.
     const double near = didi::image::structuralSimilarity(baseline, patternImage(64, 64, 4, 0));
     const double far = didi::image::structuralSimilarity(baseline, patternImage(64, 64, 16, 0));
     ASSERT_TRUE(near > far);

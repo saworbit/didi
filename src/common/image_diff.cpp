@@ -110,6 +110,13 @@ double structuralSimilarity(const RgbaImage& before, const RgbaImage& after) {
     const auto left = lumaPlane(before);
     const auto right = lumaPlane(after);
 
+    // Identical frames are exactly 1.0, said once rather than arrived at.
+    // (2*ml*mr + C1) and (ml^2 + mr^2 + C1) are equal in arithmetic when the
+    // means are equal, but not bit for bit in floating point, so the general
+    // path lands an ulp either side of 1.0 depending on the compiler. A caller
+    // comparing against 1.0 would then see identical frames score below it.
+    if (left == right) return 1.0;
+
     // The standard stabilisers for 8 bit data, so a flat block does not divide
     // by a variance of zero.
     constexpr double kC1 = (0.01 * 255.0) * (0.01 * 255.0);
