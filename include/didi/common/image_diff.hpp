@@ -51,8 +51,35 @@ struct ImageDiffResult {
     std::optional<DiffBounds> bounds;
     std::vector<uint8_t> diff_rgba;
 
+    // Perceptual measures, which answer a different question again from either
+    // group above: not "which pixels changed" but "does this still look like
+    // the same picture". Shadow filtering, antialiasing jitter and particle
+    // timing move thousands of pixels without changing what is on screen, and a
+    // per-pixel count cannot tell that apart from a real regression.
+    //
+    // ssim is 1.0 for identical images and falls towards 0 as structure
+    // diverges. perceptual_distance is the Hamming distance between the two
+    // 64 bit DCT hashes, so 0 means the images hash alike and 64 means nothing
+    // in common. Neither is thresholded; callers pick their own tolerance.
+    double ssim{1.0};
+    uint64_t perceptual_hash_before{0};
+    uint64_t perceptual_hash_after{0};
+    int perceptual_distance{0};
+
     json toJson() const;
 };
+
+// Mean structural similarity over 8x8 luma blocks, in 0.0 to 1.0. Blocks rather
+// than a Gaussian window: it is deterministic, cheap enough to run on every
+// diff, and the difference does not matter for deciding whether a frame
+// regressed.
+double structuralSimilarity(const RgbaImage& before, const RgbaImage& after);
+
+// 64 bit DCT perceptual hash. Two images that look alike hash alike, whatever
+// their pixel-level noise.
+uint64_t perceptualHash(const RgbaImage& image);
+
+int hammingDistance(uint64_t left, uint64_t right);
 
 Result<ImageDiffResult> diffRgba(const RgbaImage& before,
                                  const RgbaImage& after,

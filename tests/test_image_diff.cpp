@@ -5,6 +5,7 @@
 #include <functional>
 #include <stdexcept>
 #include <string>
+#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -94,6 +95,114 @@ void test_capture_cache_rejects_bad_ids_and_oversize_entries() {
     didi::image::RgbaImage two_pixels{2, 1, std::vector<uint8_t>(8, 0)};
     ASSERT_TRUE(cache.store("00000000000000000000000000000001", two_pixels).isErr());
     ASSERT_TRUE(cache.find("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF") == nullptr);
+}
+
+// Builds a deterministic scene-like image: a bright shape on a dark ground,
+// which is what gives SSIM and the hash something structural to hold on to.
+static didi::image::RgbaImage patternImage(int width, int height, int shift, int noise) {
+    didi::image::RgbaImage image{width, height, std::vector<uint8_t>(
+        static_cast<size_t>(width) * height * 4, 0)};
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const size_t offset = (static_cast<size_t>(y) * width + x) * 4;
+            const bool inside = (x + shift) > width / 4 && (x + shift) < (3 * width) / 4 &&
+                                y > height / 4 && y < (3 * height) / 4;
+            int value = inside ? 200 : 40;
+            // A deterministic wobble standing in for antialiasing and shadow
+            // filtering: it moves a lot of pixels and changes no structure.
+            if (noise > 0) value += ((x * 7 + y * 13) % (2 * noise + 1)) - noise;
+            const auto channel = static_cast<uint8_t>(std::clamp(value, 0, 255));
+            image.rgba[offset] = channel;
+            image.rgba[offset + 1] = channel;
+            image.rgba[offset + 2] = channel;
+            image.rgba[offset + 3] = 255;
+        }
+    }
+    return image;
+}
+
+void test_perceptual_metrics_separate_noise_from_a_real_change() {
+    // Break caught: the diff answered only on per-pixel channel deltas, so
+    // render noise that changes nothing a person would notice counted the same
+    // as a moved object. That is the case this exists for.
+    const auto baseline = patternImage(64, 64, 0, 0);
+    const auto noisy = patternImage(64, 64, 0, 6);
+    const auto moved = patternImage(64, 64, 12, 0);
+
+    const auto noise_diff = didi::image::diffRgba(baseline, noisy, 0);
+    ASSERT_TRUE(noise_diff.isOk());
+    const auto moved_diff = didi::image::diffRgba(baseline, moved, 0);
+    ASSERT_TRUE(moved_diff.isOk());
+
+    // Per pixel, the noise looks like a big change: most of the frame moved.
+    ASSERT_TRUE(noise_diff.value().changed_pixels > noise_diff.value().total_pixels / 2);
+
+    // Perceptually it did not. The structure is intact and the hashes agree,
+    // while the moved shape scores lower and hashes differently.
+    // The hash is the sharp discriminator: the noisy frame hashes identically to
+    // the baseline, the moved one is 36 bits away.
+    ASSERT_EQ(noise_diff.value().perceptual_distance, 0);
+    ASSERT_TRUE(moved_diff.value().perceptual_distance > 8);
+
+    // SSIM ranks them the same way. The absolute number depends on how flat the
+    // content is, which is why the tool reports it rather than deciding: on this
+    // deliberately flat fixture noise measures about 0.83 and the moved shape
+    // about 0.74, where a photographic frame would score both far higher.
+    ASSERT_TRUE(noise_diff.value().ssim > 0.8);
+    ASSERT_TRUE(moved_diff.value().ssim < noise_diff.value().ssim);
+}
+
+void test_perceptual_metrics_are_exact_for_identical_frames() {
+    const auto frame = patternImage(32, 32, 0, 0);
+    const auto diff = didi::image::diffRgba(frame, frame, 0);
+    ASSERT_TRUE(diff.isOk());
+    // Exactly 1.0, not near it. The general path is an ulp either side of 1.0
+    // depending on the compiler, which clang on macOS demonstrated, and a
+    // caller comparing against 1.0 would then see identical frames score below
+    // it. structuralSimilarity says 1.0 outright for identical planes.
+    ASSERT_EQ(diff.value().ssim, 1.0);
+    ASSERT_EQ(diff.value().perceptual_distance, 0);
+    ASSERT_EQ(diff.value().perceptual_hash_before, diff.value().perceptual_hash_after);
+
+    const auto payload = diff.value().toJson();
+    ASSERT_EQ(payload["ssim"], 1.0);
+    ASSERT_EQ(payload["perceptual_hash"]["hamming_distance"], 0);
+    // Fixed width hex, so two hashes are comparable at a glance.
+    ASSERT_EQ(payload["perceptual_hash"]["before"].get<std::string>().size(), 16u);
+    ASSERT_EQ(payload["perceptual_hash"]["before"], payload["perceptual_hash"]["after"]);
+}
+
+void test_structural_similarity_falls_as_structure_diverges() {
+    const auto baseline = patternImage(64, 64, 0, 0);
+    // Increasing displacement must not score better than a smaller one.
+    // Not identical planes, so this exercises the computed path rather than the
+    // exact-match short circuit.
+    const double near = didi::image::structuralSimilarity(baseline, patternImage(64, 64, 4, 0));
+    const double far = didi::image::structuralSimilarity(baseline, patternImage(64, 64, 16, 0));
+    ASSERT_TRUE(near > far);
+    ASSERT_TRUE(far >= 0.0 && near <= 1.0);
+
+    // Mismatched dimensions are not comparable, and say so rather than
+    // reporting a similarity that means nothing.
+    ASSERT_EQ(didi::image::structuralSimilarity(baseline, patternImage(32, 32, 0, 0)), 0.0);
+}
+
+void test_perceptual_hash_ignores_uniform_brightness() {
+    // Break caught: a hash that folds in the DC term moves every bit when the
+    // exposure changes, which is the opposite of what it is for.
+    const auto baseline = patternImage(64, 64, 0, 0);
+    auto brighter = baseline;
+    for (size_t offset = 0; offset < brighter.rgba.size(); offset += 4) {
+        for (int channel = 0; channel < 3; ++channel) {
+            brighter.rgba[offset + channel] =
+                static_cast<uint8_t>(std::min(255, brighter.rgba[offset + channel] + 25));
+        }
+    }
+    ASSERT_EQ(didi::image::perceptualHash(baseline), didi::image::perceptualHash(brighter));
+
+    ASSERT_EQ(didi::image::hammingDistance(0, 0), 0);
+    ASSERT_EQ(didi::image::hammingDistance(0xFFFFFFFFFFFFFFFFull, 0), 64);
+    ASSERT_EQ(didi::image::hammingDistance(0b1011ull, 0b1110ull), 2);
 }
 
 void test_restoration_guard_runs_once_on_early_exit() {
@@ -235,6 +344,14 @@ void test_base64_decode_round_trips_every_byte_value() {
 
 struct RegisterImageDiffTests {
     RegisterImageDiffTests() {
+        registerTest("ImageDiff.PerceptualSeparatesNoiseFromChange",
+                     test_perceptual_metrics_separate_noise_from_a_real_change);
+        registerTest("ImageDiff.PerceptualExactForIdenticalFrames",
+                     test_perceptual_metrics_are_exact_for_identical_frames);
+        registerTest("ImageDiff.SsimFallsAsStructureDiverges",
+                     test_structural_similarity_falls_as_structure_diverges);
+        registerTest("ImageDiff.PerceptualHashIgnoresBrightness",
+                     test_perceptual_hash_ignores_uniform_brightness);
         registerTest("ImageDiff.SubThresholdNoiseIsUnambiguous",
                      test_sub_threshold_noise_is_reported_without_contradiction);
         registerTest("CaptureCache.BorrowsAndMovesFrames",
