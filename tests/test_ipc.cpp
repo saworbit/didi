@@ -221,18 +221,19 @@ static void test_ipc_client_server_roundtrip() {
     server->stop();
 }
 
-static void test_ipc_idle_connection_survives_the_frame_timeout() {
-    // Break caught: the server applied the short frame timeout to the wait for a
-    // request to begin, so a client that sat idle between tool calls, which is
-    // normal while an agent is thinking, was dropped and forced to reconnect and
-    // re-handshake on its next call.
+static void test_second_client_can_connect_while_the_first_sits_idle() {
+    // Break caught: serverLoop holds exactly one pipe instance at a time. It
+    // creates one, serves it, and only creates the next after the read loop
+    // breaks, so the frame timeout is what recycles an idle connection. An
+    // attempt to remove that timeout, to stop churning connections between tool
+    // calls, left an idle client holding the only instance and every later
+    // connection to the same endpoint failed outright. The live Godot harness
+    // caught it at runtime_attach_session after a run of subprocess tools; this
+    // is that case in miniature.
 #if defined(_WIN32)
-    const std::string test_pipe = "\\\\.\\pipe\\godot_didi_ipc_idle_test";
-    // kServerFrameTimeoutMs is 1000 on Windows, 5000 on POSIX.
-    const auto idle_for = std::chrono::milliseconds(1600);
+    const std::string test_pipe = "\\\\.\\pipe\\godot_didi_ipc_second_client_test";
 #else
-    const std::string test_pipe = "/tmp/godot_didi_ipc_idle_test.sock";
-    const auto idle_for = std::chrono::milliseconds(5600);
+    const std::string test_pipe = "/tmp/godot_didi_ipc_second_client_test.sock";
 #endif
 
     auto server = didi::ipc::createIpcServer();
@@ -241,23 +242,28 @@ static void test_ipc_idle_connection_survives_the_frame_timeout() {
     });
     ASSERT_TRUE(server->start(test_pipe));
 
-    auto client = didi::ipc::createIpcClient();
-    ASSERT_TRUE(client->connect(test_pipe, 2000));
+    auto first = didi::ipc::createIpcClient();
+    ASSERT_TRUE(first->connect(test_pipe, 2000));
+    ASSERT_TRUE(first->sendRequest("test.echo", {{"msg", "first"}}).isOk());
 
-    const auto first = client->sendRequest("test.echo", {{"msg", "before"}});
-    ASSERT_TRUE(first.isOk());
-    ASSERT_EQ(first.value()["echo"]["msg"].get<std::string>(), "before");
+    // The first client stays connected and goes quiet, the way an attached
+    // route does while offline subprocess tools run. Past the frame timeout the
+    // server recycles that instance and can accept the next client; without a
+    // timeout it never would.
+#if defined(_WIN32)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1600));
+#else
+    std::this_thread::sleep_for(std::chrono::milliseconds(5600));
+#endif
 
-    // Sit quiet for longer than a single frame is allowed to take.
-    std::this_thread::sleep_for(idle_for);
+    auto second = didi::ipc::createIpcClient();
+    ASSERT_TRUE(second->connect(test_pipe, 4000));
+    const auto served = second->sendRequest("test.echo", {{"msg", "second"}});
+    ASSERT_TRUE(served.isOk());
+    ASSERT_EQ(served.value()["echo"]["msg"].get<std::string>(), "second");
 
-    // The same connection must still be there, and must still serve.
-    ASSERT_TRUE(client->isConnected());
-    const auto second = client->sendRequest("test.echo", {{"msg", "after"}});
-    ASSERT_TRUE(second.isOk());
-    ASSERT_EQ(second.value()["echo"]["msg"].get<std::string>(), "after");
-
-    client->disconnect();
+    second->disconnect();
+    first->disconnect();
     server->stop();
 }
 
@@ -857,7 +863,7 @@ struct RegisterIpcTests {
     RegisterIpcTests() {
         registerTest("IPC.Framing", test_ipc_framing);
         registerTest("IPC.ClientServerRoundtrip", test_ipc_client_server_roundtrip);
-        registerTest("IPC.IdleConnectionSurvivesFrameTimeout", test_ipc_idle_connection_survives_the_frame_timeout);
+        registerTest("IPC.SecondClientConnectsWhileFirstIsIdle", test_second_client_can_connect_while_the_first_sits_idle);
         registerTest("IPC.NoTimeoutRoundtrip", test_ipc_negative_timeout_waits_for_definitive_response);
         registerTest("IPC.HandlerExceptionClassification", test_ipc_server_classifies_handler_exception_with_request_id);
 #if defined(_WIN32)

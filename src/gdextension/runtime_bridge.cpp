@@ -157,64 +157,6 @@ Result<std::string> nativeStringToUtf8(const void* native_string) {
     return text;
 }
 
-struct BoundedUtf8 {
-    std::string value;
-    bool truncated{false};
-};
-
-BoundedUtf8 boundUtf8(std::string_view input, size_t maximum_bytes) {
-    BoundedUtf8 bounded;
-    bounded.value.reserve(std::min(input.size(), maximum_bytes));
-    for (size_t index = 0; index < input.size();) {
-        const auto first = static_cast<unsigned char>(input[index]);
-        size_t width = 1;
-        bool valid = false;
-        uint32_t codepoint = 0;
-        if ((first & 0x80) == 0) {
-            valid = true;
-            codepoint = first;
-        } else if ((first & 0xE0) == 0xC0 && first >= 0xC2) {
-            width = 2;
-            valid = true;
-            codepoint = first & 0x1F;
-        } else if ((first & 0xF0) == 0xE0) {
-            width = 3;
-            valid = true;
-            codepoint = first & 0x0F;
-        } else if ((first & 0xF8) == 0xF0 && first <= 0xF4) {
-            width = 4;
-            valid = true;
-            codepoint = first & 0x07;
-        }
-        valid = valid && index + width <= input.size();
-        for (size_t offset = 1; valid && offset < width; ++offset) {
-            const auto next = static_cast<unsigned char>(input[index + offset]);
-            valid = (next & 0xC0) == 0x80;
-            codepoint = (codepoint << 6) | (next & 0x3F);
-        }
-        valid = valid && (width == 1 || (width == 2 && codepoint >= 0x80) ||
-                          (width == 3 && codepoint >= 0x800) ||
-                          (width == 4 && codepoint >= 0x10000));
-        valid = valid && !(codepoint >= 0xD800 && codepoint <= 0xDFFF) &&
-                codepoint <= 0x10FFFF;
-        if (!valid) {
-            bounded.truncated = true;
-            if (bounded.value.size() + 1 > maximum_bytes) break;
-            bounded.value.push_back('?');
-            ++index;
-            continue;
-        }
-        if (bounded.value.size() + width > maximum_bytes) {
-            bounded.truncated = true;
-            break;
-        }
-        bounded.value.append(input.substr(index, width));
-        index += width;
-    }
-    if (bounded.value.size() < input.size()) bounded.truncated = true;
-    return bounded;
-}
-
 Result<std::string> callStringResult(GDExtensionObjectPtr object,
                                      const char* class_name,
                                      const char* method_name,
@@ -428,6 +370,59 @@ bool integerInRange(const json& value, int64_t minimum, int64_t maximum) {
 }
 
 } // namespace
+
+BoundedUtf8 boundUtf8(std::string_view input, size_t maximum_bytes) {
+    BoundedUtf8 bounded;
+    bounded.value.reserve(std::min(input.size(), maximum_bytes));
+    for (size_t index = 0; index < input.size();) {
+        const auto first = static_cast<unsigned char>(input[index]);
+        size_t width = 1;
+        bool valid = false;
+        uint32_t codepoint = 0;
+        if ((first & 0x80) == 0) {
+            valid = true;
+            codepoint = first;
+        } else if ((first & 0xE0) == 0xC0 && first >= 0xC2) {
+            width = 2;
+            valid = true;
+            codepoint = first & 0x1F;
+        } else if ((first & 0xF0) == 0xE0) {
+            width = 3;
+            valid = true;
+            codepoint = first & 0x0F;
+        } else if ((first & 0xF8) == 0xF0 && first <= 0xF4) {
+            width = 4;
+            valid = true;
+            codepoint = first & 0x07;
+        }
+        valid = valid && index + width <= input.size();
+        for (size_t offset = 1; valid && offset < width; ++offset) {
+            const auto next = static_cast<unsigned char>(input[index + offset]);
+            valid = (next & 0xC0) == 0x80;
+            codepoint = (codepoint << 6) | (next & 0x3F);
+        }
+        valid = valid && (width == 1 || (width == 2 && codepoint >= 0x80) ||
+                          (width == 3 && codepoint >= 0x800) ||
+                          (width == 4 && codepoint >= 0x10000));
+        valid = valid && !(codepoint >= 0xD800 && codepoint <= 0xDFFF) &&
+                codepoint <= 0x10FFFF;
+        if (!valid) {
+            bounded.truncated = true;
+            if (bounded.value.size() + 1 > maximum_bytes) break;
+            bounded.value.push_back('?');
+            ++index;
+            continue;
+        }
+        if (bounded.value.size() + width > maximum_bytes) {
+            bounded.truncated = true;
+            break;
+        }
+        bounded.value.append(input.substr(index, width));
+        index += width;
+    }
+    if (bounded.value.size() < input.size()) bounded.truncated = true;
+    return bounded;
+}
 
 Result<void> quitSceneTree(int64_t exit_code) {
     auto tree = activeSceneTree();

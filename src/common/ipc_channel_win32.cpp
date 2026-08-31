@@ -29,7 +29,8 @@ namespace {
 
 constexpr uint32_t kMaximumFrameBytes = 128U * 1024U * 1024U;
 constexpr uint32_t kMaximumHandshakeResponseBytes = 64U * 1024U;
-// Applies once a request has started arriving, never to an idle connection.
+// Also recycles an idle connection so the next client can be accepted; see the
+// comment at the read in Win32IpcServer::serverLoop.
 constexpr int kServerFrameTimeoutMs = 1000;
 // How long a cancelled overlapped operation gets to settle before we start
 // complaining. Cancellation is near-instant whenever it can happen at all.
@@ -535,24 +536,19 @@ private:
 
             // Process requests on this connection
             while (m_running.load()) {
-                // Waiting for a request to start is not the same as reading one
-                // that has started. A client idle between tool calls, which is
-                // normal while an agent is thinking, was being treated as a
-                // disconnect after one second and forced through a reconnect
-                // and re-handshake on its next call. The idle wait therefore
-                // has no deadline; m_stopEvent still breaks it. The frame
-                // timeout begins at the first byte, so a peer that stalls part
-                // way through a frame still cannot hold the connection.
-                uint8_t len_buf[4] = {0};
-                if (readExactOverlapped(pipe, len_buf, 1, hIoEvent, m_stopEvent,
-                                        win32DeadlineAfter(-1)).status != ExactIoStatus::completed) {
-                    break; // Disconnected or stop requested
-                }
+                // This timeout is load bearing, and not only a frame deadline.
+                // serverLoop holds exactly one pipe instance at a time: it
+                // creates one, serves it, and only creates the next after this
+                // loop breaks. Waiting here without a deadline means an idle
+                // client keeps the single instance forever, so a second
+                // connection to the same endpoint has nothing to connect to and
+                // fails outright. See #65 for the churn this costs and what
+                // removing it would require first.
                 const auto request_deadline = win32DeadlineAfter(kServerFrameTimeoutMs);
-                if (readExactOverlapped(pipe, len_buf + 1, sizeof(len_buf) - 1, hIoEvent,
-                                        m_stopEvent, request_deadline).status !=
-                    ExactIoStatus::completed) {
-                    break;
+                uint8_t len_buf[4] = {0};
+                if (readExactOverlapped(pipe, len_buf, sizeof(len_buf), hIoEvent, m_stopEvent,
+                                        request_deadline).status != ExactIoStatus::completed) {
+                    break; // Disconnected or stop requested
                 }
 
                 uint32_t req_len = static_cast<uint32_t>(len_buf[0]) |
@@ -671,7 +667,7 @@ namespace {
 
 constexpr uint32_t kMaximumFrameBytes = 128U * 1024U * 1024U;
 constexpr uint32_t kMaximumHandshakeResponseBytes = 64U * 1024U;
-// Applies once a request has started arriving, never to an idle connection.
+// Also recycles an idle connection so the next client can be accepted.
 constexpr int kServerFrameTimeoutMs = 5000;
 // Slice length for a wait with no deadline, so stop() is still noticed.
 constexpr int kStopPollSliceMs = 100;
@@ -1043,18 +1039,12 @@ private:
             m_activeClient.store(client);
 
             while (m_running.load()) {
-                // Waiting for a request to start is not the same as reading one
-                // that has started. A client idle between tool calls, which is
-                // normal while an agent is thinking, was being treated as a
-                // disconnect after five seconds. The idle wait therefore has no
-                // deadline; m_running still breaks it. The frame timeout begins
-                // at the first byte, so a peer that stalls part way through a
-                // frame still cannot hold the connection.
-                uint8_t len_buf[4] = {0};
-                if (!readExact(client, len_buf, 1, deadlineAfter(-1), &m_running)) break;
+                // Load bearing for the same reason as the Win32 branch above:
+                // this loop serves one accepted client at a time and only
+                // accepts the next after it breaks.
                 const auto request_deadline = deadlineAfter(kServerFrameTimeoutMs);
-                if (!readExact(client, len_buf + 1, sizeof(len_buf) - 1, request_deadline,
-                               &m_running)) break;
+                uint8_t len_buf[4] = {0};
+                if (!readExact(client, len_buf, sizeof(len_buf), request_deadline, &m_running)) break;
 
                 const uint32_t req_len = decodeFrameLength(len_buf);
                 if (req_len == 0 || req_len > kMaximumFrameBytes) break;
