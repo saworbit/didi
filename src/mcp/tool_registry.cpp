@@ -750,7 +750,14 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"max_depth", {{"type", "integer"}, {"default", 10}, {"description", "Max tree depth"}}},
                 {"include_properties", {{"type", "boolean"}, {"default", true}}},
                 {"include_signals", {{"type", "boolean"}, {"default", true}}},
-                {"include_scripts", {{"type", "boolean"}, {"default", true}}}
+                {"include_scripts", {{"type", "boolean"}, {"default", true}}},
+                {"max_nodes", {{"type", "integer"}, {"minimum", 1}, {"maximum", 100000},
+                               {"description", "Stop after this many nodes, depth first. Branches that were cut report children_omitted and children_summary."}}},
+                {"class_filter", {{"type", "array"}, {"items", {{"type", "string"}}},
+                                  {"minItems", 1}, {"maxItems", 64},
+                                  {"description", "Keep only nodes of these types and the ancestors that lead to them. Matches are flagged with matched: true."}}},
+                {"summary", {{"type", "boolean"}, {"default", false},
+                             {"description", "Return node counts by type plus one level of branch structure, with no properties. Cannot be combined with max_nodes or class_filter."}}}
             }}
         };
         t.handler = [this](const json& args) { return handleGetSceneHierarchy(args, m_ipcClient); };

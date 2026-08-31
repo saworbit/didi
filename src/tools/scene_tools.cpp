@@ -2,6 +2,7 @@
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/tools/hierarchy_view.hpp"
 #include <fstream>
 #include <regex>
 #include <filesystem>
@@ -30,11 +31,38 @@ static std::string findProjectMainScene() {
     return "";
 }
 
+// Applies the view options to a built tree and records what it did, so the live
+// and offline paths answer with the same shape and the same metadata.
+static CallToolResult shapedHierarchyResult(json payload,
+                                            const HierarchyViewOptions& options) {
+    if (!payload.contains("scene_tree")) return CallToolResult::successJson(std::move(payload));
+
+    HierarchyViewStats stats;
+    payload["scene_tree"] = shapeHierarchy(payload["scene_tree"], options, stats);
+    payload["node_count"] = stats.node_count;
+    if (options.summary) {
+        payload["summary"] = true;
+    } else {
+        if (!options.class_filter.empty()) {
+            payload["class_filter"] = json(options.class_filter);
+            payload["matched_nodes"] = stats.matched_nodes;
+        }
+        if (options.max_nodes > 0) payload["max_nodes"] = options.max_nodes;
+        if (stats.truncated) payload["truncated"] = true;
+    }
+    return CallToolResult::successJson(std::move(payload));
+}
+
 CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    auto view = parseHierarchyViewOptions(args);
+    if (view.isErr()) {
+        return CallToolResult::error("Invalid scene hierarchy request: " + view.error().message);
+    }
+
     if (ipc && ipc->isConnected()) {
         auto res = ipc->sendRequest("scene.getHierarchy", args, ::didi::ipc::kWaitForDefinitiveResponse);
         if (res.isOk()) {
-            return CallToolResult::successJson(res.value());
+            return shapedHierarchyResult(res.value(), view.value());
         }
         return CallToolResult::error("Failed to query scene hierarchy from Godot: " + res.error().message);
     }
@@ -231,9 +259,9 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
         json tree_res = {
             {"source", "parsed_tscn_file"},
             {"file_path", root},
-            {"scene_tree", tree}
+            {"scene_tree", std::move(tree)}
         };
-        return CallToolResult::successJson(tree_res);
+        return shapedHierarchyResult(std::move(tree_res), view.value());
     }
 
     json offline_msg = {
