@@ -41,6 +41,17 @@ struct Win32Deadline {
     std::chrono::steady_clock::time_point expires_at{};
 };
 
+// False only when the server has dropped its end. Anything else, including a
+// pipe with bytes already waiting, counts as alive: this decides whether to
+// throw away a working connection, so it errs towards keeping it.
+bool win32PipeServerEndIsAlive(HANDLE pipe) {
+    DWORD available = 0;
+    if (PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr)) return true;
+    const DWORD error = GetLastError();
+    return error != ERROR_BROKEN_PIPE && error != ERROR_PIPE_NOT_CONNECTED &&
+           error != ERROR_INVALID_HANDLE;
+}
+
 Win32Deadline win32DeadlineAfter(int timeout_ms) {
     if (timeout_ms < 0) return {};
     return {true, std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms)};
@@ -219,6 +230,17 @@ public:
     Result<json> sendRequest(const std::string& method, const json& params = json::object(), int timeout_ms = 10000) override {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         const auto deadline = win32DeadlineAfter(timeout_ms);
+        // The server holds one pipe instance and recycles it when a client goes
+        // quiet past its frame timeout, so the next client can get in. This
+        // handle stays valid through that; only the server's end is gone.
+        // Writing into it can succeed into a buffer nobody will read, and the
+        // caller is then told the outcome is unknown for a request the server
+        // never saw. Noticing it here is the one point where a reconnect is
+        // unambiguously safe, because nothing has been sent yet.
+        if (m_pipe != INVALID_HANDLE_VALUE && !win32PipeServerEndIsAlive(m_pipe)) {
+            CloseHandle(m_pipe);
+            m_pipe = INVALID_HANDLE_VALUE;
+        }
         if (m_pipe == INVALID_HANDLE_VALUE) {
             if (!connectUnlocked(m_pipeName.empty() ? kDefaultPipeName : m_pipeName, deadline)) {
                 return transportFailure("Cannot connect to Godot Didi GDExtension IPC pipe.",
@@ -701,6 +723,17 @@ struct MonotonicDeadline {
     std::chrono::steady_clock::time_point expires_at{};
 };
 
+// False only when the peer has closed. A recv of 0 on a stream socket means
+// exactly that; EAGAIN means nothing is waiting, which is the normal state of a
+// healthy idle connection.
+bool posixPeerIsAlive(int sock) {
+    char probe = 0;
+    const ssize_t peeked = recv(sock, &probe, 1, MSG_PEEK | MSG_DONTWAIT);
+    if (peeked > 0) return true;
+    if (peeked == 0) return false;
+    return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR;
+}
+
 MonotonicDeadline deadlineAfter(int timeout_ms) {
     if (timeout_ms < 0) return {};
     return {true, std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms)};
@@ -840,6 +873,14 @@ public:
     Result<json> sendRequest(const std::string& method, const json& params = json::object(), int timeout_ms = 10000) override {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         const auto deadline = deadlineAfter(timeout_ms);
+        // Same recycle as the Win32 branch above, and the same reason for
+        // catching it here rather than after a write: a socket whose peer has
+        // closed still accepts a write, and the failure then looks like a lost
+        // response to a request the server never read.
+        if (m_sock >= 0 && !posixPeerIsAlive(m_sock)) {
+            close(m_sock);
+            m_sock = -1;
+        }
         if (m_sock < 0) {
             if (!connectUnlocked(m_pipeName.empty() ? kDefaultPipeName : m_pipeName, deadline)) {
                 const bool timed_out = deadline.finite && remainingPollMilliseconds(deadline) == 0;
