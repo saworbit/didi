@@ -179,6 +179,86 @@ static void test_shared_index_is_reused_and_dropped_on_invalidate() {
     didi::offline::ResourceIndexer::invalidateSharedIndex();
 }
 
+static void test_rescan_reuses_unchanged_files_and_notices_changed_ones() {
+    // Rebuilding the index re-opened every scene, resource and script to pull
+    // its uid and dependencies, whether or not anything had changed. On a few
+    // thousand files that was most of the cost of a scan, repeated on every
+    // rebuild.
+    //
+    // Skipping that read is only safe if a changed file is still noticed, so
+    // that is what this checks: the same answer when nothing moved, and the new
+    // answer when something did.
+    IndexFixture fixture;
+    fixture.write("scenes/level.tscn",
+                  "[gd_scene format=3 uid=\"uid://before\"]\n"
+                  "[ext_resource type=\"Texture2D\" path=\"res://art/first.png\" id=\"1\"]\n");
+
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+    didi::offline::ResourceIndexer first;
+    first.scan(fixture.root());
+    const auto* before = first.findExact("res://scenes/level.tscn");
+    ASSERT_TRUE(before != nullptr);
+    ASSERT_EQ(before->uid, "uid://before");
+    ASSERT_EQ(before->dependencies.size(), 1u);
+    ASSERT_EQ(before->dependencies[0], "res://art/first.png");
+
+    // Nothing changed, so the memo answers and the facts must be identical.
+    didi::offline::ResourceIndexer again;
+    again.scan(fixture.root());
+    const auto* unchanged = again.findExact("res://scenes/level.tscn");
+    ASSERT_TRUE(unchanged != nullptr);
+    ASSERT_EQ(unchanged->uid, "uid://before");
+    ASSERT_EQ(unchanged->dependencies[0], "res://art/first.png");
+
+    // A rewrite of a different length moves both the size and the timestamp,
+    // which is what the memo keys on. A stale hit here would mean the index
+    // reporting a uid the file no longer carries.
+    fixture.write("scenes/level.tscn",
+                  "[gd_scene format=3 uid=\"uid://afterwards\"]\n"
+                  "[ext_resource type=\"Texture2D\" path=\"res://art/second.png\" id=\"1\"]\n"
+                  "[ext_resource type=\"Texture2D\" path=\"res://art/third.png\" id=\"2\"]\n");
+
+    didi::offline::ResourceIndexer third;
+    third.scan(fixture.root());
+    const auto* after = third.findExact("res://scenes/level.tscn");
+    ASSERT_TRUE(after != nullptr);
+    ASSERT_EQ(after->uid, "uid://afterwards");
+    ASSERT_EQ(after->dependencies.size(), 2u);
+    ASSERT_EQ(after->dependencies[0], "res://art/second.png");
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+}
+
+static void test_invalidate_drops_the_per_file_memo_as_well() {
+    // A mutating tool calls invalidateSharedIndex so its own write is never
+    // served stale. That has to reach the per file memo too: a rewrite to the
+    // same length inside the filesystem's timestamp resolution is exactly the
+    // case the memo cannot see on its own, and it is the case Didi's own
+    // writes create.
+    IndexFixture fixture;
+    fixture.write("a.tres", "[gd_resource type=\"Resource\" uid=\"uid://aaaaaa\"]\n");
+
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+    didi::offline::ResourceIndexer first;
+    first.scan(fixture.root());
+    ASSERT_EQ(first.findExact("res://a.tres")->uid, "uid://aaaaaa");
+
+    // Same length and the timestamp put back, so the memo genuinely cannot see
+    // the change and only the invalidation can. Writing and letting the clock
+    // move leaves the memo missing anyway, and the test would pass without
+    // testing anything.
+    const auto target = std::filesystem::path(fixture.root()) / "a.tres";
+    const auto original_time = std::filesystem::last_write_time(target);
+    fixture.write("a.tres", "[gd_resource type=\"Resource\" uid=\"uid://bbbbbb\"]\n");
+    std::filesystem::last_write_time(target, original_time);
+    ASSERT_EQ(std::filesystem::last_write_time(target), original_time);
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+
+    didi::offline::ResourceIndexer second;
+    second.scan(fixture.root());
+    ASSERT_EQ(second.findExact("res://a.tres")->uid, "uid://bbbbbb");
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+}
+
 struct RegisterResourceIndexerTests {
     RegisterResourceIndexerTests() {
         registerTest("ResourceIndexer.ExactLookupAndDirectoryListing",
@@ -187,6 +267,10 @@ struct RegisterResourceIndexerTests {
                      test_text_resources_report_their_dependencies);
         registerTest("ResourceIndexer.SharedIndexReuseAndInvalidation",
                      test_shared_index_is_reused_and_dropped_on_invalidate);
+        registerTest("ResourceIndexer.RescanReusesUnchangedFiles",
+                     test_rescan_reuses_unchanged_files_and_notices_changed_ones);
+        registerTest("ResourceIndexer.InvalidateDropsFileMemo",
+                     test_invalidate_drops_the_per_file_memo_as_well);
         registerTest("ResourceIndexer.TypeDetection", test_resource_type_detection);
         registerTest("ResourceIndexer.UidSidecar", test_uid_sidecar_fallback);
         registerTest("ResourceIndexer.ExternalUidSidecar", test_uid_sidecars_are_indexed_for_external_resources);

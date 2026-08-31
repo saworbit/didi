@@ -80,6 +80,71 @@ std::vector<std::string> extractDependenciesFromPath(const fs::path& file_path) 
 
 } // namespace
 
+// --- Per file memo ----------------------------------------------------------
+//
+// Rebuilding the index re-opens every scene, resource and script to pull its
+// uid and dependencies. On a project of a few thousand files that is most of
+// the cost of a scan, and it is repeated whether or not anything changed.
+//
+// A file whose size and modification time both match what was read last time
+// cannot have different contents in any way this cares about, so the extracted
+// facts are kept and the read is skipped. That is the same assumption a build
+// system makes about a timestamp.
+//
+// Didi's own writes do not rely on it: invalidateSharedIndex drops this too, so
+// a mutation is never followed by a memo hit on the file it just wrote.
+namespace {
+
+struct FileFacts {
+    std::string uid;
+    std::vector<std::string> dependencies;
+};
+
+struct FileMemoEntry {
+    std::filesystem::file_time_type modified;
+    uintmax_t size{0};
+    FileFacts facts;
+};
+
+std::mutex& fileMemoMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
+std::unordered_map<std::filesystem::path::string_type, FileMemoEntry>& fileMemo() {
+    static std::unordered_map<std::filesystem::path::string_type, FileMemoEntry> memo;
+    return memo;
+}
+
+bool lookupFileFacts(const std::filesystem::path::string_type& key,
+                     std::filesystem::file_time_type modified, uintmax_t size, FileFacts& out) {
+    std::lock_guard<std::mutex> lock(fileMemoMutex());
+    const auto found = fileMemo().find(key);
+    if (found == fileMemo().end()) return false;
+    if (found->second.modified != modified || found->second.size != size) return false;
+    out = found->second.facts;
+    return true;
+}
+
+void rememberFileFacts(const std::filesystem::path::string_type& key,
+                       std::filesystem::file_time_type modified, uintmax_t size,
+                       const FileFacts& facts) {
+    std::lock_guard<std::mutex> lock(fileMemoMutex());
+    auto& memo = fileMemo();
+    // One entry per indexable file is the natural ceiling. Past it the memo is
+    // holding paths that no longer exist, so it is cheaper to start again than
+    // to track deletions.
+    if (memo.size() > ResourceIndexer::kMaxIndexedResources) memo.clear();
+    memo[key] = FileMemoEntry{modified, size, facts};
+}
+
+void clearFileMemo() {
+    std::lock_guard<std::mutex> lock(fileMemoMutex());
+    fileMemo().clear();
+}
+
+} // namespace
+
 ResourceIndexer::ResourceIndexer() {}
 
 std::string ResourceIndexer::detectResourceType(const std::string& ext) {
@@ -151,25 +216,38 @@ void ResourceIndexer::scan(const std::string& root_dir) {
                 const std::string ext = paths::projectPathToUtf8(entry.path().extension());
                 const std::string filename = paths::projectPathToUtf8(entry.path().filename());
                 std::string type = detectResourceType(ext);
-                std::string uid = "";
-                std::vector<std::string> deps;
-
-                if (type == "PackedScene" || type == "Resource" || type == "GDScript") {
-                    uid = extractUidFromPath(entry.path());
-                    // .tres and .res carry [ext_resource] references to
-                    // textures, scripts and shaders exactly as scenes do, so a
-                    // material or theme has a dependency graph too.
-                    if (type == "PackedScene" || type == "Resource") {
-                        deps = extractDependenciesFromPath(entry.path());
-                    }
-                } else if (ext != ".uid") {
-                    uid = extractUidSidecar(entry.path());
-                }
 
                 uintmax_t file_size = 0;
-                try {
-                    file_size = entry.file_size();
-                } catch (...) {}
+                std::error_code size_error;
+                file_size = entry.file_size(size_error);
+                if (size_error) file_size = 0;
+                std::error_code time_error;
+                const auto modified = entry.last_write_time(time_error);
+
+                // The walk is cheap; opening every scene, resource and script
+                // to pull its uid and its dependencies is not, and that work is
+                // repeated in full every time the index is rebuilt. A file that
+                // has not been written since the last read cannot have new
+                // contents, so the answer is kept and the read is skipped.
+                FileFacts facts;
+                const auto native = entry.path().native();
+                const bool stampable = !size_error && !time_error;
+                if (!stampable || !lookupFileFacts(native, modified, file_size, facts)) {
+                    if (type == "PackedScene" || type == "Resource" || type == "GDScript") {
+                        facts.uid = extractUidFromPath(entry.path());
+                        // .tres and .res carry [ext_resource] references to
+                        // textures, scripts and shaders exactly as scenes do, so
+                        // a material or theme has a dependency graph too.
+                        if (type == "PackedScene" || type == "Resource") {
+                            facts.dependencies = extractDependenciesFromPath(entry.path());
+                        }
+                    } else if (ext != ".uid") {
+                        facts.uid = extractUidSidecar(entry.path());
+                    }
+                    if (stampable) rememberFileFacts(native, modified, file_size, facts);
+                }
+                std::string uid = facts.uid;
+                std::vector<std::string> deps = std::move(facts.dependencies);
 
                 ResourceInfo info;
                 info.path = rel_path;
@@ -314,6 +392,10 @@ std::shared_ptr<const ResourceIndexer> ResourceIndexer::sharedIndex(const std::s
 }
 
 void ResourceIndexer::invalidateSharedIndex() {
+    // The per file memo goes with it. A mutation that rewrites a file to the
+    // same size inside the filesystem's timestamp resolution would otherwise be
+    // served the contents it just replaced.
+    clearFileMemo();
     std::lock_guard<std::mutex> lock(sharedIndexMutex());
     sharedIndexCache().clear();
 }
