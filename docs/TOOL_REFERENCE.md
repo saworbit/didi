@@ -143,7 +143,11 @@ Runs Didi's string/comment-aware lightweight GDScript diagnostics. When an in-pr
 
 ### `script_reflect_class` — Offline
 
-Looks up a class in Didi's small built-in reference map. This is not live ClassDB reflection and coverage is intentionally limited.
+Reflects a Godot engine class offline from the API dump pinned in the repository, covering every class the engine registers rather than a hand-picked few. Returns `inherits`, `properties` (with `read_only` where there is no setter), `methods` (return type and rendered argument list, with `static`, `const` and `virtual` where they apply), `signals` and `enums`.
+
+`api_version` names the Godot version the reflection describes, and `source` is `extension_api`. This is not live ClassDB reflection: it describes the pinned API, not the editor you happen to be running, and it does not know about script classes. Attach a live editor for those.
+
+If the reference file is not installed next to the binary, `source` is `builtin_snapshot` and coverage falls back to a small built-in map.
 
 - `class_name` (`string`, required).
 
