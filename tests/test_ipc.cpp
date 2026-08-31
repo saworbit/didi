@@ -231,6 +231,44 @@ static void test_ipc_client_server_roundtrip() {
 // A normal client writes the header and payload in one call, so on a quiet
 // machine they arrive together and the bug hides. These stall between the two
 // deliberately, which is what a loaded runner does by accident.
+static void test_idle_client_is_served_after_the_server_recycles_its_connection() {
+    // The server holds one pipe instance and recycles it when a client goes
+    // quiet past the frame timeout, so a second client can get in. That is
+    // deliberate. What was never covered is what happens to the FIRST client
+    // when it comes back: it still believes it is connected, writes into a pipe
+    // the server has already dropped, and the write can succeed into a buffer
+    // nobody will read. The response read then fails, and the caller is told
+    // the outcome is unknown for a request the server never saw.
+    //
+    // This is the live harness failure on CI: a run of offline tools takes more
+    // than a second, and the next live tool call comes back 502 with
+    // outcome_unknown.
+#if defined(_WIN32)
+    const std::string test_pipe = "\\\\.\\pipe\\godot_didi_ipc_idle_resume_test";
+    const auto quiet = std::chrono::milliseconds(1600);
+#else
+    const std::string test_pipe = "/tmp/godot_didi_ipc_idle_resume_test.sock";
+    const auto quiet = std::chrono::milliseconds(5600);
+#endif
+
+    auto server = didi::ipc::createIpcServer();
+    server->setHandler([](const didi::json& request) -> didi::json {
+        return {{"echo", request.value("params", didi::json::object())}};
+    });
+    ASSERT_TRUE(server->start(test_pipe));
+
+    auto client = didi::ipc::createIpcClient();
+    ASSERT_TRUE(client->connect(test_pipe, 2000));
+    ASSERT_TRUE(client->sendRequest("test.echo", {{"msg", "before"}}).isOk());
+
+    std::this_thread::sleep_for(quiet);
+
+    const auto after = client->sendRequest("test.echo", {{"msg", "after"}});
+    ASSERT_TRUE(after.isOk());
+    ASSERT_EQ(after.value()["echo"]["msg"].get<std::string>(), "after");
+    server->stop();
+}
+
 static void test_split_request_across_the_idle_deadline_is_served() {
     const auto frame = didi::ipc::frameMessage(
         didi::json{{"id", 1}, {"method", "test.echo"}, {"params", {{"msg", "split"}}}});
@@ -959,6 +997,8 @@ struct RegisterIpcTests {
         registerTest("IPC.Framing", test_ipc_framing);
         registerTest("IPC.ClientServerRoundtrip", test_ipc_client_server_roundtrip);
         registerTest("IPC.SecondClientConnectsWhileFirstIsIdle", test_second_client_can_connect_while_the_first_sits_idle);
+        registerTest("IPC.IdleClientServedAfterRecycle",
+                     test_idle_client_is_served_after_the_server_recycles_its_connection);
         registerTest("IPC.SplitRequestAcrossIdleDeadline", test_split_request_across_the_idle_deadline_is_served);
         registerTest("IPC.NoTimeoutRoundtrip", test_ipc_negative_timeout_waits_for_definitive_response);
         registerTest("IPC.HandlerExceptionClassification", test_ipc_server_classifies_handler_exception_with_request_id);
