@@ -221,6 +221,78 @@ static void test_ipc_client_server_roundtrip() {
     server->stop();
 }
 
+// Break caught: the payload read shared the header's deadline, so a request
+// whose header landed late in the idle window had almost no time left for its
+// body and was dropped. The client had already written the whole request, so it
+// waited for a response that never came and reported a failed response read.
+// Seen first as a flaky failure of the live Godot harness on a loaded runner,
+// at a trivial eval_gdscript call.
+//
+// A normal client writes the header and payload in one call, so on a quiet
+// machine they arrive together and the bug hides. These stall between the two
+// deliberately, which is what a loaded runner does by accident.
+static void test_split_request_across_the_idle_deadline_is_served() {
+    const auto frame = didi::ipc::frameMessage(
+        didi::json{{"id", 1}, {"method", "test.echo"}, {"params", {{"msg", "split"}}}});
+    ASSERT_TRUE(frame.size() > 4);
+
+    auto server = didi::ipc::createIpcServer();
+    server->setHandler([](const didi::json& request) -> didi::json {
+        return {{"echo", request.value("params", didi::json::object())}};
+    });
+
+#if defined(_WIN32)
+    const std::string endpoint = "\\\\.\\pipe\\godot_didi_ipc_split_frame_test";
+    const auto quiet_before_header = std::chrono::milliseconds(900);
+    ASSERT_TRUE(server->start(endpoint));
+
+    const HANDLE client = CreateFileA(endpoint.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                                      OPEN_EXISTING, 0, nullptr);
+    ASSERT_TRUE(client != INVALID_HANDLE_VALUE);
+
+    // Idle almost to the deadline, then send the header, then the body a beat
+    // later. Shared deadlines gave the body whatever was left of the idle
+    // window, which is nothing; its own deadline gives it a full frame timeout.
+    std::this_thread::sleep_for(quiet_before_header);
+    ASSERT_TRUE(rawWriteExact(client, frame.data(), 4));
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    ASSERT_TRUE(rawWriteExact(client, frame.data() + 4, frame.size() - 4));
+
+    didi::json response;
+    const bool answered = rawReadFrame(client, &response);
+    CloseHandle(client);
+    server->stop();
+#else
+    const auto endpoint = rawSocketPath("split-frame");
+    const auto quiet_before_header = std::chrono::milliseconds(4900);
+    ASSERT_TRUE(server->start(endpoint));
+
+    const int client = socket(AF_UNIX, SOCK_STREAM, 0);
+    ASSERT_TRUE(client >= 0);
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    ASSERT_TRUE(endpoint.size() < sizeof(address.sun_path));
+    std::copy(endpoint.begin(), endpoint.end(), address.sun_path);
+    ASSERT_TRUE(connect(client, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+
+    // Idle almost to the deadline, then send the header, then the body a beat
+    // later. Shared deadlines gave the body whatever was left of the idle
+    // window, which is nothing; its own deadline gives it a full frame timeout.
+    std::this_thread::sleep_for(quiet_before_header);
+    ASSERT_TRUE(rawWriteExact(client, frame.data(), 4));
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    ASSERT_TRUE(rawWriteExact(client, frame.data() + 4, frame.size() - 4));
+
+    didi::json response;
+    const bool answered = rawReadFrame(client, &response);
+    close(client);
+    server->stop();
+#endif
+
+    ASSERT_TRUE(answered);
+    ASSERT_EQ(response["result"]["echo"]["msg"].get<std::string>(), "split");
+}
+
 static void test_second_client_can_connect_while_the_first_sits_idle() {
     // Break caught: serverLoop holds exactly one pipe instance at a time. It
     // creates one, serves it, and only creates the next after the read loop
@@ -607,7 +679,10 @@ static void test_win32_server_drops_slow_partial_frame() {
     const uint8_t first_header_byte = 8;
     DWORD written = 0;
     ASSERT_TRUE(WriteFile(pipe, &first_header_byte, 1, &written, nullptr) && written == 1);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    // Two bounded waits, not one: a header that starts arriving as the idle
+    // deadline expires gets one fresh deadline to finish, so a peer that sends
+    // a byte and stalls is dropped after both rather than after the first.
+    std::this_thread::sleep_for(std::chrono::milliseconds(2600));
     DWORD available = 0;
     const bool connection_alive = PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr) != 0;
     CloseHandle(pipe);
@@ -864,6 +939,7 @@ struct RegisterIpcTests {
         registerTest("IPC.Framing", test_ipc_framing);
         registerTest("IPC.ClientServerRoundtrip", test_ipc_client_server_roundtrip);
         registerTest("IPC.SecondClientConnectsWhileFirstIsIdle", test_second_client_can_connect_while_the_first_sits_idle);
+        registerTest("IPC.SplitRequestAcrossIdleDeadline", test_split_request_across_the_idle_deadline_is_served);
         registerTest("IPC.NoTimeoutRoundtrip", test_ipc_negative_timeout_waits_for_definitive_response);
         registerTest("IPC.HandlerExceptionClassification", test_ipc_server_classifies_handler_exception_with_request_id);
 #if defined(_WIN32)
