@@ -20,6 +20,11 @@ jobs:
           - os: ubuntu-22.04
             artifact_name: didi-linux-x64
             archive_ext: tar.gz
+          # arm64 only. macos-14 is an Apple Silicon runner and this builds for
+          # its own architecture, so there is no Intel macOS artifact. An Intel
+          # or universal build needs a second runner or an explicit
+          # CMAKE_OSX_ARCHITECTURES, which is a packaging decision rather than a
+          # build fix; the artifact name says arm64 so nobody is misled.
           - os: macos-14
             artifact_name: didi-macos-arm64
             archive_ext: tar.gz
@@ -39,6 +44,25 @@ jobs:
 
       - name: Build Release Binaries
         run: cmake --build build --config Release --parallel
+
+      # A tag used to package binaries without running anything. A broken build
+      # could ship as a GitHub Release with nothing in the way of it.
+      - name: Run Tests Before Packaging
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: MCP Stdio Smoke Before Packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe=./build/didi
+          [ -x "$exe" ] || exe=./build/Release/didi.exe
+          {
+            echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+            echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+          } | "$exe" --project tests/godot_smoke > smoke.out
+          grep -q '"serverInfo"' smoke.out
+          grep -q '"tools"' smoke.out
+          echo "Packaging smoke passed"
 
       - name: Package Binary & Addons (Windows)
         if: runner.os == 'Windows'

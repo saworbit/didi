@@ -72,7 +72,11 @@ jobs:
             brew untap aws/tap
           fi
 
-      - name: Setup Compiler Cache (ccache / sccache)
+      # POSIX only. The Windows job uses the Visual Studio generator, which
+      # ignores CMAKE_<LANG>_COMPILER_LAUNCHER, and its configure step never set
+      # one, so installing ccache there cached nothing and only cost time.
+      - name: Setup Compiler Cache (ccache)
+        if: runner.os != 'Windows'
         uses: hendrikmuhs/ccache-action@v1.2.23
         with:
           key: ${{ matrix.os }}-${{ matrix.compiler }}
@@ -452,3 +456,88 @@ jobs:
           proc.wait()
           print("Fast CI MCP verification complete")
           EOF
+
+  # The live release gate the guides describe. Without this, Phase 4 search,
+  # reimport, capture and diff, and every editor UndoRedo path, could break
+  # without any job going red: didi_tests cannot reach code that needs a running
+  # engine. Windows first because the harness is PowerShell; a POSIX harness is
+  # still owed.
+  godot-integration:
+    name: Live Godot Integration (windows, 4.5.1)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Cache Godot
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: godot-bin
+          key: godot-4.5.1-stable-win64
+
+      - name: Download Godot 4.5.1
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p godot-bin
+          url="https://github.com/godotengine/godot/releases/download/4.5.1-stable/Godot_v4.5.1-stable_win64.exe.zip"
+          curl --fail --location --retry 3 --retry-delay 5 --output godot.zip "$url"
+          7z x godot.zip -ogodot-bin
+          ls godot-bin
+
+      - name: Configure and Build
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release --parallel
+
+      - name: Run Live Godot Integration Harness
+        shell: pwsh
+        run: |
+          $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v4.5.1-stable_win64*.exe" |
+                   Where-Object { $_.Name -notlike "*console*" } |
+                   Select-Object -First 1
+          if (-not $godot) { throw "Godot executable not found under godot-bin" }
+          ./tests/run_godot_integration.ps1 -GodotExecutable $godot.FullName
+
+      - name: Upload Engine Logs On Failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: godot-integration-logs
+          path: |
+            build/godot_*.log
+            build/godot_*.out
+            build/godot_*.err
+          if-no-files-found: ignore
+
+  # The option landed with #38; this is the job that uses it. ASan and UBSan see
+  # things the plain builds cannot, and every one of these tests exercises real
+  # allocation and lifetime paths.
+  sanitizers:
+    name: Sanitizers (ubuntu, asan+ubsan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Install Build Tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build build-essential
+
+      - name: Configure With Sanitizers
+        run: |
+          cmake -B build -S . -G Ninja             -DCMAKE_BUILD_TYPE=RelWithDebInfo             -DDIDI_ENABLE_SANITIZERS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run Native Tests Under Sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=0
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ./build/didi_tests
