@@ -3,7 +3,11 @@ param(
     [string]$GodotExecutable,
     [string]$Configuration = "Release",
     [string]$McpExecutable = "",
-    [int]$StartupTimeoutSeconds = 30
+    # The first editor open imports the whole fixture project and builds the
+    # .godot cache. On a developer machine that is a few seconds; on a cold
+    # shared CI runner it is not, and 30 seconds went red on a job that was
+    # otherwise fine. This bounds a hang, so it is generous on purpose.
+    [int]$StartupTimeoutSeconds = 120
 )
 
 $ErrorActionPreference = "Stop"
@@ -233,15 +237,30 @@ try {
 
     $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
     $ready = $false
+    $sawPipe = $false
+    $sawScene = $false
     while ([DateTime]::UtcNow -lt $deadline -and -not $godot.HasExited) {
         $logs = ((Get-Content $stdoutPath, $stderrPath -ErrorAction SilentlyContinue) -join "`n")
-        if ($logs -match "Named pipe server started" -and $logs -match "\[DidiSmoke\] scene opened") {
+        $sawPipe = $logs -match "Named pipe server started"
+        $sawScene = $logs -match "\[DidiSmoke\] scene opened"
+        if ($sawPipe -and $sawScene) {
             $ready = $true
             break
         }
         Start-Sleep -Milliseconds 250
     }
-    Assert-True $ready "Godot editor did not start Didi IPC and open the smoke scene within $StartupTimeoutSeconds seconds."
+    # An editor that died and one that is merely slow both used to report the
+    # same thing, which sent the reader looking for a timeout that never
+    # happened. Say which of the two markers arrived and whether the process is
+    # still alive.
+    if (-not $ready) {
+        $reached = @()
+        if ($sawPipe) { $reached += "IPC pipe up" } else { $reached += "no IPC pipe" }
+        if ($sawScene) { $reached += "smoke scene open" } else { $reached += "smoke scene not open" }
+        $state = if ($godot.HasExited) { "editor exited with code $($godot.ExitCode)" }
+                 else { "editor still running after $StartupTimeoutSeconds seconds" }
+        Assert-True $false ("Godot editor did not become ready: " + ($reached -join ", ") + "; " + $state + ".")
+    }
 
     $discoveryRequests = @(
         (@{ jsonrpc = "2.0"; id = 901; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
