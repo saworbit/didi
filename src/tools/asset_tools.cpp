@@ -4,6 +4,7 @@
 #include "didi/offline/resource_indexer.hpp"
 #include "didi/offline/project_audit.hpp"
 #include "didi/offline/project_impact.hpp"
+#include "didi/offline/audio_bus_layout.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/atomic_write.hpp"
 #include <fstream>
@@ -221,6 +222,27 @@ CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpc
     }
 
     return CallToolResult::error("Resource not found: " + resource_path);
+}
+
+CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!args.is_object() || !args.empty()) {
+        return CallToolResult::error("Invalid audio request: this tool takes no arguments");
+    }
+    // Live first, because a bus a script muted at runtime is exactly the case
+    // someone is looking for and the layout file cannot show it. The offline
+    // read is a fallback, and it says so in the result rather than letting the
+    // caller assume they are looking at live state.
+    if (ipc && ipc->isConnected()) {
+        auto response = ipc->sendRequest("audio.listBuses", args, ipc::kWaitForDefinitiveResponse);
+        if (response.isOk()) return CallToolResult::successJson(response.value());
+    }
+
+    auto layout = offline::readAudioBusLayout(".");
+    if (layout.isErr()) return CallToolResult::error(layout.error().message);
+    auto payload = layout.value();
+    payload["execution_mode"] = "offline_fallback";
+    payload["is_live_engine"] = false;
+    return CallToolResult::successJson(std::move(payload));
 }
 
 CallToolResult handleProjectAnalyzeImpact(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

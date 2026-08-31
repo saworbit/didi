@@ -52,9 +52,9 @@ and verification, and it fails visibly wherever the surface has a hole.
 
 ## Amendment log
 
-Three amendments are implemented: `runtime_read_output`, recorded below with
-its tri-engine feasibility evidence, `project_audit_assets`, and
-`project_analyze_impact`. One is withdrawn: raising the engine floor to
+Four amendments are implemented: `runtime_read_output` and `audio_list_buses`,
+both recorded below with tri-engine feasibility evidence, plus
+`project_audit_assets` and `project_analyze_impact`. One is withdrawn: raising the engine floor to
 Godot 4.7, refused in favour of runtime capability detection so that 4.5 and 4.6
 users keep support. The remaining candidates come from the
 August 2026 competitive review and are proposed, not accepted, in
@@ -173,6 +173,50 @@ processes Didi does not own. No claim to reproduce Godot's debugger; this is
 engine log output, not stack frames or breakpoints. The existing
 `runtime_read_logs` contract is unchanged, and this does not become an alias
 for it: one returns Didi's own records, the other returns the engine's.
+
+### ACCEPTED (IMPLEMENTED): `audio_list_buses`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `audio_list_buses` |
+| **Failing workflow** | *A sound effect cannot be heard. Find out why.* The game runs, nothing errors, and no sound comes out. Nothing in Didi could read the bus layout, so the agent cannot tell a muted bus from a bus at -80 dB from a missing effect chain from a bug in the code that plays the sound. It has no way to look, so it guesses, and every guess costs a change to code that was never wrong. |
+| **Execution modes** | `live` and `offline_fallback`. Live for editor sessions. |
+| **Safety class** | `read`. No `dry_run`, no confirmation. It never writes. |
+| **Proving test** | Native: `Tools.AudioListBusesOffline` reads a two bus layout and requires the muted one to be reported as muted; `Tools.AudioListBusesNoLayout` covers a project Godot has not written a layout for; `Tools.AudioListBusesRelocatedLayout` covers a project that moved its layout through `project.godot`. Godot integration: request 930 requires `execution_mode: live`, a Master bus at index 0, and an effects array, which the offline read cannot produce at all. |
+| **Reviewer** | Unassigned. Read-only, so no security review is required. |
+
+**Feasibility, established 2026-08-31.** `AudioServer` is a core singleton, so it
+is reachable whether or not a scene is open. Method hashes dumped from
+`extension_api.json` on each supported engine:
+
+| Method | 4.5.1 | 4.6.2 | 4.7.2 |
+| :--- | :--- | :--- | :--- |
+| `get_bus_count` | 3905245786 | 3905245786 | 3905245786 |
+| `get_bus_name` | 844755477 | 844755477 | 844755477 |
+| `get_bus_volume_db` | 2339986948 | 2339986948 | 2339986948 |
+| `is_bus_mute` | 1116898809 | 1116898809 | 1116898809 |
+| `is_bus_solo` | 1116898809 | 1116898809 | 1116898809 |
+| `is_bus_bypassing_effects` | 1116898809 | 1116898809 | 1116898809 |
+| `get_bus_send` | 659327637 | 659327637 | 659327637 |
+| `get_bus_effect_count` | 3744713108 | 3744713108 | 3744713108 |
+| `get_bus_effect` | 726064442 | 726064442 | 726064442 |
+
+Every identifier is the same across the supported range, so the capability needs
+no engine-floor change and no per-version branch. The live harness was then run
+end to end against 4.5.1, 4.6.2 and 4.7.2, because a matching hash proves the
+binding resolves and not that the answer is right.
+
+**Why both modes.** The offline read is not a lesser copy of the live one. It
+answers the routing question with no engine running, which is most of what
+someone wants when a sound is missing. What it cannot do is report an effect
+chain, which lives in sub-resources, or a bus a script muted at runtime. The
+result carries `execution_mode` so a caller never has to guess which it has,
+and the offline result says outright that effects were not read rather than
+returning an empty list that reads as "no effects".
+
+**What it deliberately does not do.** It does not set volume, mute or solo. The
+issue asks for those too. They are mutations and belong with a dry run and a
+confirmation token, which is a different change from reading state.
 
 ### ACCEPTED (IMPLEMENTED): `project_analyze_impact`
 

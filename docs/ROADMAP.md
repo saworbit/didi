@@ -136,21 +136,21 @@ The native red-team contract covers invalid roots, project-key isolation, lock e
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `67/81`
+**Canonical implementation:** `68/82`
 **Phase 7 registrations:** `14/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-**Objective:** The implementation remains 67/81 canonical tools, and all 14 Phase 7 names remain registered but unimplemented. The approved objective was atomic 81/81 without adding public tool names.
+**Objective:** The implementation remains 68/82 canonical tools, and all 14 Phase 7 names remain registered but unimplemented. The approved objective was atomic 82/82 without adding public tool names.
 
 **Feasibility result:** The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (15/18) are implementation-feasible: `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `runtime_inject_input`, and `runtime_read_profiler`.
 
 Exactly three names (3/18) are API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility is not implementation, so none of the 15 feasible names is callable.
 
-The approved all-or-nothing 81/81 activation gate prevented Tasks 2-13; no production implementation started. Work can proceed only after governance chooses:
+The approved all-or-nothing 82/82 activation gate prevented Tasks 2-13; no production implementation started. Work can proceed only after governance chooses:
 
 - **A)** Authorize partial delivery of the 15 feasible tools, targeting 76/79 and retaining three honest unimplemented names.
-- **B)** Retain atomic 81/81 and wait for supported engine capabilities.
+- **B)** Retain atomic 82/82 and wait for supported engine capabilities.
 - **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.
 
 See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).

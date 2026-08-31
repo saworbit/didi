@@ -15,7 +15,10 @@ namespace mcp {
 static ExecutionCapability capabilityForTool(const std::string& name) {
     static const std::unordered_set<std::string> live_and_offline = {
         "scene_get_hierarchy", "get_scene_hierarchy",
-        "viewport_capture_frame", "capture_viewport"
+        "viewport_capture_frame", "capture_viewport",
+        // The layout file answers the routing question without an engine; only
+        // the effect chain and a runtime change need one.
+        "audio_list_buses"
     };
     static const std::unordered_set<std::string> live = {
         "scene_instantiate_node", "scene_remove_node", "scene_reparent_node",
@@ -115,6 +118,7 @@ CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpc
 CallToolResult handleProjectGetUidMap(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectAnalyzeImpact(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleInstantiateAsset(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleCSharpCheckBuild(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -1522,6 +1526,15 @@ void ToolRegistry::registerAllDefaultTools() {
             {"additionalProperties", false}
         };
         t.handler = [this](const json& args) { return handleProjectAnalyzeImpact(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "audio_list_buses";
+        t.description = "Lists the audio buses with volume, mute, solo, bypass, routing, and effect chains. Live when the editor is attached, from the project bus layout otherwise.";
+        t.inputSchema = {{"type", "object"}, {"properties", json::object()},
+                         {"additionalProperties", false}};
+        t.handler = [this](const json& args) { return handleAudioListBuses(args, m_ipcClient); };
         registerTool(std::move(t));
     }
     {
