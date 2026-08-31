@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 82 canonical tool names plus 10 legacy names (92 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 83 canonical tool names plus 10 legacy names (93 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `68/82`
+**Canonical implementation:** `69/83`
 **Phase 7 registrations:** `14/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 68/82 canonical tools, and all 14 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 69/83 canonical tools, and all 14 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -341,6 +341,23 @@ Live when the editor is attached, and that is the mode worth having: only a runn
 Offline it reads the project's bus layout, following `audio/buses/default_bus_layout` from `project.godot` and falling back to `res://default_bus_layout.tres` the way Godot does. A project with no layout file returns `layout_present: false` and an empty bus list rather than an error, because Godot writes that file only once a project has more than the default Master bus. Effect chains are not read offline and the result says so, since an empty effects list would otherwise read as "no effects".
 
 `execution_mode` distinguishes the two, so a caller never has to guess whether it is looking at live state.
+
+### `audio_configure_bus` — Live
+
+Sets a bus volume, mute or solo on the running engine.
+
+- `bus` (required). The bus name or its index.
+- `volume_db` (`number`, -80 to 24).
+- `mute` (`boolean`).
+- `solo` (`boolean`).
+
+At least one of `volume_db`, `mute` or `solo` must be given. A bus named by string is resolved through `AudioServer.get_bus_index`, so a bus added at runtime is addressable and one that does not exist returns `404` rather than a silent no-op.
+
+`volume_db` outside -80 to 24 is rejected rather than clamped. Outside that range a caller is either confusing decibels with a linear gain or has slipped a digit, and clamping would hide both.
+
+Live only, on purpose. Writing the layout file would change what the project loads next time and not what anyone is listening to now, which is the opposite of what someone chasing a silent bus wants. Offline the tool refuses and points at `audio_list_buses`, which still reads the layout.
+
+Classified as a mutation, so it takes `dry_run`. It needs no confirmation token: the change is reversible and destroys nothing. Bus state is not part of the edited scene, so the editor undo stack does not carry it, `undo_redo_registered` is `false`, and the result returns `before` and `revert_with` because those values are the only way back.
 
 ## 8. Runtime and debugging
 

@@ -522,7 +522,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "scene.listGroups", "scene.addToGroup", "scene.removeFromGroup",
         "scene.getGroupMembers", "scene.create", "scene.open", "scene.close",
         "scene.packBranch", "runtime.getTree", "runtime.setPaused", "runtime.stop",
-        "runtime.evalGdscript", "ui.hitTest", "audio.listBuses",
+        "runtime.evalGdscript", "ui.hitTest", "audio.listBuses", "audio.configureBus",
         // Admission is deliberately separate from the failure-injection seams.
         // One macro previously controlled both, so the feature could not be
         // admitted to production without also compiling test seams into a

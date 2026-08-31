@@ -224,6 +224,23 @@ CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpc
     return CallToolResult::error("Resource not found: " + resource_path);
 }
 
+CallToolResult handleAudioConfigureBus(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    // Live only, and that is the point rather than a gap. Writing the layout
+    // file would change what the project loads next time and not what anyone
+    // is listening to now, which is the opposite of what someone chasing a
+    // silent bus wants.
+    if (!ipc || !ipc->isConnected()) {
+        return CallToolResult::error(
+            "Godot Editor is offline. Audio bus state lives in the running engine, so launch "
+            "Godot to change it. audio_list_buses still reads the project layout offline.");
+    }
+    auto response = ipc->sendRequest("audio.configureBus", args, ipc::kWaitForDefinitiveResponse);
+    if (response.isErr()) {
+        return CallToolResult::error("Failed to configure the audio bus: " + response.error().message);
+    }
+    return CallToolResult::successJson(response.value());
+}
+
 CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object() || !args.empty()) {
         return CallToolResult::error("Invalid audio request: this tool takes no arguments");

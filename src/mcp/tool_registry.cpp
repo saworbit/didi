@@ -38,6 +38,9 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // 4.7.2 -- the trial the earlier attempt never ran, having only ever
         // exercised the test-seam build.
         , "signal_list_connections", "signal_connect", "signal_disconnect", "signal_emit"
+        // Live only on purpose. Writing the layout file would change what the
+        // project loads next time and not what anyone is listening to now.
+        , "audio_configure_bus"
     };
     static const std::unordered_set<std::string> offline = {
         "script_check_syntax", "analyze_script_diagnostics", "script_reflect_class",
@@ -119,6 +122,7 @@ CallToolResult handleProjectGetUidMap(const json& args, std::shared_ptr<ipc::IIp
 CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectAnalyzeImpact(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleAudioConfigureBus(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleInstantiateAsset(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleCSharpCheckBuild(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -1535,6 +1539,26 @@ void ToolRegistry::registerAllDefaultTools() {
         t.inputSchema = {{"type", "object"}, {"properties", json::object()},
                          {"additionalProperties", false}};
         t.handler = [this](const json& args) { return handleAudioListBuses(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "audio_configure_bus";
+        t.description = "Sets an audio bus volume, mute or solo on the running engine, and returns the values it replaced.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"bus", {{"description", "The bus name or its index."},
+                         {"oneOf", json::array({json{{"type", "string"}, {"minLength", 1}, {"maxLength", 128}},
+                                                json{{"type", "integer"}, {"minimum", 0}}})}}},
+                {"volume_db", {{"type", "number"}, {"minimum", -80}, {"maximum", 24}}},
+                {"mute", {{"type", "boolean"}}},
+                {"solo", {{"type", "boolean"}}}
+            }},
+            {"required", json::array({"bus"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleAudioConfigureBus(args, m_ipcClient); };
         registerTool(std::move(t));
     }
     {

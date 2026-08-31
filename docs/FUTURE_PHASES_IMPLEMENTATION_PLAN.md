@@ -12,12 +12,12 @@
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `68/82`
+**Canonical implementation:** `69/83`
 **Phase 7 registrations:** `14/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-This is the approved historical plan that integrated the future-phases documentation. Its original task wording is preserved below. Current Phase 7 status is `PARTIAL_DELIVERY`: the 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. The other 14 names remain registered but unimplemented. The surface is 68/82.
+This is the approved historical plan that integrated the future-phases documentation. Its original task wording is preserved below. Current Phase 7 status is `PARTIAL_DELIVERY`: the 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. The other 14 names remain registered but unimplemented. The surface is 69/83.
 
 Current evidence is [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md), and the approved executable plan is [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md). Governance authorized partial delivery; the signal names shipped under it. Further Phase 7 work requires the same treatment: a production trial per capability, not a feasibility note. Under the third path, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2; contract weakening is a separate explicit contract amendment.
 
@@ -125,7 +125,7 @@ Add a `PLANNED` Phase 7 entry that states:
 ```markdown
 ## Phase 7: Canonical Surface Completion (`PLANNED`)
 
-**Objective:** Implement the remaining 18 canonical tools, moving the protocol surface from 61/79 to 82/82 without adding public tool names.
+**Objective:** Implement the remaining 18 canonical tools, moving the protocol surface from 61/79 to 83/83 without adding public tool names.
 
 **Delivery slices:**
 - 7A: signals, viewport camera/debug, and tile/grid operations (9 tools)
@@ -195,7 +195,7 @@ Add a short section after the current implementation-status material:
 ```markdown
 ## Delivery Roadmap
 
-Phases 1-6 established the current implementation baseline. Phase 7 is planned to complete the canonical surface from 61/79 to 82/82 tools; Phases 8-12 cover project intelligence, advanced authoring, parallel orchestration, protocol evolution, and ecosystem maturity.
+Phases 1-6 established the current implementation baseline. Phase 7 is planned to complete the canonical surface from 61/79 to 83/83 tools; Phases 8-12 cover project intelligence, advanced authoring, parallel orchestration, protocol evolution, and ecosystem maturity.
 
 See the [Roadmap](docs/ROADMAP.md) for delivery status and the [Future Phases Design](docs/FUTURE_PHASES_DESIGN.md) for approved scope and exit gates.
 ```
