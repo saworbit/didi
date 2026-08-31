@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 80 canonical tool names plus 10 legacy names (90 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 81 canonical tool names plus 10 legacy names (91 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `66/80`
+**Canonical implementation:** `67/81`
 **Phase 7 registrations:** `14/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 66/80 canonical tools, and all 14 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 67/81 canonical tools, and all 14 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -269,6 +269,33 @@ Scans the project working directory for resources.
 ### `project_get_uid_map` — Offline
 
 Returns UID-to-path mappings discovered in indexed project resources. Embedded UIDs take precedence; modern Godot `.uid` sidecars are read for every resource type as a bounded fallback and accepted only when they match Godot's lowercase-alphanumeric textual UID format.
+
+### `project_analyze_impact` — Offline
+
+Answers what else changes if this changes. Renaming a variable or a signal can break a scene that wires it, an animation track that keyframes it, or an autoload that loads it, and Godot reports none of that until the game runs.
+
+- `target` (`string`, required, 1-256 bytes). A `res://` or `uid://` path, or a single Godot identifier.
+- `max_impacts` (`integer`, 1-5000, default `500`).
+
+A target that is neither a path nor a single identifier is rejected rather than answered with an empty report, because "nothing depends on this" and "you asked the wrong question" must not look the same to a caller about to delete something.
+
+Reported kinds are the forms Godot writes:
+
+| Kind | What it is |
+| :--- | :--- |
+| `ext_resource` | A scene or resource naming the file. |
+| `script_attachment` | A scene attaching the script to a node. |
+| `script_load` | `preload`, `load`, or `Load<T>` naming the file from code. |
+| `autoload` | A `project.godot` autoload entry naming the file. |
+| `scene_connection` | A `[connection]` wiring this signal or this method. |
+| `animation_track` | A `NodePath` in a track keyframing this property. |
+| `code_reference` | The name used in GDScript or C#. |
+
+`scene_connection` and `animation_track` are the two a text search finds but cannot explain, and they are the ones people miss.
+
+A name target also returns `declared_in`, so a caller knows what they are about to rename and not only what would break. Name matching is whole word, so tracing `health` does not report every `max_health`.
+
+The results are evidence, not verdicts. A name built at runtime cannot be followed, so an empty impact list is not proof that nothing depends on the target, and a local variable that happens to share the name is reported as a `code_reference`. Both limits ship in a `limitations` array in the response.
 
 ### `project_audit_assets` — Offline
 

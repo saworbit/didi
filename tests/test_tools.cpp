@@ -184,7 +184,7 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 90u);
+    ASSERT_EQ(tools.size(), 91u);
     const std::unordered_set<std::string> legacy_names = {
         "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
         "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
@@ -196,7 +196,7 @@ static void test_tool_registry_default_tools() {
         if (legacy_names.count(tool.name) == 0) ++canonical_count;
     }
     ASSERT_EQ(legacy_names.size(), 10u);
-    ASSERT_EQ(canonical_count, 80u);
+    ASSERT_EQ(canonical_count, 81u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -317,7 +317,7 @@ static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract(
         if (legacy_names.count(tool.name) != 0) continue;
         tool.capability.implemented ? ++implemented : ++unimplemented;
     }
-    ASSERT_EQ(implemented, 66u);
+    ASSERT_EQ(implemented, 67u);
     ASSERT_EQ(unimplemented, 14u);
 }
 
@@ -366,6 +366,124 @@ static void writeAuditFixture() {
         "func _ready():\n"
         "    emit_signal(\"shouted\")\n"
         "    emitted_by_member.emit()\n");
+}
+
+// The issue's own example, made concrete: rename `character_health` in
+// Player.gd. The rename is easy; what breaks is a HUD scene that wired the
+// signal, an animation track that keyframes the property, and an autoload.
+static void writeImpactFixture() {
+    writeAuditFile("project.godot",
+        "config_version=5\n"
+        "\n"
+        "[autoload]\n"
+        "\n"
+        "GameState=\"*res://scripts/game_state.gd\"\n"
+        "Unrelated=\"*res://scripts/other.gd\"\n");
+    writeAuditFile("scripts/player.gd",
+        "extends Node\n"
+        "signal character_health(amount)\n"
+        "var max_character_health := 100\n"
+        "func _ready():\n"
+        "    character_health.emit(10)\n");
+    writeAuditFile("scripts/game_state.gd", "extends Node\n");
+    writeAuditFile("scripts/other.gd", "extends Node\n");
+    writeAuditFile("scripts/hud.gd",
+        "extends Control\n"
+        "func _on_character_health(amount):\n"
+        "    pass\n");
+    writeAuditFile("scenes/hud.tscn",
+        "[gd_scene format=3]\n"
+        "[ext_resource type=\"Script\" path=\"res://scripts/hud.gd\" id=\"1\"]\n"
+        "[node name=\"Hud\" type=\"Control\"]\n"
+        "script = ExtResource(\"1\")\n"
+        "[connection signal=\"character_health\" from=\".\" to=\".\" method=\"_on_character_health\"]\n");
+    writeAuditFile("scenes/player.tscn",
+        "[gd_scene format=3]\n"
+        "[ext_resource type=\"Script\" path=\"res://scripts/player.gd\" id=\"1\"]\n"
+        "[sub_resource type=\"Animation\" id=\"Anim_1\"]\n"
+        "tracks/0/type = \"value\"\n"
+        "tracks/0/path = NodePath(\"Sprite:character_health\")\n"
+        "[node name=\"Player\" type=\"Node2D\"]\n"
+        "script = ExtResource(\"1\")\n");
+}
+
+static void test_project_impact_finds_scene_and_animation_references_a_search_cannot_explain() {
+    ScopedToolProject project("project-impact");
+    writeImpactFixture();
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto result =
+        registry.callTool("project_analyze_impact", didi::json{{"target", "character_health"}});
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(report["resolved_kind"], "name");
+
+    std::set<std::string> found;
+    for (const auto& impact : report["impacts"]) {
+        found.insert(impact["path"].get<std::string>() + " " + impact["kind"].get<std::string>());
+    }
+    // The two a lexical search reports without explaining, which is the whole
+    // reason this tool exists.
+    ASSERT_TRUE(found.count("res://scenes/hud.tscn scene_connection") == 1);
+    ASSERT_TRUE(found.count("res://scenes/player.tscn animation_track") == 1);
+    // And the ordinary code use.
+    ASSERT_TRUE(found.count("res://scripts/player.gd code_reference") == 1);
+
+    // max_character_health must not be reported. A rename tool that flags every
+    // longer name is one people stop trusting.
+    for (const auto& impact : report["impacts"]) {
+        ASSERT_TRUE(impact["detail"].get<std::string>().find("max_character_health") ==
+                    std::string::npos);
+    }
+
+    ASSERT_EQ(report["declared_in"].size(), 1u);
+    ASSERT_EQ(report["declared_in"][0]["kind"], "signal");
+    ASSERT_EQ(report["declared_in"][0]["path"], "res://scripts/player.gd");
+    ASSERT_EQ(report["declared_in"][0]["line"], 2);
+    ASSERT_TRUE(!report["limitations"].empty());
+}
+
+static void test_project_impact_traces_a_file_target_and_rejects_a_malformed_one() {
+    ScopedToolProject project("project-impact-file");
+    writeImpactFixture();
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto result = registry.callTool(
+        "project_analyze_impact", didi::json{{"target", "res://scripts/game_state.gd"}});
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(report["resolved_kind"], "file");
+    // An autoload is what makes a script reachable from everywhere, so missing
+    // it is the difference between a safe rename and a broken project.
+    ASSERT_EQ(report["impacts"].size(), 1u);
+    ASSERT_EQ(report["impacts"][0]["kind"], "autoload");
+    ASSERT_EQ(report["impacts"][0]["path"], "res://project.godot");
+
+    const auto script = registry.callTool(
+        "project_analyze_impact", didi::json{{"target", "res://scripts/player.gd"}});
+    ASSERT_TRUE(!script.isError);
+    // Named, not a temporary: iterating into the result of a parse call binds
+    // to a subobject of something already destroyed, and the loop silently
+    // sees nothing.
+    const auto script_report = didi::json::parse(script.content[0].text);
+    std::set<std::string> kinds;
+    for (const auto& impact : script_report["impacts"]) {
+        kinds.insert(impact["kind"].get<std::string>());
+    }
+    ASSERT_TRUE(kinds.count("ext_resource") == 1);
+
+    // An empty report and a question this cannot answer must not look the same
+    // to a caller who is about to delete something.
+    ASSERT_TRUE(registry.callTool("project_analyze_impact", didi::json{{"target", ""}}).isError);
+    ASSERT_TRUE(
+        registry.callTool("project_analyze_impact", didi::json{{"target", "two words"}}).isError);
+    ASSERT_TRUE(registry.callTool("project_analyze_impact", didi::json::object()).isError);
+    ASSERT_TRUE(registry
+                    .callTool("project_analyze_impact",
+                              didi::json{{"target", "character_health"}, {"max_impacts", 0}})
+                    .isError);
 }
 
 static void test_project_audit_reports_orphans_broken_references_and_dead_signals() {
@@ -1613,6 +1731,10 @@ struct RegisterToolTests {
         registerTest("Tools.SymbolExtraction", test_symbol_extraction);
         registerTest("Tools.NoDemoPathFallback", test_offline_tools_do_not_fallback_to_demo_paths);
         registerTest("Tools.Utf8ProjectPaths", test_project_paths_accept_utf8_names);
+        registerTest("Tools.ProjectImpactFindings",
+                     test_project_impact_finds_scene_and_animation_references_a_search_cannot_explain);
+        registerTest("Tools.ProjectImpactFileTarget",
+                     test_project_impact_traces_a_file_target_and_rejects_a_malformed_one);
         registerTest("Tools.ProjectAuditFindings",
                      test_project_audit_reports_orphans_broken_references_and_dead_signals);
         registerTest("Tools.ProjectAuditOptions",

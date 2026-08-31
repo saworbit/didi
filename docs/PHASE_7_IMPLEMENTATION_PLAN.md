@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement the remaining 18 registered canonical tools with native Godot-derived behavior so Didi moves atomically from 61/79 implemented to 80/80 without changing the 79 canonical names or 10 compatibility aliases.
+**Goal:** Implement the remaining 18 registered canonical tools with native Godot-derived behavior so Didi moves atomically from 61/79 implemented to 81/81 without changing the 79 canonical names or 10 compatibility aliases.
 
 **Architecture:** Keep the public capability gate closed while domain handlers, authenticated IPC routing, main-thread Godot bridge operations, and real-engine tests are built behind it. Central `MutationSafety`, route leases, matching tool/method session policy, per-session contention gates, bounded serializers, and `EditorUndoRedoManager` transactions remain the only safety path. After all 18 vertical paths pass Godot 4.5.1 and 4.7.2 integration, one final shared-file task removes the remaining gates and updates registry metadata, public documentation, validation, and CI from 60/18 to 78/0 together.
 
@@ -12,19 +12,19 @@
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `66/80`
+**Canonical implementation:** `67/81`
 **Phase 7 registrations:** `14/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
 Task 1 completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. The gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
-The all-or-nothing 80/80 activation gate originally prevented Tasks 2-13. It was replaced by an explicit partial-delivery decision. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. The other 14 names remain registered but unimplemented. The original approved plan below is preserved as the executable contract, not as evidence of delivered behavior.
+The all-or-nothing 81/81 activation gate originally prevented Tasks 2-13. It was replaced by an explicit partial-delivery decision. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. The other 14 names remain registered but unimplemented. The original approved plan below is preserved as the executable contract, not as evidence of delivered behavior.
 
 Work can proceed only after governance chooses one path:
 
 - **A)** Authorize partial delivery of the 15 feasible tools, targeting 76/79 and retaining three honest unimplemented names.
-- **B)** Retain atomic 80/80 and wait for supported engine capabilities.
+- **B)** Retain atomic 81/81 and wait for supported engine capabilities.
 - **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.
 
 See [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) for reproducible evidence.
@@ -772,7 +772,7 @@ python -m unittest tests.test_documentation_validator -v
 python tools/validate_documentation.py
 ```
 
-Expected: both exit `0`; all current documents agree on 80/80, 0 remaining, 10 legacy, and Phase 7 complete.
+Expected: both exit `0`; all current documents agree on 81/81, 0 remaining, 10 legacy, and Phase 7 complete.
 
 - [ ] **Step 3: Run both real-engine gates again.**
 
