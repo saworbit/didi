@@ -124,6 +124,21 @@ CallToolResult handleViewportDiffCapture(const json& args, std::shared_ptr<ipc::
             return invalidViewportDiff("isolation_background must be original or transparent");
         }
     }
+    // Perceptual tolerances. A per-pixel threshold cannot tell shadow filtering
+    // or antialiasing jitter from a real regression; these let a caller say what
+    // "still looks the same" means for its own pipeline.
+    if (args.contains("min_ssim")) {
+        const auto& value = args["min_ssim"];
+        if (!value.is_number() || value.get<double>() < 0.0 || value.get<double>() > 1.0) {
+            return invalidViewportDiff("min_ssim must be a number from 0.0 to 1.0");
+        }
+    }
+    if (args.contains("max_hamming_distance")) {
+        const auto& value = args["max_hamming_distance"];
+        if (!value.is_number_integer() || value.get<int64_t>() < 0 || value.get<int64_t>() > 64) {
+            return invalidViewportDiff("max_hamming_distance must be an integer from 0 to 64");
+        }
+    }
     if (!ipc || !ipc->isConnected()) {
         return CallToolResult::error("Viewport diff capture requires a live Godot editor.");
     }
@@ -146,6 +161,27 @@ CallToolResult handleViewportDiffCapture(const json& args, std::shared_ptr<ipc::
         !isCaptureId(result_data["comparison_capture_id"])) {
         return CallToolResult::error("Live viewport diff returned a missing or malformed comparison_capture_id.");
     }
+    // Applied here rather than in the engine: the metrics are a property of the
+    // two frames, the tolerance is a property of the caller's pipeline.
+    if (args.contains("min_ssim") || args.contains("max_hamming_distance")) {
+        bool within = true;
+        json applied = json::object();
+        if (args.contains("min_ssim")) {
+            const double minimum = args["min_ssim"].get<double>();
+            applied["min_ssim"] = minimum;
+            within = within && result_data.value("ssim", 0.0) >= minimum;
+        }
+        if (args.contains("max_hamming_distance")) {
+            const int64_t maximum = args["max_hamming_distance"].get<int64_t>();
+            applied["max_hamming_distance"] = maximum;
+            const auto& hashes = result_data["perceptual_hash"];
+            within = within && hashes.is_object() &&
+                     hashes.value("hamming_distance", 65) <= maximum;
+        }
+        result_data["perceptual_tolerance"] = std::move(applied);
+        result_data["perceptually_identical"] = within;
+    }
+
     result_data.erase("image_base64");
     return CallToolResult::successImage(b64, result_data.dump());
 }

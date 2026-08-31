@@ -194,8 +194,11 @@ Captures a fresh editor frame and compares it with a cached live baseline withou
 - `baseline_capture_id`: required 32-lowercase-hex live capture ID.
 - `threshold`: integer `0..255`, default `0`; a pixel changes when any RGBA channel delta is greater than the threshold.
 - `camera_identifier`, `node_isolation_path`, and `isolation_background`: same live selectors as capture.
+- `min_ssim` (`number`, `0.0..1.0`) and `max_hamming_distance` (`integer`, `0..64`): perceptual tolerances. When either is given the result carries `perceptually_identical` and the `perceptual_tolerance` that was applied.
 
-Dimensions must match exactly; Didi does not resample or color-convert. Metadata reports both IDs, resolution, changed/total pixels, ratio, per-channel mean absolute error, maximum channel delta, nullable bounding box, and `identical`. A second MCP content item contains one PNG with transparent unchanged pixels and opaque absolute RGB deltas. Missing/evicted baselines return `404`; dimension mismatch returns `409`.
+Dimensions must match exactly; Didi does not resample or color-convert. Metadata reports both IDs, resolution, changed/total pixels, ratio, per-channel mean absolute error, maximum channel delta, nullable bounding box, and `identical`.
+
+Every diff also reports two perceptual measures, whether or not a tolerance was given. `ssim` is the mean structural similarity over 8x8 luma blocks, `1.0` for identical frames. `perceptual_hash` holds the 64 bit DCT hash of each frame as fixed-width hex plus their `hamming_distance`, which is `0` when the two hash alike. These answer a different question from the pixel counts: shadow filtering, antialiasing jitter and particle timing move thousands of pixels without changing what is on screen, and a per-pixel count cannot tell that apart from a regression. The absolute SSIM value depends on how flat the content is, which is why it is reported rather than judged; pick a tolerance against your own frames. A second MCP content item contains one PNG with transparent unchanged pixels and opaque absolute RGB deltas. Missing/evicted baselines return `404`; dimension mismatch returns `409`.
 
 ### `viewport_create_test_lab` — Offline
 

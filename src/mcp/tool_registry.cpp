@@ -1194,7 +1194,11 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"resolution", {{"type", "object"}, {"description", "Reserved and ignored by live capture"}}},
                 {"node_isolation_path", {{"type", "string"}}},
                 {"isolation_background", {{"type", "string"}, {"enum", {"original", "transparent"}}, {"default", "original"}}},
-                {"threshold", {{"type", "integer"}, {"minimum", 0}, {"maximum", 255}, {"default", 0}}}
+                {"threshold", {{"type", "integer"}, {"minimum", 0}, {"maximum", 255}, {"default", 0}}},
+                {"min_ssim", {{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0},
+                              {"description", "Structural similarity at or above which the frames count as perceptually identical. Sets perceptually_identical in the result."}}},
+                {"max_hamming_distance", {{"type", "integer"}, {"minimum", 0}, {"maximum", 64},
+                                          {"description", "Largest perceptual-hash distance that still counts as perceptually identical. Sets perceptually_identical in the result."}}}
             }},
             {"required", {"baseline_capture_id"}}
         };
