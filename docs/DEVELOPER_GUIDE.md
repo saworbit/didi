@@ -178,7 +178,7 @@ The CI MCP smoke must start Didi with an explicit fixture project. It verifies t
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `66/80`
+**Canonical implementation:** `67/81`
 **Phase 7 registrations:** `14/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
@@ -187,7 +187,7 @@ Phase 7 is `PARTIAL_DELIVERY`. The gate completed on 2026-08-29 against Godot 4.
 
 Feasibility is design evidence; a production trial is production behavior. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. The other 14 names remain registered but unimplemented.
 
-Further work requires governance to authorize partial delivery of the 15 feasible tools toward 76/79, retain atomic 80/80 and wait for supported engine capabilities, or explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. The third option requires all three blockers to re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 begins. Any contract weakening is a separate explicit contract amendment, not an effect of that option. Use [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) for reproducible evidence and [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md) for the approved executable plan.
+Further work requires governance to authorize partial delivery of the 15 feasible tools toward 76/79, retain atomic 81/81 and wait for supported engine capabilities, or explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. The third option requires all three blockers to re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 begins. Any contract weakening is a separate explicit contract amendment, not an effect of that option. Use [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) for reproducible evidence and [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md) for the approved executable plan.
 
 ## Phase 5 and Phase 6 implementation map
 

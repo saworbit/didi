@@ -3,6 +3,7 @@
 #include "didi/common/logger.hpp"
 #include "didi/offline/resource_indexer.hpp"
 #include "didi/offline/project_audit.hpp"
+#include "didi/offline/project_impact.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/atomic_write.hpp"
 #include <fstream>
@@ -220,6 +221,32 @@ CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpc
     }
 
     return CallToolResult::error("Resource not found: " + resource_path);
+}
+
+CallToolResult handleProjectAnalyzeImpact(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    (void)ipc;
+    if (!args.is_object()) {
+        return CallToolResult::error("Invalid impact request: arguments must be an object");
+    }
+    offline::ProjectImpactOptions options;
+    if (!args.contains("target") || !args["target"].is_string()) {
+        return CallToolResult::error("Invalid impact request: target must be a string");
+    }
+    options.target = args["target"].get<std::string>();
+    if (args.contains("max_impacts")) {
+        const auto& value = args["max_impacts"];
+        if (!value.is_number_integer() || value.get<int64_t>() < 1 || value.get<int64_t>() > 5000) {
+            return CallToolResult::error(
+                "Invalid impact request: max_impacts must be an integer from 1 to 5000");
+        }
+        options.max_impacts = static_cast<size_t>(value.get<int64_t>());
+    }
+
+    auto report = offline::analyzeImpact(".", options);
+    if (report.isErr()) return CallToolResult::error(report.error().message);
+    auto payload = report.value();
+    payload["execution_mode"] = "offline_fallback";
+    return CallToolResult::successJson(std::move(payload));
 }
 
 CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

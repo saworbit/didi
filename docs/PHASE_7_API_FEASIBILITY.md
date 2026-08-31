@@ -4,7 +4,7 @@
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `66/80`
+**Canonical implementation:** `67/81`
 **Phase 7 registrations:** `14/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
@@ -254,5 +254,5 @@ Task 1 is complete as a feasibility gate. The four signal names -- `signal_list_
 Work can proceed only after a governance decision:
 
 - **A)** Authorize partial delivery of the 15 feasible tools, targeting 76/79 and retaining three honest unimplemented names.
-- **B)** Retain atomic 80/80 and wait for supported engine capabilities.
+- **B)** Retain atomic 81/81 and wait for supported engine capabilities.
 - **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.

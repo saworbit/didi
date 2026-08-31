@@ -41,7 +41,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "script_get_symbols", "script_patch_method", "patch_script_symbols",
         "viewport_create_test_lab", "create_visual_test_lab", "resource_create",
         "resource_inspect", "project_list_resources", "query_project_resources",
-        "project_get_uid_map", "project_audit_assets", "runtime_launch",
+        "project_get_uid_map", "project_audit_assets", "project_analyze_impact", "runtime_launch",
         "execute_test_session", "runtime_list_sessions", "runtime_attach_session",
         "runtime_detach_session", "runtime_get_session"
         , "project_search_text", "project_search_symbols",
@@ -114,6 +114,7 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
 CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectGetUidMap(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleProjectAnalyzeImpact(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleInstantiateAsset(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleCSharpCheckBuild(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -1504,6 +1505,23 @@ void ToolRegistry::registerAllDefaultTools() {
             {"additionalProperties", false}
         };
         t.handler = [this](const json& args) { return handleProjectAuditAssets(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_analyze_impact";
+        t.description = "Traces every place a symbol, signal, or res:// path is named, including scene connections and animation tracks that a text search finds but cannot explain.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
+                            {"description", "A res:// or uid:// path, or a single Godot identifier such as a variable, function, or signal name."}}},
+                {"max_impacts", {{"type", "integer"}, {"minimum", 1}, {"maximum", 5000}, {"default", 500}}}
+            }},
+            {"required", json::array({"target"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleProjectAnalyzeImpact(args, m_ipcClient); };
         registerTool(std::move(t));
     }
     {

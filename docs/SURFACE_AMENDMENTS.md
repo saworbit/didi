@@ -52,8 +52,9 @@ and verification, and it fails visibly wherever the surface has a hole.
 
 ## Amendment log
 
-Two amendments are implemented: `runtime_read_output`, recorded below with its
-tri-engine feasibility evidence, and `project_audit_assets`. One is withdrawn: raising the engine floor to
+Three amendments are implemented: `runtime_read_output`, recorded below with
+its tri-engine feasibility evidence, `project_audit_assets`, and
+`project_analyze_impact`. One is withdrawn: raising the engine floor to
 Godot 4.7, refused in favour of runtime capability detection so that 4.5 and 4.6
 users keep support. The remaining candidates come from the
 August 2026 competitive review and are proposed, not accepted, in
@@ -172,6 +173,33 @@ processes Didi does not own. No claim to reproduce Godot's debugger; this is
 engine log output, not stack frames or breakpoints. The existing
 `runtime_read_logs` contract is unchanged, and this does not become an alias
 for it: one returns Didi's own records, the other returns the engine's.
+
+### ACCEPTED (IMPLEMENTED): `project_analyze_impact`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `project_analyze_impact` |
+| **Failing workflow** | *Rename `character_health` to `health` in Player.gd and prove nothing broke.* The agent renames the declaration and its uses, runs a text search, sees it clean, and stops. It has missed the HUD scene that wired the signal through `[connection signal="character_health"]` and the animation track keyframing `NodePath("Sprite:character_health")`. Neither is a code reference, so neither is explained by a search, and Godot reports neither until the game runs. The agent ships a project that is broken at runtime and believes it verified the change. |
+| **Execution modes** | `offline_fallback`. A static read of files on disk; no editor needed. |
+| **Safety class** | `read`. No `dry_run`, no confirmation. It never writes. |
+| **Proving test** | Native: `Tools.ProjectImpactFindings` builds the issue's own example and requires the scene connection, the animation track, and the code use to be classified separately, with `max_character_health` absent. `Tools.ProjectImpactFileTarget` covers a file target reached only through a `project.godot` autoload, an `ext_resource` reference, and rejection of a target that is neither a path nor an identifier. |
+| **Reviewer** | Unassigned. Read-only, so no security review is required. Findings are bounded by `max_impacts` and the scan by the existing resource-index limits. |
+
+**Why this one.** The reference forms are all written down in the project
+already. What was missing is the ability to ask which of them name a given
+thing, and a lexical search is precisely the tool that cannot answer it.
+
+**What it deliberately does not do.** It does not perform the rename. The issue
+also asked for an atomic multi-file refactoring cascade that rewrites scripts,
+scene bindings and animation tracks in one validated transaction. That is a
+mutation with a rollback story, not an analysis, and it is not part of this
+amendment. Analysis first is also the useful order: a cascade nobody can check
+is worse than no cascade.
+
+**Why an empty result is an answer and a malformed target is not.** A target
+that is neither a `res://` path nor a single identifier is rejected. Returning
+an empty impact list for a question the tool cannot parse would read as "nothing
+depends on this" to a caller about to delete something.
 
 ### ACCEPTED (IMPLEMENTED): `project_audit_assets`
 
