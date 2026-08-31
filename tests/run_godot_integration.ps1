@@ -602,6 +602,7 @@ try {
         (Tool-Request 913 "signal_list_connections" @{ target_node = "/root/SmokeRoot" }),
         # A still-reserved Phase 7 name, so the honest-failure check keeps a subject.
         (Tool-Request 914 "physics_raycast_query" @{ from = @(0, 0, 0); to = @(0, 0, 1) }),
+        (Tool-Request 930 "audio_list_buses" @{}),
         (Tool-Request 21 "scene_get_property" @{ target_node = "/root/SmokeRoot/Missing"; property_name = "name" }),
         (Tool-Request 22 "scene_get_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "phase_one_typo" }),
         (Tool-Request 23 "scene_set_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "process_priority"; value = "wrong-type" }),
@@ -917,6 +918,17 @@ try {
     Assert-True (-not $byId[912].result.isError) "signal_disconnect failed against a live editor session."
     Assert-True ((& $connectionCount $afterDisconnect) -eq 0) "signal_disconnect left the connection in place."
     # A reserved name must still fail honestly.
+    # The live half of audio_list_buses. The offline read parses a file and
+    # says so; only a running engine reports the effect chain and anything a
+    # script changed at runtime, so that is what has to be proven here.
+    $audioBuses = Tool-Payload $byId[930]
+    Assert-True ($audioBuses.execution_mode -eq "live") "audio_list_buses did not run against the live editor."
+    Assert-True ($audioBuses.bus_count -ge 1) "audio_list_buses reported no buses from a running engine."
+    $masterBus = @($audioBuses.buses | Where-Object { $_.index -eq 0 })
+    Assert-True ($masterBus.Count -eq 1 -and $masterBus[0].name -eq "Master") "Live bus 0 is not Master."
+    Assert-True ($null -ne $masterBus[0].effects) "Live bus reported no effects array, which the offline read cannot produce at all."
+    Assert-True ($masterBus[0].mute -is [bool] -and $masterBus[0].solo -is [bool]) "Live bus mute and solo are not booleans."
+
     Assert-True $byId[914].result.isError "Unimplemented tool returned fake success."
     Assert-True ($byId[914].result.content[0].text -match "no trustworthy execution path") "Unimplemented tool error is not actionable."
     Assert-True $byId[21].result.isError "Missing node lookup returned fake success."

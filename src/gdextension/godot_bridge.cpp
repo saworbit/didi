@@ -3131,6 +3131,101 @@ json GodotBridge::execute(const std::string& method, const json& params,
                            {"undo_redo_registered", true}});
     }
 
+    if (method == "audio.listBuses") {
+        // Every method hash below is identical on Godot 4.5.1, 4.6.2 and 4.7.2,
+        // checked by dumping extension_api.json from each, so this needs no
+        // per-version branch. AudioServer is a core singleton and is present
+        // whether or not an editor scene is open.
+        auto server = singleton("AudioServer");
+        if (server.isErr()) return errorJson(server.error().code, server.error().message);
+
+        auto count_value = callObject(server.value(), "AudioServer", "get_bus_count", 3905245786LL);
+        if (count_value.isErr()) return errorJson(count_value.error().code, count_value.error().message);
+        auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (count.isErr()) return errorJson(count.error().code, count.error().message);
+
+        json buses = json::array();
+        for (int64_t index = 0; index < count.value(); ++index) {
+            auto bus_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+            if (bus_index.isErr()) return errorJson(bus_index.error().code, bus_index.error().message);
+
+            auto name_value = callObject(server.value(), "AudioServer", "get_bus_name", 844755477LL,
+                                         {&bus_index.value()});
+            if (name_value.isErr()) return errorJson(name_value.error().code, name_value.error().message);
+            auto name = stringFromVariant(name_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+            if (name.isErr()) return errorJson(name.error().code, name.error().message);
+
+            auto volume_value = callObject(server.value(), "AudioServer", "get_bus_volume_db",
+                                           2339986948LL, {&bus_index.value()});
+            if (volume_value.isErr()) return errorJson(volume_value.error().code, volume_value.error().message);
+            auto volume = scalarFromVariant<double>(volume_value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+            if (volume.isErr()) return errorJson(volume.error().code, volume.error().message);
+
+            const auto boolOf = [&](const char* method_name, int64_t hash) -> Result<bool> {
+                auto value = callObject(server.value(), "AudioServer", method_name, hash,
+                                        {&bus_index.value()});
+                if (value.isErr()) return value.error();
+                return scalarFromVariant<bool>(value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            };
+            auto mute = boolOf("is_bus_mute", 1116898809LL);
+            if (mute.isErr()) return errorJson(mute.error().code, mute.error().message);
+            auto solo = boolOf("is_bus_solo", 1116898809LL);
+            if (solo.isErr()) return errorJson(solo.error().code, solo.error().message);
+            auto bypass = boolOf("is_bus_bypassing_effects", 1116898809LL);
+            if (bypass.isErr()) return errorJson(bypass.error().code, bypass.error().message);
+
+            auto send_value = callObject(server.value(), "AudioServer", "get_bus_send", 659327637LL,
+                                         {&bus_index.value()});
+            if (send_value.isErr()) return errorJson(send_value.error().code, send_value.error().message);
+            auto send = stringFromVariant(send_value.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+            if (send.isErr()) {
+                send = stringFromVariant(send_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                if (send.isErr()) return errorJson(send.error().code, send.error().message);
+            }
+
+            auto effect_count_value = callObject(server.value(), "AudioServer",
+                                                 "get_bus_effect_count", 3744713108LL,
+                                                 {&bus_index.value()});
+            if (effect_count_value.isErr()) {
+                return errorJson(effect_count_value.error().code, effect_count_value.error().message);
+            }
+            auto effect_count =
+                scalarFromVariant<int64_t>(effect_count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (effect_count.isErr()) return errorJson(effect_count.error().code, effect_count.error().message);
+
+            // The effect chain is the part the offline layout file cannot
+            // report, so it is the reason to attach an editor at all.
+            json effects = json::array();
+            for (int64_t slot = 0; slot < effect_count.value(); ++slot) {
+                auto slot_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, slot);
+                if (slot_index.isErr()) return errorJson(slot_index.error().code, slot_index.error().message);
+                auto effect = callObject(server.value(), "AudioServer", "get_bus_effect", 726064442LL,
+                                         {&bus_index.value(), &slot_index.value()});
+                if (effect.isErr()) return errorJson(effect.error().code, effect.error().message);
+                auto class_value = callVariant(effect.value(), "get_class");
+                std::string class_name = "AudioEffect";
+                if (class_value.isOk()) {
+                    auto text = stringFromVariant(class_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                    if (text.isOk()) class_name = text.value();
+                }
+                effects.push_back({{"slot", slot}, {"class", class_name}});
+            }
+
+            buses.push_back({{"index", index},
+                             {"name", name.value()},
+                             {"volume_db", volume.value()},
+                             {"mute", mute.value()},
+                             {"solo", solo.value()},
+                             {"bypass_effects", bypass.value()},
+                             {"send", send.value()},
+                             {"effects", std::move(effects)}});
+        }
+
+        return liveResult({{"status", "success"},
+                           {"bus_count", count.value()},
+                           {"buses", std::move(buses)}});
+    }
+
     if (method == "scene.listGroups" || method == "scene.addToGroup" ||
         method == "scene.removeFromGroup" || method == "scene.getGroupMembers") {
         const std::string group = params.value("group", "");

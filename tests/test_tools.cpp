@@ -184,7 +184,7 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 91u);
+    ASSERT_EQ(tools.size(), 92u);
     const std::unordered_set<std::string> legacy_names = {
         "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
         "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
@@ -196,7 +196,7 @@ static void test_tool_registry_default_tools() {
         if (legacy_names.count(tool.name) == 0) ++canonical_count;
     }
     ASSERT_EQ(legacy_names.size(), 10u);
-    ASSERT_EQ(canonical_count, 81u);
+    ASSERT_EQ(canonical_count, 82u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -317,7 +317,7 @@ static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract(
         if (legacy_names.count(tool.name) != 0) continue;
         tool.capability.implemented ? ++implemented : ++unimplemented;
     }
-    ASSERT_EQ(implemented, 67u);
+    ASSERT_EQ(implemented, 68u);
     ASSERT_EQ(unimplemented, 14u);
 }
 
@@ -405,6 +405,100 @@ static void writeImpactFixture() {
         "tracks/0/path = NodePath(\"Sprite:character_health\")\n"
         "[node name=\"Player\" type=\"Node2D\"]\n"
         "script = ExtResource(\"1\")\n");
+}
+
+static void test_audio_list_buses_reads_the_project_layout_offline() {
+    // A muted bus is invisible: the game runs, nothing errors, and no sound
+    // comes out. Nothing in Didi could read the bus layout at all, so the
+    // question could not be asked.
+    ScopedToolProject project("audio-buses");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("default_bus_layout.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n"
+        "\n"
+        "[resource]\n"
+        "bus/0/name = \"Master\"\n"
+        "bus/0/solo = false\n"
+        "bus/0/mute = false\n"
+        "bus/0/bypass_fx = false\n"
+        "bus/0/volume_db = 0.0\n"
+        "bus/0/send = \"Master\"\n"
+        "bus/1/name = \"SFX\"\n"
+        "bus/1/solo = false\n"
+        "bus/1/mute = true\n"
+        "bus/1/bypass_fx = false\n"
+        "bus/1/volume_db = -6.5\n"
+        "bus/1/send = \"Master\"\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto result = registry.callTool("audio_list_buses", didi::json::object());
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+
+    ASSERT_EQ(report["execution_mode"], "offline_fallback");
+    ASSERT_TRUE(report["layout_present"].get<bool>());
+    ASSERT_EQ(report["buses"].size(), 2u);
+    ASSERT_EQ(report["buses"][0]["name"], "Master");
+    ASSERT_EQ(report["buses"][1]["name"], "SFX");
+    // The answer someone is actually looking for.
+    ASSERT_TRUE(report["buses"][1]["mute"].get<bool>());
+    ASSERT_TRUE(!report["buses"][0]["mute"].get<bool>());
+    ASSERT_TRUE(report["buses"][1]["volume_db"].get<double>() < -6.0);
+    ASSERT_EQ(report["buses"][1]["send"], "Master");
+    // Effects live in sub-resources, so the file cannot report them. Saying so
+    // beats an empty list that reads as "no effects".
+    ASSERT_TRUE(report.contains("note"));
+    ASSERT_TRUE(registry.callTool("audio_list_buses", didi::json{{"bus", 1}}).isError);
+}
+
+static void test_audio_list_buses_reports_a_project_with_no_layout_file() {
+    // Godot writes the layout only once a project has more than the default
+    // Master bus. Reporting that as a failure would send an agent looking for a
+    // missing file instead of telling it what the project actually does.
+    ScopedToolProject project("audio-buses-default");
+    writeAuditFile("project.godot", "config_version=5\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto result = registry.callTool("audio_list_buses", didi::json::object());
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+    ASSERT_TRUE(!report["layout_present"].get<bool>());
+    ASSERT_EQ(report["buses"].size(), 0u);
+    ASSERT_EQ(report["layout_path"], "res://default_bus_layout.tres");
+}
+
+static void test_audio_list_buses_follows_a_relocated_layout_setting() {
+    // A project that moved its layout is the case where guessing the default
+    // path silently reports no buses for a project that has several.
+    ScopedToolProject project("audio-buses-moved");
+    writeAuditFile("project.godot",
+        "config_version=5\n"
+        "\n"
+        "[audio]\n"
+        "\n"
+        "buses/default_bus_layout=\"res://config/buses.tres\"\n");
+    writeAuditFile("config/buses.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n"
+        "[resource]\n"
+        "bus/0/name = \"Master\"\n"
+        "bus/0/mute = false\n"
+        "bus/0/volume_db = 0.0\n"
+        "bus/0/send = \"Master\"\n"
+        "bus/1/name = \"Music\"\n"
+        "bus/1/mute = false\n"
+        "bus/1/volume_db = -3.0\n"
+        "bus/1/send = \"Master\"\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto result = registry.callTool("audio_list_buses", didi::json::object());
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(report["layout_path"], "res://config/buses.tres");
+    ASSERT_EQ(report["buses"].size(), 2u);
+    ASSERT_EQ(report["buses"][1]["name"], "Music");
 }
 
 static void test_project_audit_dead_signal_cost_does_not_follow_signal_count() {
@@ -1774,6 +1868,12 @@ struct RegisterToolTests {
         registerTest("Tools.SymbolExtraction", test_symbol_extraction);
         registerTest("Tools.NoDemoPathFallback", test_offline_tools_do_not_fallback_to_demo_paths);
         registerTest("Tools.Utf8ProjectPaths", test_project_paths_accept_utf8_names);
+        registerTest("Tools.AudioListBusesOffline",
+                     test_audio_list_buses_reads_the_project_layout_offline);
+        registerTest("Tools.AudioListBusesNoLayout",
+                     test_audio_list_buses_reports_a_project_with_no_layout_file);
+        registerTest("Tools.AudioListBusesRelocatedLayout",
+                     test_audio_list_buses_follows_a_relocated_layout_setting);
         registerTest("Tools.ProjectAuditSignalScale",
                      test_project_audit_dead_signal_cost_does_not_follow_signal_count);
         registerTest("Tools.ProjectImpactFindings",
