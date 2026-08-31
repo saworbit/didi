@@ -407,6 +407,49 @@ static void writeImpactFixture() {
         "script = ExtResource(\"1\")\n");
 }
 
+static void test_project_audit_dead_signal_cost_does_not_follow_signal_count() {
+    // Break caught: the dead-signal pass asked, for every declared signal,
+    // whether any file used it. That is six regex passes over every file
+    // containing the name, and a common name is in most of them, so a project
+    // with a couple of thousand scripts spent tens of seconds in this one tool.
+    //
+    // The bound below is deliberately loose. It is not a benchmark; it fails
+    // only if the work has gone quadratic in the number of signals again, which
+    // is a difference of two orders of magnitude and not of a slow machine.
+    ScopedToolProject project("project-audit-scale");
+    writeAuditFile("project.godot", "config_version=5\n");
+    // One shared name across every script, which is the case that was slow:
+    // the prefilter cannot rule any file out.
+    for (int i = 0; i < 400; ++i) {
+        const auto name = "scripts/unit" + std::to_string(i) + ".gd";
+        writeAuditFile(name,
+                       "extends Node\n"
+                       "signal changed\n"
+                       "signal dead_" + std::to_string(i) + "\n"
+                       "func _ready():\n"
+                       "    changed.emit()\n");
+    }
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = registry.callTool(
+        "project_audit_assets",
+        didi::json{{"include_orphans", false}, {"include_broken_references", false},
+                   {"max_findings", 5000}});
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    ASSERT_TRUE(!result.isError);
+
+    // Every dead_N is dead and `changed` is emitted everywhere, so the answer
+    // has to stay right as well as fast.
+    const auto report = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(report["dead_signals"].size(), 400u);
+    for (const auto& dead : report["dead_signals"]) {
+        ASSERT_TRUE(dead["signal"].get<std::string>() != "changed");
+    }
+    ASSERT_TRUE(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() < 20);
+}
+
 static void test_project_impact_finds_scene_and_animation_references_a_search_cannot_explain() {
     ScopedToolProject project("project-impact");
     writeImpactFixture();
@@ -1731,6 +1774,8 @@ struct RegisterToolTests {
         registerTest("Tools.SymbolExtraction", test_symbol_extraction);
         registerTest("Tools.NoDemoPathFallback", test_offline_tools_do_not_fallback_to_demo_paths);
         registerTest("Tools.Utf8ProjectPaths", test_project_paths_accept_utf8_names);
+        registerTest("Tools.ProjectAuditSignalScale",
+                     test_project_audit_dead_signal_cost_does_not_follow_signal_count);
         registerTest("Tools.ProjectImpactFindings",
                      test_project_impact_finds_scene_and_animation_references_a_search_cannot_explain);
         registerTest("Tools.ProjectImpactFileTarget",

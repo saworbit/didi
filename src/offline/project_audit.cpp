@@ -97,38 +97,41 @@ std::vector<SignalDeclaration> signalsDeclaredIn(const std::string& path,
     return declarations;
 }
 
-// A signal is alive if anything emits it or anything connects to it, in any
-// file. Editor-made connections live in .tscn as [connection signal="name"],
+// Every signal name that anything emits or connects to, anywhere in the
+// project. Editor-made connections live in .tscn as [connection signal="name"],
 // and code-made ones as connect("name", ...) or name.connect(...).
-bool signalIsUsed(const std::string& name,
-                  const std::vector<std::pair<std::string, std::string>>& sources) {
-    // Six regexes across every file, for every signal in the project, is the
-    // one part of this that grows fast enough to matter. A file that does not
-    // contain the name at all cannot use it, and that check is a substring
-    // scan rather than six passes of the regex engine.
-    std::vector<const std::string*> candidates;
+//
+// This is collected once for the whole project rather than asked per declared
+// signal. Asking per signal is six regex passes over every file that contains
+// the name, and a name like `changed` is in most of them, so a project with a
+// couple of thousand scripts spent tens of seconds here. One pass costs the
+// same whether the project declares one signal or a thousand.
+std::unordered_set<std::string> usedSignalNames(
+    const std::vector<std::pair<std::string, std::string>>& sources) {
+    // is_connected is named on its own because `connect` inside it is not
+    // followed by an open bracket, so the shorter alternative does not cover it.
+    static const std::regex quoted_call(
+        R"re((?:emit_signal|is_connected|connect)\s*\(\s*"([A-Za-z_][A-Za-z0-9_]*)")re");
+    static const std::regex member_call(
+        R"re(\b([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*(?:emit|connect)\s*\()re");
+    static const std::regex scene_wired(
+        R"re(\[connection[^\]]*signal="([A-Za-z_][A-Za-z0-9_]*)")re");
+
+    std::unordered_set<std::string> used;
+    const auto collect = [&used](const std::string& text, const std::regex& pattern) {
+        for (auto it = std::sregex_iterator(text.begin(), text.end(), pattern);
+             it != std::sregex_iterator(); ++it) {
+            used.insert((*it)[1].str());
+        }
+    };
+
     for (const auto& [path, text] : sources) {
         (void)path;
-        if (text.find(name) != std::string::npos) candidates.push_back(&text);
+        collect(text, quoted_call);
+        collect(text, member_call);
+        collect(text, scene_wired);
     }
-    if (candidates.empty()) return false;
-
-    const std::regex emit_call(R"re(emit_signal\s*\(\s*")re" + name + R"re(")re");
-    const std::regex emit_member(R"re(\b)re" + name + R"re(\s*\.\s*emit\s*\()re");
-    const std::regex connect_string(R"re(connect\s*\(\s*")re" + name + R"re(")re");
-    const std::regex connect_member(R"re(\b)re" + name + R"re(\s*\.\s*connect\s*\()re");
-    const std::regex scene_wired(R"re(\[connection[^\]]*signal=")re" + name + R"re(")re");
-    const std::regex is_connected(R"re(is_connected\s*\(\s*")re" + name + R"re(")re");
-
-    for (const auto* candidate : candidates) {
-        const auto& text = *candidate;
-        if (std::regex_search(text, emit_call) || std::regex_search(text, emit_member) ||
-            std::regex_search(text, connect_string) || std::regex_search(text, connect_member) ||
-            std::regex_search(text, scene_wired) || std::regex_search(text, is_connected)) {
-            return true;
-        }
-    }
-    return false;
+    return used;
 }
 
 } // namespace
@@ -212,10 +215,11 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
 
     json dead_signals = json::array();
     if (options.include_dead_signals) {
+        const auto used = usedSignalNames(sources);
         for (const auto& [source_path, text] : sources) {
             if (!strings::endsWith(source_path, ".gd")) continue;
             for (const auto& declaration : signalsDeclaredIn(source_path, text)) {
-                if (signalIsUsed(declaration.name, sources)) continue;
+                if (used.count(declaration.name) != 0) continue;
                 if (dead_signals.size() >= options.max_findings) break;
                 dead_signals.push_back({{"script", declaration.script},
                                         {"signal", declaration.name},
