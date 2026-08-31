@@ -456,8 +456,19 @@ try {
     $fieldBoundTree = Tool-Payload $runtimeById[379]
     $oversizedNameNode = @($fieldBoundTree.scene_tree.children | Where-Object { $_.name -like "TreeName_*" })[0]
     Assert-True ($null -ne $oversizedNameNode) "Runtime tree did not expose the oversized-name probe."
-    Assert-True ($oversizedNameNode.name_truncated -eq $true -and [Text.Encoding]::UTF8.GetByteCount([string]$oversizedNameNode.name) -le 1024) "Runtime tree did not UTF-8 truncate an oversized node name explicitly."
-    Assert-True ($oversizedNameNode.path_truncated -eq $true -and [Text.Encoding]::UTF8.GetByteCount([string]$oversizedNameNode.path) -le 4096) "Runtime tree did not UTF-8 truncate an oversized node path explicitly."
+    # The byte bound itself is asserted in RuntimeTree.BoundUtf8CapsBytesOnSequenceBoundaries,
+    # not here. ConvertFrom-Json on Windows PowerShell 5.1 does not round-trip
+    # astral characters, so re-encoding this name measures the harness rather
+    # than the server: the probe name arrives as 1023 bytes on the wire and
+    # GetByteCount reports 1335 for it. What this can honestly check is that the
+    # server said it truncated, and that the name came back bounded rather than
+    # at its original 7800 bytes.
+    Assert-True ($oversizedNameNode.name_truncated -eq $true) "Runtime tree did not flag an oversized node name as truncated."
+    Assert-True ($oversizedNameNode.name.Length -le 1024) "Runtime tree returned an unbounded node name."
+    # Same reasoning as the name above: the path embeds the same oversized name,
+    # so a UTF-8 re-encode here measures PowerShell's JSON handling too.
+    Assert-True ($oversizedNameNode.path_truncated -eq $true) "Runtime tree did not flag an oversized node path as truncated."
+    Assert-True ($oversizedNameNode.path.Length -le 4096) "Runtime tree returned an unbounded node path."
     foreach ($rejectedId in 307, 308, 310, 312, 313, 314, 315, 318, 320, 321) {
         Assert-True ([bool]$runtimeById[$rejectedId].result.isError) "Runtime rejection $rejectedId returned fake success."
     }

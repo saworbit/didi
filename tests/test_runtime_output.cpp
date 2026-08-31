@@ -12,6 +12,7 @@
 // `runtime_read_logs` and the capability is an illusion.
 
 #include "didi/gdextension/editor_hook.hpp"
+#include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/gdextension/runtime_log.hpp"
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
@@ -152,6 +153,44 @@ static void test_scene_tree_quit_is_deferred_past_the_response_frame() {
     ASSERT_FALSE(didi::godot::EditorHookTestAccess::hasPendingQuit(hook));
 }
 
+// The byte bound on runtime.getTree names, types and paths is a published
+// contract, and the live integration harness cannot check it: PowerShell's JSON
+// round trip inflates astral characters, so a UTF-8 byte count taken there
+// measures the harness rather than what the server sent. Pin it here, where the
+// bytes are the bytes.
+static void test_bound_utf8_caps_bytes_without_splitting_a_sequence() {
+    // "TreeName_" plus U+1F680, the shape the runtime probe fixture uses.
+    const std::string unit = "TreeName_\xF0\x9F\x9A\x80";
+    ASSERT_EQ(unit.size(), 13u);
+    std::string oversized;
+    for (int i = 0; i < 600; ++i) oversized += unit;
+    ASSERT_EQ(oversized.size(), 7800u);
+
+    const auto bounded = didi::godot::boundUtf8(oversized, 1024);
+    ASSERT_TRUE(bounded.truncated);
+    ASSERT_TRUE(bounded.value.size() <= 1024u);
+    // 78 whole units is 1014 bytes; the next "TreeName_" fits at 1023 but its
+    // emoji would cross the bound. The tail proves it stopped before the
+    // sequence rather than cutting it in half.
+    ASSERT_EQ(bounded.value.size(), 1023u);
+    ASSERT_EQ(bounded.value.substr(1023u - 9u), std::string("TreeName_"));
+
+    // A budget that lands mid-sequence must stop before it, not inside it.
+    const auto mid = didi::godot::boundUtf8(unit, 11);
+    ASSERT_TRUE(mid.truncated);
+    ASSERT_EQ(mid.value, std::string("TreeName_"));
+
+    // Exactly fitting input is not reported as truncated.
+    const auto exact = didi::godot::boundUtf8(unit, 13);
+    ASSERT_TRUE(!exact.truncated);
+    ASSERT_EQ(exact.value, unit);
+
+    // Malformed input is replaced rather than passed through or dropped.
+    const auto malformed = didi::godot::boundUtf8(std::string("ok\xFF!"), 64);
+    ASSERT_TRUE(malformed.truncated);
+    ASSERT_EQ(malformed.value, std::string("ok?!"));
+}
+
 struct RegisterRuntimeOutputTests {
     RegisterRuntimeOutputTests() {
         registerTest("RuntimeOutput.SeparateFromDidiRecords", test_engine_output_is_a_separate_stream_from_didi_records);
@@ -161,6 +200,8 @@ struct RegisterRuntimeOutputTests {
         registerTest("RuntimeOutput.ToolIsReadOnly", test_runtime_read_output_is_registered_as_a_read_only_tool);
         registerTest("EditorHook.NestedPumpStartsNoWork",
                      test_nested_pump_observes_progress_without_dequeuing);
+        registerTest("RuntimeTree.BoundUtf8CapsBytesOnSequenceBoundaries",
+                     test_bound_utf8_caps_bytes_without_splitting_a_sequence);
         registerTest("EditorHook.SceneTreeQuitIsDeferred",
                      test_scene_tree_quit_is_deferred_past_the_response_frame);
     }

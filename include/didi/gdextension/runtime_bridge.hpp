@@ -2,9 +2,23 @@
 
 #include "didi/common/types.hpp"
 #include <string>
+#include <string_view>
 
 namespace didi {
 namespace godot {
+
+// Caps a UTF-8 string at a byte budget without splitting a sequence, replacing
+// anything malformed with '?'. Exposed because the byte bound is a published
+// contract on runtime.getTree names, types and paths, and the live integration
+// harness cannot measure it: PowerShell's JSON round trip inflates astral
+// characters, so a UTF-8 byte count taken there describes the harness rather
+// than what the server sent.
+struct BoundedUtf8 {
+    std::string value;
+    bool truncated{false};
+};
+
+BoundedUtf8 boundUtf8(std::string_view input, size_t maximum_bytes);
 
 json executeRuntimeBridge(const std::string& method, const json& params,
                           const std::string& session_kind);
