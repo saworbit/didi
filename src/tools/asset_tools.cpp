@@ -2,6 +2,7 @@
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/offline/resource_indexer.hpp"
+#include "didi/offline/project_audit.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/atomic_write.hpp"
 #include <fstream>
@@ -219,6 +220,42 @@ CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpc
     }
 
     return CallToolResult::error("Resource not found: " + resource_path);
+}
+
+CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    (void)ipc;
+    if (!args.is_object()) {
+        return CallToolResult::error("Invalid audit request: arguments must be an object");
+    }
+    offline::ProjectAuditOptions options;
+    for (const auto& [key, target] : {std::pair<const char*, bool*>{"include_orphans", &options.include_orphans},
+                                      {"include_broken_references", &options.include_broken_references},
+                                      {"include_dead_signals", &options.include_dead_signals}}) {
+        if (!args.contains(key)) continue;
+        if (!args[key].is_boolean()) {
+            return CallToolResult::error(std::string("Invalid audit request: ") + key +
+                                         " must be a boolean");
+        }
+        *target = args[key].get<bool>();
+    }
+    if (args.contains("max_findings")) {
+        const auto& value = args["max_findings"];
+        if (!value.is_number_integer() || value.get<int64_t>() < 1 || value.get<int64_t>() > 5000) {
+            return CallToolResult::error(
+                "Invalid audit request: max_findings must be an integer from 1 to 5000");
+        }
+        options.max_findings = static_cast<size_t>(value.get<int64_t>());
+    }
+    if (!options.include_orphans && !options.include_broken_references &&
+        !options.include_dead_signals) {
+        return CallToolResult::error(
+            "Invalid audit request: at least one of include_orphans, "
+            "include_broken_references or include_dead_signals must stay enabled");
+    }
+
+    auto report = offline::auditProject(".", options);
+    report["execution_mode"] = "offline_fallback";
+    return CallToolResult::successJson(std::move(report));
 }
 
 CallToolResult handleProjectGetUidMap(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

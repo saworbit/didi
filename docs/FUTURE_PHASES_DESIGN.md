@@ -22,12 +22,12 @@ Complete the existing 79-tool canonical surface, then extend Didi through projec
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `65/79`
+**Canonical implementation:** `66/80`
 **Phase 7 registrations:** `14/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-**Goal:** The implementation remains 65/79 canonical tools, with all 14 Phase 7 names remaining registered but unimplemented. The approved delivery goal was atomic 79/79 without adding public tool names.
+**Goal:** The implementation remains 66/80 canonical tools, with all 14 Phase 7 names remaining registered but unimplemented. The approved delivery goal was atomic 80/80 without adding public tool names.
 
 **Scope:** Phase 7A-7C define the approved contracts for editor authoring, simulation and animation, and runtime debugging. Their implementation did not start because the hard feasibility gate blocked the atomic plan.
 
@@ -57,7 +57,7 @@ Feasibility does not make any Phase 7 name callable; a production trial does. Th
 The governance choice was between:
 
 - **A)** Authorize partial delivery of the 15 feasible tools, targeting 76/79 and retaining three honest unimplemented names.
-- **B)** Retain atomic 79/79 and wait for supported engine capabilities.
+- **B)** Retain atomic 80/80 and wait for supported engine capabilities.
 - **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.
 
 **Decided 2026-08-30: option A, with delivery gated per capability on a production trial rather than on feasibility.**

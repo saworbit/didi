@@ -184,7 +184,7 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 89u);
+    ASSERT_EQ(tools.size(), 90u);
     const std::unordered_set<std::string> legacy_names = {
         "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
         "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
@@ -196,7 +196,7 @@ static void test_tool_registry_default_tools() {
         if (legacy_names.count(tool.name) == 0) ++canonical_count;
     }
     ASSERT_EQ(legacy_names.size(), 10u);
-    ASSERT_EQ(canonical_count, 79u);
+    ASSERT_EQ(canonical_count, 80u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -317,7 +317,7 @@ static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract(
         if (legacy_names.count(tool.name) != 0) continue;
         tool.capability.implemented ? ++implemented : ++unimplemented;
     }
-    ASSERT_EQ(implemented, 65u);
+    ASSERT_EQ(implemented, 66u);
     ASSERT_EQ(unimplemented, 14u);
 }
 
@@ -332,6 +332,116 @@ static void test_offline_writer_schemas_require_explicit_overwrite() {
         ASSERT_EQ(overwrite["type"], "boolean");
         ASSERT_EQ(overwrite["default"], false);
     }
+}
+
+static void writeAuditFile(const std::string& relative, const std::string& contents) {
+    const auto path = std::filesystem::path(relative);
+    if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path());
+    std::ofstream output(path, std::ios::binary);
+    output << contents;
+}
+
+// Builds one project that contains every case at once, so a pass that leaks
+// into another one shows up as a wrong count rather than staying hidden.
+static void writeAuditFixture() {
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("art/used.png", "png-bytes");
+    writeAuditFile("art/by_uid.png", "png-bytes");
+    writeAuditFile("art/by_uid.png.uid", "uid://bybyby\n");
+    writeAuditFile("art/orphan.png", "png-bytes-orphan");
+    writeAuditFile("scenes/main.tscn",
+        "[gd_scene load_steps=3 format=3 uid=\"uid://mainmain\"]\n"
+        "[ext_resource type=\"Texture2D\" path=\"res://art/used.png\" id=\"1\"]\n"
+        "[ext_resource type=\"Texture2D\" uid=\"uid://bybyby\" id=\"2\"]\n"
+        "[ext_resource type=\"Texture2D\" path=\"res://art/deleted.png\" id=\"3\"]\n"
+        "[ext_resource type=\"Texture2D\" uid=\"uid://gonegone\" id=\"4\"]\n"
+        "[node name=\"Main\" type=\"Node2D\"]\n"
+        "[connection signal=\"wired_up\" from=\"Main\" to=\"Main\" method=\"_on_wired\"]\n");
+    writeAuditFile("scripts/player.gd",
+        "extends Node\n"
+        "signal wired_up\n"
+        "signal shouted\n"
+        "signal emitted_by_member\n"
+        "signal never_used\n"
+        "func _ready():\n"
+        "    emit_signal(\"shouted\")\n"
+        "    emitted_by_member.emit()\n");
+}
+
+static void test_project_audit_reports_orphans_broken_references_and_dead_signals() {
+    ScopedToolProject project("project-audit");
+    writeAuditFixture();
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto result = registry.callTool("project_audit_assets", didi::json::object());
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+
+    // An asset is an orphan only when nothing names it. used.png is named by
+    // path and by_uid.png only by uid, and both must survive.
+    ASSERT_EQ(report["orphans"].size(), 1u);
+    ASSERT_EQ(report["orphans"][0]["path"], "res://art/orphan.png");
+    ASSERT_EQ(report["orphans"][0]["type"], "Texture2D");
+    ASSERT_EQ(report["orphan_bytes"], std::string("png-bytes-orphan").size());
+
+    // Both broken forms, each reported once even though an unresolved uid
+    // matches the ext_resource form and the bare literal form alike.
+    std::set<std::string> broken;
+    for (const auto& entry : report["broken_references"]) {
+        broken.insert(entry["target"].get<std::string>() + " " + entry["kind"].get<std::string>());
+    }
+    // Both sizes, because a set of the findings would hide a repeated one.
+    ASSERT_EQ(report["broken_references"].size(), 2u);
+    ASSERT_EQ(broken.size(), 2u);
+    ASSERT_TRUE(broken.count("res://art/deleted.png missing_file") == 1);
+    ASSERT_TRUE(broken.count("uid://gonegone unresolved_uid") == 1);
+
+    // wired_up is connected in the scene, shouted is emitted by name, and
+    // emitted_by_member through the member form. Only never_used is dead.
+    ASSERT_EQ(report["dead_signals"].size(), 1u);
+    ASSERT_EQ(report["dead_signals"][0]["signal"], "never_used");
+    ASSERT_EQ(report["dead_signals"][0]["script"], "res://scripts/player.gd");
+    ASSERT_EQ(report["dead_signals"][0]["line"], 5);
+
+    ASSERT_TRUE(report["limitations"].is_array());
+    ASSERT_TRUE(!report["limitations"].empty());
+    ASSERT_EQ(report["execution_mode"], "offline_fallback");
+}
+
+static void test_project_audit_honours_switches_and_rejects_bad_arguments() {
+    ScopedToolProject project("project-audit-options");
+    writeAuditFixture();
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto orphans_only = registry.callTool(
+        "project_audit_assets",
+        didi::json{{"include_broken_references", false}, {"include_dead_signals", false}});
+    ASSERT_TRUE(!orphans_only.isError);
+    const auto narrowed = didi::json::parse(orphans_only.content[0].text);
+    ASSERT_EQ(narrowed["orphans"].size(), 1u);
+    ASSERT_TRUE(narrowed["broken_references"].empty());
+    ASSERT_TRUE(narrowed["dead_signals"].empty());
+
+    // The cap bounds the list but not the total, so a caller reading only the
+    // first page still learns how much space the orphans take.
+    const auto capped = registry.callTool("project_audit_assets", didi::json{{"max_findings", 1}});
+    ASSERT_TRUE(!capped.isError);
+    ASSERT_EQ(didi::json::parse(capped.content[0].text)["broken_references"].size(), 1u);
+
+    ASSERT_TRUE(registry.callTool("project_audit_assets", didi::json{{"max_findings", 0}}).isError);
+    ASSERT_TRUE(registry.callTool("project_audit_assets", didi::json{{"max_findings", 9000}}).isError);
+    ASSERT_TRUE(
+        registry.callTool("project_audit_assets", didi::json{{"include_orphans", "yes"}}).isError);
+    // Turning everything off would return an empty report that looks like a
+    // clean project, which is the one answer this must never invent.
+    ASSERT_TRUE(registry
+                    .callTool("project_audit_assets",
+                              didi::json{{"include_orphans", false},
+                                         {"include_broken_references", false},
+                                         {"include_dead_signals", false}})
+                    .isError);
 }
 
 static void test_resource_create_preserves_existing_file_without_overwrite() {
@@ -1503,6 +1613,10 @@ struct RegisterToolTests {
         registerTest("Tools.SymbolExtraction", test_symbol_extraction);
         registerTest("Tools.NoDemoPathFallback", test_offline_tools_do_not_fallback_to_demo_paths);
         registerTest("Tools.Utf8ProjectPaths", test_project_paths_accept_utf8_names);
+        registerTest("Tools.ProjectAuditFindings",
+                     test_project_audit_reports_orphans_broken_references_and_dead_signals);
+        registerTest("Tools.ProjectAuditOptions",
+                     test_project_audit_honours_switches_and_rejects_bad_arguments);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }
