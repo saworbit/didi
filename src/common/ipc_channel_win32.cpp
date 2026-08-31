@@ -544,10 +544,22 @@ private:
                 // connection to the same endpoint has nothing to connect to and
                 // fails outright. See #65 for the churn this costs and what
                 // removing it would require first.
-                const auto request_deadline = win32DeadlineAfter(kServerFrameTimeoutMs);
+                const auto idle_deadline = win32DeadlineAfter(kServerFrameTimeoutMs);
                 uint8_t len_buf[4] = {0};
-                if (readExactOverlapped(pipe, len_buf, sizeof(len_buf), hIoEvent, m_stopEvent,
-                                        request_deadline).status != ExactIoStatus::completed) {
+                auto header = readExactOverlapped(pipe, len_buf, sizeof(len_buf), hIoEvent,
+                                                  m_stopEvent, idle_deadline);
+                if (header.status == ExactIoStatus::timed_out && header.transferred > 0) {
+                    // A request started arriving as the idle deadline expired.
+                    // Dropping the connection here throws away a request the
+                    // client has already written, and it then waits for a
+                    // response that will never come. Finish the header instead,
+                    // on a deadline of its own.
+                    header = readExactOverlapped(pipe, len_buf + header.transferred,
+                                                 sizeof(len_buf) - header.transferred, hIoEvent,
+                                                 m_stopEvent,
+                                                 win32DeadlineAfter(kServerFrameTimeoutMs));
+                }
+                if (header.status != ExactIoStatus::completed) {
                     break; // Disconnected or stop requested
                 }
 
@@ -560,9 +572,16 @@ private:
                     break;
                 }
 
+                // A deadline of its own, starting now. Sharing the idle
+                // deadline meant a header that arrived late in the idle window
+                // left almost no time for its payload, so a request that was
+                // fully sent was dropped and the client saw its response read
+                // fail. The frame timeout is meant to bound a frame once it has
+                // started, not to run from before it did.
+                const auto payload_deadline = win32DeadlineAfter(kServerFrameTimeoutMs);
                 std::vector<char> req_payload(req_len);
                 if (readExactOverlapped(pipe, req_payload.data(), req_payload.size(), hIoEvent,
-                                        m_stopEvent, request_deadline).status !=
+                                        m_stopEvent, payload_deadline).status !=
                     ExactIoStatus::completed) {
                     break;
                 }
@@ -1042,15 +1061,18 @@ private:
                 // Load bearing for the same reason as the Win32 branch above:
                 // this loop serves one accepted client at a time and only
                 // accepts the next after it breaks.
-                const auto request_deadline = deadlineAfter(kServerFrameTimeoutMs);
+                const auto idle_deadline = deadlineAfter(kServerFrameTimeoutMs);
                 uint8_t len_buf[4] = {0};
-                if (!readExact(client, len_buf, sizeof(len_buf), request_deadline, &m_running)) break;
+                if (!readExact(client, len_buf, sizeof(len_buf), idle_deadline, &m_running)) break;
 
                 const uint32_t req_len = decodeFrameLength(len_buf);
                 if (req_len == 0 || req_len > kMaximumFrameBytes) break;
 
                 std::vector<char> payload(req_len);
-                if (!readExact(client, payload.data(), payload.size(), request_deadline, &m_running)) break;
+                // Its own deadline, starting now, for the reason given in the
+                // Win32 branch above.
+                const auto payload_deadline = deadlineAfter(kServerFrameTimeoutMs);
+                if (!readExact(client, payload.data(), payload.size(), payload_deadline, &m_running)) break;
 
                 json resp_json;
                 json req_json;
