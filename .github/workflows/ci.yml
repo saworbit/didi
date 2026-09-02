@@ -432,9 +432,11 @@ jobs:
           assert by_name['ui_hit_test']['_meta']['didi']['executionModes'] == ['live']
           assert by_name['ui_hit_test']['inputSchema']['properties']['max_results']['maximum'] == 256
           assert by_name['ui_hit_test']['inputSchema']['required'] == ['point']
-          for name in ('runtime_inject_input', 'runtime_get_call_stack', 'runtime_read_profiler'):
+          for name in ('runtime_inject_input', 'runtime_get_call_stack'):
               assert by_name[name]['_meta']['didi']['implemented'] is False
               assert by_name[name]['_meta']['didi']['executionModes'] == ['unimplemented']
+          assert by_name['runtime_read_profiler']['_meta']['didi']['implemented'] is True
+          assert by_name['runtime_read_profiler']['_meta']['didi']['executionModes'] == ['live']
 
           project = json.loads(req('resources/read', {'uri': 'godot://project/tree'}, 3)['result']['contents'][0]['text'])
           assert project['execution_mode'] == 'offline_fallback'
