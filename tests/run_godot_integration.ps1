@@ -71,6 +71,7 @@ $editorSessionId = ""
 $gameSessionId = ""
 $shutdownGameSessionId = ""
 $integrationSucceeded = $false
+$editorForcedTeardown = $false
 $primaryFailureMessage = ""
 $rawPhase5Responses = @()
 
@@ -152,7 +153,9 @@ function Stop-VerifiedProcessObject($VerifiedProcess, [int64]$ExpectedStartedAtM
 
 function Stop-ExactEditorProcess([uint64]$EnginePid, [int64]$EngineStartedAtMs, [int]$GracefulTimeoutSeconds) {
     $process = Get-Process -Id $EnginePid -ErrorAction SilentlyContinue
-    if ($null -eq $process) { return $true }
+    if ($null -eq $process) {
+        return [PSCustomObject]@{ stopped = $true; forced = $false }
+    }
     $accepted = Invoke-IdentityBoundProcessAction $process $EngineStartedAtMs {
         param($heldProcess)
         $heldProcess.CloseMainWindow()
@@ -170,14 +173,18 @@ function Stop-ExactEditorProcess([uint64]$EnginePid, [int64]$EngineStartedAtMs, 
     # integration fixture is disposable, so finish teardown with the same
     # start-time-verified process object instead of hanging or touching a reused
     # PID. Functional shutdown is exercised separately through runtime_stop.
-    if (Exact-ProcessAlive $EnginePid $EngineStartedAtMs) {
+    $forced = Exact-ProcessAlive $EnginePid $EngineStartedAtMs
+    if ($forced) {
         Write-Warning "Editor process $EnginePid did not exit after the graceful close request; using exact-instance teardown."
         $process = Get-Process -Id $EnginePid -ErrorAction SilentlyContinue
         if ($null -ne $process) {
             Stop-VerifiedProcessObject $process $EngineStartedAtMs
         }
     }
-    return -not (Exact-ProcessAlive $EnginePid $EngineStartedAtMs)
+    return [PSCustomObject]@{
+        stopped = -not (Exact-ProcessAlive $EnginePid $EngineStartedAtMs)
+        forced = $forced
+    }
 }
 
 function Stop-RuntimeProcess($Launcher, [uint64]$EnginePid, [int64]$EngineStartedAtMs) {
@@ -1546,7 +1553,9 @@ try {
     foreach ($response in $editorCloseResponses) { $editorCloseById[[int]$response.id] = $response }
     Assert-True ((Tool-Payload $editorCloseById[212]).closed -eq $true) "Final editor scene cleanup did not close the open scene."
 
-    Assert-True (Stop-ExactEditorProcess $editorEnginePid $editorEngineStartedAtMs 10) "Exact-instance teardown did not terminate the editor process."
+    $editorStopResult = Stop-ExactEditorProcess $editorEnginePid $editorEngineStartedAtMs 10
+    Assert-True ([bool]$editorStopResult.stopped) "Exact-instance teardown did not terminate the editor process."
+    $editorForcedTeardown = [bool]$editorStopResult.forced
 
     $responseTranscript = @(
         @($rawPrelaunchResponses)
@@ -1593,6 +1602,26 @@ finally {
     Stop-RuntimeProcess $game $gameEnginePid $gameEngineStartedAtMs
     Stop-RuntimeProcess $shutdownGame $shutdownGameEnginePid $shutdownGameEngineStartedAtMs
     Stop-RuntimeProcess $godot $editorEnginePid $editorEngineStartedAtMs
+
+    # A forced exit cannot run the extension's normal descriptor destructor.
+    # Remove only the descriptor whose filename and embedded process identity
+    # match the exact disposable editor instance that we just terminated.
+    if ($editorForcedTeardown) {
+        Assert-True ($editorSessionId -match '^[0-9a-f]{32}$') "Refusing forced-editor cleanup without a valid session ID."
+        $editorDescriptorPath = [IO.Path]::GetFullPath((Join-Path $sessionDirectory ($editorSessionId + ".json")))
+        Assert-True ($editorDescriptorPath.StartsWith($sessionDirectory + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) "Refusing to remove a descriptor outside the disposable session directory."
+        $editorDescriptorEntry = Get-Item -LiteralPath $editorDescriptorPath -Force -ErrorAction SilentlyContinue
+        if ($null -ne $editorDescriptorEntry) {
+            Assert-True (-not $editorDescriptorEntry.PSIsContainer) "Refusing to remove a non-file editor descriptor."
+            Assert-True (($editorDescriptorEntry.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) "Refusing to remove an editor descriptor reparse entry."
+            Assert-True ($editorDescriptorEntry.Length -le 65536) "Refusing to parse an oversized editor descriptor during cleanup."
+            $staleEditorDescriptor = Get-Content -LiteralPath $editorDescriptorPath -Raw | ConvertFrom-Json
+            Assert-True ([string]$staleEditorDescriptor.session_id -eq $editorSessionId) "Refusing to remove an editor descriptor with a mismatched session ID."
+            Assert-True ([uint64]$staleEditorDescriptor.pid -eq $editorEnginePid) "Refusing to remove an editor descriptor with a mismatched PID."
+            Assert-True ([int64]$staleEditorDescriptor.started_at_ms -eq $editorEngineStartedAtMs) "Refusing to remove an editor descriptor with a mismatched process-start identity."
+            Remove-Item -LiteralPath $editorDescriptorPath -Force
+        }
+    }
     $descriptorDeadline = [DateTime]::UtcNow.AddSeconds(5)
     do {
         $activeDescriptors = @(Get-ChildItem -LiteralPath $sessionDirectory -Filter "*.json" -Force -ErrorAction SilentlyContinue)
