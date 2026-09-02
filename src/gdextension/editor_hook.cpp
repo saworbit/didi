@@ -663,7 +663,8 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         // admitted to production without also compiling test seams into a
         // shipping binary. Only the seam configurator stays gated.
         "signal.listConnections", "signal.connect", "signal.disconnect", "signal.emit",
-        "runtime.injectInput", "physics.raycast", "nav.queryPath"
+        "runtime.injectInput", "physics.raycast", "nav.queryPath",
+        "anim.listTracks", "anim.playTrack"
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
         , "phase7SignalTest.configure"
 #endif
@@ -672,7 +673,8 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         // Spatial reads are editor-or-game by policy; everything else that is
         // not runtime.* is editor-only here.
         const bool game_admitted = method.rfind("runtime.", 0) == 0 ||
-                                   method == "physics.raycast" || method == "nav.queryPath";
+                                   method == "physics.raycast" || method == "nav.queryPath" ||
+                                   method == "anim.listTracks" || method == "anim.playTrack";
         if (m_sessionKind == runtime::SessionKind::game && !game_admitted) {
             return {{"error", {{"code", 409},
                                 {"message", "Editor-only method is unavailable in a game session: " + method}}}};
@@ -758,7 +760,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
 
     static const std::unordered_set<std::string> registered_but_unimplemented = {
         "scene.mutate", "physics.simulateStep", "nav.bakeMesh",
-        "anim.listTracks", "anim.playTrack", "tilemap.setCells",
+        "tilemap.setCells",
         "tilemap.getUsedRect", "gridmap.setCells", "asset.instantiate",
         "runtime.getCallStack",
         "vision.setCameraTransform", "vision.toggleDebugDraw"

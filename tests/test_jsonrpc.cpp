@@ -93,7 +93,7 @@ static void test_mcp_tool_list_reports_current_availability() {
     // unavailable rather than unimplemented. The distinction is the point:
     // "no session" and "no implementation" are different answers.
     ASSERT_EQ(by_name["signal_connect"]["_meta"]["didi"]["currentMode"], "unavailable");
-    ASSERT_EQ(by_name["anim_list_tracks"]["_meta"]["didi"]["currentMode"], "unimplemented");
+    ASSERT_EQ(by_name["tilemap_get_used_rect"]["_meta"]["didi"]["currentMode"], "unimplemented");
     ASSERT_EQ(by_name["scene_instantiate_node"]["_meta"]["didi"]["liveAvailable"], false);
 }
 
@@ -127,9 +127,10 @@ static void test_mcp_phase7_parent_gate_and_alias_identity() {
     // injection are live, the other twelve are still reserved. Keeping the two
     // lists separate is what stops a future delivery from quietly relaxing the
     // gate on the rest.
-    const std::array<const char*, 8> phase7_delivered = {
+    const std::array<const char*, 10> phase7_delivered = {
         "signal_list_connections", "signal_connect", "signal_disconnect", "signal_emit",
-        "runtime_read_profiler", "runtime_inject_input", "physics_raycast_query", "nav_query_path"
+        "runtime_read_profiler", "runtime_inject_input", "physics_raycast_query", "nav_query_path",
+        "anim_list_tracks", "anim_play_track"
     };
     for (const auto* name : phase7_delivered) {
         ASSERT_EQ(by_name[name]["_meta"]["didi"]["implemented"], true);
@@ -137,11 +138,10 @@ static void test_mcp_phase7_parent_gate_and_alias_identity() {
                   didi::json::array({"live"}));
     }
 
-    const std::array<const char*, 10> phase7 = {
+    const std::array<const char*, 8> phase7 = {
         "viewport_set_camera_transform", "viewport_toggle_debug_draw",
         "tilemap_set_cells", "tilemap_get_used_rect", "gridmap_set_cells",
         "physics_simulate_step", "nav_bake_mesh",
-        "anim_list_tracks", "anim_play_track",
         "runtime_get_call_stack"
     };
     for (const auto* name : phase7) {

@@ -99,6 +99,7 @@ set(CORE_SOURCES
     src/runtime/profiler_collector.cpp
     src/runtime/input_injection.cpp
     src/runtime/spatial_queries.cpp
+    src/runtime/animation_requests.cpp
     src/offline/class_reference.cpp
     src/mcp/mutation_safety.cpp
     src/tools/phase7_live_forward.cpp
@@ -234,11 +235,11 @@ set(TEST_SOURCES
     tests/test_phase7a_tile_grid.cpp
     tests/test_phase7b_physics.cpp
     tests/test_phase7b_navigation.cpp
-    tests/test_phase7b_animation.cpp
     tests/test_phase7c_input.cpp
     tests/test_phase7c_diagnostics.cpp
     tests/test_phase7c_profiler.cpp
     tests/test_phase7b_spatial.cpp
+    tests/test_phase7b_anim.cpp
 )
 
 if(DIDI_BUILD_TESTS)

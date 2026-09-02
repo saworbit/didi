@@ -12,14 +12,14 @@
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `73/83`
-**Phase 7 registrations:** `10/18` unimplemented
+**Canonical implementation:** `75/83`
+**Phase 7 registrations:** `8/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
 Task 1 completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. The gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
-The all-or-nothing 83/83 activation gate originally prevented Tasks 2-13. It was replaced by an explicit partial-delivery decision. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. `runtime_read_profiler`, `runtime_inject_input`, `physics_raycast_query` and `nav_query_path` followed once their own live trials on Godot 4.5.1, 4.6.2 and 4.7.2 passed. The other 10 names remain registered but unimplemented. The original approved plan below is preserved as the executable contract, not as evidence of delivered behavior.
+The all-or-nothing 83/83 activation gate originally prevented Tasks 2-13. It was replaced by an explicit partial-delivery decision. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. `runtime_read_profiler`, `runtime_inject_input`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks` and `anim_play_track` followed once their own live trials on Godot 4.5.1, 4.6.2 and 4.7.2 passed. The other 8 names remain registered but unimplemented. The original approved plan below is preserved as the executable contract, not as evidence of delivered behavior.
 
 Work can proceed only after governance chooses one path:
 

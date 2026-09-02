@@ -49,6 +49,9 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         , "runtime_inject_input"
         // Phase 7B reads against the root viewport's existing worlds.
         , "physics_raycast_query", "nav_query_path"
+        // Phase 7B animation: the list is a read in either session kind, the
+        // play is a game-only transient mutation.
+        , "anim_list_tracks", "anim_play_track"
     };
     static const std::unordered_set<std::string> offline = {
         "script_check_syntax", "analyze_script_diagnostics", "script_reflect_class",
