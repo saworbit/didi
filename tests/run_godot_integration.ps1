@@ -1492,6 +1492,23 @@ try {
         }
     }
 
+    # The final Phase 5 UI probe intentionally leaves a scene open. Close it
+    # through the authenticated bridge before asking the hidden editor window
+    # to exit; otherwise an unsaved-state prompt can make CloseMainWindow hang
+    # invisibly on CI even though every functional assertion has completed.
+    $editorCloseRequests = @(
+        (@{ jsonrpc = "2.0"; id = 210; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 211 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 212 "scene_close" @{ discard_unsaved = $true })
+    )
+    $rawEditorCloseResponses = $editorCloseRequests | & $didiExecutable --project $fixtureRoot
+    $editorCloseResponses = @($rawEditorCloseResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
+    Assert-True ($LASTEXITCODE -eq 0) "Didi editor-close process exited with $LASTEXITCODE."
+    Assert-True ($editorCloseResponses.Count -eq $editorCloseRequests.Count) "Editor-close batch response count mismatch."
+    $editorCloseById = @{}
+    foreach ($response in $editorCloseResponses) { $editorCloseById[[int]$response.id] = $response }
+    Assert-True ((Tool-Payload $editorCloseById[212]).closed -eq $true) "Final editor scene cleanup did not close the open scene."
+
     Assert-True (Request-ExactProcessClose $editorEnginePid $editorEngineStartedAtMs $StartupTimeoutSeconds) "Graceful close did not terminate the exact editor process."
 
     $responseTranscript = @(
@@ -1510,6 +1527,7 @@ try {
         @($pauseForShutdownResponses | ConvertTo-Json -Compress -Depth 100)
         @($shutdownStepResponses | ConvertTo-Json -Compress -Depth 100)
         @($rawFailureResponses)
+        @($rawEditorCloseResponses)
     )
     $logTranscript = @(
         Get-Content $stdoutPath, $stderrPath, $gameStdoutPath, $gameStderrPath,
