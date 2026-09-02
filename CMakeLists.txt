@@ -97,6 +97,7 @@ set(CORE_SOURCES
     src/runtime/session_client.cpp
     src/runtime/session_lock.cpp
     src/runtime/profiler_collector.cpp
+    src/runtime/input_injection.cpp
     src/offline/class_reference.cpp
     src/mcp/mutation_safety.cpp
     src/tools/phase7_live_forward.cpp

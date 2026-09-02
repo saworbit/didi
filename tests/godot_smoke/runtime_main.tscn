@@ -7,6 +7,8 @@ script = ExtResource("1_runtime")
 
 [node name="FrameCounter_0" type="Node" parent="."]
 
+[node name="InputCounter_0" type="Node" parent="."]
+
 [node name="RuntimeChild" type="Node" parent="."]
 
 [node name="Nested" type="Node" parent="RuntimeChild"]

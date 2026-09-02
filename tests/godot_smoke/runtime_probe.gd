@@ -5,6 +5,8 @@ var frame_counter: int = 0
 var detached_probe: Node
 var stop_during_step := false
 var observed_pause := false
+var input_counter: int = 0
+@onready var input_counter_node: Node = $InputCounter_0
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -41,6 +43,13 @@ func _process(_delta: float) -> void:
 	frame_counter_node.name = "FrameCounter_%d" % frame_counter
 	if stop_during_step and observed_pause:
 		get_tree().quit(0)
+
+# Observes what runtime_inject_input dispatched. parse_input_event returns
+# void, so this counter is the only proof that an event reached the game.
+func _input(event: InputEvent) -> void:
+	input_counter += 1
+	input_counter_node.name = "InputCounter_%d" % input_counter
+	set_meta("last_input_class", event.get_class())
 
 func _mark_unsafe_callback() -> void:
 	process_physics_priority += 1

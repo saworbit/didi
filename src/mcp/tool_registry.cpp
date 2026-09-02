@@ -44,6 +44,9 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // Phase 7C. Performance monitors exist only inside a running engine,
         // so there is no offline reading to fall back to.
         , "runtime_read_profiler"
+        // Phase 7C. Game only: Input.parse_input_event in the editor would
+        // drive the editor UI, which is nobody's intent.
+        , "runtime_inject_input"
     };
     static const std::unordered_set<std::string> offline = {
         "script_check_syntax", "analyze_script_diagnostics", "script_reflect_class",

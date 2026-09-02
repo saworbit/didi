@@ -6,12 +6,12 @@ The `_meta.didi` object returned by `tools/list` is authoritative. A registered 
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `70/83`
-**Phase 7 registrations:** `13/18` unimplemented
+**Canonical implementation:** `71/83`
+**Phase 7 registrations:** `12/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 70/83 canonical tools, and all 13 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 71/83 canonical tools, and all 12 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -386,12 +386,29 @@ Metrics are returned in a fixed order regardless of request order: `TIME_FPS`; `
 
 Errors: `400` for a malformed request, `423` while another collection is active on the session, `501` if the bind is missing, `504` if the session shuts down mid-window (`outcome` says whether any sample was taken). The result is capped at 256 KiB. This is a read; `dry_run` and `confirmation_token` are rejected.
 
+### `runtime_inject_input` — Live (game only)
+
+Legacy alias: `inject_input_event`, same schema, same policy. Dispatches explicit input events into a running game session through `Input.parse_input_event`, so an agent can press a button in the game it launched. Delivered under the Phase 7C contract.
+
+- `events` (`array`, 1..32, required). Each entry is one of:
+  - `{type: "action", action_name (1..128 bytes), pressed, strength? (0..1, default 1)}`
+  - `{type: "key", pressed, keycode? | physical_keycode? | unicode? (at least one), echo?, shift_pressed?, alt_pressed?, ctrl_pressed?, meta_pressed?, device? (-1..31, default -1)}`
+  - `{type: "mouse_button", button_index (1..9), pressed, double_click?, factor? (0..8, default 1), device? (-1..31, default -1)}`
+  - `{type: "joypad_button", button_index (0..21), pressed, pressure? (0..1, default 1), device (0..31)}`
+  - `{type: "joypad_motion", axis (0..5), axis_value (-1..1), device (0..31)}`
+- `target_context` (`"game_input"`, optional, the only accepted value).
+
+Every event is constructed and fully configured on the Godot main thread before the first one is dispatched, so a malformed or unconstructible event anywhere in the batch fails the whole call with nothing sent. Press and release are separate events; there is no duration, no timer and no implied release. `parse_input_event` returns void, so `dispatched_event_count` counts calls made, not events the game accepted. The response is `{dispatched_event_count, event_types, outcome: "completed", rollback: "not_available", execution_mode: "live", session_kind: "game"}`.
+
+Game sessions only. The standalone policy rejects an editor route and the extension rejects again before the bridge, so the editor UI never receives synthesized input. A mutation: `dry_run` returns the plan without dispatching; no confirmation token, because an event is neither reversible nor destructive.
+
+Errors: `400` malformed batch, `409` editor session, `413` request over 32 KiB, `501` if the pinned `Input.parse_input_event` bind is missing, `504` with `outcome: "unknown_outcome"` if dispatch fails after at least one event went out. Nothing is retried automatically.
+
 ### Reserved runtime schemas — Unimplemented
 
-- `runtime_inject_input` (legacy alias: `inject_input_event`)
 - `runtime_get_call_stack`
 
-`runtime_inject_input` is implementation-feasible. `runtime_get_call_stack` is API-blocked under the approved contract. Neither is callable.
+`runtime_get_call_stack` is API-blocked under the approved contract and is not callable.
 
 ## 9. Editor lifecycle
 
@@ -590,7 +607,7 @@ Timeout checks run before/after policy, context resolution, parse, execution, an
 
 ### Runtime debugger tools still unavailable
 
-`runtime_inject_input` and `runtime_get_call_stack` remain registered with `implemented: false`; Phase 3 does not synthesize input or debugger stacks. Profiler telemetry is `runtime_read_profiler`, delivered under Phase 7C.
+`runtime_get_call_stack` remains registered with `implemented: false`; Phase 3 does not read debugger stacks. Input injection is `runtime_inject_input` and profiler telemetry is `runtime_read_profiler`, both delivered under Phase 7C.
 
 
 ## Tool annotations and structured results
