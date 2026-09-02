@@ -18,7 +18,6 @@ TEST_CASE("Phase7Signals partial delivery contract", "[phase7][signals][contract
         ASSERT_TRUE(result.content[0].text.find("no trustworthy execution path") == std::string::npos);
     }
     for (const auto* name : {"physics_simulate_step", "nav_bake_mesh",
-                             "tilemap_set_cells", "tilemap_get_used_rect", "gridmap_set_cells",
                              "runtime_get_call_stack"}) {
         const auto* tool = registry.getTool(name); ASSERT_TRUE(tool != nullptr);
         ASSERT_TRUE(!tool->capability.implemented);

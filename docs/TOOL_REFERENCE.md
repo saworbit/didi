@@ -6,12 +6,12 @@ The `_meta.didi` object returned by `tools/list` is authoritative. A registered 
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `77/83`
-**Phase 7 registrations:** `6/18` unimplemented
+**Canonical implementation:** `80/83`
+**Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 77/83 canonical tools, and 6 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 80/83 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -276,13 +276,13 @@ Both are API-blocked under the approved contracts and are not callable.
 
 ## 6. TileMap and GridMap
 
-All three schemas are unimplemented:
+All three tools are implemented live in editor sessions:
 
 - `tilemap_set_cells`
 - `tilemap_get_used_rect`
 - `gridmap_set_cells`
 
-All three are implementation-feasible, but no production implementation started and they remain unavailable.
+Set/clear batches preflight every record and referenced TileSetAtlasSource or MeshLibrary item before creating one UndoRedo action. Duplicate coordinates/positions are rejected, no-op batches create no undo history, and `tilemap_get_used_rect` returns exact integer position, size, and end fields without mutation.
 
 ## 7. Resources and project files
 

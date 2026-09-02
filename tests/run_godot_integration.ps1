@@ -712,7 +712,7 @@ try {
         (Tool-Request 911 "signal_list_connections" @{ target_node = "/root/SmokeRoot" }),
         (Tool-Request 912 "signal_disconnect" @{ emitter_node = "/root/SmokeRoot"; signal_name = "tree_entered"; target_node = "/root/SmokeRoot/Subject"; target_method = "notify_property_list_changed" }),
         (Tool-Request 913 "signal_list_connections" @{ target_node = "/root/SmokeRoot" }),
-        # A still-reserved Phase 7 name, so the honest-failure check keeps a subject.
+        # Wrong-class rejection for the delivered TileMapLayer read.
         (Tool-Request 914 "tilemap_get_used_rect" @{ tilemap_path = "/root/SmokeRoot" }),
         # Phase 7C. A bounded window of Performance samples, collected from the
         # frame callback. Five samples over 200 ms is long enough to span
@@ -740,6 +740,20 @@ try {
         (Tool-Request 953 "viewport_toggle_debug_draw" @{ navigation_mesh = $true }),
         (Tool-Request 954 "viewport_toggle_debug_draw" @{ collision_shapes = $false; navigation_mesh = $false }),
         (Tool-Request 955 "viewport_set_camera_transform" @{ camera_path = "/root/SmokeRoot/Subject"; position = @{ x = 0; y = 0; z = 0 } }),
+        # Phase 7A tile/grid batches: set, reread/no-op, invalid-last preflight,
+        # and clear. The invalid final record must leave the valid first record
+        # unapplied, which the following read/no-op proves.
+        (Tool-Request 956 "tilemap_get_used_rect" @{ tilemap_path = "/root/SmokeRoot/TileLayer" }),
+        (Tool-Request 957 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/TileLayer"; cells = @(@{ coords = @(1, 2); source_id = 0; atlas_coords = @(0, 0) }) }),
+        (Tool-Request 958 "tilemap_get_used_rect" @{ tilemap_path = "/root/SmokeRoot/TileLayer" }),
+        (Tool-Request 959 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/TileLayer"; cells = @(@{ coords = @(3, 4); source_id = 0; atlas_coords = @(0, 0) }, @{ coords = @(5, 6); source_id = 999; atlas_coords = @(0, 0) }) }),
+        (Tool-Request 960 "tilemap_get_used_rect" @{ tilemap_path = "/root/SmokeRoot/TileLayer" }),
+        (Tool-Request 961 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/TileLayer"; cells = @(@{ coords = @(1, 2); erase = $true }) }),
+        (Tool-Request 962 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(1, 2, 3); item = 0 }) }),
+        (Tool-Request 963 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(1, 2, 3); item = 0 }) }),
+        (Tool-Request 964 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(4, 5, 6); item = 0 }, @{ position = @(7, 8, 9); item = 999 }) }),
+        (Tool-Request 965 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(4, 5, 6); item = -1 }) }),
+        (Tool-Request 966 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(1, 2, 3); item = -1 }) }),
         (Tool-Request 930 "audio_list_buses" @{}),
         (Tool-Request 931 "audio_configure_bus" @{ bus = "Master"; volume_db = -12.5; mute = $true }),
         (Tool-Request 932 "audio_list_buses" @{}),
@@ -861,7 +875,7 @@ try {
     $scalarEval = Tool-Payload $byId[130]
     Assert-True ($scalarEval.value -eq 7 -and $scalarEval.value_type -eq "int") "Editor scalar expression was incorrect."
     Assert-True ($scalarEval.context_node -eq "/root/SmokeRoot/Subject" -and $scalarEval.session_kind -eq "editor") "Editor expression context or provenance was incorrect."
-    Assert-True ((Tool-Payload $byId[131]).value -eq 4) "Editor default-context child count was incorrect."
+    Assert-True ((Tool-Payload $byId[131]).value -eq 6) "Editor default-context child count was incorrect."
     Assert-True (@((Tool-Payload $byId[132]).value).Count -eq 3) "Editor expression array was not preserved."
     Assert-True ((Tool-Payload $byId[133]).value.answer -eq 42) "Editor expression dictionary was not preserved."
     $editorVector = Tool-Payload $byId[134]
@@ -1003,6 +1017,25 @@ try {
     Assert-True ($restoredDebug.observed.collision_shapes -eq $false -and $restoredDebug.observed.navigation_mesh -eq $false) "Debug hints were not explicitly restored."
     Assert-True $byId[955].result.isError "viewport_set_camera_transform accepted a non-Camera3D node."
 
+    $emptyTileRect = Tool-Payload $byId[956]
+    Assert-True ($emptyTileRect.size.x -eq 0 -and $emptyTileRect.size.y -eq 0) "TileMapLayer fixture did not start empty."
+    $tileSet = Tool-Payload $byId[957]
+    Assert-True ($tileSet.changed_cells -eq 1 -and $tileSet.undo_redo_registered -eq $true -and $tileSet.rollback -eq "undo_redo") "tilemap_set_cells did not publish one undoable change."
+    $usedTileRect = Tool-Payload $byId[958]
+    Assert-True ($usedTileRect.position.x -eq 1 -and $usedTileRect.position.y -eq 2 -and $usedTileRect.size.x -eq 1 -and $usedTileRect.size.y -eq 1 -and $usedTileRect.end.x -eq 2 -and $usedTileRect.end.y -eq 3) "tilemap_get_used_rect returned the wrong integer rectangle."
+    Assert-True $byId[959].result.isError "TileMapLayer batch accepted an invalid final source."
+    $afterInvalidTile = Tool-Payload $byId[960]
+    Assert-True ($afterInvalidTile.position.x -eq 1 -and $afterInvalidTile.position.y -eq 2 -and $afterInvalidTile.size.x -eq 1 -and $afterInvalidTile.size.y -eq 1) "Invalid-last TileMapLayer batch partially mutated the scene."
+    Assert-True ((Tool-Payload $byId[961]).changed_cells -eq 1) "TileMapLayer erase did not remove the fixture cell."
+    $gridSet = Tool-Payload $byId[962]
+    Assert-True ($gridSet.changed_cells -eq 1 -and $gridSet.undo_redo_registered -eq $true) "gridmap_set_cells did not publish one undoable change."
+    $gridNoop = Tool-Payload $byId[963]
+    Assert-True ($gridNoop.changed_cells -eq 0 -and $gridNoop.unchanged_cells -eq 1 -and $gridNoop.undo_redo_registered -eq $false -and $gridNoop.rollback -eq "not_required") "GridMap no-op created undo history or reported a change."
+    Assert-True $byId[964].result.isError "GridMap batch accepted an invalid final item."
+    $gridPartialProbe = Tool-Payload $byId[965]
+    Assert-True ($gridPartialProbe.changed_cells -eq 0 -and $gridPartialProbe.unchanged_cells -eq 1) "Invalid-last GridMap batch partially mutated the scene."
+    Assert-True ((Tool-Payload $byId[966]).changed_cells -eq 1) "GridMap clear did not remove the fixture cell."
+
     $phase5Requests = @(
         (@{ jsonrpc = "2.0"; id = 500; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
         (Tool-Request 501 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
@@ -1113,8 +1146,7 @@ try {
     Assert-True $byId[935].result.isError "Configuring a bus that does not exist reported success."
     Assert-True $byId[936].result.isError "Configuring a bus with nothing to change reported success."
 
-    Assert-True $byId[914].result.isError "Unimplemented tool returned fake success."
-    Assert-True ($byId[914].result.content[0].text -match "no trustworthy execution path") "Unimplemented tool error is not actionable."
+    Assert-True $byId[914].result.isError "tilemap_get_used_rect accepted a non-TileMapLayer node."
 
     # The profiler window came from the running editor, in contract order, with
     # every sample accounted for. Zero readings are expected in an idle editor
