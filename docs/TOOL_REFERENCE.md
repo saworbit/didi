@@ -6,12 +6,12 @@ The `_meta.didi` object returned by `tools/list` is authoritative. A registered 
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `69/83`
-**Phase 7 registrations:** `14/18` unimplemented
+**Canonical implementation:** `70/83`
+**Phase 7 registrations:** `13/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 69/83 canonical tools, and all 14 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 70/83 canonical tools, and all 13 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -372,13 +372,26 @@ Launches a separate Godot process, optionally headless, captures stdout/stderr, 
 - `extra_args` (`array` of strings, optional; unsafe shell metacharacters are rejected).
 - Legacy alias: `execute_test_session`.
 
+### `runtime_read_profiler` — Live (editor or game)
+
+Samples `Performance` monitors over a bounded window and returns aggregates, so a stutter can be seen across time rather than in one frame. Delivered under the Phase 7C contract.
+
+- `duration_ms` (`integer`, `0`..`5000`, default `1000`).
+- `sample_count` (`integer`, `1`..`120`, default `30`). `duration_ms: 0` requires `sample_count: 1`.
+- `categories` (`array`, 1..4 unique of `frame`, `process`, `physics`, `render`; default all four).
+
+Sampling runs on the Godot main-thread frame callback, never on the IPC worker, and the first sample lands on the callback after the request is dequeued. For `N > 1` the target offsets are `round(i * duration_ms / (N - 1))` and each is collected on the first callback at or after it, so a slow frame that crosses several offsets records the same reading for each rather than stretching the window.
+
+Metrics are returned in a fixed order regardless of request order: `TIME_FPS`; `TIME_PROCESS`, `TIME_PHYSICS_PROCESS`; `PHYSICS_2D_ACTIVE_OBJECTS`, `PHYSICS_2D_COLLISION_PAIRS`, `PHYSICS_3D_ACTIVE_OBJECTS`, `PHYSICS_3D_COLLISION_PAIRS`; `RENDER_TOTAL_OBJECTS_IN_FRAME`, `RENDER_TOTAL_PRIMITIVES_IN_FRAME`, `RENDER_TOTAL_DRAW_CALLS_IN_FRAME`. Each metric is `{name, unit, available, availability_basis, valid_samples, invalid_samples, min, max, mean, last}`. `available` is true because the pinned `Performance.get_monitor` bind exists; it is never inferred from a value, and zero is a valid sample. A non-finite reading counts as invalid; with no valid sample the four statistics are explicit `null`. The response also carries `duration_ms`, `actual_elapsed_ms`, `samples_requested`, `samples_collected`, `execution_mode: "live"`, and `session_kind`.
+
+Errors: `400` for a malformed request, `423` while another collection is active on the session, `501` if the bind is missing, `504` if the session shuts down mid-window (`outcome` says whether any sample was taken). The result is capped at 256 KiB. This is a read; `dry_run` and `confirmation_token` are rejected.
+
 ### Reserved runtime schemas — Unimplemented
 
 - `runtime_inject_input` (legacy alias: `inject_input_event`)
 - `runtime_get_call_stack`
-- `runtime_read_profiler`
 
-`runtime_inject_input` and `runtime_read_profiler` are implementation-feasible. `runtime_get_call_stack` is API-blocked under the approved contract. None is callable.
+`runtime_inject_input` is implementation-feasible. `runtime_get_call_stack` is API-blocked under the approved contract. Neither is callable.
 
 ## 9. Editor lifecycle
 
@@ -577,7 +590,7 @@ Timeout checks run before/after policy, context resolution, parse, execution, an
 
 ### Runtime debugger tools still unavailable
 
-`runtime_inject_input`, `runtime_get_call_stack`, and `runtime_read_profiler` remain registered with `implemented: false`; Phase 3 does not synthesize input, debugger stacks, or profiler telemetry.
+`runtime_inject_input` and `runtime_get_call_stack` remain registered with `implemented: false`; Phase 3 does not synthesize input or debugger stacks. Profiler telemetry is `runtime_read_profiler`, delivered under Phase 7C.
 
 
 ## Tool annotations and structured results

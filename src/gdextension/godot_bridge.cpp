@@ -4230,5 +4230,39 @@ Result<std::string> resolveGodotProjectPath() {
     return stringFromVariant(globalized.value(), GDEXTENSION_VARIANT_TYPE_STRING);
 }
 
+// runtime.readProfiler reads these through Performance.get_monitor. The bind
+// hash and the monitor enum values are the ones the Phase 7 feasibility gate
+// pinned on Godot 4.5.1 and 4.7.2; availability is exactly that bind existing.
+// A zero sample is a legitimate reading, so nothing here infers absence from
+// a value.
+namespace {
+constexpr int64_t kPerformanceGetMonitorHash = 1943275655LL;
+} // namespace
+
+Result<void> GodotBridge::preflightPerformanceMonitors() {
+    auto performance = singleton("Performance");
+    if (performance.isErr()) return performance.error();
+    return requireMethodBind("Performance", "get_monitor", kPerformanceGetMonitorHash);
+}
+
+Result<std::vector<double>> GodotBridge::samplePerformanceMonitors(
+    const std::vector<int64_t>& monitors) {
+    auto performance = singleton("Performance");
+    if (performance.isErr()) return performance.error();
+    std::vector<double> values;
+    values.reserve(monitors.size());
+    for (const auto monitor : monitors) {
+        auto argument = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, monitor);
+        if (argument.isErr()) return argument.error();
+        auto reading = callObject(performance.value(), "Performance", "get_monitor",
+                                  kPerformanceGetMonitorHash, {&argument.value()});
+        if (reading.isErr()) return reading.error();
+        auto value = scalarFromVariant<double>(reading.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+        if (value.isErr()) return value.error();
+        values.push_back(value.value());
+    }
+    return values;
+}
+
 } // namespace godot
 } // namespace didi

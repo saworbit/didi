@@ -41,6 +41,9 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // Live only on purpose. Writing the layout file would change what the
         // project loads next time and not what anyone is listening to now.
         , "audio_configure_bus"
+        // Phase 7C. Performance monitors exist only inside a running engine,
+        // so there is no offline reading to fall back to.
+        , "runtime_read_profiler"
     };
     static const std::unordered_set<std::string> offline = {
         "script_check_syntax", "analyze_script_diagnostics", "script_reflect_class",

@@ -118,6 +118,7 @@ void EditorHook::processQueue() {
     if (m_pumping) {
         processRuntimeStepFrame();
         processAssetReimportFrame();
+        processProfilerFrame();
         return;
     }
     m_pumping = true;
@@ -158,6 +159,10 @@ void EditorHook::processQueue() {
         try {
             if (cmd.method == "asset.reimport") {
                 scheduleAssetReimport(cmd.params, cmd.response_promise, cmd.control);
+                continue;
+            }
+            if (cmd.method == "runtime.readProfiler") {
+                scheduleProfilerRead(cmd.params, cmd.response_promise, cmd.control);
                 continue;
             }
             if (cmd.method == "runtime.step") {
@@ -202,7 +207,118 @@ void EditorHook::processQueue() {
     }
     processRuntimeStepFrame();
     processAssetReimportFrame();
+    processProfilerFrame();
     processPendingQuitFrame();
+}
+
+void EditorHook::scheduleProfilerRead(
+    const json& params,
+    const std::shared_ptr<std::promise<json>>& promise,
+    const std::shared_ptr<CommandControl>& control) {
+    auto request = runtime::parseProfilerRequest(params);
+    if (request.isErr()) {
+        control->markCompleted();
+        fulfillCommand(promise, control,
+                       {{"error", {{"code", request.error().code},
+                                    {"message", request.error().message}}}});
+        return;
+    }
+    // Availability is the pinned bind existing, checked before any state is
+    // published. A zero reading later is a valid sample, not a missing API.
+    auto preflight = GodotBridge::instance().preflightPerformanceMonitors();
+    if (preflight.isErr()) {
+        control->markCompleted();
+        fulfillCommand(promise, control,
+                       {{"error", {{"code", 501},
+                                    {"message", "Performance.get_monitor is unavailable: " +
+                                                    preflight.error().message}}}});
+        return;
+    }
+    int sample_count = 0;
+    int duration_ms = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_profilerMutex);
+        if (m_pendingProfilerRead.has_value()) {
+            control->markCompleted();
+            fulfillCommand(promise, control,
+                           {{"error", {{"code", 423},
+                                        {"message", "A profiler collection is already active"},
+                                        {"data", {{"retryable", true}}}}}});
+            return;
+        }
+        sample_count = request.value().sample_count;
+        duration_ms = request.value().duration_ms;
+        m_pendingProfilerRead = PendingProfilerRead{
+            runtime::ProfilerCollector(std::move(request.value())),
+            std::chrono::steady_clock::now(), true, promise, control};
+    }
+    DIDI_LOG_INFO("EDITOR_HOOK", "Scheduled profiler collection of ", sample_count,
+                  " sample(s) over ", duration_ms, " ms");
+}
+
+void EditorHook::processProfilerFrame() {
+    // The engine call happens outside the lock. Performance.get_monitor does
+    // not re-enter the pump today, but the step and reimport paths keep the
+    // same discipline for the same reason: a nested callback that reaches this
+    // function must never find the mutex held by its own thread.
+    std::vector<int64_t> monitors;
+    std::shared_ptr<CommandControl> sampling_for;
+    int64_t elapsed = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_profilerMutex);
+        if (!m_pendingProfilerRead.has_value()) return;
+        auto& pending = *m_pendingProfilerRead;
+        if (pending.awaiting_next_callback) {
+            // The command was dequeued this callback. The first sample belongs
+            // to the next one, so the window starts at a frame boundary.
+            pending.awaiting_next_callback = false;
+            pending.started_at = std::chrono::steady_clock::now();
+            return;
+        }
+        elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now() - pending.started_at)
+                      .count();
+        if (!pending.collector.due(elapsed)) return;
+        monitors = pending.collector.monitors();
+        sampling_for = pending.control;
+    }
+
+    auto reading = GodotBridge::instance().samplePerformanceMonitors(monitors);
+
+    std::optional<PendingProfilerRead> completed;
+    json failure;
+    {
+        std::lock_guard<std::mutex> lock(m_profilerMutex);
+        // Shutdown may have taken the read while the engine was being asked.
+        if (!m_pendingProfilerRead.has_value() ||
+            m_pendingProfilerRead->control != sampling_for) {
+            return;
+        }
+        auto& pending = *m_pendingProfilerRead;
+        if (reading.isErr()) {
+            failure = {{"error", {{"code", reading.error().code},
+                                  {"message", reading.error().message},
+                                  {"data", {{"outcome", pending.collector.started()
+                                                            ? "unknown_outcome"
+                                                            : "not_started"},
+                                            {"retryable", false}}}}}};
+        } else if (!pending.collector.observe(elapsed, reading.value())) {
+            return;
+        }
+        completed = std::move(m_pendingProfilerRead);
+        m_pendingProfilerRead.reset();
+    }
+
+    completed->control->markCompleted();
+    if (!failure.is_null()) {
+        fulfillCommand(completed->response_promise, completed->control, std::move(failure));
+        return;
+    }
+    auto response = completed->collector.response();
+    response["execution_mode"] = "live";
+    response["is_live_engine"] = true;
+    response["session_kind"] = sessionKindName(m_sessionKind);
+    fulfillCommand(completed->response_promise, completed->control, std::move(response));
 }
 
 void EditorHook::requestSceneTreeQuit(int64_t exit_code) {
@@ -502,6 +618,25 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
         fulfillCommand(active_reimport->response_promise, active_reimport->control,
                        {{"error", {{"code", 503}, {"message", reason}}}});
     }
+    std::optional<PendingProfilerRead> active_profiler;
+    {
+        std::lock_guard<std::mutex> lock(m_profilerMutex);
+        if (m_pendingProfilerRead.has_value()) {
+            active_profiler = std::move(m_pendingProfilerRead);
+            m_pendingProfilerRead.reset();
+        }
+    }
+    // Taking the pending read out under the lock is what stops a late frame
+    // callback from publishing a partial window after shutdown began.
+    if (active_profiler.has_value() && active_profiler->control &&
+        active_profiler->control->tryCancelRunning()) {
+        fulfillCommand(active_profiler->response_promise, active_profiler->control,
+                       {{"error", {{"code", 504}, {"message", reason},
+                                    {"data", {{"outcome", active_profiler->collector.started()
+                                                              ? "unknown_outcome"
+                                                              : "not_started"},
+                                              {"retryable", false}}}}}});
+    }
 }
 
 json EditorHook::executeOnMainThread(const std::string& method, const json& params) {
@@ -620,7 +755,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "scene.mutate", "physics.raycast", "physics.simulateStep", "nav.bakeMesh",
         "nav.queryPath", "anim.listTracks", "anim.playTrack", "tilemap.setCells",
         "tilemap.getUsedRect", "gridmap.setCells", "asset.instantiate",
-        "runtime.injectInput", "runtime.getCallStack", "runtime.readProfiler",
+        "runtime.injectInput", "runtime.getCallStack",
         "vision.setCameraTransform", "vision.toggleDebugDraw"
     };
     if (registered_but_unimplemented.count(method)) {
@@ -684,6 +819,11 @@ bool EditorHookTestAccess::hasPendingRuntimeStep(EditorHook& hook) {
 bool EditorHookTestAccess::hasPendingAssetReimport(EditorHook& hook) {
     std::lock_guard<std::recursive_mutex> lock(hook.m_reimportMutex);
     return hook.m_pendingAssetReimport.has_value();
+}
+
+bool EditorHookTestAccess::hasPendingProfilerRead(EditorHook& hook) {
+    std::lock_guard<std::mutex> lock(hook.m_profilerMutex);
+    return hook.m_pendingProfilerRead.has_value();
 }
 
 bool EditorHookTestAccess::pumping(const EditorHook& hook) {

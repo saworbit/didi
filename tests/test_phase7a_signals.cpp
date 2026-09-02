@@ -21,8 +21,7 @@ TEST_CASE("Phase7Signals partial delivery contract", "[phase7][signals][contract
                              "nav_query_path", "anim_list_tracks", "anim_play_track",
                              "tilemap_set_cells", "tilemap_get_used_rect", "gridmap_set_cells",
                              "viewport_set_camera_transform", "viewport_toggle_debug_draw",
-                             "runtime_inject_input", "runtime_get_call_stack",
-                             "runtime_read_profiler"}) {
+                             "runtime_inject_input", "runtime_get_call_stack"}) {
         const auto* tool = registry.getTool(name); ASSERT_TRUE(tool != nullptr);
         ASSERT_TRUE(!tool->capability.implemented);
         const auto result = registry.callTool(name, didi::json::object()); ASSERT_TRUE(result.isError);

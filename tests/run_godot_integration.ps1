@@ -342,6 +342,7 @@ try {
         (Tool-Request 377 "runtime_detach_session" @{}),
         (Tool-Request 378 "runtime_attach_session" @{ session_id = $gameSession.session_id }),
         (Tool-Request 302 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 2 }),
+        (Tool-Request 390 "runtime_read_profiler" @{ duration_ms = 100; sample_count = 3; categories = @("physics", "frame") }),
         (Tool-Request 380 "runtime_read_output" @{ limit = 500 }),
         (Tool-Request 303 "runtime_set_paused" @{ paused = $true }),
         (Tool-Request 304 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 2 }),
@@ -448,6 +449,13 @@ try {
     Assert-True ($runtimeTree.scene_tree.path -eq "/root/RuntimeRoot") "Runtime tree root was not canonical."
     Assert-True ($runtimeTree.scene_tree.child_count -eq 2) "Runtime tree did not report child_count."
     Assert-True ($runtimeTree.node_count -eq 5 -and $runtimeTree.truncated) "Runtime tree bounds metadata did not report the deliberately large truncated subtree."
+    # The same window from a game session, with request order ignored: frame
+    # precedes physics in the output whatever the caller wrote.
+    $gameProfile = Tool-Payload $runtimeById[390]
+    Assert-True ($gameProfile.execution_mode -eq "live" -and $gameProfile.session_kind -eq "game") "runtime_read_profiler did not run against the game session."
+    Assert-True ($gameProfile.samples_collected -eq 3) "runtime_read_profiler in the game did not collect every sample."
+    $gameMetrics = @($gameProfile.metrics)
+    Assert-True ($gameMetrics.Count -eq 5 -and $gameMetrics[0].name -eq "TIME_FPS" -and $gameMetrics[1].name -eq "PHYSICS_2D_ACTIVE_OBJECTS") "runtime_read_profiler game window is not in contract order."
     Assert-True ((Tool-Payload $runtimeById[303]).paused -eq $true) "Game pause was not verified."
     $beforeStep = Runtime-FrameCounter (Tool-Payload $runtimeById[304])
     $step = Tool-Payload $runtimeById[305]
@@ -602,6 +610,12 @@ try {
         (Tool-Request 913 "signal_list_connections" @{ target_node = "/root/SmokeRoot" }),
         # A still-reserved Phase 7 name, so the honest-failure check keeps a subject.
         (Tool-Request 914 "physics_raycast_query" @{ from = @(0, 0, 0); to = @(0, 0, 1) }),
+        # Phase 7C. A bounded window of Performance samples, collected from the
+        # frame callback. Five samples over 200 ms is long enough to span
+        # several editor frames and short enough not to slow the harness.
+        (Tool-Request 940 "runtime_read_profiler" @{ duration_ms = 200; sample_count = 5 }),
+        (Tool-Request 941 "runtime_read_profiler" @{ duration_ms = 0; sample_count = 2 }),
+        (Tool-Request 942 "runtime_read_profiler" @{ categories = @("gpu") }),
         (Tool-Request 930 "audio_list_buses" @{}),
         (Tool-Request 931 "audio_configure_bus" @{ bus = "Master"; volume_db = -12.5; mute = $true }),
         (Tool-Request 932 "audio_list_buses" @{}),
@@ -959,6 +973,31 @@ try {
 
     Assert-True $byId[914].result.isError "Unimplemented tool returned fake success."
     Assert-True ($byId[914].result.content[0].text -match "no trustworthy execution path") "Unimplemented tool error is not actionable."
+
+    # The profiler window came from the running editor, in contract order, with
+    # every sample accounted for. Zero readings are expected in an idle editor
+    # and must not be reported as unavailable.
+    $profile = Tool-Payload $byId[940]
+    Assert-True ($profile.execution_mode -eq "live") "runtime_read_profiler did not run live."
+    Assert-True ($profile.session_kind -eq "editor") "runtime_read_profiler did not report the editor session."
+    Assert-True ($profile.samples_requested -eq 5 -and $profile.samples_collected -eq 5) "runtime_read_profiler did not collect every requested sample."
+    Assert-True ($profile.actual_elapsed_ms -ge 200) "runtime_read_profiler finished before the requested window elapsed."
+    $profileMetrics = @($profile.metrics)
+    Assert-True ($profileMetrics.Count -eq 10) "runtime_read_profiler did not return all ten metrics."
+    $expectedOrder = @("TIME_FPS", "TIME_PROCESS", "TIME_PHYSICS_PROCESS", "PHYSICS_2D_ACTIVE_OBJECTS", "PHYSICS_2D_COLLISION_PAIRS", "PHYSICS_3D_ACTIVE_OBJECTS", "PHYSICS_3D_COLLISION_PAIRS", "RENDER_TOTAL_OBJECTS_IN_FRAME", "RENDER_TOTAL_PRIMITIVES_IN_FRAME", "RENDER_TOTAL_DRAW_CALLS_IN_FRAME")
+    for ($i = 0; $i -lt 10; $i++) {
+        $metric = $profileMetrics[$i]
+        Assert-True ($metric.name -eq $expectedOrder[$i]) "runtime_read_profiler metric $i is $($metric.name), expected $($expectedOrder[$i])."
+        Assert-True ($metric.available -eq $true -and $metric.availability_basis -eq "api_bind_and_enum") "runtime_read_profiler metric $($metric.name) is not marked available by bind and enum."
+        Assert-True (($metric.valid_samples + $metric.invalid_samples) -eq 5) "runtime_read_profiler metric $($metric.name) lost samples."
+        Assert-True ($metric.valid_samples -eq 5) "runtime_read_profiler metric $($metric.name) reported non-finite readings from a live engine."
+        Assert-True ($null -ne $metric.min -and $null -ne $metric.max -and $null -ne $metric.mean -and $null -ne $metric.last) "runtime_read_profiler metric $($metric.name) has null statistics despite valid samples."
+        Assert-True ($metric.min -le $metric.mean -and $metric.mean -le $metric.max) "runtime_read_profiler metric $($metric.name) statistics are inconsistent."
+    }
+    Assert-True ($profileMetrics[0].max -gt 0) "A running editor reported zero FPS for the whole window."
+    Assert-True $byId[941].result.isError "runtime_read_profiler accepted duration 0 with more than one sample."
+    Assert-True ($byId[941].result.content[0].text -match "sample_count 1") "runtime_read_profiler duration-zero rejection is not actionable."
+    Assert-True $byId[942].result.isError "runtime_read_profiler accepted an unknown category."
     Assert-True $byId[21].result.isError "Missing node lookup returned fake success."
     Assert-True $byId[22].result.isError "Unknown property lookup returned fake null success."
     Assert-True $byId[23].result.isError "Incompatible scalar property write returned fake success."
