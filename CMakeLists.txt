@@ -96,6 +96,7 @@ set(CORE_SOURCES
     src/mcp/prompt_registry.cpp
     src/runtime/session_client.cpp
     src/runtime/session_lock.cpp
+    src/runtime/profiler_collector.cpp
     src/offline/class_reference.cpp
     src/mcp/mutation_safety.cpp
     src/tools/phase7_live_forward.cpp
@@ -234,6 +235,7 @@ set(TEST_SOURCES
     tests/test_phase7b_animation.cpp
     tests/test_phase7c_input.cpp
     tests/test_phase7c_diagnostics.cpp
+    tests/test_phase7c_profiler.cpp
 )
 
 if(DIDI_BUILD_TESTS)

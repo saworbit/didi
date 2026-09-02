@@ -136,12 +136,12 @@ The native red-team contract covers invalid roots, project-key isolation, lock e
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `69/83`
-**Phase 7 registrations:** `14/18` unimplemented
+**Canonical implementation:** `70/83`
+**Phase 7 registrations:** `13/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-**Objective:** The implementation remains 69/83 canonical tools, and all 14 Phase 7 names remain registered but unimplemented. The approved objective was atomic 83/83 without adding public tool names.
+**Objective:** The implementation remains 70/83 canonical tools, and all 13 Phase 7 names remain registered but unimplemented. The approved objective was atomic 83/83 without adding public tool names.
 
 **Feasibility result:** The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (15/18) are implementation-feasible: `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `runtime_inject_input`, and `runtime_read_profiler`.
 
@@ -197,7 +197,7 @@ status and every published count move together.
 **Delivery slices:**
 - 7A: signals, viewport camera/debug, and tile/grid operations (9 tools)
 - 7B: physics, navigation, and animation operations (6 tools)
-- 7C: input injection, call-stack inspection, and profiling (3 tools)
+- 7C: input injection, call-stack inspection, and profiling (3 tools; `runtime_read_profiler` delivered)
 
 **Exclusions:** No public tool names are added. No tool claims arbitrary debugger control or engine-output streaming beyond implemented Godot APIs.
 
@@ -297,7 +297,7 @@ These are missing capabilities that an AI agent actually requires to complete fu
 | **Phase 4 (COMPLETE)** | **Symbol Search, Asset Reimport, Viewport Diffing & Isolation** | Verified bounded search and reversible live visual feedback against Godot 4.5.1. |
 | **Phase 5 (COMPLETE)** | **C# / Shaders, Project Export, GridMap MeshLibrary, UI Hit-Testing** | Verified bounded diagnostics, guarded delivery, deterministic asset conversion, and live UI inspection against Godot 4.5.1. |
 | **Phase 6 (COMPLETE)** | **Project Isolation, Session Locks, Dry-Run, Confirm-Before-Write** | Verified fail-closed project selection, project-keyed endpoints, one-client leases, and context-bound single-use confirmations. |
-| **Phase 7 (PARTIAL_DELIVERY)** | **Canonical Surface Completion** | 15/18 implementation-feasible and 3/18 API-blocked; the four signal names are delivered and 14 remain unimplemented. |
+| **Phase 7 (PARTIAL_DELIVERY)** | **Canonical Surface Completion** | 15/18 implementation-feasible and 3/18 API-blocked; the four signal names and `runtime_read_profiler` are delivered and 13 remain unimplemented. |
 
 ---
 

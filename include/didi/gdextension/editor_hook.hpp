@@ -4,6 +4,7 @@
 #include "didi/common/json.hpp"
 #include "didi/gdextension/runtime_log.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
+#include "didi/runtime/profiler_collector.hpp"
 #include <queue>
 #include <mutex>
 #include <future>
@@ -130,6 +131,12 @@ public:
     void scheduleAssetReimport(const json& params,
                                const std::shared_ptr<std::promise<json>>& promise,
                                const std::shared_ptr<CommandControl>& control);
+    // Starts a callback-driven Performance sample window. The command returns
+    // on the callback that collects the last sample; nothing blocks the main
+    // thread, and only one collector runs per session.
+    void scheduleProfilerRead(const json& params,
+                              const std::shared_ptr<std::promise<json>>& promise,
+                              const std::shared_ptr<CommandControl>& control);
 
     // Asks for SceneTree.quit on a later frame instead of right now. runtime.stop
     // has to return its response over IPC before the main loop is allowed to
@@ -156,6 +163,7 @@ private:
     json executeOnMainThread(const std::string& method, const json& params);
     void processRuntimeStepFrame();
     void processAssetReimportFrame();
+    void processProfilerFrame();
     void processPendingQuitFrame();
 
     struct PendingRuntimeStep {
@@ -173,6 +181,14 @@ private:
         std::shared_ptr<CommandControl> control;
     };
 
+    struct PendingProfilerRead {
+        runtime::ProfilerCollector collector;
+        std::chrono::steady_clock::time_point started_at;
+        bool awaiting_next_callback{true};
+        std::shared_ptr<std::promise<json>> response_promise;
+        std::shared_ptr<CommandControl> control;
+    };
+
     std::queue<EngineCommand> m_commandQueue;
     std::mutex m_queueMutex;
     std::mutex m_stepMutex;
@@ -183,6 +199,8 @@ private:
     RuntimeStepGate m_runtimeStepGate;
     std::optional<PendingRuntimeStep> m_pendingRuntimeStep;
     std::optional<PendingAssetReimport> m_pendingAssetReimport;
+    std::mutex m_profilerMutex;
+    std::optional<PendingProfilerRead> m_pendingProfilerRead;
     std::optional<runtime::SessionKind> m_sessionKind;
     // Main-thread only. Set while processQueue is dequeuing, so a nested pump
     // triggered from inside a command observes progress without starting work.
@@ -207,6 +225,7 @@ public:
     static bool runtimeStepActive(EditorHook& hook);
     static bool hasPendingRuntimeStep(EditorHook& hook);
     static bool hasPendingAssetReimport(EditorHook& hook);
+    static bool hasPendingProfilerRead(EditorHook& hook);
     static bool pumping(const EditorHook& hook);
     static void setPumping(EditorHook& hook, bool pumping);
     static bool hasPendingQuit(const EditorHook& hook);

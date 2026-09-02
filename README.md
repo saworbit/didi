@@ -85,7 +85,7 @@ The current documented release is **1.4.0**.
 
 ## 🛠️ Protocol Surface (78 Canonical Tools)
 
-The 83 canonical names are the stable protocol surface, with 10 additional legacy registrations (93 total). The implementation remains 69/83 canonical tools, and all 14 Phase 7 names remain registered but unimplemented. Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind` from `tools/list`. `editorConnected` is true only for an editor route, while `liveAvailable` also requires that the selected editor/game kind is allowed for that exact definition. Phase 6 keeps the surface stable while requiring an explicit Godot project, adding project-keyed endpoints and one-client runtime locks, and exposing dry-run/confirmation controls on mutations. Every definition also carries specification `annotations`: `readOnlyHint` is derived from the same classification that drives `dry_run`, so the read-only set is safe for a client to auto-approve, and successful JSON results carry `structuredContent` alongside the text block.
+The 83 canonical names are the stable protocol surface, with 10 additional legacy registrations (93 total). The implementation remains 70/83 canonical tools, and all 13 Phase 7 names remain registered but unimplemented. Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind` from `tools/list`. `editorConnected` is true only for an editor route, while `liveAvailable` also requires that the selected editor/game kind is allowed for that exact definition. Phase 6 keeps the surface stable while requiring an explicit Godot project, adding project-keyed endpoints and one-client runtime locks, and exposing dry-run/confirmation controls on mutations. Every definition also carries specification `annotations`: `readOnlyHint` is derived from the same classification that drives `dry_run`, so the read-only set is safe for a client to auto-approve, and successful JSON results carry `structuredContent` alongside the text block.
 
 | Domain | Key Tools | Current execution |
 | :--- | :--- | :--- |
@@ -96,7 +96,7 @@ The 83 canonical names are the stable protocol surface, with 10 additional legac
 | **5. Physics & Navigation (6)** | `physics_raycast_query`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track` | Unimplemented. |
 | **6. Tilemaps & GridMaps (3)** | `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells` | Unimplemented. |
 | **7. Resources & Files (9)** | `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map`, `project_audit_assets`, `project_analyze_impact`, `project_search_text`, `project_search_symbols`, `asset_reimport` | File/resource inspection and bounded literal/lexical search are offline; source-asset reimport is editor-only and waits for stable idle. |
-| **8. Runtime & Debug (4)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Process launch is implemented offline; input, call stack, and profiler tools are unimplemented. |
+| **8. Runtime & Debug (4)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Process launch is implemented offline; the profiler samples `Performance` monitors live over a bounded window. Input injection and call stack remain unimplemented. |
 | **9. Editor Lifecycle (4)** | `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Implemented live. Reload requests a resource-filesystem rescan. |
 | **10. Project Wiring (18)** | Script attach/detach; autoload, InputMap, and setting management; groups; scene create/open/close/pack | Implemented live with UndoRedo, ProjectSettings persistence, typed events, overwrite guards, and normalized `res://` paths. |
 | **11. Runtime Sessions (10)** | `runtime_list_sessions`, attach/detach/get, logs, pause/step/stop/tree, `eval_gdscript` | Four local session-management tools plus six live tools. Attachment is deterministic or explicit and always authenticated; evaluation is a strict read-only expression subset, not arbitrary GDScript. |
@@ -132,12 +132,12 @@ Didi now refuses startup without `--project <root>` or `DIDI_PROJECT_ROOT`, and 
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `69/83`
-**Phase 7 registrations:** `14/18` unimplemented
+**Canonical implementation:** `70/83`
+**Phase 7 registrations:** `13/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phases 1-6 established the current implementation baseline. Phase 7 is `PARTIAL_DELIVERY`: the 2026-08-29 gate on Godot 4.5.1 and 4.7.2 found 15/18 names implementation-feasible and 3/18 API-blocked under the approved contracts. Feasibility is not implementation; the implementation remains 69/83 canonical tools, and all 14 Phase 7 names remain registered but unimplemented. The approved all-or-nothing 83/83 activation gate prevented Tasks 2-13, so no production implementation started.
+Phases 1-6 established the current implementation baseline. Phase 7 is `PARTIAL_DELIVERY`: the 2026-08-29 gate on Godot 4.5.1 and 4.7.2 found 15/18 names implementation-feasible and 3/18 API-blocked under the approved contracts. Feasibility is not implementation; the implementation remains 70/83 canonical tools, and all 13 Phase 7 names remain registered but unimplemented. The approved all-or-nothing 83/83 activation gate prevented Tasks 2-13, so no production implementation started.
 
 Work can proceed only after governance chooses one of three paths: **A)** authorize partial delivery of the 15 feasible tools, targeting 76/79 while retaining three honest unimplemented names; **B)** retain atomic 83/83 and wait for supported engine capabilities; or **C)** explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. Under Option C, all three blockers must re-enter Task 1 and prove `GO` on both Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening is a separate explicit contract amendment and is not implied by Option C. Phase 8 remains dependent on resolving this gate.
 

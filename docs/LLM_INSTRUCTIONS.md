@@ -128,14 +128,14 @@ Treat `eval_gdscript` as a small read-only expression language. Prefer literals,
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `69/83`
-**Phase 7 registrations:** `14/18` unimplemented
+**Canonical implementation:** `70/83`
+**Phase 7 registrations:** `13/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 69/83 canonical tools, and all 14 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
+Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 70/83 canonical tools, and all 13 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
-The four signal names are delivered and callable. Do not call or advertise the remaining 14 as available; feasibility is not implementation. Each further name needs its own production trial before delivery. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2 begins. Contract weakening requires a separate explicit contract amendment and is not implied. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+The four signal names and `runtime_read_profiler` are delivered and callable. Do not call or advertise the remaining 13 as available; feasibility is not implementation. Each further name needs its own production trial before delivery. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2 begins. Contract weakening requires a separate explicit contract amendment and is not implied. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Unimplemented domains
 
@@ -145,7 +145,7 @@ Do not call these names while `implemented` is false:
 - View controls: `viewport_set_camera_transform`, `viewport_toggle_debug_draw`.
 - Physics/navigation/animation: `physics_raycast_query`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`.
 - Tile/Grid maps: `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`.
-- Runtime introspection: `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler`.
+- Runtime introspection: `runtime_inject_input`, `runtime_get_call_stack`.
 
 If a task requires one of these capabilities, state the limitation and use ordinary project-file edits or a separate Godot test script only when the user has authorized that work.
 

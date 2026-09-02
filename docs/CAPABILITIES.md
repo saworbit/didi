@@ -33,7 +33,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-Didi v1.4.0 registers 83 canonical tool names. Sixty-nine are implemented in at least one mode; 14 remain reserved and return an MCP tool error. Ten legacy names are registered separately, for exactly 93 `tools/list` entries.
+Didi v1.4.0 registers 83 canonical tool names. 70 are implemented in at least one mode; 13 remain reserved and return an MCP tool error. Ten legacy names are registered separately, for exactly 93 `tools/list` entries.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
@@ -48,22 +48,23 @@ Didi v1.4.0 registers 83 canonical tool names. Sixty-nine are implemented in at 
 | `live_and_offline` | `audio_list_buses` | Live reports effect chains and any runtime change; offline reads the project bus layout. |
 | `live` | `audio_configure_bus` | Bus state lives in the running engine; the layout file is not what anyone is listening to. |
 | `live` | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` | Delivered after the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. Connect and disconnect register with the edited scene's UndoRedo history; emit requires confirmation. |
+| `live` | `runtime_read_profiler` | Editor or game. Samples `Performance` monitors from the frame callback over a bounded window; one collector per session. |
 | `live` | `ui_hit_test` | Editor-only. Traverses bounded live Control state at a viewport-space point without synthesizing or injecting input. |
 | `offline_fallback` | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method`, `viewport_create_test_lab`, `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map`, `project_audit_assets`, `project_analyze_impact`, `project_search_text`, `project_search_symbols`, `runtime_launch`, `csharp_check_build`, `shader_check_compile`, `project_list_export_presets`, `project_export`, `gridmap_export_mesh_library` | Operates on bounded project files or launches a separate Godot/dotnet process. Results are not live editor state. |
-| `unimplemented` | `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `physics_raycast_query`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Registered schema only. Calls are rejected before legacy handlers execute. |
+| `unimplemented` | `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `physics_raycast_query`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `runtime_inject_input`, `runtime_get_call_stack` | Registered schema only. Calls are rejected before legacy handlers execute. |
 
 ## Phase 7 feasibility status
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `69/83`
-**Phase 7 registrations:** `14/18` unimplemented
+**Canonical implementation:** `70/83`
+**Phase 7 registrations:** `13/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
 Phase 7 is `PARTIAL_DELIVERY`. The 2026-08-29 gate on Godot 4.5.1 and 4.7.2 classified 15/18 names as implementation-feasible and exactly 3/18 as API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three contracts, no supported public API/semantics satisfying the exact approved contract was found on either tested version. This is a versioned feasibility result, not a claim that the contracts are impossible forever.
 
-Feasibility does not make a tool callable; a production trial does. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. The other 14 names remain registered but unimplemented. The all-or-nothing gate was replaced by an explicit partial-delivery decision recorded in [SURFACE_AMENDMENTS.md](SURFACE_AMENDMENTS.md).
+Feasibility does not make a tool callable; a production trial does. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. `runtime_read_profiler` followed once its own live trial on Godot 4.5.1, 4.6.2 and 4.7.2 passed. The other 13 names remain registered but unimplemented. The all-or-nothing gate was replaced by an explicit partial-delivery decision recorded in [SURFACE_AMENDMENTS.md](SURFACE_AMENDMENTS.md).
 
 Work can proceed only after governance authorizes partial delivery of the 15 feasible tools toward 76/79, retains atomic 83/83 while waiting for supported engine capabilities, or explicitly approves and maintains engine changes or private adapters sufficient for all three exact blocked contracts. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied. See the [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 

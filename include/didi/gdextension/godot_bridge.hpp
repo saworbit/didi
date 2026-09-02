@@ -49,6 +49,10 @@ public:
                                                           const std::string& isolation_background);
     Result<void> restoreViewportIsolation(const ViewportIsolationState& state);
     Result<void> forceDraw();
+    // Performance.get_monitor support for runtime.readProfiler. Preflight is
+    // the availability check the contract names: the pinned bind exists.
+    Result<void> preflightPerformanceMonitors();
+    Result<std::vector<double>> samplePerformanceMonitors(const std::vector<int64_t>& monitors);
 
 private:
     GodotBridge() = default;
