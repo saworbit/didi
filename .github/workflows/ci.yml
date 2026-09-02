@@ -394,7 +394,9 @@ jobs:
           # delivered and one reserved tool so a reader can see the split.
           assert by_name['signal_connect']['_meta']['didi']['implemented'] is True
           assert by_name['signal_connect']['_meta']['didi']['executionModes'] == ['live']
-          assert by_name['tilemap_get_used_rect']['_meta']['didi']['implemented'] is False
+          for name in ('tilemap_set_cells', 'tilemap_get_used_rect', 'gridmap_set_cells'):
+              assert by_name[name]['_meta']['didi']['implemented'] is True
+              assert by_name[name]['_meta']['didi']['executionModes'] == ['live']
           assert by_name['runtime_list_sessions']['_meta']['didi']['executionModes'] == ['offline_fallback']
           assert by_name['runtime_get_session']['_meta']['didi']['executionModes'] == ['offline_fallback']
           assert by_name['runtime_read_logs']['_meta']['didi']['executionModes'] == ['live']
