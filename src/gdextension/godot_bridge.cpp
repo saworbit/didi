@@ -7,6 +7,7 @@
 #include "didi/common/project_path.hpp"
 #include "didi/runtime/input_injection.hpp"
 #include "didi/runtime/spatial_queries.hpp"
+#include "didi/runtime/animation_requests.hpp"
 #include <array>
 #include <algorithm>
 #include <cctype>
@@ -1854,6 +1855,189 @@ json navQueryPath(const json& params) {
 
 } // namespace
 
+
+// Phase 7B animation. The list reads an AnimationPlayer's library through the
+// pinned AnimationMixer and Animation binds and never touches a key. The play
+// is game-only, calls AnimationPlayer.play once, and rereads state through
+// Object.get because get_current_animation changes hash between 4.5 and 4.7.
+namespace {
+
+Result<GDExtensionObjectPtr> resolveAnimationPlayer(const std::string& path, const std::string& session_kind) {
+    Result<GDExtensionObjectPtr> root = Error::internal("unresolved");
+    if (session_kind == "editor") {
+        auto editor = editorInterface();
+        if (editor.isErr()) return editor.error();
+        root = editedSceneRoot(editor.value());
+    } else {
+        auto tree = liveSceneTree();
+        if (tree.isErr()) return tree.error();
+        root = liveSceneTreeRoot(tree.value());
+    }
+    if (root.isErr()) return root.error();
+    auto node = resolveNode(root.value(), path);
+    if (node.isErr()) return Error::notFound("No node at " + path);
+    if (!node.value()) return Error::notFound("No node at " + path);
+    auto class_name = makeString("AnimationPlayer");
+    if (class_name.isErr()) return class_name.error();
+    auto is_player = callObject(node.value(), "Object", "is_class", 3927539163LL, {&class_name.value()});
+    if (is_player.isErr()) return is_player.error();
+    auto flag = scalarFromVariant<GDExtensionBool>(is_player.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (flag.isErr() || !flag.value()) return Error::notFound("Node at " + path + " is not an AnimationPlayer");
+    return node.value();
+}
+
+json animListTracks(const json& params, const std::string& session_kind) {
+    auto parsed = runtime::parseAnimListRequest(params);
+    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    for (const auto& bind : {std::make_tuple("AnimationMixer", "get_animation_list", 1139954409LL),
+                             std::make_tuple("AnimationMixer", "get_animation", 2933122410LL),
+                             std::make_tuple("Animation", "get_length", 1740695150LL),
+                             std::make_tuple("Animation", "get_loop_mode", 1988889481LL),
+                             std::make_tuple("Animation", "get_track_count", 3905245786LL),
+                             std::make_tuple("Animation", "track_get_type", 3445944217LL),
+                             std::make_tuple("Animation", "track_get_path", 408788394LL),
+                             std::make_tuple("Animation", "track_get_key_count", 923996154LL),
+                             std::make_tuple("Animation", "track_get_key_time", 3085491603LL)}) {
+        auto required = requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind));
+        if (required.isErr()) return errorJson(501, required.error().message);
+    }
+    auto player = resolveAnimationPlayer(parsed.value().animation_player_path, session_kind);
+    if (player.isErr()) return errorJson(player.error().code, player.error().message);
+
+    auto names = callObject(player.value(), "AnimationMixer", "get_animation_list", 1139954409LL);
+    if (names.isErr()) return errorJson(500, names.error().message);
+    auto names_size = callVariant(names.value(), "size");
+    if (names_size.isErr()) return errorJson(500, names_size.error().message);
+    auto name_count = scalarFromVariant<int64_t>(names_size.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (name_count.isErr()) return errorJson(500, name_count.error().message);
+
+    auto int_call = [&](GDExtensionObjectPtr object, const char* klass, const char* method, int64_t hash,
+                        std::vector<const VariantValue*> args) -> Result<int64_t> {
+        auto result = callObject(object, klass, method, hash, args);
+        if (result.isErr()) return result.error();
+        return scalarFromVariant<int64_t>(result.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    };
+    auto float_call = [&](GDExtensionObjectPtr object, const char* klass, const char* method, int64_t hash,
+                          std::vector<const VariantValue*> args) -> Result<double> {
+        auto result = callObject(object, klass, method, hash, args);
+        if (result.isErr()) return result.error();
+        return scalarFromVariant<double>(result.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+    };
+
+    std::vector<runtime::AnimationInfo> animations;
+    // One past the cap is enough for the builder to report the cut.
+    const int64_t animation_limit = static_cast<int64_t>(runtime::kMaxAnimations) + 1;
+    for (int64_t index = 0; index < name_count.value() && index < animation_limit; ++index) {
+        auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (index_value.isErr()) return errorJson(500, index_value.error().message);
+        auto name_value = callVariant(names.value(), "get", {&index_value.value()});
+        if (name_value.isErr()) return errorJson(500, name_value.error().message);
+        auto name_text = stringFromVariant(name_value.value(), GodotApi::instance().variant_get_type(name_value.value().ptr()));
+        if (name_text.isErr()) return errorJson(500, name_text.error().message);
+        runtime::AnimationInfo info;
+        info.name = boundUtf8(name_text.value(), 256).value;
+
+        auto name_key = makeStringName(name_text.value());
+        if (name_key.isErr()) return errorJson(500, name_key.error().message);
+        auto animation_value = callObject(player.value(), "AnimationMixer", "get_animation", 2933122410LL, {&name_key.value()});
+        if (animation_value.isErr()) return errorJson(500, animation_value.error().message);
+        auto animation = objectFromVariant(animation_value.value());
+        if (animation.isErr() || !animation.value()) return errorJson(500, "Animation resource could not be read: " + name_text.value());
+
+        auto length = float_call(animation.value(), "Animation", "get_length", 1740695150LL, {});
+        auto loop_mode = int_call(animation.value(), "Animation", "get_loop_mode", 1988889481LL, {});
+        auto track_count = int_call(animation.value(), "Animation", "get_track_count", 3905245786LL, {});
+        if (length.isErr() || loop_mode.isErr() || track_count.isErr()) {
+            return errorJson(500, "Animation metadata could not be read: " + name_text.value());
+        }
+        info.length = std::max(0.0, length.value());
+        info.loop_mode_id = loop_mode.value();
+
+        const int64_t track_limit = static_cast<int64_t>(runtime::kMaxTracksPerAnimation);
+        for (int64_t track_index = 0; track_index < track_count.value(); ++track_index) {
+            if (track_index >= track_limit) { info.tracks_cut = true; break; }
+            auto track_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, track_index);
+            if (track_value.isErr()) return errorJson(500, track_value.error().message);
+            runtime::AnimationTrackInfo track;
+            track.index = track_index;
+            auto type = int_call(animation.value(), "Animation", "track_get_type", 3445944217LL, {&track_value.value()});
+            if (type.isErr()) return errorJson(500, type.error().message);
+            track.type_id = type.value();
+            auto path_value = callObject(animation.value(), "Animation", "track_get_path", 408788394LL, {&track_value.value()});
+            if (path_value.isErr()) return errorJson(500, path_value.error().message);
+            auto path_text = stringFromVariant(path_value.value(), GDEXTENSION_VARIANT_TYPE_NODE_PATH);
+            if (path_text.isErr()) return errorJson(500, path_text.error().message);
+            track.path = boundUtf8(path_text.value(), 1024).value;
+            auto key_count = int_call(animation.value(), "Animation", "track_get_key_count", 923996154LL, {&track_value.value()});
+            if (key_count.isErr()) return errorJson(500, key_count.error().message);
+            const int64_t key_limit = static_cast<int64_t>(runtime::kMaxKeysPerTrack);
+            for (int64_t key_index = 0; key_index < key_count.value(); ++key_index) {
+                if (key_index >= key_limit) { track.key_times_cut = true; break; }
+                auto key_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, key_index);
+                if (key_value.isErr()) return errorJson(500, key_value.error().message);
+                auto time = float_call(animation.value(), "Animation", "track_get_key_time", 3085491603LL,
+                                       {&track_value.value(), &key_value.value()});
+                if (time.isErr()) return errorJson(500, time.error().message);
+                track.key_times.push_back(time.value());
+            }
+            info.tracks.push_back(std::move(track));
+        }
+        animations.push_back(std::move(info));
+    }
+    return liveResult(runtime::buildAnimationCatalog(std::move(animations)));
+}
+
+json animPlayTrack(const json& params, const std::string& session_kind) {
+    if (session_kind != "game") return errorJson(409, "session_kind_rejected");
+    auto parsed = runtime::parseAnimPlayRequest(params);
+    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    for (const auto& bind : {std::make_tuple("AnimationMixer", "has_animation", 2619796661LL),
+                             std::make_tuple("AnimationPlayer", "play", 3118260607LL),
+                             std::make_tuple("AnimationPlayer", "is_playing", 36873697LL),
+                             std::make_tuple("Object", "get", 2760726917LL)}) {
+        auto required = requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind));
+        if (required.isErr()) return errorJson(501, required.error().message);
+    }
+    const auto& request = parsed.value();
+    auto player = resolveAnimationPlayer(request.animation_player_path, session_kind);
+    if (player.isErr()) return errorJson(player.error().code, player.error().message);
+
+    auto name = makeStringName(request.animation_name);
+    if (name.isErr()) return errorJson(500, name.error().message);
+    auto has = callObject(player.value(), "AnimationMixer", "has_animation", 2619796661LL, {&name.value()});
+    if (has.isErr()) return errorJson(500, has.error().message);
+    auto has_flag = scalarFromVariant<GDExtensionBool>(has.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (has_flag.isErr() || !has_flag.value()) {
+        return errorJson(404, "AnimationPlayer has no animation named " + request.animation_name);
+    }
+
+    auto blend = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, -1.0);
+    auto speed = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, request.custom_speed);
+    auto from_end = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(request.from_end));
+    if (blend.isErr() || speed.isErr() || from_end.isErr()) return errorJson(500, "Failed to construct play arguments");
+    auto played = callObject(player.value(), "AnimationPlayer", "play", 3118260607LL,
+                             {&name.value(), &blend.value(), &speed.value(), &from_end.value()});
+    if (played.isErr()) {
+        return errorJson(504, played.error().message, {{"outcome", "unknown_outcome"}, {"retryable", false}});
+    }
+    auto playing = callObject(player.value(), "AnimationPlayer", "is_playing", 36873697LL);
+    if (playing.isErr()) return errorJson(500, playing.error().message);
+    auto playing_flag = scalarFromVariant<GDExtensionBool>(playing.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (playing_flag.isErr()) return errorJson(500, playing_flag.error().message);
+    auto property = makeStringName("current_animation");
+    if (property.isErr()) return errorJson(500, property.error().message);
+    auto current = callObject(player.value(), "Object", "get", 2760726917LL, {&property.value()});
+    if (current.isErr()) return errorJson(500, current.error().message);
+    auto current_text = stringFromVariant(current.value(), GodotApi::instance().variant_get_type(current.value().ptr()));
+    return liveResult({{"dispatched", true},
+                       {"animation_name", current_text.isOk() ? current_text.value() : request.animation_name},
+                       {"custom_speed", request.custom_speed}, {"from_end", request.from_end},
+                       {"playing", playing_flag.value() != 0}, {"outcome", "completed"},
+                       {"rollback", "not_available"}, {"session_kind", session_kind}});
+}
+
+} // namespace
+
 json GodotBridge::execute(const std::string& method, const json& params,
                           const std::string& session_kind) {
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
@@ -1885,6 +2069,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
     }
     if (method == "physics.raycast") return physicsRaycast(params);
     if (method == "nav.queryPath") return navQueryPath(params);
+    if (method == "anim.listTracks") return animListTracks(params, session_kind);
+    if (method == "anim.playTrack") return animPlayTrack(params, session_kind);
     auto editor_result = editorInterface();
     if (editor_result.isErr()) return errorJson(editor_result.error().code, editor_result.error().message);
     auto editor = editor_result.value();

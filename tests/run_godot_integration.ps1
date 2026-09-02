@@ -381,6 +381,15 @@ try {
         (Tool-Request 405 "nav_query_path" @{ start_point = @{ x = -1; y = 0; z = 0 }; end_point = @{ x = 1; y = 0; z = 0 } }),
         (Tool-Request 406 "nav_query_path" @{ start_point = @{ x = -1; y = 0 }; end_point = @{ x = 1; y = 0 } }),
         (Tool-Request 407 "nav_query_path" @{ start_point = @{ x = -1; y = 0; z = 0 }; end_point = @{ x = 1; y = 0 } }),
+        # Phase 7B animation: list the fixture library, play it, and read the
+        # library again to prove no key changed.
+        (Tool-Request 410 "anim_list_tracks" @{ animation_player_path = "/root/RuntimeRoot/Spatial/Player" }),
+        (Tool-Request 411 "anim_play_track" @{ animation_player_path = "/root/RuntimeRoot/Spatial/Player"; animation_name = "probe"; custom_speed = 2.0 }),
+        (Tool-Request 412 "anim_list_tracks" @{ animation_player_path = "/root/RuntimeRoot/Spatial/Player" }),
+        (Tool-Request 413 "anim_play_track" @{ animation_player_path = "/root/RuntimeRoot/Spatial/Player"; animation_name = "missing" }),
+        (Tool-Request 414 "anim_play_track" @{ animation_player_path = "/root/RuntimeRoot/Spatial/Player"; animation_name = "probe"; custom_speed = -1.0 }),
+        (Tool-Request 415 "anim_list_tracks" @{ animation_player_path = "/root/RuntimeRoot/Spatial/AnimTarget" }),
+        (Tool-Request 416 "anim_play_track" @{ animation_player_path = "/root/RuntimeRoot/Spatial/Player"; animation_name = "probe"; dry_run = $true }),
         (Tool-Request 380 "runtime_read_output" @{ limit = 500 }),
         (Tool-Request 303 "runtime_set_paused" @{ paused = $true }),
         (Tool-Request 304 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 2 }),
@@ -486,7 +495,7 @@ try {
     $runtimeTree = Tool-Payload $runtimeById[302]
     Assert-True ($runtimeTree.scene_tree.path -eq "/root/RuntimeRoot") "Runtime tree root was not canonical."
     Assert-True ($runtimeTree.scene_tree.child_count -eq 4) "Runtime tree did not report child_count."
-    Assert-True ($runtimeTree.node_count -eq 11 -and $runtimeTree.truncated) "Runtime tree bounds metadata did not report the deliberately large truncated subtree."
+    Assert-True ($runtimeTree.node_count -eq 13 -and $runtimeTree.truncated) "Runtime tree bounds metadata did not report the deliberately large truncated subtree."
     $inputBefore = Runtime-InputCounter (Tool-Payload $runtimeById[391])
     $injected = Tool-Payload $runtimeById[392]
     Assert-True ($injected.execution_mode -eq "live" -and $injected.session_kind -eq "game") "runtime_inject_input did not run against the game session."
@@ -522,6 +531,27 @@ try {
     $path2d = Tool-Payload $runtimeById[406]
     Assert-True ($path2d.dimension -eq 2 -and $path2d.reachable -eq $true -and @($path2d.points).Count -ge 2) "2D path query found no path across the fixture region."
     Assert-True $runtimeById[407].result.isError "nav_query_path accepted mixed dimensions."
+
+    $listed = Tool-Payload $runtimeById[410]
+    Assert-True ($listed.execution_mode -eq "live" -and $listed.truncated -eq $false -and $null -eq $listed.truncated_at) "anim_list_tracks did not run live or reported a truncated catalog."
+    $listedAnimations = @($listed.animations)
+    Assert-True ($listedAnimations.Count -eq 1 -and $listedAnimations[0].name -eq "probe") "anim_list_tracks did not list the fixture animation ($($listedAnimations.Count))."
+    Assert-True ([Math]::Abs($listedAnimations[0].length - 1.0) -lt 0.001 -and $listedAnimations[0].loop_mode_name -eq "none" -and $listedAnimations[0].loop_mode_id -eq 0) "anim_list_tracks animation metadata is wrong."
+    $listedTracks = @($listedAnimations[0].tracks)
+    Assert-True ($listedTracks.Count -eq 1 -and $listedTracks[0].type_name -eq "value" -and $listedTracks[0].path -eq "AnimTarget:position") "anim_list_tracks track metadata is wrong ($($listedTracks[0].type_name), $($listedTracks[0].path))."
+    $keyTimes = @($listedTracks[0].key_times)
+    Assert-True ($keyTimes.Count -eq 2 -and [Math]::Abs([double]$keyTimes[0]) -lt 0.001 -and [Math]::Abs([double]$keyTimes[1] - 1.0) -lt 0.001) "anim_list_tracks key times are wrong ($($keyTimes -join ','))."
+    $played = Tool-Payload $runtimeById[411]
+    Assert-True ($played.execution_mode -eq "live" -and $played.session_kind -eq "game" -and $played.dispatched -eq $true -and $played.outcome -eq "completed") "anim_play_track did not dispatch."
+    Assert-True ($played.playing -eq $true -and $played.animation_name -eq "probe" -and $played.custom_speed -eq 2.0) "anim_play_track did not observe the animation playing ($($played.playing), $($played.animation_name))."
+    $relisted = Tool-Payload $runtimeById[412]
+    $relistedTimes = @(@(@($relisted.animations)[0].tracks)[0].key_times)
+    Assert-True ($relistedTimes.Count -eq 2 -and [Math]::Abs([double]$relistedTimes[1] - 1.0) -lt 0.001) "Playing the animation changed its keys."
+    Assert-True ($runtimeById[413].result.isError -and $runtimeById[413].result.content[0].text -match "404") "anim_play_track accepted an unknown animation name."
+    Assert-True $runtimeById[414].result.isError "anim_play_track accepted a negative speed without from_end."
+    Assert-True ($runtimeById[415].result.isError -and $runtimeById[415].result.content[0].text -match "AnimationPlayer") "anim_list_tracks accepted a node that is not an AnimationPlayer."
+    $playPreview = Tool-Payload $runtimeById[416]
+    Assert-True ($null -ne $playPreview.mutation_preview -and $playPreview.mutation_preview.tool -eq "anim_play_track") "anim_play_track dry_run did not return a preview."
 
     # The same window from a game session, with request order ignored: frame
     # precedes physics in the output whatever the caller wrote.
@@ -683,7 +713,7 @@ try {
         (Tool-Request 912 "signal_disconnect" @{ emitter_node = "/root/SmokeRoot"; signal_name = "tree_entered"; target_node = "/root/SmokeRoot/Subject"; target_method = "notify_property_list_changed" }),
         (Tool-Request 913 "signal_list_connections" @{ target_node = "/root/SmokeRoot" }),
         # A still-reserved Phase 7 name, so the honest-failure check keeps a subject.
-        (Tool-Request 914 "anim_list_tracks" @{ animation_player_path = "/root/SmokeRoot" }),
+        (Tool-Request 914 "tilemap_get_used_rect" @{ tilemap_path = "/root/SmokeRoot" }),
         # Phase 7C. A bounded window of Performance samples, collected from the
         # frame callback. Five samples over 200 ms is long enough to span
         # several editor frames and short enough not to slow the harness.
@@ -696,6 +726,9 @@ try {
         # the honest editor result is a miss with every detail field null.
         (Tool-Request 944 "physics_raycast_query" @{ from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 4; y = 0; z = 0 } }),
         (Tool-Request 945 "nav_query_path" @{ start_point = @{ x = -1; y = 0; z = 0 }; end_point = @{ x = 1; y = 0; z = 0 } }),
+        # The list works in the editor against the edited scene; the play is game-only.
+        (Tool-Request 946 "anim_list_tracks" @{ animation_player_path = "/root/SmokeRoot/Player" }),
+        (Tool-Request 947 "anim_play_track" @{ animation_player_path = "/root/SmokeRoot/Player"; animation_name = "probe" }),
         (Tool-Request 930 "audio_list_buses" @{}),
         (Tool-Request 931 "audio_configure_bus" @{ bus = "Master"; volume_db = -12.5; mute = $true }),
         (Tool-Request 932 "audio_list_buses" @{}),
@@ -817,7 +850,7 @@ try {
     $scalarEval = Tool-Payload $byId[130]
     Assert-True ($scalarEval.value -eq 7 -and $scalarEval.value_type -eq "int") "Editor scalar expression was incorrect."
     Assert-True ($scalarEval.context_node -eq "/root/SmokeRoot/Subject" -and $scalarEval.session_kind -eq "editor") "Editor expression context or provenance was incorrect."
-    Assert-True ((Tool-Payload $byId[131]).value -eq 2) "Editor default-context child count was incorrect."
+    Assert-True ((Tool-Payload $byId[131]).value -eq 3) "Editor default-context child count was incorrect."
     Assert-True (@((Tool-Payload $byId[132]).value).Count -eq 3) "Editor expression array was not preserved."
     Assert-True ((Tool-Payload $byId[133]).value.answer -eq 42) "Editor expression dictionary was not preserved."
     $editorVector = Tool-Payload $byId[134]
@@ -1085,6 +1118,10 @@ try {
     if (-not $editorRay.hit) { Assert-True ($null -eq $editorRay.collider_path -and $null -eq $editorRay.position) "Editor raycast miss carried detail fields." }
     $editorPath = Tool-Payload $byId[945]
     Assert-True ($editorPath.execution_mode -eq "live" -and $editorPath.dimension -eq 3 -and ($editorPath.reachable -is [bool]) -and ($null -ne $editorPath.points)) "nav_query_path did not run live in the editor."
+    $editorList = Tool-Payload $byId[946]
+    Assert-True ($editorList.execution_mode -eq "live" -and @($editorList.animations).Count -eq 1 -and @($editorList.animations)[0].name -eq "probe") "anim_list_tracks did not list the edited scene's animation in the editor."
+    Assert-True (@(@($editorList.animations)[0].tracks)[0].path -eq "Subject:position") "Editor anim_list_tracks track path is wrong."
+    Assert-True $byId[947].result.isError "anim_play_track accepted an editor session."
     Assert-True $byId[21].result.isError "Missing node lookup returned fake success."
     Assert-True $byId[22].result.isError "Unknown property lookup returned fake null success."
     Assert-True $byId[23].result.isError "Incompatible scalar property write returned fake success."

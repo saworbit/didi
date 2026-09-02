@@ -6,12 +6,12 @@ The `_meta.didi` object returned by `tools/list` is authoritative. A registered 
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `73/83`
-**Phase 7 registrations:** `10/18` unimplemented
+**Canonical implementation:** `75/83`
+**Phase 7 registrations:** `8/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 73/83 canonical tools, and all 10 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 75/83 canonical tools, and all 8 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -241,14 +241,35 @@ Calls `NavigationServer2D/3D.map_get_path` on the existing map and never bakes. 
 
 Errors: `400` malformed request, `409` no world or map, `501` missing bind. Read only.
 
-### Reserved physics, navigation and animation schemas — Unimplemented
+### `anim_list_tracks` — Live (editor or game)
+
+Lists what an AnimationPlayer holds. Delivered under the Phase 7B contract.
+
+- `animation_player_path` (`string`, 1..1024, required). Resolved in the edited scene in an editor session and from the tree root in a game; anything that is not an AnimationPlayer is `404`.
+
+Animations are sorted by UTF-8 name. Each is `{name, length, loop_mode_id, loop_mode_name, tracks, truncated}` with loop names `none`, `linear`, `pingpong`, `unknown`; each track is `{index, type_id, type_name, path, key_times, truncated}` in engine order, with type names `value`, `position_3d`, `rotation_3d`, `scale_3d`, `blend_shape`, `method`, `bezier`, `audio`, `animation`, `unknown`. Caps: 128 animations, 128 tracks each, 256 key times each, names 256 bytes, paths 1024 bytes, 256 KiB total. At the byte budget the catalog stops before a record and `truncated_at` is `{animation_index, track_index, key_index, reason: "count" | "bytes"}`; otherwise `null`. Nothing is edited or saved.
+
+Errors: `400`, `404`, `500`, `501`. Read only.
+
+### `anim_play_track` — Live (game only)
+
+Starts an animation on a running game's AnimationPlayer. Delivered under the Phase 7B contract.
+
+- `animation_player_path` (`string`, 1..1024, required).
+- `animation_name` (`string`, 1..256, required); an unknown name is `404`.
+- `custom_speed` (`number`, -16..16, non-zero, default 1). A negative speed requires `from_end: true`.
+- `from_end` (`boolean`, default false).
+
+One `AnimationPlayer.play(name, -1, custom_speed, from_end)` call, then `is_playing` and `current_animation` are reread rather than trusted. The result is `{dispatched: true, animation_name, custom_speed, from_end, playing, outcome: "completed", rollback: "not_available"}`; `dispatched` is not completion, and no key is edited. A mutation with `dry_run` and no confirmation token.
+
+Errors: `400`, `404`, `409` editor session, `500`, `501`, `504` if the call itself fails.
+
+### Reserved physics and navigation schemas — Unimplemented
 
 - `physics_simulate_step`
 - `nav_bake_mesh`
-- `anim_list_tracks`
-- `anim_play_track`
 
-`anim_list_tracks` and `anim_play_track` are implementation-feasible. `physics_simulate_step` and `nav_bake_mesh` are API-blocked under the approved contracts. None of the four is callable.
+Both are API-blocked under the approved contracts and are not callable.
 
 ## 6. TileMap and GridMap
 
