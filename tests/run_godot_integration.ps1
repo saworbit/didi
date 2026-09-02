@@ -584,7 +584,7 @@ try {
         Assert-True ([bool]$runtimeById[$rejectedId].result.isError) "Game expression rejection $rejectedId returned fake success."
     }
     foreach ($policyRejectedId in 350, 351, 352, 353, 354, 355, 356, 357, 361, 362) {
-        Assert-True ($runtimeById[$policyRejectedId].result.content[0].text -match "Invalid expression request") "Game policy rejection $policyRejectedId reached the engine."
+        Assert-True ($runtimeById[$policyRejectedId].result.content[0].text -match "Invalid expression request") "Game policy rejection $policyRejectedId reached the engine: $($runtimeById[$policyRejectedId].result.content[0].text)"
     }
     Assert-True ($runtimeById[331].result.content[0].text -match "nesting depth") "Deep game result failed for the wrong reason."
     Assert-True ($runtimeById[332].result.content[0].text -match "256 KiB") "Oversized game result failed for the wrong reason."
@@ -839,7 +839,7 @@ try {
         Assert-True ([bool]$byId[$rejectedId].result.isError) "Editor callback rejection $rejectedId returned fake success."
     }
     foreach ($policyRejectedId in 159, 160, 161, 162, 163, 164, 165, 166, 169, 170) {
-        Assert-True ($byId[$policyRejectedId].result.content[0].text -match "Invalid expression request") "Editor policy rejection $policyRejectedId reached the engine."
+        Assert-True ($byId[$policyRejectedId].result.content[0].text -match "Invalid expression request") "Editor policy rejection $policyRejectedId reached the engine: $($byId[$policyRejectedId].result.content[0].text)"
     }
     Assert-True ((Tool-Payload $byId[167]).value -match "SmokeRoot/Container/MaliciousSubject$") "Safe editor path scalar was rejected or incorrect."
     Assert-True ((Tool-Payload $byId[168]).value -eq 1024) "Safe editor child-count scalar did not inspect the large scene in constant space."
