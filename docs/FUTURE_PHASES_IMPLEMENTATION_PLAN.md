@@ -12,12 +12,12 @@
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `77/83`
-**Phase 7 registrations:** `6/18` unimplemented
+**Canonical implementation:** `80/83`
+**Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-This is the approved historical plan that integrated the future-phases documentation. Its original task wording is preserved below. Current Phase 7 status is `PARTIAL_DELIVERY`: the 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts. The four signal names, both viewport controls, `runtime_read_profiler`, `runtime_inject_input`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, and `anim_play_track` are delivered. The other 6 names remain registered but unimplemented. The surface is 77/83.
+This is the approved historical plan that integrated the future-phases documentation. Its original task wording is preserved below. Current Phase 7 status is `PARTIAL_DELIVERY`: the 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts. All 15 feasible names, including the three TileMapLayer/GridMap tools, are delivered. The 3 API-blocked names remain registered but unimplemented. The surface is 80/83.
 
 Current evidence is [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md), and the approved executable plan is [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md). Governance authorized partial delivery; the signal names shipped under it. Further Phase 7 work requires the same treatment: a production trial per capability, not a feasibility note. Under the third path, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2; contract weakening is a separate explicit contract amendment.
 

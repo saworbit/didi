@@ -128,21 +128,20 @@ Treat `eval_gdscript` as a small read-only expression language. Prefer literals,
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `77/83`
-**Phase 7 registrations:** `6/18` unimplemented
+**Canonical implementation:** `80/83`
+**Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 77/83 canonical tools, and 6 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 80/83 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
-The four signal names, both viewport controls, `runtime_read_profiler`, `runtime_inject_input`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, and `anim_play_track` are delivered and callable. Do not call or advertise the remaining 6 as available; feasibility is not implementation. Each further name needs its own production trial before delivery. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+All 15 feasible Phase 7 names are delivered and callable, including `tilemap_set_cells`, `tilemap_get_used_rect`, and `gridmap_set_cells` in editor sessions. Do not call or advertise the remaining 3 as available; feasibility is not implementation. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Unimplemented domains
 
 Do not call these names while `implemented` is false:
 
 - Physics/navigation: `physics_simulate_step`, `nav_bake_mesh`.
-- Tile/Grid maps: `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`.
 - Runtime introspection: `runtime_get_call_stack`.
 
 If a task requires one of these capabilities, state the limitation and use ordinary project-file edits or a separate Godot test script only when the user has authorized that work.

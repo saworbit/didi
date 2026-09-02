@@ -1,6 +1,23 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource path="res://malicious_probe.gd" type="Script" id="1_malicious"]
+[ext_resource path="res://reimport_probe.svg" type="Texture2D" id="2_tile_texture"]
+
+[sub_resource type="TileSetAtlasSource" id="tile_atlas"]
+texture = ExtResource("2_tile_texture")
+texture_region_size = Vector2i(16, 16)
+0:0/0 = 0
+
+[sub_resource type="TileSet" id="tile_set"]
+tile_size = Vector2i(16, 16)
+sources/0 = SubResource("tile_atlas")
+
+[sub_resource type="BoxMesh" id="grid_mesh"]
+size = Vector3(1, 1, 1)
+
+[sub_resource type="MeshLibrary" id="mesh_library"]
+item/0/name = "Probe Cube"
+item/0/mesh = SubResource("grid_mesh")
 
 [sub_resource type="Animation" id="anim_probe"]
 resource_name = "probe"
@@ -36,6 +53,12 @@ size = Vector3(1.5, 1.5, 1.5)
 position = Vector3(0, 1, 4)
 rotation_degrees = Vector3(-10, 0, 0)
 fov = 70.0
+
+[node name="TileLayer" type="TileMapLayer" parent="."]
+tile_set = SubResource("tile_set")
+
+[node name="Grid" type="GridMap" parent="."]
+mesh_library = SubResource("mesh_library")
 
 [node name="VisualDistractor" type="CSGSphere3D" parent="Container"]
 position = Vector3(2.5, 0, 0)

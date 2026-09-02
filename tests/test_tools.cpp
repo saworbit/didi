@@ -317,8 +317,8 @@ static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract(
         if (legacy_names.count(tool.name) != 0) continue;
         tool.capability.implemented ? ++implemented : ++unimplemented;
     }
-    ASSERT_EQ(implemented, 77u);
-    ASSERT_EQ(unimplemented, 6u);
+    ASSERT_EQ(implemented, 80u);
+    ASSERT_EQ(unimplemented, 3u);
 }
 
 static void test_offline_writer_schemas_require_explicit_overwrite() {
@@ -1390,7 +1390,7 @@ static void test_tool_capabilities_are_honest() {
     ASSERT_TRUE(unavailable.isError);
     ASSERT_TRUE(unavailable.content[0].text.find("no trustworthy execution path") == std::string::npos);
 
-    auto reserved_call = reg.callTool("tilemap_get_used_rect", didi::json::object());
+    auto reserved_call = reg.callTool("runtime_get_call_stack", didi::json::object());
     ASSERT_TRUE(reserved_call.isError);
     ASSERT_TRUE(reserved_call.content[0].text.find("no trustworthy execution path") != std::string::npos);
 }

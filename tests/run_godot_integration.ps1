@@ -71,6 +71,7 @@ $editorSessionId = ""
 $gameSessionId = ""
 $shutdownGameSessionId = ""
 $integrationSucceeded = $false
+$editorForcedTeardown = $false
 $primaryFailureMessage = ""
 $rawPhase5Responses = @()
 
@@ -150,20 +151,40 @@ function Stop-VerifiedProcessObject($VerifiedProcess, [int64]$ExpectedStartedAtM
     } $AfterIdentityVerified | Out-Null
 }
 
-function Request-ExactProcessClose([uint64]$EnginePid, [int64]$EngineStartedAtMs, [int]$TimeoutSeconds) {
+function Stop-ExactEditorProcess([uint64]$EnginePid, [int64]$EngineStartedAtMs, [int]$GracefulTimeoutSeconds) {
     $process = Get-Process -Id $EnginePid -ErrorAction SilentlyContinue
-    if ($null -eq $process) { return $true }
+    if ($null -eq $process) {
+        return [PSCustomObject]@{ stopped = $true; forced = $false }
+    }
     $accepted = Invoke-IdentityBoundProcessAction $process $EngineStartedAtMs {
         param($heldProcess)
         $heldProcess.CloseMainWindow()
     }
-    Assert-True $accepted "Exact editor process $EnginePid did not accept a graceful close request."
-    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
-    while ([DateTime]::UtcNow -lt $deadline -and
-           (Exact-ProcessAlive $EnginePid $EngineStartedAtMs)) {
-        Start-Sleep -Milliseconds 100
+    if ($accepted) {
+        $deadline = [DateTime]::UtcNow.AddSeconds($GracefulTimeoutSeconds)
+        while ([DateTime]::UtcNow -lt $deadline -and
+               (Exact-ProcessAlive $EnginePid $EngineStartedAtMs)) {
+            Start-Sleep -Milliseconds 100
+        }
     }
-    return -not (Exact-ProcessAlive $EnginePid $EngineStartedAtMs)
+
+    # A hidden Godot editor can accept WM_CLOSE without exiting on Windows CI
+    # (for example, when an invisible native prompt owns the message loop). The
+    # integration fixture is disposable, so finish teardown with the same
+    # start-time-verified process object instead of hanging or touching a reused
+    # PID. Functional shutdown is exercised separately through runtime_stop.
+    $forced = Exact-ProcessAlive $EnginePid $EngineStartedAtMs
+    if ($forced) {
+        Write-Warning "Editor process $EnginePid did not exit after the graceful close request; using exact-instance teardown."
+        $process = Get-Process -Id $EnginePid -ErrorAction SilentlyContinue
+        if ($null -ne $process) {
+            Stop-VerifiedProcessObject $process $EngineStartedAtMs
+        }
+    }
+    return [PSCustomObject]@{
+        stopped = -not (Exact-ProcessAlive $EnginePid $EngineStartedAtMs)
+        forced = $forced
+    }
 }
 
 function Stop-RuntimeProcess($Launcher, [uint64]$EnginePid, [int64]$EngineStartedAtMs) {
@@ -292,6 +313,34 @@ try {
     $editorSessionToken = [string]$editorDescriptor.token
     Assert-True ($editorSessionToken -match '^[0-9a-f]{64}$') "Editor descriptor token did not meet the private protocol shape."
     Assert-True ($editorEngineStartedAtMs -eq [int64]$editorSession.started_at_ms) "Editor discovery and private descriptor disagreed on process-start identity."
+
+    # EditorInterface.open_scene_from_path can return before a cold import has
+    # activated the scene. Prove readiness through the bridge, retrying the
+    # complete authenticated request rather than trusting the plugin log line.
+    $sceneReady = $false
+    $sceneReadyTranscript = @()
+    $sceneReadyDeadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $sceneReadyDeadline -and -not $godot.HasExited) {
+        $sceneReadyRequests = @(
+            (@{ jsonrpc = "2.0"; id = 910; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+            (Tool-Request 911 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+            (Tool-Request 912 "scene_open" @{ scene_path = "res://main.tscn" })
+        )
+        $rawSceneReadyResponses = $sceneReadyRequests | & $didiExecutable --project $fixtureRoot
+        $sceneReadyTranscript += @($rawSceneReadyResponses)
+        $sceneReadyResponses = @($rawSceneReadyResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
+        if ($LASTEXITCODE -eq 0 -and $sceneReadyResponses.Count -eq $sceneReadyRequests.Count) {
+            $sceneReadyById = @{}
+            foreach ($response in $sceneReadyResponses) { $sceneReadyById[[int]$response.id] = $response }
+            if ($sceneReadyById.ContainsKey(912) -and -not $sceneReadyById[912].result.isError) {
+                $readyPayload = Tool-Payload $sceneReadyById[912]
+                $sceneReady = $readyPayload.opened -eq $true -and $readyPayload.scene_path -eq "res://main.tscn"
+                if ($sceneReady) { break }
+            }
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    Assert-True $sceneReady "Godot editor did not activate res://main.tscn through the authenticated bridge."
 
     $game = Start-Process -FilePath $GodotExecutable `
         -ArgumentList @("--headless", "--path", $fixtureRoot, "--log-file", $gameEngineLogPath, "res://runtime_main.tscn") `
@@ -712,7 +761,7 @@ try {
         (Tool-Request 911 "signal_list_connections" @{ target_node = "/root/SmokeRoot" }),
         (Tool-Request 912 "signal_disconnect" @{ emitter_node = "/root/SmokeRoot"; signal_name = "tree_entered"; target_node = "/root/SmokeRoot/Subject"; target_method = "notify_property_list_changed" }),
         (Tool-Request 913 "signal_list_connections" @{ target_node = "/root/SmokeRoot" }),
-        # A still-reserved Phase 7 name, so the honest-failure check keeps a subject.
+        # Wrong-class rejection for the delivered TileMapLayer read.
         (Tool-Request 914 "tilemap_get_used_rect" @{ tilemap_path = "/root/SmokeRoot" }),
         # Phase 7C. A bounded window of Performance samples, collected from the
         # frame callback. Five samples over 200 ms is long enough to span
@@ -740,6 +789,20 @@ try {
         (Tool-Request 953 "viewport_toggle_debug_draw" @{ navigation_mesh = $true }),
         (Tool-Request 954 "viewport_toggle_debug_draw" @{ collision_shapes = $false; navigation_mesh = $false }),
         (Tool-Request 955 "viewport_set_camera_transform" @{ camera_path = "/root/SmokeRoot/Subject"; position = @{ x = 0; y = 0; z = 0 } }),
+        # Phase 7A tile/grid batches: set, reread/no-op, invalid-last preflight,
+        # and clear. The invalid final record must leave the valid first record
+        # unapplied, which the following read/no-op proves.
+        (Tool-Request 956 "tilemap_get_used_rect" @{ tilemap_path = "/root/SmokeRoot/TileLayer" }),
+        (Tool-Request 957 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/TileLayer"; cells = @(@{ coords = @(1, 2); source_id = 0; atlas_coords = @(0, 0) }) }),
+        (Tool-Request 958 "tilemap_get_used_rect" @{ tilemap_path = "/root/SmokeRoot/TileLayer" }),
+        (Tool-Request 959 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/TileLayer"; cells = @(@{ coords = @(3, 4); source_id = 0; atlas_coords = @(0, 0) }, @{ coords = @(5, 6); source_id = 999; atlas_coords = @(0, 0) }) }),
+        (Tool-Request 960 "tilemap_get_used_rect" @{ tilemap_path = "/root/SmokeRoot/TileLayer" }),
+        (Tool-Request 961 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/TileLayer"; cells = @(@{ coords = @(1, 2); erase = $true }) }),
+        (Tool-Request 962 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(1, 2, 3); item = 0 }) }),
+        (Tool-Request 963 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(1, 2, 3); item = 0 }) }),
+        (Tool-Request 964 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(4, 5, 6); item = 0 }, @{ position = @(7, 8, 9); item = 999 }) }),
+        (Tool-Request 965 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(4, 5, 6); item = -1 }) }),
+        (Tool-Request 966 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(1, 2, 3); item = -1 }) }),
         (Tool-Request 930 "audio_list_buses" @{}),
         (Tool-Request 931 "audio_configure_bus" @{ bus = "Master"; volume_db = -12.5; mute = $true }),
         (Tool-Request 932 "audio_list_buses" @{}),
@@ -861,7 +924,7 @@ try {
     $scalarEval = Tool-Payload $byId[130]
     Assert-True ($scalarEval.value -eq 7 -and $scalarEval.value_type -eq "int") "Editor scalar expression was incorrect."
     Assert-True ($scalarEval.context_node -eq "/root/SmokeRoot/Subject" -and $scalarEval.session_kind -eq "editor") "Editor expression context or provenance was incorrect."
-    Assert-True ((Tool-Payload $byId[131]).value -eq 4) "Editor default-context child count was incorrect."
+    Assert-True ((Tool-Payload $byId[131]).value -eq 6) "Editor default-context child count was incorrect."
     Assert-True (@((Tool-Payload $byId[132]).value).Count -eq 3) "Editor expression array was not preserved."
     Assert-True ((Tool-Payload $byId[133]).value.answer -eq 42) "Editor expression dictionary was not preserved."
     $editorVector = Tool-Payload $byId[134]
@@ -1003,6 +1066,25 @@ try {
     Assert-True ($restoredDebug.observed.collision_shapes -eq $false -and $restoredDebug.observed.navigation_mesh -eq $false) "Debug hints were not explicitly restored."
     Assert-True $byId[955].result.isError "viewport_set_camera_transform accepted a non-Camera3D node."
 
+    $emptyTileRect = Tool-Payload $byId[956]
+    Assert-True ($emptyTileRect.size.x -eq 0 -and $emptyTileRect.size.y -eq 0) "TileMapLayer fixture did not start empty."
+    $tileSet = Tool-Payload $byId[957]
+    Assert-True ($tileSet.changed_cells -eq 1 -and $tileSet.undo_redo_registered -eq $true -and $tileSet.rollback -eq "undo_redo") "tilemap_set_cells did not publish one undoable change."
+    $usedTileRect = Tool-Payload $byId[958]
+    Assert-True ($usedTileRect.position.x -eq 1 -and $usedTileRect.position.y -eq 2 -and $usedTileRect.size.x -eq 1 -and $usedTileRect.size.y -eq 1 -and $usedTileRect.end.x -eq 2 -and $usedTileRect.end.y -eq 3) "tilemap_get_used_rect returned the wrong integer rectangle."
+    Assert-True $byId[959].result.isError "TileMapLayer batch accepted an invalid final source."
+    $afterInvalidTile = Tool-Payload $byId[960]
+    Assert-True ($afterInvalidTile.position.x -eq 1 -and $afterInvalidTile.position.y -eq 2 -and $afterInvalidTile.size.x -eq 1 -and $afterInvalidTile.size.y -eq 1) "Invalid-last TileMapLayer batch partially mutated the scene."
+    Assert-True ((Tool-Payload $byId[961]).changed_cells -eq 1) "TileMapLayer erase did not remove the fixture cell."
+    $gridSet = Tool-Payload $byId[962]
+    Assert-True ($gridSet.changed_cells -eq 1 -and $gridSet.undo_redo_registered -eq $true) "gridmap_set_cells did not publish one undoable change."
+    $gridNoop = Tool-Payload $byId[963]
+    Assert-True ($gridNoop.changed_cells -eq 0 -and $gridNoop.unchanged_cells -eq 1 -and $gridNoop.undo_redo_registered -eq $false -and $gridNoop.rollback -eq "not_required") "GridMap no-op created undo history or reported a change."
+    Assert-True $byId[964].result.isError "GridMap batch accepted an invalid final item."
+    $gridPartialProbe = Tool-Payload $byId[965]
+    Assert-True ($gridPartialProbe.changed_cells -eq 0 -and $gridPartialProbe.unchanged_cells -eq 1) "Invalid-last GridMap batch partially mutated the scene."
+    Assert-True ((Tool-Payload $byId[966]).changed_cells -eq 1) "GridMap clear did not remove the fixture cell."
+
     $phase5Requests = @(
         (@{ jsonrpc = "2.0"; id = 500; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
         (Tool-Request 501 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
@@ -1113,8 +1195,7 @@ try {
     Assert-True $byId[935].result.isError "Configuring a bus that does not exist reported success."
     Assert-True $byId[936].result.isError "Configuring a bus with nothing to change reported success."
 
-    Assert-True $byId[914].result.isError "Unimplemented tool returned fake success."
-    Assert-True ($byId[914].result.content[0].text -match "no trustworthy execution path") "Unimplemented tool error is not actionable."
+    Assert-True $byId[914].result.isError "tilemap_get_used_rect accepted a non-TileMapLayer node."
 
     # The profiler window came from the running editor, in contract order, with
     # every sample accounted for. Zero readings are expected in an idle editor
@@ -1455,11 +1536,31 @@ try {
         }
     }
 
-    Assert-True (Request-ExactProcessClose $editorEnginePid $editorEngineStartedAtMs $StartupTimeoutSeconds) "Graceful close did not terminate the exact editor process."
+    # The final Phase 5 UI probe intentionally leaves a scene open. Close it
+    # through the authenticated bridge before asking the hidden editor window
+    # to exit; otherwise an unsaved-state prompt can make CloseMainWindow hang
+    # invisibly on CI even though every functional assertion has completed.
+    $editorCloseRequests = @(
+        (@{ jsonrpc = "2.0"; id = 210; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 211 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 212 "scene_close" @{ discard_unsaved = $true })
+    )
+    $rawEditorCloseResponses = $editorCloseRequests | & $didiExecutable --project $fixtureRoot
+    $editorCloseResponses = @($rawEditorCloseResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
+    Assert-True ($LASTEXITCODE -eq 0) "Didi editor-close process exited with $LASTEXITCODE."
+    Assert-True ($editorCloseResponses.Count -eq $editorCloseRequests.Count) "Editor-close batch response count mismatch."
+    $editorCloseById = @{}
+    foreach ($response in $editorCloseResponses) { $editorCloseById[[int]$response.id] = $response }
+    Assert-True ((Tool-Payload $editorCloseById[212]).closed -eq $true) "Final editor scene cleanup did not close the open scene."
+
+    $editorStopResult = Stop-ExactEditorProcess $editorEnginePid $editorEngineStartedAtMs 10
+    Assert-True ([bool]$editorStopResult.stopped) "Exact-instance teardown did not terminate the editor process."
+    $editorForcedTeardown = [bool]$editorStopResult.forced
 
     $responseTranscript = @(
         @($rawPrelaunchResponses)
         @($rawDiscoveryResponses)
+        @($sceneReadyTranscript)
         @($rawGameDiscovery)
         @($rawRuntimeResponses)
         @($rawResponses)
@@ -1473,6 +1574,7 @@ try {
         @($pauseForShutdownResponses | ConvertTo-Json -Compress -Depth 100)
         @($shutdownStepResponses | ConvertTo-Json -Compress -Depth 100)
         @($rawFailureResponses)
+        @($rawEditorCloseResponses)
     )
     $logTranscript = @(
         Get-Content $stdoutPath, $stderrPath, $gameStdoutPath, $gameStderrPath,
@@ -1500,6 +1602,26 @@ finally {
     Stop-RuntimeProcess $game $gameEnginePid $gameEngineStartedAtMs
     Stop-RuntimeProcess $shutdownGame $shutdownGameEnginePid $shutdownGameEngineStartedAtMs
     Stop-RuntimeProcess $godot $editorEnginePid $editorEngineStartedAtMs
+
+    # A forced exit cannot run the extension's normal descriptor destructor.
+    # Remove only the descriptor whose filename and embedded process identity
+    # match the exact disposable editor instance that we just terminated.
+    if ($editorForcedTeardown) {
+        Assert-True ($editorSessionId -match '^[0-9a-f]{32}$') "Refusing forced-editor cleanup without a valid session ID."
+        $editorDescriptorPath = [IO.Path]::GetFullPath((Join-Path $sessionDirectory ($editorSessionId + ".json")))
+        Assert-True ($editorDescriptorPath.StartsWith($sessionDirectory + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) "Refusing to remove a descriptor outside the disposable session directory."
+        $editorDescriptorEntry = Get-Item -LiteralPath $editorDescriptorPath -Force -ErrorAction SilentlyContinue
+        if ($null -ne $editorDescriptorEntry) {
+            Assert-True (-not $editorDescriptorEntry.PSIsContainer) "Refusing to remove a non-file editor descriptor."
+            Assert-True (($editorDescriptorEntry.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) "Refusing to remove an editor descriptor reparse entry."
+            Assert-True ($editorDescriptorEntry.Length -le 65536) "Refusing to parse an oversized editor descriptor during cleanup."
+            $staleEditorDescriptor = Get-Content -LiteralPath $editorDescriptorPath -Raw | ConvertFrom-Json
+            Assert-True ([string]$staleEditorDescriptor.session_id -eq $editorSessionId) "Refusing to remove an editor descriptor with a mismatched session ID."
+            Assert-True ([uint64]$staleEditorDescriptor.pid -eq $editorEnginePid) "Refusing to remove an editor descriptor with a mismatched PID."
+            Assert-True ([int64]$staleEditorDescriptor.started_at_ms -eq $editorEngineStartedAtMs) "Refusing to remove an editor descriptor with a mismatched process-start identity."
+            Remove-Item -LiteralPath $editorDescriptorPath -Force
+        }
+    }
     $descriptorDeadline = [DateTime]::UtcNow.AddSeconds(5)
     do {
         $activeDescriptors = @(Get-ChildItem -LiteralPath $sessionDirectory -Filter "*.json" -Force -ErrorAction SilentlyContinue)

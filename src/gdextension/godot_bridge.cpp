@@ -1608,6 +1608,80 @@ Result<VariantValue> makeVector3(double x, double y, double z) {
     return variantFromNative(GDEXTENSION_VARIANT_TYPE_VECTOR3, native.ptr());
 }
 
+Result<VariantValue> makeVector2i(int64_t x, int64_t y) {
+    auto constructor = GodotApi::instance().variant_get_ptr_constructor(
+        GDEXTENSION_VARIANT_TYPE_VECTOR2I, 3);
+    if (!constructor) return Error::internal("Godot Vector2i constructor is unavailable");
+    NativeValue native(GDEXTENSION_VARIANT_TYPE_VECTOR2I);
+    const void* arguments[] = {&x, &y};
+    constructor(native.ptr(), arguments);
+    native.markInitialized();
+    return variantFromNative(GDEXTENSION_VARIANT_TYPE_VECTOR2I, native.ptr());
+}
+
+Result<VariantValue> makeVector3i(int64_t x, int64_t y, int64_t z) {
+    auto constructor = GodotApi::instance().variant_get_ptr_constructor(
+        GDEXTENSION_VARIANT_TYPE_VECTOR3I, 3);
+    if (!constructor) return Error::internal("Godot Vector3i constructor is unavailable");
+    NativeValue native(GDEXTENSION_VARIANT_TYPE_VECTOR3I);
+    const void* arguments[] = {&x, &y, &z};
+    constructor(native.ptr(), arguments);
+    native.markInitialized();
+    return variantFromNative(GDEXTENSION_VARIANT_TYPE_VECTOR3I, native.ptr());
+}
+
+Result<json> integerVectorToJson(VariantValue& value, int dimensions) {
+    const auto type = dimensions == 2 ? GDEXTENSION_VARIANT_TYPE_VECTOR2I
+                                      : GDEXTENSION_VARIANT_TYPE_VECTOR3I;
+    auto& api = GodotApi::instance();
+    if (api.variant_get_type(value.ptr()) != type || !api.variant_get_ptr_getter) {
+        return Error::internal("Godot returned an invalid integer vector");
+    }
+    auto converter = api.get_variant_to_type_constructor(type);
+    if (!converter) return Error::internal("Godot integer vector conversion is unavailable");
+    NativeValue native(type);
+    converter(native.ptr(), value.ptr());
+    native.markInitialized();
+    json output = json::object();
+    for (const auto* axis : {"x", "y", "z"}) {
+        if (dimensions == 2 && axis[0] == 'z') break;
+        NativeName name(axis);
+        auto getter = name.valid() ? api.variant_get_ptr_getter(type, name.ptr()) : nullptr;
+        if (!getter) return Error::internal("Godot integer vector member getter is unavailable");
+        int64_t component = 0;
+        getter(native.ptr(), &component);
+        output[axis] = component;
+    }
+    return output;
+}
+
+Result<bool> objectIsClass(GDExtensionObjectPtr object, const char* class_name) {
+    auto name = makeStringName(class_name);
+    if (name.isErr()) return name.error();
+    auto result = callObject(object, "Object", "is_class", 3927539163LL, {&name.value()});
+    if (result.isErr()) return result.error();
+    auto flag = scalarFromVariant<GDExtensionBool>(result.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    return flag.isOk() ? Result<bool>(flag.value() != 0) : Result<bool>(flag.error());
+}
+
+Result<std::set<int64_t>> packedIntegerSet(VariantValue& packed) {
+    auto size_value = callVariant(packed, "size");
+    if (size_value.isErr()) return size_value.error();
+    auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (size.isErr()) return size.error();
+    std::set<int64_t> output;
+    for (int64_t index = 0; index < size.value(); ++index) {
+        auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (index_value.isErr()) return index_value.error();
+        auto item_value = callVariant(packed, "get", {&index_value.value()});
+        if (item_value.isErr()) return item_value.error();
+        auto item = scalarFromVariant<int64_t>(item_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (item.isErr()) return item.error();
+        output.insert(item.value());
+    }
+    return output;
+}
+
 Result<VariantValue> makePoint(const runtime::SpatialPoint& point) {
     return point.dimension == 2 ? makeVector2(point.x, point.y)
                                 : makeVector3(point.x, point.y, point.z);
@@ -2074,6 +2148,318 @@ json GodotBridge::execute(const std::string& method, const json& params,
     auto editor_result = editorInterface();
     if (editor_result.isErr()) return errorJson(editor_result.error().code, editor_result.error().message);
     auto editor = editor_result.value();
+
+    if (method == "tilemap.getUsedRect") {
+        if (session_kind != "editor") return errorJson(409, "session_kind_rejected");
+        if (!hasOnlyKeys(params, {"tilemap_path"}) || !params.contains("tilemap_path") ||
+            !params["tilemap_path"].is_string() || params["tilemap_path"].get<std::string>().empty() ||
+            params["tilemap_path"].get<std::string>().size() > 1024) {
+            return errorJson(400, "invalid_tilemap_get_used_rect_request");
+        }
+        if (requireMethodBind("TileMapLayer", "get_used_rect", 410525958LL).isErr() ||
+            requireMethodBind("Object", "is_class", 3927539163LL).isErr()) {
+            return errorJson(501, "required_bind_unavailable");
+        }
+        auto root = editedSceneRoot(editor);
+        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        auto layer = resolveNode(root.value(), params["tilemap_path"].get<std::string>());
+        if (layer.isErr()) return errorJson(404, "tilemap_target_not_found");
+        auto correct_class = objectIsClass(layer.value(), "TileMapLayer");
+        if (correct_class.isErr()) return errorJson(500, correct_class.error().message);
+        if (!correct_class.value()) return errorJson(404, "tilemap_target_not_found");
+        auto rect = callObject(layer.value(), "TileMapLayer", "get_used_rect", 410525958LL);
+        if (rect.isErr()) return errorJson(500, rect.error().message);
+        auto& api = GodotApi::instance();
+        if (api.variant_get_type(rect.value().ptr()) != GDEXTENSION_VARIANT_TYPE_RECT2I ||
+            !api.variant_get_ptr_getter) return errorJson(500, "extension_protocol_error");
+        auto converter = api.get_variant_to_type_constructor(GDEXTENSION_VARIANT_TYPE_RECT2I);
+        NativeName position_name("position"), size_name("size");
+        auto get_position = position_name.valid()
+                                ? api.variant_get_ptr_getter(GDEXTENSION_VARIANT_TYPE_RECT2I, position_name.ptr())
+                                : nullptr;
+        auto get_size = size_name.valid()
+                            ? api.variant_get_ptr_getter(GDEXTENSION_VARIANT_TYPE_RECT2I, size_name.ptr())
+                            : nullptr;
+        if (!converter || !get_position || !get_size) return errorJson(501, "required_bind_unavailable");
+        NativeValue native_rect(GDEXTENSION_VARIANT_TYPE_RECT2I);
+        converter(native_rect.ptr(), rect.value().ptr());
+        native_rect.markInitialized();
+        NativeValue native_position(GDEXTENSION_VARIANT_TYPE_VECTOR2I);
+        NativeValue native_size(GDEXTENSION_VARIANT_TYPE_VECTOR2I);
+        get_position(native_rect.ptr(), native_position.ptr());
+        get_size(native_rect.ptr(), native_size.ptr());
+        native_position.markInitialized();
+        native_size.markInitialized();
+        auto position_variant = variantFromNative(GDEXTENSION_VARIANT_TYPE_VECTOR2I, native_position.ptr());
+        auto size_variant = variantFromNative(GDEXTENSION_VARIANT_TYPE_VECTOR2I, native_size.ptr());
+        if (position_variant.isErr() || size_variant.isErr()) return errorJson(500, "extension_protocol_error");
+        auto position = integerVectorToJson(position_variant.value(), 2);
+        auto size = integerVectorToJson(size_variant.value(), 2);
+        if (position.isErr() || size.isErr()) return errorJson(500, "extension_protocol_error");
+        return liveResult({{"tilemap_path", params["tilemap_path"]},
+                           {"position", position.value()}, {"size", size.value()},
+                           {"end", {{"x", position.value()["x"].get<int64_t>() + size.value()["x"].get<int64_t>()},
+                                    {"y", position.value()["y"].get<int64_t>() + size.value()["y"].get<int64_t>()}}}});
+    }
+
+    if (method == "tilemap.setCells") {
+        if (session_kind != "editor") return errorJson(409, "session_kind_rejected");
+        if (!hasOnlyKeys(params, {"tilemap_path", "cells"}) ||
+            !params.contains("tilemap_path") || !params["tilemap_path"].is_string() ||
+            params["tilemap_path"].get<std::string>().empty() ||
+            params["tilemap_path"].get<std::string>().size() > 1024 ||
+            !params.contains("cells") || !params["cells"].is_array() ||
+            params["cells"].empty() || params["cells"].size() > 256) {
+            return errorJson(400, "invalid_tilemap_set_cells_request");
+        }
+        for (const auto& bind : {
+                 std::make_tuple("Object", "is_class", 3927539163LL),
+                 std::make_tuple("TileMapLayer", "get_tile_set", 2678226422LL),
+                 std::make_tuple("TileMapLayer", "set_cell", 2428518503LL),
+                 std::make_tuple("TileMapLayer", "erase_cell", 1130785943LL),
+                 std::make_tuple("TileMapLayer", "get_cell_source_id", 2485466453LL),
+                 std::make_tuple("TileMapLayer", "get_cell_atlas_coords", 3050897911LL),
+                 std::make_tuple("TileMapLayer", "get_cell_alternative_tile", 2485466453LL),
+                 std::make_tuple("TileSet", "has_source", 1116898809LL),
+                 std::make_tuple("TileSet", "get_source", 1763540252LL),
+                 std::make_tuple("TileSetAtlasSource", "get_tile_data", 3534028207LL)}) {
+            if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr())
+                return errorJson(501, "required_bind_unavailable");
+        }
+        if (preflightUndoManagerBindings().isErr()) return errorJson(501, "required_bind_unavailable");
+        auto root = editedSceneRoot(editor);
+        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        auto layer = resolveNode(root.value(), params["tilemap_path"].get<std::string>());
+        if (layer.isErr()) return errorJson(404, "tilemap_target_not_found");
+        auto correct_class = objectIsClass(layer.value(), "TileMapLayer");
+        if (correct_class.isErr() || !correct_class.value()) return errorJson(404, "tilemap_target_not_found");
+        auto tile_set_variant = callObject(layer.value(), "TileMapLayer", "get_tile_set", 2678226422LL);
+        if (tile_set_variant.isErr()) return errorJson(500, tile_set_variant.error().message);
+        auto tile_set = objectFromVariant(tile_set_variant.value());
+        if (tile_set.isErr()) return errorJson(500, tile_set.error().message);
+
+        struct Cell {
+            VariantValue coords;
+            bool erase{false};
+            int64_t source{-1};
+            VariantValue atlas;
+            int64_t alternative{-1};
+            int64_t old_source{-1};
+            VariantValue old_atlas;
+            int64_t old_alternative{-1};
+            bool changed{false};
+        };
+        std::vector<Cell> cells;
+        std::set<std::pair<int64_t, int64_t>> seen;
+        for (const auto& record : params["cells"]) {
+            if (!record.is_object() || !record.contains("coords") || !record["coords"].is_array() ||
+                record["coords"].size() != 2 || !record["coords"][0].is_number_integer() ||
+                !record["coords"][1].is_number_integer()) return errorJson(400, "invalid_tilemap_set_cells_request");
+            const int64_t x = record["coords"][0].get<int64_t>();
+            const int64_t y = record["coords"][1].get<int64_t>();
+            if (x < -1048576 || x > 1048576 || y < -1048576 || y > 1048576)
+                return errorJson(400, "invalid_tilemap_set_cells_request");
+            if (!seen.emplace(x, y).second) return errorJson(409, "duplicate_tilemap_coordinate");
+            const bool erase = record.contains("erase");
+            if ((erase && (!hasOnlyKeys(record, {"coords", "erase"}) || !record["erase"].is_boolean() || !record["erase"].get<bool>())) ||
+                (!erase && (!hasOnlyKeys(record, {"coords", "source_id", "atlas_coords", "alternative_tile"}) ||
+                            !record.contains("source_id") || !record["source_id"].is_number_integer() ||
+                            !record.contains("atlas_coords") || !record["atlas_coords"].is_array() || record["atlas_coords"].size() != 2)))
+                return errorJson(400, "invalid_tilemap_set_cells_request");
+            auto coords = makeVector2i(x, y);
+            auto empty_atlas = makeVector2i(-1, -1);
+            if (coords.isErr() || empty_atlas.isErr()) return errorJson(501, "required_bind_unavailable");
+            int64_t source = -1, alternative = -1;
+            VariantValue atlas = std::move(empty_atlas.value());
+            if (!erase) {
+                source = record["source_id"].get<int64_t>();
+                if (record.contains("alternative_tile") && !record["alternative_tile"].is_number_integer())
+                    return errorJson(400, "invalid_tilemap_set_cells_request");
+                alternative = record.value("alternative_tile", 0);
+                if (source < 0 || source > 2147483647LL || alternative < 0 || alternative > 65535 ||
+                    !record["atlas_coords"][0].is_number_integer() || !record["atlas_coords"][1].is_number_integer())
+                    return errorJson(400, "invalid_tilemap_set_cells_request");
+                const int64_t ax = record["atlas_coords"][0].get<int64_t>();
+                const int64_t ay = record["atlas_coords"][1].get<int64_t>();
+                if (ax < 0 || ax > 1048576 || ay < 0 || ay > 1048576 || !tile_set.value())
+                    return errorJson(404, "tilemap_tile_not_found");
+                auto source_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, source);
+                auto has_source = callObject(tile_set.value(), "TileSet", "has_source", 1116898809LL, {&source_value.value()});
+                auto has_flag = has_source.isOk() ? scalarFromVariant<GDExtensionBool>(has_source.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+                                                  : Result<GDExtensionBool>(has_source.error());
+                if (has_flag.isErr() || !has_flag.value()) return errorJson(404, "tilemap_tile_not_found");
+                auto source_object_value = callObject(tile_set.value(), "TileSet", "get_source", 1763540252LL, {&source_value.value()});
+                auto source_object = source_object_value.isOk() ? objectFromVariant(source_object_value.value())
+                                                                : Result<GDExtensionObjectPtr>(source_object_value.error());
+                if (source_object.isErr() || !source_object.value()) return errorJson(404, "tilemap_tile_not_found");
+                auto atlas_class = objectIsClass(source_object.value(), "TileSetAtlasSource");
+                if (atlas_class.isErr() || !atlas_class.value()) return errorJson(404, "tilemap_tile_not_found");
+                auto requested_atlas = makeVector2i(ax, ay);
+                auto alternative_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, alternative);
+                auto tile_data_value = callObject(source_object.value(), "TileSetAtlasSource", "get_tile_data", 3534028207LL,
+                                                  {&requested_atlas.value(), &alternative_value.value()});
+                auto tile_data = tile_data_value.isOk() ? objectFromVariant(tile_data_value.value())
+                                                        : Result<GDExtensionObjectPtr>(tile_data_value.error());
+                if (tile_data.isErr() || !tile_data.value()) return errorJson(404, "tilemap_tile_not_found");
+                atlas = std::move(requested_atlas.value());
+            }
+            auto old_source_value = callObject(layer.value(), "TileMapLayer", "get_cell_source_id", 2485466453LL, {&coords.value()});
+            auto old_atlas = callObject(layer.value(), "TileMapLayer", "get_cell_atlas_coords", 3050897911LL, {&coords.value()});
+            auto old_alt_value = callObject(layer.value(), "TileMapLayer", "get_cell_alternative_tile", 2485466453LL, {&coords.value()});
+            if (old_source_value.isErr() || old_atlas.isErr() || old_alt_value.isErr()) return errorJson(500, "tilemap_snapshot_failed");
+            auto old_source = scalarFromVariant<int64_t>(old_source_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            auto old_alt = scalarFromVariant<int64_t>(old_alt_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            auto old_atlas_json = integerVectorToJson(old_atlas.value(), 2);
+            auto atlas_json = integerVectorToJson(atlas, 2);
+            if (old_source.isErr() || old_alt.isErr() || old_atlas_json.isErr() || atlas_json.isErr()) return errorJson(500, "tilemap_snapshot_failed");
+            const bool changed = old_source.value() != source || old_alt.value() != alternative || old_atlas_json.value() != atlas_json.value();
+            cells.push_back(Cell{std::move(coords.value()), erase, source, std::move(atlas), alternative,
+                                 old_source.value(), std::move(old_atlas.value()), old_alt.value(), changed});
+        }
+        const size_t changed_count = std::count_if(cells.begin(), cells.end(), [](const Cell& cell) { return cell.changed; });
+        if (changed_count == 0) return liveResult({{"requested_cells", cells.size()}, {"changed_cells", 0},
+            {"unchanged_cells", cells.size()}, {"undo_redo_registered", false}, {"outcome", "completed"}, {"rollback", "not_required"}});
+        auto manager = undoManager(editor);
+        if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+        auto action = createAction(manager.value(), "Didi: set TileMapLayer cells", layer.value());
+        if (action.isErr()) return errorJson(500, action.error().message);
+        for (auto& cell : cells) if (cell.changed) {
+            auto source_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.source);
+            auto alt_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.alternative);
+            auto old_source_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.old_source);
+            auto old_alt_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.old_alternative);
+            auto registered = cell.erase
+                ? managerMethod(manager.value(), "add_do_method", layer.value(), "erase_cell", {&cell.coords})
+                : managerMethod(manager.value(), "add_do_method", layer.value(), "set_cell", {&cell.coords, &source_value.value(), &cell.atlas, &alt_value.value()});
+            if (registered.isOk()) registered = cell.old_source < 0
+                ? managerMethod(manager.value(), "add_undo_method", layer.value(), "erase_cell", {&cell.coords})
+                : managerMethod(manager.value(), "add_undo_method", layer.value(), "set_cell", {&cell.coords, &old_source_value.value(), &cell.old_atlas, &old_alt_value.value()});
+            if (registered.isErr()) { abandonAction(manager.value()); return errorJson(500, "tilemap_undo_registration_failed"); }
+        }
+        auto committed = commitAction(manager.value());
+        if (committed.isErr()) return errorJson(500, committed.error().message);
+        for (auto& cell : cells) if (cell.changed) {
+            auto observed_source_value = callObject(layer.value(), "TileMapLayer", "get_cell_source_id", 2485466453LL, {&cell.coords});
+            auto observed_atlas_value = callObject(layer.value(), "TileMapLayer", "get_cell_atlas_coords", 3050897911LL, {&cell.coords});
+            auto observed_alt_value = callObject(layer.value(), "TileMapLayer", "get_cell_alternative_tile", 2485466453LL, {&cell.coords});
+            auto observed_source = observed_source_value.isOk() ? scalarFromVariant<int64_t>(observed_source_value.value(), GDEXTENSION_VARIANT_TYPE_INT)
+                                                                : Result<int64_t>(observed_source_value.error());
+            auto observed_alt = observed_alt_value.isOk() ? scalarFromVariant<int64_t>(observed_alt_value.value(), GDEXTENSION_VARIANT_TYPE_INT)
+                                                          : Result<int64_t>(observed_alt_value.error());
+            auto observed_atlas = observed_atlas_value.isOk() ? integerVectorToJson(observed_atlas_value.value(), 2)
+                                                              : Result<json>(observed_atlas_value.error());
+            auto expected_atlas = integerVectorToJson(cell.atlas, 2);
+            if (observed_source.isErr() || observed_alt.isErr() || observed_atlas.isErr() ||
+                expected_atlas.isErr() || observed_source.value() != cell.source ||
+                observed_alt.value() != cell.alternative || observed_atlas.value() != expected_atlas.value()) {
+                const auto restored = undoLastAction(manager.value(), root.value());
+                return errorJson(500, "tilemap_postcondition_mismatch", {{"outcome", restored.isOk() ? "rolled_back" : "unknown"}});
+            }
+        }
+        return liveResult({{"requested_cells", cells.size()}, {"changed_cells", changed_count},
+            {"unchanged_cells", cells.size() - changed_count}, {"undo_redo_registered", true}, {"outcome", "completed"}, {"rollback", "undo_redo"}});
+    }
+
+    if (method == "gridmap.setCells") {
+        if (session_kind != "editor") return errorJson(409, "session_kind_rejected");
+        if (!hasOnlyKeys(params, {"gridmap_path", "cells"}) || !params.contains("gridmap_path") ||
+            !params["gridmap_path"].is_string() || params["gridmap_path"].get<std::string>().empty() ||
+            params["gridmap_path"].get<std::string>().size() > 1024 ||
+            !params.contains("cells") || !params["cells"].is_array() || params["cells"].empty() ||
+            params["cells"].size() > 256) return errorJson(400, "invalid_gridmap_set_cells_request");
+        for (const auto& bind : {std::make_tuple("Object", "is_class", 3927539163LL),
+                 std::make_tuple("GridMap", "get_mesh_library", 3350993772LL),
+                 std::make_tuple("GridMap", "set_cell_item", 3449088946LL),
+                 std::make_tuple("GridMap", "get_cell_item", 3724960147LL),
+                 std::make_tuple("GridMap", "get_cell_item_orientation", 3724960147LL),
+                 std::make_tuple("MeshLibrary", "get_item_list", 1930428628LL)}) {
+            if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) return errorJson(501, "required_bind_unavailable");
+        }
+        if (preflightUndoManagerBindings().isErr()) return errorJson(501, "required_bind_unavailable");
+        auto root = editedSceneRoot(editor);
+        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        auto grid = resolveNode(root.value(), params["gridmap_path"].get<std::string>());
+        if (grid.isErr()) return errorJson(404, "gridmap_target_not_found");
+        auto correct_class = objectIsClass(grid.value(), "GridMap");
+        if (correct_class.isErr() || !correct_class.value()) return errorJson(404, "gridmap_target_not_found");
+        auto library_value = callObject(grid.value(), "GridMap", "get_mesh_library", 3350993772LL);
+        auto library = library_value.isOk() ? objectFromVariant(library_value.value())
+                                            : Result<GDExtensionObjectPtr>(library_value.error());
+        std::set<int64_t> item_ids;
+        if (library.isOk() && library.value()) {
+            auto list = callObject(library.value(), "MeshLibrary", "get_item_list", 1930428628LL);
+            if (list.isErr()) return errorJson(500, list.error().message);
+            auto ids = packedIntegerSet(list.value());
+            if (ids.isErr()) return errorJson(500, ids.error().message);
+            item_ids = std::move(ids.value());
+        }
+        struct Cell { VariantValue position; int64_t item; int64_t orientation; int64_t old_item; int64_t old_orientation; bool changed; };
+        std::vector<Cell> cells;
+        std::set<std::tuple<int64_t, int64_t, int64_t>> seen;
+        for (const auto& record : params["cells"]) {
+            if (!hasOnlyKeys(record, {"position", "item", "orientation"}) || !record.contains("position") ||
+                !record["position"].is_array() || record["position"].size() != 3 || !record.contains("item") ||
+                !record["item"].is_number_integer()) return errorJson(400, "invalid_gridmap_set_cells_request");
+            int64_t xyz[3];
+            for (int axis = 0; axis < 3; ++axis) {
+                if (!record["position"][axis].is_number_integer()) return errorJson(400, "invalid_gridmap_set_cells_request");
+                xyz[axis] = record["position"][axis].get<int64_t>();
+                if (xyz[axis] < -1048576 || xyz[axis] > 1048576) return errorJson(400, "invalid_gridmap_set_cells_request");
+            }
+            if (!seen.emplace(xyz[0], xyz[1], xyz[2]).second) return errorJson(409, "duplicate_gridmap_position");
+            const int64_t item = record["item"].get<int64_t>();
+            if (record.contains("orientation") && !record["orientation"].is_number_integer())
+                return errorJson(400, "invalid_gridmap_set_cells_request");
+            const int64_t orientation = record.value("orientation", 0);
+            if (item < -1 || item > 2147483647LL || orientation < 0 || orientation > 23 ||
+                (item == -1 && orientation != 0)) return errorJson(400, "invalid_gridmap_set_cells_request");
+            if (item >= 0 && (!library.isOk() || !library.value() || !item_ids.count(item))) return errorJson(404, "gridmap_item_not_found");
+            auto position = makeVector3i(xyz[0], xyz[1], xyz[2]);
+            if (position.isErr()) return errorJson(501, "required_bind_unavailable");
+            auto old_item_value = callObject(grid.value(), "GridMap", "get_cell_item", 3724960147LL, {&position.value()});
+            auto old_orientation_value = callObject(grid.value(), "GridMap", "get_cell_item_orientation", 3724960147LL, {&position.value()});
+            if (old_item_value.isErr() || old_orientation_value.isErr()) return errorJson(500, "gridmap_snapshot_failed");
+            auto old_item = scalarFromVariant<int64_t>(old_item_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            auto old_orientation = scalarFromVariant<int64_t>(old_orientation_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (old_item.isErr() || old_orientation.isErr()) return errorJson(500, "gridmap_snapshot_failed");
+            const bool changed = item != old_item.value() || (item >= 0 && orientation != old_orientation.value());
+            cells.push_back(Cell{std::move(position.value()), item, orientation, old_item.value(), old_orientation.value(), changed});
+        }
+        const size_t changed_count = std::count_if(cells.begin(), cells.end(), [](const Cell& cell) { return cell.changed; });
+        if (changed_count == 0) return liveResult({{"requested_cells", cells.size()}, {"changed_cells", 0},
+            {"unchanged_cells", cells.size()}, {"undo_redo_registered", false}, {"outcome", "completed"}, {"rollback", "not_required"}});
+        auto manager = undoManager(editor);
+        if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+        auto action = createAction(manager.value(), "Didi: set GridMap cells", grid.value());
+        if (action.isErr()) return errorJson(500, action.error().message);
+        for (auto& cell : cells) if (cell.changed) {
+            auto item = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.item);
+            auto orientation = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.orientation);
+            auto old_item = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.old_item);
+            auto old_orientation = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.old_orientation);
+            auto registered = managerMethod(manager.value(), "add_do_method", grid.value(), "set_cell_item", {&cell.position, &item.value(), &orientation.value()});
+            if (registered.isOk()) registered = managerMethod(manager.value(), "add_undo_method", grid.value(), "set_cell_item", {&cell.position, &old_item.value(), &old_orientation.value()});
+            if (registered.isErr()) { abandonAction(manager.value()); return errorJson(500, "gridmap_undo_registration_failed"); }
+        }
+        auto committed = commitAction(manager.value());
+        if (committed.isErr()) return errorJson(500, committed.error().message);
+        for (auto& cell : cells) if (cell.changed) {
+            auto observed_item_value = callObject(grid.value(), "GridMap", "get_cell_item", 3724960147LL, {&cell.position});
+            auto observed_orientation_value = callObject(grid.value(), "GridMap", "get_cell_item_orientation", 3724960147LL, {&cell.position});
+            auto observed_item = observed_item_value.isOk() ? scalarFromVariant<int64_t>(observed_item_value.value(), GDEXTENSION_VARIANT_TYPE_INT)
+                                                            : Result<int64_t>(observed_item_value.error());
+            auto observed_orientation = observed_orientation_value.isOk() ? scalarFromVariant<int64_t>(observed_orientation_value.value(), GDEXTENSION_VARIANT_TYPE_INT)
+                                                                          : Result<int64_t>(observed_orientation_value.error());
+            if (observed_item.isErr() || observed_orientation.isErr() ||
+                observed_item.value() != cell.item ||
+                (cell.item >= 0 && observed_orientation.value() != cell.orientation)) {
+                const auto restored = undoLastAction(manager.value(), root.value());
+                return errorJson(500, "gridmap_postcondition_mismatch", {{"outcome", restored.isOk() ? "rolled_back" : "unknown"}});
+            }
+        }
+        return liveResult({{"requested_cells", cells.size()}, {"changed_cells", changed_count},
+            {"unchanged_cells", cells.size() - changed_count}, {"undo_redo_registered", true}, {"outcome", "completed"}, {"rollback", "undo_redo"}});
+    }
 
     if (method == "vision.setCameraTransform") {
         if (session_kind != "editor") return errorJson(409, "session_kind_rejected");

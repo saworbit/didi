@@ -144,7 +144,7 @@ The standalone router starts detached, then may auto-attach on first availabilit
 
 ## Phase 4 tests and release gate
 
-The v1.4.0 release gate runs the complete native suite; the runner's reported total remains authoritative as cases evolve. Focused suites cover the existing session/routing/evaluation contracts plus search containment and lexical filtering, two-idle-frame reimport progress, exact diff arithmetic, cache eviction, public response completeness, and restoration guards. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and also verifies the Phase 4 search/reimport/isolation/diff loop against Godot 4.5.1.
+The v1.4.0 release gate runs the complete native suite; the runner's reported total remains authoritative as cases evolve. Focused suites cover the existing session/routing/evaluation contracts plus search containment and lexical filtering, two-idle-frame reimport progress, exact diff arithmetic, cache eviction, public response completeness, and restoration guards. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and also verifies the Phase 4 search/reimport/isolation/diff loop against Godot 4.5.1. Editor teardown first requests a normal window close, then uses PID-and-start-time-verified termination if a hidden Windows editor keeps an invisible native prompt alive; this fallback is limited to the disposable test process and cannot target a reused PID. Because forced exit cannot run the extension destructor, the harness removes a leftover descriptor only after its regular-file shape, session ID, PID, and process-start identity all match that editor instance.
 
 Run from a clean worktree:
 
@@ -178,14 +178,14 @@ The CI MCP smoke must start Didi with an explicit fixture project. It verifies t
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `77/83`
-**Phase 7 registrations:** `6/18` unimplemented
+**Canonical implementation:** `80/83`
+**Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
 Phase 7 is `PARTIAL_DELIVERY`. The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2: 15/18 names are implementation-feasible, while exactly 3/18 are API-blocked under their approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Do not broaden that result into a permanent impossibility claim.
 
-Feasibility is design evidence; a production trial is production behavior. The four signal names, both viewport controls, `runtime_read_profiler`, `runtime_inject_input`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, and `anim_play_track` are delivered. The other 6 names remain registered but unimplemented.
+Feasibility is design evidence; a production trial is production behavior. All 15 feasible Phase 7 names are delivered, including the three TileMapLayer/GridMap tools. The 3 API-blocked names remain registered but unimplemented.
 
 Further work requires governance to authorize partial delivery of the 15 feasible tools toward 76/79, retain atomic 83/83 and wait for supported engine capabilities, or explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. The third option requires all three blockers to re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 begins. Any contract weakening is a separate explicit contract amendment, not an effect of that option. Use [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) for reproducible evidence and [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md) for the approved executable plan.
 

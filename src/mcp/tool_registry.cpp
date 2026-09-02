@@ -55,6 +55,9 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // Phase 7A editor-only viewport controls. Camera edits are registered
         // with UndoRedo; debug hints return the prior state for explicit restore.
         , "viewport_set_camera_transform", "viewport_toggle_debug_draw"
+        // Phase 7A editor-only tile and grid batches. Both mutations preflight
+        // every record and publish one UndoRedo action; used-rect is read-only.
+        , "tilemap_set_cells", "tilemap_get_used_rect", "gridmap_set_cells"
     };
     static const std::unordered_set<std::string> offline = {
         "script_check_syntax", "analyze_script_diagnostics", "script_reflect_class",
