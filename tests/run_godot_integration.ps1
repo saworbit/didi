@@ -293,6 +293,34 @@ try {
     Assert-True ($editorSessionToken -match '^[0-9a-f]{64}$') "Editor descriptor token did not meet the private protocol shape."
     Assert-True ($editorEngineStartedAtMs -eq [int64]$editorSession.started_at_ms) "Editor discovery and private descriptor disagreed on process-start identity."
 
+    # EditorInterface.open_scene_from_path can return before a cold import has
+    # activated the scene. Prove readiness through the bridge, retrying the
+    # complete authenticated request rather than trusting the plugin log line.
+    $sceneReady = $false
+    $sceneReadyTranscript = @()
+    $sceneReadyDeadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $sceneReadyDeadline -and -not $godot.HasExited) {
+        $sceneReadyRequests = @(
+            (@{ jsonrpc = "2.0"; id = 910; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+            (Tool-Request 911 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+            (Tool-Request 912 "scene_open" @{ scene_path = "res://main.tscn" })
+        )
+        $rawSceneReadyResponses = $sceneReadyRequests | & $didiExecutable --project $fixtureRoot
+        $sceneReadyTranscript += @($rawSceneReadyResponses)
+        $sceneReadyResponses = @($rawSceneReadyResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
+        if ($LASTEXITCODE -eq 0 -and $sceneReadyResponses.Count -eq $sceneReadyRequests.Count) {
+            $sceneReadyById = @{}
+            foreach ($response in $sceneReadyResponses) { $sceneReadyById[[int]$response.id] = $response }
+            if ($sceneReadyById.ContainsKey(912) -and -not $sceneReadyById[912].result.isError) {
+                $readyPayload = Tool-Payload $sceneReadyById[912]
+                $sceneReady = $readyPayload.opened -eq $true -and $readyPayload.scene_path -eq "res://main.tscn"
+                if ($sceneReady) { break }
+            }
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    Assert-True $sceneReady "Godot editor did not activate res://main.tscn through the authenticated bridge."
+
     $game = Start-Process -FilePath $GodotExecutable `
         -ArgumentList @("--headless", "--path", $fixtureRoot, "--log-file", $gameEngineLogPath, "res://runtime_main.tscn") `
         -PassThru -WindowStyle Hidden `
@@ -644,10 +672,6 @@ try {
     $requests = @(
         (@{ jsonrpc = "2.0"; id = 1; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
         (Tool-Request 900 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
-        # The smoke plugin's deferred opener logs after calling Godot, not after
-        # proving that an edited scene exists. Re-open explicitly so slow CI
-        # imports cannot make the first live assertion race editor readiness.
-        (Tool-Request 129 "scene_open" @{ scene_path = "res://main.tscn" }),
         (Tool-Request 130 "eval_gdscript" @{ expression = "node.get('process_priority')"; context_node = "/root/SmokeRoot/Subject" }),
         (Tool-Request 131 "eval_gdscript" @{ expression = "node.get_child_count()" }),
         (Tool-Request 132 "eval_gdscript" @{ expression = "[1, 2, 3]" }),
@@ -875,7 +899,6 @@ try {
     $attached = Tool-Payload $byId[900]
     Assert-True ($attached.handshake.status -eq "ok") "Runtime attach did not complete the authenticated handshake."
     Assert-True ($attached.session.session_id -eq $editorSession.session_id) "Runtime attach selected the wrong editor session."
-    Assert-True ((Tool-Payload $byId[129]).scene_path -eq "res://main.tscn") "Editor readiness open did not select the smoke scene."
 
     $scalarEval = Tool-Payload $byId[130]
     Assert-True ($scalarEval.value -eq 7 -and $scalarEval.value_type -eq "int") "Editor scalar expression was incorrect."
@@ -1514,6 +1537,7 @@ try {
     $responseTranscript = @(
         @($rawPrelaunchResponses)
         @($rawDiscoveryResponses)
+        @($sceneReadyTranscript)
         @($rawGameDiscovery)
         @($rawRuntimeResponses)
         @($rawResponses)
