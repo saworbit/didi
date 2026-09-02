@@ -370,6 +370,17 @@ try {
             @{ type = "joypad_button"; button_index = 22; pressed = $true; device = 0 }
         ) }),
         (Tool-Request 398 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }),
+        # Phase 7B spatial reads against the game's root viewport worlds. The
+        # fixture places a unit box at x=2 in 3D, a unit rectangle at x=2 in 2D,
+        # and a 4x4 navigation region around the origin in both.
+        (Tool-Request 400 "physics_raycast_query" @{ from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 4; y = 0; z = 0 } }),
+        (Tool-Request 401 "physics_raycast_query" @{ from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 0; y = 4; z = 0 } }),
+        (Tool-Request 402 "physics_raycast_query" @{ from = @{ x = 0; y = 0 }; to = @{ x = 4; y = 0 } }),
+        (Tool-Request 403 "physics_raycast_query" @{ from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 4; y = 0; z = 0 }; collision_mask = 2 }),
+        (Tool-Request 404 "physics_raycast_query" @{ from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 0; y = 0; z = 0 } }),
+        (Tool-Request 405 "nav_query_path" @{ start_point = @{ x = -1; y = 0; z = 0 }; end_point = @{ x = 1; y = 0; z = 0 } }),
+        (Tool-Request 406 "nav_query_path" @{ start_point = @{ x = -1; y = 0 }; end_point = @{ x = 1; y = 0 } }),
+        (Tool-Request 407 "nav_query_path" @{ start_point = @{ x = -1; y = 0; z = 0 }; end_point = @{ x = 1; y = 0 } }),
         (Tool-Request 380 "runtime_read_output" @{ limit = 500 }),
         (Tool-Request 303 "runtime_set_paused" @{ paused = $true }),
         (Tool-Request 304 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 2 }),
@@ -474,8 +485,8 @@ try {
 
     $runtimeTree = Tool-Payload $runtimeById[302]
     Assert-True ($runtimeTree.scene_tree.path -eq "/root/RuntimeRoot") "Runtime tree root was not canonical."
-    Assert-True ($runtimeTree.scene_tree.child_count -eq 3) "Runtime tree did not report child_count."
-    Assert-True ($runtimeTree.node_count -eq 6 -and $runtimeTree.truncated) "Runtime tree bounds metadata did not report the deliberately large truncated subtree."
+    Assert-True ($runtimeTree.scene_tree.child_count -eq 4) "Runtime tree did not report child_count."
+    Assert-True ($runtimeTree.node_count -eq 11 -and $runtimeTree.truncated) "Runtime tree bounds metadata did not report the deliberately large truncated subtree."
     $inputBefore = Runtime-InputCounter (Tool-Payload $runtimeById[391])
     $injected = Tool-Payload $runtimeById[392]
     Assert-True ($injected.execution_mode -eq "live" -and $injected.session_kind -eq "game") "runtime_inject_input did not run against the game session."
@@ -489,6 +500,28 @@ try {
     Assert-True $runtimeById[397].result.isError "runtime_inject_input accepted a joypad button outside 0..21."
     $inputFinal = Runtime-InputCounter (Tool-Payload $runtimeById[398])
     Assert-True ($inputFinal -eq $inputAfter) "A rejected batch or a dry run still dispatched input; the counter moved from $inputAfter to $inputFinal."
+
+    $hit3d = Tool-Payload $runtimeById[400]
+    Assert-True ($hit3d.execution_mode -eq "live" -and $hit3d.dimension -eq 3 -and $hit3d.hit -eq $true) "3D raycast did not hit the fixture body."
+    Assert-True ($hit3d.collider_path -eq "/root/RuntimeRoot/Spatial/RayTarget3D" -and $hit3d.collider_class -eq "StaticBody3D") "3D raycast did not name the fixture body ($($hit3d.collider_path), $($hit3d.collider_class))."
+    Assert-True ([Math]::Abs($hit3d.position.x - 1.5) -lt 0.01 -and [Math]::Abs($hit3d.normal.x + 1) -lt 0.01) "3D raycast hit point or normal is wrong ($($hit3d.position.x), $($hit3d.normal.x))."
+    Assert-True ($hit3d.collision_layer -eq 1) "3D raycast did not report the collider layer."
+    $miss3d = Tool-Payload $runtimeById[401]
+    Assert-True ($miss3d.hit -eq $false -and $null -eq $miss3d.collider_path -and $null -eq $miss3d.position -and $null -eq $miss3d.normal -and $null -eq $miss3d.collision_layer) "3D raycast miss did not null every detail field."
+    $hit2d = Tool-Payload $runtimeById[402]
+    Assert-True ($hit2d.dimension -eq 2 -and $hit2d.hit -eq $true -and $hit2d.collider_path -eq "/root/RuntimeRoot/Spatial/RayTarget2D") "2D raycast did not hit the fixture body."
+    Assert-True ($null -eq $hit2d.position.z) "2D raycast reported a z component."
+    $maskedMiss = Tool-Payload $runtimeById[403]
+    Assert-True ($maskedMiss.hit -eq $false) "A collision mask that excludes layer 1 still hit the fixture body."
+    Assert-True $runtimeById[404].result.isError "physics_raycast_query accepted a zero-length segment."
+    $path3d = Tool-Payload $runtimeById[405]
+    Assert-True ($path3d.execution_mode -eq "live" -and $path3d.dimension -eq 3 -and $path3d.reachable -eq $true) "3D path query found no path across the fixture region."
+    $pathPoints3d = @($path3d.points)
+    Assert-True ($pathPoints3d.Count -ge 2 -and [Math]::Abs($pathPoints3d[0].x + 1) -lt 0.01 -and [Math]::Abs($pathPoints3d[-1].x - 1) -lt 0.01) "3D path does not run from start to end ($($pathPoints3d.Count) points)."
+    Assert-True ($path3d.truncated -eq $false -and $path3d.navigation_layers -eq 1 -and $path3d.optimize -eq $true) "3D path metadata is wrong."
+    $path2d = Tool-Payload $runtimeById[406]
+    Assert-True ($path2d.dimension -eq 2 -and $path2d.reachable -eq $true -and @($path2d.points).Count -ge 2) "2D path query found no path across the fixture region."
+    Assert-True $runtimeById[407].result.isError "nav_query_path accepted mixed dimensions."
 
     # The same window from a game session, with request order ignored: frame
     # precedes physics in the output whatever the caller wrote.
@@ -541,7 +574,7 @@ try {
         Assert-True ([bool]$runtimeById[$rejectedId].result.isError) "Runtime rejection $rejectedId returned fake success."
     }
     Assert-True ((Tool-Payload $runtimeById[316]).paused -eq $false) "Game resume was not verified."
-    Assert-True ((Tool-Payload $runtimeById[323]).value -eq 3) "Game expression child count was incorrect."
+    Assert-True ((Tool-Payload $runtimeById[323]).value -eq 4) "Game expression child count was incorrect."
     Assert-True (@((Tool-Payload $runtimeById[324]).value).Count -eq 3) "Game expression array was not preserved."
     Assert-True ((Tool-Payload $runtimeById[325]).value.answer -eq 42) "Game expression dictionary was not preserved."
     $gameVector = Tool-Payload $runtimeById[326]
@@ -551,7 +584,7 @@ try {
         Assert-True ([bool]$runtimeById[$rejectedId].result.isError) "Game expression rejection $rejectedId returned fake success."
     }
     foreach ($policyRejectedId in 350, 351, 352, 353, 354, 355, 356, 357, 361, 362) {
-        Assert-True ($runtimeById[$policyRejectedId].result.content[0].text -match "Invalid expression request") "Game policy rejection $policyRejectedId reached the engine."
+        Assert-True ($runtimeById[$policyRejectedId].result.content[0].text -match "Invalid expression request") "Game policy rejection $policyRejectedId reached the engine: $($runtimeById[$policyRejectedId].result.content[0].text)"
     }
     Assert-True ($runtimeById[331].result.content[0].text -match "nesting depth") "Deep game result failed for the wrong reason."
     Assert-True ($runtimeById[332].result.content[0].text -match "256 KiB") "Oversized game result failed for the wrong reason."
@@ -650,7 +683,7 @@ try {
         (Tool-Request 912 "signal_disconnect" @{ emitter_node = "/root/SmokeRoot"; signal_name = "tree_entered"; target_node = "/root/SmokeRoot/Subject"; target_method = "notify_property_list_changed" }),
         (Tool-Request 913 "signal_list_connections" @{ target_node = "/root/SmokeRoot" }),
         # A still-reserved Phase 7 name, so the honest-failure check keeps a subject.
-        (Tool-Request 914 "physics_raycast_query" @{ from = @(0, 0, 0); to = @(0, 0, 1) }),
+        (Tool-Request 914 "anim_list_tracks" @{ animation_player_path = "/root/SmokeRoot" }),
         # Phase 7C. A bounded window of Performance samples, collected from the
         # frame callback. Five samples over 200 ms is long enough to span
         # several editor frames and short enough not to slow the harness.
@@ -659,6 +692,10 @@ try {
         (Tool-Request 942 "runtime_read_profiler" @{ categories = @("gpu") }),
         # Game only. An editor route must be refused before anything reaches Input.
         (Tool-Request 943 "runtime_inject_input" @{ events = @(@{ type = "action"; action_name = "ui_accept"; pressed = $true }) }),
+        # Editor or game. The editor root viewport's world is the editor's own, so
+        # the honest editor result is a miss with every detail field null.
+        (Tool-Request 944 "physics_raycast_query" @{ from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 4; y = 0; z = 0 } }),
+        (Tool-Request 945 "nav_query_path" @{ start_point = @{ x = -1; y = 0; z = 0 }; end_point = @{ x = 1; y = 0; z = 0 } }),
         (Tool-Request 930 "audio_list_buses" @{}),
         (Tool-Request 931 "audio_configure_bus" @{ bus = "Master"; volume_db = -12.5; mute = $true }),
         (Tool-Request 932 "audio_list_buses" @{}),
@@ -802,7 +839,7 @@ try {
         Assert-True ([bool]$byId[$rejectedId].result.isError) "Editor callback rejection $rejectedId returned fake success."
     }
     foreach ($policyRejectedId in 159, 160, 161, 162, 163, 164, 165, 166, 169, 170) {
-        Assert-True ($byId[$policyRejectedId].result.content[0].text -match "Invalid expression request") "Editor policy rejection $policyRejectedId reached the engine."
+        Assert-True ($byId[$policyRejectedId].result.content[0].text -match "Invalid expression request") "Editor policy rejection $policyRejectedId reached the engine: $($byId[$policyRejectedId].result.content[0].text)"
     }
     Assert-True ((Tool-Payload $byId[167]).value -match "SmokeRoot/Container/MaliciousSubject$") "Safe editor path scalar was rejected or incorrect."
     Assert-True ((Tool-Payload $byId[168]).value -eq 1024) "Safe editor child-count scalar did not inspect the large scene in constant space."
@@ -1043,6 +1080,11 @@ try {
     Assert-True $byId[942].result.isError "runtime_read_profiler accepted an unknown category."
     Assert-True $byId[943].result.isError "runtime_inject_input accepted an editor session."
     Assert-True ($byId[943].result.content[0].text -match "session_kind|game") "runtime_inject_input editor rejection does not say why."
+    $editorRay = Tool-Payload $byId[944]
+    Assert-True ($editorRay.execution_mode -eq "live" -and $editorRay.dimension -eq 3 -and ($editorRay.hit -is [bool])) "physics_raycast_query did not run live in the editor."
+    if (-not $editorRay.hit) { Assert-True ($null -eq $editorRay.collider_path -and $null -eq $editorRay.position) "Editor raycast miss carried detail fields." }
+    $editorPath = Tool-Payload $byId[945]
+    Assert-True ($editorPath.execution_mode -eq "live" -and $editorPath.dimension -eq 3 -and ($editorPath.reachable -is [bool]) -and ($null -ne $editorPath.points)) "nav_query_path did not run live in the editor."
     Assert-True $byId[21].result.isError "Missing node lookup returned fake success."
     Assert-True $byId[22].result.isError "Unknown property lookup returned fake null success."
     Assert-True $byId[23].result.isError "Incompatible scalar property write returned fake success."

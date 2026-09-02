@@ -47,6 +47,8 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // Phase 7C. Game only: Input.parse_input_event in the editor would
         // drive the editor UI, which is nobody's intent.
         , "runtime_inject_input"
+        // Phase 7B reads against the root viewport's existing worlds.
+        , "physics_raycast_query", "nav_query_path"
     };
     static const std::unordered_set<std::string> offline = {
         "script_check_syntax", "analyze_script_diagnostics", "script_reflect_class",

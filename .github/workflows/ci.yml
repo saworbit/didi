@@ -394,7 +394,7 @@ jobs:
           # delivered and one reserved tool so a reader can see the split.
           assert by_name['signal_connect']['_meta']['didi']['implemented'] is True
           assert by_name['signal_connect']['_meta']['didi']['executionModes'] == ['live']
-          assert by_name['physics_raycast_query']['_meta']['didi']['implemented'] is False
+          assert by_name['anim_list_tracks']['_meta']['didi']['implemented'] is False
           assert by_name['runtime_list_sessions']['_meta']['didi']['executionModes'] == ['offline_fallback']
           assert by_name['runtime_get_session']['_meta']['didi']['executionModes'] == ['offline_fallback']
           assert by_name['runtime_read_logs']['_meta']['didi']['executionModes'] == ['live']
@@ -434,7 +434,8 @@ jobs:
           assert by_name['ui_hit_test']['inputSchema']['required'] == ['point']
           assert by_name['runtime_get_call_stack']['_meta']['didi']['implemented'] is False
           assert by_name['runtime_get_call_stack']['_meta']['didi']['executionModes'] == ['unimplemented']
-          for name in ('runtime_read_profiler', 'runtime_inject_input', 'inject_input_event'):
+          for name in ('runtime_read_profiler', 'runtime_inject_input', 'inject_input_event',
+                       'physics_raycast_query', 'nav_query_path'):
               assert by_name[name]['_meta']['didi']['implemented'] is True
               assert by_name[name]['_meta']['didi']['executionModes'] == ['live']
 
