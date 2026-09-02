@@ -268,7 +268,7 @@ Until `runtime_inject_input` and physics tools are real, the honest Gogo loops a
 - parallel headless playthroughs on long-lived benches that expose `runtime_get_tree`, `eval_gdscript`, pause/step/stop, and live capture
 - parallel **offline** search / syntax / hierarchy against isolated workspaces (no Godot required)
 
-Do not market "AI playtesting farm" while input injection is still unimplemented.
+Do not market an "AI playtesting farm" from game-only input dispatch alone; Didi does not observe whether the game accepted an event or autonomously judge playtest success.
 
 ---
 

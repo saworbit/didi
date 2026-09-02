@@ -161,6 +161,6 @@ Only one MCP client can hold a runtime session lock. Detach or stop the first cl
 
 For evaluation, send only expressions supported by the [exact receiver allowlist](TOOL_REFERENCE.md#eval_gdscript--live). The submitted source is intentionally absent from successful responses and operational logs. Context and returned Nodes must remain inside the active editor/game subtree. The timeout is cooperative, not preemptive.
 
-Runtime input injection, call stacks, and profiler telemetry remain unimplemented and must not be feature-detected by name alone; check `_meta.didi.implemented`.
+Runtime input injection is game-only and profiler telemetry is a bounded live sample. Call-stack inspection remains unimplemented; always feature-detect with `_meta.didi.implemented` rather than by name alone.
 
 For Phase 4 verification, search paths and results are canonical `res://` paths. Reimport only source assets through an attached editor and wait for `idle: true`. Live capture IDs are opaque, process-local, and bounded; do not persist them across editor restarts. A diff request must use a prior live ID and identical dimensions. Isolation success is trustworthy only when metadata says `state_restored: true`; an offline grid cannot be isolated or used as a baseline.

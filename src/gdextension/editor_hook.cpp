@@ -664,7 +664,8 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         // shipping binary. Only the seam configurator stays gated.
         "signal.listConnections", "signal.connect", "signal.disconnect", "signal.emit",
         "runtime.injectInput", "physics.raycast", "nav.queryPath",
-        "anim.listTracks", "anim.playTrack"
+        "anim.listTracks", "anim.playTrack", "vision.setCameraTransform",
+        "vision.toggleDebugDraw"
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
         , "phase7SignalTest.configure"
 #endif
@@ -762,8 +763,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "scene.mutate", "physics.simulateStep", "nav.bakeMesh",
         "tilemap.setCells",
         "tilemap.getUsedRect", "gridmap.setCells", "asset.instantiate",
-        "runtime.getCallStack",
-        "vision.setCameraTransform", "vision.toggleDebugDraw"
+        "runtime.getCallStack"
     };
     if (registered_but_unimplemented.count(method)) {
         return {{"error", {{"code", 501},

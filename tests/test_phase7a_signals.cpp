@@ -19,7 +19,6 @@ TEST_CASE("Phase7Signals partial delivery contract", "[phase7][signals][contract
     }
     for (const auto* name : {"physics_simulate_step", "nav_bake_mesh",
                              "tilemap_set_cells", "tilemap_get_used_rect", "gridmap_set_cells",
-                             "viewport_set_camera_transform", "viewport_toggle_debug_draw",
                              "runtime_get_call_stack"}) {
         const auto* tool = registry.getTool(name); ASSERT_TRUE(tool != nullptr);
         ASSERT_TRUE(!tool->capability.implemented);

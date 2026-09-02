@@ -107,7 +107,7 @@ For API details outside that limited map, inspect the project or use official Go
 
 ### Run a scene or test
 
-Use `runtime_launch` to start a separate Godot process, optionally headless, for 1–120 seconds and inspect captured output. This does not attach to a running game. `break_on_error` affects result classification after exit; it does not terminate the child at the first error line. Runtime input injection, call stacks, and profiler telemetry are unimplemented.
+Use `runtime_launch` to start a separate Godot process, optionally headless, for 1–120 seconds and inspect captured output. This does not attach to a running game. `break_on_error` affects result classification after exit; it does not terminate the child at the first error line. `runtime_inject_input` is game-only, `runtime_read_profiler` samples a bounded live window, and call-stack inspection remains unimplemented.
 
 ### Observe or control an already-running session
 
@@ -128,21 +128,19 @@ Treat `eval_gdscript` as a small read-only expression language. Prefer literals,
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `75/83`
-**Phase 7 registrations:** `8/18` unimplemented
+**Canonical implementation:** `77/83`
+**Phase 7 registrations:** `6/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 75/83 canonical tools, and all 8 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 77/83 canonical tools, and 6 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
-The four signal names, `runtime_read_profiler`, `runtime_inject_input`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks` and `anim_play_track` are delivered and callable. Do not call or advertise the remaining 8 as available; feasibility is not implementation. Each further name needs its own production trial before delivery. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2 begins. Contract weakening requires a separate explicit contract amendment and is not implied. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+The four signal names, both viewport controls, `runtime_read_profiler`, `runtime_inject_input`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, and `anim_play_track` are delivered and callable. Do not call or advertise the remaining 6 as available; feasibility is not implementation. Each further name needs its own production trial before delivery. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Unimplemented domains
 
 Do not call these names while `implemented` is false:
 
-- Signals: `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`.
-- View controls: `viewport_set_camera_transform`, `viewport_toggle_debug_draw`.
 - Physics/navigation: `physics_simulate_step`, `nav_bake_mesh`.
 - Tile/Grid maps: `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`.
 - Runtime introspection: `runtime_get_call_stack`.

@@ -178,14 +178,14 @@ The CI MCP smoke must start Didi with an explicit fixture project. It verifies t
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `75/83`
-**Phase 7 registrations:** `8/18` unimplemented
+**Canonical implementation:** `77/83`
+**Phase 7 registrations:** `6/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
 Phase 7 is `PARTIAL_DELIVERY`. The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2: 15/18 names are implementation-feasible, while exactly 3/18 are API-blocked under their approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Do not broaden that result into a permanent impossibility claim.
 
-Feasibility is design evidence; a production trial is production behavior. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. `runtime_read_profiler`, `runtime_inject_input`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks` and `anim_play_track` followed once their own live trials on Godot 4.5.1, 4.6.2 and 4.7.2 passed. The other 8 names remain registered but unimplemented.
+Feasibility is design evidence; a production trial is production behavior. The four signal names, both viewport controls, `runtime_read_profiler`, `runtime_inject_input`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, and `anim_play_track` are delivered. The other 6 names remain registered but unimplemented.
 
 Further work requires governance to authorize partial delivery of the 15 feasible tools toward 76/79, retain atomic 83/83 and wait for supported engine capabilities, or explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. The third option requires all three blockers to re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 begins. Any contract weakening is a separate explicit contract amendment, not an effect of that option. Use [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) for reproducible evidence and [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md) for the approved executable plan.
 

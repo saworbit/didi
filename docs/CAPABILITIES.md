@@ -33,7 +33,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-Didi v1.4.0 registers 83 canonical tool names. 75 are implemented in at least one mode; 8 remain reserved and return an MCP tool error. Ten legacy names are registered separately, for exactly 93 `tools/list` entries.
+Didi v1.4.0 registers 83 canonical tool names. 77 are implemented in at least one mode; 6 remain reserved and return an MCP tool error. Ten legacy names are registered separately, for exactly 93 `tools/list` entries.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
@@ -48,6 +48,7 @@ Didi v1.4.0 registers 83 canonical tool names. 75 are implemented in at least on
 | `live_and_offline` | `audio_list_buses` | Live reports effect chains and any runtime change; offline reads the project bus layout. |
 | `live` | `audio_configure_bus` | Bus state lives in the running engine; the layout file is not what anyone is listening to. |
 | `live` | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` | Delivered after the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. Connect and disconnect register with the edited scene's UndoRedo history; emit requires confirmation. |
+| `live` | `viewport_set_camera_transform`, `viewport_toggle_debug_draw` | Editor only. Camera changes use UndoRedo and verified post-state; collision/navigation debug hints apply to future games run from the editor and preserve omitted values. |
 | `live` | `physics_raycast_query`, `nav_query_path` | Editor or game. Reads the root viewport's existing World2D/World3D and navigation map; creates nothing and bakes nothing. |
 | `live` | `anim_list_tracks` | Editor or game. Reads an AnimationPlayer's library through the pinned AnimationMixer and Animation binds; never edits a key. |
 | `live` | `anim_play_track` | Game only. One `AnimationPlayer.play` call, then state is reread; `dispatched` is not completion. |
@@ -55,22 +56,22 @@ Didi v1.4.0 registers 83 canonical tool names. 75 are implemented in at least on
 | `live` | `runtime_read_profiler` | Editor or game. Samples `Performance` monitors from the frame callback over a bounded window; one collector per session. |
 | `live` | `ui_hit_test` | Editor-only. Traverses bounded live Control state at a viewport-space point without synthesizing or injecting input. |
 | `offline_fallback` | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method`, `viewport_create_test_lab`, `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map`, `project_audit_assets`, `project_analyze_impact`, `project_search_text`, `project_search_symbols`, `runtime_launch`, `csharp_check_build`, `shader_check_compile`, `project_list_export_presets`, `project_export`, `gridmap_export_mesh_library` | Operates on bounded project files or launches a separate Godot/dotnet process. Results are not live editor state. |
-| `unimplemented` | `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `physics_simulate_step`, `nav_bake_mesh`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `runtime_get_call_stack` | Registered schema only. Calls are rejected before legacy handlers execute. |
+| `unimplemented` | `physics_simulate_step`, `nav_bake_mesh`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `runtime_get_call_stack` | Registered schema only. Calls are rejected before legacy handlers execute. |
 
 ## Phase 7 feasibility status
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `75/83`
-**Phase 7 registrations:** `8/18` unimplemented
+**Canonical implementation:** `77/83`
+**Phase 7 registrations:** `6/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
 Phase 7 is `PARTIAL_DELIVERY`. The 2026-08-29 gate on Godot 4.5.1 and 4.7.2 classified 15/18 names as implementation-feasible and exactly 3/18 as API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three contracts, no supported public API/semantics satisfying the exact approved contract was found on either tested version. This is a versioned feasibility result, not a claim that the contracts are impossible forever.
 
-Feasibility does not make a tool callable; a production trial does. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. `runtime_read_profiler`, `runtime_inject_input`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks` and `anim_play_track` followed once their own live trials on Godot 4.5.1, 4.6.2 and 4.7.2 passed. The other 8 names remain registered but unimplemented. The all-or-nothing gate was replaced by an explicit partial-delivery decision recorded in [SURFACE_AMENDMENTS.md](SURFACE_AMENDMENTS.md).
+Feasibility does not make a tool callable; production evidence does. The four signal names, both viewport controls, `runtime_read_profiler`, `runtime_inject_input`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, and `anim_play_track` are delivered. The other 6 names remain registered but unimplemented. The all-or-nothing gate was replaced by an explicit partial-delivery decision recorded in [SURFACE_AMENDMENTS.md](SURFACE_AMENDMENTS.md).
 
-Work can proceed only after governance authorizes partial delivery of the 15 feasible tools toward 76/79, retains atomic 83/83 while waiting for supported engine capabilities, or explicitly approves and maintains engine changes or private adapters sufficient for all three exact blocked contracts. Under the third option, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied. See the [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Governance authorized partial delivery. Three feasible TileMap/GridMap tools remain to be implemented; the three API-blocked names stay reserved. See the [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Planned Capability Growth
 
@@ -134,4 +135,4 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 - Runtime logs retain 2,000 records. Messages are capped at 16 KiB and `details` at 64 KiB. `cursor` means the next sequence to inspect; filtered records still advance `next_cursor`, and `dropped_before_cursor` reports a retention gap.
 - `runtime_step` accepts 1–60 frames, requires an already-paused game, allows one active step, advances exactly the requested callbacks, and verifies re-pause. Shutdown cancels a pending step. `runtime_stop` only confirms that quit was requested; disappearance from discovery confirms exit.
 - `eval_gdscript` is expression-only and read-only. It rejects object traversal, direct/indexed property syntax, dynamic dispatch, mutation, reflection, statements, comments, assignment, and arbitrary callbacks. Its 1–5,000 ms timeout is cooperative, not preemptive; strict accepted operations are documented in [Tool Reference](TOOL_REFERENCE.md#eval_gdscript--live).
-- The structured ring is not process stdout/stderr. `runtime_launch` remains the bounded offline child-process path for captured stdout/stderr after exit. Runtime input injection, call stacks, and profiler telemetry remain unimplemented.
+- The structured ring is not process stdout/stderr. `runtime_launch` remains the bounded offline child-process path for captured stdout/stderr after exit. Input injection is game-only, profiler telemetry is a bounded live sample, and call-stack inspection remains unimplemented.

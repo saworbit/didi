@@ -317,8 +317,8 @@ static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract(
         if (legacy_names.count(tool.name) != 0) continue;
         tool.capability.implemented ? ++implemented : ++unimplemented;
     }
-    ASSERT_EQ(implemented, 75u);
-    ASSERT_EQ(unimplemented, 8u);
+    ASSERT_EQ(implemented, 77u);
+    ASSERT_EQ(unimplemented, 6u);
 }
 
 static void test_offline_writer_schemas_require_explicit_overwrite() {
