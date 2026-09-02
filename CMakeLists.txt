@@ -98,6 +98,7 @@ set(CORE_SOURCES
     src/runtime/session_lock.cpp
     src/runtime/profiler_collector.cpp
     src/runtime/input_injection.cpp
+    src/runtime/spatial_queries.cpp
     src/offline/class_reference.cpp
     src/mcp/mutation_safety.cpp
     src/tools/phase7_live_forward.cpp
@@ -237,6 +238,7 @@ set(TEST_SOURCES
     tests/test_phase7c_input.cpp
     tests/test_phase7c_diagnostics.cpp
     tests/test_phase7c_profiler.cpp
+    tests/test_phase7b_spatial.cpp
 )
 
 if(DIDI_BUILD_TESTS)

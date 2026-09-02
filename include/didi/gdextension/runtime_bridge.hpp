@@ -1,6 +1,7 @@
 #pragma once
 
 #include "didi/common/types.hpp"
+#include "gdextension_interface.h"
 #include <string>
 #include <string_view>
 
@@ -22,6 +23,11 @@ BoundedUtf8 boundUtf8(std::string_view input, size_t maximum_bytes);
 
 json executeRuntimeBridge(const std::string& method, const json& params,
                           const std::string& session_kind);
+
+// The live SceneTree and its root Window, for the editor and a game alike.
+// Spatial queries read the root viewport's existing worlds through these.
+Result<GDExtensionObjectPtr> liveSceneTree();
+Result<GDExtensionObjectPtr> liveSceneTreeRoot(GDExtensionObjectPtr tree);
 
 // Calls SceneTree.quit. runtime.stop does not call this directly: it hands the
 // exit code to EditorHook::requestSceneTreeQuit so the IPC response is written

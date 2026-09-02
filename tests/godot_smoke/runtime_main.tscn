@@ -1,6 +1,20 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource path="res://runtime_probe.gd" type="Script" id="1_runtime"]
+
+[sub_resource type="BoxShape3D" id="box_3d"]
+size = Vector3(1, 1, 1)
+
+[sub_resource type="RectangleShape2D" id="rect_2d"]
+size = Vector2(1, 1)
+
+[sub_resource type="NavigationMesh" id="nav_mesh_3d"]
+vertices = PackedVector3Array(-2, 0, -2, 2, 0, -2, 2, 0, 2, -2, 0, 2)
+polygons = [PackedInt32Array(0, 1, 2, 3)]
+
+[sub_resource type="NavigationPolygon" id="nav_polygon_2d"]
+vertices = PackedVector2Array(-2, -2, 2, -2, 2, 2, -2, 2)
+polygons = [PackedInt32Array(0, 3, 2, 1)]
 
 [node name="RuntimeRoot" type="Node"]
 script = ExtResource("1_runtime")
@@ -12,3 +26,23 @@ script = ExtResource("1_runtime")
 [node name="RuntimeChild" type="Node" parent="."]
 
 [node name="Nested" type="Node" parent="RuntimeChild"]
+
+[node name="Spatial" type="Node" parent="."]
+
+[node name="RayTarget3D" type="StaticBody3D" parent="Spatial"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0, 0)
+
+[node name="Shape3D" type="CollisionShape3D" parent="Spatial/RayTarget3D"]
+shape = SubResource("box_3d")
+
+[node name="RayTarget2D" type="StaticBody2D" parent="Spatial"]
+position = Vector2(2, 0)
+
+[node name="Shape2D" type="CollisionShape2D" parent="Spatial/RayTarget2D"]
+shape = SubResource("rect_2d")
+
+[node name="NavRegion3D" type="NavigationRegion3D" parent="Spatial"]
+navigation_mesh = SubResource("nav_mesh_3d")
+
+[node name="NavRegion2D" type="NavigationRegion2D" parent="Spatial"]
+navigation_polygon = SubResource("nav_polygon_2d")

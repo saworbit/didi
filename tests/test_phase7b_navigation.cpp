@@ -6,7 +6,7 @@
 void registerTest(const std::string& name, std::function<void()> fn);
 TEST_CASE("Phase7Navigation fail-closed contract", "[phase7][navigation][contract]") {
     auto& registry = didi::mcp::ToolRegistry::instance(); registry.registerAllDefaultTools();
-    for (const auto* name : {"nav_bake_mesh", "nav_query_path"}) {
+    for (const auto* name : {"nav_bake_mesh"}) {
         const auto* tool = registry.getTool(name); ASSERT_TRUE(tool && !tool->capability.implemented);
         ASSERT_TRUE(registry.callTool(name, didi::json::object()).isError);
     }

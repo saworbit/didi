@@ -6,7 +6,7 @@
 void registerTest(const std::string& name, std::function<void()> fn);
 TEST_CASE("Phase7Physics fail-closed contract", "[phase7][physics][contract]") {
     auto& registry = didi::mcp::ToolRegistry::instance(); registry.registerAllDefaultTools();
-    for (const auto* name : {"physics_raycast_query", "physics_simulate_step"}) {
+    for (const auto* name : {"physics_simulate_step"}) {
         const auto* tool = registry.getTool(name); ASSERT_TRUE(tool && !tool->capability.implemented);
         ASSERT_TRUE(registry.callTool(name, didi::json::object()).isError);
     }

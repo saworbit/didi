@@ -317,8 +317,8 @@ static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract(
         if (legacy_names.count(tool.name) != 0) continue;
         tool.capability.implemented ? ++implemented : ++unimplemented;
     }
-    ASSERT_EQ(implemented, 71u);
-    ASSERT_EQ(unimplemented, 12u);
+    ASSERT_EQ(implemented, 73u);
+    ASSERT_EQ(unimplemented, 10u);
 }
 
 static void test_offline_writer_schemas_require_explicit_overwrite() {
@@ -1335,7 +1335,7 @@ static void test_tool_capabilities_are_honest() {
     // must keep it. Checking both is what stops the prefix from becoming
     // decorative.
     ASSERT_TRUE(signal_json["description"].get<std::string>().rfind("UNIMPLEMENTED:", 0) != 0);
-    ASSERT_TRUE(reg.getTool("physics_raycast_query")->toJson()["description"]
+    ASSERT_TRUE(reg.getTool("physics_simulate_step")->toJson()["description"]
                     .get<std::string>().rfind("UNIMPLEMENTED:", 0) == 0);
     ASSERT_EQ(syntax_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"offline_fallback"}));
@@ -1390,7 +1390,7 @@ static void test_tool_capabilities_are_honest() {
     ASSERT_TRUE(unavailable.isError);
     ASSERT_TRUE(unavailable.content[0].text.find("no trustworthy execution path") == std::string::npos);
 
-    auto reserved_call = reg.callTool("physics_raycast_query", didi::json::object());
+    auto reserved_call = reg.callTool("anim_list_tracks", didi::json::object());
     ASSERT_TRUE(reserved_call.isError);
     ASSERT_TRUE(reserved_call.content[0].text.find("no trustworthy execution path") != std::string::npos);
 }

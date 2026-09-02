@@ -4,8 +4,8 @@
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `71/83`
-**Phase 7 registrations:** `12/18` unimplemented
+**Canonical implementation:** `73/83`
+**Phase 7 registrations:** `10/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
@@ -249,7 +249,7 @@ No C or C++ compilation was needed for Task 1: ClassDB identifiers came from the
 
 ## Gate consequence
 
-Task 1 is complete as a feasibility gate. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. `runtime_read_profiler` and `runtime_inject_input` followed once their own live trials on Godot 4.5.1, 4.6.2 and 4.7.2 passed. The other 12 names remain registered but unimplemented.
+Task 1 is complete as a feasibility gate. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. `runtime_read_profiler`, `runtime_inject_input`, `physics_raycast_query` and `nav_query_path` followed once their own live trials on Godot 4.5.1, 4.6.2 and 4.7.2 passed. The other 10 names remain registered but unimplemented.
 
 Work can proceed only after a governance decision:
 

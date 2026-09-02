@@ -6,12 +6,12 @@ The `_meta.didi` object returned by `tools/list` is authoritative. A registered 
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `71/83`
-**Phase 7 registrations:** `12/18` unimplemented
+**Canonical implementation:** `73/83`
+**Phase 7 registrations:** `10/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 71/83 canonical tools, and all 12 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 73/83 canonical tools, and all 10 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -218,16 +218,37 @@ Writes `res://addons/didi/test_lab_sandbox.tscn` with a basic light, environment
 
 ## 5. Physics, animation, and navigation
 
-All six schemas are unimplemented:
+### `physics_raycast_query` — Live (editor or game)
 
-- `physics_raycast_query`
+Fires one ray segment through the attached session's root viewport World2D or World3D and reports what it hit. Delivered under the Phase 7B contract.
+
+- `from`, `to` (required): `{x, y}` or `{x, y, z}`, both the same dimension, every coordinate finite and within -1000000..1000000, and not the same point.
+- `collision_mask` (`integer`, 1..2147483647, default 1).
+
+Query flags are fixed by the contract: bodies and areas are both hit, hit-from-inside is off, and back faces are hit in 3D. The result is `{dimension, hit, collider_path, collider_class, position, normal, collision_layer}`; on a miss every detail field is `null`. A collider that is not a Node in the tree reports `collider_path: null` with a bounded class name, never an object id. In the editor the root viewport's world is the editor's own, not the edited scene's, so bodies in the open scene are not what this ray sees; a game session sees its scene.
+
+Errors: `400` malformed request, `409` no world or direct space state, `501` missing bind. Read only; `dry_run` and `confirmation_token` are rejected.
+
+### `nav_query_path` — Live (editor or game)
+
+Asks the root viewport world's navigation map for a path. Delivered under the Phase 7B contract.
+
+- `start_point`, `end_point` (required): same shape and bounds as the ray endpoints; equal points are allowed.
+- `navigation_layers` (`integer`, 1..2147483647, default 1).
+- `optimize` (`boolean`, default true).
+
+Calls `NavigationServer2D/3D.map_get_path` on the existing map and never bakes. The result is `{dimension, reachable, points, truncated, navigation_layers, optimize}` with points in path order, capped at 256 points and 256 KiB; an empty path is `reachable: false`.
+
+Errors: `400` malformed request, `409` no world or map, `501` missing bind. Read only.
+
+### Reserved physics, navigation and animation schemas — Unimplemented
+
 - `physics_simulate_step`
 - `nav_bake_mesh`
-- `nav_query_path`
 - `anim_list_tracks`
 - `anim_play_track`
 
-`physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, and `anim_play_track` are implementation-feasible. `physics_simulate_step` and `nav_bake_mesh` are API-blocked under the approved contracts. None is callable.
+`anim_list_tracks` and `anim_play_track` are implementation-feasible. `physics_simulate_step` and `nav_bake_mesh` are API-blocked under the approved contracts. None of the four is callable.
 
 ## 6. TileMap and GridMap
 

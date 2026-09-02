@@ -22,12 +22,12 @@ Complete the existing 79-tool canonical surface, then extend Didi through projec
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `71/83`
-**Phase 7 registrations:** `12/18` unimplemented
+**Canonical implementation:** `73/83`
+**Phase 7 registrations:** `10/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-**Goal:** The implementation remains 71/83 canonical tools, with all 12 Phase 7 names remaining registered but unimplemented. The approved delivery goal was atomic 83/83 without adding public tool names.
+**Goal:** The implementation remains 73/83 canonical tools, with all 10 Phase 7 names remaining registered but unimplemented. The approved delivery goal was atomic 83/83 without adding public tool names.
 
 **Scope:** Phase 7A-7C define the approved contracts for editor authoring, simulation and animation, and runtime debugging. Their implementation did not start because the hard feasibility gate blocked the atomic plan.
 
@@ -52,7 +52,7 @@ The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (1
 
 Exactly three names (3/18) are API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version. This is not a permanent impossibility claim.
 
-Feasibility does not make any Phase 7 name callable; a production trial does. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. `runtime_read_profiler` and `runtime_inject_input` followed once their own live trials on Godot 4.5.1, 4.6.2 and 4.7.2 passed. The other 12 names remain registered but unimplemented. Reproducible evidence is in [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md), and the approved executable plan is [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md).
+Feasibility does not make any Phase 7 name callable; a production trial does. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. `runtime_read_profiler`, `runtime_inject_input`, `physics_raycast_query` and `nav_query_path` followed once their own live trials on Godot 4.5.1, 4.6.2 and 4.7.2 passed. The other 10 names remain registered but unimplemented. Reproducible evidence is in [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md), and the approved executable plan is [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 The governance choice was between:
 

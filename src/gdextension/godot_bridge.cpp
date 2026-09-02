@@ -6,6 +6,7 @@
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/runtime/input_injection.hpp"
+#include "didi/runtime/spatial_queries.hpp"
 #include <array>
 #include <algorithm>
 #include <cctype>
@@ -17,6 +18,7 @@
 #include <limits>
 #include <optional>
 #include <set>
+#include <tuple>
 #include <utility>
 
 namespace didi {
@@ -1589,6 +1591,269 @@ json injectInput(const json& params, const std::string& session_kind) {
 
 } // namespace
 
+
+// Phase 7B spatial reads. Both use only the attached session root viewport's
+// existing World2D/World3D, so nothing here creates a world, a map or a body.
+namespace {
+
+Result<VariantValue> makeVector3(double x, double y, double z) {
+    auto constructor = GodotApi::instance().variant_get_ptr_constructor(
+        GDEXTENSION_VARIANT_TYPE_VECTOR3, 3);
+    if (!constructor) return Error::internal("Godot Vector3 constructor is unavailable");
+    NativeValue native(GDEXTENSION_VARIANT_TYPE_VECTOR3);
+    const void* arguments[] = {&x, &y, &z};
+    constructor(native.ptr(), arguments);
+    native.markInitialized();
+    return variantFromNative(GDEXTENSION_VARIANT_TYPE_VECTOR3, native.ptr());
+}
+
+Result<VariantValue> makePoint(const runtime::SpatialPoint& point) {
+    return point.dimension == 2 ? makeVector2(point.x, point.y)
+                                : makeVector3(point.x, point.y, point.z);
+}
+
+Result<json> pointVariantToJson(VariantValue& value, int dimension) {
+    auto& api = GodotApi::instance();
+    const auto type = dimension == 2 ? GDEXTENSION_VARIANT_TYPE_VECTOR2 : GDEXTENSION_VARIANT_TYPE_VECTOR3;
+    if (api.variant_get_type(value.ptr()) != type) {
+        return Error::internal("Godot returned a point of the wrong dimension");
+    }
+    if (!api.variant_get_ptr_getter) return Error::internal("Godot built-in member getter API is unavailable");
+    auto to_native = api.get_variant_to_type_constructor(type);
+    if (!to_native) return Error::internal("Missing Variant-to-native vector conversion");
+    NativeValue native(type);
+    to_native(native.ptr(), value.ptr());
+    native.markInitialized();
+    json output = json::object();
+    for (const auto* axis : {"x", "y", "z"}) {
+        if (dimension == 2 && axis[0] == 'z') break;
+        NativeName name(axis);
+        if (!name.valid()) return Error::internal("Failed to construct vector member name");
+        auto getter = api.variant_get_ptr_getter(type, name.ptr());
+        if (!getter) return Error::internal("Godot vector member getter is unavailable");
+        double component = 0.0;
+        getter(native.ptr(), &component);
+        output[axis] = component;
+    }
+    return output;
+}
+
+// The root viewport's World2D or World3D as a Variant, or the object behind it.
+Result<VariantValue> rootWorld(int dimension) {
+    auto tree = liveSceneTree();
+    if (tree.isErr()) return tree.error();
+    auto root = liveSceneTreeRoot(tree.value());
+    if (root.isErr()) return root.error();
+    auto world = dimension == 2
+                     ? callObject(root.value(), "Viewport", "get_world_2d", 2339128592LL)
+                     : callObject(root.value(), "Viewport", "get_world_3d", 317588385LL);
+    if (world.isErr()) return world.error();
+    auto object = objectFromVariant(world.value());
+    if (object.isErr() || !object.value()) {
+        return Error(409, dimension == 2 ? "Root viewport has no World2D" : "Root viewport has no World3D");
+    }
+    return std::move(world.value());
+}
+
+json physicsRaycast(const json& params) {
+    auto parsed = runtime::parseRaycastRequest(params);
+    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    const auto& request = parsed.value();
+    const int dimension = request.dimension();
+    const char* params_class = dimension == 2 ? "PhysicsRayQueryParameters2D" : "PhysicsRayQueryParameters3D";
+    const char* state_class = dimension == 2 ? "PhysicsDirectSpaceState2D" : "PhysicsDirectSpaceState3D";
+    const int64_t create_hash = dimension == 2 ? 3196569324LL : 3110599579LL;
+    const int64_t state_hash = dimension == 2 ? 2506717822LL : 2069328350LL;
+    const int64_t ray_hash = dimension == 2 ? 1590275562LL : 3957970750LL;
+
+    for (const auto& bind : {std::make_tuple(params_class, "create", create_hash),
+                             std::make_tuple(state_class, "intersect_ray", ray_hash),
+                             std::make_tuple(dimension == 2 ? "World2D" : "World3D", "get_direct_space_state", state_hash)}) {
+        auto required = requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind));
+        if (required.isErr()) return errorJson(501, required.error().message);
+    }
+
+    auto world = rootWorld(dimension);
+    if (world.isErr()) return errorJson(world.error().code, world.error().message);
+    auto world_object = objectFromVariant(world.value());
+    if (world_object.isErr()) return errorJson(500, world_object.error().message);
+    auto state = callObject(world_object.value(), dimension == 2 ? "World2D" : "World3D",
+                            "get_direct_space_state", state_hash);
+    if (state.isErr()) return errorJson(500, state.error().message);
+    auto state_object = objectFromVariant(state.value());
+    if (state_object.isErr() || !state_object.value()) {
+        return errorJson(409, "Root viewport world has no direct space state");
+    }
+
+    auto from = makePoint(request.from);
+    auto to = makePoint(request.to);
+    auto mask = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, request.collision_mask);
+    if (from.isErr() || to.isErr() || mask.isErr()) return errorJson(500, "Failed to construct ray arguments");
+    // Static: the bind is called with a null instance and the trailing exclude
+    // list takes its default.
+    Result<VariantValue> query = [&]() -> Result<VariantValue> {
+        auto& api = GodotApi::instance();
+        NativeName klass(params_class);
+        NativeName method("create");
+        if (!klass.valid() || !method.valid()) return Error::internal("Failed to construct ray query identifiers");
+        auto bind = api.classdb_get_method_bind(klass.ptr(), method.ptr(), create_hash);
+        if (!bind) return Error(501, "Godot method binding unavailable for ray query creation");
+        const void* raw_args[] = {from.value().ptr(), to.value().ptr(), mask.value().ptr()};
+        VariantValue created(VariantValue::Uninitialized{});
+        GDExtensionCallError error{};
+        api.object_method_bind_call(bind, nullptr, raw_args, 3, created.ptr(), &error);
+        created.markInitialized();
+        if (error.error != GDEXTENSION_CALL_OK) {
+            return Error::internal("PhysicsRayQueryParameters.create failed (call error " +
+                                   std::to_string(error.error) + ")");
+        }
+        return std::move(created);
+    }();
+    if (query.isErr()) return errorJson(query.error().code, query.error().message);
+    auto query_object = objectFromVariant(query.value());
+    if (query_object.isErr() || !query_object.value()) return errorJson(500, "Ray query parameters were not created");
+    // Fixed flags from the contract: bodies and areas on, hit-from-inside off,
+    // back faces on in 3D.
+    auto set_flag = [&](const char* method, bool enabled) -> Result<void> {
+        auto value = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(enabled));
+        if (value.isErr()) return value.error();
+        auto result = callObject(query_object.value(), params_class, method, 2586408642LL, {&value.value()});
+        return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
+    };
+    for (const auto& flag : {std::make_pair("set_collide_with_bodies", true),
+                             std::make_pair("set_collide_with_areas", true),
+                             std::make_pair("set_hit_from_inside", false)}) {
+        auto set = set_flag(flag.first, flag.second);
+        if (set.isErr()) return errorJson(500, set.error().message);
+    }
+    if (dimension == 3) {
+        auto set = set_flag("set_hit_back_faces", true);
+        if (set.isErr()) return errorJson(500, set.error().message);
+    }
+
+    auto hit = callObject(state_object.value(), state_class, "intersect_ray", ray_hash, {&query.value()});
+    if (hit.isErr()) return errorJson(500, hit.error().message);
+    json result = {{"dimension", dimension}, {"hit", false}, {"collider_path", nullptr},
+                   {"collider_class", nullptr}, {"position", nullptr}, {"normal", nullptr},
+                   {"collision_layer", nullptr}};
+    auto size = callVariant(hit.value(), "size");
+    if (size.isErr()) return errorJson(500, size.error().message);
+    auto count = scalarFromVariant<int64_t>(size.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (count.isErr() || count.value() == 0) return liveResult(result);
+
+    auto lookup = [&](const char* key) -> Result<VariantValue> {
+        auto key_value = makeString(key);
+        if (key_value.isErr()) return key_value.error();
+        return callVariant(hit.value(), "get", {&key_value.value()});
+    };
+    auto position = lookup("position");
+    auto normal = lookup("normal");
+    auto collider = lookup("collider");
+    if (position.isErr() || normal.isErr() || collider.isErr()) return errorJson(500, "Ray hit dictionary is incomplete");
+    auto position_json = pointVariantToJson(position.value(), dimension);
+    auto normal_json = pointVariantToJson(normal.value(), dimension);
+    if (position_json.isErr() || normal_json.isErr()) return errorJson(500, "Ray hit vectors could not be read");
+    result["hit"] = true;
+    result["position"] = position_json.value();
+    result["normal"] = normal_json.value();
+    auto collider_object = objectFromVariant(collider.value());
+    if (collider_object.isOk() && collider_object.value()) {
+        auto class_name = nodeString(collider_object.value(), "get_class", 201670096LL);
+        if (class_name.isOk()) {
+            auto bounded = boundUtf8(class_name.value(), 256);
+            result["collider_class"] = bounded.value;
+        }
+        auto is_node_name = makeString("Node");
+        if (is_node_name.isOk()) {
+            auto is_node = callObject(collider_object.value(), "Object", "is_class", 3927539163LL, {&is_node_name.value()});
+            if (is_node.isOk()) {
+                auto node_flag = scalarFromVariant<GDExtensionBool>(is_node.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                if (node_flag.isOk() && node_flag.value()) {
+                    auto path = nodeString(collider_object.value(), "get_path", 4075236667LL);
+                    if (path.isOk() && !path.value().empty() && path.value().size() <= 1024) {
+                        result["collider_path"] = path.value();
+                    }
+                }
+            }
+        }
+        auto layer = callObject(collider_object.value(),
+                                dimension == 2 ? "CollisionObject2D" : "CollisionObject3D",
+                                "get_collision_layer", 3905245786LL);
+        if (layer.isOk()) {
+            auto layer_value = scalarFromVariant<int64_t>(layer.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (layer_value.isOk()) result["collision_layer"] = layer_value.value();
+        }
+    }
+    return liveResult(result);
+}
+
+json navQueryPath(const json& params) {
+    auto parsed = runtime::parseNavPathRequest(params);
+    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    const auto& request = parsed.value();
+    const int dimension = request.dimension();
+    const char* server_class = dimension == 2 ? "NavigationServer2D" : "NavigationServer3D";
+    const int64_t path_hash = dimension == 2 ? 1279824844LL : 276783190LL;
+    auto required = requireMethodBind(server_class, "map_get_path", path_hash);
+    if (required.isErr()) return errorJson(501, required.error().message);
+    auto map_bind = requireMethodBind(dimension == 2 ? "World2D" : "World3D", "get_navigation_map", 2944877500LL);
+    if (map_bind.isErr()) return errorJson(501, map_bind.error().message);
+
+    auto world = rootWorld(dimension);
+    if (world.isErr()) return errorJson(world.error().code, world.error().message);
+    auto world_object = objectFromVariant(world.value());
+    if (world_object.isErr()) return errorJson(500, world_object.error().message);
+    auto map = callObject(world_object.value(), dimension == 2 ? "World2D" : "World3D",
+                          "get_navigation_map", 2944877500LL);
+    if (map.isErr()) return errorJson(500, map.error().message);
+    if (GodotApi::instance().variant_get_type(map.value().ptr()) != GDEXTENSION_VARIANT_TYPE_RID) {
+        return errorJson(409, "Root viewport world has no navigation map");
+    }
+    auto server = singleton(server_class);
+    if (server.isErr()) return errorJson(501, server.error().message);
+
+    auto start = makePoint(request.start_point);
+    auto end = makePoint(request.end_point);
+    auto optimize = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(request.optimize));
+    auto layers = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, request.navigation_layers);
+    if (start.isErr() || end.isErr() || optimize.isErr() || layers.isErr()) {
+        return errorJson(500, "Failed to construct navigation arguments");
+    }
+    auto path = callObject(server.value(), server_class, "map_get_path", path_hash,
+                           {&map.value(), &start.value(), &end.value(), &optimize.value(), &layers.value()});
+    if (path.isErr()) return errorJson(500, path.error().message);
+    auto size = callVariant(path.value(), "size");
+    if (size.isErr()) return errorJson(500, size.error().message);
+    auto count = scalarFromVariant<int64_t>(size.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (count.isErr()) return errorJson(500, count.error().message);
+
+    constexpr int64_t kMaxPoints = 256;
+    constexpr size_t kMaxBytes = 256u * 1024u;
+    json points = json::array();
+    bool truncated = false;
+    for (int64_t index = 0; index < count.value(); ++index) {
+        if (index >= kMaxPoints) { truncated = true; break; }
+        auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (index_value.isErr()) return errorJson(500, index_value.error().message);
+        auto point = callVariant(path.value(), "get", {&index_value.value()});
+        if (point.isErr()) return errorJson(500, point.error().message);
+        auto converted = pointVariantToJson(point.value(), dimension);
+        if (converted.isErr()) return errorJson(500, converted.error().message);
+        points.push_back(converted.value());
+        if (points.dump().size() > kMaxBytes) {
+            points.erase(points.size() - 1);
+            truncated = true;
+            break;
+        }
+    }
+    return liveResult({{"dimension", dimension}, {"reachable", count.value() > 0},
+                       {"points", std::move(points)}, {"truncated", truncated},
+                       {"navigation_layers", request.navigation_layers},
+                       {"optimize", request.optimize}});
+}
+
+} // namespace
+
 json GodotBridge::execute(const std::string& method, const json& params,
                           const std::string& session_kind) {
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
@@ -1618,6 +1883,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
     if (method == "runtime.injectInput") {
         return injectInput(params, session_kind);
     }
+    if (method == "physics.raycast") return physicsRaycast(params);
+    if (method == "nav.queryPath") return navQueryPath(params);
     auto editor_result = editorInterface();
     if (editor_result.isErr()) return errorJson(editor_result.error().code, editor_result.error().message);
     auto editor = editor_result.value();
