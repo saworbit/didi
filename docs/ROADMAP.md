@@ -88,7 +88,7 @@ Phase 3 adds ten canonical tools and closes authenticated attach-to-running for 
 - Live runtime tree inspection capped at 10,000 nodes and 256 KiB with UTF-8-safe field truncation, plus verified pause, exact 1–60 frame stepping, single-pending-step enforcement, shutdown cancellation, and graceful stop request.
 - `eval_gdscript` as a strict read-only expression subset with receiver-aware calls, native scalar ClassDB property prebinding, in-subtree context/results, result depth/element/size bounds, and cooperative (not preemptive) timeout checks.
 
-The structured ring does not intercept arbitrary external `print()` output. `runtime_launch` remains the bounded child stdout/stderr capture path. Input injection, call stacks, and profiler telemetry remain registered but unimplemented.
+The structured ring does not intercept arbitrary external `print()` output. `runtime_launch` remains the bounded child stdout/stderr capture path. Phase 7 later delivered game input injection and bounded profiler sampling; call-stack inspection remains registered but unimplemented.
 
 ---
 
@@ -136,18 +136,18 @@ The native red-team contract covers invalid roots, project-key isolation, lock e
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `75/83`
-**Phase 7 registrations:** `8/18` unimplemented
+**Canonical implementation:** `77/83`
+**Phase 7 registrations:** `6/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-**Objective:** The implementation remains 75/83 canonical tools, and all 8 Phase 7 names remain registered but unimplemented. The approved objective was atomic 83/83 without adding public tool names.
+**Objective:** The implementation remains 77/83 canonical tools, and all 6 Phase 7 names remain registered but unimplemented while authorized partial delivery continues. The original objective was atomic 83/83 without adding public tool names.
 
 **Feasibility result:** The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (15/18) are implementation-feasible: `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `runtime_inject_input`, and `runtime_read_profiler`.
 
 Exactly three names (3/18) are API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility is not implementation, so none of the 15 feasible names is callable.
 
-The approved all-or-nothing 83/83 activation gate prevented Tasks 2-13; no production implementation started. Work can proceed only after governance chooses:
+The approved all-or-nothing 83/83 activation gate originally prevented Tasks 2-13; governance subsequently chose partial delivery:
 
 - **A)** Authorize partial delivery of the 15 feasible tools, targeting 76/79 and retaining three honest unimplemented names.
 - **B)** Retain atomic 83/83 and wait for supported engine capabilities.
@@ -195,7 +195,7 @@ implementation on `main` remains 61/79 and Phase 7 stays
 status and every published count move together.
 
 **Delivery slices:**
-- 7A: signals, viewport camera/debug, and tile/grid operations (9 tools)
+- 7A: signals, viewport camera/debug, and tile/grid operations (9 tools; signals and both viewport controls delivered)
 - 7B: physics, navigation, and animation operations (6 tools; `physics_raycast_query`, `nav_query_path`, `anim_list_tracks` and `anim_play_track` delivered)
 - 7C: input injection, call-stack inspection, and profiling (3 tools; `runtime_read_profiler` and `runtime_inject_input` delivered)
 
@@ -207,7 +207,7 @@ status and every published count move together.
 
 **Objective:** Add dependency-aware project analysis, import health, asset provenance, and safe bulk asset workflows after canonical completion.
 
-**Dependency:** Phase 8 remains planned and cannot start until governance resolves the Phase 7 feasibility block and either revises or satisfies the canonical-completion prerequisite.
+**Dependency:** Phase 8 remains planned until the authorized Phase 7 partial-delivery exit gate is satisfied or explicitly revised.
 
 **Exclusions:** No custom GDScript language server, unbounded whole-project semantic analysis, or silent import-setting mutation.
 
@@ -280,7 +280,7 @@ These are missing capabilities that an AI agent actually requires to complete fu
 ## 🚫 What NOT to Add Yet
 
 - ❌ **Do NOT add success stubs.** A registered name that cannot execute must report `implemented: false` and reject calls. This rule is absolute.
-- ⚠️ **Do NOT add speculative domain families** (e.g. `audio_bus_*`, `multiplayer_*`, `particle_*`, `xr_*`) while existing reserved signal, physics/navigation, TileMap/GridMap, camera/debug, and runtime-debugger schemas remain unimplemented. A single name that an agent workflow provably needs is added through a [Surface Amendment](SURFACE_AMENDMENTS.md), not blocked by this rule.
+- ⚠️ **Do NOT add speculative domain families** (e.g. `audio_bus_*`, `multiplayer_*`, `particle_*`, `xr_*`) while existing reserved physics/navigation, TileMap/GridMap, and runtime-debugger schemas remain unimplemented. A single name that an agent workflow provably needs is added through a [Surface Amendment](SURFACE_AMENDMENTS.md), not blocked by this rule.
 - ❌ **Do NOT create a second plugin architecture or network transport** — local named pipes and UNIX domain sockets are optimal.
 - ❌ **Do NOT build a custom GDScript language server** — extend the existing symbol extractor and headless Godot compiler check only where evidence requires it.
 - ❌ **Do NOT expand the limited static ClassDB map** — replace it with live Godot `ClassDB` or generated `extension_api.json` data.
@@ -297,7 +297,7 @@ These are missing capabilities that an AI agent actually requires to complete fu
 | **Phase 4 (COMPLETE)** | **Symbol Search, Asset Reimport, Viewport Diffing & Isolation** | Verified bounded search and reversible live visual feedback against Godot 4.5.1. |
 | **Phase 5 (COMPLETE)** | **C# / Shaders, Project Export, GridMap MeshLibrary, UI Hit-Testing** | Verified bounded diagnostics, guarded delivery, deterministic asset conversion, and live UI inspection against Godot 4.5.1. |
 | **Phase 6 (COMPLETE)** | **Project Isolation, Session Locks, Dry-Run, Confirm-Before-Write** | Verified fail-closed project selection, project-keyed endpoints, one-client leases, and context-bound single-use confirmations. |
-| **Phase 7 (PARTIAL_DELIVERY)** | **Canonical Surface Completion** | 15/18 implementation-feasible and 3/18 API-blocked; the four signal names, `runtime_read_profiler`, `runtime_inject_input`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks` and `anim_play_track` are delivered and 8 remain unimplemented. |
+| **Phase 7 (PARTIAL_DELIVERY)** | **Canonical Surface Completion** | 15/18 implementation-feasible and 3/18 API-blocked; the four signal names, both viewport controls, `runtime_read_profiler`, `runtime_inject_input`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, and `anim_play_track` are delivered and 6 remain unimplemented. |
 
 ---
 
@@ -308,13 +308,13 @@ This is the current registered canonical surface, not a claim that every row exe
 | Domain | Key Tools | Current status |
 | :--- | :--- | :--- |
 | **1. Scene & Nodes (7)** | `scene_get_hierarchy`, `scene_instantiate_node`, `scene_remove_node`, `scene_reparent_node`, `scene_set_property`, `scene_get_property`, `scene_duplicate_node` | Implemented live; hierarchy also has offline parsing. Phase 1 scalar/built-in-node limits apply. |
-| **2. Signals & Events (4)** | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` | Unimplemented. |
+| **2. Signals & Events (4)** | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` | Implemented live in editor sessions. |
 | **3. Scripting & AST (4)** | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method` | Implemented offline/file-based with documented coverage limits. |
-| **4. Vision & Render (4)** | `viewport_capture_frame`, `viewport_set_camera_transform`, `viewport_create_test_lab`, `viewport_toggle_debug_draw` | Capture and offline lab generation implemented; camera/debug controls unimplemented. |
+| **4. Vision & Render (4)** | `viewport_capture_frame`, `viewport_set_camera_transform`, `viewport_create_test_lab`, `viewport_toggle_debug_draw` | Capture and offline lab generation implemented; camera transforms and collision/navigation debug hints are live editor controls. |
 | **5. Physics & Nav (6)** | `physics_raycast_query`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track` | Raycast, path and animation tools are live; physics stepping and navigation baking are unimplemented. |
 | **6. Tilemaps & Grids (3)**| `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells` | Unimplemented. |
 | **7. Resources & UIDs (4)**| `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map` | Implemented offline/file-based. |
-| **8. Runtime & Debug (4)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Process launch implemented; input/debug/profiler tools unimplemented. |
+| **8. Runtime & Debug (4)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler` | Process launch, game input, and bounded profiler sampling are implemented; call-stack inspection is unimplemented. |
 | **9. Editor Lifecycle (4)**| `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Implemented live; reload requests a filesystem source scan. |
 | **10. Phase 2 Project Wiring (18)** | Script attach/detach; autoloads; InputMap; project settings; groups; scene create/open/close/pack | Implemented live. Project writes persist with rollback; node writes use UndoRedo; resource writes require safe paths and explicit overwrite. |
 | **11. Phase 3 Runtime Sessions (10)** | Session list/attach/detach/get; logs; pause/step/stop/tree; `eval_gdscript` | Implemented. Four tools execute as local session management; six require an authenticated auto-selected or explicitly attached live editor/game. Evaluation is read-only and expression-only. |

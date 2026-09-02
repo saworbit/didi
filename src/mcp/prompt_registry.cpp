@@ -95,7 +95,8 @@ void PromptRegistry::registerAllDefaultPrompts() {
             "4. Edit project scripts through the normal workspace or `script_patch_method`, then run `script_check_syntax`.\n"
             "5. Attach scripts with `script_attach_to_node` and `script_detach_from_node`, and wire signals with `signal_connect`, `signal_disconnect` and `signal_list_connections`.\n"
             "6. Use `runtime_launch` for a separate-process test, then inspect the session with `runtime_read_logs`, `runtime_read_output`, `runtime_get_tree` and `eval_gdscript`.\n"
-            "7. Explicitly report unimplemented input injection, physics stepping, navigation baking, tilemap and gridmap editing, animation control, call stacks and profiler telemetry instead of claiming those steps succeeded.";
+            "7. Use game-only `runtime_inject_input`, live physics/navigation queries, animation inspection/playback and bounded profiler sampling only when their session policy fits.\n"
+            "8. Explicitly report unimplemented physics stepping, navigation baking, tilemap and gridmap editing, and call stacks instead of claiming those steps succeeded.";
 
         json result = {
             {"description", "Capability-aware gameplay slice workflow for Godot 4.5+"},

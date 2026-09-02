@@ -10,7 +10,9 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <cmath>
 #include <sstream>
+#include <string_view>
 #include <vector>
 
 namespace didi {
@@ -28,6 +30,53 @@ bool isCaptureId(const json& value) {
 
 CallToolResult invalidViewportDiff(const std::string& message) {
     return CallToolResult::error("Invalid viewport diff request: " + message);
+}
+
+CallToolResult viewportRequestError(const ResolvedToolBinding& binding,
+                                    std::string_view message) {
+    return CallToolResult::error(json{{"error", {
+        {"code", 400}, {"message", message},
+        {"data", {{"tool", binding.invoked_name},
+                  {"canonical_tool", binding.canonical_name},
+                  {"retryable", false}}}}}}.dump());
+}
+
+bool hasOnlyViewportKeys(const json& value,
+                         std::initializer_list<std::string_view> allowed) {
+    if (!value.is_object()) return false;
+    for (auto it = value.begin(); it != value.end(); ++it) {
+        bool found = false;
+        for (const auto key : allowed) {
+            if (it.key() == key) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) return false;
+    }
+    return true;
+}
+
+bool isBoundedViewportString(const json& value, size_t minimum, size_t maximum) {
+    if (!value.is_string()) return false;
+    const auto& text = value.get_ref<const std::string&>();
+    if (text.size() < minimum || text.size() > maximum) return false;
+    try {
+        (void)json(text).dump();
+        return true;
+    } catch (const json::exception&) {
+        return false;
+    }
+}
+
+bool isFiniteVector3(const json& value, double limit) {
+    if (!value.is_object() || value.size() != 3) return false;
+    for (const auto* axis : {"x", "y", "z"}) {
+        if (!value.contains(axis) || !value[axis].is_number()) return false;
+        const double component = value[axis].get<double>();
+        if (!std::isfinite(component) || component < -limit || component > limit) return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -188,6 +237,18 @@ CallToolResult handleViewportDiffCapture(const json& args, std::shared_ptr<ipc::
 
 CallToolResult handleViewportSetCameraTransform(const ResolvedToolBinding& binding, const json& args,
                          std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!hasOnlyViewportKeys(
+            args, {"camera_path", "position", "rotation_degrees", "fov"}) ||
+        !args.contains("camera_path") ||
+        !isBoundedViewportString(args["camera_path"], 1, 1024) ||
+        !args.contains("position") || !isFiniteVector3(args["position"], 1000000.0) ||
+        (args.contains("rotation_degrees") &&
+         !isFiniteVector3(args["rotation_degrees"], 360000.0)) ||
+        (args.contains("fov") &&
+         (!args["fov"].is_number() || !std::isfinite(args["fov"].get<double>()) ||
+          args["fov"].get<double>() < 1.0 || args["fov"].get<double>() > 179.0))) {
+        return viewportRequestError(binding, "invalid_viewport_set_camera_transform_request");
+    }
     return sendPhase7LiveRequest(binding, args, ipc);
 }
 
@@ -294,6 +355,15 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
 
 CallToolResult handleViewportToggleDebugDraw(const ResolvedToolBinding& binding, const json& args,
                          std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!hasOnlyViewportKeys(
+            args, {"collision_shapes", "navigation_mesh", "wireframe"}) ||
+        (!args.contains("collision_shapes") && !args.contains("navigation_mesh")) ||
+        (args.contains("collision_shapes") && !args["collision_shapes"].is_boolean()) ||
+        (args.contains("navigation_mesh") && !args["navigation_mesh"].is_boolean()) ||
+        (args.contains("wireframe") &&
+         (!args["wireframe"].is_boolean() || args["wireframe"].get<bool>()))) {
+        return viewportRequestError(binding, "invalid_viewport_toggle_debug_draw_request");
+    }
     return sendPhase7LiveRequest(binding, args, ipc);
 }
 

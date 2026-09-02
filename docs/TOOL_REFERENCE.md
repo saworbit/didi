@@ -6,12 +6,12 @@ The `_meta.didi` object returned by `tools/list` is authoritative. A registered 
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `75/83`
-**Phase 7 registrations:** `8/18` unimplemented
+**Canonical implementation:** `77/83`
+**Phase 7 registrations:** `6/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation remains 75/83 canonical tools, and all 8 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version. Feasibility does not make any of the 15 callable. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 77/83 canonical tools, and 6 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -211,10 +211,13 @@ Writes `res://addons/didi/test_lab_sandbox.tscn` with a basic light, environment
 - `overwrite` (`boolean`, default `false`); an existing sandbox is preserved unless explicitly set to `true`.
 - Legacy alias: `create_visual_test_lab`.
 
-### Reserved visual schemas — Unimplemented
+### `viewport_set_camera_transform` — Live (editor only)
 
-- `viewport_set_camera_transform`
-- `viewport_toggle_debug_draw`
+Updates an in-scene `Camera3D` in one editor UndoRedo action. `camera_path` and an exact finite `{x,y,z}` `position` are required; optional `rotation_degrees` uses the same shape and optional `fov` is from 1 through 179. Position components are bounded to ±1,000,000 and rotation components to ±360,000. The result contains observed `old` and `new` state plus `undo_redo_registered: true`; it does not claim control of the editor navigation camera.
+
+### `viewport_toggle_debug_draw` — Live (editor only)
+
+Sets the public SceneTree `collision_shapes` and `navigation_mesh` debug hints used by future games run from that editor. At least one is required. Omitted hints are preserved, both are reread after mutation, and both original values are restored if a setter or postcondition fails. The retained `wireframe` field accepts only `false` because Godot exposes no supported live wireframe control. The result returns `previous`, `observed`, `effective_scope: "future_games_run_from_editor"`, and `rollback: "explicit_restore"`.
 
 ## 5. Physics, animation, and navigation
 

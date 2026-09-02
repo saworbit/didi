@@ -32,6 +32,11 @@ size = Vector3(1.5, 1.5, 1.5)
 
 [node name="Container" type="Node3D" parent="."]
 
+[node name="ViewportCamera" type="Camera3D" parent="."]
+position = Vector3(0, 1, 4)
+rotation_degrees = Vector3(-10, 0, 0)
+fov = 70.0
+
 [node name="VisualDistractor" type="CSGSphere3D" parent="Container"]
 position = Vector3(2.5, 0, 0)
 radius = 0.75

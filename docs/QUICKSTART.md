@@ -119,7 +119,7 @@ Once connected, ask your AI assistant any of the following:
 - 🚀 **Runtime Test**: *"Run `res://scenes/main.tscn` headlessly and report any engine errors or warnings."* (`runtime_launch`)
 - 🛡️ **Safe Mutation Preview**: *"Preview creating a SpawnPoint without executing it; show the planned project and route before asking me to apply it."* (`scene_instantiate_node` with `dry_run: true`)
 
-Signal wiring, physics/navigation queries, TileMap/GridMap editing, runtime input injection, call stacks, and profiler telemetry are registered but unimplemented in the current build. An MCP client should not call them when `implemented` is false.
+Signal wiring, viewport camera/debug controls, physics/navigation queries, game input injection, and profiler telemetry are implemented live. TileMap/GridMap editing and call-stack inspection remain registered but unimplemented; an MCP client should not call any name when `implemented` is false.
 
 Every implemented mutation supports `dry_run`. Editor reload, script patching, and overwrite-enabled offline writers require the exact preview's `confirmation_token`; it expires after 120 seconds and is single-use. Repeat the original arguments unchanged, remove `dry_run`, and add the token only when the preview matches your intent.
 

@@ -52,6 +52,9 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // Phase 7B animation: the list is a read in either session kind, the
         // play is a game-only transient mutation.
         , "anim_list_tracks", "anim_play_track"
+        // Phase 7A editor-only viewport controls. Camera edits are registered
+        // with UndoRedo; debug hints return the prior state for explicit restore.
+        , "viewport_set_camera_transform", "viewport_toggle_debug_draw"
     };
     static const std::unordered_set<std::string> offline = {
         "script_check_syntax", "analyze_script_diagnostics", "script_reflect_class",
@@ -1229,15 +1232,16 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "viewport_set_camera_transform";
-        t.description = "Positions and rotates the editor or test camera to inspect specific coordinates.";
+        t.description = "Updates an in-scene Camera3D transform and optional field of view through the editor UndoRedo history.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
+                {"camera_path", {{"type", "string"}}},
                 {"position", {{"type", "object"}, {"description", "Vector3 {x, y, z}"}}},
-                {"rotation", {{"type", "object"}, {"description", "Vector3 {x, y, z} in degrees"}}},
-                {"fov", {{"type", "number"}, {"default", 75.0}}}
+                {"rotation_degrees", {{"type", "object"}, {"description", "Optional Vector3 {x, y, z} in degrees"}}},
+                {"fov", {{"type", "number"}}}
             }},
-            {"required", {"position"}}
+            {"required", {"camera_path", "position"}}
         };
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleViewportSetCameraTransform(binding, args, m_ipcClient);
@@ -1270,7 +1274,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "viewport_toggle_debug_draw";
-        t.description = "Toggles collision wireframes, navigation meshes, normal vectors, and lighting modes.";
+        t.description = "Sets editor SceneTree collision and navigation debug hints for future games run from that editor.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {

@@ -729,6 +729,17 @@ try {
         # The list works in the editor against the edited scene; the play is game-only.
         (Tool-Request 946 "anim_list_tracks" @{ animation_player_path = "/root/SmokeRoot/Player" }),
         (Tool-Request 947 "anim_play_track" @{ animation_player_path = "/root/SmokeRoot/Player"; animation_name = "probe" }),
+        # Phase 7A viewport controls: mutate an in-scene Camera3D through
+        # UndoRedo, prove omitted rotation/FOV preservation, then restore both
+        # actions. Debug hints are read/set/reread and explicitly restored.
+        (Tool-Request 948 "viewport_set_camera_transform" @{ camera_path = "/root/SmokeRoot/ViewportCamera"; position = @{ x = 1.25; y = -2.5; z = 3.75 }; rotation_degrees = @{ x = 10; y = 20; z = 30 }; fov = 73 }),
+        (Tool-Request 949 "viewport_set_camera_transform" @{ camera_path = "/root/SmokeRoot/ViewportCamera"; position = @{ x = -4; y = 5; z = 6 } }),
+        (Tool-Request 950 "editor_undo" @{}),
+        (Tool-Request 951 "editor_undo" @{}),
+        (Tool-Request 952 "viewport_toggle_debug_draw" @{ collision_shapes = $true }),
+        (Tool-Request 953 "viewport_toggle_debug_draw" @{ navigation_mesh = $true }),
+        (Tool-Request 954 "viewport_toggle_debug_draw" @{ collision_shapes = $false; navigation_mesh = $false }),
+        (Tool-Request 955 "viewport_set_camera_transform" @{ camera_path = "/root/SmokeRoot/Subject"; position = @{ x = 0; y = 0; z = 0 } }),
         (Tool-Request 930 "audio_list_buses" @{}),
         (Tool-Request 931 "audio_configure_bus" @{ bus = "Master"; volume_db = -12.5; mute = $true }),
         (Tool-Request 932 "audio_list_buses" @{}),
@@ -850,7 +861,7 @@ try {
     $scalarEval = Tool-Payload $byId[130]
     Assert-True ($scalarEval.value -eq 7 -and $scalarEval.value_type -eq "int") "Editor scalar expression was incorrect."
     Assert-True ($scalarEval.context_node -eq "/root/SmokeRoot/Subject" -and $scalarEval.session_kind -eq "editor") "Editor expression context or provenance was incorrect."
-    Assert-True ((Tool-Payload $byId[131]).value -eq 3) "Editor default-context child count was incorrect."
+    Assert-True ((Tool-Payload $byId[131]).value -eq 4) "Editor default-context child count was incorrect."
     Assert-True (@((Tool-Payload $byId[132]).value).Count -eq 3) "Editor expression array was not preserved."
     Assert-True ((Tool-Payload $byId[133]).value.answer -eq 42) "Editor expression dictionary was not preserved."
     $editorVector = Tool-Payload $byId[134]
@@ -973,6 +984,24 @@ try {
     $restoredDiff = Tool-Payload $phase4ById[418]
     Assert-True ($restoredDiff.identical -eq $true -and $restoredDiff.changed_pixels -eq 0) "Undo did not restore an exact baseline viewport at threshold zero."
     Assert-True ((Tool-Payload $phase4ById[419]).value -eq $true) "Visual mutation undo did not restore scene visibility."
+
+    # Keep the viewport acceptance gate ahead of later offline subprocess tests,
+    # so an unrelated compiler/export failure cannot hide the live evidence.
+    $cameraFull = Tool-Payload $byId[948]
+    Assert-True ($cameraFull.execution_mode -eq "live" -and $cameraFull.undo_redo_registered -eq $true -and $cameraFull.rollback -eq "undo_redo") "viewport_set_camera_transform did not complete through UndoRedo."
+    Assert-True ([math]::Abs([double]$cameraFull.old.position.y - 1.0) -lt 0.001 -and [math]::Abs([double]$cameraFull.old.fov - 70.0) -lt 0.001) "viewport_set_camera_transform did not report the fixture's previous camera state."
+    Assert-True ([math]::Abs([double]$cameraFull.new.position.x - 1.25) -lt 0.001 -and [math]::Abs([double]$cameraFull.new.rotation_degrees.y - 20.0) -lt 0.001 -and [math]::Abs([double]$cameraFull.new.fov - 73.0) -lt 0.001) "viewport_set_camera_transform did not reread the requested camera state."
+    $cameraPositionOnly = Tool-Payload $byId[949]
+    Assert-True ([math]::Abs([double]$cameraPositionOnly.old.rotation_degrees.z - 30.0) -lt 0.001 -and [math]::Abs([double]$cameraPositionOnly.new.rotation_degrees.z - 30.0) -lt 0.001) "Omitted camera rotation was not preserved."
+    Assert-True ([math]::Abs([double]$cameraPositionOnly.old.fov - 73.0) -lt 0.001 -and [math]::Abs([double]$cameraPositionOnly.new.fov - 73.0) -lt 0.001) "Omitted camera FOV was not preserved."
+    Assert-True (-not $byId[950].result.isError -and -not $byId[951].result.isError) "Viewport camera actions could not both be undone."
+    $collisionDebug = Tool-Payload $byId[952]
+    Assert-True ($collisionDebug.execution_mode -eq "live" -and $collisionDebug.observed.collision_shapes -eq $true -and $collisionDebug.rollback -eq "explicit_restore") "Collision debug hint was not observed after mutation."
+    $navigationDebug = Tool-Payload $byId[953]
+    Assert-True ($navigationDebug.observed.navigation_mesh -eq $true -and $navigationDebug.observed.collision_shapes -eq $true) "Navigation debug mutation did not preserve the omitted collision hint."
+    $restoredDebug = Tool-Payload $byId[954]
+    Assert-True ($restoredDebug.observed.collision_shapes -eq $false -and $restoredDebug.observed.navigation_mesh -eq $false) "Debug hints were not explicitly restored."
+    Assert-True $byId[955].result.isError "viewport_set_camera_transform accepted a non-Camera3D node."
 
     $phase5Requests = @(
         (@{ jsonrpc = "2.0"; id = 500; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
