@@ -644,6 +644,10 @@ try {
     $requests = @(
         (@{ jsonrpc = "2.0"; id = 1; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
         (Tool-Request 900 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        # The smoke plugin's deferred opener logs after calling Godot, not after
+        # proving that an edited scene exists. Re-open explicitly so slow CI
+        # imports cannot make the first live assertion race editor readiness.
+        (Tool-Request 129 "scene_open" @{ scene_path = "res://main.tscn" }),
         (Tool-Request 130 "eval_gdscript" @{ expression = "node.get('process_priority')"; context_node = "/root/SmokeRoot/Subject" }),
         (Tool-Request 131 "eval_gdscript" @{ expression = "node.get_child_count()" }),
         (Tool-Request 132 "eval_gdscript" @{ expression = "[1, 2, 3]" }),
@@ -871,6 +875,7 @@ try {
     $attached = Tool-Payload $byId[900]
     Assert-True ($attached.handshake.status -eq "ok") "Runtime attach did not complete the authenticated handshake."
     Assert-True ($attached.session.session_id -eq $editorSession.session_id) "Runtime attach selected the wrong editor session."
+    Assert-True ((Tool-Payload $byId[129]).scene_path -eq "res://main.tscn") "Editor readiness open did not select the smoke scene."
 
     $scalarEval = Tool-Payload $byId[130]
     Assert-True ($scalarEval.value -eq 7 -and $scalarEval.value_type -eq "int") "Editor scalar expression was incorrect."
