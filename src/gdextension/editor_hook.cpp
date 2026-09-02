@@ -662,7 +662,8 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         // One macro previously controlled both, so the feature could not be
         // admitted to production without also compiling test seams into a
         // shipping binary. Only the seam configurator stays gated.
-        "signal.listConnections", "signal.connect", "signal.disconnect", "signal.emit"
+        "signal.listConnections", "signal.connect", "signal.disconnect", "signal.emit",
+        "runtime.injectInput"
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
         , "phase7SignalTest.configure"
 #endif
@@ -755,7 +756,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "scene.mutate", "physics.raycast", "physics.simulateStep", "nav.bakeMesh",
         "nav.queryPath", "anim.listTracks", "anim.playTrack", "tilemap.setCells",
         "tilemap.getUsedRect", "gridmap.setCells", "asset.instantiate",
-        "runtime.injectInput", "runtime.getCallStack",
+        "runtime.getCallStack",
         "vision.setCameraTransform", "vision.toggleDebugDraw"
     };
     if (registered_but_unimplemented.count(method)) {

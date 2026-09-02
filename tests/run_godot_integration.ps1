@@ -92,6 +92,12 @@ function Tool-Payload($Response) {
     return $Response.result.content[0].text | ConvertFrom-Json
 }
 
+function Runtime-InputCounter($TreePayload) {
+    $counterNode = @($TreePayload.scene_tree.children | Where-Object { $_.name -match '^InputCounter_(\d+)$' })[0]
+    Assert-True ($null -ne $counterNode) "Runtime tree did not expose the input counter node."
+    return [int]([regex]::Match($counterNode.name, '^InputCounter_(\d+)$').Groups[1].Value)
+}
+
 function Runtime-FrameCounter($TreePayload) {
     $counterNode = @($TreePayload.scene_tree.children | Where-Object { $_.name -match '^FrameCounter_(\d+)$' })[0]
     Assert-True ($null -ne $counterNode) "Runtime tree did not expose the frame counter node."
@@ -343,6 +349,27 @@ try {
         (Tool-Request 378 "runtime_attach_session" @{ session_id = $gameSession.session_id }),
         (Tool-Request 302 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 2 }),
         (Tool-Request 390 "runtime_read_profiler" @{ duration_ms = 100; sample_count = 3; categories = @("physics", "frame") }),
+        # Phase 7C input injection, proven by the fixture's _input counter rather
+        # than by the dispatch count. One of each event class, then a tree read
+        # after the next frame has flushed input.
+        (Tool-Request 391 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }),
+        (Tool-Request 392 "runtime_inject_input" @{ events = @(
+            @{ type = "action"; action_name = "ui_accept"; pressed = $true },
+            @{ type = "action"; action_name = "ui_accept"; pressed = $false },
+            @{ type = "key"; keycode = 65; pressed = $true; shift_pressed = $true },
+            @{ type = "mouse_button"; button_index = 1; pressed = $true },
+            @{ type = "joypad_button"; button_index = 0; pressed = $true; device = 0 },
+            @{ type = "joypad_motion"; axis = 0; axis_value = 0.5; device = 0 }
+        ) }),
+        (Tool-Request 393 "runtime_read_profiler" @{ duration_ms = 50; sample_count = 2; categories = @("frame") }),
+        (Tool-Request 394 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }),
+        (Tool-Request 395 "inject_input_event" @{ events = @(@{ type = "action"; action_name = "ui_accept"; pressed = $true }); dry_run = $true }),
+        (Tool-Request 396 "runtime_inject_input" @{ events = @(@{ type = "key"; pressed = $true }) }),
+        (Tool-Request 397 "runtime_inject_input" @{ events = @(
+            @{ type = "action"; action_name = "ui_accept"; pressed = $true },
+            @{ type = "joypad_button"; button_index = 22; pressed = $true; device = 0 }
+        ) }),
+        (Tool-Request 398 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }),
         (Tool-Request 380 "runtime_read_output" @{ limit = 500 }),
         (Tool-Request 303 "runtime_set_paused" @{ paused = $true }),
         (Tool-Request 304 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 2 }),
@@ -447,8 +474,22 @@ try {
 
     $runtimeTree = Tool-Payload $runtimeById[302]
     Assert-True ($runtimeTree.scene_tree.path -eq "/root/RuntimeRoot") "Runtime tree root was not canonical."
-    Assert-True ($runtimeTree.scene_tree.child_count -eq 2) "Runtime tree did not report child_count."
-    Assert-True ($runtimeTree.node_count -eq 5 -and $runtimeTree.truncated) "Runtime tree bounds metadata did not report the deliberately large truncated subtree."
+    Assert-True ($runtimeTree.scene_tree.child_count -eq 3) "Runtime tree did not report child_count."
+    Assert-True ($runtimeTree.node_count -eq 6 -and $runtimeTree.truncated) "Runtime tree bounds metadata did not report the deliberately large truncated subtree."
+    $inputBefore = Runtime-InputCounter (Tool-Payload $runtimeById[391])
+    $injected = Tool-Payload $runtimeById[392]
+    Assert-True ($injected.execution_mode -eq "live" -and $injected.session_kind -eq "game") "runtime_inject_input did not run against the game session."
+    Assert-True ($injected.dispatched_event_count -eq 6 -and $injected.outcome -eq "completed" -and $injected.rollback -eq "not_available") "runtime_inject_input did not report six dispatched events."
+    Assert-True ((@($injected.event_types) -join ",") -eq "action,action,key,mouse_button,joypad_button,joypad_motion") "runtime_inject_input event_types are not in dispatch order."
+    $inputAfter = Runtime-InputCounter (Tool-Payload $runtimeById[394])
+    Assert-True (($inputAfter - $inputBefore) -eq 6) "The game observed $($inputAfter - $inputBefore) injected events, expected 6; dispatch count alone is not delivery."
+    $inputPreview = Tool-Payload $runtimeById[395]
+    Assert-True ($null -ne $inputPreview.mutation_preview -and $inputPreview.mutation_preview.tool -eq "inject_input_event") "inject_input_event dry_run did not return a preview under the invoked name."
+    Assert-True $runtimeById[396].result.isError "runtime_inject_input accepted a key event with no key identity."
+    Assert-True $runtimeById[397].result.isError "runtime_inject_input accepted a joypad button outside 0..21."
+    $inputFinal = Runtime-InputCounter (Tool-Payload $runtimeById[398])
+    Assert-True ($inputFinal -eq $inputAfter) "A rejected batch or a dry run still dispatched input; the counter moved from $inputAfter to $inputFinal."
+
     # The same window from a game session, with request order ignored: frame
     # precedes physics in the output whatever the caller wrote.
     $gameProfile = Tool-Payload $runtimeById[390]
@@ -500,7 +541,7 @@ try {
         Assert-True ([bool]$runtimeById[$rejectedId].result.isError) "Runtime rejection $rejectedId returned fake success."
     }
     Assert-True ((Tool-Payload $runtimeById[316]).paused -eq $false) "Game resume was not verified."
-    Assert-True ((Tool-Payload $runtimeById[323]).value -eq 2) "Game expression child count was incorrect."
+    Assert-True ((Tool-Payload $runtimeById[323]).value -eq 3) "Game expression child count was incorrect."
     Assert-True (@((Tool-Payload $runtimeById[324]).value).Count -eq 3) "Game expression array was not preserved."
     Assert-True ((Tool-Payload $runtimeById[325]).value.answer -eq 42) "Game expression dictionary was not preserved."
     $gameVector = Tool-Payload $runtimeById[326]
@@ -616,6 +657,8 @@ try {
         (Tool-Request 940 "runtime_read_profiler" @{ duration_ms = 200; sample_count = 5 }),
         (Tool-Request 941 "runtime_read_profiler" @{ duration_ms = 0; sample_count = 2 }),
         (Tool-Request 942 "runtime_read_profiler" @{ categories = @("gpu") }),
+        # Game only. An editor route must be refused before anything reaches Input.
+        (Tool-Request 943 "runtime_inject_input" @{ events = @(@{ type = "action"; action_name = "ui_accept"; pressed = $true }) }),
         (Tool-Request 930 "audio_list_buses" @{}),
         (Tool-Request 931 "audio_configure_bus" @{ bus = "Master"; volume_db = -12.5; mute = $true }),
         (Tool-Request 932 "audio_list_buses" @{}),
@@ -998,6 +1041,8 @@ try {
     Assert-True $byId[941].result.isError "runtime_read_profiler accepted duration 0 with more than one sample."
     Assert-True ($byId[941].result.content[0].text -match "sample_count 1") "runtime_read_profiler duration-zero rejection is not actionable."
     Assert-True $byId[942].result.isError "runtime_read_profiler accepted an unknown category."
+    Assert-True $byId[943].result.isError "runtime_inject_input accepted an editor session."
+    Assert-True ($byId[943].result.content[0].text -match "session_kind|game") "runtime_inject_input editor rejection does not say why."
     Assert-True $byId[21].result.isError "Missing node lookup returned fake success."
     Assert-True $byId[22].result.isError "Unknown property lookup returned fake null success."
     Assert-True $byId[23].result.isError "Incompatible scalar property write returned fake success."

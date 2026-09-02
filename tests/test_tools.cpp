@@ -317,8 +317,8 @@ static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract(
         if (legacy_names.count(tool.name) != 0) continue;
         tool.capability.implemented ? ++implemented : ++unimplemented;
     }
-    ASSERT_EQ(implemented, 70u);
-    ASSERT_EQ(unimplemented, 13u);
+    ASSERT_EQ(implemented, 71u);
+    ASSERT_EQ(unimplemented, 12u);
 }
 
 static void test_offline_writer_schemas_require_explicit_overwrite() {
@@ -1374,7 +1374,10 @@ static void test_tool_capabilities_are_honest() {
     ASSERT_EQ(profiler_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"live"}));
     ASSERT_EQ(profiler_json["_meta"]["didi"]["implemented"], true);
-    for (const auto& reserved : {inject_input_json, call_stack_json}) {
+    ASSERT_EQ(inject_input_json["_meta"]["didi"]["executionModes"],
+              didi::json::array({"live"}));
+    ASSERT_EQ(inject_input_json["_meta"]["didi"]["implemented"], true);
+    for (const auto& reserved : {call_stack_json}) {
         ASSERT_EQ(reserved["_meta"]["didi"]["executionModes"],
                   didi::json::array({"unimplemented"}));
         ASSERT_EQ(reserved["_meta"]["didi"]["implemented"], false);

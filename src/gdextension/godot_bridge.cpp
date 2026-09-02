@@ -5,6 +5,7 @@
 #include "didi/gdextension/viewport_renderer.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/runtime/input_injection.hpp"
 #include <array>
 #include <algorithm>
 #include <cctype>
@@ -1449,6 +1450,145 @@ Result<void> GodotBridge::forceDraw() {
     return Result<void>::ok();
 }
 
+
+// runtime.injectInput. Every event is constructed and fully configured before
+// the first one is dispatched, so a bad event in position five fails the
+// batch with nothing sent. Dispatch is Input.parse_input_event, which returns
+// void: the count is calls made, not events accepted, and only a fixture that
+// observes _input can say more.
+namespace {
+
+constexpr int64_t kInputParseInputEventHash = 3754044979LL;
+
+Result<VariantValue> buildInjectedEvent(const runtime::InjectedInputEvent& spec) {
+    using Kind = runtime::InjectedInputEvent::Kind;
+    const char* class_name = nullptr;
+    switch (spec.kind) {
+        case Kind::action: class_name = "InputEventAction"; break;
+        case Kind::key: class_name = "InputEventKey"; break;
+        case Kind::mouse_button: class_name = "InputEventMouseButton"; break;
+        case Kind::joypad_button: class_name = "InputEventJoypadButton"; break;
+        case Kind::joypad_motion: class_name = "InputEventJoypadMotion"; break;
+    }
+    NativeName native_class(class_name);
+    if (!native_class.valid()) return Error::internal("Failed to construct input event class name");
+    auto object = GodotApi::instance().classdb_construct_object(native_class.ptr());
+    if (!object) return Error::internal(std::string("Godot could not construct ") + class_name);
+    auto fail = [&](const Error& error) -> Result<VariantValue> {
+        GodotApi::instance().object_destroy(object);
+        return error;
+    };
+    auto set_int = [&](const char* owner, const char* method, int64_t hash, int64_t number) -> Result<void> {
+        auto value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, number);
+        if (value.isErr()) return value.error();
+        auto result = callObject(object, owner, method, hash, {&value.value()});
+        return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
+    };
+    auto set_bool = [&](const char* owner, const char* method, bool enabled) -> Result<void> {
+        auto value = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(enabled));
+        if (value.isErr()) return value.error();
+        auto result = callObject(object, owner, method, 2586408642LL, {&value.value()});
+        return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
+    };
+    auto set_float = [&](const char* owner, const char* method, double number) -> Result<void> {
+        auto value = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, number);
+        if (value.isErr()) return value.error();
+        auto result = callObject(object, owner, method, 373806689LL, {&value.value()});
+        return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
+    };
+    auto check = [&](const Result<void>& step) { return step.isErr(); };
+
+    Result<void> step = Result<void>::ok();
+    switch (spec.kind) {
+        case Kind::action: {
+            auto action = makeStringName(spec.action_name);
+            if (action.isErr()) return fail(action.error());
+            auto set = callObject(object, "InputEventAction", "set_action", 3304788590LL, {&action.value()});
+            if (set.isErr()) return fail(set.error());
+            if (check(step = set_bool("InputEventAction", "set_pressed", spec.pressed))) return fail(step.error());
+            if (check(step = set_float("InputEventAction", "set_strength", spec.strength))) return fail(step.error());
+            break;
+        }
+        case Kind::key: {
+            if (spec.keycode > 0 &&
+                check(step = set_int("InputEventKey", "set_keycode", 888074362LL, spec.keycode))) return fail(step.error());
+            if (spec.physical_keycode > 0 &&
+                check(step = set_int("InputEventKey", "set_physical_keycode", 888074362LL, spec.physical_keycode))) return fail(step.error());
+            if (spec.unicode > 0 &&
+                check(step = set_int("InputEventKey", "set_unicode", 1286410249LL, spec.unicode))) return fail(step.error());
+            if (check(step = set_bool("InputEventKey", "set_pressed", spec.pressed))) return fail(step.error());
+            if (check(step = set_bool("InputEventKey", "set_echo", spec.echo))) return fail(step.error());
+            if (check(step = set_bool("InputEventWithModifiers", "set_shift_pressed", spec.shift_pressed))) return fail(step.error());
+            if (check(step = set_bool("InputEventWithModifiers", "set_alt_pressed", spec.alt_pressed))) return fail(step.error());
+            if (check(step = set_bool("InputEventWithModifiers", "set_ctrl_pressed", spec.ctrl_pressed))) return fail(step.error());
+            if (check(step = set_bool("InputEventWithModifiers", "set_meta_pressed", spec.meta_pressed))) return fail(step.error());
+            if (check(step = set_int("InputEvent", "set_device", 1286410249LL, spec.device))) return fail(step.error());
+            break;
+        }
+        case Kind::mouse_button: {
+            if (check(step = set_int("InputEventMouseButton", "set_button_index", 3624991109LL, spec.button_index))) return fail(step.error());
+            if (check(step = set_bool("InputEventMouseButton", "set_pressed", spec.pressed))) return fail(step.error());
+            if (check(step = set_bool("InputEventMouseButton", "set_double_click", spec.double_click))) return fail(step.error());
+            if (check(step = set_float("InputEventMouseButton", "set_factor", spec.factor))) return fail(step.error());
+            if (check(step = set_int("InputEvent", "set_device", 1286410249LL, spec.device))) return fail(step.error());
+            break;
+        }
+        case Kind::joypad_button: {
+            if (check(step = set_int("InputEventJoypadButton", "set_button_index", 1466368136LL, spec.button_index))) return fail(step.error());
+            if (check(step = set_bool("InputEventJoypadButton", "set_pressed", spec.pressed))) return fail(step.error());
+            if (check(step = set_float("InputEventJoypadButton", "set_pressure", spec.pressure))) return fail(step.error());
+            if (check(step = set_int("InputEvent", "set_device", 1286410249LL, spec.device))) return fail(step.error());
+            break;
+        }
+        case Kind::joypad_motion: {
+            if (check(step = set_int("InputEventJoypadMotion", "set_axis", 1332685170LL, spec.axis))) return fail(step.error());
+            if (check(step = set_float("InputEventJoypadMotion", "set_axis_value", spec.axis_value))) return fail(step.error());
+            if (check(step = set_int("InputEvent", "set_device", 1286410249LL, spec.device))) return fail(step.error());
+            break;
+        }
+    }
+    auto wrapped = makeObject(object);
+    if (wrapped.isErr()) return fail(wrapped.error());
+    return wrapped;
+}
+
+json injectInput(const json& params, const std::string& session_kind) {
+    if (session_kind != "game") return errorJson(409, "session_kind_rejected");
+    auto parsed = runtime::parseInputInjectionRequest(params);
+    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    auto input = singleton("Input");
+    if (input.isErr()) return errorJson(501, "Input singleton is unavailable: " + input.error().message);
+    auto bind = requireMethodBind("Input", "parse_input_event", kInputParseInputEventHash);
+    if (bind.isErr()) return errorJson(501, "Input.parse_input_event is unavailable: " + bind.error().message);
+
+    std::vector<VariantValue> events;
+    events.reserve(parsed.value().size());
+    json event_types = json::array();
+    for (const auto& spec : parsed.value()) {
+        auto built = buildInjectedEvent(spec);
+        if (built.isErr()) return errorJson(built.error().code, built.error().message);
+        events.push_back(std::move(built.value()));
+        event_types.push_back(spec.kindName());
+    }
+    size_t dispatched = 0;
+    for (auto& event : events) {
+        auto sent = callObject(input.value(), "Input", "parse_input_event", kInputParseInputEventHash, {&event});
+        if (sent.isErr()) {
+            // Some events went out and this one did not. That is exactly the
+            // ambiguous case the contract calls unknown, and it is not retried.
+            return errorJson(dispatched == 0 ? 500 : 504, sent.error().message,
+                             {{"outcome", dispatched == 0 ? "not_started" : "unknown_outcome"},
+                              {"dispatched_event_count", dispatched}, {"retryable", false}});
+        }
+        ++dispatched;
+    }
+    return liveResult({{"dispatched_event_count", dispatched}, {"event_types", std::move(event_types)},
+                       {"outcome", "completed"}, {"rollback", "not_available"},
+                       {"session_kind", session_kind}});
+}
+
+} // namespace
+
 json GodotBridge::execute(const std::string& method, const json& params,
                           const std::string& session_kind) {
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
@@ -1472,6 +1612,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
     if (method == "runtime.getTree" || method == "runtime.setPaused" ||
         method == "runtime.stop") {
         return executeRuntimeBridge(method, params, session_kind);
+    }
+    // A game has no EditorInterface, so this runs before the editor lookup
+    // the editor-only methods below depend on.
+    if (method == "runtime.injectInput") {
+        return injectInput(params, session_kind);
     }
     auto editor_result = editorInterface();
     if (editor_result.isErr()) return errorJson(editor_result.error().code, editor_result.error().message);

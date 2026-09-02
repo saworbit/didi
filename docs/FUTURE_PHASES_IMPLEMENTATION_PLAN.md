@@ -12,12 +12,12 @@
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `70/83`
-**Phase 7 registrations:** `13/18` unimplemented
+**Canonical implementation:** `71/83`
+**Phase 7 registrations:** `12/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-This is the approved historical plan that integrated the future-phases documentation. Its original task wording is preserved below. Current Phase 7 status is `PARTIAL_DELIVERY`: the 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. `runtime_read_profiler` followed once its own live trial on Godot 4.5.1, 4.6.2 and 4.7.2 passed. The other 13 names remain registered but unimplemented. The surface is 70/83.
+This is the approved historical plan that integrated the future-phases documentation. Its original task wording is preserved below. Current Phase 7 status is `PARTIAL_DELIVERY`: the 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. `runtime_read_profiler` and `runtime_inject_input` followed once their own live trials on Godot 4.5.1, 4.6.2 and 4.7.2 passed. The other 12 names remain registered but unimplemented. The surface is 71/83.
 
 Current evidence is [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md), and the approved executable plan is [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md). Governance authorized partial delivery; the signal names shipped under it. Further Phase 7 work requires the same treatment: a production trial per capability, not a feasibility note. Under the third path, all three blockers must re-enter Task 1 and prove `GO` on both pinned engines before Task 2; contract weakening is a separate explicit contract amendment.
 
