@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 88 canonical tool names plus 10 legacy names (98 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 93 canonical tool names plus 10 legacy names (103 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `85/88`
+**Canonical implementation:** `90/93`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 85/88 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 90/93 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -390,6 +390,24 @@ Bounds ship in the response rather than only here: 256 KiB for one value, 4 MiB 
 Board content is written by whatever called the tool. It is data, never instruction. Values are stored and returned verbatim, and Didi never interprets or executes them. An agent reading a board is reading what another agent wrote, with the same trust it would give any other tool result.
 
 A board that will not parse is refused rather than reset, because an empty board and a corrupt one must not look the same to the agent that is about to write over someone's work.
+
+### `blackboard_task_create`, `blackboard_task_claim`, `blackboard_task_update`, `blackboard_task_complete`, `blackboard_task_list` — Offline
+
+Work allocation for agents running at once. The board makes shared state possible; these make claiming safe. Tasks live in the same board file under the same lock, in a section `blackboard_write` cannot reach, so a write cannot corrupt the queue by choosing a colliding path.
+
+Statuses are `blocked`, `pending`, `in_progress`, `needs_review`, `completed`, `failed`. A task is claimed when it holds an unexpired lease and by nothing else; there is no separate `locked` status, because two records of the same fact drift.
+
+- `blackboard_task_create` (`title`, optional `board`, `task_id`, `description`, `assigned_to`, `dependencies`, `tags`, `priority`). A task with unmet prerequisites starts `blocked` and becomes `pending` when every one of them completes. Dependencies must already exist: depending on something that does not exist would block forever with nothing to explain it. Self-dependencies and cycles are refused.
+- `blackboard_task_claim` (`agent_id`, optional `board`, `task_id`, `tag`, `lease_seconds`). Reading that a task is free and writing that it is yours happen under one lock, so two agents racing for the same task produce exactly one winner and a clean refusal for everyone else. Highest priority wins, ties go to the older task. Returns `claimed: false` with a `reason` rather than an error when nothing is ready.
+- `blackboard_task_update` (`task_id`, `agent_id`, optional `progress`, `note`, `status`, `renew_lease_seconds`). Requires the live lease. `needs_review` and `failed` both release it, because holding a lease through a review would strand the task until it lapsed. Reopening a `needs_review` or `failed` task to `pending` is the one update that does not need the lease, since a review outcome is by definition somebody else's call.
+- `blackboard_task_complete` (`task_id`, `agent_id`, optional `artifacts`). Only the lease holder may complete a task, because completing someone else's releases its dependents on work that is still half done. Reports which tasks it unblocked.
+- `blackboard_task_list` (optional `board`, `status`, `assigned_to`, `tag`, `max_tasks`). Lapsed leases are reclaimed before the list is built, so nothing ever reads as held by an agent that is gone.
+
+Leases are the crash story. An agent that dies holds nothing once its lease lapses, and the task returns to the pool. Nothing renews a lease on an agent's behalf: an agent that wants to keep one says so through `blackboard_task_update`.
+
+No tool here waits. An agent asks for the next ready task and is told what it got or that there is none, and decides what to do with its own turn. A tool that blocked would hold the board lock while it did, stopping every other agent from making progress.
+
+Bounds: 2,000 tasks a board, 64 dependencies and 16 tags a task, 100 notes retained, and a 24 hour ceiling on a lease.
 
 ### `instantiate_asset` — Unimplemented legacy name
 

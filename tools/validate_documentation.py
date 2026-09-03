@@ -83,7 +83,7 @@ FUTURE_PHASE_COMPLETION_FIELDS = (
 # manifest IS supplied the built binary is authoritative and this constant is
 # checked against it, so a stale fallback fails the build jobs rather than
 # silently disagreeing with the software it stands in for.
-CANONICAL_IMPLEMENTATION_COUNTS = (88, 85, 3)
+CANONICAL_IMPLEMENTATION_COUNTS = (93, 90, 3)
 
 # How many names Phase 7 reserved in total. Distinct from the unimplemented
 # count above: they were equal only while no Phase 7 tool had been delivered,

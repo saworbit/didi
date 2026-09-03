@@ -69,11 +69,77 @@ struct BlackboardClearRequest {
     bool dry_run{false};
 };
 
+// Tasks share the board file and its lock. A task is claimed when it holds an
+// unexpired lease and by nothing else: a separate "locked" status would be a
+// second record of the same fact, and two records drift.
+inline constexpr size_t kBlackboardMaxTasks = 2'000;
+inline constexpr size_t kBlackboardMaxTaskIdBytes = 128;
+inline constexpr size_t kBlackboardMaxTaskTitleBytes = 512;
+inline constexpr size_t kBlackboardMaxTaskTextBytes = 4'096;
+inline constexpr size_t kBlackboardMaxTaskDependencies = 64;
+inline constexpr size_t kBlackboardMaxTaskTags = 16;
+inline constexpr int64_t kBlackboardMaxLeaseSeconds = 24 * 60 * 60;
+inline constexpr int64_t kBlackboardDefaultLeaseSeconds = 300;
+
+struct BlackboardTaskCreateRequest {
+    std::string board{"default"};
+    std::string task_id;                    // Generated when empty.
+    std::string title;
+    std::optional<std::string> description;
+    std::optional<std::string> assigned_to;
+    std::vector<std::string> dependencies;
+    std::vector<std::string> tags;
+    int64_t priority{0};                    // Higher is claimed first.
+    bool dry_run{false};
+};
+
+struct BlackboardTaskClaimRequest {
+    std::string board{"default"};
+    std::string agent_id;
+    std::optional<std::string> task_id;     // Claim this one, or the best ready one.
+    std::optional<std::string> tag;         // Only consider tasks carrying this tag.
+    int64_t lease_seconds{kBlackboardDefaultLeaseSeconds};
+    bool dry_run{false};
+};
+
+struct BlackboardTaskUpdateRequest {
+    std::string board{"default"};
+    std::string task_id;
+    std::string agent_id;                   // Must hold the lease.
+    std::optional<int64_t> progress;        // 0 to 100.
+    std::optional<std::string> note;
+    std::optional<std::string> status;      // needs_review or failed.
+    std::optional<int64_t> renew_lease_seconds;
+    bool dry_run{false};
+};
+
+struct BlackboardTaskCompleteRequest {
+    std::string board{"default"};
+    std::string task_id;
+    std::string agent_id;                   // Must hold the lease.
+    json artifacts;                         // Free-form pointers to what changed.
+    bool dry_run{false};
+};
+
+struct BlackboardTaskListRequest {
+    std::string board{"default"};
+    std::optional<std::string> status;
+    std::optional<std::string> assigned_to;
+    std::optional<std::string> tag;
+    size_t max_tasks{200};
+};
+
 Result<json> blackboardWrite(const BlackboardWriteRequest& request, BlackboardClock clock = {});
 Result<json> blackboardRead(const BlackboardReadRequest& request, BlackboardClock clock = {});
 Result<json> blackboardPatch(const BlackboardPatchRequest& request, BlackboardClock clock = {});
 Result<json> blackboardListKeys(const BlackboardListKeysRequest& request, BlackboardClock clock = {});
 Result<json> blackboardClear(const BlackboardClearRequest& request, BlackboardClock clock = {});
+
+Result<json> blackboardTaskCreate(const BlackboardTaskCreateRequest& request, BlackboardClock clock = {});
+Result<json> blackboardTaskClaim(const BlackboardTaskClaimRequest& request, BlackboardClock clock = {});
+Result<json> blackboardTaskUpdate(const BlackboardTaskUpdateRequest& request, BlackboardClock clock = {});
+Result<json> blackboardTaskComplete(const BlackboardTaskCompleteRequest& request, BlackboardClock clock = {});
+Result<json> blackboardTaskList(const BlackboardTaskListRequest& request, BlackboardClock clock = {});
 
 // Exposed for tests and for the tool layer's error messages. Splits a dot or
 // slash path into segments, rejecting anything that could escape the board or

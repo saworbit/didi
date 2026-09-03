@@ -29,7 +29,7 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
 ┌─────────────────────────────────────────────────────────────┐
 │        Didi (C++ MCP Core Engine - didi / didi.exe)         │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2026-07-28 + 2024-11-05)    │
-│  - Registry (88 canonical tools + 10 legacy names)          │
+│  - Registry (93 canonical tools + 10 legacy names)          │
 │  - Dynamic Resources (project tree, editor state, logs)     │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
 │  - Offline file/process tools and capability metadata       │

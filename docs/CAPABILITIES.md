@@ -33,7 +33,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-Didi v1.4.0 registers 88 canonical tool names. 85 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 85 canonical tools are implemented. Ten legacy names are registered separately, for exactly 98 `tools/list` entries.
+Didi v1.4.0 registers 93 canonical tool names. 90 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 90 canonical tools are implemented. Ten legacy names are registered separately, for exactly 103 `tools/list` entries.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
@@ -63,7 +63,7 @@ Didi v1.4.0 registers 88 canonical tool names. 85 are implemented in at least on
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `85/88`
+**Canonical implementation:** `90/93`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->

@@ -67,6 +67,8 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "project_get_uid_map", "project_audit_assets", "project_analyze_impact", "runtime_launch",
         "blackboard_write", "blackboard_read", "blackboard_patch",
         "blackboard_list_keys", "blackboard_clear",
+        "blackboard_task_create", "blackboard_task_claim", "blackboard_task_update",
+        "blackboard_task_complete", "blackboard_task_list",
         "execute_test_session", "runtime_list_sessions", "runtime_attach_session",
         "runtime_detach_session", "runtime_get_session"
         , "project_search_text", "project_search_symbols",
@@ -144,6 +146,11 @@ CallToolResult handleBlackboardRead(const json& args, std::shared_ptr<ipc::IIpcC
 CallToolResult handleBlackboardPatch(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleBlackboardListKeys(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleBlackboardClear(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleBlackboardTaskCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleBlackboardTaskClaim(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleBlackboardTaskUpdate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleBlackboardTaskComplete(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleBlackboardTaskList(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectAnalyzeImpact(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAudioConfigureBus(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -1643,6 +1650,118 @@ void ToolRegistry::registerAllDefaultTools() {
             {"additionalProperties", false}
         };
         t.handler = [this](const json& args) { return handleBlackboardClear(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_task_create";
+        t.description = "Registers a unit of work on the board, optionally waiting on other tasks. A task whose prerequisites are unmet is blocked until every one of them completes.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"maxLength", 64}}},
+                {"task_id", {{"type", "string"}, {"maxLength", 128},
+                             {"description", "Letters, digits, underscore, hyphen and dot. Generated as TASK-n when omitted."}}},
+                {"title", {{"type", "string"}, {"minLength", 1}, {"maxLength", 512}}},
+                {"description", {{"type", "string"}, {"maxLength", 4096}}},
+                {"assigned_to", {{"type", "string"}, {"maxLength", 128},
+                                 {"description", "A suggestion only. Claiming is what actually assigns work."}}},
+                {"dependencies", {{"type", "array"}, {"maxItems", 64}, {"items", {{"type", "string"}}},
+                                  {"description", "Task ids that must reach completed first. Each must already exist: depending on something that does not exist would block forever with nothing to explain it."}}},
+                {"tags", {{"type", "array"}, {"maxItems", 16}, {"items", {{"type", "string"}}}}},
+                {"priority", {{"type", "integer"}, {"minimum", -1000}, {"maximum", 1000}, {"default", 0},
+                              {"description", "Higher is claimed first. Ties go to the older task."}}}
+            }},
+            {"required", json::array({"title"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardTaskCreate(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_task_claim";
+        t.description = "Atomically leases the next ready task, or a named one. Reading that a task is free and writing that it is yours happen under one lock, so two agents cannot both win it.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"maxLength", 64}}},
+                {"agent_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128},
+                              {"description", "Who is taking the work. Recorded as the lease owner and required to update or complete it."}}},
+                {"task_id", {{"type", "string"}, {"maxLength", 128},
+                             {"description", "Claim this task specifically. Omit to take the highest priority ready one."}}},
+                {"tag", {{"type", "string"}, {"maxLength", 64},
+                         {"description", "Only consider tasks carrying this tag."}}},
+                {"lease_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 86400}, {"default", 300},
+                                   {"description", "How long the claim holds. When it lapses the task returns to the pool, so an agent that dies does not strand the work."}}}
+            }},
+            {"required", json::array({"agent_id"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardTaskClaim(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_task_update";
+        t.description = "Records progress, adds a note, renews the lease, or hands the task back for review. Requires the live lease, except for reopening a needs_review or failed task.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"maxLength", 64}}},
+                {"task_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128}}},
+                {"agent_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128},
+                              {"description", "Must hold the live lease, unless reopening a needs_review or failed task, which is by definition somebody else's call."}}},
+                {"progress", {{"type", "integer"}, {"minimum", 0}, {"maximum", 100}}},
+                {"note", {{"type", "string"}, {"maxLength", 4096},
+                          {"description", "Appended to the task's notes. The oldest is dropped past 100."}}},
+                {"status", {{"type", "string"}, {"enum", json::array({"needs_review", "failed", "pending"})},
+                            {"description", "needs_review and failed both release the lease. pending reopens a reviewed or failed task."}}},
+                {"renew_lease_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 86400},
+                                         {"description", "Push the lease expiry out. Nothing renews a lease on an agent's behalf."}}}
+            }},
+            {"required", json::array({"task_id", "agent_id"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardTaskUpdate(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_task_complete";
+        t.description = "Marks a task done and releases whatever was waiting on it. Only the agent holding the live lease may complete it, because completing someone else's task releases dependents on work that is still half done.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"maxLength", 64}}},
+                {"task_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128}}},
+                {"agent_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128},
+                              {"description", "Must hold the live lease."}}},
+                {"artifacts", {{"description", "Free-form record of what changed: files, node paths, board keys. Stored and returned verbatim."}}}
+            }},
+            {"required", json::array({"task_id", "agent_id"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardTaskComplete(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_task_list";
+        t.description = "Lists tasks with their status, lease and dependencies, filtered by status, assignee or tag. Lapsed leases are reclaimed before the list is built, so nothing reads as held by an agent that is gone.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"maxLength", 64}}},
+                {"status", {{"type", "string"},
+                            {"enum", json::array({"blocked", "pending", "in_progress", "needs_review", "completed", "failed"})}}},
+                {"assigned_to", {{"type", "string"}, {"maxLength", 128}}},
+                {"tag", {{"type", "string"}, {"maxLength", 64}}},
+                {"max_tasks", {{"type", "integer"}, {"minimum", 1}, {"maximum", 2000}, {"default", 200}}}
+            }},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardTaskList(args, m_ipcClient); };
         registerTool(std::move(t));
     }
     {
