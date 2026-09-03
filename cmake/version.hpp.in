@@ -1,0 +1,11 @@
+#pragma once
+
+// Generated from project(VERSION ...) in CMakeLists.txt. The copy in the build
+// tree is an output: do not edit it, and do not spell the version out anywhere
+// else. Everything in C++ that needs it reads this.
+
+namespace didi {
+
+inline const char* kProjectVersion = "@PROJECT_VERSION@";
+
+}  // namespace didi

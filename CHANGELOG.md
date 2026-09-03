@@ -59,6 +59,7 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Changed
 
+- Took the version out of the C++ sources. `project(VERSION ...)` in `CMakeLists.txt` now generates `didi/common/version.hpp` into the build tree, and `mcp_protocol.hpp` and `main.cpp` read it instead of spelling `1.4.0` out three times between them. The documentation validator no longer compares those two files, because they cannot drift; it rejects a literal version appearing in either of them instead. The contributing instructions were also incomplete: they listed eight files to update and omitted `demo/addons/didi/plugin.cfg`, which the validator has been checking all along.
 - Mutating tool schemas now advertise `dry_run`; editor reload, script patching, and overwrite-enabled offline writers require a 120-second single-use token bound to the exact arguments, project, and runtime route.
 - The documentation validator now derives the Phase 7 status block's implementation ratio, and the spelled-out forms of published counts, from the tool manifest as well. Both were still literals, so registering any new canonical tool failed CI until the validator itself was edited.
 - Corrected the published read-only registration count. It was stated as 43 and the binary reports 41; the figure had never been checked against the software.

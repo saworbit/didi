@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include "didi/common/version.hpp"
 #include "didi/common/types.hpp"
 #include "didi/common/json.hpp"
 
@@ -15,7 +16,7 @@ struct ResolvedToolBinding;
 
 inline const char* kProtocolVersion = "2024-11-05";
 inline const char* kServerName = "didi";
-inline const char* kServerVersion = "1.4.0";
+inline const char* kServerVersion = kProjectVersion;
 
 // Revision 2026-07-28 removed the initialize handshake: a modern client
 // declares its protocol version in `_meta` on every request, and servers must

@@ -3,6 +3,15 @@ project(didi VERSION 1.4.0 LANGUAGES C CXX)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+# The version had to be typed into four files and kept in step by a documentation
+# check. Everything in C++ now reads it from here, generated from project()
+# above, so those two spellings cannot drift and there is nothing to remember.
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.hpp.in"
+    "${CMAKE_BINARY_DIR}/generated/include/didi/common/version.hpp"
+    @ONLY
+)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -24,6 +33,7 @@ endif()
 # Carried on didi_core as PUBLIC rather than set globally, so every target that
 # links it inherits the same set and nothing picks these up by accident.
 set(DIDI_INCLUDE_DIRECTORIES
+    ${CMAKE_BINARY_DIR}/generated/include
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/include/didi/common
     ${CMAKE_CURRENT_SOURCE_DIR}/include/didi/mcp

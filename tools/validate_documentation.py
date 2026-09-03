@@ -36,10 +36,19 @@ REQUIRED_DOCUMENTS = (
     "docs/TOOL_REFERENCE.md",
 )
 
-VERSION_SOURCES = (
-    "CMakeLists.txt",
+# The C++ side is not on this list any more. It reads the version from a header
+# generated out of project(VERSION ...), so it cannot drift and there is nothing
+# to compare. GENERATED_VERSION_FILES below keeps it that way.
+# Files that must keep reading the generated version rather than repeating it.
+# Removing them from VERSION_SOURCES only stops the comparison; this is what
+# stops someone quietly typing the number back in and reintroducing the drift.
+GENERATED_VERSION_FILES = (
     "include/didi/mcp/mcp_protocol.hpp",
     "src/standalone/main.cpp",
+)
+
+VERSION_SOURCES = (
+    "CMakeLists.txt",
     "addons/didi/plugin.cfg",
     # The demo project ships its own copy of the addon, because a Godot project
     # cannot reference an addon outside its own res://. It drifted two minor
@@ -1473,8 +1482,6 @@ def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[s
 
     if version is not None:
         version_expectations = {
-            "include/didi/mcp/mcp_protocol.hpp": f'kServerVersion = "{version}"',
-            "src/standalone/main.cpp": f"v{version}",
             "addons/didi/plugin.cfg": f'version="{version}"',
             "demo/addons/didi/plugin.cfg": f'version="{version}"',
             "README.md": version,
@@ -1487,6 +1494,15 @@ def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[s
             if text is not None and expected not in text:
                 errors.append(
                     f"{relative_path}: expected current project version {version} ({expected!r})"
+                )
+
+        for relative_path in GENERATED_VERSION_FILES:
+            text = _read_required(root, relative_path, errors)
+            if text is not None and version in text:
+                errors.append(
+                    f"{relative_path}: spells out version {version}. It reads "
+                    "didi::kProjectVersion from the generated header, and a literal here "
+                    "is the duplication that header exists to remove."
                 )
 
         major, minor, _patch = version.split(".")
