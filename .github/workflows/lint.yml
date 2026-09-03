@@ -48,4 +48,5 @@ jobs:
       - name: Validate Documentation Contract
         run: |
           python -m unittest tests.test_documentation_validator -v
+          python -m unittest tests.test_field_trial -v
           python tools/validate_documentation.py
