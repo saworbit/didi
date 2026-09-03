@@ -102,6 +102,8 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 | `godot://project/tree` | `offline_fallback` | Filesystem/resource-index snapshot rooted at the explicit canonical Godot project. |
 | `godot://editor/state` | `live`, `offline_fallback` | Live mode reports connection status and active edited-scene root; offline mode reports that no editor is connected. |
 | `godot://runtime/logs` | `live`, `offline_fallback` | Returns Didi's cursor-shaped extension ring when attached, or a schema-compatible server-status record offline. It does not capture arbitrary Godot/external `print()` output. |
+| `blackboard://<board>/state` | `offline_fallback` | Shared state on a board, with the author, reason and expiry recorded per path. The default board is listed; any other resolves on demand. Subscribable. |
+| `blackboard://<board>/tasks` | `offline_fallback` | Tasks on a board with status, lease and dependencies. Lapsed leases are reclaimed before the answer is built. Subscribable. |
 
 ## Current limits and safety rules
 
@@ -125,6 +127,9 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 - A write refuses to run through an existing value, and a board that will not parse is refused rather than reset, so a corrupt board never reads as an empty one.
 - A task is claimed when it holds an unexpired lease and by nothing else; there is no separate locked status. Claiming is atomic under the board lock, lapsed leases return work to the pool, and only the lease holder may update or complete a task. Reopening a `needs_review` or `failed` task is the one update that does not need the lease.
 - Task bounds: 2,000 tasks a board, 64 dependencies and 16 tags a task, 100 notes retained, and 24 hours on a lease. Dependencies must already exist, and self-dependencies and cycles are refused at creation.
+- `resources/subscribe` accepts `blackboard://` URIs only. Nothing else changes without a call from the same client, so accepting a subscription to it would promise notifications that never arrive.
+- A subscription is noticed by watching the board file's size and modified time on a background thread, because the writer is a different process. That is polling, but it is polling inside the server: it costs no request, no token and no turn. The thread runs only while something is subscribed, and the first tick records the current state rather than announcing it.
+- `notifications/resources/updated` carries the URI and never the contents. Reading still goes through `resources/read` and the same bounds as any other read.
 - Successful JSON results and resources identify their actual `execution_mode`. Offline-only script, resource, project, test-lab, and runtime handlers execute in the standalone process even while an editor is connected.
 - `script_check_syntax` combines lightweight diagnostics with a Godot `--headless --check-only` run only when a file path is supplied and a Godot executable is available. `source_text`-only checks do not invoke Godot.
 - `script_reflect_class` reflects the Godot API dump pinned in the repository, not live Godot ClassDB reflection. It covers every engine class, reports the `api_version` it describes, and knows nothing about script classes. It falls back to a small built-in map when the reference file is not installed beside the binary.

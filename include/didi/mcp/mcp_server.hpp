@@ -5,6 +5,10 @@
 #include <memory>
 #include <atomic>
 #include <optional>
+#include <mutex>
+#include <set>
+#include <thread>
+#include <vector>
 #include "didi/mcp/jsonrpc.hpp"
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/mcp/resource_registry.hpp"
@@ -43,11 +47,35 @@ private:
     void sendNotification(const std::string& method, const json& params);
     void releaseRuntimeSession();
 
+    // A background thread notices another process changing a board, so every
+    // write to stdout has to be serialised: two interleaved writes are one
+    // corrupt line, and a corrupt line ends the session.
+    void writeLine(const std::string& payload);
+    void startBoardWatcher();
+    void stopBoardWatcher();
+    void watchBoards();
+
     std::atomic<bool> m_running{false};
     bool m_initialized{false};
     bool m_skipConfirmations{false};
     std::shared_ptr<ipc::IIpcClient> m_ipcClient;
     std::shared_ptr<runtime::IRuntimeSessionClient> m_runtimeSessionClient;
+
+    std::mutex m_writeMutex;
+    mutable std::mutex m_subscriptionMutex;
+    std::set<std::string> m_subscriptions;
+    std::thread m_boardWatcher;
+    std::atomic<bool> m_watching{false};
+
+public:
+    // Test seam. Subscription bookkeeping and the notification payload are the
+    // parts worth asserting without standing up a process and a real clock.
+    // The single writer, exposed because the interleaving test has to drive it
+    // from a thread alongside the watcher. Nothing else should call it.
+    void writeLineForTest(const std::string& payload) { writeLine(payload); }
+    bool subscribeResource(const std::string& uri);
+    bool unsubscribeResource(const std::string& uri);
+    std::vector<std::string> subscribedResources() const;
 };
 
 } // namespace mcp

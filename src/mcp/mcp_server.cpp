@@ -8,6 +8,10 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <chrono>
+#include <thread>
+#include <unordered_map>
+#include "didi/offline/blackboard.hpp"
 
 #if defined(_WIN32)
 #include <io.h>
@@ -16,6 +20,11 @@
 
 namespace didi {
 namespace mcp {
+
+// Half a second is well under an agent turn and far above the cost of two
+// filesystem stats. The sleep is sliced so shutdown does not wait it out.
+static constexpr int kBoardPollSliceMs = 50;
+static constexpr int kBoardPollSlices = 10;
 
 static bool liveAllowedFor(const std::string& identifier, bool resource,
                            const std::string& session_kind) {
@@ -118,18 +127,25 @@ void McpServer::stop() {
     releaseRuntimeSession();
 }
 
+// The only place anything reaches stdout. The board watcher runs on its own
+// thread, so an unguarded write would let a notification land inside a
+// response and produce one line neither side can parse.
+void McpServer::writeLine(const std::string& payload) {
+    std::lock_guard<std::mutex> guard(m_writeMutex);
+    std::cout << payload << "\n";
+    std::cout.flush();
+}
+
 void McpServer::sendResponse(const JsonRpcResponse& resp) {
     std::string out = resp.serialize();
     DIDI_LOG_DEBUG("MCP_OUT", "JSON-RPC response bytes=", out.size());
-    std::cout << out << "\n";
-    std::cout.flush();
+    writeLine(out);
 }
 
 void McpServer::sendBatchResponse(const json& responses) {
     const std::string out = responses.dump();
     DIDI_LOG_DEBUG("MCP_OUT", "JSON-RPC batch responses=", responses.size(), " bytes=", out.size());
-    std::cout << out << "\n";
-    std::cout.flush();
+    writeLine(out);
 }
 
 void McpServer::sendNotification(const std::string& method, const json& params) {
@@ -140,8 +156,7 @@ void McpServer::sendNotification(const std::string& method, const json& params) 
     };
     std::string out = notif.dump();
     DIDI_LOG_DEBUG("MCP_NOTIF", "JSON-RPC notification bytes=", out.size());
-    std::cout << out << "\n";
-    std::cout.flush();
+    writeLine(out);
 }
 
 namespace {
@@ -333,7 +348,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             {"protocolVersion", kProtocolVersion},
             {"capabilities", {
                 {"tools", {{"listChanged", false}}},
-                {"resources", {{"subscribe", false}, {"listChanged", false}}},
+                {"resources", {{"subscribe", true}, {"listChanged", false}}},
                 {"prompts", {{"listChanged", false}}}
             }},
             {"serverInfo", {
@@ -527,6 +542,35 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             req.id, cacheable({{"resources", res_list}}, kSessionDependentTtlMs, "private"));
     }
 
+    if (req.method == "resources/subscribe" || req.method == "resources/unsubscribe") {
+        if (!req.params.is_object() || !req.params.contains("uri") ||
+            !req.params["uri"].is_string()) {
+            return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams,
+                                              "Resource URI must be a string");
+        }
+        const std::string uri = req.params["uri"].get<std::string>();
+        const bool subscribing = req.method == "resources/subscribe";
+
+        // Only boards change underneath a caller. Accepting a subscription to
+        // anything else would be a promise of notifications that never arrive.
+        if (uri.rfind("blackboard://", 0) != 0) {
+            return makeApplicationError(
+                req.id, Error::invalidArgument(
+                            "only blackboard:// resources can be subscribed to; nothing else "
+                            "changes without a tool call from this client"));
+        }
+        if (subscribing) {
+            auto exists = ResourceRegistry::instance().readResource(uri);
+            if (exists.isErr()) return makeApplicationError(req.id, exists.error());
+        }
+
+        const bool changed = subscribing ? subscribeResource(uri) : unsubscribeResource(uri);
+        return JsonRpcResponse::makeSuccess(
+            req.id, complete({{"uri", uri},
+                              {"subscribed", subscribing},
+                              {"changed", changed}}));
+    }
+
     if (req.method == "resources/read") {
         if (!req.params.is_object()) {
             return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams, "Params must be a JSON object");
@@ -696,11 +740,98 @@ void McpServer::runStdio() {
     releaseRuntimeSession();
 }
 
+
+bool McpServer::subscribeResource(const std::string& uri) {
+    bool added = false;
+    {
+        std::lock_guard<std::mutex> guard(m_subscriptionMutex);
+        added = m_subscriptions.insert(uri).second;
+    }
+    // The thread exists only while something is subscribed, so a session that
+    // never subscribes never starts one.
+    if (added) startBoardWatcher();
+    return added;
+}
+
+bool McpServer::unsubscribeResource(const std::string& uri) {
+    bool removed = false;
+    bool empty = false;
+    {
+        std::lock_guard<std::mutex> guard(m_subscriptionMutex);
+        removed = m_subscriptions.erase(uri) > 0;
+        empty = m_subscriptions.empty();
+    }
+    if (empty) stopBoardWatcher();
+    return removed;
+}
+
+std::vector<std::string> McpServer::subscribedResources() const {
+    std::lock_guard<std::mutex> guard(m_subscriptionMutex);
+    return {m_subscriptions.begin(), m_subscriptions.end()};
+}
+
+void McpServer::startBoardWatcher() {
+    bool expected = false;
+    if (!m_watching.compare_exchange_strong(expected, true)) return;
+    m_boardWatcher = std::thread([this] { watchBoards(); });
+}
+
+void McpServer::stopBoardWatcher() {
+    if (!m_watching.exchange(false)) return;
+    if (m_boardWatcher.joinable()) m_boardWatcher.join();
+}
+
+// The writer is a different process, so there is no in-process hook to fire.
+// This compares the board file's size and modified time on a timer. It is
+// polling, but it is polling nobody pays for: no request, no token, no turn.
+void McpServer::watchBoards() {
+    std::unordered_map<std::string, offline::BlackboardFileStamp> seen;
+    bool primed = false;
+
+    while (m_watching.load()) {
+        std::vector<std::string> uris = subscribedResources();
+        std::unordered_map<std::string, std::vector<std::string>> boards;
+        for (const auto& uri : uris) {
+            constexpr const char* kScheme = "blackboard://";
+            if (uri.rfind(kScheme, 0) != 0) continue;
+            const std::string rest = uri.substr(std::string(kScheme).size());
+            const auto slash = rest.find('/');
+            if (slash == std::string::npos || slash == 0) continue;
+            boards[rest.substr(0, slash)].push_back(uri);
+        }
+
+        for (const auto& entry : boards) {
+            const auto stamp = offline::blackboardFileStamp(entry.first);
+            const auto previous = seen.find(entry.first);
+            const bool known = previous != seen.end();
+            const bool changed =
+                stamp.has_value() ? (!known || previous->second != *stamp) : known;
+
+            if (stamp.has_value()) seen[entry.first] = *stamp;
+            else seen.erase(entry.first);
+
+            // The first tick records what is already there. Announcing it would
+            // tell every subscriber that something changed the moment it
+            // subscribed, which is never true and trains callers to ignore us.
+            if (!primed || !changed) continue;
+            for (const auto& uri : entry.second) {
+                sendNotification("notifications/resources/updated", {{"uri", uri}});
+            }
+        }
+        primed = true;
+
+        for (int slice = 0; slice < kBoardPollSlices && m_watching.load(); ++slice) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(kBoardPollSliceMs));
+        }
+    }
+}
+
 // Hands back any attached runtime session before the process goes away, so the
 // session lock file and the IPC route are released by us rather than left for
 // the operating system to clean up when the process finally exits.
 void McpServer::releaseRuntimeSession() {
     m_running.store(false);
+    stopBoardWatcher();
     if (!m_runtimeSessionClient) return;
     if (!m_runtimeSessionClient->activeSession().has_value()) return;
 

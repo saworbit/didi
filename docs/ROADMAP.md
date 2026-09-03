@@ -296,7 +296,7 @@ These are missing capabilities that an AI agent actually requires to complete fu
 - **Theme & Layout Inspection**: Inspect Control node anchors, margins, minimum sizes, and theme overrides.
 
 ### 5. Enhanced MCP Protocol Surface
-- **Resource Subscriptions**: Add active change/push notifications for the existing `godot://editor/state`, `godot://project/tree`, and `godot://runtime/logs` resources.
+- **Resource Subscriptions**: `resources/subscribe` and `notifications/resources/updated` are delivered for `blackboard://` resources, which are the ones that change without a call from the subscribing client. The `godot://` resources remain unsubscribable: they change only in response to a tool call the client already made, or to editor activity that has no watcher yet.
 - **Resource Templates**: Dynamic URI templates `godot://node/{path}` and `godot://script/{res_path}`.
 - **Additional Structured Workflows**: Extend the existing anomaly-debugging and gameplay-slice prompts with guided *Create Character*, *Wire Signal*, and *Visual Verification Loop* workflows.
 - **Structured Engine Logging**: Support `logging/setLevel` and stream Godot engine warnings and errors into MCP notifications.

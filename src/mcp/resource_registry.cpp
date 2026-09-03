@@ -1,4 +1,5 @@
 #include "didi/mcp/resource_registry.hpp"
+#include "didi/offline/blackboard.hpp"
 #include "didi/offline/resource_indexer.hpp"
 #include "didi/runtime/session_client.hpp"
 #include <algorithm>
@@ -103,8 +104,37 @@ std::vector<ResourceDefinition> ResourceRegistry::listResources() const {
     return list;
 }
 
+namespace {
+
+// blackboard://<board>/<state|tasks>. Boards are created on demand, so the set of
+// URIs is not knowable in advance; the default board is registered so it appears
+// in resources/list, and anything else resolves here.
+Result<std::string> readBlackboardUri(const std::string& uri) {
+    constexpr const char* kScheme = "blackboard://";
+    const std::string rest = uri.substr(std::string(kScheme).size());
+    const auto slash = rest.find('/');
+    if (slash == std::string::npos || slash == 0 || slash + 1 >= rest.size()) {
+        return Error::invalidArgument(
+            "blackboard resource URI must be blackboard://<board>/state or /tasks");
+    }
+    const std::string board = rest.substr(0, slash);
+    const std::string kind = rest.substr(slash + 1);
+    auto payload = offline::blackboardReadResource(board, kind);
+    if (payload.isErr()) return payload.error();
+    json document = payload.value();
+    document["execution_mode"] = "offline_fallback";
+    return document.dump();
+}
+
+bool isBlackboardUri(const std::string& uri) {
+    return uri.rfind("blackboard://", 0) == 0;
+}
+
+} // namespace
+
 Result<std::string> ResourceRegistry::readResource(const std::string& uri) {
     auto res = getResource(uri);
+    if (!res && isBlackboardUri(uri)) return readBlackboardUri(uri);
     if (!res) {
         return Error::notFound("Resource not found: " + uri);
     }
@@ -131,6 +161,28 @@ void ResourceRegistry::setIpcClient(std::shared_ptr<ipc::IIpcClient> ipc_client)
 }
 
 void ResourceRegistry::registerAllDefaultResources() {
+    // The default board, so a client sees these in resources/list. Any other
+    // board resolves dynamically, because boards are created on demand.
+    for (const char* kind : {"state", "tasks"}) {
+        ResourceDefinition board;
+        board.uri = std::string("blackboard://default/") + kind;
+        board.name = std::string("Blackboard default ") + kind;
+        board.description =
+            std::string(kind) == "state"
+                ? "Shared state on the default board, with the author, reason and expiry recorded per path. Subscribe to be told when another agent changes it."
+                : "Tasks on the default board with status, lease and dependencies. Lapsed leases are reclaimed before the answer is built.";
+        board.mimeType = "application/json";
+        const std::string kind_name = kind;
+        board.readHandler = [kind_name]() -> Result<std::string> {
+            auto payload = offline::blackboardReadResource("default", kind_name);
+            if (payload.isErr()) return payload.error();
+            return payload.value().dump();
+        };
+        board.capability.modes = {"offline_fallback"};
+        board.capability.implemented = true;
+        registerResource(std::move(board));
+    }
+
     // 1. godot://project/tree
     ResourceDefinition proj_tree;
     proj_tree.uri = "godot://project/tree";

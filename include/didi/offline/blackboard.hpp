@@ -149,4 +149,25 @@ Result<std::vector<std::string>> blackboardSplitPath(const std::string& path);
 // The directory a board lives in, resolved under the current project root.
 Result<std::filesystem::path> blackboardBoardPath(const std::string& board);
 
+// Reads a whole board as one document, for the `blackboard://` resources. Kind is
+// "state" or "tasks". Expiry is applied first, so a resource never reports an
+// entry a read would not return.
+Result<json> blackboardReadResource(const std::string& board, const std::string& kind,
+                                    BlackboardClock clock = {});
+
+// Size and modified time of a board file, or nullopt when it does not exist yet.
+// The watcher compares these rather than parsing, because it runs on a timer and
+// most ticks find nothing.
+struct BlackboardFileStamp {
+    uint64_t size{0};
+    int64_t modified_ns{0};
+
+    bool operator==(const BlackboardFileStamp& other) const {
+        return size == other.size && modified_ns == other.modified_ns;
+    }
+    bool operator!=(const BlackboardFileStamp& other) const { return !(*this == other); }
+};
+
+std::optional<BlackboardFileStamp> blackboardFileStamp(const std::string& board);
+
 } // namespace didi::offline

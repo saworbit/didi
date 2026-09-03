@@ -41,6 +41,39 @@ Example shape:
 - Offline mode reports that no editor extension is connected.
 - Selection, camera transforms, scene filename, and UndoRedo depth are not currently exposed.
 
+## `blackboard://<board>/state` and `blackboard://<board>/tasks`
+
+The board as a resource, so a client can read it without spending a tool call and,
+more usefully, be told when it changes.
+
+`blackboard://default/state` and `blackboard://default/tasks` are listed in
+`resources/list`. Boards are created on demand, so any other board resolves
+without being registered: `blackboard://experiment/state` works as soon as
+something writes to that board, and reads as an empty board before then. A URI
+that is neither shape is refused rather than answered with an empty board.
+
+Both are subscribable, and they are the only subscribable resources. Nothing
+else changes without a call from the same client, so a subscription to
+`godot://project/tree` would be a promise of notifications that never arrive.
+
+The writer is a different `didi` process, so the server watches the board file's
+size and modified time on a background thread and emits
+`notifications/resources/updated` when they change. That is polling. What it is
+not is polling an agent pays for: the loop is in C++ at a fixed interval and
+costs no request, no token and no turn, which is the whole point. The thread
+exists only while something is subscribed, and the first tick records what is
+already there rather than announcing it as a change.
+
+A notification carries the URI and nothing else. Fetch the contents with
+`resources/read`, which applies the same bounds as any other read.
+
+Not built: `blackboard://<board>/hypotheses`, because hypotheses are state at a
+path an agent chose and `state` already exposes them; `audit_log`, because the
+board records the last write of each path rather than a history, and an
+append-only log needs its own retention design; and per-path subscription, since
+a subscriber can re-read a bounded document more cheaply than the watcher can
+diff it on every tick.
+
 ## `godot://runtime/logs`
 
 - Modes: `live`, `offline_fallback`.

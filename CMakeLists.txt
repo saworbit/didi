@@ -258,6 +258,7 @@ set(TEST_SOURCES
     tests/test_resource_indexer.cpp
     tests/test_import_health.cpp
     tests/test_blackboard.cpp
+    tests/test_blackboard_resources.cpp
     tests/test_project_search.cpp
     tests/test_image_diff.cpp
     tests/test_test_runner.cpp

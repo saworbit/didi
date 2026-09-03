@@ -1163,4 +1163,45 @@ Result<json> blackboardTaskList(const BlackboardTaskListRequest& request, Blackb
     });
 }
 
+
+Result<json> blackboardReadResource(const std::string& board, const std::string& kind,
+                                    BlackboardClock clock) {
+    const int64_t now_ms = clock ? clock() : systemClockMs();
+    if (kind != "state" && kind != "tasks") {
+        return Error::invalidArgument("blackboard resource kind must be state or tasks");
+    }
+    return withBoardLock(board, [&](const std::filesystem::path& file) -> Result<json> {
+        auto loaded = loadBoard(file);
+        if (loaded.isErr()) return loaded.error();
+        Board board_data = loaded.value();
+        // Sweep before answering, so a resource never reports an entry that a
+        // read would have dropped.
+        if (sweepExpired(board_data, now_ms) || refreshTasks(board_data, now_ms)) {
+            auto saved = saveBoard(file, board_data);
+            if (saved.isErr()) return saved.error();
+        }
+        if (kind == "state") {
+            return json{{"board", board}, {"state", board_data.state}, {"meta", board_data.meta}};
+        }
+        json tasks = json::array();
+        for (const auto& entry : board_data.tasks.items()) tasks.push_back(entry.value());
+        return json{{"board", board}, {"tasks", tasks}, {"count", tasks.size()}};
+    });
+}
+
+std::optional<BlackboardFileStamp> blackboardFileStamp(const std::string& board) {
+    auto path = blackboardBoardPath(board);
+    if (path.isErr()) return std::nullopt;
+    std::error_code error;
+    if (!std::filesystem::exists(path.value(), error) || error) return std::nullopt;
+    const auto size = std::filesystem::file_size(path.value(), error);
+    if (error) return std::nullopt;
+    const auto written = std::filesystem::last_write_time(path.value(), error);
+    if (error) return std::nullopt;
+    BlackboardFileStamp stamp;
+    stamp.size = static_cast<uint64_t>(size);
+    stamp.modified_ns = static_cast<int64_t>(written.time_since_epoch().count());
+    return stamp;
+}
+
 } // namespace didi::offline
