@@ -267,7 +267,7 @@ confirmation token, which is a different change from reading state.
 | **Failing workflow** | *Rename `character_health` to `health` in Player.gd and prove nothing broke.* The agent renames the declaration and its uses, runs a text search, sees it clean, and stops. It has missed the HUD scene that wired the signal through `[connection signal="character_health"]` and the animation track keyframing `NodePath("Sprite:character_health")`. Neither is a code reference, so neither is explained by a search, and Godot reports neither until the game runs. The agent ships a project that is broken at runtime and believes it verified the change. |
 | **Execution modes** | `offline_fallback`. A static read of files on disk; no editor needed. |
 | **Safety class** | `read`. No `dry_run`, no confirmation. It never writes. |
-| **Proving test** | Native: `Tools.ProjectImpactFindings` builds the issue's own example and requires the scene connection, the animation track, and the code use to be classified separately, with `max_character_health` absent. `Tools.ProjectImpactFileTarget` covers a file target reached only through a `project.godot` autoload, an `ext_resource` reference, and rejection of a target that is neither a path nor an identifier. |
+| **Proving test** | Native: `Tools.ProjectImpactFindings` builds the issue's own example and requires the scene connection, the animation track, and the code use to be classified separately, with `max_character_health` absent. `Tools.ProjectImpactFileTarget` covers a file target reached only through a `project.godot` autoload, an `ext_resource` reference, and malformed-target rejection. `Tools.ProjectImpactNodePath` requires exact node-path matches across scene connections, animation tracks, serialized `NodePath` properties, and direct code literals, with a similarly named sibling absent. |
 | **Reviewer** | Unassigned. Read-only, so no security review is required. Findings are bounded by `max_impacts` and the scan by the existing resource-index limits. |
 
 **Why this one.** The reference forms are all written down in the project
@@ -281,10 +281,20 @@ mutation with a rollback story, not an analysis, and it is not part of this
 amendment. Analysis first is also the useful order: a cascade nobody can check
 is worse than no cascade.
 
+**Node-path completion, 2026-09-03.** The original implementation covered
+symbols, signals, and resource paths but rejected the node paths requested by
+the failing workflow. It now accepts validated relative, `/root/...`, `%...`,
+and `$...` paths and compares extracted paths exactly. Scene connection
+endpoints, animation track paths, serialized `NodePath` values, and direct
+GDScript `$...`, `%...`, standalone `^"..."`, or literal `get_node(...)`
+references are classified separately.
+Computed paths remain invisible and the response says so.
+
 **Why an empty result is an answer and a malformed target is not.** A target
-that is neither a `res://` path nor a single identifier is rejected. Returning
-an empty impact list for a question the tool cannot parse would read as "nothing
-depends on this" to a caller about to delete something.
+that is neither a resource path, a validated node path, nor a single identifier
+is rejected. Returning an empty impact list for a question the tool cannot
+parse would read as "nothing depends on this" to a caller about to delete
+something.
 
 ### ACCEPTED (IMPLEMENTED): `project_audit_assets`
 

@@ -141,6 +141,8 @@ Phases 1-6 established the implementation baseline. Phase 7 is `PARTIAL_DELIVERY
 
 Governance selected partial delivery: feasible tools ship only after their own production evidence, while `implemented: false` keeps unavailable names honest. The three API-blocked contracts remain `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`.
 
+Phase 8 is now `IN PROGRESS`. Its first read-only slice provides bounded project audit and reverse impact analysis, including exact static node-path references; UID-cache reconciliation, import diagnostics/configuration, and incremental freshness remain planned.
+
 See the [Roadmap](docs/ROADMAP.md), [Phase 7 feasibility evidence](docs/PHASE_7_API_FEASIBILITY.md), [approved executable plan](docs/PHASE_7_IMPLEMENTATION_PLAN.md), and [Future Phases Design](docs/FUTURE_PHASES_DESIGN.md).
 
 ---

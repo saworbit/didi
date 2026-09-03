@@ -203,11 +203,13 @@ API-blocked contracts stay honestly unimplemented.
 
 **Exit gate (option A):** The fifteen feasible canonical tools have real implementations, and the three API-blocked names remain registered with `implemented: false` and reject calls. Each delivered tool carries cross-platform, native bridge, Godot, security, mutation-policy, and documentation evidence. The superseded atomic gate required that all 79 canonical tools have real implementations and cross-platform, native bridge, Godot, security, mutation-policy, and documentation evidence. Successful placeholders do not satisfy this gate. The 10 legacy registrations remain compatibility-only and do not change the canonical count.
 
-## Phase 8: Deep Project Intelligence and Asset Pipeline (`PLANNED`)
+## Phase 8: Deep Project Intelligence and Asset Pipeline (`IN PROGRESS`)
 
 **Objective:** Add dependency-aware project analysis, import health, asset provenance, and safe bulk asset workflows after canonical completion.
 
-**Dependency:** The authorized Phase 7 partial-delivery exit gate is satisfied. Phase 8 remains planned until its first separately reviewed implementation slice begins.
+**Dependency:** The authorized Phase 7 partial-delivery exit gate is satisfied.
+
+**Current slice:** Bounded reverse impact analysis is delivered for symbols, signals, resource paths, and exact static node paths. It identifies serialized scene connections, animation tracks, `NodePath` properties, and direct code literals without claiming to follow dynamically constructed paths. UID-cache reconciliation, import-health diagnostics, guarded import configuration, and incremental freshness remain planned.
 
 **Exclusions:** No custom GDScript language server, unbounded whole-project semantic analysis, or silent import-setting mutation.
 
