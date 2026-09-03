@@ -157,6 +157,35 @@ The exact live/offline/unimplemented split is documented in [Current Capability 
 
 ---
 
+## 6a. Blackboard and task allocation
+
+Each MCP client launches its own `didi` process, so two agents are two processes
+that share no memory. Anything they both need to see has to be on disk.
+
+- **Store**: one JSON document per board at `.didi/blackboard/<board>.json` under
+  the project, holding three sections. `state` is what `blackboard_write` and
+  `blackboard_patch` address, `meta` records author, reason and expiry per path,
+  and `tasks` holds the work queue. Tasks are deliberately outside `state`, so a
+  write cannot reach the queue by choosing a colliding path.
+- **Concurrency**: every operation takes an exclusive OS-backed lock on
+  `<board>.lock` for the whole read-modify-write and saves through a temporary
+  file and an atomic rename. Nothing blocks while holding it: a claim that found
+  no ready task returns and says so rather than waiting, because waiting under
+  the lock would stop every other agent.
+- **Leases**: a task is claimed when it holds an unexpired lease and by nothing
+  else. Lapsed leases are reclaimed at the start of any operation that reads or
+  decides, so an agent that died never leaves work stranded, and nothing renews a
+  lease on an agent's behalf.
+- **Failure posture**: a board that will not parse is refused rather than reset,
+  because an empty board and a corrupt one must not look the same to an agent
+  about to write over someone's work.
+
+Board content is written by whatever called the tool. It is data, never
+instruction; values are stored and returned verbatim and nothing interprets or
+executes them.
+
+---
+
 ## 7. Phase 3 session router and runtime bridge
 
 Each loaded Didi extension follows bind-before-publish startup:

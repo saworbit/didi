@@ -223,6 +223,28 @@ API-blocked contracts stay honestly unimplemented.
 
 **Exit gate:** Authoring mutations are UndoRedo-backed and dry-runnable. Temporary visual state is restored on success, error, timeout, and cancellation. Real editor and game fixtures prove layout, animation, capture-target, and comparison behavior.
 
+## Phase 9a: Agent Coordination Surface (`IN PROGRESS`)
+
+**Objective:** Let independent agent processes share decisions and allocate work
+without a human sequencing them by hand.
+
+**Delivered:** the blackboard (`blackboard_write`, `blackboard_read`,
+`blackboard_patch`, `blackboard_list_keys`, `blackboard_clear`) and task
+allocation on top of it (`blackboard_task_create`, `blackboard_task_claim`,
+`blackboard_task_update`, `blackboard_task_complete`, `blackboard_task_list`).
+Both are file-backed under `.didi/blackboard/` with an OS-backed lock, because
+each MCP client is its own process and shares no memory with the next.
+
+**Not delivered:** reactive resource subscriptions, live editor state reflected
+onto board namespaces, and any human-facing dashboard. Those remain open and are
+tracked as their own work rather than implied by what shipped here.
+
+**Exit gate:** a claim is atomic under concurrency, a lapsed lease returns work
+to the pool, and dependency completion releases dependents. All three are
+covered by native tests that fail when the lock is removed.
+
+---
+
 ## Phase 10: Gogo Parallel Godot Orchestration (`PLANNED`)
 
 **Objective:** Coordinate isolated Godot work across parallel workers with deterministic ownership, conflict prevention, and auditable integration.

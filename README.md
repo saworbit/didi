@@ -86,7 +86,7 @@ The current documented release is **1.4.0**.
 
 ---
 
-## 🛠️ Protocol Surface (83 Canonical Tools)
+## 🛠️ Protocol Surface (93 Canonical Tools)
 
 The 93 canonical names are the stable protocol surface, with 10 additional legacy registrations (103 total). The implementation remains 90/93 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind` from `tools/list`. `editorConnected` is true only for an editor route, while `liveAvailable` also requires that the selected editor/game kind is allowed for that exact definition. Phase 6 keeps the surface stable while requiring an explicit Godot project, adding project-keyed endpoints and one-client runtime locks, and exposing dry-run/confirmation controls on mutations. Every definition also carries specification `annotations`: `readOnlyHint` is derived from the same classification that drives `dry_run`, so the read-only set is safe for a client to auto-approve, and successful JSON results carry `structuredContent` alongside the text block.
 
