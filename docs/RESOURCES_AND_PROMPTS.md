@@ -48,7 +48,7 @@ Example shape:
 - Live mode returns the selected session's 2,000-record Didi ring in cursor shape: `records`, `oldest_cursor`, `next_cursor`, and `dropped_before_cursor`, plus live session provenance. Records contain `sequence`, `timestamp_ms`, `level`, `source`, `message`, and nullable `details`.
 - Offline mode returns the same cursor-shaped contract with one server-status record and `execution_mode: "offline_fallback"`.
 - Resource reads are snapshots, not subscriptions. Use the `runtime_read_logs` tool for explicit `cursor`, `limit` (`1..500`), and minimum-level polling; advance to every returned `next_cursor` even when filtering.
-- The ring records structured Didi lifecycle/command/control/evaluation events. It does **not** intercept arbitrary Godot/external-process `print()` output. `runtime_launch` remains the bounded child stdout/stderr capture path.
+- The ring records structured Didi lifecycle/command/control/evaluation events. It does **not** intercept arbitrary Godot/external-process `print()` output. Poll `runtime_read_output` for the separate bounded engine-output ring of an attached session; `runtime_launch` remains the bounded stdout/stderr capture path for a Didi-owned child process.
 
 ## `godot_debug_visual_anomaly`
 
@@ -57,7 +57,7 @@ Arguments:
 - `target_resource_path` (required).
 - `symptom_description` (optional).
 
-The generated prompt tells the model to check capability metadata, generate an offline test-lab scene if useful, inspect the live or parsed hierarchy, capture the actual active editor viewport when available, and use only implemented focused scene/property or script-patch tools. Multi-camera control, debug draw, and the legacy `mutate_scene_tree` tool are not assumed.
+The generated prompt tells the model to check capability metadata, generate an offline test-lab scene if useful, inspect the live or parsed hierarchy, capture the actual active editor viewport when available, and use only implemented focused scene/property or script-patch tools. It may use the supported `viewport_set_camera_transform` and collision/navigation `viewport_toggle_debug_draw` controls in an editor session, restoring temporary state afterward; arbitrary multi-camera orchestration and the legacy `mutate_scene_tree` tool are not assumed.
 
 ## `godot_generate_gameplay_slice`
 
@@ -66,4 +66,4 @@ Arguments:
 - `feature_name` (required).
 - `requirements` (required).
 
-The generated prompt scopes work to the current surface: search/index files, inspect hierarchy, create built-in nodes through focused live scene tools when connected, patch/check GDScript, reimport changed source assets, and run a separate Godot test process. For verification, callers can retain a live capture ID, isolate one edited-scene branch, and request an exact bounded PNG diff. For Phase 3 observation, callers may explicitly list/attach an editor or game, poll structured logs, inspect the runtime tree, use verified game pause/step/stop, and issue only allowlisted read-only expressions. Runtime input injection, call stacks, profiler telemetry, arbitrary scripts, and raw stdout subscription remain unsupported.
+The generated prompt scopes work to the current surface: search/index files, inspect hierarchy, create built-in nodes through focused live scene tools when connected, patch/check GDScript, reimport changed source assets, and run a separate Godot test process. For verification, callers can retain a live capture ID, isolate one edited-scene branch, and request an exact bounded PNG diff. Callers may explicitly list/attach an editor or game, poll structured logs and the separate engine-output ring, inspect the runtime tree, use verified game pause/step/stop, dispatch bounded game-only `runtime_inject_input`, sample `runtime_read_profiler`, and issue only allowlisted read-only expressions. Editor sessions may also use the shipped viewport and TileMap/GridMap tools. Arbitrary scripts and raw stdout subscription remain unsupported; the only unavailable canonical operations are `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`.

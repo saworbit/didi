@@ -1428,6 +1428,8 @@ static void test_resource_registry() {
 }
 
 static void test_prompt_registry() {
+    auto& tools = didi::mcp::ToolRegistry::instance();
+    tools.registerAllDefaultTools();
     auto& reg = didi::mcp::PromptRegistry::instance();
     reg.registerAllDefaultPrompts();
     auto prompts = reg.listPrompts();
@@ -1442,6 +1444,9 @@ static void test_prompt_registry() {
     const std::string visual_text = res.value()["messages"][0]["content"]["text"].get<std::string>();
     ASSERT_TRUE(visual_text.find("tools/list") != std::string::npos);
     ASSERT_TRUE(visual_text.find("mutate_scene_tree") == std::string::npos);
+    ASSERT_TRUE(visual_text.find("`viewport_set_camera_transform`") != std::string::npos);
+    ASSERT_TRUE(visual_text.find("`viewport_toggle_debug_draw`") != std::string::npos);
+    ASSERT_TRUE(visual_text.find("unsupported camera, debug-draw") == std::string::npos);
 
     auto gameplay = reg.getPromptResult("godot_generate_gameplay_slice", {
         {"feature_name", "PlayerController"}, {"requirements", "Move a character"}
@@ -1450,6 +1455,19 @@ static void test_prompt_registry() {
     const std::string gameplay_text = gameplay.value()["messages"][0]["content"]["text"].get<std::string>();
     ASSERT_TRUE(gameplay_text.find("implemented: false") != std::string::npos);
     ASSERT_TRUE(gameplay_text.find("inject_input_event") == std::string::npos);
+    const auto manifest = tools.buildManifest();
+    ASSERT_EQ(manifest.unimplemented.size(), 3u);
+    for (const auto& name : manifest.unimplemented) {
+        ASSERT_TRUE(gameplay_text.find("`" + name + "`") != std::string::npos);
+    }
+    for (const auto* name : {
+             "viewport_set_camera_transform", "viewport_toggle_debug_draw",
+             "tilemap_set_cells", "tilemap_get_used_rect", "gridmap_set_cells",
+             "runtime_inject_input", "runtime_read_profiler"}) {
+        ASSERT_TRUE(gameplay_text.find(std::string("`") + name + "`") != std::string::npos);
+    }
+    ASSERT_TRUE(gameplay_text.find("tilemap and gridmap editing") == std::string::npos);
+    ASSERT_TRUE(gameplay_text.find("unsupported camera, debug-draw, shader") == std::string::npos);
 }
 
 static void test_tool_capture_viewport_with_ipc() {

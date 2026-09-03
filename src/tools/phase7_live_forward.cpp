@@ -1,6 +1,7 @@
 #include "didi/tools/phase7_live_forward.hpp"
 
 #include "didi/runtime/session_client.hpp"
+#include "didi/mcp/mutation_safety.hpp"
 
 #include <array>
 #include <string>
@@ -82,10 +83,10 @@ CallToolResult sendPhase7LiveRequest(const ResolvedToolBinding& binding,
         const bool quarantined = (transport.has_value() || explicit_quarantine)
                                      ? runtime::quarantineRuntimeRoute(client, *lease)
                                      : false;
-        if (binding.canonical_name == "signal_emit" && transport.has_value() &&
+        if (MutationSafety::isMutation(binding) && transport.has_value() &&
             transport->request_started && transport->outcome_unknown) {
             return phase7Error(binding, 504, "unknown_outcome",
-                               {{"retryable", false}, {"outcome", "unknown"},
+                               {{"retryable", false}, {"outcome", "unknown_outcome"},
                                 {"route_quarantine", quarantined}});
         }
         // Carry what the engine actually said. Collapsing every live failure

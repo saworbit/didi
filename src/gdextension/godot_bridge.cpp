@@ -4,6 +4,7 @@
 #include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/gdextension/viewport_renderer.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/json_bounds.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/runtime/input_injection.hpp"
 #include "didi/runtime/spatial_queries.hpp"
@@ -1030,6 +1031,19 @@ Result<void> preflightUndoManagerBindings() {
     }};
     for (const auto& [method, hash] : required) {
         auto available = requireMethodBind("EditorUndoRedoManager", method, hash);
+        if (available.isErr()) return available;
+    }
+    return Result<void>::ok();
+}
+
+Result<void> preflightUndoRollbackBindings() {
+    for (const auto& bind : {
+             std::make_tuple("EditorUndoRedoManager", "get_object_history_id", 1107568780LL),
+             std::make_tuple("EditorUndoRedoManager", "get_history_undo_redo", 2417974513LL),
+             std::make_tuple("UndoRedo", "has_undo", 36873697LL),
+             std::make_tuple("UndoRedo", "undo", 2240911060LL)}) {
+        auto available = requireMethodBind(std::get<0>(bind), std::get<1>(bind),
+                                           std::get<2>(bind));
         if (available.isErr()) return available;
     }
     return Result<void>::ok();
@@ -2226,7 +2240,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr())
                 return errorJson(501, "required_bind_unavailable");
         }
-        if (preflightUndoManagerBindings().isErr()) return errorJson(501, "required_bind_unavailable");
+        if (preflightUndoManagerBindings().isErr() || preflightUndoRollbackBindings().isErr())
+            return errorJson(501, "required_bind_unavailable");
         auto root = editedSceneRoot(editor);
         if (root.isErr()) return errorJson(root.error().code, root.error().message);
         auto layer = resolveNode(root.value(), params["tilemap_path"].get<std::string>());
@@ -2253,12 +2268,13 @@ json GodotBridge::execute(const std::string& method, const json& params,
         std::set<std::pair<int64_t, int64_t>> seen;
         for (const auto& record : params["cells"]) {
             if (!record.is_object() || !record.contains("coords") || !record["coords"].is_array() ||
-                record["coords"].size() != 2 || !record["coords"][0].is_number_integer() ||
-                !record["coords"][1].is_number_integer()) return errorJson(400, "invalid_tilemap_set_cells_request");
-            const int64_t x = record["coords"][0].get<int64_t>();
-            const int64_t y = record["coords"][1].get<int64_t>();
-            if (x < -1048576 || x > 1048576 || y < -1048576 || y > 1048576)
+                record["coords"].size() != 2) return errorJson(400, "invalid_tilemap_set_cells_request");
+            const auto x_value = boundedJsonInteger(record["coords"][0], -1048576, 1048576);
+            const auto y_value = boundedJsonInteger(record["coords"][1], -1048576, 1048576);
+            if (!x_value.has_value() || !y_value.has_value())
                 return errorJson(400, "invalid_tilemap_set_cells_request");
+            const int64_t x = *x_value;
+            const int64_t y = *y_value;
             if (!seen.emplace(x, y).second) return errorJson(409, "duplicate_tilemap_coordinate");
             const bool erase = record.contains("erase");
             if ((erase && (!hasOnlyKeys(record, {"coords", "erase"}) || !record["erase"].is_boolean() || !record["erase"].get<bool>())) ||
@@ -2272,17 +2288,21 @@ json GodotBridge::execute(const std::string& method, const json& params,
             int64_t source = -1, alternative = -1;
             VariantValue atlas = std::move(empty_atlas.value());
             if (!erase) {
-                source = record["source_id"].get<int64_t>();
-                if (record.contains("alternative_tile") && !record["alternative_tile"].is_number_integer())
+                const auto source_value_int = boundedJsonInteger(record["source_id"], 0, 2147483647LL);
+                const auto alternative_value_int = record.contains("alternative_tile")
+                    ? boundedJsonInteger(record["alternative_tile"], 0, 65535)
+                    : std::optional<int64_t>(0);
+                if (!source_value_int.has_value() || !alternative_value_int.has_value())
                     return errorJson(400, "invalid_tilemap_set_cells_request");
-                alternative = record.value("alternative_tile", 0);
-                if (source < 0 || source > 2147483647LL || alternative < 0 || alternative > 65535 ||
-                    !record["atlas_coords"][0].is_number_integer() || !record["atlas_coords"][1].is_number_integer())
+                source = *source_value_int;
+                alternative = *alternative_value_int;
+                const auto ax_value = boundedJsonInteger(record["atlas_coords"][0], 0, 1048576);
+                const auto ay_value = boundedJsonInteger(record["atlas_coords"][1], 0, 1048576);
+                if (!ax_value.has_value() || !ay_value.has_value())
                     return errorJson(400, "invalid_tilemap_set_cells_request");
-                const int64_t ax = record["atlas_coords"][0].get<int64_t>();
-                const int64_t ay = record["atlas_coords"][1].get<int64_t>();
-                if (ax < 0 || ax > 1048576 || ay < 0 || ay > 1048576 || !tile_set.value())
-                    return errorJson(404, "tilemap_tile_not_found");
+                const int64_t ax = *ax_value;
+                const int64_t ay = *ay_value;
+                if (!tile_set.value()) return errorJson(404, "tilemap_tile_not_found");
                 auto source_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, source);
                 auto has_source = callObject(tile_set.value(), "TileSet", "has_source", 1116898809LL, {&source_value.value()});
                 auto has_flag = has_source.isOk() ? scalarFromVariant<GDExtensionBool>(has_source.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
@@ -2375,7 +2395,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
                  std::make_tuple("MeshLibrary", "get_item_list", 1930428628LL)}) {
             if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) return errorJson(501, "required_bind_unavailable");
         }
-        if (preflightUndoManagerBindings().isErr()) return errorJson(501, "required_bind_unavailable");
+        if (preflightUndoManagerBindings().isErr() || preflightUndoRollbackBindings().isErr())
+            return errorJson(501, "required_bind_unavailable");
         auto root = editedSceneRoot(editor);
         if (root.isErr()) return errorJson(root.error().code, root.error().message);
         auto grid = resolveNode(root.value(), params["gridmap_path"].get<std::string>());
@@ -2402,17 +2423,20 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 !record["item"].is_number_integer()) return errorJson(400, "invalid_gridmap_set_cells_request");
             int64_t xyz[3];
             for (int axis = 0; axis < 3; ++axis) {
-                if (!record["position"][axis].is_number_integer()) return errorJson(400, "invalid_gridmap_set_cells_request");
-                xyz[axis] = record["position"][axis].get<int64_t>();
-                if (xyz[axis] < -1048576 || xyz[axis] > 1048576) return errorJson(400, "invalid_gridmap_set_cells_request");
+                const auto coordinate = boundedJsonInteger(record["position"][axis], -1048576, 1048576);
+                if (!coordinate.has_value()) return errorJson(400, "invalid_gridmap_set_cells_request");
+                xyz[axis] = *coordinate;
             }
             if (!seen.emplace(xyz[0], xyz[1], xyz[2]).second) return errorJson(409, "duplicate_gridmap_position");
-            const int64_t item = record["item"].get<int64_t>();
-            if (record.contains("orientation") && !record["orientation"].is_number_integer())
+            const auto item_value = boundedJsonInteger(record["item"], -1, 2147483647LL);
+            const auto orientation_value = record.contains("orientation")
+                ? boundedJsonInteger(record["orientation"], 0, 23)
+                : std::optional<int64_t>(0);
+            if (!item_value.has_value() || !orientation_value.has_value())
                 return errorJson(400, "invalid_gridmap_set_cells_request");
-            const int64_t orientation = record.value("orientation", 0);
-            if (item < -1 || item > 2147483647LL || orientation < 0 || orientation > 23 ||
-                (item == -1 && orientation != 0)) return errorJson(400, "invalid_gridmap_set_cells_request");
+            const int64_t item = *item_value;
+            const int64_t orientation = *orientation_value;
+            if (item == -1 && orientation != 0) return errorJson(400, "invalid_gridmap_set_cells_request");
             if (item >= 0 && (!library.isOk() || !library.value() || !item_ids.count(item))) return errorJson(404, "gridmap_item_not_found");
             auto position = makeVector3i(xyz[0], xyz[1], xyz[2]);
             if (position.isErr()) return errorJson(501, "required_bind_unavailable");

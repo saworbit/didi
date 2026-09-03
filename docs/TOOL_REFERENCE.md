@@ -282,7 +282,9 @@ All three tools are implemented live in editor sessions:
 - `tilemap_get_used_rect`
 - `gridmap_set_cells`
 
-Set/clear batches preflight every record and referenced TileSetAtlasSource or MeshLibrary item before creating one UndoRedo action. Duplicate coordinates/positions are rejected, no-op batches create no undo history, and `tilemap_get_used_rect` returns exact integer position, size, and end fields without mutation.
+Set/clear batches preflight every record, every required undo/rollback binding, and every referenced TileSetAtlasSource or MeshLibrary item before creating one UndoRedo action. Integer fields outside their documented bounds, including unsigned JSON values above `INT64_MAX`, are rejected before conversion. Duplicate coordinates/positions are rejected, no-op batches create no undo history, and `tilemap_get_used_rect` returns exact integer position, size, and end fields without mutation. The live integration gate performs an actual undo and redo for both TileMapLayer and GridMap edits rather than trusting only the registration metadata.
+
+Like every mutating Phase 7 live tool, these setters return `504 unknown_outcome` with `retryable: false` when transport fails after dispatch and the result cannot be determined. Do not automatically retry that response; inspect live state first.
 
 ## 7. Resources and project files
 

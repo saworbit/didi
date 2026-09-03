@@ -75,7 +75,7 @@ The Windows live integration harness copies the tracked fixture into `build/` an
 
 The harness runs to completion on Windows PowerShell 5.1, including the persistence-rollback case that denies write rights through `icacls`. That case previously aborted the run: it selects its platform branch with `$IsWindows`, an automatic variable introduced in PowerShell 6, which is undefined on 5.1 and so took the POSIX branch and called `chmod`.
 
-The Phase 1 substrate has also been run against Godot 4.6.2 and 4.7.2. Phase 2's compatibility floor and CI integration target are Godot 4.5.1; bridge method hashes must be taken from that version's extension API.
+The Phase 1 substrate has also been run against Godot 4.6.2 and 4.7.2. The compatibility floor remains Godot 4.5.1; the live CI matrix runs the complete integration harness on 4.5.1 and 4.7.2, and bridge method hashes must remain valid on both versions.
 
 ---
 
@@ -144,7 +144,7 @@ The standalone router starts detached, then may auto-attach on first availabilit
 
 ## Phase 4 tests and release gate
 
-The v1.4.0 release gate runs the complete native suite; the runner's reported total remains authoritative as cases evolve. Focused suites cover the existing session/routing/evaluation contracts plus search containment and lexical filtering, two-idle-frame reimport progress, exact diff arithmetic, cache eviction, public response completeness, and restoration guards. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and also verifies the Phase 4 search/reimport/isolation/diff loop against Godot 4.5.1. Editor teardown first requests a normal window close, then uses PID-and-start-time-verified termination if a hidden Windows editor keeps an invisible native prompt alive; this fallback is limited to the disposable test process and cannot target a reused PID. Because forced exit cannot run the extension destructor, the harness removes a leftover descriptor only after its regular-file shape, session ID, PID, and process-start identity all match that editor instance.
+The v1.4.0 release gate runs the complete native suite; the runner's reported total remains authoritative as cases evolve. Focused suites cover the existing session/routing/evaluation contracts plus search containment and lexical filtering, two-idle-frame reimport progress, exact diff arithmetic, cache eviction, public response completeness, and restoration guards. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and verifies the complete live workflow on Godot 4.5.1 and 4.7.2. Editor teardown first requests a normal window close, then uses PID-and-start-time-verified termination if a hidden Windows editor keeps an invisible native prompt alive; this fallback is limited to the disposable test process and cannot target a reused PID. Because forced exit cannot run the extension destructor, the harness removes a leftover descriptor only after its regular-file shape, session ID, PID, and process-start identity all match that editor instance.
 
 Run from a clean worktree:
 
@@ -172,7 +172,7 @@ depending on a predecessor, not on the code under test.
 
 For expression-policy changes, add a failing native scanner test and a real editor/game integration probe before changing implementation. A new accepted Node operation must prove it cannot dispatch script callbacks, traverse outside the active subtree, allocate unbounded data before a check, leak source/token text, or turn the cooperative timeout into a hard-preemption claim.
 
-The CI MCP smoke must start Didi with an explicit fixture project. It verifies the live `tools/list` surface against the manifest emitted by `didi --dump-tool-manifest` from the same build, so counts are never written into the workflow, and it asserts every `implemented` flag rather than a sample. It also continues to assert offline-only search/deep-domain metadata, live-only reimport/diff/UI-hit-test metadata, strict Phase 4/5/6 schemas, local metadata for the four session tools, live metadata for the six routed runtime tools, cursor-shaped logs, and `implemented: false` for `runtime_inject_input`, `runtime_get_call_stack`, and `runtime_read_profiler`.
+The CI MCP smoke must start Didi with an explicit fixture project. It verifies the live `tools/list` surface against the manifest emitted by `didi --dump-tool-manifest` from the same build, so counts are never written into the workflow, and it asserts every `implemented` flag rather than a sample. It also continues to assert offline-only search/deep-domain metadata, live-only reimport/diff/UI-hit-test metadata, strict Phase 4/5/6/7 schemas, local metadata for the four session tools, live metadata for routed runtime tools, cursor-shaped logs, implemented game input and profiler capabilities, and `implemented: false` only for `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`.
 
 ## Phase 7 feasibility gate
 
@@ -187,7 +187,7 @@ Phase 7 is `PARTIAL_DELIVERY`. The gate completed on 2026-08-29 against Godot 4.
 
 Feasibility is design evidence; a production trial is production behavior. All 15 feasible Phase 7 names are delivered, including the three TileMapLayer/GridMap tools. The 3 API-blocked names remain registered but unimplemented.
 
-Further work requires governance to authorize partial delivery of the 15 feasible tools toward 76/79, retain atomic 83/83 and wait for supported engine capabilities, or explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. The third option requires all three blockers to re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 begins. Any contract weakening is a separate explicit contract amendment, not an effect of that option. Use [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) for reproducible evidence and [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md) for the approved executable plan.
+Governance authorized partial delivery, and all 15 feasible tools are now shipped at 80/83 canonical implementations. Further work on `physics_simulate_step`, `nav_bake_mesh`, or `runtime_get_call_stack` requires new feasibility evidence on Godot 4.5.1 and 4.7.2 or an explicit contract amendment; do not weaken their contracts implicitly. Use [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) for reproducible evidence and [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md) for the approved executable plan.
 
 ## Phase 5 and Phase 6 implementation map
 
@@ -195,7 +195,7 @@ Further work requires governance to authorize partial delivery of the 15 feasibl
 - `include/didi/common/project_path.hpp`: explicit project-root validation, canonical containment, and stable 16-hex project endpoint keys.
 - `src/runtime/session_lock.cpp`: owner-only cross-platform OS locks and `423` exclusion for a second MCP owner.
 - `src/mcp/mutation_safety.cpp`: mutation classification, schema decoration, handler-free previews, exact context binding, 120-second expiry, and single-use confirmation storage.
-- `tests/test_phase5.cpp`, `tests/test_phase6.cpp`, and `tests/run_godot_integration.ps1`: deep-domain contracts, project/lock/preview red-team cases, and disposable Phases 1–6 Godot workflows.
+- `tests/test_phase5.cpp`, `tests/test_phase6.cpp`, the `tests/test_phase7*.cpp` suites, and `tests/run_godot_integration.ps1`: deep-domain contracts, project/lock/preview red-team cases, Phase 7 transport and validation contracts, and disposable Phases 1–7 Godot workflows.
 
 When adding or reclassifying a mutation, update `MutationSafety::isMutation`, add `dry_run` schema coverage, and prove the dry-run never enters its handler. Add confirmation only for the documented high-risk set; changing that set is a public safety-contract change and requires updates to the Tool Reference, Capability Matrix, LLM instructions, and API specification.
 
@@ -208,6 +208,6 @@ python -m unittest tests.test_documentation_validator -v
 python tools/validate_documentation.py
 ```
 
-The validator derives the release from `CMakeLists.txt` and checks the MCP server header, standalone version output, addon manifest, README, capability matrix, changelog, and security policy for alignment. It also locks the documented 79 canonical/10 legacy/89 total surface, the 60 implemented/18 unimplemented split, Phase 7's `PARTIAL_DELIVERY` status, 15/18 versus 3/18 feasibility result, exact three-tool blocker set, authoritative-record links, stale current-state prose, and all relative Markdown targets and anchors.
+The validator derives the release from `CMakeLists.txt` and checks the MCP server header, standalone version output, addon manifest, README, capability matrix, changelog, and security policy for alignment. It also locks the documented 83 canonical/10 legacy/93 total surface, the 80 implemented/3 unimplemented split, Phase 7's `PARTIAL_DELIVERY` status, 15/18 versus 3/18 feasibility result, exact three-tool blocker set, authoritative-record links, stale current-state prose, and all relative Markdown targets and anchors.
 
 When the release changes, update these files in one change: `CMakeLists.txt`, `include/didi/mcp/mcp_protocol.hpp`, `src/standalone/main.cpp`, `addons/didi/plugin.cfg`, `README.md`, `CHANGELOG.md`, `docs/CAPABILITIES.md`, and `SECURITY.md`. When the tool surface or capability modes change, also update runtime discovery tests, `docs/TOOL_REFERENCE.md`, `docs/ROADMAP.md`, `docs/LLM_INSTRUCTIONS.md`, and the relevant quickstart/integration examples. Historical specs and plans record their original decisions and should not be rewritten as current release documentation.
