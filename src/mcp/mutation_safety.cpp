@@ -32,11 +32,18 @@ const std::unordered_set<std::string_view> kMutations = {
     // token, the same as scene_set_property. The result carries the values it
     // replaced, because bus state is not in the edited scene and the editor
     // undo stack does not carry it.
-    "audio_configure_bus"
+    "audio_configure_bus",
+    // The board is shared state between agents. A write is reversible and
+    // idempotent for the same arguments, so it gets a dry run and no token.
+    "blackboard_write", "blackboard_patch", "blackboard_clear"
 };
 
 const std::unordered_set<std::string_view> kAlwaysConfirmed = {
-    "editor_reload_project", "script_patch_method", "patch_script_symbols", "signal_emit"
+    "editor_reload_project", "script_patch_method", "patch_script_symbols", "signal_emit",
+    // Always, not on an overwrite flag: there is no non-destructive clear. It
+    // removes a subtree, or the whole board, that another agent is working
+    // from, with no undo stack behind it and no engine to ask.
+    "blackboard_clear"
 };
 
 const std::unordered_set<std::string_view> kOverwriteConfirmed = {
