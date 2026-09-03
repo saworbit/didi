@@ -1605,10 +1605,14 @@ static void test_resource_registry() {
     reg.registerAllDefaultResources();
     auto resources = reg.listResources();
 
-    ASSERT_EQ(resources.size(), 3);
+    ASSERT_EQ(resources.size(), 5);
     ASSERT_TRUE(reg.getResource("godot://project/tree") != nullptr);
     ASSERT_TRUE(reg.getResource("godot://editor/state") != nullptr);
     ASSERT_TRUE(reg.getResource("godot://runtime/logs") != nullptr);
+    // The default board is listed so a client can discover it. Other boards are
+    // created on demand and resolve without being registered.
+    ASSERT_TRUE(reg.getResource("blackboard://default/state") != nullptr);
+    ASSERT_TRUE(reg.getResource("blackboard://default/tasks") != nullptr);
 
     const auto project_tree = reg.getResource("godot://project/tree")->toJson();
     const auto editor_state = reg.getResource("godot://editor/state")->toJson();

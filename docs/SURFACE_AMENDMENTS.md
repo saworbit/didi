@@ -443,6 +443,51 @@ task returns to the pool; an agent that wants to keep one renews it explicitly
 through `blackboard_task_update`. There is no scheduler here, only the record
 that makes one possible.
 
+### ACCEPTED (IMPLEMENTED): `blackboard://` resources and `resources/subscribe`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | No tool name. Two resource URIs, `blackboard://<board>/state` and `blackboard://<board>/tasks`, plus the `resources/subscribe` and `resources/unsubscribe` methods and the `notifications/resources/updated` notification. |
+| **Failing workflow** | *Agent B waits for agent A to finish `CharacterBase.gd`.* B has a task that depends on A's, so it cannot start, and it has no way to be told when it can. Its only option is to call `blackboard_task_list` again on a turn it pays for, then again, then again. Each poll costs a request, a context window, and latency, and the interval is a guess: too short and it burns turns, too long and the work sits idle. The board records the fact B is waiting for; nothing carries it to B. |
+| **Execution modes** | `offline_fallback`. Boards are files; no editor is involved. |
+| **Safety class** | `read`. Subscribing conveys no authority: it delivers a URI that changed, never the contents, and reading still goes through `resources/read` with the same bounds as any other read. |
+| **Proving test** | Native: `BlackboardResources.ReadsStateAndTasks` requires both URIs to resolve for a named board and an unknown board to be refused rather than answered empty. `BlackboardResources.SubscriptionLifecycle` requires subscribe, duplicate subscribe, unsubscribe and unknown-URI unsubscribe to behave, and requires an unsubscribed URI to stop notifying. `BlackboardResources.NotifiesOnExternalChange` writes to the board file from outside the server and requires the notification to arrive without any tool call in between. `BlackboardResources.SerialisesConcurrentWrites` requires a notification emitted while a response is being written to produce two intact JSON lines rather than one interleaved one. |
+| **Reviewer** | Unassigned pending security review, with the board itself. This advertises a protocol capability, so it is also a compatibility claim: `subscribe` moves to `true` only because the handlers exist. |
+
+**How a change in another process is noticed, and what that costs.** Each MCP
+client runs its own `didi`, so the writer is a different process and there is no
+in-process hook to fire. The server watches the board file's size and modified
+time on a background thread and emits `notifications/resources/updated` when it
+changes. That is polling, and calling it anything else would be dishonest. What
+it is not is polling that an agent pays for: the loop runs in C++ at a fixed
+interval and costs no requests, no tokens and no turns, which is the entire
+complaint in the issue. The thread exists only while something is subscribed.
+
+**A notification carries a URI and nothing else.** The specification says the
+contents are fetched with `resources/read`, and that is also the safer shape: a
+notification that carried data would be a second path to board content that does
+not go through the read bounds.
+
+**Writes to stdout are now serialised.** `runStdio` was the only writer, so
+nothing guarded `std::cout`. A watcher thread makes that untrue, and two
+concurrent writes would interleave into one corrupt line. Every response, batch
+and notification now takes the same lock.
+
+**What this deliberately does not do.** The issue asks for four URIs. Two are
+built. `blackboard://<board>/hypotheses` is not a resource, because hypotheses
+are state at a path an agent chose and `state` already exposes them; adding a
+second name for the same bytes invites the two to disagree. `audit_log` is not
+built either: the board records the last write of each path, not a history, and
+an append-only log is a retention and bounds design of its own rather than a URI
+to hang on this one.
+
+**Per-path subscription is not built.** The issue asks for
+`blackboard://<board>/state/{path}`. A subscriber gets the board it asked for and
+re-reads, which costs one read against a bounded document. Templated
+subscriptions would need the watcher to diff old and new state to decide which
+of a hundred subtree URIs changed, on every tick, for a result the subscriber
+can compute itself.
+
 ### PROPOSED: `scene_close` reads real dirty state on Godot 4.7+
 
 | Field | Value |
