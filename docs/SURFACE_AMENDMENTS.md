@@ -405,6 +405,44 @@ something another agent wrote, with the same trust as any other tool result.
 The bounds are published in the response rather than only in the docs, because
 the caller that hits one is the one that needs to know why.
 
+### ACCEPTED (IMPLEMENTED): `blackboard_task_create`, `blackboard_task_claim`, `blackboard_task_update`, `blackboard_task_complete`, `blackboard_task_list`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `blackboard_task_create`, `blackboard_task_claim`, `blackboard_task_update`, `blackboard_task_complete`, `blackboard_task_list` |
+| **Failing workflow** | *Make the player double-jump, with three agents working at once.* One has to write `CharacterBase.gd` before the second can extend it into `Player.gd`, while a third checks the collision shapes and can start immediately. With a board and nothing else, the second agent can read that the first has not finished, but it cannot wait for it: it polls `blackboard_read` on a turn it pays for, or it guesses a delay, or a human sequences the three by hand. Worse, nothing stops both agents deciding to write `CharacterBase.gd`, because reading "unclaimed" and writing "mine" are two calls and another agent fits between them. The board makes shared state possible; it does not make work allocation safe. |
+| **Execution modes** | `offline_fallback`. Tasks live in the same board file, under the same lock. No editor is involved. |
+| **Safety class** | `read` for `blackboard_task_list`. `create/set` for the other four: each takes `dry_run` and none destroys another agent's work irrecoverably. No confirmation token, because a failed or abandoned task can be reclaimed and re-run, unlike a cleared board. |
+| **Proving test** | Native: `BlackboardTasks.ClaimIsExclusive` runs concurrent claimers against one ready task and requires exactly one winner. `BlackboardTasks.LeaseExpiryReclaims` requires a lapsed lease to make a task claimable again and the original holder's completion to be refused. `BlackboardTasks.DependenciesGateReadiness` requires a task to stay blocked until every prerequisite is completed, and completing the last one to release it. `BlackboardTasks.CycleIsRefused` requires a dependency cycle to be refused at creation rather than producing tasks nothing can ever claim. `BlackboardTasks.OnlyTheHolderCompletes` requires a second agent's complete and update to be refused. `BlackboardTasks.StatusTransitions` covers the legal moves and refuses the rest. `BlackboardTasks.ListFilters` covers status, assignee and tag filtering with the cap reported. |
+| **Reviewer** | Unassigned pending security review, as with the board itself. These tools write only to the board file, which is already inside the project boundary. |
+
+**Why in the board file rather than beside it.** A task is state, and the board
+already has exactly the property tasks need: one lock, one atomic save. Putting
+tasks in a second file would mean two locks and an ordering between them, which
+is how deadlocks are built. They live in a `tasks` section that
+`blackboard_write` cannot reach, because writes go into `state` only: an agent
+cannot corrupt the queue by writing to a path that happens to collide with it.
+
+**Why `locked` is not a status.** The issue lists `pending`, `in_progress`,
+`locked`, `needs_review`, `completed`, `failed`. A separate `locked` duplicates
+the lease, and two places recording the same fact drift. A task is claimed when
+it holds an unexpired lease, and that is the only record of it. The state the
+issue actually needed and did not name is the one before `pending`: a task
+whose dependencies are unmet is `blocked`, and it becomes `pending` when they
+are all completed.
+
+**Why claiming refuses rather than waits.** No tool here blocks. An agent asks
+for the next ready task and is told either which one it got or that there is
+none, and it decides what to do with its own turn. A tool that waits would hold
+the board lock while it did, which is the one thing that would stop every other
+agent from making progress.
+
+**What this deliberately does not do.** It does not run anything, notify
+anything, or renew a lease on an agent's behalf. A lease lapses on time and the
+task returns to the pool; an agent that wants to keep one renews it explicitly
+through `blackboard_task_update`. There is no scheduler here, only the record
+that makes one possible.
+
 ### PROPOSED: `scene_close` reads real dirty state on Godot 4.7+
 
 | Field | Value |

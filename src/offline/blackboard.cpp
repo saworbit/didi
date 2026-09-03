@@ -10,6 +10,7 @@
 #include <fstream>
 #include <sstream>
 #include <thread>
+#include <unordered_set>
 
 namespace didi::offline {
 namespace {
@@ -119,6 +120,9 @@ struct Board {
     // fails with a type error that MSVC never sees.
     json state = json::object();
     json meta = json::object();
+    // Tasks live here rather than in `state`, so a blackboard_write can never
+    // reach them by choosing a colliding path.
+    json tasks = json::object();
 };
 
 Result<std::filesystem::path> boardDirectory() {
@@ -187,6 +191,7 @@ Result<Board> loadBoard(const std::filesystem::path& file) {
     }
     if (document.contains("state") && document["state"].is_object()) board.state = document["state"];
     if (document.contains("meta") && document["meta"].is_object()) board.meta = document["meta"];
+    if (document.contains("tasks") && document["tasks"].is_object()) board.tasks = document["tasks"];
     return board;
 }
 
@@ -194,7 +199,8 @@ Result<bool> saveBoard(const std::filesystem::path& file, const Board& board) {
     json document = {
         {"version", kBoardFormatVersion},
         {"state", board.state},
-        {"meta", board.meta}
+        {"meta", board.meta},
+        {"tasks", board.tasks}
     };
     const std::string serialized = document.dump();
     if (serialized.size() > kBlackboardMaxBoardBytes) {
@@ -289,6 +295,109 @@ Result<json> withBoardLock(const std::string& board, Operation operation) {
                                board + "'");
     }
     return operation(file);
+}
+
+
+// ---- Tasks -------------------------------------------------------------
+//
+// A task is claimed when it holds an unexpired lease and by nothing else. The
+// statuses below are the whole set; `blocked` is the one the issue needed and
+// did not name, and `locked` is deliberately absent because the lease already
+// records it.
+constexpr const char* kStatusBlocked = "blocked";
+constexpr const char* kStatusPending = "pending";
+constexpr const char* kStatusInProgress = "in_progress";
+constexpr const char* kStatusNeedsReview = "needs_review";
+constexpr const char* kStatusCompleted = "completed";
+constexpr const char* kStatusFailed = "failed";
+
+bool isLegalTaskId(const std::string& id) {
+    if (id.empty() || id.size() > kBlackboardMaxTaskIdBytes) return false;
+    return std::all_of(id.begin(), id.end(), [](unsigned char character) {
+        return std::isalnum(character) != 0 || character == '_' || character == '-' ||
+               character == '.';
+    });
+}
+
+bool hasLiveLease(const json& task, int64_t now_ms) {
+    const auto lease = task.find("lease");
+    if (lease == task.end() || !lease->is_object()) return false;
+    const auto expires = lease->find("expires_at_ms");
+    return expires != lease->end() && expires->is_number_integer() &&
+           expires->get<int64_t>() > now_ms;
+}
+
+std::string leaseOwner(const json& task) {
+    const auto lease = task.find("lease");
+    if (lease == task.end() || !lease->is_object()) return {};
+    const auto owner = lease->find("owner");
+    return owner != lease->end() && owner->is_string() ? owner->get<std::string>() : std::string{};
+}
+
+// Lapses dead leases and moves a blocked task to pending once every prerequisite
+// has completed. Run before anything reads or decides, so no caller ever sees a
+// task held by an agent that is gone.
+bool refreshTasks(Board& board, int64_t now_ms) {
+    bool changed = false;
+    for (auto& entry : board.tasks.items()) {
+        json& task = entry.value();
+        if (!task.is_object()) continue;
+        if (task.value("status", "") == kStatusInProgress && !hasLiveLease(task, now_ms)) {
+            // The holder never renewed. The work is not done and nobody is on it.
+            task["status"] = kStatusPending;
+            task.erase("lease");
+            task["assigned_to"] = nullptr;
+            changed = true;
+        }
+    }
+    for (auto& entry : board.tasks.items()) {
+        json& task = entry.value();
+        if (!task.is_object() || task.value("status", "") != kStatusBlocked) continue;
+        bool ready = true;
+        for (const auto& dependency : task.value("dependencies", json::array())) {
+            if (!dependency.is_string()) continue;
+            const auto found = board.tasks.find(dependency.get<std::string>());
+            if (found == board.tasks.end() ||
+                found->value("status", "") != kStatusCompleted) {
+                ready = false;
+                break;
+            }
+        }
+        if (ready) {
+            task["status"] = kStatusPending;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+// Depth-first search over the dependency edges. Creation already refuses an
+// unknown dependency, which makes a cycle impossible between well-formed calls,
+// but a board file is a file and someone can edit it.
+bool createsCycle(const json& tasks, const std::string& task_id,
+                  const std::vector<std::string>& dependencies) {
+    std::vector<std::string> stack(dependencies.begin(), dependencies.end());
+    std::unordered_set<std::string> seen;
+    while (!stack.empty()) {
+        const std::string current = stack.back();
+        stack.pop_back();
+        if (current == task_id) return true;
+        if (!seen.insert(current).second) continue;
+        const auto found = tasks.find(current);
+        if (found == tasks.end() || !found->is_object()) continue;
+        for (const auto& dependency : found->value("dependencies", json::array())) {
+            if (dependency.is_string()) stack.push_back(dependency.get<std::string>());
+        }
+    }
+    return false;
+}
+
+std::string generateTaskId(const json& tasks) {
+    for (size_t index = 1; index <= kBlackboardMaxTasks + 1; ++index) {
+        const std::string candidate = "TASK-" + std::to_string(index);
+        if (!tasks.contains(candidate)) return candidate;
+    }
+    return {};
 }
 
 } // namespace
@@ -640,6 +749,417 @@ Result<json> blackboardClear(const BlackboardClearRequest& request, BlackboardCl
         auto saved = saveBoard(file, board);
         if (saved.isErr()) return saved.error();
         return result;
+    });
+}
+
+
+Result<json> blackboardTaskCreate(const BlackboardTaskCreateRequest& request,
+                                  BlackboardClock clock) {
+    const int64_t now_ms = clock ? clock() : systemClockMs();
+    if (request.title.empty() || request.title.size() > kBlackboardMaxTaskTitleBytes) {
+        return Error::invalidArgument("title must be 1 to " +
+                                      std::to_string(kBlackboardMaxTaskTitleBytes) + " bytes");
+    }
+    if (!request.task_id.empty() && !isLegalTaskId(request.task_id)) {
+        return Error::invalidArgument(
+            "task_id must be 1 to " + std::to_string(kBlackboardMaxTaskIdBytes) +
+            " characters of letters, digits, underscore, hyphen or dot");
+    }
+    if (request.dependencies.size() > kBlackboardMaxTaskDependencies) {
+        return Error::invalidArgument("a task may declare at most " +
+                                      std::to_string(kBlackboardMaxTaskDependencies) +
+                                      " dependencies");
+    }
+    if (request.tags.size() > kBlackboardMaxTaskTags) {
+        return Error::invalidArgument("a task may carry at most " +
+                                      std::to_string(kBlackboardMaxTaskTags) + " tags");
+    }
+
+    return withBoardLock(request.board, [&](const std::filesystem::path& file) -> Result<json> {
+        auto loaded = loadBoard(file);
+        if (loaded.isErr()) return loaded.error();
+        Board board = loaded.value();
+        refreshTasks(board, now_ms);
+
+        if (board.tasks.size() >= kBlackboardMaxTasks) {
+            return Error::invalidArgument("the board already holds " +
+                                          std::to_string(kBlackboardMaxTasks) + " tasks");
+        }
+
+        std::string task_id = request.task_id;
+        if (task_id.empty()) task_id = generateTaskId(board.tasks);
+        if (task_id.empty()) return Error::internal("no free task id is available");
+        if (board.tasks.contains(task_id)) {
+            return Error::invalidArgument("task '" + task_id + "' already exists");
+        }
+
+        // An unknown dependency is refused rather than treated as satisfied. A
+        // task waiting on something that does not exist would sit blocked with
+        // nothing to explain why.
+        for (const auto& dependency : request.dependencies) {
+            if (dependency == task_id) {
+                return Error::invalidArgument("a task cannot depend on itself");
+            }
+            if (!board.tasks.contains(dependency)) {
+                return Error::invalidArgument("dependency '" + dependency + "' does not exist");
+            }
+        }
+        if (createsCycle(board.tasks, task_id, request.dependencies)) {
+            return Error::invalidArgument(
+                "those dependencies would create a cycle, and nothing in it could ever be claimed");
+        }
+
+        bool ready = true;
+        for (const auto& dependency : request.dependencies) {
+            if (board.tasks[dependency].value("status", "") != kStatusCompleted) {
+                ready = false;
+                break;
+            }
+        }
+
+        json task = json::object();
+        task["task_id"] = task_id;
+        task["title"] = request.title;
+        task["description"] = request.description.has_value() ? json(*request.description) : json();
+        task["assigned_to"] = request.assigned_to.has_value() ? json(*request.assigned_to) : json();
+        task["dependencies"] = request.dependencies;
+        task["tags"] = request.tags;
+        task["priority"] = request.priority;
+        task["status"] = ready ? kStatusPending : kStatusBlocked;
+        task["progress"] = 0;
+        task["notes"] = json::array();
+        task["artifacts"] = json::object();
+        task["created_at_ms"] = now_ms;
+        task["updated_at_ms"] = now_ms;
+
+        json result = {
+            {"board", request.board},
+            {"task", task},
+            {"dry_run", request.dry_run}
+        };
+        if (request.dry_run) return result;
+
+        board.tasks[task_id] = task;
+        auto saved = saveBoard(file, board);
+        if (saved.isErr()) return saved.error();
+        return result;
+    });
+}
+
+Result<json> blackboardTaskClaim(const BlackboardTaskClaimRequest& request, BlackboardClock clock) {
+    const int64_t now_ms = clock ? clock() : systemClockMs();
+    if (request.agent_id.empty() || request.agent_id.size() > kBlackboardMaxTaskIdBytes) {
+        return Error::invalidArgument("agent_id must be 1 to " +
+                                      std::to_string(kBlackboardMaxTaskIdBytes) + " bytes");
+    }
+    if (request.lease_seconds < 1 || request.lease_seconds > kBlackboardMaxLeaseSeconds) {
+        return Error::invalidArgument("lease_seconds must be between 1 and " +
+                                      std::to_string(kBlackboardMaxLeaseSeconds));
+    }
+
+    return withBoardLock(request.board, [&](const std::filesystem::path& file) -> Result<json> {
+        auto loaded = loadBoard(file);
+        if (loaded.isErr()) return loaded.error();
+        Board board = loaded.value();
+        const bool refreshed = refreshTasks(board, now_ms);
+
+        // Read and write are one operation under one lock. Two agents reading
+        // "unclaimed" and both writing "mine" is the failure this exists to stop.
+        std::string chosen;
+        int64_t best_priority = 0;
+        int64_t best_created = 0;
+        for (const auto& entry : board.tasks.items()) {
+            const json& task = entry.value();
+            if (!task.is_object()) continue;
+            if (task.value("status", "") != kStatusPending) continue;
+            if (hasLiveLease(task, now_ms)) continue;
+            if (request.task_id.has_value() && entry.key() != *request.task_id) continue;
+            if (request.tag.has_value()) {
+                const auto tags = task.value("tags", json::array());
+                if (std::none_of(tags.begin(), tags.end(), [&](const json& tag) {
+                        return tag.is_string() && tag.get<std::string>() == *request.tag;
+                    })) {
+                    continue;
+                }
+            }
+            const int64_t priority = task.value("priority", static_cast<int64_t>(0));
+            const int64_t created = task.value("created_at_ms", static_cast<int64_t>(0));
+            if (chosen.empty() || priority > best_priority ||
+                (priority == best_priority && created < best_created)) {
+                chosen = entry.key();
+                best_priority = priority;
+                best_created = created;
+            }
+        }
+
+        if (chosen.empty()) {
+            json empty = {
+                {"board", request.board},
+                {"claimed", false},
+                {"dry_run", request.dry_run}
+            };
+            if (request.task_id.has_value()) {
+                const auto found = board.tasks.find(*request.task_id);
+                empty["reason"] = found == board.tasks.end()
+                    ? std::string("no such task")
+                    : "task is " + found->value("status", std::string("unknown")) +
+                          (hasLiveLease(*found, now_ms) ? " and leased by " + leaseOwner(*found)
+                                                        : std::string());
+            } else {
+                empty["reason"] = "no task is ready to claim";
+            }
+            if (!request.dry_run && refreshed) {
+                auto saved = saveBoard(file, board);
+                if (saved.isErr()) return saved.error();
+            }
+            return empty;
+        }
+
+        json claimed = board.tasks[chosen];
+        claimed["status"] = kStatusInProgress;
+        claimed["assigned_to"] = request.agent_id;
+        claimed["updated_at_ms"] = now_ms;
+        claimed["lease"] = {
+            {"owner", request.agent_id},
+            {"granted_at_ms", now_ms},
+            {"expires_at_ms", now_ms + request.lease_seconds * 1000},
+            {"lease_seconds", request.lease_seconds}
+        };
+
+        json result = {
+            {"board", request.board},
+            {"claimed", true},
+            {"task", claimed},
+            {"dry_run", request.dry_run}
+        };
+        if (request.dry_run) return result;
+
+        board.tasks[chosen] = claimed;
+        auto saved = saveBoard(file, board);
+        if (saved.isErr()) return saved.error();
+        return result;
+    });
+}
+
+Result<json> blackboardTaskUpdate(const BlackboardTaskUpdateRequest& request,
+                                  BlackboardClock clock) {
+    const int64_t now_ms = clock ? clock() : systemClockMs();
+    if (!isLegalTaskId(request.task_id)) return Error::invalidArgument("task_id is not legal");
+    if (request.agent_id.empty()) return Error::invalidArgument("agent_id is required");
+    if (request.progress.has_value() && (*request.progress < 0 || *request.progress > 100)) {
+        return Error::invalidArgument("progress must be between 0 and 100");
+    }
+    if (request.note.has_value() && request.note->size() > kBlackboardMaxTaskTextBytes) {
+        return Error::invalidArgument("note must be at most " +
+                                      std::to_string(kBlackboardMaxTaskTextBytes) + " bytes");
+    }
+    if (request.status.has_value() && *request.status != kStatusNeedsReview &&
+        *request.status != kStatusFailed && *request.status != kStatusPending) {
+        return Error::invalidArgument(
+            "status may only be set to needs_review, failed, or pending to reopen");
+    }
+    if (request.renew_lease_seconds.has_value() &&
+        (*request.renew_lease_seconds < 1 ||
+         *request.renew_lease_seconds > kBlackboardMaxLeaseSeconds)) {
+        return Error::invalidArgument("renew_lease_seconds must be between 1 and " +
+                                      std::to_string(kBlackboardMaxLeaseSeconds));
+    }
+
+    return withBoardLock(request.board, [&](const std::filesystem::path& file) -> Result<json> {
+        auto loaded = loadBoard(file);
+        if (loaded.isErr()) return loaded.error();
+        Board board = loaded.value();
+        refreshTasks(board, now_ms);
+
+        const auto found = board.tasks.find(request.task_id);
+        if (found == board.tasks.end()) {
+            return Error::invalidArgument("task '" + request.task_id + "' does not exist");
+        }
+        json task = *found;
+        const std::string status = task.value("status", std::string());
+        if (status == kStatusCompleted) {
+            return Error::invalidArgument("task '" + request.task_id + "' is already completed");
+        }
+
+        const bool reopening = request.status.has_value() && *request.status == kStatusPending;
+        if (hasLiveLease(task, now_ms)) {
+            if (leaseOwner(task) != request.agent_id) {
+                return Error(409, "task '" + request.task_id + "' is leased by " +
+                                      leaseOwner(task) + ", not " + request.agent_id);
+            }
+        } else if (reopening) {
+            // A review outcome is by definition somebody else's call, so
+            // reopening does not need the lease that the review released.
+            if (status != kStatusNeedsReview && status != kStatusFailed) {
+                return Error::invalidArgument("only a needs_review or failed task can be reopened");
+            }
+        } else {
+            return Error(409, "task '" + request.task_id +
+                                  "' holds no live lease; claim it before updating it");
+        }
+
+        if (request.progress.has_value()) task["progress"] = *request.progress;
+        if (request.note.has_value()) {
+            json notes = task.value("notes", json::array());
+            if (notes.size() >= 100) notes.erase(notes.begin());
+            notes.push_back(
+                {{"at_ms", now_ms}, {"agent", request.agent_id}, {"note", *request.note}});
+            task["notes"] = notes;
+        }
+        if (request.status.has_value()) {
+            task["status"] = *request.status;
+            // needs_review and failed both hand the work back. Holding the lease
+            // through a review would strand the task until the lease lapsed.
+            task.erase("lease");
+            if (reopening) task["assigned_to"] = nullptr;
+        } else if (request.renew_lease_seconds.has_value()) {
+            json lease = task.value("lease", json::object());
+            lease["owner"] = request.agent_id;
+            lease["expires_at_ms"] = now_ms + *request.renew_lease_seconds * 1000;
+            lease["lease_seconds"] = *request.renew_lease_seconds;
+            task["lease"] = lease;
+        }
+        task["updated_at_ms"] = now_ms;
+
+        json result = {
+            {"board", request.board},
+            {"task", task},
+            {"dry_run", request.dry_run}
+        };
+        if (request.dry_run) return result;
+
+        board.tasks[request.task_id] = task;
+        refreshTasks(board, now_ms);
+        auto saved = saveBoard(file, board);
+        if (saved.isErr()) return saved.error();
+        return result;
+    });
+}
+
+Result<json> blackboardTaskComplete(const BlackboardTaskCompleteRequest& request,
+                                    BlackboardClock clock) {
+    const int64_t now_ms = clock ? clock() : systemClockMs();
+    if (!isLegalTaskId(request.task_id)) return Error::invalidArgument("task_id is not legal");
+    if (request.agent_id.empty()) return Error::invalidArgument("agent_id is required");
+    if (!request.artifacts.is_null() &&
+        request.artifacts.dump().size() > kBlackboardMaxValueBytes) {
+        return Error::invalidArgument("artifacts is larger than the single value limit");
+    }
+
+    return withBoardLock(request.board, [&](const std::filesystem::path& file) -> Result<json> {
+        auto loaded = loadBoard(file);
+        if (loaded.isErr()) return loaded.error();
+        Board board = loaded.value();
+        refreshTasks(board, now_ms);
+
+        const auto found = board.tasks.find(request.task_id);
+        if (found == board.tasks.end()) {
+            return Error::invalidArgument("task '" + request.task_id + "' does not exist");
+        }
+        json task = *found;
+        if (task.value("status", std::string()) == kStatusCompleted) {
+            return Error::invalidArgument("task '" + request.task_id + "' is already completed");
+        }
+        // Completing someone else's task is how a dependent gets released while
+        // the work behind it is still half done.
+        if (!hasLiveLease(task, now_ms)) {
+            return Error(409, "task '" + request.task_id +
+                                  "' holds no live lease; claim it before completing it");
+        }
+        if (leaseOwner(task) != request.agent_id) {
+            return Error(409, "task '" + request.task_id + "' is leased by " + leaseOwner(task) +
+                                  ", not " + request.agent_id);
+        }
+
+        task["status"] = kStatusCompleted;
+        task["progress"] = 100;
+        task["completed_at_ms"] = now_ms;
+        task["updated_at_ms"] = now_ms;
+        task["assigned_to"] = request.agent_id;
+        if (!request.artifacts.is_null()) task["artifacts"] = request.artifacts;
+        task.erase("lease");
+
+        Board projected = board;
+        projected.tasks[request.task_id] = task;
+        refreshTasks(projected, now_ms);
+
+        json released = json::array();
+        for (const auto& entry : projected.tasks.items()) {
+            if (entry.value().value("status", std::string()) != kStatusPending) continue;
+            const auto before = board.tasks.find(entry.key());
+            if (before != board.tasks.end() &&
+                before->value("status", std::string()) == kStatusBlocked) {
+                released.push_back(entry.key());
+            }
+        }
+
+        json result = {
+            {"board", request.board},
+            {"task", task},
+            {"unblocked", released},
+            {"dry_run", request.dry_run}
+        };
+        if (request.dry_run) return result;
+
+        board.tasks = projected.tasks;
+        auto saved = saveBoard(file, board);
+        if (saved.isErr()) return saved.error();
+        return result;
+    });
+}
+
+Result<json> blackboardTaskList(const BlackboardTaskListRequest& request, BlackboardClock clock) {
+    const int64_t now_ms = clock ? clock() : systemClockMs();
+    if (request.max_tasks < 1 || request.max_tasks > kBlackboardMaxTasks) {
+        return Error::invalidArgument("max_tasks must be between 1 and " +
+                                      std::to_string(kBlackboardMaxTasks));
+    }
+
+    return withBoardLock(request.board, [&](const std::filesystem::path& file) -> Result<json> {
+        auto loaded = loadBoard(file);
+        if (loaded.isErr()) return loaded.error();
+        Board board = loaded.value();
+        if (refreshTasks(board, now_ms)) {
+            auto saved = saveBoard(file, board);
+            if (saved.isErr()) return saved.error();
+        }
+
+        json tasks = json::array();
+        size_t matched = 0;
+        for (const auto& entry : board.tasks.items()) {
+            const json& task = entry.value();
+            if (!task.is_object()) continue;
+            if (request.status.has_value() &&
+                task.value("status", std::string()) != *request.status) {
+                continue;
+            }
+            if (request.assigned_to.has_value()) {
+                const auto assigned = task.find("assigned_to");
+                if (assigned == task.end() || !assigned->is_string() ||
+                    assigned->get<std::string>() != *request.assigned_to) {
+                    continue;
+                }
+            }
+            if (request.tag.has_value()) {
+                const auto tags = task.value("tags", json::array());
+                if (std::none_of(tags.begin(), tags.end(), [&](const json& tag) {
+                        return tag.is_string() && tag.get<std::string>() == *request.tag;
+                    })) {
+                    continue;
+                }
+            }
+            ++matched;
+            if (tasks.size() >= request.max_tasks) continue;
+            tasks.push_back(task);
+        }
+
+        return json{
+            {"board", request.board},
+            {"tasks", tasks},
+            {"returned", tasks.size()},
+            {"total", matched},
+            {"truncated", matched > tasks.size()}
+        };
     });
 }
 

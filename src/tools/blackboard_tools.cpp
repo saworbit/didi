@@ -161,5 +161,163 @@ CallToolResult handleBlackboardClear(const json& args, std::shared_ptr<ipc::IIpc
     return finish(offline::blackboardClear(request));
 }
 
+
+namespace {
+
+// Reads a bounded array of short strings, used for dependencies and tags.
+bool readStringList(const json& args, const char* key, size_t max_items, size_t max_bytes,
+                    std::vector<std::string>& out, std::string& failure) {
+    if (!args.contains(key) || args[key].is_null()) return true;
+    if (!args[key].is_array()) {
+        failure = std::string(key) + " must be an array of strings";
+        return false;
+    }
+    if (args[key].size() > max_items) {
+        failure = std::string(key) + " must hold at most " + std::to_string(max_items) + " entries";
+        return false;
+    }
+    for (const auto& item : args[key]) {
+        if (!item.is_string() || item.get<std::string>().empty() ||
+            item.get<std::string>().size() > max_bytes) {
+            failure = std::string(key) + " entries must be non-empty strings of at most " +
+                      std::to_string(max_bytes) + " bytes";
+            return false;
+        }
+        out.push_back(item.get<std::string>());
+    }
+    return true;
+}
+
+} // namespace
+
+CallToolResult handleBlackboardTaskCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    (void)ipc;
+    if (!args.is_object()) return CallToolResult::error("arguments must be an object");
+    ArgumentReader reader{args, {}};
+
+    offline::BlackboardTaskCreateRequest request;
+    request.board = reader.string("board", "default", offline::kBlackboardMaxBoardNameBytes);
+    request.task_id = reader.string("task_id", {}, offline::kBlackboardMaxTaskIdBytes);
+    request.title = reader.string("title", {}, offline::kBlackboardMaxTaskTitleBytes);
+    request.priority = reader.integer("priority", 0, -1000, 1000);
+    if (!reader.ok()) return CallToolResult::error(reader.failure);
+    if (request.title.empty()) return CallToolResult::error("title is required");
+
+    if (args.contains("description") && !args["description"].is_null()) {
+        request.description = reader.string("description", {}, offline::kBlackboardMaxTaskTextBytes);
+    }
+    if (args.contains("assigned_to") && !args["assigned_to"].is_null()) {
+        request.assigned_to = reader.string("assigned_to", {}, offline::kBlackboardMaxTaskIdBytes);
+    }
+    if (!reader.ok()) return CallToolResult::error(reader.failure);
+
+    std::string failure;
+    if (!readStringList(args, "dependencies", offline::kBlackboardMaxTaskDependencies,
+                        offline::kBlackboardMaxTaskIdBytes, request.dependencies, failure) ||
+        !readStringList(args, "tags", offline::kBlackboardMaxTaskTags, 64, request.tags, failure)) {
+        return CallToolResult::error(failure);
+    }
+
+    return finish(offline::blackboardTaskCreate(request));
+}
+
+CallToolResult handleBlackboardTaskClaim(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    (void)ipc;
+    if (!args.is_object()) return CallToolResult::error("arguments must be an object");
+    ArgumentReader reader{args, {}};
+
+    offline::BlackboardTaskClaimRequest request;
+    request.board = reader.string("board", "default", offline::kBlackboardMaxBoardNameBytes);
+    request.agent_id = reader.string("agent_id", {}, offline::kBlackboardMaxTaskIdBytes);
+    request.lease_seconds = reader.integer("lease_seconds", offline::kBlackboardDefaultLeaseSeconds,
+                                           1, offline::kBlackboardMaxLeaseSeconds);
+    if (!reader.ok()) return CallToolResult::error(reader.failure);
+    if (request.agent_id.empty()) return CallToolResult::error("agent_id is required");
+
+    if (args.contains("task_id") && !args["task_id"].is_null()) {
+        request.task_id = reader.string("task_id", {}, offline::kBlackboardMaxTaskIdBytes);
+    }
+    if (args.contains("tag") && !args["tag"].is_null()) {
+        request.tag = reader.string("tag", {}, 64);
+    }
+    if (!reader.ok()) return CallToolResult::error(reader.failure);
+
+    return finish(offline::blackboardTaskClaim(request));
+}
+
+CallToolResult handleBlackboardTaskUpdate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    (void)ipc;
+    if (!args.is_object()) return CallToolResult::error("arguments must be an object");
+    ArgumentReader reader{args, {}};
+
+    offline::BlackboardTaskUpdateRequest request;
+    request.board = reader.string("board", "default", offline::kBlackboardMaxBoardNameBytes);
+    request.task_id = reader.string("task_id", {}, offline::kBlackboardMaxTaskIdBytes);
+    request.agent_id = reader.string("agent_id", {}, offline::kBlackboardMaxTaskIdBytes);
+    if (!reader.ok()) return CallToolResult::error(reader.failure);
+    if (request.task_id.empty()) return CallToolResult::error("task_id is required");
+    if (request.agent_id.empty()) return CallToolResult::error("agent_id is required");
+
+    if (args.contains("progress") && !args["progress"].is_null()) {
+        request.progress = reader.integer("progress", 0, 0, 100);
+    }
+    if (args.contains("note") && !args["note"].is_null()) {
+        request.note = reader.string("note", {}, offline::kBlackboardMaxTaskTextBytes);
+    }
+    if (args.contains("status") && !args["status"].is_null()) {
+        request.status = reader.string("status", {}, 32);
+    }
+    if (args.contains("renew_lease_seconds") && !args["renew_lease_seconds"].is_null()) {
+        request.renew_lease_seconds = reader.integer("renew_lease_seconds", 0, 1,
+                                                     offline::kBlackboardMaxLeaseSeconds);
+    }
+    if (!reader.ok()) return CallToolResult::error(reader.failure);
+
+    return finish(offline::blackboardTaskUpdate(request));
+}
+
+CallToolResult handleBlackboardTaskComplete(const json& args,
+                                            std::shared_ptr<ipc::IIpcClient> ipc) {
+    (void)ipc;
+    if (!args.is_object()) return CallToolResult::error("arguments must be an object");
+    ArgumentReader reader{args, {}};
+
+    offline::BlackboardTaskCompleteRequest request;
+    request.board = reader.string("board", "default", offline::kBlackboardMaxBoardNameBytes);
+    request.task_id = reader.string("task_id", {}, offline::kBlackboardMaxTaskIdBytes);
+    request.agent_id = reader.string("agent_id", {}, offline::kBlackboardMaxTaskIdBytes);
+    if (!reader.ok()) return CallToolResult::error(reader.failure);
+    if (request.task_id.empty()) return CallToolResult::error("task_id is required");
+    if (request.agent_id.empty()) return CallToolResult::error("agent_id is required");
+    if (args.contains("artifacts") && !args["artifacts"].is_null()) {
+        request.artifacts = args["artifacts"];
+    }
+
+    return finish(offline::blackboardTaskComplete(request));
+}
+
+CallToolResult handleBlackboardTaskList(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    (void)ipc;
+    if (!args.is_object()) return CallToolResult::error("arguments must be an object");
+    ArgumentReader reader{args, {}};
+
+    offline::BlackboardTaskListRequest request;
+    request.board = reader.string("board", "default", offline::kBlackboardMaxBoardNameBytes);
+    request.max_tasks = static_cast<size_t>(
+        reader.integer("max_tasks", 200, 1, static_cast<int64_t>(offline::kBlackboardMaxTasks)));
+    if (args.contains("status") && !args["status"].is_null()) {
+        request.status = reader.string("status", {}, 32);
+    }
+    if (args.contains("assigned_to") && !args["assigned_to"].is_null()) {
+        request.assigned_to = reader.string("assigned_to", {}, offline::kBlackboardMaxTaskIdBytes);
+    }
+    if (args.contains("tag") && !args["tag"].is_null()) {
+        request.tag = reader.string("tag", {}, 64);
+    }
+    if (!reader.ok()) return CallToolResult::error(reader.failure);
+
+    return finish(offline::blackboardTaskList(request));
+}
+
 } // namespace mcp
 } // namespace didi

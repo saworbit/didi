@@ -33,7 +33,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-Didi v1.4.0 registers 88 canonical tool names. 85 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 85 canonical tools are implemented. Ten legacy names are registered separately, for exactly 98 `tools/list` entries.
+Didi v1.4.0 registers 93 canonical tool names. 90 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 90 canonical tools are implemented. Ten legacy names are registered separately, for exactly 103 `tools/list` entries.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
@@ -56,14 +56,14 @@ Didi v1.4.0 registers 88 canonical tool names. 85 are implemented in at least on
 | `live` | `runtime_inject_input` | Game only. Builds every event before dispatching any through `Input.parse_input_event`; the count is calls made, not events accepted. |
 | `live` | `runtime_read_profiler` | Editor or game. Samples `Performance` monitors from the frame callback over a bounded window; one collector per session. |
 | `live` | `ui_hit_test` | Editor-only. Traverses bounded live Control state at a viewport-space point without synthesizing or injecting input. |
-| `offline_fallback` | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method`, `viewport_create_test_lab`, `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map`, `project_audit_assets`, `project_analyze_impact`, `project_search_text`, `project_search_symbols`, `runtime_launch`, `csharp_check_build`, `shader_check_compile`, `project_list_export_presets`, `project_export`, `gridmap_export_mesh_library` | Operates on bounded project files or launches a separate Godot/dotnet process. Results are not live editor state. |
+| `offline_fallback` | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method`, `viewport_create_test_lab`, `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map`, `project_audit_assets`, `project_analyze_impact`, `blackboard_write`, `blackboard_read`, `blackboard_patch`, `blackboard_list_keys`, `blackboard_clear`, `blackboard_task_create`, `blackboard_task_claim`, `blackboard_task_update`, `blackboard_task_complete`, `blackboard_task_list`, `project_search_text`, `project_search_symbols`, `runtime_launch`, `csharp_check_build`, `shader_check_compile`, `project_list_export_presets`, `project_export`, `gridmap_export_mesh_library` | Operates on bounded project files or launches a separate Godot/dotnet process. Results are not live editor state. |
 | `unimplemented` | `physics_simulate_step`, `nav_bake_mesh`, `runtime_get_call_stack` | Registered schema only. Calls are rejected before legacy handlers execute. |
 
 ## Phase 7 feasibility status
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `85/88`
+**Canonical implementation:** `90/93`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->

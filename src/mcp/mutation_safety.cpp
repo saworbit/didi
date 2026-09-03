@@ -35,7 +35,11 @@ const std::unordered_set<std::string_view> kMutations = {
     "audio_configure_bus",
     // The board is shared state between agents. A write is reversible and
     // idempotent for the same arguments, so it gets a dry run and no token.
-    "blackboard_write", "blackboard_patch", "blackboard_clear"
+    "blackboard_write", "blackboard_patch", "blackboard_clear",
+    // Task moves are reversible: a failed or abandoned task can be reopened
+    // and re-run, so they get a dry run and no confirmation token.
+    "blackboard_task_create", "blackboard_task_claim", "blackboard_task_update",
+    "blackboard_task_complete"
 };
 
 const std::unordered_set<std::string_view> kAlwaysConfirmed = {

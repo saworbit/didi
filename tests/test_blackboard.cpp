@@ -350,6 +350,346 @@ void test_blackboard_clear_scopes() {
     ASSERT_TRUE(after.value()["value"].empty());
 }
 
+
+std::string createTask(const std::string& title,
+                       const std::vector<std::string>& dependencies = {},
+                       int64_t priority = 0,
+                       const std::vector<std::string>& tags = {},
+                       int64_t* now_ms = nullptr) {
+    BlackboardTaskCreateRequest request;
+    request.title = title;
+    request.dependencies = dependencies;
+    request.priority = priority;
+    request.tags = tags;
+    auto result = now_ms ? blackboardTaskCreate(request, fixedClock(now_ms))
+                         : blackboardTaskCreate(request);
+    ASSERT_TRUE(result.isOk());
+    return result.value()["task"]["task_id"].get<std::string>();
+}
+
+std::string taskStatus(const std::string& task_id, int64_t* now_ms = nullptr) {
+    BlackboardTaskListRequest request;
+    auto listed = now_ms ? blackboardTaskList(request, fixedClock(now_ms))
+                         : blackboardTaskList(request);
+    ASSERT_TRUE(listed.isOk());
+    for (const auto& task : listed.value()["tasks"]) {
+        if (task["task_id"].get<std::string>() == task_id) {
+            return task["status"].get<std::string>();
+        }
+    }
+    return "missing";
+}
+
+void test_tasks_claim_is_exclusive() {
+    BoardFixture fixture("claim");
+    const std::string task = createTask("write CharacterBase.gd");
+
+    // Reading "unclaimed" and writing "mine" are two steps, and another agent
+    // fits between them. Exactly one of these may come away with the task.
+    //
+    // The agents wait on a gate so they all attempt the claim at the same
+    // instant. Without it they start in sequence, finish before the next one
+    // begins, and the test passes whether the claim is atomic or not.
+    constexpr int kAgents = 8;
+    std::atomic<bool> go{false};
+    std::atomic<int> ready{0};
+    std::atomic<int> winners{0};
+    std::atomic<int> refusals{0};
+    std::atomic<int> failures{0};
+    std::vector<std::thread> agents;
+    for (int index = 0; index < kAgents; ++index) {
+        agents.emplace_back([index, &go, &ready, &winners, &refusals, &failures] {
+            BlackboardTaskClaimRequest request;
+            request.agent_id = "agent-" + std::to_string(index);
+            request.lease_seconds = 60;
+            ++ready;
+            while (!go.load(std::memory_order_acquire)) std::this_thread::yield();
+            auto claimed = blackboardTaskClaim(request);
+            if (claimed.isErr()) ++failures;
+            else if (claimed.value()["claimed"].get<bool>()) ++winners;
+            else ++refusals;
+        });
+    }
+    while (ready.load() < kAgents) std::this_thread::yield();
+    go.store(true, std::memory_order_release);
+    for (auto& agent : agents) agent.join();
+
+    // One winner, and every other agent told cleanly that it lost. An error is
+    // not a refusal: it would mean the claim collided rather than serialised.
+    ASSERT_EQ(winners.load(), 1);
+    ASSERT_EQ(failures.load(), 0);
+    ASSERT_EQ(refusals.load(), kAgents - 1);
+
+    ASSERT_EQ(taskStatus(task), std::string("in_progress"));
+
+    // A second claim finds nothing, and says why rather than returning empty.
+    BlackboardTaskClaimRequest again;
+    again.agent_id = "latecomer";
+    auto nothing = blackboardTaskClaim(again);
+    ASSERT_TRUE(nothing.isOk());
+    ASSERT_TRUE(!nothing.value()["claimed"].get<bool>());
+    ASSERT_TRUE(nothing.value().contains("reason"));
+}
+
+void test_tasks_lease_expiry_reclaims() {
+    BoardFixture fixture("lease");
+    int64_t now_ms = 5'000'000;
+    const std::string task = createTask("import the sprites", {}, 0, {}, &now_ms);
+
+    BlackboardTaskClaimRequest first;
+    first.agent_id = "agent-a";
+    first.lease_seconds = 30;
+    auto claimed = blackboardTaskClaim(first, fixedClock(&now_ms));
+    ASSERT_TRUE(claimed.isOk() && claimed.value()["claimed"].get<bool>());
+
+    // While the lease is live nobody else can have it.
+    BlackboardTaskClaimRequest contender;
+    contender.agent_id = "agent-b";
+    auto blocked = blackboardTaskClaim(contender, fixedClock(&now_ms));
+    ASSERT_TRUE(blocked.isOk() && !blocked.value()["claimed"].get<bool>());
+
+    // The agent dies. The lease lapses and the work returns to the pool.
+    now_ms += 31 * 1000;
+    ASSERT_EQ(taskStatus(task, &now_ms), std::string("pending"));
+    auto reclaimed = blackboardTaskClaim(contender, fixedClock(&now_ms));
+    ASSERT_TRUE(reclaimed.isOk() && reclaimed.value()["claimed"].get<bool>());
+    ASSERT_EQ(reclaimed.value()["task"]["lease"]["owner"].get<std::string>(),
+              std::string("agent-b"));
+
+    // The original holder must not be able to finish work it no longer owns.
+    BlackboardTaskCompleteRequest stale;
+    stale.task_id = task;
+    stale.agent_id = "agent-a";
+    ASSERT_TRUE(blackboardTaskComplete(stale, fixedClock(&now_ms)).isErr());
+}
+
+void test_tasks_dependencies_gate_readiness() {
+    BoardFixture fixture("deps");
+    int64_t now_ms = 1'000'000;
+
+    const std::string base = createTask("write CharacterBase.gd", {}, 0, {}, &now_ms);
+    const std::string shapes = createTask("check collision shapes", {}, 0, {}, &now_ms);
+    const std::string player = createTask("extend into Player.gd", {base, shapes}, 0, {}, &now_ms);
+
+    ASSERT_EQ(taskStatus(player, &now_ms), std::string("blocked"));
+    ASSERT_EQ(taskStatus(base, &now_ms), std::string("pending"));
+
+    // Claiming must never hand out a blocked task.
+    BlackboardTaskClaimRequest targeted;
+    targeted.agent_id = "agent-b";
+    targeted.task_id = player;
+    auto refused = blackboardTaskClaim(targeted, fixedClock(&now_ms));
+    ASSERT_TRUE(refused.isOk() && !refused.value()["claimed"].get<bool>());
+
+    const auto finish = [&](const std::string& task_id, const std::string& agent) {
+        BlackboardTaskClaimRequest claim;
+        claim.agent_id = agent;
+        claim.task_id = task_id;
+        claim.lease_seconds = 600;
+        auto got = blackboardTaskClaim(claim, fixedClock(&now_ms));
+        ASSERT_TRUE(got.isOk() && got.value()["claimed"].get<bool>());
+        BlackboardTaskCompleteRequest done;
+        done.task_id = task_id;
+        done.agent_id = agent;
+        return blackboardTaskComplete(done, fixedClock(&now_ms));
+    };
+
+    auto first = finish(base, "agent-a");
+    ASSERT_TRUE(first.isOk());
+    // One prerequisite left, so nothing is released yet.
+    ASSERT_EQ(first.value()["unblocked"].size(), size_t{0});
+    ASSERT_EQ(taskStatus(player, &now_ms), std::string("blocked"));
+
+    auto second = finish(shapes, "agent-c");
+    ASSERT_TRUE(second.isOk());
+    ASSERT_EQ(second.value()["unblocked"].size(), size_t{1});
+    ASSERT_EQ(second.value()["unblocked"][0].get<std::string>(), player);
+    ASSERT_EQ(taskStatus(player, &now_ms), std::string("pending"));
+}
+
+void test_tasks_cycle_is_refused() {
+    BoardFixture fixture("cycle");
+    const std::string first = createTask("first");
+
+    // Depending on something that does not exist would sit blocked forever with
+    // nothing to explain it.
+    BlackboardTaskCreateRequest unknown;
+    unknown.title = "depends on a ghost";
+    unknown.dependencies = {"TASK-does-not-exist"};
+    ASSERT_TRUE(blackboardTaskCreate(unknown).isErr());
+
+    BlackboardTaskCreateRequest itself;
+    itself.task_id = "TASK-self";
+    itself.title = "depends on itself";
+    itself.dependencies = {"TASK-self"};
+    ASSERT_TRUE(blackboardTaskCreate(itself).isErr());
+
+    BlackboardTaskCreateRequest duplicate;
+    duplicate.task_id = first;
+    duplicate.title = "same id again";
+    ASSERT_TRUE(blackboardTaskCreate(duplicate).isErr());
+
+    // The refusals left nothing behind.
+    BlackboardTaskListRequest all;
+    auto listed = blackboardTaskList(all);
+    ASSERT_TRUE(listed.isOk());
+    ASSERT_EQ(listed.value()["total"].get<size_t>(), size_t{1});
+}
+
+void test_tasks_only_the_holder_completes() {
+    BoardFixture fixture("holder");
+    int64_t now_ms = 2'000'000;
+    const std::string task = createTask("rebalance the jump", {}, 0, {}, &now_ms);
+
+    BlackboardTaskClaimRequest claim;
+    claim.agent_id = "agent-a";
+    claim.lease_seconds = 600;
+    ASSERT_TRUE(blackboardTaskClaim(claim, fixedClock(&now_ms)).isOk());
+
+    BlackboardTaskCompleteRequest stranger;
+    stranger.task_id = task;
+    stranger.agent_id = "agent-b";
+    ASSERT_TRUE(blackboardTaskComplete(stranger, fixedClock(&now_ms)).isErr());
+
+    BlackboardTaskUpdateRequest meddler;
+    meddler.task_id = task;
+    meddler.agent_id = "agent-b";
+    meddler.progress = 90;
+    ASSERT_TRUE(blackboardTaskUpdate(meddler, fixedClock(&now_ms)).isErr());
+    ASSERT_EQ(taskStatus(task, &now_ms), std::string("in_progress"));
+
+    BlackboardTaskUpdateRequest owner;
+    owner.task_id = task;
+    owner.agent_id = "agent-a";
+    owner.progress = 50;
+    owner.note = "jump height feels right, tuning the fall";
+    auto updated = blackboardTaskUpdate(owner, fixedClock(&now_ms));
+    ASSERT_TRUE(updated.isOk());
+    ASSERT_EQ(updated.value()["task"]["progress"].get<int>(), 50);
+    ASSERT_EQ(updated.value()["task"]["notes"].size(), size_t{1});
+
+    BlackboardTaskCompleteRequest done;
+    done.task_id = task;
+    done.agent_id = "agent-a";
+    done.artifacts = json{{"files", json::array({"res://Player.gd"})}};
+    auto completed = blackboardTaskComplete(done, fixedClock(&now_ms));
+    ASSERT_TRUE(completed.isOk());
+    ASSERT_EQ(completed.value()["task"]["status"].get<std::string>(), std::string("completed"));
+    ASSERT_EQ(completed.value()["task"]["artifacts"]["files"][0].get<std::string>(),
+              std::string("res://Player.gd"));
+
+    // Completing twice is refused rather than quietly repeated.
+    ASSERT_TRUE(blackboardTaskComplete(done, fixedClock(&now_ms)).isErr());
+}
+
+void test_tasks_status_transitions() {
+    BoardFixture fixture("transitions");
+    int64_t now_ms = 3'000'000;
+    const std::string task = createTask("tune the coyote time", {}, 0, {}, &now_ms);
+
+    BlackboardTaskClaimRequest claim;
+    claim.agent_id = "agent-a";
+    claim.lease_seconds = 600;
+    ASSERT_TRUE(blackboardTaskClaim(claim, fixedClock(&now_ms)).isOk());
+
+    // A review hands the work back, so the lease goes with it.
+    BlackboardTaskUpdateRequest review;
+    review.task_id = task;
+    review.agent_id = "agent-a";
+    review.status = "needs_review";
+    auto reviewed = blackboardTaskUpdate(review, fixedClock(&now_ms));
+    ASSERT_TRUE(reviewed.isOk());
+    ASSERT_TRUE(!reviewed.value()["task"].contains("lease"));
+    ASSERT_EQ(taskStatus(task, &now_ms), std::string("needs_review"));
+
+    // A review outcome is somebody else's call, so reopening needs no lease.
+    BlackboardTaskUpdateRequest reopen;
+    reopen.task_id = task;
+    reopen.agent_id = "reviewer";
+    reopen.status = "pending";
+    ASSERT_TRUE(blackboardTaskUpdate(reopen, fixedClock(&now_ms)).isOk());
+    ASSERT_EQ(taskStatus(task, &now_ms), std::string("pending"));
+
+    // Anything else without a lease is refused.
+    BlackboardTaskUpdateRequest unleased;
+    unleased.task_id = task;
+    unleased.agent_id = "agent-a";
+    unleased.progress = 10;
+    ASSERT_TRUE(blackboardTaskUpdate(unleased, fixedClock(&now_ms)).isErr());
+
+    BlackboardTaskUpdateRequest illegal;
+    illegal.task_id = task;
+    illegal.agent_id = "agent-a";
+    illegal.status = "completed";
+    ASSERT_TRUE(blackboardTaskUpdate(illegal, fixedClock(&now_ms)).isErr());
+
+    // A renewed lease pushes the expiry out rather than handing the task on.
+    BlackboardTaskClaimRequest reclaim;
+    reclaim.agent_id = "agent-a";
+    reclaim.lease_seconds = 30;
+    ASSERT_TRUE(blackboardTaskClaim(reclaim, fixedClock(&now_ms)).isOk());
+    BlackboardTaskUpdateRequest renew;
+    renew.task_id = task;
+    renew.agent_id = "agent-a";
+    renew.renew_lease_seconds = 600;
+    auto renewed = blackboardTaskUpdate(renew, fixedClock(&now_ms));
+    ASSERT_TRUE(renewed.isOk());
+    now_ms += 60 * 1000;
+    ASSERT_EQ(taskStatus(task, &now_ms), std::string("in_progress"));
+}
+
+void test_tasks_list_filters() {
+    BoardFixture fixture("filters");
+    int64_t now_ms = 4'000'000;
+    const std::string art = createTask("import sprites", {}, 0, {"art"}, &now_ms);
+    createTask("write the controller", {}, 5, {"code"}, &now_ms);
+    createTask("balance the jump", {}, 1, {"code"}, &now_ms);
+
+    BlackboardTaskListRequest by_tag;
+    by_tag.tag = "code";
+    auto tagged = blackboardTaskList(by_tag, fixedClock(&now_ms));
+    ASSERT_TRUE(tagged.isOk());
+    ASSERT_EQ(tagged.value()["total"].get<size_t>(), size_t{2});
+
+    // Priority decides which ready task a tagged claim gets.
+    BlackboardTaskClaimRequest claim;
+    claim.agent_id = "coder";
+    claim.tag = "code";
+    claim.lease_seconds = 600;
+    auto claimed = blackboardTaskClaim(claim, fixedClock(&now_ms));
+    ASSERT_TRUE(claimed.isOk() && claimed.value()["claimed"].get<bool>());
+    ASSERT_EQ(claimed.value()["task"]["title"].get<std::string>(),
+              std::string("write the controller"));
+
+    BlackboardTaskListRequest by_assignee;
+    by_assignee.assigned_to = "coder";
+    auto mine = blackboardTaskList(by_assignee, fixedClock(&now_ms));
+    ASSERT_TRUE(mine.isOk());
+    ASSERT_EQ(mine.value()["total"].get<size_t>(), size_t{1});
+
+    BlackboardTaskListRequest by_status;
+    by_status.status = "pending";
+    auto pending = blackboardTaskList(by_status, fixedClock(&now_ms));
+    ASSERT_TRUE(pending.isOk());
+    ASSERT_EQ(pending.value()["total"].get<size_t>(), size_t{2});
+
+    BlackboardTaskListRequest capped;
+    capped.max_tasks = 1;
+    auto limited = blackboardTaskList(capped, fixedClock(&now_ms));
+    ASSERT_TRUE(limited.isOk());
+    ASSERT_EQ(limited.value()["returned"].get<size_t>(), size_t{1});
+    ASSERT_EQ(limited.value()["total"].get<size_t>(), size_t{3});
+    ASSERT_TRUE(limited.value()["truncated"].get<bool>());
+
+    // Tasks are not reachable through the state paths, so a write cannot corrupt
+    // the queue by choosing a colliding name.
+    BlackboardReadRequest state;
+    auto board = blackboardRead(state, fixedClock(&now_ms));
+    ASSERT_TRUE(board.isOk());
+    ASSERT_TRUE(board.value()["value"].empty());
+    ASSERT_TRUE(!art.empty());
+}
+
 struct Register {
     Register() {
         registerTest("Blackboard.WriteReadRoundTrip", test_blackboard_write_read_round_trip);
@@ -361,6 +701,14 @@ struct Register {
         registerTest("Blackboard.BoundsRefuseOversizeInput",
                      test_blackboard_bounds_refuse_oversize_input);
         registerTest("Blackboard.ClearScopes", test_blackboard_clear_scopes);
+        registerTest("BlackboardTasks.ClaimIsExclusive", test_tasks_claim_is_exclusive);
+        registerTest("BlackboardTasks.LeaseExpiryReclaims", test_tasks_lease_expiry_reclaims);
+        registerTest("BlackboardTasks.DependenciesGateReadiness",
+                     test_tasks_dependencies_gate_readiness);
+        registerTest("BlackboardTasks.CycleIsRefused", test_tasks_cycle_is_refused);
+        registerTest("BlackboardTasks.OnlyTheHolderCompletes", test_tasks_only_the_holder_completes);
+        registerTest("BlackboardTasks.StatusTransitions", test_tasks_status_transitions);
+        registerTest("BlackboardTasks.ListFilters", test_tasks_list_filters);
     }
 } g_registerBlackboardTests;
 

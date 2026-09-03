@@ -136,12 +136,12 @@ The native red-team contract covers invalid roots, project-key isolation, lock e
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `85/88`
+**Canonical implementation:** `90/93`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-**Objective:** The implementation remains 85/88 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. All 15 feasible names are delivered. The original objective was atomic 83/83 without adding public tool names.
+**Objective:** The implementation remains 90/93 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. All 15 feasible names are delivered. The original objective was atomic 83/83 without adding public tool names.
 
 **Feasibility result:** The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (15/18) are implementation-feasible: `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `runtime_inject_input`, and `runtime_read_profiler`.
 
@@ -191,7 +191,7 @@ baseline is carrying an unauthorized second decision.
 
 This decision authorized Task 2. At decision time the implementation was 61/79;
 the delivery slices have since landed and the current status block above is
-authoritative at 85/88. Phase 7 remains `PARTIAL_DELIVERY` because the three
+authoritative at 90/93. Phase 7 remains `PARTIAL_DELIVERY` because the three
 API-blocked contracts stay honestly unimplemented.
 
 **Delivery slices:**
@@ -222,6 +222,28 @@ API-blocked contracts stay honestly unimplemented.
 **Exclusions:** No arbitrary GPU command injection, sticky global debug state, or image-diff claim across mismatched dimensions or undocumented color conversion.
 
 **Exit gate:** Authoring mutations are UndoRedo-backed and dry-runnable. Temporary visual state is restored on success, error, timeout, and cancellation. Real editor and game fixtures prove layout, animation, capture-target, and comparison behavior.
+
+## Phase 9a: Agent Coordination Surface (`IN PROGRESS`)
+
+**Objective:** Let independent agent processes share decisions and allocate work
+without a human sequencing them by hand.
+
+**Delivered:** the blackboard (`blackboard_write`, `blackboard_read`,
+`blackboard_patch`, `blackboard_list_keys`, `blackboard_clear`) and task
+allocation on top of it (`blackboard_task_create`, `blackboard_task_claim`,
+`blackboard_task_update`, `blackboard_task_complete`, `blackboard_task_list`).
+Both are file-backed under `.didi/blackboard/` with an OS-backed lock, because
+each MCP client is its own process and shares no memory with the next.
+
+**Not delivered:** reactive resource subscriptions, live editor state reflected
+onto board namespaces, and any human-facing dashboard. Those remain open and are
+tracked as their own work rather than implied by what shipped here.
+
+**Exit gate:** a claim is atomic under concurrency, a lapsed lease returns work
+to the pool, and dependency completion releases dependents. All three are
+covered by native tests that fail when the lock is removed.
+
+---
 
 ## Phase 10: Gogo Parallel Godot Orchestration (`PLANNED`)
 
