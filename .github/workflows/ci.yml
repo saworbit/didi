@@ -140,6 +140,28 @@ jobs:
       - name: Compile Targets in Parallel
         run: cmake --build build --config Release --parallel
 
+      - name: Verify the staged addon is complete and clean
+        shell: bash
+        run: |
+          # Release packaging copies this directory verbatim. A missing file
+          # ships an addon Godot cannot start, and an extra one ships whatever
+          # a tool happened to generate in place. The source addon directory
+          # used to be the packaging source and shipped both kinds of mistake.
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Windows) library="bin/didi_extension.dll" ;;
+            macOS)   library="bin/libdidi_extension.dylib" ;;
+            *)       library="bin/libdidi_extension.so" ;;
+          esac
+          expected="$library didi.gdextension didi_plugin.gd plugin.cfg "
+          actual=$(cd build/addons/didi && LC_ALL=C find . -type f | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' ')
+          if [ "$actual" != "$expected" ]; then
+            echo "Staged addon is [$actual]" >&2
+            echo "Expected          [$expected]" >&2
+            exit 1
+          fi
+          echo "Staged addon verified"
+
       - name: Run Native Tests (including fake-live cursor routing)
         shell: bash
         run: |

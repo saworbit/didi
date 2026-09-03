@@ -72,7 +72,9 @@ jobs:
           mkdir -p dist/${{ matrix.artifact_name }}/addons/didi
           cp build/Release/didi.exe dist/${{ matrix.artifact_name }}/bin/
           cp build/Release/didi_class_reference.json dist/${{ matrix.artifact_name }}/bin/
-          cp -r addons/didi/* dist/${{ matrix.artifact_name }}/addons/didi/
+          # From the staged addon the build produced, not from the source
+          # directory, which also holds whatever a tool generated in place.
+          cp -r build/addons/didi/* dist/${{ matrix.artifact_name }}/addons/didi/
           cp README.md LICENSE dist/${{ matrix.artifact_name }}/
           cd dist
           7z a ../${{ matrix.artifact_name }}.zip ${{ matrix.artifact_name }}/
@@ -85,7 +87,7 @@ jobs:
           mkdir -p dist/${{ matrix.artifact_name }}/addons/didi
           cp build/didi dist/${{ matrix.artifact_name }}/bin/
           cp build/didi_class_reference.json dist/${{ matrix.artifact_name }}/bin/
-          cp -r addons/didi/* dist/${{ matrix.artifact_name }}/addons/didi/
+          cp -r build/addons/didi/* dist/${{ matrix.artifact_name }}/addons/didi/
           cp README.md LICENSE dist/${{ matrix.artifact_name }}/
           cd dist
           tar -czvf ../${{ matrix.artifact_name }}.tar.gz ${{ matrix.artifact_name }}/

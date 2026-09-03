@@ -18,15 +18,17 @@ cmake --build build --config Release
 ```
 On Windows this produces:
 - `build/Release/didi.exe` (MCP Server binary)
-- `addons/didi/bin/didi_extension.dll` (GDExtension module)
+- `build/addons/didi/` (the complete Godot addon, extension library included)
 
 Linux and macOS builds use the platform-specific executable and shared-library names declared in `addons/didi/didi.gdextension`.
+
+The addon is assembled in the build directory rather than in the source tree, so what you copy is what the build produced and nothing a tool left behind. The `addons/didi` folder in the repository is the manifest that goes into that assembly, not a build output.
 
 ---
 
 ## 🎮 Step 2: Enable the Godot Plugin
 
-1. Copy the `addons/didi` folder into your Godot project root:
+1. Copy the built `build/addons/didi` folder into your Godot project root, as `addons/didi`:
    ```
    your_game_project/
    ├── addons/
