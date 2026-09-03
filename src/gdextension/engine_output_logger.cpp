@@ -51,6 +51,26 @@ private:
     bool m_initialized{false};
 };
 
+// See the twin in godot_bridge.cpp. Only for constructions this code owns, never
+// from inside create_instance_func.
+GDExtensionObjectPtr constructObject(GDExtensionConstStringNamePtr class_name) {
+    auto& api = GodotApi::instance();
+    if (!api.classdb_construct_object) return nullptr;
+    auto object = api.classdb_construct_object(class_name);
+    if (!object) return nullptr;
+    NativeName object_class("Object");
+    NativeName notification("notification");
+    if (!object_class.valid() || !notification.valid()) return object;
+    auto bind = api.classdb_get_method_bind(object_class.ptr(), notification.ptr(),
+                                            kObjectNotificationHash);
+    if (!bind) return object;
+    int64_t what = kNotificationPostInitialize;
+    GDExtensionBool reversed = 0;
+    const void* arguments[] = {&what, &reversed};
+    api.object_method_bind_ptrcall(bind, object, arguments, nullptr);
+    return object;
+}
+
 // Reads a Godot String the engine handed us into a std::string.
 //
 // This is the only engine call made from inside a log callback. It is a pure
@@ -211,7 +231,12 @@ void installEngineOutputLogger() {
     api.classdb_register_extension_class4(api.getLibrary(), class_name.ptr(), parent_name.ptr(), &info);
     g_class_registered = true;
 
-    g_logger_object = api.classdb_construct_object(class_name.ptr());
+    // Post-initialization is this caller's job: classdb_construct_object2 is
+    // ClassDB::instantiate_without_postinitialization. Note the deliberate
+    // asymmetry with createInstance above, which must NOT notify: that runs as
+    // the engine's create_instance_func, before the instance is fully bound,
+    // and the engine sends the notification once it returns.
+    g_logger_object = constructObject(class_name.ptr());
     if (g_logger_object) {
         // Take the first reference ourselves. The engine adds its own when
         // OS.add_logger stores the instance, and drops it on remove_logger;

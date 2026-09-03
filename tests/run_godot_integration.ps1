@@ -342,6 +342,32 @@ try {
     }
     Assert-True $sceneReady "Godot editor did not activate res://main.tscn through the authenticated bridge."
 
+    # Regression guard for the themed-Control crash found in field trial 01.
+    # classdb_construct_object2 is ClassDB::instantiate_without_postinitialization,
+    # so a Control that resolves theme items during post-initialization is handed
+    # back half-built and takes the editor down with it. A truncated transcript or
+    # a dead editor here means the notification stopped being sent.
+    $postInitRequests = @(
+        (@{ jsonrpc = "2.0"; id = 920; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 921 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 922 "scene_instantiate_node" @{ node_type = "Label"; parent_path = "/root"; name = "PostInitLabel" }),
+        (Tool-Request 923 "scene_instantiate_node" @{ node_type = "Button"; parent_path = "/root"; name = "PostInitButton" }),
+        # Put the edited scene back as it was found. Later assertions count the
+        # children of this root, so a guard that leaves nodes behind fails them.
+        (Tool-Request 924 "scene_remove_node" @{ target_node = "/root/PostInitLabel" }),
+        (Tool-Request 925 "scene_remove_node" @{ target_node = "/root/PostInitButton" })
+    )
+    $rawPostInitResponses = $postInitRequests | & $didiExecutable --project $fixtureRoot
+    $postInitResponses = @($rawPostInitResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
+    Assert-True ($postInitResponses.Count -eq $postInitRequests.Count) "Themed Control construction returned an incomplete transcript; the editor route did not survive."
+    $postInitById = @{}
+    foreach ($response in $postInitResponses) { $postInitById[[int]$response.id] = $response }
+    Tool-Payload $postInitById[922] | Out-Null
+    Tool-Payload $postInitById[923] | Out-Null
+    Tool-Payload $postInitById[924] | Out-Null
+    Tool-Payload $postInitById[925] | Out-Null
+    Assert-True (-not $godot.HasExited) "Godot editor died constructing a themed Control; NOTIFICATION_POSTINITIALIZE is not reaching newly constructed objects."
+
     $game = Start-Process -FilePath $GodotExecutable `
         -ArgumentList @("--headless", "--path", $fixtureRoot, "--log-file", $gameEngineLogPath, "res://runtime_main.tscn") `
         -PassThru -WindowStyle Hidden `

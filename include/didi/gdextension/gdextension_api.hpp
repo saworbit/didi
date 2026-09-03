@@ -12,6 +12,17 @@
 namespace didi {
 namespace godot {
 
+// `Object::notification(what, reversed)`, from extension_api.json. The
+// signature has been stable since 4.0; a hash the running engine disagrees
+// with yields a null bind, which callers treat as "skip", not as an error.
+inline constexpr int64_t kObjectNotificationHash = 4023243586LL;
+
+// `Object::NOTIFICATION_POSTINITIALIZE`. Objects built through
+// `classdb_construct_object2` or `3` have not received it: the engine
+// implements both as `ClassDB::instantiate_without_postinitialization`, and
+// sending it is the extension's responsibility.
+inline constexpr int64_t kNotificationPostInitialize = 0;
+
 class GodotApi {
 public:
     static GodotApi& instance() {

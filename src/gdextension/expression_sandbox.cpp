@@ -728,6 +728,27 @@ private:
     bool m_initialized{false};
 };
 
+// See the twin in godot_bridge.cpp. Objects from classdb_construct_object2 have
+// not been post-initialized; the engine implements it as
+// ClassDB::instantiate_without_postinitialization.
+GDExtensionObjectPtr constructObject(GDExtensionConstStringNamePtr class_name) {
+    auto& api = GodotApi::instance();
+    if (!api.classdb_construct_object) return nullptr;
+    auto object = api.classdb_construct_object(class_name);
+    if (!object) return nullptr;
+    NativeName object_class("Object");
+    NativeName notification("notification");
+    if (!object_class.valid() || !notification.valid()) return object;
+    auto bind = api.classdb_get_method_bind(object_class.ptr(), notification.ptr(),
+                                            kObjectNotificationHash);
+    if (!bind) return object;
+    int64_t what = kNotificationPostInitialize;
+    GDExtensionBool reversed = 0;
+    const void* arguments[] = {&what, &reversed};
+    api.object_method_bind_ptrcall(bind, object, arguments, nullptr);
+    return object;
+}
+
 class OwnedObject {
 public:
     explicit OwnedObject(GDExtensionObjectPtr object) : m_object(object) {}
@@ -1590,7 +1611,11 @@ json executeExpression(const json& params, const std::string& session_kind) {
     if (!expression_class.valid() || !GodotApi::instance().classdb_construct_object) {
         return errorJson(500, "Godot Expression construction API is unavailable");
     }
-    OwnedObject expression(GodotApi::instance().classdb_construct_object(expression_class.ptr()));
+    // classdb_construct_object2 is ClassDB::instantiate_without_postinitialization,
+    // so the notification the engine's own memnew path sends is ours to send.
+    // RefCounted initialises its refcount in the constructor, not here, so this
+    // does not disturb the ownership OwnedObject assumes.
+    OwnedObject expression(constructObject(expression_class.ptr()));
     if (!expression.get()) return errorJson(500, "Godot could not construct Expression");
 
     auto source_value = makeString(executable_source);
