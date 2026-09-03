@@ -54,7 +54,15 @@ jobs:
           [ -x "$VENV_PY" ] || VENV_PY=".venv-release/Scripts/python.exe"
           "$VENV_PY" -m pip install --quiet --disable-pip-version-check -r requirements-dev.txt
           "$VENV_PY" -c "import jsonschema; assert jsonschema.__version__ == '4.25.1', jsonschema.__version__"
-          echo "DIDI_RELEASE_PYTHON=$PWD/$VENV_PY" >> "$GITHUB_ENV"
+          # This step runs in bash, so $PWD on Windows is a /d/a/... path that
+          # CMake cannot execute. cygpath -m gives an absolute Windows path with
+          # forward slashes, which is the form CMake wants on every runner.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            RESOLVED=$(cygpath -m "$PWD/$VENV_PY")
+          else
+            RESOLVED="$PWD/$VENV_PY"
+          fi
+          echo "DIDI_RELEASE_PYTHON=$RESOLVED" >> "$GITHUB_ENV"
 
       - name: Configure CMake
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="${{ env.DIDI_RELEASE_PYTHON }}"
