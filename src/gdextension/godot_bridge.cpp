@@ -317,6 +317,43 @@ Result<VariantValue> callObject(GDExtensionObjectPtr object, const char* class_n
     return std::move(result);
 }
 
+// Construct a Godot object and finish constructing it.
+//
+// `GodotApi::classdb_construct_object` is bound to the interface entry point
+// `classdb_construct_object2`, which the engine implements as
+// `ClassDB::instantiate_without_postinitialization`. The name is the whole
+// story: the object comes back before NOTIFICATION_POSTINITIALIZE has been
+// sent. Godot's own `memnew` path sends it for built-in classes, so a class
+// that does real work there, a themed Control resolving theme items being the
+// case that found this, is otherwise handed back half-built. Constructing
+// a Label that way segfaults the editor.
+//
+// Every construction goes through here so a new call site cannot reintroduce
+// the omission. `classdb_construct_object3` carries the same requirement, so
+// this stays correct across that migration.
+GDExtensionObjectPtr constructObject(GDExtensionConstStringNamePtr class_name) {
+    auto& api = GodotApi::instance();
+    if (!api.classdb_construct_object) return nullptr;
+    auto object = api.classdb_construct_object(class_name);
+    if (!object) return nullptr;
+
+    // A missing bind leaves the object exactly as it was before this function
+    // existed, which is survivable, rather than failing a construction that
+    // would otherwise have worked.
+    NativeName object_class("Object");
+    NativeName notification("notification");
+    if (!object_class.valid() || !notification.valid()) return object;
+    auto bind = api.classdb_get_method_bind(object_class.ptr(), notification.ptr(),
+                                            kObjectNotificationHash);
+    if (!bind) return object;
+
+    int64_t what = kNotificationPostInitialize;
+    GDExtensionBool reversed = 0;
+    const void* arguments[] = {&what, &reversed};
+    api.object_method_bind_ptrcall(bind, object, arguments, nullptr);
+    return object;
+}
+
 Result<void> requireMethodBind(const char* class_name, const char* method_name, int64_t hash) {
     auto& api = GodotApi::instance();
     NativeName klass(class_name);
@@ -622,7 +659,7 @@ Result<VariantValue> makeInputEvent(const json& descriptor) {
     }
 
     NativeName native_class(class_name);
-    auto object = GodotApi::instance().classdb_construct_object(native_class.ptr());
+    auto object = constructObject(native_class.ptr());
     if (!object) return Error::internal("Godot could not construct " + std::string(class_name));
     auto fail = [&](const Error& error) -> Result<VariantValue> {
         GodotApi::instance().object_destroy(object);
@@ -1489,7 +1526,7 @@ Result<VariantValue> buildInjectedEvent(const runtime::InjectedInputEvent& spec)
     }
     NativeName native_class(class_name);
     if (!native_class.valid()) return Error::internal("Failed to construct input event class name");
-    auto object = GodotApi::instance().classdb_construct_object(native_class.ptr());
+    auto object = constructObject(native_class.ptr());
     if (!object) return Error::internal(std::string("Godot could not construct ") + class_name);
     auto fail = [&](const Error& error) -> Result<VariantValue> {
         GodotApi::instance().object_destroy(object);
@@ -4731,7 +4768,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         bool original_persistent = params.value("persistent", true);
         if (!adding) {
             NativeName packed_scene_name("PackedScene");
-            auto packed_scene = GodotApi::instance().classdb_construct_object(packed_scene_name.ptr());
+            auto packed_scene = constructObject(packed_scene_name.ptr());
             if (!packed_scene) return errorJson(500, "Godot could not inspect group persistence");
             auto packed_scene_value = makeObject(packed_scene);
             auto root_value = makeObject(root.value());
@@ -4897,7 +4934,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 return errorJson(400, "root_name must be a non-empty node name without path separators");
             }
             NativeName native_type(root_type);
-            packed_root = GodotApi::instance().classdb_construct_object(native_type.ptr());
+            packed_root = constructObject(native_type.ptr());
             if (!packed_root) return errorJson(500, "Godot could not construct scene root type: " + root_type);
             auto name = makeStringName(root_name);
             auto named = name.isOk()
@@ -4955,7 +4992,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
 
         NativeName packed_scene_name("PackedScene");
-        auto packed_scene = GodotApi::instance().classdb_construct_object(packed_scene_name.ptr());
+        auto packed_scene = constructObject(packed_scene_name.ptr());
         if (!packed_scene) {
             GodotApi::instance().object_destroy(packed_root);
             return errorJson(500, "Godot could not construct PackedScene");
@@ -5184,7 +5221,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (parent.isErr()) return errorJson(parent.error().code, parent.error().message);
         std::string node_type = params.value("node_type", "Node");
         NativeName type_name(node_type);
-        auto node = GodotApi::instance().classdb_construct_object(type_name.ptr());
+        auto node = constructObject(type_name.ptr());
         if (!node) return errorJson(400, "Godot ClassDB could not instantiate node type: " + node_type);
         auto node_class = makeString("Node");
         auto is_node_variant = node_class.isOk()
