@@ -1,0 +1,18 @@
+# The C++ sources vendor no package manager, so the only moving dependency here
+# is the set of actions the workflows pin. Left alone they quietly rot and start
+# warning about deprecated runner images.
+#
+# Python is deliberately not watched: CI asserts an exact jsonschema version on
+# purpose, so an automatic bump would open a pull request that always fails
+# until someone edits the assertion by hand.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+    labels:
+      - dependencies

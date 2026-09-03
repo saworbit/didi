@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or general help
+    url: https://github.com/saworbit/didi/discussions
+    about: Ask how to set Didi up, how a tool behaves, or anything that is not a bug report.
+  - name: Setup and configuration
+    url: https://github.com/saworbit/didi/blob/main/docs/QUICKSTART.md
+    about: Five minute setup for Godot, Cursor, Claude and VS Code before opening an issue.
+  - name: What a tool can actually do today
+    url: https://github.com/saworbit/didi/blob/main/docs/CAPABILITIES.md
+    about: Live, offline, unavailable and unimplemented behaviour, so you can tell a gap from a bug.
+  - name: Report a security vulnerability
+    url: https://github.com/saworbit/didi/security/advisories/new
+    about: Please report vulnerabilities privately rather than in a public issue.
