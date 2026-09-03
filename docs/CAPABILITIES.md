@@ -2,7 +2,7 @@
 
 This page describes what the current Didi build can execute. The runtime response from `tools/list` or `resources/list` is always authoritative if it differs from this snapshot.
 
-Didi must start with `--project <root>` or `DIDI_PROJECT_ROOT`; the selected canonical directory must contain `project.godot`. Missing or invalid project selection fails before MCP initialization.
+Didi must start with `--project <root>` or `DIDI_PROJECT_ROOT`; the selected canonical directory must contain `project.godot`. Missing or invalid project selection fails before MCP initialization, as does an unknown or malformed launch option.
 
 ## Reading capability metadata
 

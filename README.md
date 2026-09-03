@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Godot Engine](https://img.shields.io/badge/Godot-4.5%2B-478cbf?logo=godotengine&logoColor=white)](https://godotengine.org/)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=c%2B%2B&logoColor=white)](https://isocpp.org/)
-[![MCP Standard](https://img.shields.io/badge/MCP-2026--07--28-8A2BE2)](https://modelcontextprotocol.io/)
+[![MCP Standard](https://img.shields.io/badge/MCP-2026--07--28%20%7C%202024--11--05-8A2BE2)](https://modelcontextprotocol.io/)
 
 > *"Nothing happens. Nobody comes, nobody goes. It's awful!"* — *Waiting for Godot*
 > 

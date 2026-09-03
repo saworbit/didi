@@ -6,6 +6,8 @@ Use these instructions when an MCP client is connected to Didi for a Godot 4.5+ 
 
 Didi starts only with `--project <root>` or `DIDI_PROJECT_ROOT`, and that directory must contain `project.godot`. Treat the selected canonical project as the filesystem and session-isolation boundary. Do not attempt to recover a missing project by searching parent directories, `demo/`, or unrelated workspaces.
 
+Launch arguments are validated before anything else runs. An unknown option or a bad value exits `2` and prints the reason on stderr; it never starts with a silent default. Read that line rather than retrying the same command.
+
 ## Treat discovery as authoritative
 
 Before planning work, call `tools/list` and inspect `_meta.didi` on every candidate tool.

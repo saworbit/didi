@@ -99,6 +99,8 @@ Add to your VS Code MCP settings:
 
 The `--project` argument in the examples is mandatory unless `DIDI_PROJECT_ROOT` is set. The selected directory must contain `project.godot`; otherwise Didi exits with status `2` before MCP initialization.
 
+The launch arguments themselves are checked first. An unknown option, a missing or empty value, a value that is really the next option, a log level outside `DEBUG`, `INFO`, `WARN`, `ERROR`, `NONE`, or a stray argument all exit `2` with the reason and the matching help line on stderr. A typo never starts the server, so a client that appears to launch cleanly really did get the configuration you wrote.
+
 Ask the MCP client to list Didi's tools and inspect `_meta.didi`. Live tools should report `currentMode: "live"` when the matching Godot project is open with the addon enabled. If the editor is closed, live-only tools report `unavailable`; file-based tools report `offline_fallback`.
 
 See [Current Capability Matrix](CAPABILITIES.md) for the complete snapshot.
