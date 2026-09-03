@@ -5021,6 +5021,75 @@ json GodotBridge::execute(const std::string& method, const json& params,
                            {"source_node", params.value("target_node", "")}});
     }
 
+    if (method == "editor.getSelection") {
+        // What the person has selected is the referent of "this node". Nothing
+        // else in the surface can answer it, and a second MCP client cannot ask
+        // at all, because only one may hold the editor route.
+        auto selection_value = callObject(editor, "EditorInterface", "get_selection", 2690272531LL);
+        if (selection_value.isErr()) {
+            return errorJson(selection_value.error().code, selection_value.error().message);
+        }
+        auto selection = objectFromVariant(selection_value.value());
+        if (selection.isErr()) return errorJson(selection.error().code, selection.error().message);
+        if (!selection.value()) {
+            return errorJson(500, "Godot returned no EditorSelection");
+        }
+
+        auto root_result = editedSceneRoot(editor);
+        if (root_result.isErr()) {
+            return errorJson(root_result.error().code, root_result.error().message);
+        }
+        auto root = root_result.value();
+
+        auto nodes_value = callObject(selection.value(), "EditorSelection", "get_selected_nodes",
+                                      2915620761LL);
+        if (nodes_value.isErr()) {
+            return errorJson(nodes_value.error().code, nodes_value.error().message);
+        }
+        auto size_value = callVariant(nodes_value.value(), "size");
+        if (size_value.isErr()) return errorJson(size_value.error().code, size_value.error().message);
+        auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (size.isErr()) return errorJson(size.error().code, size.error().message);
+
+        // A selection is a handful of nodes, but it is engine-supplied and this
+        // runs on the main loop, so it is bounded like every other list.
+        constexpr int64_t kMaxSelected = 256;
+        const int64_t total = size.value();
+        const int64_t reported = std::min(total, kMaxSelected);
+
+        json selected = json::array();
+        for (int64_t index = 0; index < reported; ++index) {
+            auto position = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+            if (position.isErr()) return errorJson(position.error().code, position.error().message);
+            auto node_value = callVariant(nodes_value.value(), "get", {&position.value()});
+            if (node_value.isErr()) return errorJson(node_value.error().code, node_value.error().message);
+            auto node = objectFromVariant(node_value.value());
+            if (node.isErr()) return errorJson(node.error().code, node.error().message);
+            // A selected node can be freed between the engine building the list
+            // and this reading it. Skipping is right: reporting a null path
+            // would be a node path that resolves to nothing.
+            if (!node.value()) continue;
+
+            auto path = logicalPathFromEditedRoot(root, node.value());
+            auto node_class = nodeString(node.value(), "get_class", 201670096LL);
+            auto node_name = nodeString(node.value(), "get_name", 2002593661LL);
+            // A node selected in another open scene is not addressable from the
+            // edited root, so it is counted and not named rather than reported
+            // with a path that does not resolve.
+            if (path.isErr()) continue;
+            json entry = {{"node_path", path.value()}};
+            if (node_class.isOk()) entry["class"] = node_class.value();
+            if (node_name.isOk()) entry["name"] = node_name.value();
+            selected.push_back(std::move(entry));
+        }
+
+        return liveResult({{"status", "success"},
+                           {"selected", selected},
+                           {"count", selected.size()},
+                           {"selected_total", total},
+                           {"truncated", total > reported}});
+    }
+
     if (method == "editor.getState" || method == "scene.getHierarchy") {
         auto root_result = editedSceneRoot(editor);
         if (root_result.isErr()) return errorJson(root_result.error().code, root_result.error().message);

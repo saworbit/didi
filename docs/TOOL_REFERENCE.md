@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 93 canonical tool names plus 10 legacy names (103 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 94 canonical tool names plus 10 legacy names (104 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `90/93`
+**Canonical implementation:** `91/94`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 90/93 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 91/94 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -408,6 +408,14 @@ Leases are the crash story. An agent that dies holds nothing once its lease laps
 No tool here waits. An agent asks for the next ready task and is told what it got or that there is none, and decides what to do with its own turn. A tool that blocked would hold the board lock while it did, stopping every other agent from making progress.
 
 Bounds: 2,000 tasks a board, 64 dependencies and 16 tags a task, 100 notes retained, and a 24 hour ceiling on a lease.
+
+### `scene_get_selection` — Live
+
+Reports the nodes selected in the Godot editor, which is what a person means by "this node". Takes no arguments.
+
+Live and editor only. A selection exists only in a running editor, so there is no offline fallback: an empty list read from a file would be a fabricated fact rather than a degraded answer.
+
+Each entry carries `node_path` relative to the edited scene root, plus `class` and `name`. The response also carries `selected_total` and `truncated`, because two things are deliberately not named: a node selected in a scene other than the edited one, which has no path from the edited root, and a node freed between the engine building the list and Didi reading it. Both are counted rather than reported with a path that resolves to nothing. The list is capped at 256 nodes.
 
 ### `instantiate_asset` — Unimplemented legacy name
 

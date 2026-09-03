@@ -32,7 +32,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "scene_create", "scene_open", "scene_close", "scene_pack_branch",
         "runtime_read_logs", "runtime_read_output", "runtime_set_paused", "runtime_step", "runtime_stop",
         "runtime_get_tree", "eval_gdscript"
-        , "asset_reimport", "viewport_diff_capture", "ui_hit_test"
+        , "asset_reimport", "viewport_diff_capture", "ui_hit_test", "scene_get_selection"
         // Phase 7 partial delivery. Admitted after the production-configuration
         // extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and
         // 4.7.2 -- the trial the earlier attempt never ran, having only ever
@@ -69,6 +69,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "blackboard_list_keys", "blackboard_clear",
         "blackboard_task_create", "blackboard_task_claim", "blackboard_task_update",
         "blackboard_task_complete", "blackboard_task_list",
+        "scene_get_selection",
         "execute_test_session", "runtime_list_sessions", "runtime_attach_session",
         "runtime_detach_session", "runtime_get_session"
         , "project_search_text", "project_search_symbols",
@@ -151,6 +152,7 @@ CallToolResult handleBlackboardTaskClaim(const json& args, std::shared_ptr<ipc::
 CallToolResult handleBlackboardTaskUpdate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleBlackboardTaskComplete(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleBlackboardTaskList(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleSceneGetSelection(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectAnalyzeImpact(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAudioConfigureBus(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -1762,6 +1764,15 @@ void ToolRegistry::registerAllDefaultTools() {
             {"additionalProperties", false}
         };
         t.handler = [this](const json& args) { return handleBlackboardTaskList(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "scene_get_selection";
+        t.description = "Reports the nodes selected in the Godot editor, which is what a person means by \"this node\". Live and editor only: a selection exists only in a running editor.";
+        t.inputSchema = {{"type", "object"}, {"properties", json::object()},
+                         {"additionalProperties", false}};
+        t.handler = [this](const json& args) { return handleSceneGetSelection(args, m_ipcClient); };
         registerTool(std::move(t));
     }
     {

@@ -551,4 +551,26 @@ CallToolResult handleUiHitTest(const json& args, std::shared_ptr<ipc::IIpcClient
     return CallToolResult::successJson(response.value());
 }
 
+
+CallToolResult handleSceneGetSelection(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!args.is_object()) return CallToolResult::error("arguments must be an object");
+    if (!args.empty()) return CallToolResult::error("scene_get_selection takes no arguments");
+    if (!ipc || !ipc->isConnected()) {
+        return CallToolResult::error(
+            "Reading the editor selection requires a live Godot editor. There is no offline "
+            "answer: a selection exists only in a running editor.");
+    }
+    auto response = ipc->sendRequest("editor.getSelection", json::object(),
+                                     ipc::kWaitForDefinitiveResponse);
+    if (response.isErr()) {
+        return CallToolResult::error("Reading the editor selection failed: " +
+                                     response.error().message);
+    }
+    if (!response.value().is_object() || !response.value().contains("selected") ||
+        !response.value()["selected"].is_array()) {
+        return CallToolResult::error("Live editor selection returned a malformed response");
+    }
+    return CallToolResult::successJson(response.value());
+}
+
 } // namespace didi::mcp
