@@ -76,7 +76,7 @@ Governance authorized partial delivery. All feasible tools are now delivered; th
 
 ## Planned Capability Growth
 
-The capability matrix describes current behavior only. Phase 8 is `IN PROGRESS`: bounded project audit and exact static node-path impact analysis are delivered, while UID-cache reconciliation, import health/configuration, and incremental freshness remain planned. Delivery and governance status are tracked in [ROADMAP.md](ROADMAP.md), with detailed post-Phase-6 scope in [FUTURE_PHASES_DESIGN.md](FUTURE_PHASES_DESIGN.md). A feasible or planned capability must not appear as supported until its implementation and acceptance evidence are complete.
+The capability matrix describes current behavior only. Phase 8 is `IN PROGRESS`: bounded project audit, exact static node-path impact analysis, and conservative `.import` source/output health evidence are delivered. UID-cache reconciliation, checksum/importer-version validation, guarded import configuration, and broader incremental freshness remain planned. Delivery and governance status are tracked in [ROADMAP.md](ROADMAP.md), with detailed post-Phase-6 scope in [FUTURE_PHASES_DESIGN.md](FUTURE_PHASES_DESIGN.md). A feasible or planned capability must not appear as supported until its implementation and acceptance evidence are complete.
 
 ## Legacy names
 

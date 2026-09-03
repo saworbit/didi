@@ -161,7 +161,7 @@ Requirements:
 
 **Dependency:** Satisfied by the authorized Phase 7 partial-delivery exit gate.
 
-**Delivered slice:** `project_analyze_impact` provides bounded reverse lookup for symbols, signals, resource paths, and exact static node paths. It classifies scene connections, animation tracks, serialized `NodePath` values, and direct code literals while explicitly excluding dynamically constructed paths. `project_audit_assets` supplies bounded orphan, broken-reference, and dead-signal evidence. These are read-only offline analyses; the remaining scope below is not implied to be implemented.
+**Delivered slice:** `project_analyze_impact` provides bounded reverse lookup for symbols, signals, resource paths, and exact static node paths. It classifies scene connections, animation tracks, serialized `NodePath` values, and direct code literals while explicitly excluding dynamically constructed paths. `project_audit_assets` supplies bounded orphan, broken-reference, dead-signal, and conservative `.import` source/output health evidence. Import metadata reads reject malformed/unsafe paths, skip symlinks, and cap both files and bytes; `source_newer_than_output` is timestamp evidence rather than Godot checksum/importer-version validation. These are read-only offline analyses; UID-cache reconciliation, richer import validity, guarded configuration, and broader freshness remain unimplemented.
 
 **Goal:** Make project-wide dependencies, UID resolution, and import health inspectable and safely configurable.
 

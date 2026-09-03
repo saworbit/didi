@@ -1,6 +1,7 @@
 #include "didi/offline/project_audit.hpp"
 
 #include "didi/common/project_path.hpp"
+#include "didi/offline/import_health.hpp"
 #include "didi/offline/resource_indexer.hpp"
 
 #include <algorithm>
@@ -228,6 +229,15 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         }
     }
 
+    json import_health = {
+        {"scanned_import_metadata", 0},
+        {"import_issues", json::array()},
+        {"import_issue_count", 0}
+    };
+    if (options.include_import_health) {
+        import_health = inspectImportHealth(root_dir, options.max_findings);
+    }
+
     json result = {
         {"scanned_resources", resources.size()},
         {"scanned_text_files", sources.size()},
@@ -235,9 +245,15 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         {"orphan_bytes", orphan_bytes},
         {"broken_references", broken},
         {"dead_signals", dead_signals},
-        {"max_findings", options.max_findings}
+        {"max_findings", options.max_findings},
+        {"scanned_import_metadata", import_health["scanned_import_metadata"]},
+        {"import_issues", import_health["import_issues"]},
+        {"import_issue_count", import_health["import_issue_count"]}
     };
     if (indexer.truncated()) result["truncated"] = true;
+    if (import_health.contains("import_scan_truncated")) {
+        result["import_scan_truncated"] = true;
+    }
 
     // Said in the payload, not only in the docs, because these are the two ways
     // a caller can act on this and be wrong.
@@ -246,7 +262,10 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         "use may still be listed as an orphan.",
         "A signal is reported as dead only when no file emits it, connects to "
         "it, or wires it in a scene. A connection made through a variable name "
-        "cannot be seen."
+        "cannot be seen.",
+        "source_newer_than_output compares filesystem modification times. It is "
+        "evidence that reimport may be needed, not Godot's checksum, importer-version, "
+        "or settings-validity verdict."
     });
     return result;
 }

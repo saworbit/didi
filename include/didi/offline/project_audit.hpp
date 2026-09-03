@@ -31,6 +31,7 @@ struct ProjectAuditOptions {
     bool include_orphans{true};
     bool include_broken_references{true};
     bool include_dead_signals{true};
+    bool include_import_health{true};
     // A cap so one call cannot return an unbounded list.
     size_t max_findings{500};
 };

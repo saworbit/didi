@@ -1516,7 +1516,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "project_audit_assets";
-        t.description = "Audits the project for unreferenced assets, references that resolve to nothing, and declared signals nothing emits or connects. Reports evidence, not verdicts.";
+        t.description = "Audits the project for unreferenced assets, references that resolve to nothing, declared signals nothing uses, and unhealthy Godot import metadata. Reports evidence, not verdicts.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -1526,6 +1526,8 @@ void ToolRegistry::registerAllDefaultTools() {
                                                {"description", "res:// paths and uid:// references that resolve to no file in the project."}}},
                 {"include_dead_signals", {{"type", "boolean"}, {"default", true},
                                           {"description", "Signals declared in GDScript that no file emits, connects to, or wires in a scene."}}},
+                {"include_import_health", {{"type", "boolean"}, {"default", true},
+                                           {"description", "Existing Godot .import metadata with missing sources or outputs, malformed/unsafe paths, or source files newer than their outputs."}}},
                 {"max_findings", {{"type", "integer"}, {"minimum", 1}, {"maximum", 5000}, {"default", 500}}}
             }},
             {"additionalProperties", false}

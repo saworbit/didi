@@ -209,7 +209,7 @@ API-blocked contracts stay honestly unimplemented.
 
 **Dependency:** The authorized Phase 7 partial-delivery exit gate is satisfied.
 
-**Current slice:** Bounded reverse impact analysis is delivered for symbols, signals, resource paths, and exact static node paths. It identifies serialized scene connections, animation tracks, `NodePath` properties, and direct code literals without claiming to follow dynamically constructed paths. UID-cache reconciliation, import-health diagnostics, guarded import configuration, and incremental freshness remain planned.
+**Current slice:** Bounded reverse impact analysis is delivered for symbols, signals, resource paths, and exact static node paths. It identifies serialized scene connections, animation tracks, `NodePath` properties, and direct code literals without claiming to follow dynamically constructed paths. `project_audit_assets` also inspects existing `.import` metadata for malformed or unsafe paths, missing sources/outputs, and source timestamps newer than outputs under explicit file-count, byte, symlink, containment, and response bounds. UID-cache reconciliation, checksum/importer-version validity, guarded import configuration, and broader incremental freshness remain planned.
 
 **Exclusions:** No custom GDScript language server, unbounded whole-project semantic analysis, or silent import-setting mutation.
 
