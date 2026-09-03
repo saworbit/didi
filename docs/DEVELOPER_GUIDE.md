@@ -49,7 +49,7 @@ didi/
 │   ├── gdextension/      # In-engine GDExtension module & renderer
 │   └── standalone/       # main.cpp entry point for didi.exe
 ├── tests/                # Native suite plus real Godot smoke fixture/harness
-├── addons/didi/          # Godot addon manifest and extension DLL
+├── addons/didi/          # Godot addon manifest; the built addon is staged in build/addons/didi
 └── demo/                 # Reference Godot 4 test project
 ```
 
