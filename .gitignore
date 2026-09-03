@@ -36,6 +36,11 @@ demo/addons/didi/bin/*
 !addons/didi/bin/.gitkeep
 !demo/addons/didi/bin/.gitkeep
 
+# Agent blackboards. Shared state between agent processes, written under the
+# project by the blackboard tools. Ignored here because the fixtures generate
+# them; a real project may well want to commit its architectural decisions.
+.didi/
+
 # Godot Engine Import and Cache
 .godot/
 *.translation

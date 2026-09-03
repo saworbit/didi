@@ -65,6 +65,8 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "viewport_create_test_lab", "create_visual_test_lab", "resource_create",
         "resource_inspect", "project_list_resources", "query_project_resources",
         "project_get_uid_map", "project_audit_assets", "project_analyze_impact", "runtime_launch",
+        "blackboard_write", "blackboard_read", "blackboard_patch",
+        "blackboard_list_keys", "blackboard_clear",
         "execute_test_session", "runtime_list_sessions", "runtime_attach_session",
         "runtime_detach_session", "runtime_get_session"
         , "project_search_text", "project_search_symbols",
@@ -137,6 +139,11 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
 CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectGetUidMap(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleBlackboardWrite(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleBlackboardRead(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleBlackboardPatch(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleBlackboardListKeys(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleBlackboardClear(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectAnalyzeImpact(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAudioConfigureBus(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -1533,6 +1540,109 @@ void ToolRegistry::registerAllDefaultTools() {
             {"additionalProperties", false}
         };
         t.handler = [this](const json& args) { return handleProjectAuditAssets(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_write";
+        t.description = "Writes a value at a dot or slash path on a shared board, so a later agent in another process can read the decision instead of re-deriving it.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"minLength", 1}, {"maxLength", 64},
+                           {"description", "Board name. Letters, digits, underscore and hyphen. Separate boards do not see each other."}}},
+                {"path", {{"type", "string"}, {"minLength", 1}, {"maxLength", 512},
+                          {"description", "Dot or slash path such as architecture.inventory.slots. Segments cannot be empty, '.' or '..'."}}},
+                {"value", {{"description", "Any JSON value. Stored and returned verbatim; Didi never interprets or executes it."}}},
+                {"author", {{"type", "string"}, {"maxLength", 128},
+                            {"description", "Who wrote it. Recorded as metadata, never verified."}}},
+                {"reason", {{"type", "string"}, {"maxLength", 512},
+                            {"description", "Why it was written. Recorded as metadata."}}},
+                {"ttl_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 2592000},
+                                 {"description", "Drop the entry once this many seconds have passed. Expiry is applied on the next read, listing or write."}}}
+            }},
+            {"required", json::array({"path", "value"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardWrite(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_read";
+        t.description = "Reads a board or a subtree of one. Deep returns the whole subtree; shallow returns one level and marks nested containers rather than dropping them.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"minLength", 1}, {"maxLength", 64},
+                           {"description", "Board name. Letters, digits, underscore and hyphen. Separate boards do not see each other."}}},
+                {"path", {{"type", "string"}, {"maxLength", 512},
+                          {"description", "Dot or slash path. Omit to read the whole board."}}},
+                {"deep", {{"type", "boolean"}, {"default", true},
+                          {"description", "False returns one level, with nested containers replaced by a _truncated marker carrying their size."}}},
+                {"include_metadata", {{"type", "boolean"}, {"default", false},
+                                      {"description", "Include the author, reason, write time and expiry recorded for each path."}}}
+            }},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardRead(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_patch";
+        t.description = "Applies RFC 6902 operations to a board, all or nothing, so a parallel change is not silently overwritten by a read-modify-write.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"minLength", 1}, {"maxLength", 64},
+                           {"description", "Board name. Letters, digits, underscore and hyphen. Separate boards do not see each other."}}},
+                {"operations", {{"type", "array"}, {"minItems", 1}, {"maxItems", 100},
+                                {"description", "RFC 6902 operations against the board root. If any one fails, none is applied and the board is unchanged."},
+                                {"items", {{"type", "object"}}}}},
+                {"author", {{"type", "string"}, {"maxLength", 128}}},
+                {"reason", {{"type", "string"}, {"maxLength", 512}}}
+            }},
+            {"required", json::array({"operations"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardPatch(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_list_keys";
+        t.description = "Lists the paths on a board, namespaces and values alike, so an agent can discover what another one recorded without reading the whole board.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"minLength", 1}, {"maxLength", 64},
+                           {"description", "Board name. Letters, digits, underscore and hyphen. Separate boards do not see each other."}}},
+                {"prefix", {{"type", "string"}, {"maxLength", 512},
+                            {"description", "Only paths at or beneath this one. Omit to list everything."}}},
+                {"max_keys", {{"type", "integer"}, {"minimum", 1}, {"maximum", 10000}, {"default", 500}}},
+                {"include_metadata", {{"type", "boolean"}, {"default", false}}}
+            }},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardListKeys(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_clear";
+        t.description = "Removes a subtree, or the whole board when no path is given. This is the one that destroys work another agent is relying on, so it is confirmed.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"minLength", 1}, {"maxLength", 64},
+                           {"description", "Board name. Letters, digits, underscore and hyphen. Separate boards do not see each other."}}},
+                {"path", {{"type", "string"}, {"maxLength", 512},
+                          {"description", "Dot or slash path to remove. Omit to clear the entire board."}}}
+            }},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardClear(args, m_ipcClient); };
         registerTool(std::move(t));
     }
     {

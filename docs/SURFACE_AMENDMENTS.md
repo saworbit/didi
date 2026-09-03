@@ -364,6 +364,47 @@ that baseline is not adopted, and the tri-engine matrix (4.5.1, 4.6.2, 4.7.2)
 remains the verified set. Reopen this only when a capability Didi actually needs
 is unavailable below 4.7 and cannot be detected at runtime.
 
+### ACCEPTED (IMPLEMENTED): `blackboard_write`, `blackboard_read`, `blackboard_patch`, `blackboard_list_keys`, `blackboard_clear`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `blackboard_write`, `blackboard_read`, `blackboard_patch`, `blackboard_list_keys`, `blackboard_clear` |
+| **Failing workflow** | *Make the player double-jump, with one agent deciding the design and a second writing the code.* The first agent settles that jump count lives on `Player.gd` as `max_jumps`, that the reset happens in `_on_floor_entered`, and that the input action is the existing `ui_accept`. None of that is in the project yet, so the only place it exists is that agent's context. The second agent starts with an empty context and either re-derives the decisions, differently, or is handed the entire first transcript. Re-deriving produces `jump_count` against `max_jumps` and two agents editing the same file; handing over the transcript costs the tokens the split was meant to save. There is no file the first agent can leave the decision in that is not the project itself, and writing a half-made decision into `Player.gd` is worse than not recording it. |
+| **Execution modes** | `offline_fallback`. The board is a file next to the project; no editor is involved and none of these tools touch the engine. |
+| **Safety class** | `read` for `blackboard_read` and `blackboard_list_keys`. `create/set` for `blackboard_write` and `blackboard_patch`: both take `dry_run`, both are idempotent for the same arguments. `remove/overwrite` for `blackboard_clear`, which additionally requires a confirmation token, because it is the one that destroys work another agent is relying on. |
+| **Proving test** | Native: `Blackboard.WriteReadRoundTrip` writes a nested path and reads it back shallow and deep. `Blackboard.PathRejection` requires traversal, empty segments, over-long paths and over-deep paths to be refused rather than normalised. `Blackboard.PatchIsAtomic` requires a failing RFC 6902 operation to leave the board exactly as it was. `Blackboard.ConcurrentWritersDoNotLose` runs interleaved read-modify-write cycles through the file lock and requires every write to survive. `Blackboard.ExpiryRemovesEntries` requires a `ttl_seconds` entry to disappear from reads, key listings and the file itself once it lapses. `Blackboard.BoundsRefuseOversizeInput` covers the value, board, key-count and depth caps. `Blackboard.ClearScopes` requires a namespace clear to leave siblings intact and a whole-board clear to leave a readable empty board. |
+| **Reviewer** | Unassigned pending security review. These are the first tools that write outside the Godot project tree, so the boundary is stated in full below rather than left to the code. |
+
+**Why a file and not memory.** The issue proposed an in-memory store with
+optional persistence. In-memory cannot work here, and the reason is structural:
+each MCP client launches its own `didi` process, so two agents are two
+processes and share no memory. An in-memory board would appear to work in every
+single-agent test and be empty for the second agent in the workflow above,
+which is the only workflow that motivated it. The board is therefore a file
+from the start, held under `.didi/blackboard/` in the project, with an
+OS-backed exclusive lock across every read-modify-write and an atomic rename on
+save.
+
+**Why in the project and not the session directory.** The session directory is
+keyed per session and cleaned by the operating system. A board keyed per
+session is invisible to the second agent, and a board in a temporary directory
+loses the decisions it exists to keep. `.didi/` sits beside `project.godot`,
+survives, and is inspectable by the person supervising the agents, which is the
+point of a blackboard rather than a cache.
+
+**What this deliberately does not do.** It is not a database. There are no
+queries, no indexes and no history beyond the last write of each path. It does
+not coordinate anything on its own: nothing here claims work, expires a lease,
+or unblocks a waiting agent. That is the task engine, and it is a separate
+amendment on top of this one rather than a flag inside `blackboard_write`.
+
+**What a caller has to know.** Board content is written by whatever calls the
+tool. It is data, never instruction, and Didi never executes it. Values are
+returned to the caller verbatim, so an agent reading a board is reading
+something another agent wrote, with the same trust as any other tool result.
+The bounds are published in the response rather than only in the docs, because
+the caller that hits one is the one that needs to know why.
+
 ### PROPOSED: `scene_close` reads real dirty state on Godot 4.7+
 
 | Field | Value |

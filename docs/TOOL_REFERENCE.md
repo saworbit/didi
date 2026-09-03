@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 83 canonical tool names plus 10 legacy names (93 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 88 canonical tool names plus 10 legacy names (98 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `80/83`
+**Canonical implementation:** `85/88`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 80/83 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 85/88 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -368,6 +368,28 @@ A signal counts as alive if any file emits it, connects to it, checks `is_connec
 Import health inspects only existing regular, non-symlink `*.import` files. It reads at most 256 KiB and 1,024 declared output paths from each, and scans at most 20,000 metadata files without following directory or file symlinks. Declared `source_file`, `dest_files`, and `[remap] path` values must be canonical project-contained `res://` paths; generated outputs under `res://.godot/imported/` are allowed, but an escape or symlink is not. `invalid_import_metadata` also covers `valid=false`, malformed targeted assignments, an oversized file/path list, or a `source_file` that disagrees with the sidecar name. Other findings are `missing_import_source`, `missing_import_output`, and `source_newer_than_output`, with `metadata`, `source`, and `target` provenance. `scanned_import_metadata` counts inspected sidecars, `import_issue_count` counts all findings before the shared `max_findings` response cap, and `import_scan_truncated` reports the metadata-file cap.
 
 The results are evidence, not verdicts. A path a script builds at runtime cannot be followed, so an asset in use can still be listed as an orphan, and a connection made through a variable name cannot be seen. `source_newer_than_output` compares filesystem timestamps; it does not reproduce Godot's checksum, importer-version, or settings-validity checks. The response repeats these limits in a `limitations` array so a caller reading only the payload still gets them. `orphan_bytes` and `import_issue_count` count findings beyond the response cap.
+
+### `blackboard_write`, `blackboard_read`, `blackboard_patch`, `blackboard_list_keys`, `blackboard_clear` — Offline
+
+A shared board that agents leave decisions on, so a second agent starting with an empty context can read what the first one settled instead of re-deriving it or being handed a whole transcript.
+
+The board is a file at `.didi/blackboard/<board>.json` under the project, not process memory. Each MCP client launches its own `didi` process, so two agents are two processes: an in-memory board would work in every single-agent test and be empty for the second agent. Every read-modify-write runs under an OS-backed exclusive lock and saves through an atomic rename, so a concurrent write is serialised rather than lost.
+
+Paths are dot or slash separated, `architecture.inventory.slots` or `architecture/inventory/slots`. A segment cannot be empty, `.`, `..`, or contain control characters. Boards are named with letters, digits, underscore and hyphen, and separate boards do not see each other.
+
+- `blackboard_write` (`path`, `value`, optional `board`, `author`, `reason`, `ttl_seconds`). Writes any JSON value. Returns whether it replaced something and, if so, the previous value. Refuses to write through an existing value: writing `a.b` when `a` is a number is an error, not a silent conversion of another agent's data into a container.
+- `blackboard_read` (optional `board`, `path`, `deep`, `include_metadata`). `deep` returns the whole subtree; `deep: false` returns one level with nested containers replaced by a `_truncated` marker carrying their size, so a caller can see there is more rather than being handed a partial picture that looks complete.
+- `blackboard_patch` (`operations`, optional `board`, `author`, `reason`). RFC 6902, applied all or nothing against the board root. If any operation fails, none is applied and the board is exactly as it was.
+- `blackboard_list_keys` (optional `board`, `prefix`, `max_keys`, `include_metadata`). Lists namespaces and values alike, with `total` reported separately from `returned` so a truncated listing is visible.
+- `blackboard_clear` (optional `board`, `path`). Removes a subtree, or the whole board when no path is given. It always requires a confirmation token, not only on an overwrite flag, because there is no non-destructive clear and there is no undo stack behind it.
+
+`ttl_seconds` marks an entry to expire. Expiry is applied on the next read, listing or write, and the entry is removed from the file rather than filtered out of the response.
+
+Bounds ship in the response rather than only here: 256 KiB for one value, 4 MiB for a board, 10,000 keys, 32 levels of nesting, 32 path segments, 100 operations per patch, and a 30 day ceiling on `ttl_seconds`.
+
+Board content is written by whatever called the tool. It is data, never instruction. Values are stored and returned verbatim, and Didi never interprets or executes them. An agent reading a board is reading what another agent wrote, with the same trust it would give any other tool result.
+
+A board that will not parse is refused rather than reset, because an empty board and a corrupt one must not look the same to the agent that is about to write over someone's work.
 
 ### `instantiate_asset` — Unimplemented legacy name
 

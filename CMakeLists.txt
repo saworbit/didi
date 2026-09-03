@@ -123,6 +123,7 @@ set(CORE_SOURCES
     src/offline/gdscript_diagnostics.cpp
     src/offline/resource_indexer.cpp
     src/offline/audio_bus_layout.cpp
+    src/offline/blackboard.cpp
     src/offline/import_health.cpp
     src/offline/project_audit.cpp
     src/offline/project_impact.cpp
@@ -136,6 +137,7 @@ set(CORE_SOURCES
     src/tools/script_tools.cpp
     src/tools/runtime_tools.cpp
     src/tools/asset_tools.cpp
+    src/tools/blackboard_tools.cpp
     src/tools/project_tools.cpp
     src/tools/signal_tools.cpp
     src/tools/physics_nav_tools.cpp
@@ -255,6 +257,7 @@ set(TEST_SOURCES
     tests/test_script_patch.cpp
     tests/test_resource_indexer.cpp
     tests/test_import_health.cpp
+    tests/test_blackboard.cpp
     tests/test_project_search.cpp
     tests/test_image_diff.cpp
     tests/test_test_runner.cpp
