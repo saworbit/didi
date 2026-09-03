@@ -39,8 +39,25 @@ jobs:
         with:
           cmake-version: '3.28.x'
 
+      # ctest runs the Python contract suite as well as the native one, and that
+      # suite needs the pinned jsonschema. Without this the release gate fails on
+      # a runner whose system jsonschema is older than Draft202012Validator,
+      # which is exactly how a release stops on a dependency and not on a defect.
+      # CMake is told which interpreter to bake into the test, so ctest uses this
+      # one rather than whichever it would have discovered.
+      - name: Install pinned test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv .venv-release
+          VENV_PY=".venv-release/bin/python"
+          [ -x "$VENV_PY" ] || VENV_PY=".venv-release/Scripts/python.exe"
+          "$VENV_PY" -m pip install --quiet --disable-pip-version-check -r requirements-dev.txt
+          "$VENV_PY" -c "import jsonschema; assert jsonschema.__version__ == '4.25.1', jsonschema.__version__"
+          echo "DIDI_RELEASE_PYTHON=$PWD/$VENV_PY" >> "$GITHUB_ENV"
+
       - name: Configure CMake
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="${{ env.DIDI_RELEASE_PYTHON }}"
 
       - name: Build Release Binaries
         run: cmake --build build --config Release --parallel

@@ -11,12 +11,20 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
+Nothing yet. The surface below is what 1.5.0 shipped and is current.
+
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
 **Canonical implementation:** `91/94`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
+
+Discovery now exposes 94 canonical tools plus 10 legacy registrations (104 total). 91 canonical tools are implemented and 3 remain unimplemented.
+
+---
+
+## [1.5.0] - 2026-09-03
 
 ### Added
 

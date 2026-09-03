@@ -12,7 +12,7 @@
 
 **Didi** (`godot-mcp-native`) is a high-performance, native [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for **Godot 4.5+**, engineered in **C++20** as a standalone executable (`didi.exe` on Windows, `didi` on POSIX) and an in-engine GDExtension library for the target platform.
 
-The current documented release is **1.4.0**.
+The current documented release is **1.5.0**.
 
 ---
 
