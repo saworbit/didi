@@ -3,11 +3,11 @@
 #include "didi/common/project_path.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <optional>
-#include <regex>
 #include <set>
 #include <sstream>
 #include <tuple>
@@ -39,14 +39,9 @@ struct IssueLess {
     }
 };
 
-size_t matchCount(const std::string& text, const std::regex& pattern) {
-    return static_cast<size_t>(std::distance(std::sregex_iterator(text.begin(), text.end(), pattern),
-                                             std::sregex_iterator()));
-}
-
 struct ImportSections {
-    std::string remap{"\n"};
-    std::string dependencies{"\n"};
+    std::vector<std::string> remap;
+    std::vector<std::string> dependencies;
 };
 
 ImportSections importSections(const std::string& text) {
@@ -69,8 +64,8 @@ ImportSections importSections(const std::string& text) {
             active = ActiveSection::Other;
             continue;
         }
-        if (active == ActiveSection::Remap) sections.remap += line + '\n';
-        if (active == ActiveSection::Dependencies) sections.dependencies += line + '\n';
+        if (active == ActiveSection::Remap) sections.remap.push_back(line);
+        if (active == ActiveSection::Dependencies) sections.dependencies.push_back(line);
     }
     return sections;
 }
@@ -86,53 +81,93 @@ std::optional<std::string> readBounded(const fs::path& path) {
     return contents;
 }
 
+std::optional<std::pair<std::string, std::string>> assignment(const std::string& line) {
+    const auto equals = line.find('=');
+    if (equals == std::string::npos) return std::nullopt;
+    const auto key = strings::trim(line.substr(0, equals));
+    if (key.empty()) return std::nullopt;
+    return std::pair{key, strings::trim(line.substr(equals + 1))};
+}
+
+bool isPathKey(const std::string& key) {
+    if (key == "path") return true;
+    if (!strings::startsWith(key, "path.") || key.size() == 5) return false;
+    return std::all_of(key.begin() + 5, key.end(), [](unsigned char character) {
+        return std::isalnum(character) != 0 || character == '_' || character == '.' ||
+               character == '-';
+    });
+}
+
+std::optional<std::string> quotedValue(const std::string& value, bool allow_empty) {
+    if (value.size() < 2 || value.front() != '"' || value.back() != '"') return std::nullopt;
+    const auto unquoted = value.substr(1, value.size() - 2);
+    if ((!allow_empty && unquoted.empty()) || unquoted.find('"') != std::string::npos) {
+        return std::nullopt;
+    }
+    return unquoted;
+}
+
+std::optional<std::vector<std::string>> destinationValues(const std::string& value) {
+    if (value.size() < 2 || value.front() != '[' || value.back() != ']') return std::nullopt;
+    std::vector<std::string> outputs;
+    size_t cursor = 1;
+    const size_t end = value.size() - 1;
+    const auto skip_space = [&] {
+        while (cursor < end && std::isspace(static_cast<unsigned char>(value[cursor])) != 0) {
+            ++cursor;
+        }
+    };
+    skip_space();
+    if (cursor == end) return outputs;
+    while (cursor < end) {
+        if (value[cursor] != '"') return std::nullopt;
+        const auto close = value.find('"', cursor + 1);
+        if (close == std::string::npos || close >= end || close == cursor + 1) return std::nullopt;
+        outputs.push_back(value.substr(cursor + 1, close - cursor - 1));
+        if (outputs.size() > kMaxImportPathsPerMetadata) return std::nullopt;
+        cursor = close + 1;
+        skip_space();
+        if (cursor == end) break;
+        if (value[cursor] != ',') return std::nullopt;
+        ++cursor;
+        skip_space();
+        if (cursor == end) return std::nullopt;
+    }
+    return outputs;
+}
+
 std::optional<ImportMetadata> parseMetadata(const std::string& text) {
     const auto sections = importSections(text);
-    static const std::regex source_assignment(R"re(\n[ \t]*source_file\s*=)re");
-    static const std::regex source_pattern(R"re(\n[ \t]*source_file\s*=\s*"([^"]+)")re");
-    static const std::regex path_assignment(R"re(\n[ \t]*path(?:\.[A-Za-z0-9_.-]+)?\s*=)re");
-    static const std::regex path_pattern(R"re(\n[ \t]*path(?:\.[A-Za-z0-9_.-]+)?\s*=\s*"([^"]*)")re");
-    static const std::regex destinations_assignment(R"re(\n[ \t]*dest_files\s*=)re");
-    static const std::regex destinations_pattern(R"re(\n[ \t]*dest_files\s*=\s*\[([^\]]*)\])re");
-    static const std::regex quoted_value(R"re("([^"]+)")re");
-    static const std::regex explicitly_invalid(R"re(\n[ \t]*valid\s*=\s*false\b)re");
-
-    std::smatch source_match;
-    if (std::regex_search(sections.remap, explicitly_invalid) ||
-        matchCount(sections.dependencies, source_assignment) != 1 ||
-        !std::regex_search(sections.dependencies, source_match, source_pattern) ||
-        matchCount(sections.dependencies, source_pattern) != 1 ||
-        matchCount(sections.remap, path_assignment) != matchCount(sections.remap, path_pattern) ||
-        matchCount(sections.dependencies, destinations_assignment) > 1) {
-        return std::nullopt;
-    }
-
     ImportMetadata metadata;
-    metadata.source = source_match[1].str();
-    for (auto it = std::sregex_iterator(sections.remap.begin(), sections.remap.end(), path_pattern);
-         it != std::sregex_iterator(); ++it) {
-        const auto output = (*it)[1].str();
-        if (!output.empty()) metadata.outputs.push_back(output);
-    }
-    std::smatch destinations_match;
-    const bool destinations_declared = std::regex_search(sections.dependencies,
-                                                         destinations_assignment);
-    if (std::regex_search(sections.dependencies, destinations_match, destinations_pattern)) {
-        const auto values = destinations_match[1].str();
-        for (auto it = std::sregex_iterator(values.begin(), values.end(), quoted_value);
-             it != std::sregex_iterator(); ++it) {
-            metadata.outputs.push_back((*it)[1].str());
+    for (const auto& line : sections.remap) {
+        const auto field = assignment(line);
+        if (!field) continue;
+        if (field->first == "valid" && field->second == "false") return std::nullopt;
+        if (isPathKey(field->first)) {
+            const auto output = quotedValue(field->second, true);
+            if (!output) return std::nullopt;
+            if (!output->empty()) metadata.outputs.push_back(*output);
         }
-        const auto residue = std::regex_replace(values, quoted_value, "");
-        if (std::any_of(residue.begin(), residue.end(), [](unsigned char character) {
-                return character != ',' && character != ' ' && character != '\t' &&
-                       character != '\r' && character != '\n';
-            })) {
-            return std::nullopt;
-        }
-    } else if (destinations_declared) {
-        return std::nullopt;
     }
+
+    size_t source_assignments = 0;
+    size_t destination_assignments = 0;
+    for (const auto& line : sections.dependencies) {
+        const auto field = assignment(line);
+        if (!field) continue;
+        if (field->first == "source_file") {
+            ++source_assignments;
+            const auto source = quotedValue(field->second, false);
+            if (!source) return std::nullopt;
+            metadata.source = *source;
+        } else if (field->first == "dest_files") {
+            ++destination_assignments;
+            const auto outputs = destinationValues(field->second);
+            if (!outputs) return std::nullopt;
+            metadata.outputs.insert(metadata.outputs.end(), outputs->begin(), outputs->end());
+        }
+    }
+    if (source_assignments != 1 || destination_assignments > 1) return std::nullopt;
     if (metadata.outputs.size() > kMaxImportPathsPerMetadata) return std::nullopt;
     return metadata;
 }
