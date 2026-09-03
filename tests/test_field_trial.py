@@ -1,6 +1,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import tempfile
 import unittest
 
 
@@ -84,6 +85,82 @@ class BuildReportTests(unittest.TestCase):
     def test_empty_manifest_reports_zero_rather_than_dividing_by_zero(self):
         report = COVERAGE.build_report({}, [])
         self.assertEqual(report["totals"]["coverage_percent"], 0.0)
+
+
+SEED_PATH = REPOSITORY_ROOT / "tools" / "field-trial" / "seed_trial.py"
+SEED_SPEC = importlib.util.spec_from_file_location("field_trial_seed", SEED_PATH)
+if SEED_SPEC is None or SEED_SPEC.loader is None:
+    raise ImportError(f"Cannot load seed script from {SEED_PATH}")
+SEED = importlib.util.module_from_spec(SEED_SPEC)
+SEED_SPEC.loader.exec_module(SEED)
+
+
+class SeedTests(unittest.TestCase):
+    def setUp(self):
+        self._temp = tempfile.TemporaryDirectory()
+        self.root = Path(self._temp.name)
+        self.addCleanup(self._temp.cleanup)
+        self.didi = self.root / "didi.exe"
+        self.didi.write_text("binary", encoding="utf-8")
+        self.godot = self.root / "godot.exe"
+        self.godot.write_text("binary", encoding="utf-8")
+
+    def seed(self, target):
+        return SEED.seed(
+            target=target,
+            didi_exe=self.didi,
+            godot_exe=self.godot,
+            repository=REPOSITORY_ROOT,
+        )
+
+    def test_writes_a_project_godot_the_server_will_accept(self):
+        target = self.root / "trial"
+        self.seed(target)
+        project = (target / "project.godot").read_text(encoding="utf-8")
+        self.assertIn("config_version=5", project)
+        self.assertIn("[application]", project)
+
+    def test_seed_carries_no_addon_and_no_enabled_plugin(self):
+        target = self.root / "trial"
+        self.seed(target)
+        self.assertFalse((target / "addons").exists())
+        self.assertNotIn(
+            "editor_plugins", (target / "project.godot").read_text(encoding="utf-8")
+        )
+
+    def test_mcp_config_launches_the_built_server_at_debug_on_this_project(self):
+        target = self.root / "trial"
+        self.seed(target)
+        config = json.loads((target / ".mcp.json").read_text(encoding="utf-8"))
+        server = config["mcpServers"]["didi"]
+        self.assertEqual(server["command"], str(self.didi))
+        self.assertEqual(
+            server["args"], ["--project", str(target), "--log-level", "DEBUG"]
+        )
+
+    def test_baseline_records_what_the_tester_was_handed(self):
+        target = self.root / "trial"
+        baseline = self.seed(target)
+        written = json.loads((target / "baseline.json").read_text(encoding="utf-8"))
+        self.assertEqual(written, baseline)
+        for field in ("commit", "godot_executable", "didi_executable", "seeded_utc"):
+            self.assertIn(field, written)
+        self.assertRegex(written["commit"], r"^[0-9a-f]{7,40}$")
+
+    def test_refuses_to_overwrite_an_existing_trial(self):
+        target = self.root / "trial"
+        self.seed(target)
+        with self.assertRaises(FileExistsError):
+            self.seed(target)
+
+    def test_refuses_a_server_path_that_does_not_exist(self):
+        with self.assertRaises(FileNotFoundError):
+            SEED.seed(
+                target=self.root / "trial",
+                didi_exe=self.root / "absent.exe",
+                godot_exe=self.godot,
+                repository=REPOSITORY_ROOT,
+            )
 
 
 if __name__ == "__main__":

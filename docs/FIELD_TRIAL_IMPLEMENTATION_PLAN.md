@@ -260,7 +260,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `python -m unittest tests.test_field_trial -v`
-Expected: PASS, 10 tests.
+Expected: PASS, 9 tests.
 
 - [ ] **Step 5: Register the test in CI**
 
@@ -520,7 +520,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `python -m unittest tests.test_field_trial -v`
-Expected: PASS, 16 tests.
+Expected: PASS, 15 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -707,7 +707,7 @@ Expected: baseline printed. Record the `commit` value; the review compares the r
 - [ ] **Step 7: Verify the whole suite and the validator**
 
 Run: `python -m unittest tests.test_field_trial -v` then `python tools/validate_documentation.py`
-Expected: 16 tests pass, validator exits 0.
+Expected: 15 tests pass, validator exits 0.
 
 - [ ] **Step 8: Open the pull request**
 
