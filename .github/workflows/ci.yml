@@ -184,6 +184,14 @@ jobs:
           # make the confirmation system decorative.
           "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_yolo_mode -v
 
+      - name: Verify the command line refuses unknown and malformed options
+        shell: bash
+        run: |
+          # A typo used to start the server as though the launch had succeeded,
+          # and a value option could swallow the flag after it, so an operator
+          # could ask for a mode and quietly start without it.
+          "$DIDI_PYTHON" -m unittest tests.test_cli_arguments -v
+
       - name: Validate Internal Markdown Links
         shell: bash
         run: |
