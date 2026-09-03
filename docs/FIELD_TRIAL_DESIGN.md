@@ -97,11 +97,17 @@ Issues only. No commits, no branches, no pull requests. Issue text is written in
 
 ## 8. Measurement
 
-The ledger is the tester's account of itself and is not trusted for coverage. The server runs at `--log-level DEBUG` with output captured to a file, and tool invocations are counted from that log. That gives objective data on which implemented tools were called and, more usefully, which never occurred to the tester at all.
+The ledger is the tester's account of itself and is not trusted for coverage.
 
-If the server does not log invocations at `DEBUG`, that is finding number one and the ledger carries coverage for round one.
+The server log cannot supply that account either. `handleRequest` logs `Method: tools/call` at `DEBUG` and the tool name appears only in the `TOOL_EXEC` line written when a call throws, so the log can say how many tool calls happened but not which tools they were. Counting coverage from it would silently under-report every tool that worked.
 
-The run produces four artifacts: the ledger, the captured server log, the working directory tree, and the list of issues filed.
+Coverage therefore comes from the client transcript, where every invocation is recorded as a `tool_use` block named `mcp__didi__<tool>` carrying its arguments. `tools/field-trial/coverage.py` reads that transcript and compares it against the manifest captured at seed time, giving the distinct tools called, the total invocations, and the set of implemented tools that never occurred to the tester at all. That last set is the interesting one.
+
+The server still runs at `--log-level DEBUG`, because the log remains the best record of what the server thought was happening when something failed.
+
+That the tool name is absent from every non-error log line is a real observability gap. It is recorded here rather than fixed, because changing the server to measure the server immediately before testing it is the wrong order.
+
+The run produces five artifacts: the ledger, the coverage report, the captured server log, the working directory tree, and the list of issues filed.
 
 ## 9. Out of scope
 
