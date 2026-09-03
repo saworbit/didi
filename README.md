@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Godot Engine](https://img.shields.io/badge/Godot-4.5%2B-478cbf?logo=godotengine&logoColor=white)](https://godotengine.org/)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=c%2B%2B&logoColor=white)](https://isocpp.org/)
-[![MCP Standard](https://img.shields.io/badge/MCP-2024--11--05-8A2BE2)](https://modelcontextprotocol.io/)
+[![MCP Standard](https://img.shields.io/badge/MCP-2026--07--28-8A2BE2)](https://modelcontextprotocol.io/)
 
 > *"Nothing happens. Nobody comes, nobody goes. It's awful!"* — *Waiting for Godot*
 > 
@@ -34,6 +34,8 @@ The current documented release is **1.4.0**.
 | 📡 [**API & Wire Protocol Specification**](docs/API_SPECIFICATION.md) | **Integrators** | JSON-RPC 2.0 transport and binary frame specifications. |
 | 🔐 [**Security Policy**](SECURITY.md) | **Users / Operators** | Supported release line, local attachment boundary, and private reporting guidance. |
 | 📝 [**Changelog**](CHANGELOG.md) | **All** | Version history and notable changes. |
+| 🤝 [**Contributing**](CONTRIBUTING.md) | **Contributors** | Build, test, and review expectations for a change you want merged. |
+| 💚 [**Code of Conduct**](CODE_OF_CONDUCT.md) | **Everyone** | How people here are expected to treat each other, and how to report a problem. |
 
 ---
 

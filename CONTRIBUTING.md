@@ -4,7 +4,14 @@ Thank you for your interest in contributing to **Didi** (`godot-mcp-native`)!
 
 ---
 
-## 🛠️ Code of Conduct & Principles
+## 🤝 Code of Conduct
+
+Everyone taking part here agrees to the [Code of Conduct](CODE_OF_CONDUCT.md).
+Report anything that breaks it privately through the maintainer's GitHub profile.
+
+---
+
+## 🛠️ Engineering Principles
 
 1. **Native Performance First**: Didi avoids heavy runtimes (no Node.js, Python, or WebSockets). All core logic is implemented in modern C++20.
 2. **Deterministic Memory & Lifetime**: Use modern RAII, smart pointers, and zero-allocation framing paths where possible.
