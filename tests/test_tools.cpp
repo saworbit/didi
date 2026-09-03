@@ -1,4 +1,5 @@
 #include "didi/mcp/tool_registry.hpp"
+#include "didi/runtime/session_kind_policy.hpp"
 #include "didi/mcp/resource_registry.hpp"
 #include "didi/mcp/prompt_registry.hpp"
 #include "didi/mcp/mcp_server.hpp"
@@ -185,7 +186,7 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 103u);
+    ASSERT_EQ(tools.size(), 104u);
     const std::unordered_set<std::string> legacy_names = {
         "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
         "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
@@ -197,7 +198,7 @@ static void test_tool_registry_default_tools() {
         if (legacy_names.count(tool.name) == 0) ++canonical_count;
     }
     ASSERT_EQ(legacy_names.size(), 10u);
-    ASSERT_EQ(canonical_count, 93u);
+    ASSERT_EQ(canonical_count, 94u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -318,7 +319,7 @@ static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract(
         if (legacy_names.count(tool.name) != 0) continue;
         tool.capability.implemented ? ++implemented : ++unimplemented;
     }
-    ASSERT_EQ(implemented, 90u);
+    ASSERT_EQ(implemented, 91u);
     ASSERT_EQ(unimplemented, 3u);
 }
 
@@ -1600,6 +1601,35 @@ static void test_tool_capabilities_are_honest() {
     ASSERT_TRUE(reserved_call.content[0].text.find("no trustworthy execution path") != std::string::npos);
 }
 
+static void test_scene_get_selection_contract() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto* tool = registry.getTool("scene_get_selection");
+    ASSERT_TRUE(tool != nullptr);
+
+    // Live and editor only. A selection exists only in a running editor, so an
+    // offline mode here would be a fabricated empty answer rather than a
+    // degraded one.
+    const auto definition = tool->toJson();
+    ASSERT_EQ(definition["_meta"]["didi"]["executionModes"], didi::json::array({"live"}));
+    ASSERT_TRUE(definition["_meta"]["didi"]["implemented"].get<bool>());
+    ASSERT_EQ(didi::runtime::livePolicyForTool("scene_get_selection"),
+              didi::runtime::LiveSessionKindPolicy::editor_only);
+
+    // It is a read, so it must not have acquired a dry run.
+    ASSERT_TRUE(!definition["inputSchema"]["properties"].contains("dry_run"));
+
+    // Detached, it refuses and says why rather than returning an empty list,
+    // which would read as "nothing is selected".
+    registry.setIpcClient(nullptr);
+    auto refused = registry.callTool("scene_get_selection", didi::json::object());
+    ASSERT_TRUE(refused.isError);
+    ASSERT_TRUE(refused.content[0].text.find("live Godot editor") != std::string::npos);
+
+    auto rejected = registry.callTool("scene_get_selection", didi::json{{"root_path", "/root"}});
+    ASSERT_TRUE(rejected.isError);
+}
+
 static void test_resource_registry() {
     auto& reg = didi::mcp::ResourceRegistry::instance();
     reg.registerAllDefaultResources();
@@ -2177,6 +2207,7 @@ struct RegisterToolTests {
                      test_project_audit_honours_switches_and_rejects_bad_arguments);
         registerTest("Tools.ProjectAuditImportHealth",
                      test_project_audit_exposes_optional_import_health);
+        registerTest("Tools.SceneGetSelectionContract", test_scene_get_selection_contract);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }

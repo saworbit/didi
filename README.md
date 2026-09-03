@@ -23,10 +23,10 @@ The current documented release is **1.4.0**.
 | 🚀 [**Quickstart Guide**](docs/QUICKSTART.md) | **Developers / Humans** | 5-minute step-by-step setup for Godot, Cursor, Claude, and VS Code. |
 | 🤖 [**LLM Agent Instructions**](docs/LLM_INSTRUCTIONS.md) | **AI Assistants / LLMs** | Dedicated system prompt & decision tree for Claude, Cursor, Windsurf, Antigravity. |
 | ✅ [**Current Capability Matrix**](docs/CAPABILITIES.md) | **Everyone** | Authoritative live, offline, unavailable, and unimplemented behavior. |
-| 🗺️ [**Roadmap & 93-Tool Surface**](docs/ROADMAP.md) | **Developers / Contributors** | Completed phases and technical build order. |
+| 🗺️ [**Roadmap & 94-Tool Surface**](docs/ROADMAP.md) | **Developers / Contributors** | Completed phases and technical build order. |
 | 🧪 [**Phase 7 API Feasibility Evidence**](docs/PHASE_7_API_FEASIBILITY.md) | **Developers / Governance** | Reproducible Godot 4.5.1/4.7.2 feasibility results and the exact three blocked contracts. |
 | 📋 [**Phase 7 Approved Executable Plan**](docs/PHASE_7_IMPLEMENTATION_PLAN.md) | **Developers / Governance** | Approved atomic 83/83 plan, stopped at its feasibility gate. |
-| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 93 canonical tools plus 10 legacy names. |
+| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 94 canonical tools plus 10 legacy names. |
 | 🏛️ [**Architecture & System Topology**](docs/ARCHITECTURE.md) | **Engineers / Architects** | Deep-dive into C++20 design, dual execution topology, threading safety, and named-pipe IPC. |
 | 📦 [**Dynamic Resources & Prompts**](docs/RESOURCES_AND_PROMPTS.md) | **Developers / LLMs** | Technical specs for `godot://...` resources and prompt workflows. |
 | 🛡️ [**Administrator & Operations Guide**](docs/ADMIN_GUIDE.md) | **DevOps / Admins** | Security DACL hardening, CI/CD headless execution, observability, and troubleshooting. |
@@ -65,7 +65,7 @@ The current documented release is **1.4.0**.
 ┌─────────────────────────────────────────────────────────────┐
 │        Didi (C++ MCP Core Engine - didi / didi.exe)         │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2024-11-05 standard)       │
-│  - Registry (93 canonical tools + 10 legacy names)          │
+│  - Registry (94 canonical tools + 10 legacy names)          │
 │  - Dynamic Resources (godot://project/tree, editor/state)   │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
 │  - Offline Fallback Engine (GDScript AST, .tscn parser)     │
@@ -86,9 +86,9 @@ The current documented release is **1.4.0**.
 
 ---
 
-## 🛠️ Protocol Surface (93 Canonical Tools)
+## 🛠️ Protocol Surface (94 Canonical Tools)
 
-The 93 canonical names are the stable protocol surface, with 10 additional legacy registrations (103 total). The implementation remains 90/93 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind` from `tools/list`. `editorConnected` is true only for an editor route, while `liveAvailable` also requires that the selected editor/game kind is allowed for that exact definition. Phase 6 keeps the surface stable while requiring an explicit Godot project, adding project-keyed endpoints and one-client runtime locks, and exposing dry-run/confirmation controls on mutations. The coordination tools are the exception to the one-client picture: they are how separate agent processes share decisions and divide work, since each MCP client runs its own `didi` and nothing is shared in memory. Every definition also carries specification `annotations`: `readOnlyHint` is derived from the same classification that drives `dry_run`, so the read-only set is safe for a client to auto-approve, and successful JSON results carry `structuredContent` alongside the text block.
+The 94 canonical names are the stable protocol surface, with 10 additional legacy registrations (104 total). The implementation remains 91/94 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind` from `tools/list`. `editorConnected` is true only for an editor route, while `liveAvailable` also requires that the selected editor/game kind is allowed for that exact definition. Phase 6 keeps the surface stable while requiring an explicit Godot project, adding project-keyed endpoints and one-client runtime locks, and exposing dry-run/confirmation controls on mutations. The coordination tools are the exception to the one-client picture: they are how separate agent processes share decisions and divide work, since each MCP client runs its own `didi` and nothing is shared in memory. Every definition also carries specification `annotations`: `readOnlyHint` is derived from the same classification that drives `dry_run`, so the read-only set is safe for a client to auto-approve, and successful JSON results carry `structuredContent` alongside the text block.
 
 | Domain | Key Tools | Current execution |
 | :--- | :--- | :--- |
@@ -136,12 +136,12 @@ Didi now refuses startup without `--project <root>` or `DIDI_PROJECT_ROOT`, and 
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `90/93`
+**Canonical implementation:** `91/94`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phases 1-6 established the implementation baseline. Phase 7 is `PARTIAL_DELIVERY`: the 2026-08-29 gate on Godot 4.5.1 and 4.7.2 found 15/18 names implementation-feasible and 3/18 API-blocked under the approved contracts. All 15 feasible names are now delivered; the implementation is 90/93 canonical tools and only the 3 API-blocked names remain registered but unimplemented.
+Phases 1-6 established the implementation baseline. Phase 7 is `PARTIAL_DELIVERY`: the 2026-08-29 gate on Godot 4.5.1 and 4.7.2 found 15/18 names implementation-feasible and 3/18 API-blocked under the approved contracts. All 15 feasible names are now delivered; the implementation is 91/94 canonical tools and only the 3 API-blocked names remain registered but unimplemented.
 
 Governance selected partial delivery: feasible tools ship only after their own production evidence, while `implemented: false` keeps unavailable names honest. The three API-blocked contracts remain `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`.
 

@@ -647,7 +647,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
     DIDI_LOG_DEBUG("EDITOR_HOOK", "Executing command on Godot main thread: ", method);
 
     static const std::unordered_set<std::string> live_bridge_methods = {
-        "editor.getState", "scene.getHierarchy", "scene.instantiateNode",
+        "editor.getState", "editor.getSelection", "scene.getHierarchy", "scene.instantiateNode",
         "scene.removeNode", "scene.reparentNode", "scene.setProperty",
         "scene.getProperty", "scene.duplicateNode", "editor.undo", "editor.redo",
         "editor.saveScene", "editor.reloadProject", "script.attachToNode",

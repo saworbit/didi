@@ -810,6 +810,7 @@ try {
         (Tool-Request 964 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(4, 5, 6); item = 0 }, @{ position = @(7, 8, 9); item = 999 }) }),
         (Tool-Request 965 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(4, 5, 6); item = -1 }) }),
         (Tool-Request 966 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(1, 2, 3); item = -1 }) }),
+        (Tool-Request 974 "scene_get_selection" @{}),
         (Tool-Request 930 "audio_list_buses" @{}),
         (Tool-Request 931 "audio_configure_bus" @{ bus = "Master"; volume_db = -12.5; mute = $true }),
         (Tool-Request 932 "audio_list_buses" @{}),
@@ -1182,6 +1183,21 @@ try {
     # The live half of audio_list_buses. The offline read parses a file and
     # says so; only a running engine reports the effect chain and anything a
     # script changed at runtime, so that is what has to be proven here.
+    # scene_get_selection exists to answer "this node", and it is built on two
+    # EditorInterface/EditorSelection method binds that no unit test can
+    # exercise. This is the check that they resolve on a real engine: a wrong
+    # hash fails here and nowhere else.
+    $selection = Tool-Payload $byId[974]
+    Assert-True ($selection.execution_mode -eq "live") "scene_get_selection did not run against the live editor."
+    Assert-True ($null -ne $selection.selected) "scene_get_selection returned no selected array, so the EditorSelection binds did not resolve."
+    Assert-True ($selection.selected -is [array] -or $selection.count -eq 0) "scene_get_selection returned a malformed selected array."
+    Assert-True ($selection.count -eq $selection.selected.Count) "scene_get_selection count disagrees with the array it reported."
+    Assert-True ($selection.selected_total -ge $selection.count) "scene_get_selection reported fewer total than named."
+    Assert-True ($selection.truncated -is [bool]) "scene_get_selection did not report truncation as a boolean."
+    # The harness cannot select a node from outside the editor, so the non-empty
+    # case is not covered here. What is covered is the part that can be wrong
+    # without anyone noticing: the binds.
+
     $audioBuses = Tool-Payload $byId[930]
     Assert-True ($audioBuses.execution_mode -eq "live") "audio_list_buses did not run against the live editor."
     Assert-True ($audioBuses.bus_count -ge 1) "audio_list_buses reported no buses from a running engine."

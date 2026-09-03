@@ -488,6 +488,38 @@ subscriptions would need the watcher to diff old and new state to decide which
 of a hundred subtree URIs changed, on every tick, for a result the subscriber
 can compute itself.
 
+### ACCEPTED (IMPLEMENTED): `scene_get_selection`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `scene_get_selection` |
+| **Failing workflow** | *"Make this node jump higher."* The person is pointing at something in the editor and the agent has no way to find out what. It can list the hierarchy, but not which of those nodes is selected, so it guesses from the conversation, asks the person to type a path they can already see on screen, or edits the wrong node. Nothing in the surface answers a deictic reference, and the state that would answer it is sitting in the editor. |
+| **Execution modes** | `live`, editor only. There is no offline answer: a selection exists only in a running editor, and reporting an empty one from a file would be a fabricated fact rather than a fallback. |
+| **Safety class** | `read`. No `dry_run`, no confirmation. It never writes. |
+| **Proving test** | Native: `Tools.SceneGetSelectionContract` requires the tool to be registered live-only and editor-only, to reject arguments, and to refuse with a clear message when no editor is connected. Live: the Godot integration harness selects a node in a real editor and requires the reported path to match. |
+| **Reviewer** | Unassigned. Read-only, so no security review is required. The response is bounded at 256 nodes and reports the untruncated total separately. |
+
+**Why this and not the issue that asked for it.** #140 asked to reflect editor
+state onto blackboard namespaces continuously, and cited `scene_get_selection`
+as one of the ad-hoc tools that made it necessary. That tool did not exist, and
+neither did the other two it named. Measurement settled the rest: a board write
+costs 5.5 ms on a near-empty board and 11.5 ms on a small one against a 16.7 ms
+frame budget, so per-frame reflection is not affordable, and the bidirectional
+half would have made board content instruction. The useful part underneath was
+this: agents cannot see the selection at all.
+
+**Method binds are verified on the floor and the ceiling.**
+`EditorInterface::get_selection` is `2690272531` and
+`EditorSelection::get_selected_nodes` is `2915620761` on both Godot 4.5.1 and
+4.7.2, checked by dumping the extension API from each rather than assuming
+hashes are stable.
+
+**What it does not report.** A node selected in a scene other than the edited
+one has no path from the edited root, so it is counted in `selected_total` and
+not named. A node freed between the engine building the list and this reading it
+is skipped, because a path that resolves to nothing is worse than a shorter
+list.
+
 ### PROPOSED: `scene_close` reads real dirty state on Godot 4.7+
 
 | Field | Value |
