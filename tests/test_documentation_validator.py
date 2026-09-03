@@ -65,13 +65,15 @@ class DocumentationValidatorTests(unittest.TestCase):
     def make_valid_repository(self) -> Path:
         self.write("LICENSE", "MIT License\n")
         self.write("CMakeLists.txt", "project(didi VERSION 1.4.0 LANGUAGES C CXX)\n")
+        # Both read the generated header. A literal version in either is what
+        # the validator now rejects, so the valid fixture must not carry one.
         self.write(
             "include/didi/mcp/mcp_protocol.hpp",
-            'inline const char* kServerVersion = "1.4.0";\n',
+            "inline const char* kServerVersion = kProjectVersion;\n",
         )
         self.write(
             "src/standalone/main.cpp",
-            'std::cout << "didi (godot-mcp-native) v1.4.0";\n',
+            'std::cout << "didi (godot-mcp-native) v" << kServerVersion;\n',
         )
         self.write("addons/didi/plugin.cfg", 'version="1.4.0"\n')
         self.write("demo/addons/didi/plugin.cfg", 'version="1.4.0"\n')

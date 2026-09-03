@@ -80,7 +80,7 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--version" || arg == "-v") {
-            std::cout << "didi (godot-mcp-native) v1.4.0" << std::endl;
+            std::cout << "didi (godot-mcp-native) v" << didi::mcp::kServerVersion << std::endl;
             return 0;
         } else if (arg == "--dump-tool-manifest") {
             // Emits the registered tool surface as JSON so documentation can be
@@ -166,7 +166,8 @@ int main(int argc, char* argv[]) {
         return 2;
     }
 
-    DIDI_LOG_INFO("MAIN", "Starting Didi MCP Native Server v1.4.0 for Godot 4.5+...");
+    DIDI_LOG_INFO("MAIN", "Starting Didi MCP Native Server v", didi::mcp::kServerVersion,
+                  " for Godot 4.5+...");
 
     didi::mcp::McpServer server;
     server.setConfirmationsSkipped(skip_confirmations);
