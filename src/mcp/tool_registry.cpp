@@ -1536,12 +1536,12 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "project_analyze_impact";
-        t.description = "Traces every place a symbol, signal, or res:// path is named, including scene connections and animation tracks that a text search finds but cannot explain.";
+        t.description = "Traces every place a symbol, signal, resource path, or static node path is named, including scene connections and animation tracks that a text search finds but cannot explain.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
                 {"target", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
-                            {"description", "A res:// or uid:// path, or a single Godot identifier such as a variable, function, or signal name."}}},
+                            {"description", "A canonical res:// path, lowercase-alphanumeric uid:// value, static Godot node path such as Player/Sprite, /root, or Hand/Sword/%Hilt, or a single Godot identifier such as a variable, function, or signal name."}}},
                 {"max_impacts", {{"type", "integer"}, {"minimum", 1}, {"maximum", 5000}, {"default", 500}}}
             }},
             {"required", json::array({"target"})},

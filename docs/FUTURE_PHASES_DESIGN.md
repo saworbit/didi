@@ -157,9 +157,11 @@ Requirements:
 
 ## Phase 8: Deep Project Intelligence and Asset Pipeline
 
-**Status:** `PLANNED`
+**Status:** `IN PROGRESS`
 
-**Dependency:** Satisfied by the authorized Phase 7 partial-delivery exit gate. Phase 8 remains `PLANNED` until its first separately reviewed implementation slice begins.
+**Dependency:** Satisfied by the authorized Phase 7 partial-delivery exit gate.
+
+**Delivered slice:** `project_analyze_impact` provides bounded reverse lookup for symbols, signals, resource paths, and exact static node paths. It classifies scene connections, animation tracks, serialized `NodePath` values, and direct code literals while explicitly excluding dynamically constructed paths. `project_audit_assets` supplies bounded orphan, broken-reference, and dead-signal evidence. These are read-only offline analyses; the remaining scope below is not implied to be implemented.
 
 **Goal:** Make project-wide dependencies, UID resolution, and import health inspectable and safely configurable.
 

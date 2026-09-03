@@ -12,6 +12,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <tuple>
 #include <unordered_set>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
@@ -389,6 +390,28 @@ static void writeImpactFixture() {
     writeAuditFile("scripts/other.gd", "extends Node\n");
     writeAuditFile("scripts/hud.gd",
         "extends Control\n"
+        "@onready var sprite = $Player/Sprite.position\n"
+        "@onready var player = $Player.position\n"
+        "@onready var unique_player = %Player.show()\n"
+        "@onready var other_sprite = $Player/Sprite2\n"
+        "var looked_up = get_node(\"Player/Sprite\")\n"
+        "var absolute = get_node(\"/root/Main/Player\")\n"
+        "var stored_path: NodePath = ^\"Player/Sprite\"\n"
+        "var text = \"$Player/Sprite\"\n"
+        "var fake_call = \"get_node('Player/Sprite')\"\n"
+        "var unicode_node = get_node(\"玩家/Sprite\")\n"
+        "var unicode_direct = $玩家/Sprite.position\n"
+        "var unique_descendant = get_node(\"Hand/Sword/%Hilt\")\n"
+        "var unique_descendant_direct = $Hand/Sword/%Hilt.position\n"
+        "var spaced_node = get_node(\"Node Name/Child?\")\n"
+        "# $Player/Sprite must not count as code\n"
+        "# NodePath(\"Player/Sprite\") must not count as code\n"
+        "var poem = \"\"\"\n"
+        "$Player/Sprite\n"
+        "NodePath(\"Player/Sprite\")\n"
+        "[connection signal=\"fake\" from=\"Player/Sprite\" to=\".\"]\n"
+        "tracks/9/path = NodePath(\"Player/Sprite:fake\")\n"
+        "\"\"\"\n"
         "func _on_character_health(amount):\n"
         "    pass\n");
     writeAuditFile("scenes/hud.tscn",
@@ -396,6 +419,10 @@ static void writeImpactFixture() {
         "[ext_resource type=\"Script\" path=\"res://scripts/hud.gd\" id=\"1\"]\n"
         "[node name=\"Hud\" type=\"Control\"]\n"
         "script = ExtResource(\"1\")\n"
+        "focus_neighbor_right = NodePath(\"Player/Sprite\")\n"
+        "focus_neighbor_left = NodePath(\"Player/Sprite2\")\n"
+        "; old_focus = NodePath(\"Player/Sprite\")\n"
+        "[connection signal=\"pressed\" from=\"Player/Sprite\" to=\".\" method=\"_on_pressed\"]\n"
         "[connection signal=\"character_health\" from=\".\" to=\".\" method=\"_on_character_health\"]\n");
     writeAuditFile("scenes/player.tscn",
         "[gd_scene format=3]\n"
@@ -403,8 +430,19 @@ static void writeImpactFixture() {
         "[sub_resource type=\"Animation\" id=\"Anim_1\"]\n"
         "tracks/0/type = \"value\"\n"
         "tracks/0/path = NodePath(\"Sprite:character_health\")\n"
+        "tracks/1/type = \"value\"\n"
+        "tracks/1/path = NodePath(\"Player/Sprite:position:x\")\n"
+        "tracks/2/type = \"value\"\n"
+        "tracks/2/path = NodePath(\"Player/Sprite2:position:x\")\n"
         "[node name=\"Player\" type=\"Node2D\"]\n"
         "script = ExtResource(\"1\")\n");
+    writeAuditFile("scripts/paths.cs",
+        "// var oldPath = new NodePath(\"Player/Sprite\");\n"
+        "/*\n"
+        "[connection signal=\"fake\" from=\"Player/Sprite\" to=\".\"]\n"
+        "tracks/9/path = NodePath(\"Player/Sprite:fake\")\n"
+        "*/\n"
+        "var text = \"new NodePath(\\\"Player/Sprite\\\")\";\n");
 }
 
 static void test_audio_configure_bus_is_gated_and_offline_honest() {
@@ -672,6 +710,111 @@ static void test_project_impact_traces_a_file_target_and_rejects_a_malformed_one
                     .callTool("project_analyze_impact",
                               didi::json{{"target", "character_health"}, {"max_impacts", 0}})
                     .isError);
+}
+
+static void test_project_impact_traces_exact_node_paths() {
+    ScopedToolProject project("project-impact-node-path");
+    writeImpactFixture();
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto result = registry.callTool(
+        "project_analyze_impact", didi::json{{"target", "Player/Sprite"}});
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(report["resolved_kind"], "node_path");
+
+    std::set<std::string> kinds;
+    for (const auto& impact : report["impacts"]) {
+        kinds.insert(impact["kind"].get<std::string>());
+        ASSERT_TRUE(impact["detail"].get<std::string>().find("Player/Sprite2") ==
+                    std::string::npos);
+    }
+    ASSERT_TRUE(kinds.count("scene_connection") == 1);
+    ASSERT_TRUE(kinds.count("animation_track") == 1);
+    ASSERT_TRUE(kinds.count("node_path_reference") == 1);
+    ASSERT_TRUE(kinds.count("code_reference") == 1);
+    ASSERT_EQ(report["counts_by_kind"]["scene_connection"], 1u);
+    ASSERT_EQ(report["counts_by_kind"]["animation_track"], 1u);
+    ASSERT_EQ(report["counts_by_kind"]["node_path_reference"], 1u);
+    ASSERT_EQ(report["counts_by_kind"]["code_reference"], 3u);
+    ASSERT_TRUE(report.find("declared_in") == report.end());
+    ASSERT_TRUE(!report["limitations"].empty());
+
+    std::tuple<std::string, int, std::string> previous;
+    bool first = true;
+    for (const auto& impact : report["impacts"]) {
+        const auto current = std::make_tuple(impact["path"].get<std::string>(),
+                                             impact["line"].get<int>(),
+                                             impact["kind"].get<std::string>());
+        if (!first) ASSERT_TRUE(previous <= current);
+        previous = current;
+        first = false;
+    }
+
+    const auto capped = registry.callTool(
+        "project_analyze_impact",
+        didi::json{{"target", "Player/Sprite"}, {"max_impacts", 1}});
+    ASSERT_TRUE(!capped.isError);
+    const auto capped_report = didi::json::parse(capped.content[0].text);
+    ASSERT_EQ(capped_report["impacts"].size(), 1u);
+    ASSERT_EQ(capped_report["impacts"][0], report["impacts"][0]);
+    ASSERT_TRUE(capped_report["truncated"].get<bool>());
+
+    const auto property_target = registry.callTool(
+        "project_analyze_impact",
+        didi::json{{"target", "Player/Sprite:position:x"}});
+    ASSERT_TRUE(!property_target.isError);
+    const auto property_report = didi::json::parse(property_target.content[0].text);
+    ASSERT_EQ(property_report["counts_by_kind"]["animation_track"], 1u);
+    ASSERT_TRUE(property_report["counts_by_kind"].find("node_path_reference") ==
+                property_report["counts_by_kind"].end());
+
+    const auto absolute = registry.callTool(
+        "project_analyze_impact", didi::json{{"target", "/root/Main/Player"}});
+    ASSERT_TRUE(!absolute.isError);
+    const auto absolute_report = didi::json::parse(absolute.content[0].text);
+    ASSERT_EQ(absolute_report["resolved_kind"], "node_path");
+    ASSERT_EQ(absolute_report["counts_by_kind"]["code_reference"], 1u);
+
+    for (const auto& target : {"$Player", "%Player"}) {
+        const auto shorthand = registry.callTool(
+            "project_analyze_impact", didi::json{{"target", target}});
+        ASSERT_TRUE(!shorthand.isError);
+        const auto shorthand_report = didi::json::parse(shorthand.content[0].text);
+        ASSERT_EQ(shorthand_report["resolved_kind"], "node_path");
+        ASSERT_EQ(shorthand_report["counts_by_kind"]["code_reference"], 1u);
+    }
+
+    const auto unicode = registry.callTool(
+        "project_analyze_impact", didi::json{{"target", "玩家/Sprite"}});
+    ASSERT_TRUE(!unicode.isError);
+    const auto unicode_report = didi::json::parse(unicode.content[0].text);
+    ASSERT_EQ(unicode_report["resolved_kind"], "node_path");
+    ASSERT_EQ(unicode_report["counts_by_kind"]["code_reference"], 2u);
+
+    for (const auto& target : {".", "..", "/root", "Hand/Sword/%Hilt",
+                               "Node Name/Child?"}) {
+        const auto valid = registry.callTool(
+            "project_analyze_impact", didi::json{{"target", target}});
+        ASSERT_TRUE(!valid.isError);
+        ASSERT_EQ(didi::json::parse(valid.content[0].text)["resolved_kind"], "node_path");
+    }
+
+    const auto unique_suffix = registry.callTool(
+        "project_analyze_impact", didi::json{{"target", "%Hilt"}});
+    ASSERT_TRUE(!unique_suffix.isError);
+    ASSERT_EQ(didi::json::parse(unique_suffix.content[0].text)["impact_count"], 0u);
+
+    for (const auto& malformed : {"Player//Sprite", "/", "http:/host", "bad?:/path",
+                                  "%/Player", "Player/:property", "res://",
+                                  "res://../outside.tres", "res://bad\\name.tres",
+                                  "uid://", "uid://BAD"}) {
+        ASSERT_TRUE(registry
+                        .callTool("project_analyze_impact",
+                                  didi::json{{"target", malformed}})
+                        .isError);
+    }
 }
 
 static void test_project_audit_reports_orphans_broken_references_and_dead_signals() {
@@ -1960,6 +2103,8 @@ struct RegisterToolTests {
                      test_project_impact_finds_scene_and_animation_references_a_search_cannot_explain);
         registerTest("Tools.ProjectImpactFileTarget",
                      test_project_impact_traces_a_file_target_and_rejects_a_malformed_one);
+        registerTest("Tools.ProjectImpactNodePath",
+                     test_project_impact_traces_exact_node_paths);
         registerTest("Tools.ProjectAuditFindings",
                      test_project_audit_reports_orphans_broken_references_and_dead_signals);
         registerTest("Tools.ProjectAuditOptions",

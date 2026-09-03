@@ -321,10 +321,10 @@ Returns UID-to-path mappings discovered in indexed project resources. Embedded U
 
 Answers what else changes if this changes. Renaming a variable or a signal can break a scene that wires it, an animation track that keyframes it, or an autoload that loads it, and Godot reports none of that until the game runs.
 
-- `target` (`string`, required, 1-256 bytes). A `res://` or `uid://` path, or a single Godot identifier.
+- `target` (`string`, required, 1-256 bytes). A canonical `res://` path, lowercase-alphanumeric `uid://` value, static Godot node path such as `.`, `..`, `Player/Sprite`, `/root`, `%Player`, `Hand/Sword/%Hilt`, or `$Player/Sprite`, or a single Godot identifier. Quoted calls may contain valid spaces, punctuation, or UTF-8 node names.
 - `max_impacts` (`integer`, 1-5000, default `500`).
 
-A target that is neither a path nor a single identifier is rejected rather than answered with an empty report, because "nothing depends on this" and "you asked the wrong question" must not look the same to a caller about to delete something.
+A target that is neither a resource path, a validated node path, nor a single identifier is rejected rather than answered with an empty report, because "nothing depends on this" and "you asked the wrong question" must not look the same to a caller about to delete something.
 
 Reported kinds are the forms Godot writes:
 
@@ -336,13 +336,16 @@ Reported kinds are the forms Godot writes:
 | `autoload` | A `project.godot` autoload entry naming the file. |
 | `scene_connection` | A `[connection]` wiring this signal or this method. |
 | `animation_track` | A `NodePath` in a track keyframing this property. |
+| `node_path_reference` | A serialized `NodePath` property naming the exact node. |
 | `code_reference` | The name used in GDScript or C#. |
 
 `scene_connection` and `animation_track` are the two a text search finds but cannot explain, and they are the ones people miss.
 
 A name target also returns `declared_in`, so a caller knows what they are about to rename and not only what would break. Name matching is whole word, so tracing `health` does not report every `max_health`.
 
-The results are evidence, not verdicts. A name built at runtime cannot be followed, so an empty impact list is not proof that nothing depends on the target, and a local variable that happens to share the name is reported as a `code_reference`. Both limits ship in a `limitations` array in the response.
+Node-path targets match complete captured paths: `Player/Sprite` does not match `Player/Sprite2`. Animation property suffixes are ignored when the node portion matches, so `NodePath("Player/Sprite:position:x")` is an impact of `Player/Sprite`. Static scene connection endpoints, serialized `NodePath` values, GDScript `$...`/`%...` shorthands, standalone `^"..."` node-path literals, and literal `get_node(...)`/`get_node_or_null(...)` calls are covered. Shorthand references remain matches when followed by ordinary member access such as `$Player/Sprite.position`. GDScript strings and comments, C# strings and comments, and `.tscn`/`.tres` semicolon comments are excluded from shorthand and constructor evidence.
+
+The results are evidence, not verdicts. A name or node path built at runtime cannot be followed, so an empty impact list is not proof that nothing depends on the target, and a local variable that happens to share a name is reported as a `code_reference`. These limits ship in a `limitations` array in the response.
 
 ### `project_audit_assets` — Offline
 

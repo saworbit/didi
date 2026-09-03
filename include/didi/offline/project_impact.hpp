@@ -26,10 +26,12 @@ namespace didi::offline {
 //   autoload             a project.godot autoload entry naming a file
 //   scene_connection     [connection] wiring this signal or this method
 //   animation_track      a NodePath in a track keyframing this property
-//   code_reference       the name used in GDScript or C#
+//   node_path_reference  another serialized NodePath property
+//   code_reference       the name or static node path used in GDScript or C#
 struct ProjectImpactOptions {
-    // The symbol, signal, or res:// path to trace. A target starting with
-    // res:// or uid:// is treated as a file; anything else as a name.
+    // The symbol, signal, resource path, or node path to trace. A target
+    // starting with res:// or uid:// is treated as a file. A validated Godot
+    // node path is treated separately from a single identifier.
     std::string target;
     // A cap so one call cannot return an unbounded list.
     size_t max_impacts{500};
