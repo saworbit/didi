@@ -11,6 +11,15 @@ Report anything that breaks it privately through the maintainer's GitHub profile
 
 ---
 
+## 📦 Third Party Code
+
+A few single-header libraries are vendored directly into `include/`. They have
+no package manager entry and nothing updates them automatically, so
+[THIRD_PARTY.md](THIRD_PARTY.md) records what they are and what updating one
+involves. Add a row there if you vendor anything else.
+
+---
+
 ## 🛠️ Engineering Principles
 
 1. **Native Performance First**: Didi avoids heavy runtimes (no Node.js, Python, or WebSockets). All core logic is implemented in modern C++20.
