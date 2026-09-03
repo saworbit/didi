@@ -114,8 +114,11 @@ json shallowView(const json& value) {
 }
 
 struct Board {
-    json state{json::object()};
-    json meta{json::object()};
+    // Copy-initialized, not braced. `json state{json::object()}` builds an
+    // array holding one empty object on GCC, and every path write then
+    // fails with a type error that MSVC never sees.
+    json state = json::object();
+    json meta = json::object();
 };
 
 Result<std::filesystem::path> boardDirectory() {

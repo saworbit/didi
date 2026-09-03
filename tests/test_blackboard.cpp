@@ -72,6 +72,15 @@ json writeValue(const std::string& path, const json& value, int64_t* now_ms = nu
 void test_blackboard_write_read_round_trip() {
     BoardFixture fixture("round-trip");
 
+    // A board nobody has written is an empty object, not an array. Brace-initialising
+    // a json from json::object() picks the initializer-list constructor on GCC and
+    // yields an array holding one object, which MSVC never reproduces and which makes
+    // every path write fail with a type error.
+    BlackboardReadRequest empty;
+    auto blank = blackboardRead(empty);
+    ASSERT_TRUE(blank.isOk());
+    ASSERT_TRUE(blank.value()["value"].is_object());
+
     writeValue("architecture.inventory.slots", 12);
     writeValue("architecture.inventory.stacking", "by_type");
     writeValue("qa.notes", json::array({"jump feels floaty"}));
@@ -269,7 +278,7 @@ void test_blackboard_bounds_refuse_oversize_input() {
     ASSERT_TRUE(blackboardWrite(big).isErr());
 
     json nested = "leaf";
-    for (int level = 0; level < kBlackboardMaxDepth + 4; ++level) {
+    for (size_t level = 0; level < kBlackboardMaxDepth + 4; ++level) {
         nested = json{{"n", nested}};
     }
     BlackboardWriteRequest deep;

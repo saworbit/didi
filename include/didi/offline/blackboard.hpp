@@ -47,7 +47,10 @@ struct BlackboardReadRequest {
 
 struct BlackboardPatchRequest {
     std::string board{"default"};
-    json operations{json::array()};  // RFC 6902, applied all or nothing.
+    // Copy-initialized, not braced: `json x{json::array()}` picks the
+    // initializer-list constructor on GCC and yields an array holding one
+    // array, which is not what any of this means.
+    json operations = json::array();  // RFC 6902, applied all or nothing.
     std::optional<std::string> author;
     std::optional<std::string> reason;
     bool dry_run{false};
