@@ -47,6 +47,31 @@ Every implemented mutation exposes `dry_run`. A dry-run stops before tool handle
 
 ---
 
+## 🚩 Command Line Options
+
+| Option | Value | Purpose |
+| :--- | :--- | :--- |
+| `-v`, `--version` | none | Print the version and exit `0` |
+| `-h`, `--help` | none | Print the option list and exit `0` |
+| `-p`, `--project <dir>` | Directory path | Godot project root, required unless `DIDI_PROJECT_ROOT` is set |
+| `--pipe-name <name>` | Pipe / socket name | Legacy direct IPC override, same effect as `DIDI_PIPE_NAME` |
+| `--log-level <level>` | `DEBUG`, `INFO`, `WARN`, `ERROR`, `NONE` | Stderr logging verbosity |
+| `--dump-tool-manifest` | none | Print the registered tool surface as JSON and exit `0`, no project or IPC needed |
+| `--yolo` | none | Skip confirmation on destructive tools, same effect as `DIDI_YOLO=1` |
+
+Parsing fails closed and it fails first. Before project resolution and before any
+server startup, Didi exits `2` and prints the reason plus the matching help line
+on stderr for an unknown option, a missing or empty value, a value that is
+really the next option, a log level outside the list above, or a stray
+argument. The last case is the one that used to hurt in unattended runs:
+`--log-level --yolo` consumed the flag, so the process came up without the mode
+the operator asked for and without the warning that says confirmations are off.
+
+A launch that prints nothing on stderr and stays running got exactly the
+configuration you wrote.
+
+---
+
 ## ⚙️ Environment Variables Configuration
 
 Administrators can configure Didi globally or per-service using standard environment variables:
@@ -112,8 +137,9 @@ The live `godot://runtime/logs`/`runtime_read_logs` ring retains 2,000 structure
 | Symptom | Probable Cause | Recommended Action |
 | :--- | :--- | :--- |
 | `Cannot connect to Godot Didi GDExtension IPC pipe` | Godot Editor is not open, or Didi plugin is disabled. | 1. Open the project in Godot Editor.<br>2. Verify **Project Settings $\rightarrow$ Plugins $\rightarrow$ Didi** is checked.<br>3. Verify `didi_extension.dll` exists in `addons/didi/bin/`. |
+| `Didi startup refused: unknown option ...` (exit `2`) | A misspelled option, a missing value, or a value that is really the next option. | Read the second stderr line, which is the help line for that option, and fix the client's `args` array. Run `didi --help` for the full list. |
 | `Failed to spawn Godot process` | `godot` is not in `PATH` and not found in default locations. | Set the `GODOT_BIN` environment variable to the exact path of your Godot console executable (e.g. `C:\Godot\Godot_v4.7.2-stable_win64_console.exe`). |
-| `Content-Length framing is not supported` | The MCP client is using HTTP-style framing instead of MCP 2024-11-05 newline-delimited JSON. | Configure the client to send one UTF-8 JSON-RPC object per line; Didi closes the session after this error to prevent request smuggling. |
+| `Content-Length framing is not supported` | The MCP client is using HTTP-style framing instead of newline-delimited JSON over stdio, which is how both served revisions frame messages. | Configure the client to send one UTF-8 JSON-RPC object per line; Didi closes the session after this error to prevent request smuggling. |
 | `Timeout waiting for response length` | Godot Editor is suspended in a script breakpoint. | Resume execution in Godot Debugger or restart the editor session. |
 | Tool is listed but returns `unimplemented` | The name is reserved in the protocol surface but has no trustworthy execution path. | Check `_meta.didi.implemented` and use only implemented tools from [Current Capability Matrix](CAPABILITIES.md). |
 | Session is listed as stale | PID exited or process-start identity no longer matches (including PID reuse). | Start/reload the intended Godot process; do not edit descriptor identity fields. |

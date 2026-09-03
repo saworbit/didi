@@ -174,15 +174,38 @@ if(DIDI_BUILD_TESTS)
     target_link_libraries(phase7_signal_bridge_probe PRIVATE didi_core)
 endif()
 
-# Copy DLL to addons/didi/bin after build
+# The addon is exactly these tracked files plus the library built here. Naming
+# them in one place means the staged copy, the installed copy, and the packaged
+# archive cannot disagree about what an addon contains. didi_plugin.gd is on the
+# list because plugin.cfg names it as the plugin script: without it Godot loads
+# an addon that cannot start.
+set(DIDI_ADDON_MANIFEST_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/plugin.cfg"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi.gdextension"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_plugin.gd"
+)
+set(DIDI_ADDON_STAGE_DIR "${CMAKE_BINARY_DIR}/addons/didi")
+
+# The complete addon, assembled in the build directory. Release packaging reads
+# this, so an archive contains what the build produced rather than whatever a
+# POST_BUILD step happened to leave lying in a tracked source directory. The
+# source addon directory is a manifest, not an output.
 add_custom_command(TARGET didi_extension POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/bin"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:didi_extension>" "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/bin/"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${DIDI_ADDON_STAGE_DIR}/bin"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:didi_extension>" "${DIDI_ADDON_STAGE_DIR}/bin/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${DIDI_ADDON_MANIFEST_FILES} "${DIDI_ADDON_STAGE_DIR}/"
+    COMMENT "Staging the didi addon in the build directory"
+)
+
+# These two are Godot projects in this repository, and a Godot project can only
+# load an extension from inside its own res://. They are the reason the library
+# is written into the source tree at all, and both paths are gitignored.
+add_custom_command(TARGET didi_extension POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/demo/addons/didi/bin"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:didi_extension>" "${CMAKE_CURRENT_SOURCE_DIR}/demo/addons/didi/bin/"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/tests/godot_smoke/addons/didi/bin"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:didi_extension>" "${CMAKE_CURRENT_SOURCE_DIR}/tests/godot_smoke/addons/didi/bin/"
-    COMMENT "Copying didi_extension library to addon directories..."
+    COMMENT "Copying didi_extension into the demo and smoke Godot projects"
 )
 
 # The standalone server and the extension are the installable products. Without
@@ -205,8 +228,7 @@ endif()
 install(TARGETS didi_extension
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/didi/addons/didi/bin
         RUNTIME DESTINATION ${CMAKE_INSTALL_LIBDIR}/didi/addons/didi/bin)
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/plugin.cfg"
-              "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi.gdextension"
+install(FILES ${DIDI_ADDON_MANIFEST_FILES}
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/didi/addons/didi)
 
 # 3. Unit Test Suite (didi_tests.exe)

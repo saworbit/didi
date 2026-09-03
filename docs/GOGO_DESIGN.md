@@ -8,7 +8,7 @@
 
 **Does not depend on:** Agent-to-Agent (A2A), a second transport, or turning a Godot process into an autonomous planner.
 
-**Naming:** Didi remains the product, binary (`didi` / `didi.exe`), GDExtension, and MCP server. Gogo is the subsystem. Code lives under `didi::gogo`. Do not rename the repository or the existing 78-tool surface.
+**Naming:** Didi remains the product, binary (`didi` / `didi.exe`), GDExtension, and MCP server. Gogo is the subsystem. Code lives under `didi::gogo`. Do not rename the repository or the existing 83-tool surface.
 
 In *Waiting for Godot*, Didi waits. Gogo is the one who actually shows up. That is the split: Didi is the bridge; Gogo is the farm that does the parallel work.
 
@@ -52,7 +52,7 @@ These are hard non-goals for the first Gogo milestone. Several already appear in
 - Do not attach twenty agents to one live editor. Godot scene, editor, and rendering APIs are not safe for concurrent mutation. Parallelism is **process** parallelism.
 - Do not treat `runtime_launch` as Gogo. That tool waits for the child to **exit** (1-120 s) and returns stdout/stderr. A bench must stay alive and publish a descriptor.
 - Do not silently write into `demo/` or Didi's own repository CWD. Gogo workspaces are explicit directories.
-- Do not raise the 78-tool count by stuffing stubs. New names land only when they execute.
+- Do not raise the 83-tool count by stuffing stubs. New names land only when they execute.
 - Do not advertise "20 instances" as a compatibility guarantee. Twenty is an operator aspiration. The contract is a small default cap and a documented hard cap.
 - Do not rename `didi` to `gogo`. The binary and product stay Didi.
 
@@ -141,7 +141,7 @@ An acquire request for more benches than free capacity returns a structured erro
 
 ## 8. Proposed MCP surface
 
-Do not register these until the implementation phase. Keep the 78-tool count stable until then.
+Do not register these until the implementation phase. Keep the 83-tool count stable until then.
 
 Suggested canonical names, Domain 13, prefix `gogo_`:
 
