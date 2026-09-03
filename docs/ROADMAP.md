@@ -1,7 +1,7 @@
 # Didi Strategic Roadmap & Technical Build Order 🗺️
 
 > **Core Philosophy**:
-> The 79-tool canonical surface includes completed Phases 1–6: live editor substrate, project wiring, authenticated runtime sessions, autonomous verification, deep-domain workflows, and enterprise safety controls.
+> The 83-tool canonical surface includes completed Phases 1–6 and the feasible Phase 7 delivery: live editor substrate, project wiring, authenticated runtime sessions, autonomous verification, deep-domain workflows, enterprise safety controls, and bounded editor/runtime authoring.
 
 ---
 
@@ -189,13 +189,13 @@ users, and it must be justified on its own merits -- for example
 [Surface Amendments](SURFACE_AMENDMENTS.md). Work that assumes 4.7.2 as its sole
 baseline is carrying an unauthorized second decision.
 
-This decision authorizes Task 2. It does not change the phase status: the
-implementation on `main` remains 61/79 and Phase 7 stays
-`PARTIAL_DELIVERY` until the first delivery slice lands, at which point the
-status and every published count move together.
+This decision authorized Task 2. At decision time the implementation was 61/79;
+the delivery slices have since landed and the current status block above is
+authoritative at 80/83. Phase 7 remains `PARTIAL_DELIVERY` because the three
+API-blocked contracts stay honestly unimplemented.
 
 **Delivery slices:**
-- 7A: signals, viewport camera/debug, and tile/grid operations (9 tools; signals and both viewport controls delivered)
+- 7A: signals, viewport camera/debug, and tile/grid operations (9 tools; all delivered)
 - 7B: physics, navigation, and animation operations (6 tools; `physics_raycast_query`, `nav_query_path`, `anim_list_tracks` and `anim_play_track` delivered)
 - 7C: input injection, call-stack inspection, and profiling (3 tools; `runtime_read_profiler` and `runtime_inject_input` delivered)
 
@@ -207,7 +207,7 @@ status and every published count move together.
 
 **Objective:** Add dependency-aware project analysis, import health, asset provenance, and safe bulk asset workflows after canonical completion.
 
-**Dependency:** Phase 8 remains planned until the authorized Phase 7 partial-delivery exit gate is satisfied or explicitly revised.
+**Dependency:** The authorized Phase 7 partial-delivery exit gate is satisfied. Phase 8 remains planned until its first separately reviewed implementation slice begins.
 
 **Exclusions:** No custom GDScript language server, unbounded whole-project semantic analysis, or silent import-setting mutation.
 
@@ -280,7 +280,7 @@ These are missing capabilities that an AI agent actually requires to complete fu
 ## 🚫 What NOT to Add Yet
 
 - ❌ **Do NOT add success stubs.** A registered name that cannot execute must report `implemented: false` and reject calls. This rule is absolute.
-- ⚠️ **Do NOT add speculative domain families** (e.g. `audio_bus_*`, `multiplayer_*`, `particle_*`, `xr_*`) while existing reserved physics/navigation, TileMap/GridMap, and runtime-debugger schemas remain unimplemented. A single name that an agent workflow provably needs is added through a [Surface Amendment](SURFACE_AMENDMENTS.md), not blocked by this rule.
+- ⚠️ **Do NOT add speculative domain families** (e.g. `multiplayer_*`, `particle_*`, `xr_*`) as substitutes for the three reserved blockers: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. A single name that an agent workflow provably needs is added through a [Surface Amendment](SURFACE_AMENDMENTS.md), not blocked by this rule.
 - ❌ **Do NOT create a second plugin architecture or network transport** — local named pipes and UNIX domain sockets are optimal.
 - ❌ **Do NOT build a custom GDScript language server** — extend the existing symbol extractor and headless Godot compiler check only where evidence requires it.
 - ❌ **Do NOT expand the limited static ClassDB map** — replace it with live Godot `ClassDB` or generated `extension_api.json` data.

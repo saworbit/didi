@@ -26,7 +26,7 @@ The current documented release is **1.4.0**.
 | 🗺️ [**Roadmap & 83-Tool Surface**](docs/ROADMAP.md) | **Developers / Contributors** | Completed phases and technical build order. |
 | 🧪 [**Phase 7 API Feasibility Evidence**](docs/PHASE_7_API_FEASIBILITY.md) | **Developers / Governance** | Reproducible Godot 4.5.1/4.7.2 feasibility results and the exact three blocked contracts. |
 | 📋 [**Phase 7 Approved Executable Plan**](docs/PHASE_7_IMPLEMENTATION_PLAN.md) | **Developers / Governance** | Approved atomic 83/83 plan, stopped at its feasibility gate. |
-| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 79 canonical tools plus 10 legacy names. |
+| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 83 canonical tools plus 10 legacy names. |
 | 🏛️ [**Architecture & System Topology**](docs/ARCHITECTURE.md) | **Engineers / Architects** | Deep-dive into C++20 design, dual execution topology, threading safety, and named-pipe IPC. |
 | 📦 [**Dynamic Resources & Prompts**](docs/RESOURCES_AND_PROMPTS.md) | **Developers / LLMs** | Technical specs for `godot://...` resources and prompt workflows. |
 | 🛡️ [**Administrator & Operations Guide**](docs/ADMIN_GUIDE.md) | **DevOps / Admins** | Security DACL hardening, CI/CD headless execution, observability, and troubleshooting. |
@@ -62,7 +62,7 @@ The current documented release is **1.4.0**.
 ┌─────────────────────────────────────────────────────────────┐
 │        Didi (C++ MCP Core Engine - didi / didi.exe)         │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2024-11-05 standard)       │
-│  - Registry (79 canonical tools + 10 legacy names)          │
+│  - Registry (83 canonical tools + 10 legacy names)          │
 │  - Dynamic Resources (godot://project/tree, editor/state)   │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
 │  - Offline Fallback Engine (GDScript AST, .tscn parser)     │
@@ -108,7 +108,7 @@ Didi publishes one private descriptor per loaded editor or game process. Windows
 
 Live main-thread work has finite boundaries. At the extension's 15-second deadline, work that has not started returns `outcome: "not_started"` without quarantining the route; work that started but remains unresolved returns `outcome: "unknown_outcome"` and requests route quarantine. Public live tools and the runtime-log resource use a 17-second outer transport deadline and quarantine only the exact failed route generation, so callers must not blindly retry mutations with unknown outcomes.
 
-`runtime_read_logs` polls the bounded 2,000-record Didi ring with a cursor. This structured ring records Didi lifecycle, command, control, and evaluation events; it does **not** intercept arbitrary `print()` output from Godot or another external process. Use `runtime_launch` when you need bounded child-process stdout/stderr captured after that process exits.
+`runtime_read_logs` polls the bounded 2,000-record Didi ring with a cursor. This structured ring records Didi lifecycle, command, control, and evaluation events; it does **not** intercept arbitrary `print()` output from Godot or another external process. Poll the separate bounded `runtime_read_output` stream for `print()`, warnings, errors, and script diagnostics from an attached editor or game. Use `runtime_launch` when you need bounded stdout/stderr from a Didi-owned child process captured after that process exits.
 
 `eval_gdscript` accepts one expression (1–2048 UTF-8 bytes), an optional in-subtree `context_node`, and `timeout_ms` from 1–5000. It rejects statements, assignment, dynamic/indexed access, traversal, arbitrary dispatch, and mutation. Its timeout checks are cooperative, not preemptive; the grammar and receiver allowlist are deliberately small enough to bound accepted work. See the [Tool Reference](docs/TOOL_REFERENCE.md#11-phase-3-runtime-sessions) for the exact allowed calls and result limits.
 

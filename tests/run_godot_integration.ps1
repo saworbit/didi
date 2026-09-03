@@ -795,10 +795,17 @@ try {
         (Tool-Request 956 "tilemap_get_used_rect" @{ tilemap_path = "/root/SmokeRoot/TileLayer" }),
         (Tool-Request 957 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/TileLayer"; cells = @(@{ coords = @(1, 2); source_id = 0; atlas_coords = @(0, 0) }) }),
         (Tool-Request 958 "tilemap_get_used_rect" @{ tilemap_path = "/root/SmokeRoot/TileLayer" }),
+        (Tool-Request 967 "editor_undo" @{}),
+        (Tool-Request 968 "tilemap_get_used_rect" @{ tilemap_path = "/root/SmokeRoot/TileLayer" }),
+        (Tool-Request 969 "editor_redo" @{}),
+        (Tool-Request 970 "tilemap_get_used_rect" @{ tilemap_path = "/root/SmokeRoot/TileLayer" }),
         (Tool-Request 959 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/TileLayer"; cells = @(@{ coords = @(3, 4); source_id = 0; atlas_coords = @(0, 0) }, @{ coords = @(5, 6); source_id = 999; atlas_coords = @(0, 0) }) }),
         (Tool-Request 960 "tilemap_get_used_rect" @{ tilemap_path = "/root/SmokeRoot/TileLayer" }),
         (Tool-Request 961 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/TileLayer"; cells = @(@{ coords = @(1, 2); erase = $true }) }),
         (Tool-Request 962 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(1, 2, 3); item = 0 }) }),
+        (Tool-Request 971 "editor_undo" @{}),
+        (Tool-Request 972 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(1, 2, 3); item = -1 }) }),
+        (Tool-Request 973 "editor_redo" @{}),
         (Tool-Request 963 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(1, 2, 3); item = 0 }) }),
         (Tool-Request 964 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(4, 5, 6); item = 0 }, @{ position = @(7, 8, 9); item = 999 }) }),
         (Tool-Request 965 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(4, 5, 6); item = -1 }) }),
@@ -1072,14 +1079,24 @@ try {
     Assert-True ($tileSet.changed_cells -eq 1 -and $tileSet.undo_redo_registered -eq $true -and $tileSet.rollback -eq "undo_redo") "tilemap_set_cells did not publish one undoable change."
     $usedTileRect = Tool-Payload $byId[958]
     Assert-True ($usedTileRect.position.x -eq 1 -and $usedTileRect.position.y -eq 2 -and $usedTileRect.size.x -eq 1 -and $usedTileRect.size.y -eq 1 -and $usedTileRect.end.x -eq 2 -and $usedTileRect.end.y -eq 3) "tilemap_get_used_rect returned the wrong integer rectangle."
+    Assert-True (-not $byId[967].result.isError) "TileMapLayer change could not be undone."
+    $undoneTileRect = Tool-Payload $byId[968]
+    Assert-True ($undoneTileRect.size.x -eq 0 -and $undoneTileRect.size.y -eq 0) "TileMapLayer undo did not restore the empty fixture."
+    Assert-True (-not $byId[969].result.isError) "TileMapLayer change could not be redone."
+    $redoneTileRect = Tool-Payload $byId[970]
+    Assert-True ($redoneTileRect.position.x -eq 1 -and $redoneTileRect.position.y -eq 2 -and $redoneTileRect.size.x -eq 1 -and $redoneTileRect.size.y -eq 1) "TileMapLayer redo did not restore the exact cell rectangle."
     Assert-True $byId[959].result.isError "TileMapLayer batch accepted an invalid final source."
     $afterInvalidTile = Tool-Payload $byId[960]
     Assert-True ($afterInvalidTile.position.x -eq 1 -and $afterInvalidTile.position.y -eq 2 -and $afterInvalidTile.size.x -eq 1 -and $afterInvalidTile.size.y -eq 1) "Invalid-last TileMapLayer batch partially mutated the scene."
     Assert-True ((Tool-Payload $byId[961]).changed_cells -eq 1) "TileMapLayer erase did not remove the fixture cell."
     $gridSet = Tool-Payload $byId[962]
     Assert-True ($gridSet.changed_cells -eq 1 -and $gridSet.undo_redo_registered -eq $true) "gridmap_set_cells did not publish one undoable change."
+    Assert-True (-not $byId[971].result.isError) "GridMap change could not be undone."
+    $gridUndoProbe = Tool-Payload $byId[972]
+    Assert-True ($gridUndoProbe.changed_cells -eq 0 -and $gridUndoProbe.unchanged_cells -eq 1 -and $gridUndoProbe.undo_redo_registered -eq $false) "GridMap undo did not restore the empty cell."
+    Assert-True (-not $byId[973].result.isError) "GridMap change could not be redone."
     $gridNoop = Tool-Payload $byId[963]
-    Assert-True ($gridNoop.changed_cells -eq 0 -and $gridNoop.unchanged_cells -eq 1 -and $gridNoop.undo_redo_registered -eq $false -and $gridNoop.rollback -eq "not_required") "GridMap no-op created undo history or reported a change."
+    Assert-True ($gridNoop.changed_cells -eq 0 -and $gridNoop.unchanged_cells -eq 1 -and $gridNoop.undo_redo_registered -eq $false -and $gridNoop.rollback -eq "not_required") "GridMap redo did not restore the exact item or the no-op created undo history."
     Assert-True $byId[964].result.isError "GridMap batch accepted an invalid final item."
     $gridPartialProbe = Tool-Payload $byId[965]
     Assert-True ($gridPartialProbe.changed_cells -eq 0 -and $gridPartialProbe.unchanged_cells -eq 1) "Invalid-last GridMap batch partially mutated the scene."

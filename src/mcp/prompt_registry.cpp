@@ -58,7 +58,8 @@ void PromptRegistry::registerAllDefaultPrompts() {
             "2. Use `project_list_resources` and `scene_get_hierarchy` to locate the asset and understand either live or parsed state.\n"
             "3. If useful, call `viewport_create_test_lab` to write a sandbox scene, then explicitly open or run that scene before drawing conclusions.\n"
             "4. Use `viewport_capture_frame` for the active editor viewport and verify `is_live_frame` before treating pixels as live evidence.\n"
-            "5. Apply only supported focused `scene_*` scalar/node changes or `script_patch_method`, re-read the affected state, and report any unsupported camera, debug-draw, shader, or composite-property step.";
+            "5. Use editor-only `viewport_set_camera_transform` or collision/navigation `viewport_toggle_debug_draw` when useful, then restore temporary state and verify it.\n"
+            "6. Apply only supported focused `scene_*` scalar/node changes or `script_patch_method`, re-read the affected state, and report unsupported shader or composite-property steps honestly.";
 
         json result = {
             {"description", "Capability-aware visual anomaly workflow for Godot 4.5+"},
@@ -95,8 +96,9 @@ void PromptRegistry::registerAllDefaultPrompts() {
             "4. Edit project scripts through the normal workspace or `script_patch_method`, then run `script_check_syntax`.\n"
             "5. Attach scripts with `script_attach_to_node` and `script_detach_from_node`, and wire signals with `signal_connect`, `signal_disconnect` and `signal_list_connections`.\n"
             "6. Use `runtime_launch` for a separate-process test, then inspect the session with `runtime_read_logs`, `runtime_read_output`, `runtime_get_tree` and `eval_gdscript`.\n"
-            "7. Use game-only `runtime_inject_input`, live physics/navigation queries, animation inspection/playback and bounded profiler sampling only when their session policy fits.\n"
-            "8. Explicitly report unimplemented physics stepping, navigation baking, tilemap and gridmap editing, and call stacks instead of claiming those steps succeeded.";
+            "7. Use editor-only `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `tilemap_set_cells`, `tilemap_get_used_rect`, and `gridmap_set_cells` when their session policy fits.\n"
+            "8. Use game-only `runtime_inject_input`, live physics/navigation queries, animation inspection/playback, and bounded `runtime_read_profiler` sampling only when their session policy fits.\n"
+            "9. Explicitly report only `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack` as unimplemented instead of claiming those steps succeeded.";
 
         json result = {
             {"description", "Capability-aware gameplay slice workflow for Godot 4.5+"},

@@ -92,8 +92,28 @@ TEST_CASE(phase7_signal_forwarder_post_dispatch_contract) {
     ASSERT_EQ(emit_error.at("code"), 504);
     ASSERT_EQ(emit_error.at("message"), "unknown_outcome");
     ASSERT_EQ(emit_error.at("data").at("retryable"), false);
-    ASSERT_EQ(emit_error.at("data").at("outcome"), "unknown");
+    ASSERT_EQ(emit_error.at("data").at("outcome"), "unknown_outcome");
     ASSERT_EQ(emit_error.at("data").at("route_quarantine"), true);
+
+    // Every mutating Phase 7 call has the same no-retry contract once the
+    // transport confirms dispatch but cannot determine the outcome. Limiting
+    // this to signal_emit made tile/grid edits look safely retryable after an
+    // ambiguous timeout.
+    for (const auto* name : {
+             "signal_connect", "signal_disconnect",
+             "viewport_set_camera_transform", "viewport_toggle_debug_draw",
+             "tilemap_set_cells", "gridmap_set_cells", "anim_play_track",
+             "runtime_inject_input"}) {
+        auto route = std::make_shared<FailingRoute>(didi::ipc::transportFailure(
+            "deadline after dispatch", {true, true, true}));
+        const auto error = errorPayload(didi::mcp::sendPhase7LiveRequest(
+            didi::mcp::resolveAliasBinding(name), didi::json::object(), route));
+        ASSERT_EQ(error.at("code"), 504);
+        ASSERT_EQ(error.at("message"), "unknown_outcome");
+        ASSERT_EQ(error.at("data").at("retryable"), false);
+        ASSERT_EQ(error.at("data").at("outcome"), "unknown_outcome");
+        ASSERT_EQ(error.at("data").at("route_quarantine"), true);
+    }
 
     const auto connect = didi::mcp::resolveAliasBinding("signal_connect");
     // A real transport failure, which is what this case was always named for.

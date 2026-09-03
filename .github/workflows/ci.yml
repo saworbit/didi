@@ -468,9 +468,13 @@ jobs:
   # engine. Windows first because the harness is PowerShell; a POSIX harness is
   # still owed.
   godot-integration:
-    name: Live Godot Integration (windows, 4.5.1)
+    name: Live Godot Integration (windows, ${{ matrix.godot-version }})
     runs-on: windows-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        godot-version: [4.5.1, 4.7.2]
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
@@ -480,15 +484,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: godot-bin
-          key: godot-4.5.1-stable-win64
+          key: godot-${{ matrix.godot-version }}-stable-win64
 
-      - name: Download Godot 4.5.1
+      - name: Download Godot ${{ matrix.godot-version }}
         if: steps.cache-godot.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p godot-bin
-          url="https://github.com/godotengine/godot/releases/download/4.5.1-stable/Godot_v4.5.1-stable_win64.exe.zip"
+          url="https://github.com/godotengine/godot/releases/download/${{ matrix.godot-version }}-stable/Godot_v${{ matrix.godot-version }}-stable_win64.exe.zip"
           curl --fail --location --retry 3 --retry-delay 5 --output godot.zip "$url"
           7z x godot.zip -ogodot-bin
           ls godot-bin
@@ -501,7 +505,7 @@ jobs:
       - name: Run Live Godot Integration Harness
         shell: pwsh
         run: |
-          $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v4.5.1-stable_win64*.exe" |
+          $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v${{ matrix.godot-version }}-stable_win64*.exe" |
                    Where-Object { $_.Name -notlike "*console*" } |
                    Select-Object -First 1
           if (-not $godot) { throw "Godot executable not found under godot-bin" }
@@ -511,7 +515,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: godot-integration-logs
+          name: godot-integration-${{ matrix.godot-version }}-logs
           path: |
             build/godot_*.log
             build/godot_*.out

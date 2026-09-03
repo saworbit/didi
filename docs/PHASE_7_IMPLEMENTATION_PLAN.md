@@ -19,9 +19,9 @@
 
 Task 1 completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. The gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For each blocker, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
-The all-or-nothing 83/83 activation gate originally prevented Tasks 2-13. It was replaced by an explicit partial-delivery decision. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. `runtime_read_profiler`, `runtime_inject_input`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks` and `anim_play_track` followed once their own live trials on Godot 4.5.1, 4.6.2 and 4.7.2 passed. The other 8 names remain registered but unimplemented. The original approved plan below is preserved as the executable contract, not as evidence of delivered behavior.
+The all-or-nothing 83/83 activation gate originally prevented Tasks 2-13. It was replaced by an explicit partial-delivery decision. All 15 implementation-feasible names are now delivered after their production-configuration paths passed the required live trials; the unavailable set is exactly `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. The original approved plan below is preserved as the executable contract, not as evidence of delivered behavior.
 
-Work can proceed only after governance chooses one path:
+The governance decision selected partial delivery (the historical option A below). Further work on the three blockers requires option C or an explicit contract amendment:
 
 - **A)** Authorize partial delivery of the 15 feasible tools, targeting 76/79 and retaining three honest unimplemented names.
 - **B)** Retain atomic 83/83 and wait for supported engine capabilities.

@@ -1352,6 +1352,66 @@ Historical vocabulary example: Phase 7 is planned.
                     errors,
                 )
 
+    def test_rejects_stale_phase7_delivery_prose_in_current_documents(self):
+        stale_claims = (
+            ("README.md", "Current behavior for 79 canonical tools plus 10 legacy names", "79 canonical tools plus 10 legacy names"),
+            ("docs/QUICKSTART.md", "TileMap/GridMap editing and call-stack inspection remain registered but unimplemented", "TileMap/GridMap editing remains registered but unimplemented"),
+            ("docs/FUTURE_PHASES_DESIGN.md", "The eleven feasible-but-unbuilt names have no implementation at all yet", "Eleven feasible-but-unbuilt names have no implementation at all yet"),
+            ("docs/FUTURE_PHASES_DESIGN.md", "Complete the existing 79-tool canonical surface", "existing 79-tool canonical surface"),
+            ("docs/FUTURE_PHASES_DESIGN.md", "Phase 7A-7C define the approved contracts for editor authoring, simulation and animation, and runtime debugging. Their implementation did not start because the gate blocked it", "Phase 7A-7C contracts: their implementation did not start"),
+            ("docs/FUTURE_PHASES_DESIGN.md", "The detailed 7A-7C requirements below remain approved contract design, not delivered behavior", "The detailed 7A-7C requirements are not delivered behavior"),
+            ("docs/FUTURE_PHASES_DESIGN.md", "All 79 canonical registrations report implemented: true", "All 79 canonical registrations report implemented"),
+            ("docs/ROADMAP.md", "The implementation on `main` remains 61/79", "The implementation on `main` remains 61/79"),
+            ("docs/ROADMAP.md", "TileMap/GridMap editing remains unimplemented", "TileMap/GridMap editing remains unimplemented"),
+            ("docs/LLM_INSTRUCTIONS.md", "Didi exposes 79 canonical tools", "exposes 79 canonical tools"),
+            ("docs/DEVELOPER_GUIDE.md", "implemented: false for `runtime_inject_input`, `runtime_get_call_stack`, and `runtime_read_profiler`", "implemented: false for runtime_inject_input and runtime_read_profiler"),
+            ("docs/DEVELOPER_GUIDE.md", "79 canonical/10 legacy/89 total", "79 canonical/10 legacy/89 total"),
+            ("docs/DEVELOPER_GUIDE.md", "60 implemented/18 unimplemented", "60 implemented/18 unimplemented"),
+            ("docs/RESOURCES_AND_PROMPTS.md", "Runtime input injection, call stacks, profiler telemetry, and raw stdout remain unsupported", "Runtime input injection, call stacks, profiler telemetry remain unsupported"),
+            ("docs/PHASE_7_IMPLEMENTATION_PLAN.md", "The other 8 names remain registered but unimplemented", "The other 8 names remain registered but unimplemented"),
+            ("docs/PHASE_7_IMPLEMENTATION_PLAN.md", "Work can proceed only after governance chooses one path", "Work can proceed only after governance chooses"),
+        )
+        for relative_path, claim, expected_fragment in stale_claims:
+            with self.subTest(relative_path=relative_path, claim=claim):
+                root = self.make_valid_repository()
+                path = root / relative_path
+                text = path.read_text(encoding="utf-8")
+                self.write(relative_path, claim + ".\n\n" + text)
+
+                errors = validate_repository(root)
+
+                self.assertTrue(
+                    any(
+                        relative_path in error
+                        and expected_fragment.lower() in error.lower()
+                        for error in errors
+                    ),
+                    errors,
+                )
+
+    def test_ignores_stale_delivery_claims_in_excluded_contexts(self):
+        root = self.make_valid_repository()
+        path = root / "docs/FUTURE_PHASES_DESIGN.md"
+        text = path.read_text(encoding="utf-8")
+        text += """
+
+```text
+The detailed 7A-7C requirements below remain approved contract design, not delivered behavior.
+```
+
+## Historical wording
+
+Phase 7A-7C define the approved contracts for editor authoring. Their implementation did not start because the old gate blocked it.
+"""
+        self.write("docs/FUTURE_PHASES_DESIGN.md", text)
+
+        errors = validate_repository(root)
+
+        self.assertFalse(
+            any("stale Phase 7 delivery prose" in error for error in errors),
+            errors,
+        )
+
     def test_enforces_canonical_count_arithmetic(self):
         root = self.make_valid_repository()
         roadmap = (root / "docs/ROADMAP.md").read_text(encoding="utf-8")

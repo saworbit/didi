@@ -191,6 +191,122 @@ PHASE7_CURRENT_STATE_DOCUMENTS = (
     "docs/ROADMAP.md",
     "docs/TOOL_REFERENCE.md",
 )
+PHASE7_STALE_DELIVERY_CLAIMS = {
+    "README.md": (
+        (
+            re.compile(r"79 canonical tools plus 10 legacy names", re.IGNORECASE),
+            "79 canonical tools plus 10 legacy names",
+        ),
+        (
+            re.compile(r"Registry \(79 canonical tools \+ 10 legacy names\)", re.IGNORECASE),
+            "Registry (79 canonical tools + 10 legacy names)",
+        ),
+    ),
+    "docs/QUICKSTART.md": (
+        (
+            re.compile(
+                r"TileMap/GridMap editing(?: and call-stack inspection)? "
+                r"remain registered but unimplemented",
+                re.IGNORECASE,
+            ),
+            "TileMap/GridMap editing remains registered but unimplemented",
+        ),
+    ),
+    "docs/FUTURE_PHASES_DESIGN.md": (
+        (
+            re.compile(r"existing\s+79-tool\s+canonical\s+surface", re.IGNORECASE),
+            "existing 79-tool canonical surface",
+        ),
+        (
+            re.compile(
+                r"(?:The\s+)?eleven\s+feasible-but-unbuilt\s+names\s+have\s+no\s+"
+                r"implementation\s+at\s+all\s+yet",
+                re.IGNORECASE,
+            ),
+            "Eleven feasible-but-unbuilt names have no implementation at all yet",
+        ),
+        (
+            re.compile(
+                r"Phase\s+7A-7C\s+define\s+the\s+approved\s+contracts[\s\S]{0,160}"
+                r"Their\s+implementation\s+did\s+not\s+start\s+because",
+                re.IGNORECASE,
+            ),
+            "Phase 7A-7C contracts: their implementation did not start",
+        ),
+        (
+            re.compile(
+                r"The\s+detailed\s+7A-7C\s+requirements\s+below\s+remain\s+"
+                r"approved\s+contract\s+design,\s+not\s+delivered\s+behavior",
+                re.IGNORECASE,
+            ),
+            "The detailed 7A-7C requirements are not delivered behavior",
+        ),
+        (
+            re.compile(r"All\s+79\s+canonical\s+registrations\s+report", re.IGNORECASE),
+            "All 79 canonical registrations report implemented",
+        ),
+    ),
+    "docs/ROADMAP.md": (
+        (
+            re.compile(
+                r"The\s+implementation\s+on\s+`main`\s+remains\s+61/79",
+                re.IGNORECASE,
+            ),
+            "The implementation on `main` remains 61/79",
+        ),
+        (
+            re.compile(
+                r"TileMap/GridMap\s+(?:editing\s+)?(?:remains?|is)\s+unimplemented",
+                re.IGNORECASE,
+            ),
+            "TileMap/GridMap editing remains unimplemented",
+        ),
+    ),
+    "docs/LLM_INSTRUCTIONS.md": (
+        (
+            re.compile(r"exposes\s+79\s+canonical\s+tools", re.IGNORECASE),
+            "exposes 79 canonical tools",
+        ),
+    ),
+    "docs/DEVELOPER_GUIDE.md": (
+        (
+            re.compile(
+                r"implemented:\s*false`?\s+for\s+`runtime_inject_input`[\s\S]{0,100}"
+                r"`runtime_read_profiler`",
+                re.IGNORECASE,
+            ),
+            "implemented: false for runtime_inject_input and runtime_read_profiler",
+        ),
+        (
+            re.compile(r"79\s+canonical/10\s+legacy/89\s+total", re.IGNORECASE),
+            "79 canonical/10 legacy/89 total",
+        ),
+        (
+            re.compile(r"60\s+implemented/18\s+unimplemented", re.IGNORECASE),
+            "60 implemented/18 unimplemented",
+        ),
+    ),
+    "docs/RESOURCES_AND_PROMPTS.md": (
+        (
+            re.compile(
+                r"Runtime input injection, call stacks, profiler telemetry[\s\S]{0,80}"
+                r"remain unsupported",
+                re.IGNORECASE,
+            ),
+            "Runtime input injection, call stacks, profiler telemetry remain unsupported",
+        ),
+    ),
+    "docs/PHASE_7_IMPLEMENTATION_PLAN.md": (
+        (
+            re.compile(r"The\s+other\s+8\s+names\s+remain\s+registered\s+but\s+unimplemented", re.IGNORECASE),
+            "The other 8 names remain registered but unimplemented",
+        ),
+        (
+            re.compile(r"Work\s+can\s+proceed\s+only\s+after\s+governance\s+chooses", re.IGNORECASE),
+            "Work can proceed only after governance chooses",
+        ),
+    ),
+}
 PHASE7_CURRENT_STATUS_START = "<!-- phase7-current-status:start -->"
 PHASE7_CURRENT_STATUS_END = "<!-- phase7-current-status:end -->"
 PHASE7_FEASIBLE_NAMES_START = "<!-- phase7-feasible-names:start -->"
@@ -908,6 +1024,17 @@ def validate_phase7_reconciliation(
             errors.append(
                 f"{relative_path}: stale Phase 7 planned prose in current-state documentation"
             )
+
+    for relative_path, claims in PHASE7_STALE_DELIVERY_CLAIMS.items():
+        raw_text = texts.get(relative_path)
+        if raw_text is None:
+            continue
+        text = _without_phase7_excluded_contexts(raw_text)
+        for pattern, description in claims:
+            if pattern.search(text):
+                errors.append(
+                    f"{relative_path}: stale Phase 7 delivery prose: {description}"
+                )
 
     readme = texts.get("README.md")
     if readme is not None and not all(

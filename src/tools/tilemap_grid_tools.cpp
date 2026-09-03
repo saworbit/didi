@@ -1,6 +1,7 @@
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/tools/phase7_live_forward.hpp"
 #include "didi/common/ipc_channel.hpp"
+#include "didi/common/json_bounds.hpp"
 #include "didi/common/logger.hpp"
 #include <set>
 #include <string_view>
@@ -36,8 +37,7 @@ bool boundedString(const json& value) {
 }
 
 bool boundedInteger(const json& value, int64_t minimum, int64_t maximum) {
-    return value.is_number_integer() && value.get<int64_t>() >= minimum &&
-           value.get<int64_t>() <= maximum;
+    return boundedJsonInteger(value, minimum, maximum).has_value();
 }
 
 bool integerTuple(const json& value, size_t dimensions, int64_t minimum,
@@ -100,8 +100,9 @@ bool hasDuplicateTuple(const json& cells, const char* key, size_t dimensions) {
             cell[key].size() != dimensions) return false;
         std::vector<int64_t> tuple;
         for (const auto& component : cell[key]) {
-            if (!component.is_number_integer()) return false;
-            tuple.push_back(component.get<int64_t>());
+            const auto number = jsonInt64(component);
+            if (!number.has_value()) return false;
+            tuple.push_back(*number);
         }
         if (!seen.insert(std::move(tuple)).second) return true;
     }

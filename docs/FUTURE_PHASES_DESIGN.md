@@ -4,7 +4,7 @@
 
 ## Goal
 
-Complete the existing 79-tool canonical surface, then extend Didi through project intelligence, advanced authoring, parallel Godot orchestration, broader MCP capabilities, and mature distribution without weakening the local authenticated safety boundary.
+Complete the original 79-tool canonical surface, then extend Didi through project intelligence, advanced authoring, parallel Godot orchestration, broader MCP capabilities, and mature distribution without weakening the local authenticated safety boundary.
 
 ## Future-Phase Governance
 
@@ -29,7 +29,7 @@ Complete the existing 79-tool canonical surface, then extend Didi through projec
 
 **Goal:** The implementation remains 80/83 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. All 15 feasible names are delivered. The original delivery goal was atomic 83/83 without adding public tool names.
 
-**Scope:** Phase 7A-7C define the approved contracts for editor authoring, simulation and animation, and runtime debugging. Their implementation did not start because the hard feasibility gate blocked the atomic plan.
+**Scope:** Phase 7A-7C define the approved contracts for editor authoring, simulation and animation, and runtime debugging. All fifteen implementation-feasible operations are delivered; the three API-blocked contracts remain discoverable and reject calls honestly.
 
 **Explicit exclusions:** No new public tool names, arbitrary debugger control, or engine-output streaming beyond implemented Godot APIs.
 
@@ -87,11 +87,12 @@ was one no user would ever run. Separating those two concerns is what made the
 trial possible, and the trial is what made delivery honest.
 
 **The standing rule this sets:** feasibility does not authorize delivery. Each
-remaining Phase 7 name needs its own production trial on the supported engines
-before it ships. The eleven feasible-but-unbuilt names have no implementation at
-all yet, so none of them is close; delivering them is new work, not a flag flip.
+Phase 7 name needed its own production trial on the supported engines before it
+could ship. All fifteen feasible names have now passed their delivery gates;
+the three blocked names require new feasibility evidence before implementation.
 
-The detailed 7A-7C requirements below remain approved contract design, not delivered behavior.
+The detailed 7A-7C requirements below are retained as the delivered contract and
+as the standard for any future change to those tools.
 
 ### Phase 7A: Editor Authoring Completion
 
@@ -144,11 +145,11 @@ Requirements:
 - Profiler sampling has explicit duration, sample-count, category, and payload limits.
 - No tool claims arbitrary debugger control or engine-output streaming beyond implemented Godot APIs.
 
-### Phase 7 Exit Gate
+### Phase 7 Partial-Delivery Gate
 
-- All 79 canonical registrations report `implemented: true`.
-- The 10 legacy registrations remain compatibility-only and do not change the canonical count.
-- No canonical tool reports `currentMode: "unimplemented"`.
+- All 15 implementation-feasible Phase 7 registrations report `implemented: true`; the three API-blocked names remain explicitly unavailable.
+- The full surface reports 80 implemented and 3 unimplemented canonical tools out of 83, plus 10 compatibility-only legacy registrations.
+- The unavailable set is exactly `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`.
 - Capability, tool-reference, roadmap, LLM, security, and smoke-test facts update together.
 - Native and Godot integration suites cover every newly enabled tool and safety boundary.
 - Required Windows, Linux, and macOS checks pass.
@@ -158,7 +159,7 @@ Requirements:
 
 **Status:** `PLANNED`
 
-**Dependency:** Phase 8 cannot start until governance resolves the Phase 7 feasibility block and either revises or satisfies the canonical-completion prerequisite.
+**Dependency:** Satisfied by the authorized Phase 7 partial-delivery exit gate. Phase 8 remains `PLANNED` until its first separately reviewed implementation slice begins.
 
 **Goal:** Make project-wide dependencies, UID resolution, and import health inspectable and safely configurable.
 

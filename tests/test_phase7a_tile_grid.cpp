@@ -19,6 +19,7 @@ struct RegisterPhase7TileGrid { RegisterPhase7TileGrid() { registerTest("Phase7T
 #include "didi/tools/resolved_tool_binding.hpp"
 
 #include <memory>
+#include <limits>
 #include <vector>
 
 #define ASSERT_EQ(a, b) ASSERT_TRUE((a) == (b))
@@ -78,6 +79,7 @@ didi::json gridSetRecord(int x, int y, int z) {
 
 void test_phase7_tile_grid_handlers_reject_invalid_batches_before_dispatch() {
     using namespace didi::mcp;
+    const auto unsigned_overflow = std::numeric_limits<uint64_t>::max();
     auto tile_client = std::make_shared<TileGridRecordingClient>();
     auto tile = resolveAliasBinding("tilemap_set_cells");
     didi::json too_many_tiles = didi::json::array();
@@ -89,6 +91,10 @@ void test_phase7_tile_grid_handlers_reject_invalid_batches_before_dispatch() {
              {{"tilemap_path", "/root/Tiles"}, {"cells", {{{"coords", {0, 0}}, {"erase", false}}}}},
              {{"tilemap_path", "/root/Tiles"}, {"cells", {{{"coords", {0, 0}}, {"erase", true}, {"source_id", 0}}}}},
              {{"tilemap_path", "/root/Tiles"}, {"cells", {{{"coords", {0, 0}}, {"source_id", -1}, {"atlas_coords", {0, 0}}}}}},
+             {{"tilemap_path", "/root/Tiles"}, {"cells", {{{"coords", {unsigned_overflow, 0}}, {"erase", true}}}}},
+             {{"tilemap_path", "/root/Tiles"}, {"cells", {{{"coords", {0, 0}}, {"source_id", unsigned_overflow}, {"atlas_coords", {0, 0}}}}}},
+             {{"tilemap_path", "/root/Tiles"}, {"cells", {{{"coords", {0, 0}}, {"source_id", 0}, {"atlas_coords", {unsigned_overflow, 0}}}}}},
+             {{"tilemap_path", "/root/Tiles"}, {"cells", {{{"coords", {0, 0}}, {"source_id", 0}, {"atlas_coords", {0, 0}}, {"alternative_tile", unsigned_overflow}}}}},
              {{"tilemap_path", "/root/Tiles"}, {"cells", {tileSetRecord(0, 0), {{"coords", {1048577, 0}}, {"erase", true}}}}}}) {
         assertTileGridRejected(handleTilemapSetCells(tile, invalid, tile_client), tile_client);
     }
@@ -110,6 +116,9 @@ void test_phase7_tile_grid_handlers_reject_invalid_batches_before_dispatch() {
              {{"gridmap_path", "/root/Grid"}, {"cells", {{{"position", {0, 0}}, {"item", 0}}}}},
              {{"gridmap_path", "/root/Grid"}, {"cells", {{{"position", {0, 0, 0}}, {"item", -1}, {"orientation", 1}}}}},
              {{"gridmap_path", "/root/Grid"}, {"cells", {{{"position", {0, 0, 0}}, {"item", 0}, {"orientation", 24}}}}},
+             {{"gridmap_path", "/root/Grid"}, {"cells", {{{"position", {unsigned_overflow, 0, 0}}, {"item", 0}}}}},
+             {{"gridmap_path", "/root/Grid"}, {"cells", {{{"position", {0, 0, 0}}, {"item", unsigned_overflow}}}}},
+             {{"gridmap_path", "/root/Grid"}, {"cells", {{{"position", {0, 0, 0}}, {"item", 0}, {"orientation", unsigned_overflow}}}}},
              {{"gridmap_path", "/root/Grid"}, {"cells", {gridSetRecord(0, 0, 0), {{"position", {0, 0, 1048577}}, {"item", 0}}}}}}) {
         assertTileGridRejected(handleGridmapSetCells(grid, invalid, grid_client), grid_client);
     }
