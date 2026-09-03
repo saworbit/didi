@@ -296,7 +296,8 @@ CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::I
     offline::ProjectAuditOptions options;
     for (const auto& [key, target] : {std::pair<const char*, bool*>{"include_orphans", &options.include_orphans},
                                       {"include_broken_references", &options.include_broken_references},
-                                      {"include_dead_signals", &options.include_dead_signals}}) {
+                                      {"include_dead_signals", &options.include_dead_signals},
+                                      {"include_import_health", &options.include_import_health}}) {
         if (!args.contains(key)) continue;
         if (!args[key].is_boolean()) {
             return CallToolResult::error(std::string("Invalid audit request: ") + key +
@@ -313,10 +314,11 @@ CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::I
         options.max_findings = static_cast<size_t>(value.get<int64_t>());
     }
     if (!options.include_orphans && !options.include_broken_references &&
-        !options.include_dead_signals) {
+        !options.include_dead_signals && !options.include_import_health) {
         return CallToolResult::error(
             "Invalid audit request: at least one of include_orphans, "
-            "include_broken_references or include_dead_signals must stay enabled");
+            "include_broken_references, include_dead_signals or include_import_health "
+            "must stay enabled");
     }
 
     auto report = offline::auditProject(".", options);

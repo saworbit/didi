@@ -113,6 +113,7 @@ set(CORE_SOURCES
     src/offline/gdscript_diagnostics.cpp
     src/offline/resource_indexer.cpp
     src/offline/audio_bus_layout.cpp
+    src/offline/import_health.cpp
     src/offline/project_audit.cpp
     src/offline/project_impact.cpp
     src/offline/project_text_scan.cpp
@@ -221,6 +222,7 @@ set(TEST_SOURCES
     tests/test_tools.cpp
     tests/test_script_patch.cpp
     tests/test_resource_indexer.cpp
+    tests/test_import_health.cpp
     tests/test_project_search.cpp
     tests/test_image_diff.cpp
     tests/test_test_runner.cpp

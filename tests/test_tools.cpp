@@ -889,7 +889,69 @@ static void test_project_audit_honours_switches_and_rejects_bad_arguments() {
                     .callTool("project_audit_assets",
                               didi::json{{"include_orphans", false},
                                          {"include_broken_references", false},
-                                         {"include_dead_signals", false}})
+                                         {"include_dead_signals", false},
+                                         {"include_import_health", false}})
+                    .isError);
+}
+
+static void test_project_audit_exposes_optional_import_health() {
+    ScopedToolProject project("project-audit-import-health");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("art/icon.png", "source");
+    writeAuditFile(
+        "art/icon.png.import",
+        "[remap]\n"
+        "importer=\"texture\"\n"
+        "type=\"CompressedTexture2D\"\n"
+        "path=\"res://.godot/imported/icon.ctex\"\n\n"
+        "[deps]\n"
+        "source_file=\"res://art/icon.png\"\n"
+        "dest_files=[\"res://.godot/imported/icon.ctex\"]\n");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto* tool = registry.getTool("project_audit_assets");
+    ASSERT_TRUE(tool != nullptr);
+    const auto definition = tool->toJson();
+    ASSERT_EQ(definition["inputSchema"]["properties"]["include_import_health"]["type"],
+              "boolean");
+    ASSERT_EQ(definition["inputSchema"]["properties"]["include_import_health"]["default"],
+              true);
+
+    const auto default_result = registry.callTool("project_audit_assets", didi::json::object());
+    ASSERT_TRUE(!default_result.isError);
+    const auto default_report = didi::json::parse(default_result.content[0].text);
+    ASSERT_EQ(default_report["scanned_import_metadata"], 1u);
+    ASSERT_EQ(default_report["import_issue_count"], 1u);
+    ASSERT_EQ(default_report["import_issues"][0]["kind"], "missing_import_output");
+
+    const auto disabled = registry.callTool(
+        "project_audit_assets", didi::json{{"include_import_health", false}});
+    ASSERT_TRUE(!disabled.isError);
+    const auto disabled_report = didi::json::parse(disabled.content[0].text);
+    ASSERT_EQ(disabled_report["scanned_import_metadata"], 0u);
+    ASSERT_EQ(disabled_report["import_issue_count"], 0u);
+    ASSERT_TRUE(disabled_report["import_issues"].empty());
+
+    const auto only_imports = registry.callTool(
+        "project_audit_assets",
+        didi::json{{"include_orphans", false},
+                   {"include_broken_references", false},
+                   {"include_dead_signals", false},
+                   {"include_import_health", true}});
+    ASSERT_TRUE(!only_imports.isError);
+    ASSERT_EQ(didi::json::parse(only_imports.content[0].text)["import_issue_count"], 1u);
+
+    ASSERT_TRUE(registry
+                    .callTool("project_audit_assets",
+                              didi::json{{"include_import_health", "yes"}})
+                    .isError);
+    ASSERT_TRUE(registry
+                    .callTool("project_audit_assets",
+                              didi::json{{"include_orphans", false},
+                                         {"include_broken_references", false},
+                                         {"include_dead_signals", false},
+                                         {"include_import_health", false}})
                     .isError);
 }
 
@@ -2109,6 +2171,8 @@ struct RegisterToolTests {
                      test_project_audit_reports_orphans_broken_references_and_dead_signals);
         registerTest("Tools.ProjectAuditOptions",
                      test_project_audit_honours_switches_and_rejects_bad_arguments);
+        registerTest("Tools.ProjectAuditImportHealth",
+                     test_project_audit_exposes_optional_import_health);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }

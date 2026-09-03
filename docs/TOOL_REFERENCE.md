@@ -349,14 +349,15 @@ The results are evidence, not verdicts. A name or node path built at runtime can
 
 ### `project_audit_assets` — Offline
 
-Reads the whole project once and reports three things nothing in a single file can show: assets that nothing references, references that resolve to no file, and signals that nothing emits or connects.
+Reads the project and reports four things nothing in a single file can show: assets that nothing references, references that resolve to no file, signals that nothing emits or connects, and unhealthy existing Godot `.import` metadata.
 
 - `include_orphans` (`boolean`, default `true`).
 - `include_broken_references` (`boolean`, default `true`).
 - `include_dead_signals` (`boolean`, default `true`).
+- `include_import_health` (`boolean`, default `true`).
 - `max_findings` (`integer`, 1-5000, default `500`).
 
-At least one of the three must stay enabled.
+At least one of the four must stay enabled.
 
 Orphan detection covers asset types only: `Texture2D`, `AudioStream`, `MeshResource`, `Font`, and `Shader`. Scenes and scripts are excluded on purpose, because a scene that nothing references is usually a level you open by hand. `.import` and `.uid` sidecars are excluded too.
 
@@ -364,7 +365,9 @@ References are followed in every form Godot writes and people type: `[ext_resour
 
 A signal counts as alive if any file emits it, connects to it, checks `is_connected`, or wires it through `[connection signal="..."]` in a scene.
 
-The results are evidence, not verdicts. A path a script builds at runtime cannot be followed, so an asset in use can still be listed as an orphan, and a connection made through a variable name cannot be seen. The response repeats both limits in a `limitations` array so a caller reading only the payload still gets them. `orphan_bytes` counts every orphan found, including any beyond `max_findings`.
+Import health inspects only existing regular, non-symlink `*.import` files. It reads at most 256 KiB and 1,024 declared output paths from each, and scans at most 20,000 metadata files without following directory or file symlinks. Declared `source_file`, `dest_files`, and `[remap] path` values must be canonical project-contained `res://` paths; generated outputs under `res://.godot/imported/` are allowed, but an escape or symlink is not. `invalid_import_metadata` also covers `valid=false`, malformed targeted assignments, an oversized file/path list, or a `source_file` that disagrees with the sidecar name. Other findings are `missing_import_source`, `missing_import_output`, and `source_newer_than_output`, with `metadata`, `source`, and `target` provenance. `scanned_import_metadata` counts inspected sidecars, `import_issue_count` counts all findings before the shared `max_findings` response cap, and `import_scan_truncated` reports the metadata-file cap.
+
+The results are evidence, not verdicts. A path a script builds at runtime cannot be followed, so an asset in use can still be listed as an orphan, and a connection made through a variable name cannot be seen. `source_newer_than_output` compares filesystem timestamps; it does not reproduce Godot's checksum, importer-version, or settings-validity checks. The response repeats these limits in a `limitations` array so a caller reading only the payload still gets them. `orphan_bytes` and `import_issue_count` count findings beyond the response cap.
 
 ### `instantiate_asset` — Unimplemented legacy name
 
