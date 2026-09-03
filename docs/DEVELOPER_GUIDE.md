@@ -65,6 +65,7 @@ The native runner's reported total is authoritative as the suite evolves. Covera
 - Transactional attach, deterministic auto-selection, fresh identity handshakes, route supersession, kind-aware availability, deadlines, and quarantine.
 - Runtime log cursor/gap/filter behavior, UTF-8 and payload bounds, runtime-tree bounds, and expression-sandbox policy.
 - Tool/resource live and offline provenance, viewport/image encoding, GDScript diagnostics/patching/reflection, and resource indexing.
+- Blackboard path rejection, atomic patching, expiry, bounds, and the cross-process file lock; task claim exclusivity under concurrent claimers, lease expiry and reclaim, dependency readiness, cycle refusal, and lease ownership on update and complete.
 
 The Windows live integration harness copies the tracked fixture into `build/` and starts real Godot processes. It preserves the Phase 1/2 sequence, adds Phase 3 concurrent editor/game routing, and now exercises Phase 4 bounded search, SVG reimport, reversible isolation, capture IDs, mutation diffs, exact undo restoration, and cleanup. The earlier coverage still checks scripts, groups, autoloads, nested settings, InputEvent forms, persistence rollback, scene lifecycle, resource ownership, unsafe paths, and honest errors:
 

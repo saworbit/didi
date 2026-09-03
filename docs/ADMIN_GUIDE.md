@@ -91,6 +91,23 @@ Godot discovery recognizes common 4.5.1, 4.6.2, and 4.7.2 Windows console/editor
 
 ---
 
+## 🗂️ Blackboard Storage
+
+The coordination tools write one file per board at `.didi/blackboard/<board>.json`
+inside the project, beside a `<board>.lock` used for the exclusive OS lock. There
+is no server, no daemon and no network listener: a board is a file, and the only
+processes touching it are the `didi` processes started against that project.
+
+| Concern | Behaviour |
+| :--- | :--- |
+| Growth | Bounded per board: 4 MiB of state, 10,000 keys, 2,000 tasks. A write that would exceed a bound is refused and nothing is written. |
+| Permissions | Whatever the project directory grants. A board is not a privilege boundary between the agents that can read it. |
+| Cleanup | Nothing expires a board. Entries written with `ttl_seconds` lapse on the next read, listing or write; everything else persists until `blackboard_clear`. |
+| Version control | Ignored by this repository's `.gitignore`. A real project may reasonably want to commit its architectural decisions, so decide deliberately rather than by default. |
+| Stale lock file | The lock is held by an open OS handle, not by the file existing. A leftover `.lock` after a crash blocks nothing. |
+
+---
+
 ## 🚀 CI/CD Pipeline & Headless Deployment
 
 In automated CI environments (GitHub Actions, GitLab CI, Jenkins), Didi operates entirely headless without requiring a display server or GPU:

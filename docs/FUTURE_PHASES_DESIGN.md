@@ -221,6 +221,30 @@ Requirements:
 - Temporary visual state is restored on success, error, timeout, and cancellation.
 - Real editor and game fixtures prove layout, animation, capture-target, and comparison behavior.
 
+## Phase 9a: Agent Coordination Surface
+
+**Goal:** Let independent agent processes share decisions and divide work without
+a human sequencing them.
+
+**Scope:** a project-local blackboard and task allocation on top of it, both
+file-backed with an exclusive OS lock, because each MCP client is its own process.
+
+**Explicit exclusions:** reactive resource subscriptions, live editor state
+reflected onto board namespaces, and any human-facing dashboard. None of these is
+implied by what shipped.
+
+**Security classification:** shared state inside the project boundary. A board is
+not a trust boundary between agents, and a lease is cooperation rather than
+authentication. See [SECURITY.md](../SECURITY.md).
+
+**Mutation classification:** writes and task moves are create/set with a dry run;
+`blackboard_clear` is remove/overwrite and always confirmed.
+
+**Status:** delivered for the blackboard and the task engine. The exclusions above
+remain open.
+
+---
+
 ## Phase 10: Gogo Parallel Godot Orchestration
 
 **Status:** `PLANNED`

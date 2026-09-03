@@ -142,6 +142,30 @@ Phase 3 discovers endpoints from access-controlled descriptors and authenticates
 
 ---
 
+## 4a. Running more than one agent
+
+Each MCP client launches its own `didi` process. Two agents therefore share no
+memory, and anything both must see has to be on disk. That is what the
+coordination tools are for.
+
+- Point every agent at the same `--project`. Boards are keyed by project, so
+  agents on the same project see the same board and agents on different projects
+  cannot reach each other's.
+- Give each agent a stable `agent_id`. It is recorded as the lease owner and is
+  required to update or complete a task. It is an identifier for cooperation, not
+  an authentication check.
+- Take work with `blackboard_task_claim` rather than reading a list and picking.
+  Claiming is atomic; reading then picking is a race that hands one task to two
+  agents.
+- Size `lease_seconds` to the work, and renew through `blackboard_task_update` if
+  it runs long. A lapsed lease returns the task to the pool, which is what makes
+  a crashed agent harmless and a silent one indistinguishable from it.
+- The runtime session lock is unaffected. One MCP client at a time may drive a
+  given Godot session; coordinating several agents does not change that, and only
+  one of them can hold the editor route.
+
+---
+
 ## 5. Phase 3 client integration sequence
 
 `tools/list` returns 93 canonical tools and 10 legacy registrations, 103 in total. Integrators should treat the four session-management tools as local operations even though their discovery metadata uses the existing `offline_fallback` capability label:
