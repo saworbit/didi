@@ -1,5 +1,8 @@
 # CMake & Build Artifacts
-build/
+# Covers build/ and any out-of-source tree beside it, build-ninja/ being the one
+# the Ninja generator uses on Windows. Without this a git add -A sweeps several
+# thousand lines of build output into a commit, which is how it got there once.
+build*/
 bin/
 out/
 CMakeCache.txt
