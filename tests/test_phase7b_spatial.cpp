@@ -18,6 +18,7 @@ namespace {
 
 using didi::json;
 using didi::runtime::parseNavPathRequest;
+using didi::runtime::parseRaycastBatchRequest;
 using didi::runtime::parseRaycastRequest;
 
 json v2(double x, double y) { return {{"x", x}, {"y", y}}; }
@@ -26,7 +27,8 @@ json v3(double x, double y, double z) { return {{"x", x}, {"y", y}, {"z", z}}; }
 void test_registry_advertises_live_reads() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
-    for (const auto* name : {"physics_raycast_query", "nav_query_path"}) {
+    for (const auto* name : {"physics_raycast_query", "spatial_query_raycast_batch",
+                             "nav_query_path"}) {
         const auto* tool = registry.getTool(name);
         ASSERT_TRUE(tool != nullptr);
         ASSERT_TRUE(tool->capability.implemented);
@@ -133,11 +135,74 @@ void test_hook_admits_both_session_kinds_by_policy() {
     didi::godot::EditorHookTestAccess::setSessionKind(hook, std::nullopt);
 }
 
+void test_raycast_batch_is_exactly_the_single_ray_contract_repeated() {
+    // The batch exists so fifty sightlines cost one dispatch and one space
+    // state lookup rather than fifty. What it must not become is a second
+    // contract: an entry the single call would reject has to be rejected here,
+    // and the other way round, or a caller learns two sets of rules.
+    auto batch = parseRaycastBatchRequest({{"rays", json::array({
+        {{"from", v3(0, 0, 0)}, {"to", v3(4, 0, 0)}},
+        {{"from", v3(0, 0, 0)}, {"to", v3(0, 9, 0)}, {"collision_mask", 5}}})}});
+    ASSERT_TRUE(batch.isOk());
+    ASSERT_EQ(batch.value().rays.size(), 2u);
+    ASSERT_EQ(batch.value().dimension(), 3);
+    // The default mask is the single call's default, not a second one.
+    ASSERT_EQ(batch.value().rays[0].collision_mask, 1);
+    ASSERT_EQ(batch.value().rays[1].collision_mask, 5);
+
+    auto two_d = parseRaycastBatchRequest({{"rays", json::array({
+        {{"from", v2(0, 0)}, {"to", v2(0, 4)}}})}});
+    ASSERT_TRUE(two_d.isOk());
+    ASSERT_EQ(two_d.value().dimension(), 2);
+
+    // Everything the single call refuses, refused here, and the message says
+    // which entry so the caller does not have to bisect the batch.
+    const auto rejected = [](const json& params) { return parseRaycastBatchRequest(params); };
+    auto zero_length = rejected({{"rays", json::array({
+        {{"from", v3(1, 1, 1)}, {"to", v3(1, 1, 1)}}})}});
+    ASSERT_TRUE(zero_length.isErr());
+    ASSERT_TRUE(zero_length.error().message.find("rays[0]") != std::string::npos);
+
+    auto bad_second = rejected({{"rays", json::array({
+        {{"from", v3(0, 0, 0)}, {"to", v3(4, 0, 0)}},
+        {{"from", v3(0, 0, 0)}, {"to", v3(4, 0, 0)}, {"collision_mask", 0}}})}});
+    ASSERT_TRUE(bad_second.isErr());
+    ASSERT_TRUE(bad_second.error().message.find("rays[1]") != std::string::npos);
+
+    // A 2D and a 3D ray are answered by different space states, so a batch that
+    // mixed them would be answering from two different worlds.
+    auto mixed = rejected({{"rays", json::array({
+        {{"from", v3(0, 0, 0)}, {"to", v3(4, 0, 0)}},
+        {{"from", v2(0, 0)}, {"to", v2(0, 4)}}})}});
+    ASSERT_TRUE(mixed.isErr());
+    ASSERT_TRUE(mixed.error().message.find("space state") != std::string::npos);
+
+    // An empty batch is a question about nothing, and an unbounded one is a
+    // response nobody sized.
+    ASSERT_TRUE(rejected({{"rays", json::array()}}).isErr());
+    json too_many = json::array();
+    for (int index = 0; index < 65; ++index) {
+        too_many.push_back({{"from", v3(0, 0, 0)}, {"to", v3(1, 0, 0)}});
+    }
+    ASSERT_TRUE(rejected({{"rays", too_many}}).isErr());
+    json at_the_cap = json::array();
+    for (int index = 0; index < 64; ++index) {
+        at_the_cap.push_back({{"from", v3(0, 0, 0)}, {"to", v3(1, 0, 0)}});
+    }
+    ASSERT_TRUE(parseRaycastBatchRequest({{"rays", at_the_cap}}).isOk());
+
+    ASSERT_TRUE(rejected({{"rays", json::array({{{"from", v3(0, 0, 0)}, {"to", v3(1, 0, 0)}}})},
+                          {"unknown", 1}}).isErr());
+    ASSERT_TRUE(rejected({{"rays", "not an array"}}).isErr());
+}
+
 struct RegisterPhase7bSpatial {
     RegisterPhase7bSpatial() {
         registerTest("phase7b_spatial.registry_live_reads", test_registry_advertises_live_reads);
         registerTest("phase7b_spatial.raycast_parses", test_raycast_parses_both_dimensions_with_defaults);
         registerTest("phase7b_spatial.raycast_rejects", test_raycast_rejects_contract_violations);
+        registerTest("phase7b_spatial.raycast_batch_matches_single",
+                     test_raycast_batch_is_exactly_the_single_ray_contract_repeated);
         registerTest("phase7b_spatial.nav_parses_and_rejects", test_nav_path_parses_and_rejects);
         registerTest("phase7b_spatial.hook_admits_both_kinds", test_hook_admits_both_session_kinds_by_policy);
     }

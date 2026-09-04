@@ -30,6 +30,7 @@ bool isTask1Blocker(std::string_view canonical_name) {
 size_t responseLimit(std::string_view canonical_name) {
     if (canonical_name == "signal_list_connections") return 64u * 1024u;
     if (canonical_name == "tilemap_get_used_rect") return 16u * 1024u;
+    if (canonical_name == "spatial_query_raycast_batch") return 64u * 1024u;
     return 256u * 1024u;
 }
 

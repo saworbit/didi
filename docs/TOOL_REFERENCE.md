@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 97 canonical tool names plus 10 legacy names (107 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 98 canonical tool names plus 10 legacy names (108 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `94/97`
+**Canonical implementation:** `95/98`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 94/97 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 95/98 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -249,6 +249,18 @@ Updates an in-scene `Camera3D` in one editor UndoRedo action. `camera_path` and 
 Sets the public SceneTree `collision_shapes` and `navigation_mesh` debug hints used by future games run from that editor. At least one is required. Omitted hints are preserved, both are reread after mutation, and both original values are restored if a setter or postcondition fails. The retained `wireframe` field accepts only `false` because Godot exposes no supported live wireframe control. The result returns `previous`, `observed`, `effective_scope: "future_games_run_from_editor"`, and `rollback: "explicit_restore"`.
 
 ## 5. Physics, animation, and navigation
+
+### `spatial_query_raycast_batch` — Live
+
+Casts many rays against the attached session's physics world in one dispatch. Every entry uses the `physics_raycast_query` contract unchanged and returns the same hit record, with an added `index`.
+
+- `rays` (`array`, required, 1 to 64): each `{from, to, collision_mask?}`, the same shape the single call takes.
+
+The direct space state and the method binds are resolved once for the batch, so the rays are answered against one physics state rather than against successive ones, and fifty sightlines cost one lookup instead of fifty.
+
+One batch is one dimension. A 2D and a 3D ray are answered by different space states, so a mixed batch is refused rather than split. A rejection names the index of the ray that failed, and a ray that cannot be answered fails the whole batch: a partial batch read as complete is a clear sightline nobody checked.
+
+RID exclusion is not offered. A RID is a process-local handle a caller has no way to obtain over the protocol, so the field the request describes could not be filled in. Path-based exclusion is the shape it would take.
 
 ### `physics_raycast_query` — Live (editor or game)
 

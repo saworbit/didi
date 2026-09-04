@@ -13,6 +13,10 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Added
 
+- Added `spatial_query_raycast_batch`, which casts up to 64 rays against the attached session's physics world in one dispatch. Deciding whether a spawn point is in the player's line of sight, or whether a corridor has clearance, meant one round trip per ray or a viewport capture and a guess, and neither is affordable in a loop that pays per turn. The direct space state and the method binds are resolved once for the batch rather than once per ray, so every ray is also answered against the same physics state instead of against successive ones. Each entry goes through the `physics_raycast_query` contract unchanged and comes back with the same hit record, so a batch entry and a single call cannot describe the same hit differently; a rejection names the index of the ray that failed. One batch is one dimension, because a 2D and a 3D ray are answered by different space states and a batch that split across both would be answering from two worlds. A ray that cannot be answered fails the whole batch rather than leaving a gap, since a partial batch read as complete is a clear sightline that was never checked.
+
+### Added
+
 - Added `runtime_watch_invariants`, which watches declared conditions every frame of a running game and stops the game on the frame that breaks one. An agent could already drive a game and read values back out of it, one round trip at a time, but it could not notice a condition that is false for two frames, and by the time a poll returned the frame was gone. Three kinds, each one that can be answered honestly: `performance_between` on a Performance monitor, which is what a minimum frame rate is; `expression_between` on a bounded sandbox expression, which is what a bounded property is, and which covers a world-boundary check through a vector component; and `no_engine_errors`, which is what an unhandled script error looks like from outside the script. A violation reports the condition, the value that broke it, the bound it broke, and the elapsed time, and by default pauses the game on that frame so the state that failed is still there to read. The outcome has three values rather than two: an invariant that never produced a reading makes the run `inconclusive`, never `held`, because a condition nobody could measure is not a condition that stayed true. The request is refused if an invariant has no bound at all, since a condition that cannot be violated would report as held on nothing.
 
 ### Added
@@ -41,12 +45,12 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `94/97`
+**Canonical implementation:** `95/98`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 97 canonical tools plus 10 legacy registrations (107 total). 94 canonical tools are implemented and 3 remain unimplemented.
+Discovery now exposes 98 canonical tools plus 10 legacy registrations (108 total). 95 canonical tools are implemented and 3 remain unimplemented.
 
 ---
 

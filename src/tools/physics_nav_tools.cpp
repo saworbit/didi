@@ -11,6 +11,11 @@ CallToolResult handlePhysicsRaycastQuery(const ResolvedToolBinding& binding, con
     return sendPhase7LiveRequest(binding, args, ipc);
 }
 
+CallToolResult handleSpatialQueryRaycastBatch(const ResolvedToolBinding& binding, const json& args,
+                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    return sendPhase7LiveRequest(binding, args, ipc);
+}
+
 CallToolResult handlePhysicsSimulateStep(const ResolvedToolBinding& binding, const json& args,
                          std::shared_ptr<ipc::IIpcClient> ipc) {
     return sendPhase7LiveRequest(binding, args, ipc);
