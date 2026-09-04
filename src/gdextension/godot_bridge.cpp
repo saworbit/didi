@@ -259,6 +259,24 @@ Result<VariantValue> makeJsonVariant(const json& value, int depth = 0) {
     return Error::invalidArgument("JSON value cannot be converted to a supported Godot Variant");
 }
 
+// Did a property end up holding what the caller asked for?
+//
+// Compares by value rather than by JSON type, because Godot legitimately
+// changes the type on the way in: an integer written to a float property reads
+// back as a real, and reporting that as "not applied" would be a false alarm
+// on a write that worked perfectly. Only a genuine difference should be
+// reported as one.
+bool jsonScalarsEquivalent(const json& observed, const json& requested) {
+    if (observed.is_number() && requested.is_number()) {
+        const double a = observed.get<double>();
+        const double b = requested.get<double>();
+        if (!std::isfinite(a) || !std::isfinite(b)) return observed == requested;
+        const double scale = std::max({1.0, std::fabs(a), std::fabs(b)});
+        return std::fabs(a - b) <= 1e-9 * scale;
+    }
+    return observed == requested;
+}
+
 Result<void> validateJsonForPropertyType(const json& value, GDExtensionVariantType type) {
     bool compatible = false;
     switch (type) {
@@ -4187,8 +4205,28 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (rollback.isErr()) return errorJson(500, "Autoload save failed and rollback failed: " + rollback.error().message);
             return errorJson(500, "ProjectSettings.save failed; autoload mutation was rolled back");
         }
+        // Say what this did and did not do. Writing the setting is not the same
+        // as the attached editor knowing about it: Godot registers an autoload's
+        // global name through editor-internal paths a GDExtension cannot reach,
+        // so scripts referring to the singleton keep failing to compile in this
+        // editor session until it restarts. `editor_reload_project` does not
+        // clear it either. Reporting only `persisted: true` left callers
+        // debugging their own scripts for a state this call had created.
         return liveResult({{"status", "success"}, {"name", autoload_name}, {"path", resource_path},
-                           {"singleton", autoload_singleton}, {"removed", removing}, {"persisted", true}});
+                           {"singleton", autoload_singleton}, {"removed", removing}, {"persisted", true},
+                           {"registered_in_attached_editor", false},
+                           {"requires_editor_restart", true},
+                           {"limitation",
+                            removing
+                                ? std::string(
+                                      "The setting is removed from project.godot, but this editor "
+                                      "session keeps resolving the singleton until it is restarted. "
+                                      "editor_reload_project does not change that.")
+                                : std::string(
+                                      "The setting is written to project.godot, but this editor "
+                                      "session will not resolve the singleton until it is restarted. "
+                                      "Scripts referencing it report 'Identifier not found' until "
+                                      "then, and editor_reload_project does not change that.")}});
     }
 
     if (method == "project.listInputActions" || method == "project.setInputAction" ||
@@ -5206,8 +5244,24 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (undo_property.isErr()) return errorJson(undo_property.error().code, undo_property.error().message);
         auto committed = commitAction(manager.value());
         if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+
+        // Report what the property now holds, not what was asked for. A commit
+        // that succeeds is not a property that changed: Godot discards some
+        // writes outright, `anchors_preset` on a Control still in layout_mode 0
+        // being the case that found this, and echoing the request back reported
+        // success for a scene that had not moved. The caller has no other way
+        // to see the difference. Same shape as vision.setCameraTransform, which
+        // returns observed state rather than the values it was handed.
+        auto observed = callObject(node.value(), "Object", "get", 2760726917LL, {&property_name.value()});
+        if (observed.isErr()) return errorJson(observed.error().code, observed.error().message);
+        auto observed_json = variantToJson(observed.value());
+        if (observed_json.isErr()) return errorJson(observed_json.error().code, observed_json.error().message);
+        auto old_json = variantToJson(old_value.value());
+        if (old_json.isErr()) return errorJson(old_json.error().code, old_json.error().message);
         return liveResult({{"status", "success"}, {"target_node", params.value("target_node", "")},
-                           {"property_name", property}, {"value", params["value"]},
+                           {"property_name", property}, {"value", observed_json.value()},
+                           {"requested_value", params["value"]}, {"old_value", old_json.value()},
+                           {"applied", jsonScalarsEquivalent(observed_json.value(), params["value"])},
                            {"undo_redo_registered", true}});
     }
 

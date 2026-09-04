@@ -72,6 +72,8 @@ Sets an existing scalar property through UndoRedo. Unknown properties and incomp
 - `property_name` (`string`, required).
 - `value` (required): JSON null, boolean, signed integer, real, or string compatible with the existing Godot property type.
 
+The property is read back after the commit, and the result reports what it now holds rather than what was requested. `value` is that observed state, `old_value` is what it held before, `requested_value` is the argument, and `applied` says whether the two now agree. A committed UndoRedo action is not a changed property: Godot discards some writes, such as `anchors_preset` on a Control still in `layout_mode` 0, and those return `applied: false` with `value` unchanged. Numbers are compared by value, so writing an integer to a float property is `applied: true`.
+
 ### `scene_get_property` — Live
 
 Returns one existing scalar property. Metadata and export hints are not returned.
@@ -173,6 +175,8 @@ Rewrites a matching GDScript symbol in a project-root-confined file, then runs t
 - `new_definition` (`string`, required).
 - `symbol_type` (`string`, default `"function"`).
 - Legacy alias: `patch_script_symbols`.
+
+Diagnostics are computed against the file after it is written, so they include the Godot compiler check when a Godot binary is discoverable, not only the lexical rules. `has_errors: true` means the patch left the file in a state the compiler rejects, and the same diagnostics `script_check_syntax` would report are returned here.
 
 ## 4. Viewport and visual helpers
 
@@ -532,7 +536,7 @@ All Phase 2 tools are live-only and execute on Godot's main thread. They do not 
 ### Autoloads
 
 - `project_list_autoloads`: returns sorted `{name, path, singleton}` entries.
-- `project_set_autoload`: requires identifier `name` and existing `res://` script or scene `path`; `singleton` defaults to `true`. Existing entries require `replace: true`.
+- `project_set_autoload`: requires identifier `name` and existing `res://` script or scene `path`; `singleton` defaults to `true`. Existing entries require `replace: true`. The setting is persisted, but the attached editor does not pick it up: Godot registers an autoload's global name through editor-internal paths a GDExtension cannot reach. The result carries `registered_in_attached_editor: false`, `requires_editor_restart: true`, and a `limitation` stating it. Until that editor restarts, scripts referencing a newly added singleton report `Identifier not found`, and a removed one keeps resolving. `editor_reload_project` does not change either.
 - `project_remove_autoload`: requires `name` and rejects missing entries.
 
 Mutations use Godot's `autoload/<name>` representation, call `ProjectSettings.save()`, and restore the previous value if saving fails.
