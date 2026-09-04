@@ -21,11 +21,6 @@ CallToolResult handleSpatialQueryClearance(const ResolvedToolBinding& binding, c
     return sendPhase7LiveRequest(binding, args, ipc);
 }
 
-CallToolResult handleShaderListUniforms(const ResolvedToolBinding& binding, const json& args,
-                         std::shared_ptr<ipc::IIpcClient> ipc) {
-    return sendPhase7LiveRequest(binding, args, ipc);
-}
-
 CallToolResult handlePhysicsSimulateStep(const ResolvedToolBinding& binding, const json& args,
                          std::shared_ptr<ipc::IIpcClient> ipc) {
     return sendPhase7LiveRequest(binding, args, ipc);

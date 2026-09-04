@@ -40,7 +40,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         , "signal_list_connections", "signal_connect", "signal_disconnect", "signal_emit"
         // Reads a ShaderMaterial off a node in the edited scene, so it needs the
         // editor's scene and has no offline reading to fall back to.
-        , "shader_list_uniforms"
+        , "shader_list_uniforms", "shader_set_uniform"
         // Live only on purpose. Writing the layout file would change what the
         // project loads next time and not what anyone is listening to now.
         , "audio_configure_bus"
@@ -139,6 +139,7 @@ CallToolResult handlePhysicsRaycastQuery(const ResolvedToolBinding& binding, con
 CallToolResult handleSpatialQueryRaycastBatch(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleSpatialQueryClearance(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleShaderListUniforms(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleShaderSetUniform(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handlePhysicsSimulateStep(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleNavBakeMesh(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleNavQueryPath(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -396,6 +397,7 @@ ResolvedToolBinding resolveAliasBinding(std::string_view invoked_name, const jso
         {"spatial_query_raycast_batch", "physics.raycastBatch"},
         {"spatial_query_clearance", "physics.clearance"},
         {"shader_list_uniforms", "shader.listUniforms"},
+        {"shader_set_uniform", "shader.setUniform"},
     };
     for (const auto& entry : phase7_bindings) {
         if (entry.name != invoked_name) continue;
@@ -1363,6 +1365,29 @@ void ToolRegistry::registerAllDefaultTools() {
     // ==========================================
     // Domain 5: Physics, Animation & Navigation
     // ==========================================
+    {
+        ToolDefinition t;
+        t.name = "shader_set_uniform";
+        t.description = "Sets one shader uniform on a ShaderMaterial held by a node in the edited scene, through the editor UndoRedo stack, and reports what the uniform holds afterwards.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target_node", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}}},
+                {"property_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
+                                   {"description", "The property the ShaderMaterial sits in, such as material_override."}}},
+                {"uniform_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
+                                  {"description", "Must be a uniform the shader declares. A name it does not know is refused rather than written and ignored."}}},
+                {"value", {{"type", json::array({"null", "boolean", "integer", "number", "string", "object"})},
+                           {"description", "The new value, in the same JSON spelling scene_set_property takes for that Godot type: a number for float, {x,y} or {x,y,z} for a vector, {r,g,b} with optional a or a \"#rrggbb\" string for a colour, and a res:// path for a texture or other resource uniform."}}}
+            }},
+            {"required", json::array({"target_node", "property_name", "uniform_name", "value"})},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleShaderSetUniform(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
     {
         ToolDefinition t;
         t.name = "shader_list_uniforms";
