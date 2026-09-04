@@ -835,7 +835,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         // admitted to production without also compiling test seams into a
         // shipping binary. Only the seam configurator stays gated.
         "signal.listConnections", "signal.connect", "signal.disconnect", "signal.emit",
-        "runtime.injectInput", "physics.raycast", "nav.queryPath",
+        "runtime.injectInput", "physics.raycast", "physics.raycastBatch", "nav.queryPath",
         "anim.listTracks", "anim.playTrack", "vision.setCameraTransform",
         "vision.toggleDebugDraw", "tilemap.setCells", "tilemap.getUsedRect",
         "gridmap.setCells"
@@ -847,7 +847,8 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         // Spatial reads are editor-or-game by policy; everything else that is
         // not runtime.* is editor-only here.
         const bool game_admitted = method.rfind("runtime.", 0) == 0 ||
-                                   method == "physics.raycast" || method == "nav.queryPath" ||
+                                   method == "physics.raycast" ||
+                                   method == "physics.raycastBatch" || method == "nav.queryPath" ||
                                    method == "anim.listTracks" || method == "anim.playTrack";
         if (m_sessionKind == runtime::SessionKind::game && !game_admitted) {
             return {{"error", {{"code", 409},

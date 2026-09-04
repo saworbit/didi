@@ -2140,6 +2140,192 @@ Result<VariantValue> rootWorld(int dimension) {
     return std::move(world.value());
 }
 
+// The binds and the space state a ray needs, resolved once. A batch pays for
+// this lookup once rather than once per ray, and every ray in the batch is then
+// answered against the same physics state instead of against N successive ones.
+struct RaycastSpace {
+    int dimension{3};
+    const char* params_class{nullptr};
+    const char* state_class{nullptr};
+    int64_t create_hash{0};
+    int64_t ray_hash{0};
+    GDExtensionObjectPtr state{nullptr};
+};
+
+Result<RaycastSpace> openRaycastSpace(int dimension) {
+    RaycastSpace space;
+    space.dimension = dimension;
+    space.params_class = dimension == 2 ? "PhysicsRayQueryParameters2D" : "PhysicsRayQueryParameters3D";
+    space.state_class = dimension == 2 ? "PhysicsDirectSpaceState2D" : "PhysicsDirectSpaceState3D";
+    space.create_hash = dimension == 2 ? 3196569324LL : 3110599579LL;
+    space.ray_hash = dimension == 2 ? 1590275562LL : 3957970750LL;
+    const int64_t state_hash = dimension == 2 ? 2506717822LL : 2069328350LL;
+
+    for (const auto& bind : {std::make_tuple(space.params_class, "create", space.create_hash),
+                             std::make_tuple(space.state_class, "intersect_ray", space.ray_hash),
+                             std::make_tuple(dimension == 2 ? "World2D" : "World3D",
+                                             "get_direct_space_state", state_hash)}) {
+        auto required = requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind));
+        if (required.isErr()) return Error(501, required.error().message);
+    }
+
+    auto world = rootWorld(dimension);
+    if (world.isErr()) return world.error();
+    auto world_object = objectFromVariant(world.value());
+    if (world_object.isErr()) return Error::internal(world_object.error().message);
+    auto state = callObject(world_object.value(), dimension == 2 ? "World2D" : "World3D",
+                            "get_direct_space_state", state_hash);
+    if (state.isErr()) return Error::internal(state.error().message);
+    auto state_object = objectFromVariant(state.value());
+    if (state_object.isErr() || !state_object.value()) {
+        return Error(409, "Root viewport world has no direct space state");
+    }
+    space.state = state_object.value();
+    return space;
+}
+
+// One ray against an already-open space. The record is the same one
+// physics_raycast_query returns, so a batch entry and a single call cannot
+// describe the same hit differently.
+Result<json> castOneRay(const RaycastSpace& space, const runtime::RaycastRequest& request) {
+    const int dimension = space.dimension;
+    const char* params_class = space.params_class;
+    auto from = makePoint(request.from);
+    auto to = makePoint(request.to);
+    auto mask = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, request.collision_mask);
+    if (from.isErr() || to.isErr() || mask.isErr()) {
+        return Error::internal("Failed to construct ray arguments");
+    }
+    Result<VariantValue> query = [&]() -> Result<VariantValue> {
+        auto& api = GodotApi::instance();
+        NativeName klass(params_class);
+        NativeName method("create");
+        if (!klass.valid() || !method.valid()) return Error::internal("Failed to construct ray query identifiers");
+        auto bind = api.classdb_get_method_bind(klass.ptr(), method.ptr(), space.create_hash);
+        if (!bind) return Error(501, "Godot method binding unavailable for ray query creation");
+        const void* raw_args[] = {from.value().ptr(), to.value().ptr(), mask.value().ptr()};
+        VariantValue created(VariantValue::Uninitialized{});
+        GDExtensionCallError error{};
+        api.object_method_bind_call(bind, nullptr, raw_args, 3, created.ptr(), &error);
+        created.markInitialized();
+        if (error.error != GDEXTENSION_CALL_OK) {
+            return Error::internal("PhysicsRayQueryParameters.create failed (call error " +
+                                   std::to_string(error.error) + ")");
+        }
+        return std::move(created);
+    }();
+    if (query.isErr()) return query.error();
+    auto query_object = objectFromVariant(query.value());
+    if (query_object.isErr() || !query_object.value()) {
+        return Error::internal("Ray query parameters were not created");
+    }
+    auto set_flag = [&](const char* method, bool enabled) -> Result<void> {
+        auto value = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(enabled));
+        if (value.isErr()) return value.error();
+        auto result = callObject(query_object.value(), params_class, method, 2586408642LL, {&value.value()});
+        return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
+    };
+    for (const auto& flag : {std::make_pair("set_collide_with_bodies", true),
+                             std::make_pair("set_collide_with_areas", true),
+                             std::make_pair("set_hit_from_inside", false)}) {
+        auto set = set_flag(flag.first, flag.second);
+        if (set.isErr()) return Error::internal(set.error().message);
+    }
+    if (dimension == 3) {
+        auto set = set_flag("set_hit_back_faces", true);
+        if (set.isErr()) return Error::internal(set.error().message);
+    }
+
+    auto hit = callObject(space.state, space.state_class, "intersect_ray", space.ray_hash,
+                          {&query.value()});
+    if (hit.isErr()) return Error::internal(hit.error().message);
+    json result = {{"dimension", dimension}, {"hit", false}, {"collider_path", nullptr},
+                   {"collider_class", nullptr}, {"position", nullptr}, {"normal", nullptr},
+                   {"collision_layer", nullptr}};
+    auto size = callVariant(hit.value(), "size");
+    if (size.isErr()) return Error::internal(size.error().message);
+    auto count = scalarFromVariant<int64_t>(size.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (count.isErr() || count.value() == 0) return result;
+
+    auto lookup = [&](const char* key) -> Result<VariantValue> {
+        auto key_value = makeString(key);
+        if (key_value.isErr()) return key_value.error();
+        return callVariant(hit.value(), "get", {&key_value.value()});
+    };
+    auto position = lookup("position");
+    auto normal = lookup("normal");
+    auto collider = lookup("collider");
+    if (position.isErr() || normal.isErr() || collider.isErr()) {
+        return Error::internal("Ray hit dictionary is incomplete");
+    }
+    auto position_json = pointVariantToJson(position.value(), dimension);
+    auto normal_json = pointVariantToJson(normal.value(), dimension);
+    if (position_json.isErr() || normal_json.isErr()) {
+        return Error::internal("Ray hit vectors could not be read");
+    }
+    result["hit"] = true;
+    result["position"] = position_json.value();
+    result["normal"] = normal_json.value();
+    auto collider_object = objectFromVariant(collider.value());
+    if (collider_object.isOk() && collider_object.value()) {
+        auto class_name = nodeString(collider_object.value(), "get_class", 201670096LL);
+        if (class_name.isOk()) {
+            auto bounded = boundUtf8(class_name.value(), 256);
+            result["collider_class"] = bounded.value;
+        }
+        auto is_node_name = makeString("Node");
+        if (is_node_name.isOk()) {
+            auto is_node = callObject(collider_object.value(), "Object", "is_class", 3927539163LL, {&is_node_name.value()});
+            if (is_node.isOk()) {
+                auto node_flag = scalarFromVariant<GDExtensionBool>(is_node.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                if (node_flag.isOk() && node_flag.value()) {
+                    auto path = nodeString(collider_object.value(), "get_path", 4075236667LL);
+                    if (path.isOk() && !path.value().empty() && path.value().size() <= 1024) {
+                        result["collider_path"] = path.value();
+                    }
+                }
+            }
+        }
+        auto layer = callObject(collider_object.value(),
+                                dimension == 2 ? "CollisionObject2D" : "CollisionObject3D",
+                                "get_collision_layer", 3905245786LL);
+        if (layer.isOk()) {
+            auto layer_value = scalarFromVariant<int64_t>(layer.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (layer_value.isOk()) result["collision_layer"] = layer_value.value();
+        }
+    }
+    return result;
+}
+
+json physicsRaycastBatch(const json& params) {
+    auto parsed = runtime::parseRaycastBatchRequest(params);
+    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    const auto& request = parsed.value();
+    auto space = openRaycastSpace(request.dimension());
+    if (space.isErr()) return errorJson(space.error().code, space.error().message);
+
+    json results = json::array();
+    size_t hits = 0;
+    for (size_t index = 0; index < request.rays.size(); ++index) {
+        auto cast = castOneRay(space.value(), request.rays[index]);
+        // One ray that cannot be answered fails the batch. A partial batch that
+        // looked complete would be read as fifty clear sightlines when it was
+        // forty-nine and a silence.
+        if (cast.isErr()) {
+            return errorJson(cast.error().code,
+                             "rays[" + std::to_string(index) + "]: " + cast.error().message);
+        }
+        auto record = cast.value();
+        if (record.value("hit", false)) ++hits;
+        record["index"] = index;
+        results.push_back(std::move(record));
+    }
+    return liveResult({{"dimension", request.dimension()},
+                       {"requested_rays", request.rays.size()},
+                       {"hit_count", hits},
+                       {"results", std::move(results)}});
+}
+
 json physicsRaycast(const json& params) {
     auto parsed = runtime::parseRaycastRequest(params);
     if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
@@ -2552,6 +2738,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         return injectInput(params, session_kind);
     }
     if (method == "physics.raycast") return physicsRaycast(params);
+    if (method == "physics.raycastBatch") return physicsRaycastBatch(params);
     if (method == "nav.queryPath") return navQueryPath(params);
     if (method == "anim.listTracks") return animListTracks(params, session_kind);
     if (method == "anim.playTrack") return animPlayTrack(params, session_kind);

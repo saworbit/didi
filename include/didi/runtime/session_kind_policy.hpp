@@ -22,7 +22,8 @@ inline LiveSessionKindPolicy livePolicyForTool(std::string_view name) {
     }
     if (name == "runtime_read_logs" || name == "runtime_read_output" || name == "runtime_get_tree" ||
         name == "eval_gdscript" || name == "physics_raycast_query" ||
-        name == "nav_query_path" || name == "anim_list_tracks" ||
+        name == "nav_query_path" || name == "spatial_query_raycast_batch" ||
+        name == "anim_list_tracks" ||
         name == "runtime_read_profiler" ||
         // A running game can be driven and read but could never be seen. The
         // frame is in the process Didi is attached to; the editor-only camera
@@ -43,7 +44,8 @@ inline LiveSessionKindPolicy livePolicyForMethod(std::string_view method) {
     }
     if (method == "runtime.getLogs" || method == "runtime.getOutput" || method == "runtime.getTree" ||
         method == "runtime.evalGdscript" || method == "session.handshake" ||
-        method == "physics.raycast" || method == "nav.queryPath" ||
+        method == "physics.raycast" || method == "physics.raycastBatch" ||
+        method == "nav.queryPath" ||
         method == "anim.listTracks" || method == "runtime.readProfiler" ||
         method == "profiler.sample" ||
         method == "vision.captureViewport" || method == "vision.diffViewport") {

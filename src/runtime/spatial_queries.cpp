@@ -115,6 +115,42 @@ Result<RaycastRequest> parseRaycastRequest(const json& params) {
     return request;
 }
 
+Result<RaycastBatchRequest> parseRaycastBatchRequest(const json& params) {
+    if (!params.is_object()) return Error::invalidArgument("Raycast batch params must be an object");
+    if (!onlyKeys(params, {"rays"})) {
+        return Error::invalidArgument("Raycast batch request contains an unknown property");
+    }
+    if (!params.contains("rays") || !params["rays"].is_array()) {
+        return Error::invalidArgument("rays must be an array");
+    }
+    const auto& rays = params["rays"];
+    if (rays.empty() || rays.size() > kMaxRaycastBatch) {
+        return Error::invalidArgument("rays must contain 1 to " + std::to_string(kMaxRaycastBatch) +
+                                      " entries");
+    }
+    RaycastBatchRequest request;
+    request.rays.reserve(rays.size());
+    for (size_t index = 0; index < rays.size(); ++index) {
+        // Each entry goes through the single-ray contract unchanged. A batch
+        // that accepted anything the single call rejects, or the other way
+        // round, would be a second contract nobody wrote down.
+        auto ray = parseRaycastRequest(rays[index]);
+        if (ray.isErr()) {
+            return Error(ray.error().code,
+                         "rays[" + std::to_string(index) + "]: " + ray.error().message);
+        }
+        if (!request.rays.empty() && ray.value().dimension() != request.rays.front().dimension()) {
+            return Error::invalidArgument(
+                "rays[" + std::to_string(index) +
+                "] is " + std::to_string(ray.value().dimension()) +
+                "D and the batch is " + std::to_string(request.rays.front().dimension()) +
+                "D; one batch is answered by one space state");
+        }
+        request.rays.push_back(std::move(ray.value()));
+    }
+    return request;
+}
+
 Result<NavPathRequest> parseNavPathRequest(const json& params) {
     if (!params.is_object()) return Error::invalidArgument("Navigation params must be an object");
     if (!onlyKeys(params, {"start_point", "end_point", "navigation_layers", "optimize"})) {

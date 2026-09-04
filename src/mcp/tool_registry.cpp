@@ -51,7 +51,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // drive the editor UI, which is nobody's intent.
         , "runtime_inject_input"
         // Phase 7B reads against the root viewport's existing worlds.
-        , "physics_raycast_query", "nav_query_path"
+        , "physics_raycast_query", "spatial_query_raycast_batch", "nav_query_path"
         // Phase 7B animation: the list is a read in either session kind, the
         // play is a game-only transient mutation.
         , "anim_list_tracks", "anim_play_track"
@@ -132,6 +132,7 @@ CallToolResult handleScriptAttachToNode(const json& args, std::shared_ptr<ipc::I
 CallToolResult handleScriptDetachFromNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
 CallToolResult handlePhysicsRaycastQuery(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleSpatialQueryRaycastBatch(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handlePhysicsSimulateStep(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleNavBakeMesh(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleNavQueryPath(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -386,6 +387,7 @@ ResolvedToolBinding resolveAliasBinding(std::string_view invoked_name, const jso
         {"runtime_get_call_stack", "runtime.getCallStack"},
         {"runtime_read_profiler", "runtime.readProfiler"},
         {"runtime_watch_invariants", "runtime.watchInvariants"},
+        {"spatial_query_raycast_batch", "physics.raycastBatch"},
     };
     for (const auto& entry : phase7_bindings) {
         if (entry.name != invoked_name) continue;
@@ -1353,6 +1355,36 @@ void ToolRegistry::registerAllDefaultTools() {
     // ==========================================
     // Domain 5: Physics, Animation & Navigation
     // ==========================================
+    {
+        ToolDefinition t;
+        t.name = "spatial_query_raycast_batch";
+        t.description = "Casts many rays against the attached session's physics world in one dispatch, sharing one space state, and returns the same hit record per ray that physics_raycast_query returns.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"rays", {
+                    {"type", "array"}, {"minItems", 1}, {"maxItems", 64},
+                    {"description", "Rays to cast. Every ray shares one dimension, because a 2D and a 3D ray are answered by different space states."},
+                    {"items", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"from", {{"type", "object"}, {"description", "{x,y} for 2D or {x,y,z} for 3D."}}},
+                            {"to", {{"type", "object"}, {"description", "{x,y} for 2D or {x,y,z} for 3D."}}},
+                            {"collision_mask", {{"type", "integer"}, {"minimum", 1}, {"maximum", 2147483647}, {"default", 1}}}
+                        }},
+                        {"required", json::array({"from", "to"})},
+                        {"additionalProperties", false}
+                    }}
+                }}
+            }},
+            {"required", json::array({"rays"})},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleSpatialQueryRaycastBatch(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
     {
         ToolDefinition t;
         t.name = "physics_raycast_query";

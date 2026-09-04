@@ -471,6 +471,21 @@ try {
         (Tool-Request 402 "physics_raycast_query" @{ from = @{ x = 0; y = 0 }; to = @{ x = 4; y = 0 } }),
         (Tool-Request 403 "physics_raycast_query" @{ from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 4; y = 0; z = 0 }; collision_mask = 2 }),
         (Tool-Request 404 "physics_raycast_query" @{ from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 0; y = 0; z = 0 } }),
+        # The same rays as 400, 401 and 403, batched. Whatever the batch says
+        # about them has to be what the single calls above said, or there are
+        # two contracts.
+        (Tool-Request 2278 "spatial_query_raycast_batch" @{ rays = @(
+            @{ from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 4; y = 0; z = 0 } },
+            @{ from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 0; y = 4; z = 0 } },
+            @{ from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 4; y = 0; z = 0 }; collision_mask = 2 }) }),
+        (Tool-Request 2279 "spatial_query_raycast_batch" @{ rays = @(
+            @{ from = @{ x = 0; y = 0 }; to = @{ x = 4; y = 0 } }) }),
+        (Tool-Request 2280 "spatial_query_raycast_batch" @{ rays = @(
+            @{ from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 4; y = 0; z = 0 } },
+            @{ from = @{ x = 0; y = 0 }; to = @{ x = 4; y = 0 } }) }),
+        (Tool-Request 2281 "spatial_query_raycast_batch" @{ rays = @(
+            @{ from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 4; y = 0; z = 0 } },
+            @{ from = @{ x = 1; y = 1; z = 1 }; to = @{ x = 1; y = 1; z = 1 } }) }),
         (Tool-Request 405 "nav_query_path" @{ start_point = @{ x = -1; y = 0; z = 0 }; end_point = @{ x = 1; y = 0; z = 0 } }),
         (Tool-Request 406 "nav_query_path" @{ start_point = @{ x = -1; y = 0 }; end_point = @{ x = 1; y = 0 } }),
         (Tool-Request 407 "nav_query_path" @{ start_point = @{ x = -1; y = 0; z = 0 }; end_point = @{ x = 1; y = 0 } }),
@@ -689,6 +704,28 @@ try {
     $maskedMiss = Tool-Payload $runtimeById[403]
     Assert-True ($maskedMiss.hit -eq $false) "A collision mask that excludes layer 1 still hit the fixture body."
     Assert-True $runtimeById[404].result.isError "physics_raycast_query accepted a zero-length segment."
+    # The batch answers the same rays the single calls just answered, from one
+    # space state, and has to agree with them record for record.
+    $batch3d = Tool-Payload $runtimeById[2278]
+    Assert-True ($batch3d.execution_mode -eq "live" -and $batch3d.dimension -eq 3) "Raycast batch did not run live in 3D."
+    Assert-True ($batch3d.requested_rays -eq 3 -and $batch3d.hit_count -eq 1) "Raycast batch counted $($batch3d.hit_count) hit(s) across $($batch3d.requested_rays) ray(s); the same three single rays hit once."
+    $batchResults = @($batch3d.results)
+    Assert-True ($batchResults.Count -eq 3) "Raycast batch returned $($batchResults.Count) records for 3 rays."
+    Assert-True ($batchResults[0].index -eq 0 -and $batchResults[1].index -eq 1 -and $batchResults[2].index -eq 2) "Raycast batch records are not in request order."
+    Assert-True ($batchResults[0].hit -eq $true -and $batchResults[0].collider_path -eq $hit3d.collider_path -and $batchResults[0].collider_class -eq $hit3d.collider_class) "A batched ray named a different collider than the identical single call."
+    Assert-True ([Math]::Abs($batchResults[0].position.x - $hit3d.position.x) -lt 0.001 -and [Math]::Abs($batchResults[0].normal.x - $hit3d.normal.x) -lt 0.001) "A batched ray reported a different hit point or normal than the identical single call."
+    Assert-True ($batchResults[0].collision_layer -eq $hit3d.collision_layer) "A batched ray reported a different collider layer than the identical single call."
+    Assert-True ($batchResults[1].hit -eq $false -and $null -eq $batchResults[1].collider_path -and $null -eq $batchResults[1].position) "A batched miss did not null every detail field the way a single miss does."
+    Assert-True ($batchResults[2].hit -eq $false) "A batched ray ignored the collision mask the identical single call honoured."
+
+    $batch2d = Tool-Payload $runtimeById[2279]
+    Assert-True ($batch2d.dimension -eq 2 -and @($batch2d.results)[0].collider_path -eq $hit2d.collider_path) "A batched 2D ray did not match the identical single call."
+    Assert-True ($null -eq @($batch2d.results)[0].position.z) "A batched 2D ray reported a z component."
+
+    Assert-True $runtimeById[2280].result.isError "A raycast batch mixed 2D and 3D rays, which two space states cannot answer together."
+    Assert-True $runtimeById[2281].result.isError "A raycast batch accepted a zero-length segment the single call refuses."
+    Assert-True ($runtimeById[2281].result.content[0].text -match "rays\[1\]") "A rejected batch did not name which ray was wrong."
+
     $path3d = Tool-Payload $runtimeById[405]
     Assert-True ($path3d.execution_mode -eq "live" -and $path3d.dimension -eq 3 -and $path3d.reachable -eq $true) "3D path query found no path across the fixture region."
     $pathPoints3d = @($path3d.points)
