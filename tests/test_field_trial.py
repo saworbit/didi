@@ -370,6 +370,21 @@ class CycleSummaryTests(unittest.TestCase):
             "cycle-3", 1, [{"name": "fix", "status": "failed", "detail": "a | b"}], "fix_failed"))
         self.assertIn("a \\| b", rendered)
 
+    def test_agent_failure_reads_the_json_the_client_prints(self):
+        stdout = json.dumps({
+            "is_error": True, "num_turns": 1, "total_cost_usd": 0,
+            "result": "Failed to authenticate: OAuth session expired and could not be refreshed",
+        })
+        detail = CYCLE.agent_failure_detail(stdout, "")
+        self.assertIn("OAuth session expired", detail)
+        self.assertIn("turns=1", detail)
+
+    def test_agent_failure_falls_back_to_streams_when_output_is_not_json(self):
+        self.assertIn("boom", CYCLE.agent_failure_detail("not json at all", "boom"))
+
+    def test_agent_failure_never_returns_an_empty_cell(self):
+        self.assertEqual(CYCLE.agent_failure_detail("", ""), "no output")
+
     def test_build_script_targets_the_worktree_not_the_checkout(self):
         script = CYCLE.build_batch(Path(r"D:\didi-trials\cycle-1-worktree"))
         self.assertIn(r"-S \"D:\didi-trials\cycle-1-worktree\"".replace('\\"', '"'), script)

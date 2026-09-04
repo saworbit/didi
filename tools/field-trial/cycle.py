@@ -87,6 +87,24 @@ def cycle_summary(
     }
 
 
+def agent_failure_detail(stdout: str, stderr: str) -> str:
+    """Why the agent run failed, in words.
+
+    The client reports failures as JSON on stdout with an empty stderr, so a
+    cycle that reports stderr alone says a run failed and nothing else. The
+    first authentication expiry surfaced as a blank cell in the summary table.
+    """
+    try:
+        payload = json.loads(stdout.strip().splitlines()[-1])
+    except (json.JSONDecodeError, IndexError):
+        return (stderr or stdout or "no output").strip()[-300:]
+    if isinstance(payload, dict) and payload.get("result"):
+        turns = payload.get("num_turns", "?")
+        cost = payload.get("total_cost_usd", 0)
+        return f"{payload['result']} (turns={turns}, cost=${cost})"
+    return (stderr or stdout or "no output").strip()[-300:]
+
+
 def render_summary(summary: dict) -> str:
     lines = [
         f"# Cycle {summary['cycle_id']}",
@@ -257,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
         record("fix", "failed", f"could not launch the agent: {error}")
         return finish("agent_unavailable")
     if completed.returncode != 0:
-        record("fix", "failed", (completed.stderr or "")[-300:])
+        record("fix", "failed", agent_failure_detail(completed.stdout or "", completed.stderr or ""))
         return finish("fix_failed")
 
     patch = run(["git", "diff"], worktree).stdout
