@@ -63,6 +63,20 @@ def build_command(
     return command
 
 
+def transcript_slug(absolute_path: str) -> str:
+    """The directory name the client files a transcript under.
+
+    Separate from `transcript_path` because it is the only part of that lookup
+    with a platform-independent answer. `Path.resolve()` is not: given a Windows
+    path it returns it unchanged on Windows and glues the current directory onto
+    the front of it on Linux, so a test that asserts a slug for a Windows path
+    through the resolving function passes on the machine the loop runs on and
+    fails in CI. The rule itself, colon and both separators become hyphens, holds
+    everywhere and is what is worth asserting.
+    """
+    return absolute_path.replace(":", "-").replace("\\", "-").replace("/", "-")
+
+
 def transcript_path(
     working_directory: Path,
     session_id: str,
@@ -70,12 +84,11 @@ def transcript_path(
 ) -> Path:
     """Where the client will have written this session's transcript.
 
-    The client keys transcripts by a slug of the working directory, replacing the
-    drive colon and every separator with a hyphen.
+    The client keys transcripts by a slug of the working directory, so the
+    directory is resolved to the absolute form the client itself would have seen.
     """
     root = projects_root or DEFAULT_PROJECTS_ROOT
-    slug = str(Path(working_directory).resolve()).replace(":", "-").replace("\\", "-").replace("/", "-")
-    return root / slug / f"{session_id}.jsonl"
+    return root / transcript_slug(str(Path(working_directory).resolve())) / f"{session_id}.jsonl"
 
 
 def resolve_executable(name: str = CLAUDE) -> str:

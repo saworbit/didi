@@ -328,14 +328,29 @@ class ResolveExecutableTests(unittest.TestCase):
 
 
 class TranscriptPathTests(unittest.TestCase):
+    def test_slug_replaces_the_drive_colon_and_both_separators(self):
+        self.assertEqual(
+            RUNNER.transcript_slug(r"D:\didi-trials\trial-07"),
+            "D--didi-trials-trial-07",
+        )
+        self.assertEqual(
+            RUNNER.transcript_slug("/home/runner/didi-trials/trial-07"),
+            "-home-runner-didi-trials-trial-07",
+        )
+
     def test_derives_the_transcript_from_cwd_and_session_id(self):
+        # An absolute path for whichever platform is running this. transcript_path
+        # resolves what it is handed, and a Windows path does not resolve to
+        # itself on Linux, so pinning a literal slug here tests the platform
+        # rather than the lookup.
+        working = Path(tempfile.gettempdir()).resolve() / "trial-07"
         path = RUNNER.transcript_path(
-            Path(r"D:\didi-trials\trial-07"),
+            working,
             "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-            projects_root=Path(r"C:\Users\User\.claude\projects"),
+            projects_root=Path(tempfile.gettempdir()) / "projects",
         )
         self.assertEqual(path.name, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl")
-        self.assertEqual(path.parent.name, "D--didi-trials-trial-07")
+        self.assertEqual(path.parent.name, RUNNER.transcript_slug(str(working)))
 
 
 CYCLE_PATH = REPOSITORY_ROOT / "tools" / "field-trial" / "cycle.py"
