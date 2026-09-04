@@ -4,6 +4,8 @@
 #include "didi/mcp/prompt_registry.hpp"
 #include "didi/mcp/mcp_server.hpp"
 #include "didi/gdextension/editor_hook.hpp"
+#include "didi/gdextension/godot_bridge.hpp"
+#include "didi/gdextension/gdextension_interface.h"
 #include "didi/common/project_path.hpp"
 #include "didi/common/atomic_write.hpp"
 #include "didi/tools/hierarchy_view.hpp"
@@ -2128,8 +2130,122 @@ static void test_project_paths_accept_utf8_names() {
     registry.setIpcClient(nullptr);
 }
 
+// Field trial 02 sent the string "1.0" for the float property anchor_right and
+// read back "JSON value is incompatible with Godot property type 3". Nothing in
+// that names the property, says a string arrived, or says what 3 is, so the
+// tester concluded Didi rejected whole numbers for floats and filed #216
+// against correct behaviour. These pin the sentence that ends it in a turn.
+static void test_property_type_mismatch_names_the_value_the_caller_sent() {
+    const auto message = didi::godot::describePropertyTypeMismatch(
+        "anchor_right", didi::json("1.0"), GDEXTENSION_VARIANT_TYPE_FLOAT);
+
+    // The property, so a multi-property instantiate says which one failed.
+    ASSERT_TRUE(message.find("\"anchor_right\"") != std::string::npos);
+    // The expected type, by name rather than as the enum number 3.
+    ASSERT_TRUE(message.find("float") != std::string::npos);
+    ASSERT_TRUE(message.find("type 3") == std::string::npos);
+    // The received type, which is the entire mistake and was never mentioned.
+    ASSERT_TRUE(message.find("JSON string") != std::string::npos);
+    // The value quoted back, so a JSON string is visibly a string.
+    ASSERT_TRUE(message.find("\"1.0\"") != std::string::npos);
+    // The wrong conclusion the old message invited, refused explicitly.
+    ASSERT_TRUE(message.find("Whole numbers") != std::string::npos);
+}
+
+static void test_property_type_mismatch_names_every_scalar_type_in_words() {
+    struct Case {
+        const char* property;
+        didi::json value;
+        int type;
+        const char* expected_type_word;
+        const char* expected_received_word;
+    };
+    const std::vector<Case> cases = {
+        {"process_priority", didi::json("wrong-type"), GDEXTENSION_VARIANT_TYPE_INT, "an int",
+         "JSON string"},
+        {"visible", didi::json(1), GDEXTENSION_VARIANT_TYPE_BOOL, "a bool", "JSON number"},
+        {"name", didi::json(7), GDEXTENSION_VARIANT_TYPE_STRING, "a String", "JSON number"},
+        {"theme_type_variation", didi::json(true), GDEXTENSION_VARIANT_TYPE_STRING_NAME,
+         "a StringName", "JSON boolean"},
+        {"target_path", didi::json::array(), GDEXTENSION_VARIANT_TYPE_NODE_PATH, "a NodePath",
+         "JSON array"},
+    };
+    for (const auto& item : cases) {
+        const auto message =
+            didi::godot::describePropertyTypeMismatch(item.property, item.value, item.type);
+        ASSERT_TRUE(message.find(std::string("\"") + item.property + "\"") != std::string::npos);
+        ASSERT_TRUE(message.find(item.expected_type_word) != std::string::npos);
+        ASSERT_TRUE(message.find(item.expected_received_word) != std::string::npos);
+        // No user-facing message prints a bare variant enum number.
+        ASSERT_TRUE(message.find("property type " + std::to_string(item.type)) ==
+                    std::string::npos);
+    }
+
+    // A type outside the scalar contract is still said out loud, not numbered.
+    ASSERT_TRUE(didi::godot::godotVariantTypeName(GDEXTENSION_VARIANT_TYPE_VECTOR2) == "Vector2");
+    ASSERT_TRUE(didi::godot::godotVariantTypeName(GDEXTENSION_VARIANT_TYPE_FLOAT) == "float");
+    ASSERT_TRUE(didi::godot::godotVariantTypeName(GDEXTENSION_VARIANT_TYPE_NODE_PATH) ==
+                "NodePath");
+}
+
+// The message is the only thing that changes. This pins the accept/reject set
+// so a future edit to the wording cannot quietly start coercing a string into
+// a number, which is the false success #213 to #217 were about.
+static void test_property_type_acceptance_set_is_unchanged() {
+    using didi::godot::PropertyTypeMatch;
+    using didi::godot::matchJsonToPropertyType;
+
+    // Rejected, and must stay rejected: a string is not a number.
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json("1.0"), GDEXTENSION_VARIANT_TYPE_FLOAT) ==
+                PropertyTypeMatch::Incompatible);
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json("12"), GDEXTENSION_VARIANT_TYPE_INT) ==
+                PropertyTypeMatch::Incompatible);
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json("true"), GDEXTENSION_VARIANT_TYPE_BOOL) ==
+                PropertyTypeMatch::Incompatible);
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json(1.5), GDEXTENSION_VARIANT_TYPE_INT) ==
+                PropertyTypeMatch::Incompatible);
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json(1), GDEXTENSION_VARIANT_TYPE_STRING) ==
+                PropertyTypeMatch::Incompatible);
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json(nullptr), GDEXTENSION_VARIANT_TYPE_FLOAT) ==
+                PropertyTypeMatch::Incompatible);
+
+    // Accepted, and must stay accepted. A whole number for a float is one of
+    // them: #216 reported it rejected, and it never was.
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json(1), GDEXTENSION_VARIANT_TYPE_FLOAT) ==
+                PropertyTypeMatch::Compatible);
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json(1.0), GDEXTENSION_VARIANT_TYPE_FLOAT) ==
+                PropertyTypeMatch::Compatible);
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json(12), GDEXTENSION_VARIANT_TYPE_INT) ==
+                PropertyTypeMatch::Compatible);
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json(true), GDEXTENSION_VARIANT_TYPE_BOOL) ==
+                PropertyTypeMatch::Compatible);
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json("text"), GDEXTENSION_VARIANT_TYPE_STRING) ==
+                PropertyTypeMatch::Compatible);
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json("text"), GDEXTENSION_VARIANT_TYPE_STRING_NAME) ==
+                PropertyTypeMatch::Compatible);
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json("Node/Child"),
+                                        GDEXTENSION_VARIANT_TYPE_NODE_PATH) ==
+                PropertyTypeMatch::Compatible);
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json(nullptr), GDEXTENSION_VARIANT_TYPE_NIL) ==
+                PropertyTypeMatch::Compatible);
+
+    // Outside the scalar contract, which is a different rejection from a type
+    // mismatch and stays that way.
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json::array({1, 2}),
+                                        GDEXTENSION_VARIANT_TYPE_VECTOR2) ==
+                PropertyTypeMatch::UnsupportedPropertyType);
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json::array(), GDEXTENSION_VARIANT_TYPE_ARRAY) ==
+                PropertyTypeMatch::UnsupportedPropertyType);
+}
+
 struct RegisterToolTests {
     RegisterToolTests() {
+        registerTest("Tools.PropertyTypeMismatchNamesTheValue",
+                     test_property_type_mismatch_names_the_value_the_caller_sent);
+        registerTest("Tools.PropertyTypeMismatchNamesEveryScalarType",
+                     test_property_type_mismatch_names_every_scalar_type_in_words);
+        registerTest("Tools.PropertyTypeAcceptanceUnchanged",
+                     test_property_type_acceptance_set_is_unchanged);
         registerTest("Tools.DefaultRegistration", test_tool_registry_default_tools);
         registerTest("Tools.Phase7InputAliasPublicContract",
                      test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract);

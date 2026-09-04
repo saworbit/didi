@@ -60,5 +60,33 @@ private:
 
 Result<std::string> resolveGodotProjectPath();
 
+// Whether a JSON value may be written to a property of a given Godot variant
+// type. The type is the numeric GDEXTENSION_VARIANT_TYPE_* code, taken as an
+// int so the decision, and the message built from it, can be exercised without
+// a running engine.
+enum class PropertyTypeMatch {
+    Compatible,
+    Incompatible,
+    UnsupportedPropertyType,
+};
+
+PropertyTypeMatch matchJsonToPropertyType(const json& value, int godot_type);
+
+// The name Godot gives a variant type. A caller reading a rejection has no way
+// to turn a bare enum number back into a type, so nothing user-facing prints
+// one.
+std::string godotVariantTypeName(int godot_type);
+
+// The name of the JSON type a value actually carries: "string", "number",
+// "boolean", "null", "array", "object".
+std::string jsonValueTypeName(const json& value);
+
+// The rejection a caller reads when the JSON type of their value does not
+// match the property's Godot type. It names the property, what arrived, and
+// what to send instead, because the value they sent is the whole mistake and
+// the response is the only thing they can see.
+std::string describePropertyTypeMismatch(const std::string& property_name,
+                                         const json& value, int godot_type);
+
 } // namespace godot
 } // namespace didi
