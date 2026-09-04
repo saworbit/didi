@@ -47,7 +47,7 @@ Creates a built-in ClassDB node under the active edited scene and registers add/
 - `node_type` (`string`, default `"Node"`).
 - `parent_path` (`string`, default `"/root"`).
 - `name` (`string`, optional).
-- `properties` (`object`, optional): Initial scalar properties subject to the Phase 1 type contract.
+- `properties` (`object`, optional): Initial scalar properties subject to the Phase 1 type contract. Each value is a JSON null, boolean, signed integer, real, or string compatible with that property's Godot type, the same contract as `scene_set_property`'s `value`.
 - `scene_path` is present in the schema, but PackedScene instantiation currently returns `501`.
 
 ### `scene_remove_node` — Live
