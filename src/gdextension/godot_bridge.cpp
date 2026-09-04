@@ -259,35 +259,69 @@ Result<VariantValue> makeJsonVariant(const json& value, int depth = 0) {
     return Error::invalidArgument("JSON value cannot be converted to a supported Godot Variant");
 }
 
-Result<void> validateJsonForPropertyType(const json& value, GDExtensionVariantType type) {
-    bool compatible = false;
+// A JSON real that names a whole number, inside the range an int64 holds
+// exactly. JSON has one number type, so a client with a real in hand sends
+// 3.0 where it means 3 and there is nothing else it can write. 2^63 is a
+// double but not an int64, so the upper bound is exclusive.
+bool isWholeNumberJsonReal(const json& value) {
+    if (!value.is_number_float()) return false;
+    const double number = value.get<double>();
+    if (!std::isfinite(number) || std::trunc(number) != number) return false;
+    return number >= -9223372036854775808.0 && number < 9223372036854775808.0;
+}
+
+bool propertyTypeAcceptsJson(const json& value, GDExtensionVariantType type) {
     switch (type) {
         case GDEXTENSION_VARIANT_TYPE_NIL:
-            compatible = value.is_null();
-            break;
+            return value.is_null();
         case GDEXTENSION_VARIANT_TYPE_BOOL:
-            compatible = value.is_boolean();
-            break;
+            return value.is_boolean();
         case GDEXTENSION_VARIANT_TYPE_INT:
-            compatible = value.is_number_integer() || value.is_number_unsigned();
-            break;
+            // The whole-number real belongs here for the same reason an int
+            // belongs on a float property below: the client wrote the only
+            // number JSON gave it, and Godot converts either way losslessly.
+            return value.is_number_integer() || value.is_number_unsigned() ||
+                   isWholeNumberJsonReal(value);
         case GDEXTENSION_VARIANT_TYPE_FLOAT:
-            compatible = value.is_number();
-            break;
+            return value.is_number();
         case GDEXTENSION_VARIANT_TYPE_STRING:
         case GDEXTENSION_VARIANT_TYPE_STRING_NAME:
         case GDEXTENSION_VARIANT_TYPE_NODE_PATH:
-            compatible = value.is_string();
+            return value.is_string();
+        default:
+            return false;
+    }
+}
+
+Result<void> validateJsonForPropertyType(const json& value, GDExtensionVariantType type) {
+    switch (type) {
+        case GDEXTENSION_VARIANT_TYPE_NIL:
+        case GDEXTENSION_VARIANT_TYPE_BOOL:
+        case GDEXTENSION_VARIANT_TYPE_INT:
+        case GDEXTENSION_VARIANT_TYPE_FLOAT:
+        case GDEXTENSION_VARIANT_TYPE_STRING:
+        case GDEXTENSION_VARIANT_TYPE_STRING_NAME:
+        case GDEXTENSION_VARIANT_TYPE_NODE_PATH:
             break;
         default:
             return Error::invalidArgument("Property type " + std::to_string(type) +
                                           " is outside the Phase 1 scalar property contract");
     }
-    if (!compatible) {
+    if (!propertyTypeAcceptsJson(value, type)) {
         return Error::invalidArgument("JSON value is incompatible with Godot property type " +
                                       std::to_string(type));
     }
     return Result<void>::ok();
+}
+
+// Godot narrows a real to an int on assignment, but converting the whole
+// number here keeps the value that reaches the property the one the caller
+// named rather than one the engine derived.
+Result<VariantValue> makeJsonVariantForProperty(const json& value, GDExtensionVariantType type) {
+    if (type == GDEXTENSION_VARIANT_TYPE_INT && isWholeNumberJsonReal(value)) {
+        return makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(value.get<double>()));
+    }
+    return makeJsonVariant(value);
 }
 
 Result<VariantValue> callObject(GDExtensionObjectPtr object, const char* class_name,
@@ -1199,6 +1233,13 @@ json liveResult(const json& fields) {
 }
 
 } // namespace
+
+// The admission rule the property tools apply, reading the JSON alone. It is
+// the same call the bridge makes, so a test that asserts it here asserts what
+// a live editor session will answer.
+bool jsonValueFitsPropertyType(const json& value, int variant_type) {
+    return propertyTypeAcceptsJson(value, static_cast<GDExtensionVariantType>(variant_type));
+}
 
 GodotBridge& GodotBridge::instance() {
     static GodotBridge bridge;
@@ -5185,10 +5226,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                {"property_name", property}, {"value", value.value()}});
         }
         if (!params.contains("value")) return errorJson(400, "value is required");
-        auto compatible = validateJsonForPropertyType(
-            params["value"], GodotApi::instance().variant_get_type(old_value.value().ptr()));
+        const auto property_type = GodotApi::instance().variant_get_type(old_value.value().ptr());
+        auto compatible = validateJsonForPropertyType(params["value"], property_type);
         if (compatible.isErr()) return errorJson(compatible.error().code, compatible.error().message);
-        auto new_value = makeJsonVariant(params["value"]);
+        auto new_value = makeJsonVariantForProperty(params["value"], property_type);
         if (new_value.isErr()) return errorJson(new_value.error().code, new_value.error().message);
         auto manager = undoManager(editor);
         if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
@@ -5268,13 +5309,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 GodotApi::instance().object_destroy(node);
                 return errorJson(current_value.error().code, current_value.error().message);
             }
-            auto compatible = validateJsonForPropertyType(
-                it.value(), GodotApi::instance().variant_get_type(current_value.value().ptr()));
+            const auto property_type =
+                GodotApi::instance().variant_get_type(current_value.value().ptr());
+            auto compatible = validateJsonForPropertyType(it.value(), property_type);
             if (compatible.isErr()) {
                 GodotApi::instance().object_destroy(node);
                 return errorJson(compatible.error().code, compatible.error().message);
             }
-            auto property_value = makeJsonVariant(it.value());
+            auto property_value = makeJsonVariantForProperty(it.value(), property_type);
             if (property_value.isErr()) {
                 GodotApi::instance().object_destroy(node);
                 return errorJson(property_value.error().code, property_value.error().message);

@@ -60,5 +60,10 @@ private:
 
 Result<std::string> resolveGodotProjectPath();
 
+// Whether a JSON value can stand for a value of a Godot property type, where
+// variant_type is a GDExtensionVariantType. The answer comes from the JSON
+// alone, so it holds with or without a running engine.
+bool jsonValueFitsPropertyType(const json& value, int variant_type);
+
 } // namespace godot
 } // namespace didi
