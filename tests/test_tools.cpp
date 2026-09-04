@@ -2261,13 +2261,79 @@ static void test_property_type_acceptance_set_is_unchanged() {
     ASSERT_TRUE(matchJsonToPropertyType(didi::json(nullptr), GDEXTENSION_VARIANT_TYPE_NIL) ==
                 PropertyTypeMatch::Compatible);
 
-    // Outside the scalar contract, which is a different rejection from a type
-    // mismatch and stays that way.
-    ASSERT_TRUE(matchJsonToPropertyType(didi::json::array({1, 2}),
-                                        GDEXTENSION_VARIANT_TYPE_VECTOR2) ==
-                PropertyTypeMatch::UnsupportedPropertyType);
+    // Outside the contract, which is a different rejection from a type mismatch
+    // and stays that way.
     ASSERT_TRUE(matchJsonToPropertyType(didi::json::array(), GDEXTENSION_VARIANT_TYPE_ARRAY) ==
                 PropertyTypeMatch::UnsupportedPropertyType);
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json::object(), GDEXTENSION_VARIANT_TYPE_RECT2) ==
+                PropertyTypeMatch::UnsupportedPropertyType);
+
+    // Vector2 is inside it now, and an array is the wrong shape for one rather
+    // than a type the contract will not touch.
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json::array({1, 2}),
+                                        GDEXTENSION_VARIANT_TYPE_VECTOR2) ==
+                PropertyTypeMatch::Incompatible);
+}
+
+// A 2D node could not be positioned and a resource slot could not be filled,
+// because the contract stopped at scalars. These are the shapes it takes now,
+// and the near misses it still refuses, which is the half that matters: a
+// silently dropped "z" is a position nobody asked for.
+static void test_property_contract_takes_vectors_colors_and_resource_paths() {
+    using didi::godot::PropertyTypeMatch;
+    using didi::godot::matchJsonToPropertyType;
+    const auto accepted = [](const didi::json& value, GDExtensionVariantType type) {
+        return matchJsonToPropertyType(value, static_cast<int>(type)) ==
+               PropertyTypeMatch::Compatible;
+    };
+    const auto refused = [](const didi::json& value, GDExtensionVariantType type) {
+        return matchJsonToPropertyType(value, static_cast<int>(type)) ==
+               PropertyTypeMatch::Incompatible;
+    };
+
+    ASSERT_TRUE(accepted({{"x", 480}, {"y", 270.5}}, GDEXTENSION_VARIANT_TYPE_VECTOR2));
+    ASSERT_TRUE(accepted({{"x", 0}, {"y", 1.5}, {"z", -2}}, GDEXTENSION_VARIANT_TYPE_VECTOR3));
+    ASSERT_TRUE(accepted({{"x", 32}, {"y", 32}}, GDEXTENSION_VARIANT_TYPE_VECTOR2I));
+    ASSERT_TRUE(accepted({{"x", 1}, {"y", 0}, {"z", 3}}, GDEXTENSION_VARIANT_TYPE_VECTOR3I));
+    // A whole-number real is a whole number, the same rule an int property has.
+    ASSERT_TRUE(accepted({{"x", 32.0}, {"y", 32.0}}, GDEXTENSION_VARIANT_TYPE_VECTOR2I));
+    ASSERT_TRUE(refused({{"x", 32.5}, {"y", 32}}, GDEXTENSION_VARIANT_TYPE_VECTOR2I));
+
+    // A missing axis is a different position from the one intended, and an
+    // extra key is a mistake worth showing rather than dropping.
+    ASSERT_TRUE(refused({{"x", 1}}, GDEXTENSION_VARIANT_TYPE_VECTOR2));
+    ASSERT_TRUE(refused({{"x", 1}, {"y", 2}}, GDEXTENSION_VARIANT_TYPE_VECTOR3));
+    ASSERT_TRUE(refused({{"x", 1}, {"y", 2}, {"z", 3}}, GDEXTENSION_VARIANT_TYPE_VECTOR2));
+    ASSERT_TRUE(refused({{"x", 1}, {"y", "2"}}, GDEXTENSION_VARIANT_TYPE_VECTOR2));
+
+    ASSERT_TRUE(accepted({{"r", 1}, {"g", 0.5}, {"b", 0}}, GDEXTENSION_VARIANT_TYPE_COLOR));
+    ASSERT_TRUE(accepted({{"r", 1}, {"g", 0.5}, {"b", 0}, {"a", 0.25}},
+                         GDEXTENSION_VARIANT_TYPE_COLOR));
+    ASSERT_TRUE(accepted(didi::json("#ff8800"), GDEXTENSION_VARIANT_TYPE_COLOR));
+    ASSERT_TRUE(accepted(didi::json("#ff8800cc"), GDEXTENSION_VARIANT_TYPE_COLOR));
+    ASSERT_TRUE(refused(didi::json("ff8800"), GDEXTENSION_VARIANT_TYPE_COLOR));
+    ASSERT_TRUE(refused(didi::json("#ff88"), GDEXTENSION_VARIANT_TYPE_COLOR));
+    ASSERT_TRUE(refused(didi::json("#gg8800"), GDEXTENSION_VARIANT_TYPE_COLOR));
+    ASSERT_TRUE(refused({{"r", 1}, {"g", 0.5}}, GDEXTENSION_VARIANT_TYPE_COLOR));
+
+    ASSERT_TRUE(accepted(didi::json("res://tiles/arena_tileset.tres"),
+                         GDEXTENSION_VARIANT_TYPE_OBJECT));
+    // Clearing a slot is the one thing null is for here.
+    ASSERT_TRUE(accepted(didi::json(nullptr), GDEXTENSION_VARIANT_TYPE_OBJECT));
+    ASSERT_TRUE(refused(didi::json("tiles/arena_tileset.tres"), GDEXTENSION_VARIANT_TYPE_OBJECT));
+    ASSERT_TRUE(refused(didi::json("res://../outside.tres"), GDEXTENSION_VARIANT_TYPE_OBJECT));
+    ASSERT_TRUE(refused(didi::json("res://"), GDEXTENSION_VARIANT_TYPE_OBJECT));
+    ASSERT_TRUE(refused(didi::json(1), GDEXTENSION_VARIANT_TYPE_OBJECT));
+
+    // The rejection has to say what to send, because the value is the whole
+    // mistake and the message is all the caller can see.
+    const auto vector_message = didi::godot::describePropertyTypeMismatch(
+        "position", didi::json(480), GDEXTENSION_VARIANT_TYPE_VECTOR2);
+    ASSERT_TRUE(vector_message.find("Vector2") != std::string::npos);
+    ASSERT_TRUE(vector_message.find("\"x\"") != std::string::npos);
+    const auto resource_message = didi::godot::describePropertyTypeMismatch(
+        "tile_set", didi::json(1), GDEXTENSION_VARIANT_TYPE_OBJECT);
+    ASSERT_TRUE(resource_message.find("res://") != std::string::npos);
 }
 
 static void test_script_create_writes_a_gdscript_and_reports_its_diagnostics() {
@@ -2379,6 +2445,8 @@ struct RegisterToolTests {
                      test_property_type_mismatch_names_every_scalar_type_in_words);
         registerTest("Tools.PropertyTypeAcceptanceUnchanged",
                      test_property_type_acceptance_set_is_unchanged);
+        registerTest("Tools.PropertyContractVectorsColorsResources",
+                     test_property_contract_takes_vectors_colors_and_resource_paths);
         registerTest("Tools.DefaultRegistration", test_tool_registry_default_tools);
         registerTest("Tools.Phase7InputAliasPublicContract",
                      test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract);

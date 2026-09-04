@@ -13,6 +13,10 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Added
 
+- `scene_set_property` and the `properties` argument of `scene_instantiate_node` take Vector2, Vector2i, Vector3, Vector3i, Color and Resource paths. The scalar contract meant a 2D node could not be placed at all, a CollisionShape2D could not be given a shape, a TileMapLayer could not be given a TileSet and a Sprite2D could not be given a texture, so scene data ended up in `_ready()` and the scene a person opens was not the scene Didi built. Vectors come from `{x,y}` and `{x,y,z}` objects, which is the encoding `resource_create` already takes, so the live and offline sides agree. Colour comes from `{r,g,b}` with an optional `a` or from a `#rrggbb`/`#rrggbbaa` string. A resource slot takes a `res://` path, loaded through ResourceLoader and refused if the loaded type is not the class the property holds, the same check `script_attach_to_node` makes for a Script; `null` clears one. An object carrying a member the target type does not have is refused rather than having it dropped. An empty resource slot reads back as nil, so the property's declared type now comes from the class rather than from whatever the slot happens to hold, and `scene_get_property` can describe a position, a colour and a filled slot instead of refusing to encode them.
+
+### Added
+
 - Added `script_create`, which writes a GDScript file under the project root. Every other `script_*` tool assumed the `.gd` file already existed, so the first step of the documented workflow was the one step that had to happen outside Didi. It takes `script_path`, `source_text` and `overwrite`, preserves an existing script unless the overwrite is explicit and confirmed, and runs the same diagnostics `script_patch_method` runs after its write, so a bad script is visible at creation rather than at attach time.
 
 ### Fixed
