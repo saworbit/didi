@@ -176,6 +176,8 @@ Rewrites a matching GDScript symbol in a project-root-confined file, then runs t
 - `symbol_type` (`string`, default `"function"`).
 - Legacy alias: `patch_script_symbols`.
 
+Diagnostics are computed against the file after it is written, so they include the Godot compiler check when a Godot binary is discoverable, not only the lexical rules. `has_errors: true` means the patch left the file in a state the compiler rejects, and the same diagnostics `script_check_syntax` would report are returned here.
+
 ## 4. Viewport and visual helpers
 
 ### `viewport_capture_frame` — Live + offline
