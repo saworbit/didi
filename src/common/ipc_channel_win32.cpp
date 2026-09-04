@@ -36,8 +36,16 @@ namespace {
 // a request the engine never saw. That is the one failure it cannot tell from a
 // request that ran. Two independently chosen numbers in two processes is how
 // that comes back, so both come from here and the margin is asserted.
+#if defined(_WIN32)
 constexpr int kServerIdleRecycleMs = 1000;
 constexpr int kClientIdleReuseMs = 300;
+#else
+// A Unix socket server polls for its next accept rather than holding the only
+// instance of a named endpoint, so it can afford a longer window, and its frame
+// timings are already built on this one.
+constexpr int kServerIdleRecycleMs = 5000;
+constexpr int kClientIdleReuseMs = 1500;
+#endif
 static_assert(kClientIdleReuseMs * 3 <= kServerIdleRecycleMs,
               "a client must stop reusing a connection well before a server recycles it");
 
@@ -841,17 +849,6 @@ struct MonotonicDeadline {
 // False only when the peer has closed. A recv of 0 on a stream socket means
 // exactly that; EAGAIN means nothing is waiting, which is the normal state of a
 // healthy idle connection.
-// Whether bytes are sitting in the socket waiting to be read. Used on the
-// server side to decide whether closing this connection would discard a request
-// the client has already written.
-bool posixSocketHasPendingBytes(int sock) {
-    struct pollfd pfd{};
-    pfd.fd = sock;
-    pfd.events = POLLIN;
-    const int ready = poll(&pfd, 1, 0);
-    return ready > 0 && (pfd.revents & POLLIN) != 0;
-}
-
 bool posixPeerIsAlive(int sock) {
     char probe = 0;
     const ssize_t peeked = recv(sock, &probe, 1, MSG_PEEK | MSG_DONTWAIT);
@@ -1248,15 +1245,16 @@ private:
                 // accepts the next after it breaks.
                 const auto idle_deadline = deadlineAfter(serverIdleRecycleMs());
                 uint8_t len_buf[4] = {0};
-                if (!readExact(client, len_buf, sizeof(len_buf), idle_deadline, &m_running)) {
-                    // A request that landed while this connection was being
-                    // recycled is served rather than closed on, for the reason
-                    // spelled out in the Win32 branch above: closing discards
-                    // bytes the client has already written and leaves it unable
-                    // to tell that from a request the engine ran.
-                    if (m_running.load() && posixSocketHasPendingBytes(client)) continue;
-                    break;
-                }
+                // There is deliberately no equivalent here of the Win32 branch's
+                // check for a request that landed during teardown. poll reports
+                // a closed peer as readable, so it turns a disconnect into a
+                // loop that never accepts the next client, and readExact does
+                // not report how much of a header it consumed before failing,
+                // so resuming after a partial read would desynchronise the
+                // stream. Both are worse than the window the check would
+                // narrow. What keeps a client off that boundary is its own
+                // reuse budget, and that applies on both transports.
+                if (!readExact(client, len_buf, sizeof(len_buf), idle_deadline, &m_running)) break;
 
                 const uint32_t req_len = decodeFrameLength(len_buf);
                 if (req_len == 0 || req_len > kMaximumFrameBytes) break;
