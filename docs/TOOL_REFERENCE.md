@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 94 canonical tool names plus 10 legacy names (104 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 95 canonical tool names plus 10 legacy names (105 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `91/94`
+**Canonical implementation:** `92/95`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 91/94 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 92/95 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -166,6 +166,16 @@ Extracts functions, variables, signals, enums, and inner classes from GDScript t
 - `file_path` (`string`, optional).
 - `source_text` (`string`, optional).
 
+### `script_create` — Offline
+
+Writes a new GDScript file under the project root and runs the same diagnostics `script_patch_method` runs afterwards, so a bad script is visible at creation rather than at attach time. Nothing else in the surface creates a `.gd` file.
+
+- `script_path` (`string`, required); must end in `.gd` and resolve inside the project root.
+- `source_text` (`string`, required); written verbatim.
+- `overwrite` (`boolean`, default `false`); an existing script is preserved unless explicitly set to `true`, and an overwrite requires a confirmation token.
+
+`status` is `created_offline` or `replaced_offline`. Diagnostics are computed against the file after it is written, so they include the Godot compiler check when a Godot binary is discoverable.
+
 ### `script_patch_method` — Offline
 
 Rewrites a matching GDScript symbol in a project-root-confined file, then runs the available diagnostics.
@@ -295,6 +305,8 @@ Like every mutating Phase 7 live tool, these setters return `504 unknown_outcome
 ### `resource_create` — Offline
 
 Writes a textual `.tres` file under the project root. Supported JSON encodings include strings, booleans, numbers, arrays, and `{x,y}`/`{x,y,z}` objects emitted as Vector2/Vector3. Didi does not instantiate or validate the requested Resource class in Godot.
+
+`save_path` must end in `.tres` or `.res`. The body is Godot text-resource markup and nothing else, so any other target is refused rather than written; use `script_create` for a `.gd` file.
 
 - `resource_type` (`string`, default `"StandardMaterial3D"`).
 - `save_path` (`string`, required).
@@ -755,4 +767,4 @@ Requires finite viewport-space `point.x` and `point.y`. Optional `root_path` def
 
 Every implemented mutating tool schema includes `dry_run: boolean`. A true dry-run stops at the registry boundary and returns `dry_run: true` plus `mutation_preview`; no tool handler, subprocess, filesystem writer, or Godot main-thread command runs. The preview reports the exact tool/arguments, canonical project, execution mode, optional session ID, route generation, binding hash, and a conservative planned-change record.
 
-`editor_reload_project`, `script_patch_method`/`patch_script_symbols`, and `overwrite: true` calls to `resource_create`, `viewport_create_test_lab`/`create_visual_test_lab`, `project_export`, and `gridmap_export_mesh_library` require confirmation. Call the exact tool with identical arguments plus `dry_run: true`, then repeat it without `dry_run` and with the returned `confirmation_token`. Tokens are cryptographically random, expire after 120 seconds, are consumed on the first attempt, and reject tool, argument, project, execution-mode, session, route-generation, expiry, and replay mismatches.
+`editor_reload_project`, `script_patch_method`/`patch_script_symbols`, and `overwrite: true` calls to `resource_create`, `script_create`, `viewport_create_test_lab`/`create_visual_test_lab`, `project_export`, and `gridmap_export_mesh_library` require confirmation. Call the exact tool with identical arguments plus `dry_run: true`, then repeat it without `dry_run` and with the returned `confirmation_token`. Tokens are cryptographically random, expire after 120 seconds, are consumed on the first attempt, and reject tool, argument, project, execution-mode, session, route-generation, expiry, and replay mismatches.

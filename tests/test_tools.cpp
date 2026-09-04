@@ -188,7 +188,7 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 104u);
+    ASSERT_EQ(tools.size(), 105u);
     const std::unordered_set<std::string> legacy_names = {
         "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
         "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
@@ -200,7 +200,7 @@ static void test_tool_registry_default_tools() {
         if (legacy_names.count(tool.name) == 0) ++canonical_count;
     }
     ASSERT_EQ(legacy_names.size(), 10u);
-    ASSERT_EQ(canonical_count, 94u);
+    ASSERT_EQ(canonical_count, 95u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -222,6 +222,7 @@ static void test_tool_registry_default_tools() {
     ASSERT_TRUE(reg.getTool("script_reflect_class") != nullptr);
     ASSERT_TRUE(reg.getTool("script_get_symbols") != nullptr);
     ASSERT_TRUE(reg.getTool("script_patch_method") != nullptr);
+    ASSERT_TRUE(reg.getTool("script_create") != nullptr);
 
     // Domain 4: Visual Verification & Viewport Rendering
     ASSERT_TRUE(reg.getTool("viewport_capture_frame") != nullptr);
@@ -321,14 +322,14 @@ static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract(
         if (legacy_names.count(tool.name) != 0) continue;
         tool.capability.implemented ? ++implemented : ++unimplemented;
     }
-    ASSERT_EQ(implemented, 91u);
+    ASSERT_EQ(implemented, 92u);
     ASSERT_EQ(unimplemented, 3u);
 }
 
 static void test_offline_writer_schemas_require_explicit_overwrite() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
-    for (const auto* name : {"resource_create", "viewport_create_test_lab",
+    for (const auto* name : {"resource_create", "script_create", "viewport_create_test_lab",
                              "create_visual_test_lab"}) {
         const auto* tool = registry.getTool(name);
         ASSERT_TRUE(tool != nullptr);
@@ -2269,6 +2270,107 @@ static void test_property_type_acceptance_set_is_unchanged() {
                 PropertyTypeMatch::UnsupportedPropertyType);
 }
 
+static void test_script_create_writes_a_gdscript_and_reports_its_diagnostics() {
+    // Break caught: nothing in the surface created a .gd file, so the first
+    // step of the documented workflow was the one step that had to happen
+    // outside Didi, and resource_create was the nearest thing and wrong.
+    ScopedToolProject project("script-create");
+    writeAuditFile("project.godot", "config_version=5\n");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+
+    const auto created = registry.callTool("script_create", didi::json{
+        {"script_path", "res://scripts/score_keeper.gd"},
+        {"source_text", "extends Node\n\nvar score: int = 0\n"}});
+    ASSERT_TRUE(!created.isError);
+    const auto payload = didi::json::parse(created.content[0].text);
+    ASSERT_EQ(payload["status"], "created_offline");
+    ASSERT_EQ(payload["script_path"], "res://scripts/score_keeper.gd");
+    ASSERT_TRUE(!payload["has_errors"].get<bool>());
+    ASSERT_EQ(readToolTestFile("scripts/score_keeper.gd"),
+              "extends Node\n\nvar score: int = 0\n");
+
+    // An existing script is preserved unless the replacement is explicit, and
+    // the file on disk is the proof rather than the status string.
+    const auto refused = registry.callTool("script_create", didi::json{
+        {"script_path", "res://scripts/score_keeper.gd"},
+        {"source_text", "extends Node\n"}});
+    ASSERT_TRUE(refused.isError);
+    ASSERT_EQ(readToolTestFile("scripts/score_keeper.gd"),
+              "extends Node\n\nvar score: int = 0\n");
+
+    // The path is checked before anything is written. A .tres target would be
+    // a file Godot loads as a resource and never as a script.
+    const auto wrong_extension = registry.callTool("script_create", didi::json{
+        {"script_path", "res://scripts/thing.tres"}, {"source_text", "extends Node\n"}});
+    ASSERT_TRUE(wrong_extension.isError);
+    ASSERT_TRUE(!std::filesystem::exists("scripts/thing.tres"));
+
+    const auto escaping = registry.callTool("script_create", didi::json{
+        {"script_path", "res://../outside.gd"}, {"source_text", "extends Node\n"}});
+    ASSERT_TRUE(escaping.isError);
+
+    // Classified as a mutation, so the safety envelope applies and a preview
+    // writes nothing.
+    const auto preview = registry.callTool("script_create", didi::json{
+        {"script_path", "res://scripts/previewed.gd"},
+        {"source_text", "extends Node\n"}, {"dry_run", true}});
+    ASSERT_TRUE(!preview.isError);
+    const auto preview_payload = didi::json::parse(preview.content[0].text);
+    ASSERT_TRUE(preview_payload["dry_run"].get<bool>());
+    ASSERT_EQ(preview_payload["mutation_preview"]["tool"], "script_create");
+    ASSERT_TRUE(!std::filesystem::exists("scripts/previewed.gd"));
+
+    // A script that does not parse is reported at creation rather than at
+    // attach time, and the file is still written so the caller can fix it.
+    const auto broken = registry.callTool("script_create", didi::json{
+        {"script_path", "res://scripts/broken.gd"},
+        {"source_text", "extends Node\n\nfunc broken()\n\tpass\n"}});
+    ASSERT_TRUE(!broken.isError);
+    const auto broken_payload = didi::json::parse(broken.content[0].text);
+    ASSERT_TRUE(broken_payload["has_errors"].get<bool>());
+    ASSERT_TRUE(broken_payload["diagnostics_count"].get<size_t>() > 0u);
+
+    registry.setIpcClient(nullptr);
+}
+
+static void test_resource_create_refuses_a_target_it_cannot_write() {
+    // Break caught: resource_create wrote [gd_resource] markup to whatever
+    // save_path it was handed, including a .gd path, and reported
+    // created_offline for a file script_check_syntax called unparseable in the
+    // same session.
+    ScopedToolProject project("resource-create-path");
+    writeAuditFile("project.godot", "config_version=5\n");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+
+    const auto script_target = registry.callTool("resource_create", didi::json{
+        {"save_path", "res://scripts/score_keeper.gd"},
+        {"resource_type", "GDScript"},
+        {"properties", {{"source_code", "extends Node\n"}}}});
+    ASSERT_TRUE(script_target.isError);
+    ASSERT_TRUE(script_target.content[0].text.find("script_create") != std::string::npos);
+    ASSERT_TRUE(!std::filesystem::exists("scripts/score_keeper.gd"));
+
+    const auto no_extension = registry.callTool("resource_create", didi::json{
+        {"save_path", "res://materials/wood"}});
+    ASSERT_TRUE(no_extension.isError);
+
+    // What it is for still works, in either accepted spelling.
+    const auto material = registry.callTool("resource_create", didi::json{
+        {"save_path", "res://materials/wood.tres"},
+        {"resource_type", "StandardMaterial3D"}});
+    ASSERT_TRUE(!material.isError);
+    ASSERT_TRUE(readToolTestFile("materials/wood.tres").find("StandardMaterial3D") !=
+                std::string::npos);
+    ASSERT_TRUE(!registry.callTool("resource_create", didi::json{
+        {"save_path", "res://materials/stone.RES"}}).isError);
+
+    registry.setIpcClient(nullptr);
+}
+
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.PropertyTypeMismatchNamesTheValue",
@@ -2357,6 +2459,10 @@ struct RegisterToolTests {
         registerTest("Tools.SceneGetSelectionContract", test_scene_get_selection_contract);
         registerTest("Tools.PropertyAdmissionReadsTheNumber",
                      test_property_admission_reads_the_number_not_its_json_spelling);
+        registerTest("Tools.ScriptCreate",
+                     test_script_create_writes_a_gdscript_and_reports_its_diagnostics);
+        registerTest("Tools.ResourceCreatePathGuard",
+                     test_resource_create_refuses_a_target_it_cannot_write);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }

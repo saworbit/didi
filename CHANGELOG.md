@@ -11,16 +11,22 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
-Nothing yet. The surface below is what 1.5.0 shipped and is current.
+### Added
+
+- Added `script_create`, which writes a GDScript file under the project root. Every other `script_*` tool assumed the `.gd` file already existed, so the first step of the documented workflow was the one step that had to happen outside Didi. It takes `script_path`, `source_text` and `overwrite`, preserves an existing script unless the overwrite is explicit and confirmed, and runs the same diagnostics `script_patch_method` runs after its write, so a bad script is visible at creation rather than at attach time.
+
+### Fixed
+
+- `resource_create` refuses a `save_path` that is not `.tres` or `.res`. It wrote Godot text-resource markup into whatever path it was handed, including a `.gd` file, and reported `created_offline` for a file `script_check_syntax` immediately called unparseable in the same session.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `91/94`
+**Canonical implementation:** `92/95`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 94 canonical tools plus 10 legacy registrations (104 total). 91 canonical tools are implemented and 3 remain unimplemented.
+Discovery now exposes 95 canonical tools plus 10 legacy registrations (105 total). 92 canonical tools are implemented and 3 remain unimplemented.
 
 ---
 

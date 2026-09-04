@@ -92,7 +92,11 @@ inline std::string projectEndpointKey(const std::filesystem::path& project_root)
     return output.str();
 }
 
-inline Result<std::filesystem::path> resolveProjectFile(const std::string& file_path) {
+// The same path rules as resolveProjectFile without requiring that something is
+// already there. A tool that creates a file has to check the path before it
+// exists, and repeating the traversal, UTF-8 and containment rules per writer
+// is how two of them end up disagreeing.
+inline Result<std::filesystem::path> resolveProjectFileForWrite(const std::string& file_path) {
     if (file_path.empty()) return Error::invalidArgument("file path is empty");
     std::string relative_value = file_path;
     if (strings::startsWith(relative_value, "res://")) relative_value.erase(0, 6);
@@ -119,7 +123,14 @@ inline Result<std::filesystem::path> resolveProjectFile(const std::string& file_
     if (error || !isWithinProject(root, target)) {
         return Error::invalidArgument("file path resolves outside the project root");
     }
-    if (!std::filesystem::is_regular_file(target, error) || error) {
+    return target;
+}
+
+inline Result<std::filesystem::path> resolveProjectFile(const std::string& file_path) {
+    auto target = resolveProjectFileForWrite(file_path);
+    if (target.isErr()) return target;
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(target.value(), error) || error) {
         return Error::notFound("file does not exist beneath the project root");
     }
     return target;
