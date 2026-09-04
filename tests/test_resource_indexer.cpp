@@ -259,6 +259,47 @@ static void test_invalidate_drops_the_per_file_memo_as_well() {
     didi::offline::ResourceIndexer::invalidateSharedIndex();
 }
 
+static void test_imported_assets_take_their_uid_from_import_metadata() {
+    // Break caught: Godot writes no .uid sidecar for an imported asset, it
+    // writes the uid into the .import file it generates beside it. Nothing read
+    // that, so no texture, audio clip or mesh ever reached the uid map and
+    // project_audit_assets called every uid:// reference to one unresolved.
+    IndexFixture fixture;
+    fixture.write("tiles/wall.png", "not-a-real-png");
+    fixture.write("tiles/wall.png.import",
+                  "[remap]\n\n"
+                  "importer=\"texture\"\n"
+                  "type=\"CompressedTexture2D\"\n"
+                  "uid=\"uid://btgxunai7rduq\"\n"
+                  "path=\"res://.godot/imported/wall.png-abc.ctex\"\n");
+    // A .uid sidecar still wins where one exists, and a file with neither still
+    // reports no uid rather than an invented one.
+    fixture.write("audio/hit.wav", "RIFF");
+    fixture.write("audio/hit.wav.uid", "uid://sidecarwins1\n");
+    fixture.write("audio/hit.wav.import", "[remap]\n\nuid=\"uid://importloses1\"\n");
+    fixture.write("tiles/plain.png", "not-a-real-png");
+
+    didi::offline::ResourceIndexer indexer;
+    indexer.scan(fixture.root());
+
+    const auto* wall = indexer.findExact("res://tiles/wall.png");
+    ASSERT_TRUE(wall != nullptr);
+    ASSERT_EQ(wall->uid, "uid://btgxunai7rduq");
+
+    const auto* audio = indexer.findExact("res://audio/hit.wav");
+    ASSERT_TRUE(audio != nullptr);
+    ASSERT_EQ(audio->uid, "uid://sidecarwins1");
+
+    const auto* plain = indexer.findExact("res://tiles/plain.png");
+    ASSERT_TRUE(plain != nullptr);
+    ASSERT_TRUE(plain->uid.empty());
+
+    // The .import file is metadata, not a resource that owns the uid, so it
+    // must not claim it and shadow the asset in the map.
+    const auto* metadata = indexer.findExact("res://tiles/wall.png.import");
+    ASSERT_TRUE(metadata == nullptr || metadata->uid.empty());
+}
+
 struct RegisterResourceIndexerTests {
     RegisterResourceIndexerTests() {
         registerTest("ResourceIndexer.ExactLookupAndDirectoryListing",
@@ -274,5 +315,7 @@ struct RegisterResourceIndexerTests {
         registerTest("ResourceIndexer.TypeDetection", test_resource_type_detection);
         registerTest("ResourceIndexer.UidSidecar", test_uid_sidecar_fallback);
         registerTest("ResourceIndexer.ExternalUidSidecar", test_uid_sidecars_are_indexed_for_external_resources);
+        registerTest("ResourceIndexer.ImportedAssetUid",
+                     test_imported_assets_take_their_uid_from_import_metadata);
     }
 } g_registerResourceIndexerTests;

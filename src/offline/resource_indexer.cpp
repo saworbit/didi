@@ -45,6 +45,28 @@ std::string extractUidSidecar(const fs::path& file_path) {
     return isValidUid(uid) ? uid : "";
 }
 
+// Godot writes no .uid sidecar for an imported asset. Its UID lives in the
+// .import file the import pipeline already generates beside it, so a texture,
+// audio clip or mesh never appeared in the map and project_audit_assets called
+// every uid:// reference to one a broken reference.
+std::string extractUidFromImportMetadata(const fs::path& file_path) {
+    auto import_path = file_path;
+    import_path += ".import";
+    std::ifstream metadata(import_path);
+    if (!metadata.is_open()) return "";
+    static const std::regex uid_regex(R"re(^\s*uid\s*=\s*"(uid:\/\/[^"]+)")re");
+    std::string line;
+    int count = 0;
+    while (std::getline(metadata, line) && count++ < 32) {
+        std::smatch match;
+        if (std::regex_search(line, match, uid_regex) && match.size() > 1) {
+            const auto uid = match[1].str();
+            if (isValidUid(uid)) return uid;
+        }
+    }
+    return "";
+}
+
 std::string extractUidFromPath(const fs::path& file_path) {
     std::ifstream file(file_path);
     static const std::regex uid_regex(R"re(uid="(uid:\/\/[^"]+)")re");
@@ -241,8 +263,11 @@ void ResourceIndexer::scan(const std::string& root_dir) {
                         if (type == "PackedScene" || type == "Resource") {
                             facts.dependencies = extractDependenciesFromPath(entry.path());
                         }
-                    } else if (ext != ".uid") {
+                    } else if (ext != ".uid" && ext != ".import") {
                         facts.uid = extractUidSidecar(entry.path());
+                        if (facts.uid.empty()) {
+                            facts.uid = extractUidFromImportMetadata(entry.path());
+                        }
                     }
                     if (stampable) rememberFileFacts(native, modified, file_size, facts);
                 }
