@@ -311,25 +311,23 @@ bool jsonScalarsEquivalent(const json& observed, const json& requested) {
     return observed == requested;
 }
 
-Result<void> validateJsonForPropertyType(const json& value, GDExtensionVariantType type) {
-    switch (type) {
-        case GDEXTENSION_VARIANT_TYPE_NIL:
-        case GDEXTENSION_VARIANT_TYPE_BOOL:
-        case GDEXTENSION_VARIANT_TYPE_INT:
-        case GDEXTENSION_VARIANT_TYPE_FLOAT:
-        case GDEXTENSION_VARIANT_TYPE_STRING:
-        case GDEXTENSION_VARIANT_TYPE_STRING_NAME:
-        case GDEXTENSION_VARIANT_TYPE_NODE_PATH:
+// The property name is not decoration. A scene_instantiate_node call carries
+// several properties, and a rejection that does not say which one leaves the
+// caller guessing at the very moment they have nothing else to look at.
+Result<void> validateJsonForPropertyType(const std::string& property_name, const json& value,
+                                         GDExtensionVariantType type) {
+    switch (matchJsonToPropertyType(value, static_cast<int>(type))) {
+        case PropertyTypeMatch::Compatible:
+            return Result<void>::ok();
+        case PropertyTypeMatch::UnsupportedPropertyType:
+            return Error::invalidArgument("Property \"" + property_name + "\" is a " +
+                                          godotVariantTypeName(static_cast<int>(type)) +
+                                          ", which is outside the Phase 1 scalar property contract");
+        case PropertyTypeMatch::Incompatible:
             break;
-        default:
-            return Error::invalidArgument("Property type " + std::to_string(type) +
-                                          " is outside the Phase 1 scalar property contract");
     }
-    if (!propertyTypeAcceptsJson(value, type)) {
-        return Error::invalidArgument("JSON value is incompatible with Godot property type " +
-                                      std::to_string(type));
-    }
-    return Result<void>::ok();
+    return Error::invalidArgument(
+        describePropertyTypeMismatch(property_name, value, static_cast<int>(type)));
 }
 
 // Godot narrows a real to an int on assignment, but converting the whole
@@ -5265,7 +5263,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         if (!params.contains("value")) return errorJson(400, "value is required");
         const auto property_type = GodotApi::instance().variant_get_type(old_value.value().ptr());
-        auto compatible = validateJsonForPropertyType(params["value"], property_type);
+        auto compatible = validateJsonForPropertyType(property, params["value"], property_type);
         if (compatible.isErr()) return errorJson(compatible.error().code, compatible.error().message);
         auto new_value = makeJsonVariantForProperty(params["value"], property_type);
         if (new_value.isErr()) return errorJson(new_value.error().code, new_value.error().message);
@@ -5365,7 +5363,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             const auto property_type =
                 GodotApi::instance().variant_get_type(current_value.value().ptr());
-            auto compatible = validateJsonForPropertyType(it.value(), property_type);
+            auto compatible = validateJsonForPropertyType(it.key(), it.value(), property_type);
             if (compatible.isErr()) {
                 GodotApi::instance().object_destroy(node);
                 return errorJson(compatible.error().code, compatible.error().message);
@@ -5752,6 +5750,151 @@ Result<std::vector<double>> GodotBridge::samplePerformanceMonitors(
         values.push_back(value.value());
     }
     return values;
+}
+
+// The property-type rejection, in words.
+//
+// A caller that sent the wrong JSON type has exactly one thing to look at: the
+// error. Field trial 02 sent the string "1.0" for a float property, read
+// "JSON value is incompatible with Godot property type 3", and concluded Didi
+// rejected whole numbers for floats. The type number is knowable only from the
+// GDExtension headers, the property was never named, and the one fact that
+// would have ended it in a turn, that a JSON string arrived where a number was
+// wanted, was the fact left out.
+//
+// These four are pure functions of a JSON value and a variant type number, so
+// the decision and the sentence built from it are both testable without an
+// engine. The set of accepted values lives in matchJsonToPropertyType alone:
+// the message is built from the same answer that rejects, and cannot drift
+// into describing a rule the check does not apply.
+
+PropertyTypeMatch matchJsonToPropertyType(const json& value, int godot_type) {
+    // Delegates the accept/reject decision to propertyTypeAcceptsJson rather
+    // than repeating it. Two copies of this rule already disagreed once: the
+    // rewrite that produced this function was written before an int property
+    // learned to take a whole-number real such as 9.0, and merging the two
+    // without noticing would have quietly reverted that while every unit test
+    // kept passing, because those exercise the helper and not this path. One
+    // source of truth is the only version of this that stays true.
+    switch (godot_type) {
+        case GDEXTENSION_VARIANT_TYPE_NIL:
+        case GDEXTENSION_VARIANT_TYPE_BOOL:
+        case GDEXTENSION_VARIANT_TYPE_INT:
+        case GDEXTENSION_VARIANT_TYPE_FLOAT:
+        case GDEXTENSION_VARIANT_TYPE_STRING:
+        case GDEXTENSION_VARIANT_TYPE_STRING_NAME:
+        case GDEXTENSION_VARIANT_TYPE_NODE_PATH:
+            break;
+        default:
+            return PropertyTypeMatch::UnsupportedPropertyType;
+    }
+    return propertyTypeAcceptsJson(value, static_cast<GDExtensionVariantType>(godot_type))
+               ? PropertyTypeMatch::Compatible
+               : PropertyTypeMatch::Incompatible;
+}
+
+std::string godotVariantTypeName(int godot_type) {
+    switch (godot_type) {
+        case GDEXTENSION_VARIANT_TYPE_NIL: return "Nil";
+        case GDEXTENSION_VARIANT_TYPE_BOOL: return "bool";
+        case GDEXTENSION_VARIANT_TYPE_INT: return "int";
+        case GDEXTENSION_VARIANT_TYPE_FLOAT: return "float";
+        case GDEXTENSION_VARIANT_TYPE_STRING: return "String";
+        case GDEXTENSION_VARIANT_TYPE_VECTOR2: return "Vector2";
+        case GDEXTENSION_VARIANT_TYPE_VECTOR2I: return "Vector2i";
+        case GDEXTENSION_VARIANT_TYPE_RECT2: return "Rect2";
+        case GDEXTENSION_VARIANT_TYPE_RECT2I: return "Rect2i";
+        case GDEXTENSION_VARIANT_TYPE_VECTOR3: return "Vector3";
+        case GDEXTENSION_VARIANT_TYPE_VECTOR3I: return "Vector3i";
+        case GDEXTENSION_VARIANT_TYPE_TRANSFORM2D: return "Transform2D";
+        case GDEXTENSION_VARIANT_TYPE_VECTOR4: return "Vector4";
+        case GDEXTENSION_VARIANT_TYPE_VECTOR4I: return "Vector4i";
+        case GDEXTENSION_VARIANT_TYPE_PLANE: return "Plane";
+        case GDEXTENSION_VARIANT_TYPE_QUATERNION: return "Quaternion";
+        case GDEXTENSION_VARIANT_TYPE_AABB: return "AABB";
+        case GDEXTENSION_VARIANT_TYPE_BASIS: return "Basis";
+        case GDEXTENSION_VARIANT_TYPE_TRANSFORM3D: return "Transform3D";
+        case GDEXTENSION_VARIANT_TYPE_PROJECTION: return "Projection";
+        case GDEXTENSION_VARIANT_TYPE_COLOR: return "Color";
+        case GDEXTENSION_VARIANT_TYPE_STRING_NAME: return "StringName";
+        case GDEXTENSION_VARIANT_TYPE_NODE_PATH: return "NodePath";
+        case GDEXTENSION_VARIANT_TYPE_RID: return "RID";
+        case GDEXTENSION_VARIANT_TYPE_OBJECT: return "Object";
+        case GDEXTENSION_VARIANT_TYPE_CALLABLE: return "Callable";
+        case GDEXTENSION_VARIANT_TYPE_SIGNAL: return "Signal";
+        case GDEXTENSION_VARIANT_TYPE_DICTIONARY: return "Dictionary";
+        case GDEXTENSION_VARIANT_TYPE_ARRAY: return "Array";
+        case GDEXTENSION_VARIANT_TYPE_PACKED_BYTE_ARRAY: return "PackedByteArray";
+        case GDEXTENSION_VARIANT_TYPE_PACKED_INT32_ARRAY: return "PackedInt32Array";
+        case GDEXTENSION_VARIANT_TYPE_PACKED_INT64_ARRAY: return "PackedInt64Array";
+        case GDEXTENSION_VARIANT_TYPE_PACKED_FLOAT32_ARRAY: return "PackedFloat32Array";
+        case GDEXTENSION_VARIANT_TYPE_PACKED_FLOAT64_ARRAY: return "PackedFloat64Array";
+        case GDEXTENSION_VARIANT_TYPE_PACKED_STRING_ARRAY: return "PackedStringArray";
+        case GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR2_ARRAY: return "PackedVector2Array";
+        case GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR3_ARRAY: return "PackedVector3Array";
+        case GDEXTENSION_VARIANT_TYPE_PACKED_COLOR_ARRAY: return "PackedColorArray";
+        case GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR4_ARRAY: return "PackedVector4Array";
+        default: break;
+    }
+    // A type this build has no name for still gets said out loud rather than
+    // printed as a bare integer with no clue what kind of number it is.
+    return "unnamed Godot type " + std::to_string(godot_type);
+}
+
+std::string jsonValueTypeName(const json& value) {
+    if (value.is_null()) return "null";
+    if (value.is_boolean()) return "boolean";
+    if (value.is_number()) return "number";
+    if (value.is_string()) return "string";
+    if (value.is_array()) return "array";
+    if (value.is_object()) return "object";
+    return "value";
+}
+
+std::string describePropertyTypeMismatch(const std::string& property_name, const json& value,
+                                         int godot_type) {
+    // What to send instead, phrased as the caller would type it. Coercing the
+    // value here would be a false success of exactly the kind #213 to #217 were
+    // about, so the advice is all this adds: the rejection itself stands.
+    std::string remedy;
+    switch (godot_type) {
+        case GDEXTENSION_VARIANT_TYPE_NIL:
+            remedy = "Send null.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_BOOL:
+            remedy = "Send true or false, unquoted.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_INT:
+            remedy = "Send a whole number, for example 12, not a quoted string.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_FLOAT:
+            remedy = "Send a number, for example 1.0, not a quoted string. "
+                     "Whole numbers such as 1 are accepted for float properties.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_STRING:
+        case GDEXTENSION_VARIANT_TYPE_STRING_NAME:
+        case GDEXTENSION_VARIANT_TYPE_NODE_PATH:
+            remedy = "Send a quoted string, for example \"text\".";
+            break;
+        default:
+            remedy = "Send a value of that type.";
+            break;
+    }
+
+    // Quoting the value back is what makes a JSON string visible as one: the
+    // tester who sent "1.0" saw a message that could equally have described the
+    // number 1.0, which is why they read it as a rejection of whole numbers.
+    std::string received = value.dump();
+    constexpr size_t kMaxReceivedChars = 60;
+    if (received.size() > kMaxReceivedChars) {
+        received = received.substr(0, kMaxReceivedChars) + "...";
+    }
+
+    const std::string type_name = godotVariantTypeName(godot_type);
+    const std::string article =
+        (!type_name.empty() && std::strchr("AEIOUaeiou", type_name[0]) != nullptr) ? "an " : "a ";
+    return "Property \"" + property_name + "\" is " + article + type_name + "; received a JSON " +
+           jsonValueTypeName(value) + " (" + received + "). " + remedy;
 }
 
 } // namespace godot

@@ -866,6 +866,15 @@ try {
         (Tool-Request 22 "scene_get_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "phase_one_typo" }),
         (Tool-Request 23 "scene_set_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "process_priority"; value = "wrong-type" }),
         (Tool-Request 24 "scene_get_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "process_priority" }),
+        # Field trial 02's exact mistake: a float property, a JSON string. The
+        # rejection is correct; what it says is the whole of issue #225.
+        (Tool-Request 2250 "scene_set_property" @{ target_node = "/root/SmokeRoot/ViewportCamera"; property_name = "fov"; value = "70.0" }),
+        (Tool-Request 2251 "scene_get_property" @{ target_node = "/root/SmokeRoot/ViewportCamera"; property_name = "fov" }),
+        (Tool-Request 2252 "scene_set_property" @{ target_node = "/root/SmokeRoot/ViewportCamera"; property_name = "fov"; value = 55 }),
+        (Tool-Request 2253 "scene_get_property" @{ target_node = "/root/SmokeRoot/ViewportCamera"; property_name = "fov" }),
+        # Put the camera back before anything renders through it.
+        (Tool-Request 2254 "scene_set_property" @{ target_node = "/root/SmokeRoot/ViewportCamera"; property_name = "fov"; value = 70.0 }),
+        (Tool-Request 2255 "scene_instantiate_node" @{ node_type = "Camera3D"; parent_path = "/root/SmokeRoot"; name = "MismatchSpawn"; properties = @{ fov = "70.0" } }),
         (Tool-Request 25 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/SmokeRoot"; name = "InvalidSpawn"; properties = @{ phase_one_typo = 1 } }),
         (Tool-Request 26 "scene_remove_node" @{ target_node = "/root/SmokeRoot/Subject" }),
         (Tool-Request 27 "editor_undo" @{}),
@@ -1313,6 +1322,30 @@ try {
     Assert-True $byId[22].result.isError "Unknown property lookup returned fake null success."
     Assert-True $byId[23].result.isError "Incompatible scalar property write returned fake success."
     Assert-True ((Tool-Payload $byId[24]).value -eq 12) "Rejected property write changed the live node."
+    # Issue #225. The old message was "JSON value is incompatible with Godot
+    # property type 2": no property, no words for the type, and no mention of
+    # the string that was actually sent. Each of those is the thing the caller
+    # needs, so each is asserted here rather than only that a rejection occurred.
+    $mismatchText = $byId[23].result.content[0].text
+    Assert-True ($mismatchText -match "process_priority") "Type-mismatch rejection does not name the property."
+    Assert-True ($mismatchText -match "\bint\b") "Type-mismatch rejection does not name the expected Godot type in words."
+    Assert-True ($mismatchText -match "JSON string") "Type-mismatch rejection does not say a JSON string was received."
+    Assert-True ($mismatchText -notmatch "property type \d") "Type-mismatch rejection still prints a bare variant enum number."
+    # The float case field trial 02 hit, live.
+    Assert-True $byId[2250].result.isError "A JSON string for a float property returned fake success."
+    $floatText = $byId[2250].result.content[0].text
+    Assert-True ($floatText -match "fov") "Float type-mismatch rejection does not name the property."
+    Assert-True ($floatText -match "\bfloat\b") "Float type-mismatch rejection does not say the property is a float."
+    Assert-True ($floatText -match "JSON string") "Float type-mismatch rejection does not say a JSON string was received."
+    Assert-True ($floatText -match "70\.0") "Float type-mismatch rejection does not quote the value that was sent."
+    Assert-True ($floatText -match "Whole numbers") "Float type-mismatch rejection does not correct the #216 misreading."
+    Assert-True ((Tool-Payload $byId[2251]).value -eq 70) "Rejected float write changed the live node."
+    # The rejection set is unchanged: a whole number is still a valid float.
+    Assert-True (-not $byId[2252].result.isError) "A whole number was rejected for a float property."
+    Assert-True ((Tool-Payload $byId[2253]).value -eq 55) "Accepted whole-number float write did not land."
+    # A multi-property instantiate says which property failed.
+    Assert-True $byId[2255].result.isError "Instantiate accepted a JSON string for a float property."
+    Assert-True ($byId[2255].result.content[0].text -match "fov") "Instantiate type-mismatch rejection does not name the property that failed."
     Assert-True $byId[25].result.isError "Unknown initial property returned fake instantiate success."
     $restoredOrder = @((Tool-Payload $byId[28]).scene_tree.children.name)
     Assert-True ($restoredOrder[0] -eq "Subject") "Remove undo did not restore the node's original sibling index: $($restoredOrder -join ', ')"
