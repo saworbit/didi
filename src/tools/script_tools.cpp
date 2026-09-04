@@ -127,8 +127,16 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
                                      ": " + written.error().message);
     }
 
-    // Verify syntax of the patched file
-    auto diags = offline::GDScriptDiagnostics::analyze(file_path, patched_content);
+    // Verify syntax of the patched file.
+    //
+    // Analyze against the file just written rather than against the content in
+    // hand. `analyze` only runs the Godot compiler check when no source_text is
+    // supplied, so passing `patched_content` here silently reduced this to the
+    // lexical rules: a patch that left the file unparseable still came back
+    // with `has_errors: false` and an empty diagnostics array, and only a
+    // separate `script_check_syntax` call revealed it. The write above already
+    // put this exact content on disk, so the file is the same evidence.
+    auto diags = offline::GDScriptDiagnostics::analyze(disk_path.string());
     json diag_arr = json::array();
     bool has_error = false;
     for (const auto& d : diags) {
