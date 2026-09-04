@@ -464,6 +464,43 @@ class StagedPatchMismatchTests(unittest.TestCase):
             self.assertEqual(git("diff", "--cached").stdout, graded)
 
 
+class RenderDiscussionTests(unittest.TestCase):
+    """A brief that omits the comments hands the agent a premise nobody believes.
+
+    #216 was filed as "float properties reject whole numbers". The transcript
+    later showed the client had sent the string "1.0" and the rejection was
+    correct, and that correction lives in a comment. An agent given the body
+    alone would set out to fix a bug that is not there.
+    """
+
+    def test_carries_a_correction_that_arrived_after_the_report(self):
+        rendered = CYCLE.render_discussion([
+            {"author": {"login": "saworbit"},
+             "body": "The value on the wire was the string \"1.0\", not the number."},
+        ])
+        self.assertIn("saworbit", rendered)
+        self.assertIn('string "1.0"', rendered)
+
+    def test_an_issue_with_no_comments_adds_nothing(self):
+        self.assertEqual(CYCLE.render_discussion([]), "")
+        self.assertEqual(CYCLE.render_discussion(None), "")
+
+    def test_empty_comment_bodies_add_nothing(self):
+        self.assertEqual(CYCLE.render_discussion([{"author": {"login": "x"}, "body": "  "}]), "")
+
+    def test_keeps_the_most_recent_comments_when_the_thread_is_long(self):
+        comments = [{"author": {"login": "x"}, "body": f"comment {i}"} for i in range(25)]
+        rendered = CYCLE.render_discussion(comments, limit=3)
+        self.assertIn("comment 24", rendered)
+        self.assertIn("comment 22", rendered)
+        self.assertNotIn("comment 21", rendered)
+
+    def test_survives_a_comment_with_no_author(self):
+        rendered = CYCLE.render_discussion([{"body": "anonymous correction"}])
+        self.assertIn("unknown", rendered)
+        self.assertIn("anonymous correction", rendered)
+
+
 class CycleSummaryTests(unittest.TestCase):
     def test_names_the_phase_that_failed(self):
         summary = CYCLE.cycle_summary(

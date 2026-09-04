@@ -41,7 +41,7 @@ FIX_BRIEF = """You are fixing one reported defect in the Didi MCP server at {rep
 Issue #{number}: {title}
 
 {body}
-
+{discussion}
 Rules for this task:
 1. Find the root cause before changing anything. Read the code paths the issue names.
 2. Add a check that FAILS on the current build and PASSES once fixed. A check that
@@ -103,6 +103,31 @@ def out_of_policy_paths(status_porcelain: str, allowed=gates.ALLOWED_PREFIXES) -
         if not path.startswith(tuple(allowed)):
             offenders.append(path)
     return offenders
+
+
+def render_discussion(comments: list[dict] | None, limit: int = 10) -> str:
+    """The issue's comments, for the brief.
+
+    A report's first draft is often wrong and the correction arrives underneath
+    it. #216 was filed as "float properties reject whole numbers"; the transcript
+    later showed the client had sent the string "1.0" and the rejection was
+    right. An agent handed the body alone inherits the mistaken premise with none
+    of the evidence that overturned it, and sets out to fix a bug that is not
+    there.
+
+    Kept oldest-first and capped, because the brief is the agent's whole view of
+    the problem and a long thread would crowd out the report itself.
+    """
+    if not comments:
+        return ""
+    lines = ["", "Discussion on the issue, oldest first. Later comments may correct the report:"]
+    for comment in comments[-limit:]:
+        author = (comment.get("author") or {}).get("login") or "unknown"
+        body = (comment.get("body") or "").strip()
+        if not body:
+            continue
+        lines.append(f"\n--- comment by {author} ---\n{body}")
+    return "\n".join(lines) + "\n" if len(lines) > 2 else ""
 
 
 def changed_paths(patch_text: str) -> set[str]:
@@ -193,11 +218,11 @@ def render_summary(summary: dict) -> str:
 def select_from_tracker(repo: str, issue_number: int | None) -> dict | None:
     if issue_number is not None:
         result = run(["gh", "issue", "view", str(issue_number), "--repo", repo,
-                      "--json", "number,title,body,createdAt,labels"], REPOSITORY)
+                      "--json", "number,title,body,createdAt,labels,comments"], REPOSITORY)
         return json.loads(result.stdout) if result.returncode == 0 else None
     result = run(["gh", "issue", "list", "--repo", repo, "--state", "open",
                   "--label", gates.AGENT_READY_LABEL, "--limit", "50",
-                  "--json", "number,title,body,createdAt,labels"], REPOSITORY)
+                  "--json", "number,title,body,createdAt,labels,comments"], REPOSITORY)
     if result.returncode != 0:
         return None
     return gates.select_issue(json.loads(result.stdout or "[]"))
@@ -340,6 +365,7 @@ def main(argv: list[str] | None = None) -> int:
     session_id = str(uuid.uuid4())
     prompt = FIX_BRIEF.format(
         repository=worktree, number=issue_number, title=issue["title"], body=issue["body"],
+        discussion=render_discussion(issue.get("comments")),
         build_command=f'cmd /c "{build_script}"',
     )
     command = runner.build_command(
