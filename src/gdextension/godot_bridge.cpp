@@ -374,6 +374,17 @@ bool propertyTypeAcceptsJson(const json& value, GDExtensionVariantType type) {
     }
 }
 
+// Whether the property contract has a JSON spelling for this Godot type at all.
+// Reported next to a shader uniform so a caller can tell a value it may write
+// from one it may only read, and taken from the same decision scene_set_property
+// makes rather than from a second list that would drift from it.
+bool jsonTypeIsInsidePropertyContract(int godot_type) {
+    return matchJsonToPropertyType(json(nullptr), godot_type) !=
+               PropertyTypeMatch::UnsupportedPropertyType ||
+           matchJsonToPropertyType(json(0), godot_type) !=
+               PropertyTypeMatch::UnsupportedPropertyType;
+}
+
 // Did a property end up holding what the caller asked for?
 //
 // Compares by value rather than by JSON type, because Godot legitimately
@@ -5965,6 +5976,161 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                  {"message", "Use focused property/signal tools for fields omitted from hierarchy traversal."}};
         if (budget.truncated) hierarchy_result["truncated"] = true;
         return liveResult(hierarchy_result);
+    }
+
+    if (method == "shader.listUniforms") {
+        if (!hasOnlyKeys(params, {"target_node", "property_name"}) ||
+            !params.contains("target_node") || !params["target_node"].is_string() ||
+            !params.contains("property_name") || !params["property_name"].is_string()) {
+            return errorJson(400, "invalid_shader_list_uniforms_request");
+        }
+        for (const auto& bind : {
+                 std::make_tuple("ShaderMaterial", "get_shader", 2078273437LL),
+                 std::make_tuple("Shader", "get_shader_uniform_list", 1230511656LL),
+                 std::make_tuple("Shader", "get_mode", 3392948163LL),
+                 std::make_tuple("ShaderMaterial", "get_shader_parameter", 2760726917LL)}) {
+            if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) {
+                return errorJson(501, "required_bind_unavailable");
+            }
+        }
+        auto root = editedSceneRoot(editor);
+        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        const auto target_path = params["target_node"].get<std::string>();
+        const auto property = params["property_name"].get<std::string>();
+        auto node = resolveNode(root.value(), target_path);
+        if (node.isErr()) return errorJson(404, "shader_target_not_found");
+
+        auto has_property = objectHasProperty(node.value(), property);
+        if (has_property.isErr()) return errorJson(has_property.error().code, has_property.error().message);
+        if (!has_property.value()) {
+            return errorJson(404, "Property not found on target node: " + property);
+        }
+        auto property_name = makeStringName(property);
+        if (property_name.isErr()) return errorJson(500, property_name.error().message);
+        auto slot = callObject(node.value(), "Object", "get", 2760726917LL, {&property_name.value()});
+        if (slot.isErr()) return errorJson(500, slot.error().message);
+        auto material = objectFromVariant(slot.value());
+        if (material.isErr()) return errorJson(500, material.error().message);
+        if (!material.value()) {
+            return errorJson(404, "Property \"" + property + "\" on " + target_path +
+                                      " holds nothing; there is no material to read");
+        }
+        auto is_shader_material = objectIsClass(material.value(), "ShaderMaterial");
+        if (is_shader_material.isErr()) return errorJson(500, is_shader_material.error().message);
+        if (!is_shader_material.value()) {
+            // A StandardMaterial3D has properties, not shader uniforms. Reading
+            // it here and reporting an empty uniform list would look like a
+            // shader with nothing to set.
+            auto actual = callObject(material.value(), "Object", "get_class", 201670096LL);
+            std::string actual_name = "an unrecognised type";
+            if (actual.isOk()) {
+                auto text = stringFromVariant(actual.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                if (text.isOk()) actual_name = text.value();
+            }
+            return errorJson(409, "Property \"" + property + "\" on " + target_path + " holds " +
+                                      actual_name + " and not a ShaderMaterial");
+        }
+
+        auto shader_value = callObject(material.value(), "ShaderMaterial", "get_shader", 2078273437LL);
+        if (shader_value.isErr()) return errorJson(500, shader_value.error().message);
+        auto shader = objectFromVariant(shader_value.value());
+        if (shader.isErr()) return errorJson(500, shader.error().message);
+        if (!shader.value()) {
+            return errorJson(409, "The ShaderMaterial on " + target_path + " has no shader assigned");
+        }
+
+        json result = {{"target_node", target_path}, {"property_name", property}};
+        auto shader_path_name = makeStringName("resource_path");
+        if (shader_path_name.isOk()) {
+            auto shader_path = callObject(shader.value(), "Object", "get", 2760726917LL,
+                                          {&shader_path_name.value()});
+            if (shader_path.isOk()) {
+                auto text = stringFromVariant(shader_path.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                result["shader_path"] = (text.isOk() && !text.value().empty())
+                                            ? json(text.value()) : json(nullptr);
+            }
+        }
+        auto mode = callObject(shader.value(), "Shader", "get_mode", 3392948163LL);
+        if (mode.isOk()) {
+            auto mode_value = scalarFromVariant<int64_t>(mode.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (mode_value.isOk()) {
+                // 0 spatial, 1 canvas_item, 2 particles, 3 sky, 4 fog. Named so
+                // a caller is not handed a bare number to look up.
+                static const char* kModes[] = {"spatial", "canvas_item", "particles", "sky", "fog"};
+                const auto index = mode_value.value();
+                result["shader_mode"] = (index >= 0 && index < 5) ? json(kModes[index])
+                                                                  : json(nullptr);
+            }
+        }
+
+        auto groups = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+        if (groups.isErr()) return errorJson(500, groups.error().message);
+        auto uniforms = callObject(shader.value(), "Shader", "get_shader_uniform_list", 1230511656LL,
+                                   {&groups.value()});
+        if (uniforms.isErr()) return errorJson(500, uniforms.error().message);
+        auto size_value = callVariant(uniforms.value(), "size");
+        if (size_value.isErr()) return errorJson(500, size_value.error().message);
+        auto count = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (count.isErr()) return errorJson(500, count.error().message);
+
+        constexpr int64_t kMaxUniforms = 256;
+        const int64_t reported = std::min<int64_t>(count.value(), kMaxUniforms);
+        auto name_key = makeString("name");
+        auto type_key = makeString("type");
+        if (name_key.isErr() || type_key.isErr()) return errorJson(500, "Failed to build uniform keys");
+
+        json listed = json::array();
+        for (int64_t index = 0; index < reported; ++index) {
+            auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+            if (index_value.isErr()) return errorJson(500, index_value.error().message);
+            auto entry = callVariant(uniforms.value(), "get", {&index_value.value()});
+            if (entry.isErr()) return errorJson(500, entry.error().message);
+            auto name_value = callVariant(entry.value(), "get", {&name_key.value()});
+            if (name_value.isErr()) return errorJson(500, name_value.error().message);
+            const auto name_type = GodotApi::instance().variant_get_type(name_value.value().ptr());
+            if (name_type != GDEXTENSION_VARIANT_TYPE_STRING &&
+                name_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+                continue;
+            }
+            auto name = stringFromVariant(name_value.value(), name_type);
+            if (name.isErr()) return errorJson(500, name.error().message);
+
+            int64_t declared_type = 0;
+            auto type_value = callVariant(entry.value(), "get", {&type_key.value()});
+            if (type_value.isOk()) {
+                auto declared = scalarFromVariant<int64_t>(type_value.value(),
+                                                           GDEXTENSION_VARIANT_TYPE_INT);
+                if (declared.isOk()) declared_type = declared.value();
+            }
+
+            json uniform = {{"name", name.value()},
+                            {"type", godotVariantTypeName(static_cast<int>(declared_type))},
+                            {"settable", jsonTypeIsInsidePropertyContract(static_cast<int>(declared_type))}};
+
+            auto uniform_name = makeStringName(name.value());
+            if (uniform_name.isErr()) return errorJson(500, uniform_name.error().message);
+            auto current = callObject(material.value(), "ShaderMaterial", "get_shader_parameter",
+                                      2760726917LL, {&uniform_name.value()});
+            if (current.isErr()) return errorJson(500, current.error().message);
+            // The effective value: the material's override where it has one and
+            // the shader's default otherwise. There is deliberately no flag
+            // separating the two. get_shader_parameter returns the default for a
+            // uniform the material never set, so a flag built on the returned
+            // value would have claimed every uniform was overridden, which the
+            // live harness caught. Reporting one value and saying what it is
+            // beats reporting a fact this cannot establish.
+            // Lenient: a uniform of a type this cannot encode is reported by
+            // name and type with a null value, rather than failing the whole
+            // read and leaving the caller with nothing.
+            auto encoded = variantToJson(current.value(), 0, true);
+            uniform["value"] = encoded.isOk() ? encoded.value() : json(nullptr);
+            listed.push_back(std::move(uniform));
+        }
+
+        result["uniforms"] = std::move(listed);
+        result["uniform_count"] = count.value();
+        result["truncated"] = count.value() > kMaxUniforms;
+        return liveResult(result);
     }
 
     if (method == "scene.getProperty" || method == "scene.setProperty") {

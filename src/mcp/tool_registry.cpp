@@ -38,6 +38,9 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // 4.7.2 -- the trial the earlier attempt never ran, having only ever
         // exercised the test-seam build.
         , "signal_list_connections", "signal_connect", "signal_disconnect", "signal_emit"
+        // Reads a ShaderMaterial off a node in the edited scene, so it needs the
+        // editor's scene and has no offline reading to fall back to.
+        , "shader_list_uniforms"
         // Live only on purpose. Writing the layout file would change what the
         // project loads next time and not what anyone is listening to now.
         , "audio_configure_bus"
@@ -135,6 +138,7 @@ CallToolResult handleScriptDetachFromNode(const json& args, std::shared_ptr<ipc:
 CallToolResult handlePhysicsRaycastQuery(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleSpatialQueryRaycastBatch(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleSpatialQueryClearance(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleShaderListUniforms(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handlePhysicsSimulateStep(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleNavBakeMesh(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleNavQueryPath(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -391,6 +395,7 @@ ResolvedToolBinding resolveAliasBinding(std::string_view invoked_name, const jso
         {"runtime_watch_invariants", "runtime.watchInvariants"},
         {"spatial_query_raycast_batch", "physics.raycastBatch"},
         {"spatial_query_clearance", "physics.clearance"},
+        {"shader_list_uniforms", "shader.listUniforms"},
     };
     for (const auto& entry : phase7_bindings) {
         if (entry.name != invoked_name) continue;
@@ -1358,6 +1363,26 @@ void ToolRegistry::registerAllDefaultTools() {
     // ==========================================
     // Domain 5: Physics, Animation & Navigation
     // ==========================================
+    {
+        ToolDefinition t;
+        t.name = "shader_list_uniforms";
+        t.description = "Reads the shader uniforms of a ShaderMaterial held by a node in the edited scene, with each uniform's declared type, its current value, and whether the material overrides it.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target_node", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024},
+                                 {"description", "Node in the edited scene holding the material."}}},
+                {"property_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
+                                   {"description", "The property the ShaderMaterial sits in, such as material_override on a MeshInstance3D or material on a CanvasItem. Named rather than guessed; scene_get_property will say which properties a node has."}}}
+            }},
+            {"required", json::array({"target_node", "property_name"})},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleShaderListUniforms(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
     {
         ToolDefinition t;
         t.name = "spatial_query_clearance";

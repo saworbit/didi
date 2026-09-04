@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 99 canonical tool names plus 10 legacy names (109 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 100 canonical tool names plus 10 legacy names (110 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `96/99`
+**Canonical implementation:** `97/100`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 96/99 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 97/100 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -819,6 +819,19 @@ All Phase 5 subprocess tools launch an executable with an argv array, never thro
 ### `csharp_check_build` — Offline
 
 Runs `dotnet build` with `configuration` (`Debug` or `Release`, default `Debug`) and `timeout_seconds` (`1..300`, default `60`). Optional `project_file` must be a normalized project-contained `.csproj`; when omitted, exactly one project-root `.csproj` must exist. The result includes exit/timeout/output metadata and bounded structured MSBuild diagnostics. This is a real build and may update normal `bin`/`obj` outputs.
+
+### `shader_list_uniforms` — Live
+
+Reads the shader uniforms of a `ShaderMaterial` held by a node in the edited scene. `resource_inspect` reports file metadata and `scene_get_property` reports which material a node has; neither reaches inside to the parameters.
+
+- `target_node` (`string`, required).
+- `property_name` (`string`, required): the property the material sits in, such as `material_override` on a MeshInstance3D or `material` on a CanvasItem. Named rather than guessed, because the right property differs by node type and `scene_get_property` will say which a node has.
+
+Each uniform carries its declared Godot type, its effective value, and `settable`. The value is the material's override where it has one and the shader's own default otherwise; the two are not distinguished, because `get_shader_parameter` returns the default for a uniform the material never set and there is no honest flag to build from that. `settable` says whether the property contract has a JSON spelling for that type at all, and comes from the same decision `scene_set_property` makes, so the two cannot disagree.
+
+A uniform whose type has no JSON spelling is still reported by name and type, with a null value, rather than failing the whole read. A material slot holding something that is not a `ShaderMaterial` is refused and names what it found, since an empty uniform list would read as a shader with nothing to set. At most 256 uniforms are returned, with `uniform_count` and `truncated` reported separately.
+
+Setting a uniform is not here. It is a write to a resource rather than to a node, so it does not sit on the editor UndoRedo stack the way `scene_set_property` does, and that is a decision worth making on its own rather than in passing.
 
 ### `shader_check_compile` — Offline
 
