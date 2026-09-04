@@ -60,6 +60,19 @@ If nothing can be made to fail, the cycle stops at `could_not_reproduce` and nev
 
 This gate is not theoretical. During the manual fix of #213 a regression test was written that passed *before* the fix, because it used a Control whose parent was not a Control and so never reproduced the discard. An agent reporting "test added, suite green" would have been telling the truth while shipping a guard that could not catch its own bug. G1 is what catches that, and it is the reason the loop is worth automating at all.
 
+**What G1 does not prove.** It proves that *some* assertion in the patch went from failing to passing. It does not prove that the assertion which flipped is the one the issue describes. A patch that adds one true reproduction alongside several assertions that already passed satisfies the gate on the strength of whichever one was red.
+
+This is not hypothetical either. The fix for #216 passed G1 on an int property refusing a whole-number real, while the float case named in the issue title passes with or without the change — a float property already admitted any JSON number. The change is real and worth having; it is simply not the reported defect. The cycle therefore writes the red run's full output to `gate/red.txt` and puts it in the summary, so a reader can see *which* check was red without auditing the source. Closing the issue remains a human decision, and this is a large part of why.
+
+### G4: the commit carries the patch that was graded
+
+The gates grade the working tree. The pull request carries the index. Those are two different things, and every place they can drift has now drifted at least once:
+
+- Checking `git diff` while committing with `git add -A` shipped ten build artifacts through a policy that never saw them.
+- Staging the allowed paths up front did not survive G1: the red run stashes `src`, `include` and `docs`, and `git stash pop` restores the working tree **without restoring the index**. The source half of a fix returned unstaged and the commit carried the tests alone. #223 opened with a new test and nothing for it to pass against, while every gate reported green — honestly, because the tree it graded held the whole change.
+
+So the index is re-staged after G1 and compared against the approved bytes at the moment of the commit, which is the only moment that matters. A mismatch fails the cycle and names the files that came or went. The regression test drives a real repository through the same stash round trip, because the bug was in what git does to the index and no amount of testing our own string handling would have found it.
+
 ### G3: the diff policy
 
 Reward hacking in coding agents is documented and specific: editing the test suite, hardcoding expected values, replacing assertions with trivially passing statements. The mitigation is to remove the opportunity.
