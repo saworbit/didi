@@ -296,6 +296,68 @@ static void test_gdscript_symbol_patch_parameterized_annotation() {
     ASSERT_EQ(patched.find("var speed"), patched.rfind("var speed"));
 }
 
+static void test_gdscript_symbol_patch_keeps_annotated_neighbour() {
+    // Break caught: the backward preamble scan absorbed any previous line
+    // starting with '@', including a complete declaration such as
+    // "@export var alpha ...". Patching the annotated declaration directly
+    // below it silently deleted the neighbour.
+    std::string original =
+        "extends Node\n\n"
+        "@export var alpha: float = 1.0\n"
+        "@export var beta: float = 2.0\n"
+        "@export var gamma: float = 3.0\n\n\n"
+        "func total() -> float:\n"
+        "\treturn alpha + beta + gamma\n";
+
+    auto patch_res = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "beta", "@export var beta: float = 9.0", "variable");
+    ASSERT_TRUE(patch_res.isOk());
+
+    std::string expected =
+        "extends Node\n\n"
+        "@export var alpha: float = 1.0\n"
+        "@export var beta: float = 9.0\n"
+        "@export var gamma: float = 3.0\n\n\n"
+        "func total() -> float:\n"
+        "\treturn alpha + beta + gamma\n";
+    ASSERT_EQ(patch_res.value(), expected);
+
+    // The same scan runs for every symbol type, so a function sitting under an
+    // annotated variable must not consume that variable either.
+    std::string func_original =
+        "extends Node\n\n"
+        "@onready var timer: Timer = $Timer\n"
+        "func _ready() -> void:\n"
+        "\ttimer.start()\n";
+
+    auto func_res = didi::offline::GDScriptDiagnostics::patchSymbol(
+        func_original, "_ready", "func _ready() -> void:\n\ttimer.stop()", "function");
+    ASSERT_TRUE(func_res.isOk());
+
+    std::string func_expected =
+        "extends Node\n\n"
+        "@onready var timer: Timer = $Timer\n"
+        "func _ready() -> void:\n"
+        "\ttimer.stop()\n";
+    ASSERT_EQ(func_res.value(), func_expected);
+
+    // A bare annotation on its own line still belongs to the symbol below it.
+    std::string bare_original =
+        "extends Node\n\n"
+        "@export\n"
+        "var speed: float = 5.0\n";
+
+    auto bare_res = didi::offline::GDScriptDiagnostics::patchSymbol(
+        bare_original, "speed", "@export\nvar speed: float = 20.0", "variable");
+    ASSERT_TRUE(bare_res.isOk());
+
+    std::string bare_expected =
+        "extends Node\n\n"
+        "@export\n"
+        "var speed: float = 20.0\n";
+    ASSERT_EQ(bare_res.value(), bare_expected);
+}
+
 static void test_gdscript_extract_symbols_constants_and_container_types() {
     // Break caught: const declarations were dropped and Array[String] was
     // truncated to Array.
@@ -402,6 +464,7 @@ struct RegisterScriptPatchTests {
         registerTest("GDScript.PatchPreservesOrdinaryComments", test_gdscript_symbol_patch_preserves_ordinary_comments);
         registerTest("GDScript.PatchPreservesSiblingPreamble", test_gdscript_symbol_patch_preserves_next_sibling_preamble);
         registerTest("GDScript.PatchParameterizedAnnotation", test_gdscript_symbol_patch_parameterized_annotation);
+        registerTest("GDScript.PatchKeepsAnnotatedNeighbour", test_gdscript_symbol_patch_keeps_annotated_neighbour);
         registerTest("GDScript.ExtractConstantsAndContainerTypes", test_gdscript_extract_symbols_constants_and_container_types);
         registerTest("GDScript.ColonRuleAllowsContinuationsAndBraces", test_gdscript_colon_rule_allows_continuations_and_open_braces);
         registerTest("GDScript.ReflectClassUsesShippedApiReference",

@@ -598,11 +598,16 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
         const bool matched = parsed_kind ? declares_symbol(lines[i])
                                          : std::regex_search(lines[i], symbol_regex);
         if (matched) {
-            // Check previous lines for annotations / doc comments
+            // Check previous lines for annotations / doc comments. An @ line
+            // that declares a symbol of its own, such as @export var alpha, is
+            // the neighbour above the target rather than part of its preamble,
+            // so the scan stops there instead of swallowing the declaration.
             int actual_start = static_cast<int>(i);
             while (actual_start > 0) {
                 std::string prev = strings::trim(lines[actual_start - 1]);
-                if (strings::startsWith(prev, "@") || strings::startsWith(prev, "##")) {
+                const bool bare_annotation =
+                    strings::startsWith(prev, "@") && !parseDeclaration(prev).has_value();
+                if (bare_annotation || strings::startsWith(prev, "##")) {
                     actual_start--;
                 } else {
                     break;
