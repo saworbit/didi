@@ -93,6 +93,21 @@ CallToolResult sendPhase7LiveRequest(const ResolvedToolBinding& binding,
         // into a bare "route request failed" leaves a caller -- human or agent
         // -- with no way to tell a bad node path from a dead transport, which
         // is the difference between fixing the request and retrying forever.
+        //
+        // The status is part of what it said. A 503 reads as a transport or
+        // routing problem, so a rejected request sent a caller off to
+        // re-verify the session when the engine had already answered and the
+        // fix was in the arguments. When the transport is intact and the
+        // engine refused with a client error, that status and message are the
+        // result; 503 stays for a route that could not deliver at all.
+        if (!transport.has_value() && failure.code >= 400 && failure.code < 500) {
+            json data = failure.data.is_object() ? failure.data : json::object();
+            data["retryable"] = false;
+            data["route_quarantine"] = quarantined;
+            data["upstream_code"] = failure.code;
+            data["upstream_message"] = failure.message;
+            return phase7Error(binding, failure.code, failure.message, std::move(data));
+        }
         return phase7Error(binding, 503, "runtime_route_request_failed",
                            {{"retryable", false},
                             {"route_quarantine", quarantined},

@@ -2346,6 +2346,16 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (tile_set_variant.isErr()) return errorJson(500, tile_set_variant.error().message);
         auto tile_set = objectFromVariant(tile_set_variant.value());
         if (tile_set.isErr()) return errorJson(500, tile_set.error().message);
+        // A layer with no TileSet used to be reported as tilemap_tile_not_found
+        // once the first cell was examined, which reads as a bad source id or
+        // bad atlas coordinates and sends the caller looking at their payload.
+        // The cause is one unset property on the node, and it is worth saying so
+        // before any cell is looked at.
+        if (!tile_set.value()) {
+            return errorJson(409, "tilemap_layer_has_no_tileset",
+                             {{"tilemap_path", params["tilemap_path"].get<std::string>()},
+                              {"retryable", false}});
+        }
 
         struct Cell {
             VariantValue coords;
@@ -2396,7 +2406,6 @@ json GodotBridge::execute(const std::string& method, const json& params,
                     return errorJson(400, "invalid_tilemap_set_cells_request");
                 const int64_t ax = *ax_value;
                 const int64_t ay = *ay_value;
-                if (!tile_set.value()) return errorJson(404, "tilemap_tile_not_found");
                 auto source_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, source);
                 auto has_source = callObject(tile_set.value(), "TileSet", "has_source", 1116898809LL, {&source_value.value()});
                 auto has_flag = has_source.isOk() ? scalarFromVariant<GDExtensionBool>(has_source.value(), GDEXTENSION_VARIANT_TYPE_BOOL)

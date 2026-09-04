@@ -846,6 +846,9 @@ try {
         (Tool-Request 959 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/TileLayer"; cells = @(@{ coords = @(3, 4); source_id = 0; atlas_coords = @(0, 0) }, @{ coords = @(5, 6); source_id = 999; atlas_coords = @(0, 0) }) }),
         (Tool-Request 960 "tilemap_get_used_rect" @{ tilemap_path = "/root/SmokeRoot/TileLayer" }),
         (Tool-Request 961 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/TileLayer"; cells = @(@{ coords = @(1, 2); erase = $true }) }),
+        # A layer with no TileSet is a property that was never set, not a tile
+        # that could not be found and not a route that went away.
+        (Tool-Request 2256 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/BareTileLayer"; cells = @(@{ coords = @(0, 0); source_id = 0; atlas_coords = @(0, 0) }) }),
         (Tool-Request 962 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(1, 2, 3); item = 0 }) }),
         (Tool-Request 971 "editor_undo" @{}),
         (Tool-Request 972 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(1, 2, 3); item = -1 }) }),
@@ -985,7 +988,7 @@ try {
     $scalarEval = Tool-Payload $byId[130]
     Assert-True ($scalarEval.value -eq 7 -and $scalarEval.value_type -eq "int") "Editor scalar expression was incorrect."
     Assert-True ($scalarEval.context_node -eq "/root/SmokeRoot/Subject" -and $scalarEval.session_kind -eq "editor") "Editor expression context or provenance was incorrect."
-    Assert-True ((Tool-Payload $byId[131]).value -eq 6) "Editor default-context child count was incorrect."
+    Assert-True ((Tool-Payload $byId[131]).value -eq 7) "Editor default-context child count was incorrect."
     Assert-True (@((Tool-Payload $byId[132]).value).Count -eq 3) "Editor expression array was not preserved."
     Assert-True ((Tool-Payload $byId[133]).value.answer -eq 42) "Editor expression dictionary was not preserved."
     $editorVector = Tool-Payload $byId[134]
@@ -1143,6 +1146,11 @@ try {
     $afterInvalidTile = Tool-Payload $byId[960]
     Assert-True ($afterInvalidTile.position.x -eq 1 -and $afterInvalidTile.position.y -eq 2 -and $afterInvalidTile.size.x -eq 1 -and $afterInvalidTile.size.y -eq 1) "Invalid-last TileMapLayer batch partially mutated the scene."
     Assert-True ((Tool-Payload $byId[961]).changed_cells -eq 1) "TileMapLayer erase did not remove the fixture cell."
+    Assert-True $byId[2256].result.isError "tilemap_set_cells accepted a layer with no TileSet."
+    $bareTileError = $byId[2256].result.content[0].text
+    Assert-True ($bareTileError -match "tilemap_layer_has_no_tileset") "A layer with no TileSet is not named as the cause."
+    Assert-True ($bareTileError -match "BareTileLayer") "The no-TileSet rejection does not name the layer."
+    Assert-True ($bareTileError -notmatch "runtime_route_request_failed") "An engine rejection is still reported as a routing failure."
     $gridSet = Tool-Payload $byId[962]
     Assert-True ($gridSet.changed_cells -eq 1 -and $gridSet.undo_redo_registered -eq $true) "gridmap_set_cells did not publish one undoable change."
     Assert-True (-not $byId[971].result.isError) "GridMap change could not be undone."
