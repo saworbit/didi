@@ -536,7 +536,7 @@ All Phase 2 tools are live-only and execute on Godot's main thread. They do not 
 ### Autoloads
 
 - `project_list_autoloads`: returns sorted `{name, path, singleton}` entries.
-- `project_set_autoload`: requires identifier `name` and existing `res://` script or scene `path`; `singleton` defaults to `true`. Existing entries require `replace: true`.
+- `project_set_autoload`: requires identifier `name` and existing `res://` script or scene `path`; `singleton` defaults to `true`. Existing entries require `replace: true`. The setting is persisted, but the attached editor does not pick it up: Godot registers an autoload's global name through editor-internal paths a GDExtension cannot reach. The result carries `registered_in_attached_editor: false`, `requires_editor_restart: true`, and a `limitation` stating it. Until that editor restarts, scripts referencing a newly added singleton report `Identifier not found`, and a removed one keeps resolving. `editor_reload_project` does not change either.
 - `project_remove_autoload`: requires `name` and rejects missing entries.
 
 Mutations use Godot's `autoload/<name>` representation, call `ProjectSettings.save()`, and restore the previous value if saving fails.

@@ -59,6 +59,7 @@ Do not use `scene_path` for PackedScene instantiation; it is not implemented. Do
 - Attach and detach existing GDScript resources with `script_attach_to_node` and `script_detach_from_node`; both are UndoRedo-backed.
 - Use `scene_add_to_group`, `scene_remove_from_group`, `scene_list_groups`, and `scene_get_group_members` for edited-scene-confined groups.
 - Use typed autoload and InputMap tools for `autoload/*` and `input/*`; never route those namespaces through `project_set_setting`.
+- `project_set_autoload` persists the setting but cannot make the attached editor register the singleton; it returns `requires_editor_restart: true`. Until that editor restarts, every script referencing the new singleton fails to compile with `Identifier not found`. Those errors are the tool's doing, not your script's, so do not rewrite working code to chase them.
 - Treat `replace: true`, `overwrite: true`, and `discard_unsaved: true` as explicit destructive intent. Do not add them speculatively.
 - Input events must use the documented key, mouse-button, joypad-button, or joypad-motion shapes.
 

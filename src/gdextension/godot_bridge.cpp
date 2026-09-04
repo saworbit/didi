@@ -4205,8 +4205,28 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (rollback.isErr()) return errorJson(500, "Autoload save failed and rollback failed: " + rollback.error().message);
             return errorJson(500, "ProjectSettings.save failed; autoload mutation was rolled back");
         }
+        // Say what this did and did not do. Writing the setting is not the same
+        // as the attached editor knowing about it: Godot registers an autoload's
+        // global name through editor-internal paths a GDExtension cannot reach,
+        // so scripts referring to the singleton keep failing to compile in this
+        // editor session until it restarts. `editor_reload_project` does not
+        // clear it either. Reporting only `persisted: true` left callers
+        // debugging their own scripts for a state this call had created.
         return liveResult({{"status", "success"}, {"name", autoload_name}, {"path", resource_path},
-                           {"singleton", autoload_singleton}, {"removed", removing}, {"persisted", true}});
+                           {"singleton", autoload_singleton}, {"removed", removing}, {"persisted", true},
+                           {"registered_in_attached_editor", false},
+                           {"requires_editor_restart", true},
+                           {"limitation",
+                            removing
+                                ? std::string(
+                                      "The setting is removed from project.godot, but this editor "
+                                      "session keeps resolving the singleton until it is restarted. "
+                                      "editor_reload_project does not change that.")
+                                : std::string(
+                                      "The setting is written to project.godot, but this editor "
+                                      "session will not resolve the singleton until it is restarted. "
+                                      "Scripts referencing it report 'Identifier not found' until "
+                                      "then, and editor_reload_project does not change that.")}});
     }
 
     if (method == "project.listInputActions" || method == "project.setInputAction" ||
