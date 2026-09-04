@@ -151,6 +151,37 @@ TEST_CASE(phase7_application_error_does_not_quarantine_the_route) {
     ASSERT_EQ(rejected->calls, 1);
     ASSERT_EQ(rejected->quarantines, 0);
     ASSERT_EQ(error.at("data").at("route_quarantine"), false);
+
+    // Break caught: the engine's own status was replaced by 503, which reads as
+    // a transport or routing problem. A caller who got one for a rejected
+    // request went and re-verified the session when the fix was in the
+    // arguments. The engine answered, so its answer is the result.
+    ASSERT_EQ(error.at("code"), 422);
+    ASSERT_EQ(error.at("message"), "invalid_signal_connect_request");
+    ASSERT_EQ(error.at("data").at("upstream_code"), 422);
+    ASSERT_EQ(error.at("data").at("upstream_message"), "invalid_signal_connect_request");
+
+    // Whatever the engine attached to the rejection travels with it, so a
+    // caller sees the node or property that failed and not just a number.
+    auto detailed = std::make_shared<FailingRoute>(
+        didi::Error(409, "tilemap_layer_has_no_tileset",
+                    didi::json{{"tilemap_path", "/root/Main/Walls"}}));
+    const auto detailed_error = errorPayload(
+        didi::mcp::sendPhase7LiveRequest(didi::mcp::resolveAliasBinding("tilemap_set_cells"),
+                                         didi::json::object(), detailed));
+    ASSERT_EQ(detailed_error.at("code"), 409);
+    ASSERT_EQ(detailed_error.at("message"), "tilemap_layer_has_no_tileset");
+    ASSERT_EQ(detailed_error.at("data").at("tilemap_path"), "/root/Main/Walls");
+    ASSERT_EQ(detailed->quarantines, 0);
+
+    // An engine-side failure that is not the caller's to fix keeps the routing
+    // status, because retrying the same arguments is not the answer to it.
+    auto internal = std::make_shared<FailingRoute>(didi::Error(500, "tilemap_snapshot_failed"));
+    const auto internal_error = errorPayload(
+        didi::mcp::sendPhase7LiveRequest(connect, didi::json::object(), internal));
+    ASSERT_EQ(internal_error.at("code"), 503);
+    ASSERT_EQ(internal_error.at("message"), "runtime_route_request_failed");
+    ASSERT_EQ(internal_error.at("data").at("upstream_code"), 500);
 }
 
 struct RegisterPhase7SignalFollowup {

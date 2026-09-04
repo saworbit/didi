@@ -57,6 +57,8 @@ fov = 70.0
 [node name="TileLayer" type="TileMapLayer" parent="."]
 tile_set = SubResource("tile_set")
 
+[node name="BareTileLayer" type="TileMapLayer" parent="."]
+
 [node name="Grid" type="GridMap" parent="."]
 mesh_library = SubResource("mesh_library")
 
