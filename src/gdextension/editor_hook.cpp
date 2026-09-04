@@ -3,6 +3,7 @@
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/gdextension_api.hpp"
 #include "didi/gdextension/runtime_bridge.hpp"
+#include "didi/gdextension/expression_sandbox.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/types.hpp"
 #include <unordered_set>
@@ -119,6 +120,7 @@ void EditorHook::processQueue() {
         processRuntimeStepFrame();
         processAssetReimportFrame();
         processProfilerFrame();
+        processInvariantWatchFrame();
         return;
     }
     m_pumping = true;
@@ -165,6 +167,10 @@ void EditorHook::processQueue() {
                 scheduleProfilerRead(cmd.params, cmd.response_promise, cmd.control);
                 continue;
             }
+            if (cmd.method == "runtime.watchInvariants") {
+                scheduleInvariantWatch(cmd.params, cmd.response_promise, cmd.control);
+                continue;
+            }
             if (cmd.method == "runtime.step") {
                 if (!cmd.params.is_object() ||
                     (cmd.params.contains("frames") &&
@@ -208,6 +214,7 @@ void EditorHook::processQueue() {
     processRuntimeStepFrame();
     processAssetReimportFrame();
     processProfilerFrame();
+    processInvariantWatchFrame();
     processPendingQuitFrame();
 }
 
@@ -315,6 +322,171 @@ void EditorHook::processProfilerFrame() {
         return;
     }
     auto response = completed->collector.response();
+    response["execution_mode"] = "live";
+    response["is_live_engine"] = true;
+    response["session_kind"] = sessionKindName(m_sessionKind);
+    fulfillCommand(completed->response_promise, completed->control, std::move(response));
+}
+
+void EditorHook::scheduleInvariantWatch(
+    const json& params, const std::shared_ptr<std::promise<json>>& promise,
+    const std::shared_ptr<CommandControl>& control) {
+    auto request = runtime::parseInvariantWatchRequest(params);
+    if (request.isErr()) {
+        control->markCompleted();
+        fulfillCommand(promise, control,
+                       {{"error", {{"code", request.error().code},
+                                    {"message", request.error().message}}}});
+        return;
+    }
+    // A performance invariant reads the same monitors the profiler does, so it
+    // needs the same bind, and finding that out on the first frame instead of
+    // now would report a watch that started and observed nothing.
+    for (const auto& invariant : request.value().invariants) {
+        if (invariant.kind != runtime::InvariantKind::performance_between) continue;
+        auto preflight = GodotBridge::instance().preflightPerformanceMonitors();
+        if (preflight.isErr()) {
+            control->markCompleted();
+            fulfillCommand(promise, control,
+                           {{"error", {{"code", 501},
+                                        {"message", "Performance.get_monitor is unavailable: " +
+                                                        preflight.error().message}}}});
+            return;
+        }
+        break;
+    }
+
+    int duration_ms = 0;
+    size_t invariant_count = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_invariantMutex);
+        if (m_pendingInvariantWatch.has_value()) {
+            control->markCompleted();
+            fulfillCommand(promise, control,
+                           {{"error", {{"code", 423},
+                                        {"message", "An invariant watch is already active"},
+                                        {"data", {{"retryable", true}}}}}});
+            return;
+        }
+        duration_ms = request.value().duration_ms;
+        invariant_count = request.value().invariants.size();
+        m_pendingInvariantWatch = PendingInvariantWatch{
+            runtime::InvariantWatch(std::move(request.value())),
+            std::chrono::steady_clock::now(), true, engineOutput().nextSequence(), promise, control};
+    }
+    DIDI_LOG_INFO("EDITOR_HOOK", "Scheduled an invariant watch of ", invariant_count,
+                  " condition(s) over ", duration_ms, " ms");
+}
+
+void EditorHook::processInvariantWatchFrame() {
+    // Same discipline as processProfilerFrame: the engine work happens outside
+    // the lock, because a nested callback that reaches this function must never
+    // find the mutex held by its own thread.
+    std::vector<runtime::InvariantSpec> invariants;
+    std::shared_ptr<CommandControl> watching_for;
+    uint64_t error_cursor = 0;
+    int64_t elapsed = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_invariantMutex);
+        if (!m_pendingInvariantWatch.has_value()) return;
+        auto& pending = *m_pendingInvariantWatch;
+        if (pending.awaiting_next_callback) {
+            // The command was dequeued this callback. The window starts at a
+            // frame boundary, the same as the profiler's.
+            pending.awaiting_next_callback = false;
+            pending.started_at = std::chrono::steady_clock::now();
+            pending.error_cursor = engineOutput().nextSequence();
+            return;
+        }
+        elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now() - pending.started_at)
+                      .count();
+        invariants = pending.watch.request().invariants;
+        watching_for = pending.control;
+        error_cursor = pending.error_cursor;
+    }
+
+    runtime::InvariantSample sample;
+    sample.readings.resize(invariants.size());
+
+    std::vector<int64_t> monitors;
+    std::vector<size_t> monitor_targets;
+    for (size_t index = 0; index < invariants.size(); ++index) {
+        if (invariants[index].kind != runtime::InvariantKind::performance_between) continue;
+        monitors.push_back(runtime::kProfilerMetrics[invariants[index].metric_index].monitor);
+        monitor_targets.push_back(index);
+    }
+    if (!monitors.empty()) {
+        auto reading = GodotBridge::instance().samplePerformanceMonitors(monitors);
+        for (size_t slot = 0; slot < monitor_targets.size(); ++slot) {
+            auto& target = sample.readings[monitor_targets[slot]];
+            if (reading.isErr()) {
+                target.read_error = reading.error().message;
+            } else {
+                target.value = reading.value()[slot];
+            }
+        }
+    }
+
+    for (size_t index = 0; index < invariants.size(); ++index) {
+        const auto& invariant = invariants[index];
+        if (invariant.kind != runtime::InvariantKind::expression_between) continue;
+        json params = {{"expression", invariant.expression},
+                       // Short on purpose. This runs inside a frame, and an
+                       // expression allowed to take a second would be measuring
+                       // a game it had itself stopped.
+                       {"timeout_ms", 50}};
+        if (!invariant.context_node.empty()) params["context_node"] = invariant.context_node;
+        const auto evaluated = executeExpression(params, sessionKindName(m_sessionKind));
+        auto& target = sample.readings[index];
+        if (evaluated.contains("error")) {
+            target.read_error = evaluated["error"].value("message", "expression failed");
+            continue;
+        }
+        const json value = evaluated.value("value", json());
+        if (value.is_number()) {
+            target.value = value.get<double>();
+        } else if (value.is_boolean()) {
+            // A condition is a number here, and true is one. Saying so keeps a
+            // boolean invariant expressible without a second kind.
+            target.value = value.get<bool>() ? 1.0 : 0.0;
+        } else {
+            target.read_error = "expression did not evaluate to a number or a boolean";
+        }
+    }
+
+    sample.engine_errors = static_cast<int64_t>(
+        engineOutput().countFrom(error_cursor, "error"));
+
+    std::optional<PendingInvariantWatch> completed;
+    bool violated = false;
+    {
+        std::lock_guard<std::mutex> lock(m_invariantMutex);
+        if (!m_pendingInvariantWatch.has_value() ||
+            m_pendingInvariantWatch->control != watching_for) {
+            return;
+        }
+        auto& pending = *m_pendingInvariantWatch;
+        if (!pending.watch.observe(elapsed, sample)) return;
+        violated = pending.watch.violated();
+        completed = std::move(m_pendingInvariantWatch);
+        m_pendingInvariantWatch.reset();
+    }
+
+    // The pause happens on this frame, which is the frame that broke it. That
+    // is the whole difference between a report and a reproduction.
+    bool paused = false;
+    if (violated && completed->watch.request().pause_on_violation) {
+        auto stopped = setLiveSceneTreePaused(true);
+        paused = stopped.isOk();
+        if (stopped.isErr()) {
+            DIDI_LOG_WARN("EDITOR_HOOK", "Could not pause on an invariant violation: ",
+                          stopped.error().message);
+        }
+    }
+
+    completed->control->markCompleted();
+    auto response = completed->watch.response(paused);
     response["execution_mode"] = "live";
     response["is_live_engine"] = true;
     response["session_kind"] = sessionKindName(m_sessionKind);

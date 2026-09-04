@@ -26,6 +26,16 @@ public:
 
     static bool isValidLevel(std::string_view level);
 
+    // The sequence the next appended record will carry. A watch takes this
+    // before it starts so an error it counts is one this run produced, not one
+    // already sitting on the ring.
+    uint64_t nextSequence() const;
+
+    // How many retained records at or above `minimum_level` carry a sequence at
+    // or after `cursor`. Counting rather than reading keeps a per-frame check
+    // from copying the payloads it is not going to look at.
+    size_t countFrom(uint64_t cursor, std::string_view minimum_level) const;
+
 private:
     struct Record {
         uint64_t sequence;

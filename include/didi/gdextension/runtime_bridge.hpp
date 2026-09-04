@@ -29,6 +29,14 @@ json executeRuntimeBridge(const std::string& method, const json& params,
 Result<GDExtensionObjectPtr> liveSceneTree();
 Result<GDExtensionObjectPtr> liveSceneTreeRoot(GDExtensionObjectPtr tree);
 
+// Pauses or resumes the live SceneTree.
+//
+// runtime.setPaused reaches this through the request path. The invariant watch
+// needs it from inside the frame callback instead, on the frame that broke the
+// condition: a pause that arrives a round trip later is a pause on a different
+// frame, and the state it freezes is no longer the state that failed.
+Result<void> setLiveSceneTreePaused(bool paused);
+
 // Calls SceneTree.quit. runtime.stop does not call this directly: it hands the
 // exit code to EditorHook::requestSceneTreeQuit so the IPC response is written
 // before the main loop is allowed to exit.

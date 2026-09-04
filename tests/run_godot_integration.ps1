@@ -505,6 +505,29 @@ try {
         (Tool-Request 314 "runtime_stop" @{ exit_code = 256 }),
         (Tool-Request 315 "scene_set_property" @{ target_node = "/root/RuntimeRoot"; property_name = "process_priority"; value = 12 }),
         (Tool-Request 316 "runtime_set_paused" @{ paused = $false }),
+        # Invariant watching, against a game that is actually running. A short
+        # window with a condition the fixture holds, then one it cannot, so the
+        # violation path and the pause are both exercised. The resume after it
+        # matters: everything below this runs against the same game.
+        (Tool-Request 2272 "runtime_watch_invariants" @{ duration_ms = 200; invariants = @(
+            @{ name = "clean_run"; kind = "no_engine_errors" },
+            @{ name = "children_present"; kind = "expression_between";
+               expression = "node.get_child_count()"; context_node = "/root/RuntimeRoot"; minimum = 1 }) }),
+        (Tool-Request 2273 "runtime_watch_invariants" @{ duration_ms = 2000; invariants = @(
+            @{ name = "impossible"; kind = "expression_between";
+               expression = "node.get_child_count()"; context_node = "/root/RuntimeRoot";
+               maximum = -1 }) }),
+        (Tool-Request 2274 "runtime_get_session" @{}),
+        (Tool-Request 2275 "runtime_set_paused" @{ paused = $false }),
+        # A condition nobody could read is not a condition that held.
+        (Tool-Request 2276 "runtime_watch_invariants" @{ duration_ms = 150; pause_on_violation = $false;
+            invariants = @(
+            @{ name = "unreadable"; kind = "expression_between";
+               expression = "node.get_child_count()"; context_node = "/root/NoSuchNode";
+               minimum = 0 }) }),
+        # A condition that cannot be violated is refused rather than reported held.
+        (Tool-Request 2277 "runtime_watch_invariants" @{ duration_ms = 100; invariants = @(
+            @{ name = "unbounded"; kind = "performance_between"; metric = "TIME_FPS" }) }),
         (Tool-Request 323 "eval_gdscript" @{ expression = "node.get_child_count()"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 324 "eval_gdscript" @{ expression = "[1, 2, 3]"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 325 "eval_gdscript" @{ expression = "{'answer': 42, 'ok': true}"; context_node = "/root/RuntimeRoot" }),
@@ -585,6 +608,36 @@ try {
     # A game has one root viewport, so an editor camera selector is a mistake
     # worth naming rather than an argument to quietly ignore.
     Assert-True $runtimeById[2260].result.isError "A game viewport capture accepted an editor camera_identifier."
+
+    # A watch that held, over a real window of engine frames.
+    $held = Tool-Payload $runtimeById[2272]
+    Assert-True ($held.outcome -eq "held") "An invariant watch over a healthy game did not hold; outcome was $($held.outcome)."
+    Assert-True ($held.session_kind -eq "game") "The invariant watch did not report the session it ran in."
+    Assert-True ($held.samples -ge 1) "The invariant watch reported no samples, so it observed nothing."
+    $heldNames = @($held.invariants | ForEach-Object { $_.name })
+    Assert-True ($heldNames -contains "clean_run" -and $heldNames -contains "children_present") "The invariant watch did not report every condition it was given."
+    foreach ($condition in $held.invariants) {
+        Assert-True ($condition.readings -ge 1) "Invariant $($condition.name) held on zero readings, which is not holding."
+    }
+
+    # And one that could not hold, with the game stopped on the frame that broke
+    # it. Sampling in the engine is the only way that frame is still there.
+    $violated = Tool-Payload $runtimeById[2273]
+    Assert-True ($violated.outcome -eq "violated") "An impossible invariant was not reported as violated."
+    Assert-True ($violated.violation.name -eq "impossible") "The violation did not name the condition that broke."
+    Assert-True ($violated.violation.bound -eq "maximum") "The violation did not name the bound it broke."
+    Assert-True ($null -ne $violated.violation.observed) "The violation did not carry the value that broke it."
+    Assert-True ($violated.paused -eq $true) "The game was not paused on the violating frame."
+    Assert-True ($violated.elapsed_ms -lt 2000) "The watch ran the whole window instead of stopping on the violation."
+    Assert-True ((Tool-Payload $runtimeById[2274]).session.kind -eq "game") "The session was not usable after an invariant pause."
+    Assert-True (-not $runtimeById[2275].result.isError) "The game could not be resumed after an invariant pause."
+
+    $inconclusive = Tool-Payload $runtimeById[2276]
+    Assert-True ($inconclusive.outcome -eq "inconclusive") "A condition that could never be read was not reported as inconclusive."
+    Assert-True ($inconclusive.invariants[0].readings -eq 0) "An unreadable condition reported readings it did not take."
+    Assert-True ($null -ne $inconclusive.invariants[0].read_error) "An unreadable condition did not say why it could not be read."
+
+    Assert-True $runtimeById[2277].result.isError "An invariant with no bound was accepted, and nothing could have violated it."
 
     $selectedGame = Tool-Payload $runtimeById[376]
     Assert-True ($selectedGame.session.session_id -eq $gameSession.session_id -and $selectedGame.session.kind -eq "game") "Runtime get-session did not return the selected game route."

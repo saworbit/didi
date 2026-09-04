@@ -436,6 +436,12 @@ Result<GDExtensionObjectPtr> liveSceneTree() { return activeSceneTree(); }
 
 Result<GDExtensionObjectPtr> liveSceneTreeRoot(GDExtensionObjectPtr tree) { return sceneTreeRoot(tree); }
 
+Result<void> setLiveSceneTreePaused(bool paused) {
+    auto tree = activeSceneTree();
+    if (tree.isErr()) return tree.error();
+    return setSceneTreePaused(tree.value(), paused);
+}
+
 json executeRuntimeBridge(const std::string& method, const json& params,
                           const std::string& session_kind) {
     if (!params.is_object()) return errorJson(400, "Runtime params must be an object");

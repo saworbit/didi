@@ -12,7 +12,12 @@ enum class SessionKind { editor, game };
 inline LiveSessionKindPolicy livePolicyForTool(std::string_view name) {
     if (name == "runtime_set_paused" || name == "runtime_step" || name == "runtime_stop" ||
         name == "physics_simulate_step" || name == "anim_play_track" ||
-        name == "runtime_inject_input" || name == "inject_input_event") {
+        name == "runtime_inject_input" || name == "inject_input_event" ||
+        // Watching conditions while a game runs, and stopping it on the frame
+        // that broke one. An editor has a SceneTree and monitors of its own,
+        // but neither is a game running, so the answer would describe the
+        // wrong thing.
+        name == "runtime_watch_invariants") {
         return LiveSessionKindPolicy::game_only;
     }
     if (name == "runtime_read_logs" || name == "runtime_read_output" || name == "runtime_get_tree" ||
@@ -32,7 +37,8 @@ inline LiveSessionKindPolicy livePolicyForTool(std::string_view name) {
 inline LiveSessionKindPolicy livePolicyForMethod(std::string_view method) {
     if (method == "runtime.setPaused" || method == "runtime.step" ||
         method == "runtime.stop" || method == "physics.simulateStep" ||
-        method == "anim.playTrack" || method == "runtime.injectInput") {
+        method == "anim.playTrack" || method == "runtime.injectInput" ||
+        method == "runtime.watchInvariants") {
         return LiveSessionKindPolicy::game_only;
     }
     if (method == "runtime.getLogs" || method == "runtime.getOutput" || method == "runtime.getTree" ||

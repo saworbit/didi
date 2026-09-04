@@ -44,6 +44,9 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // Phase 7C. Performance monitors exist only inside a running engine,
         // so there is no offline reading to fall back to.
         , "runtime_read_profiler"
+        // Game only. The window is measured in engine frames, and the pause on
+        // a violation happens on the frame that broke it.
+        , "runtime_watch_invariants"
         // Phase 7C. Game only: Input.parse_input_event in the editor would
         // drive the editor UI, which is nobody's intent.
         , "runtime_inject_input"
@@ -172,6 +175,7 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
 CallToolResult handleInjectInputEvent(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleRuntimeGetCallStack(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleRuntimeReadProfiler(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleRuntimeWatchInvariants(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleRuntimeListSessions(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
 CallToolResult handleRuntimeAttachSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
 CallToolResult handleRuntimeDetachSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
@@ -381,6 +385,7 @@ ResolvedToolBinding resolveAliasBinding(std::string_view invoked_name, const jso
         {"runtime_inject_input", "runtime.injectInput"},
         {"runtime_get_call_stack", "runtime.getCallStack"},
         {"runtime_read_profiler", "runtime.readProfiler"},
+        {"runtime_watch_invariants", "runtime.watchInvariants"},
     };
     for (const auto& entry : phase7_bindings) {
         if (entry.name != invoked_name) continue;
@@ -1965,6 +1970,45 @@ void ToolRegistry::registerAllDefaultTools() {
         t.inputSchema = {{"type", "object"}};
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleRuntimeReadProfiler(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "runtime_watch_invariants";
+        t.description = "Watches declared conditions every frame of a running game and stops the game on the frame that breaks one, reporting which condition, the value that broke it, and when.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"duration_ms", {{"type", "integer"}, {"minimum", 1}, {"maximum", 30000}, {"default", 2000},
+                                 {"description", "How long to watch. The watch ends early on the first violation."}}},
+                {"pause_on_violation", {{"type", "boolean"}, {"default", true},
+                                        {"description", "Pause the game on the violating frame so the state that failed is still there to read."}}},
+                {"invariants", {
+                    {"type", "array"}, {"minItems", 1}, {"maxItems", 8},
+                    {"description", "Conditions that must stay true."},
+                    {"items", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 64}}},
+                            {"kind", {{"type", "string"},
+                                      {"enum", json::array({"performance_between", "expression_between", "no_engine_errors"})}}},
+                            {"metric", {{"type", "string"}, {"description", "performance_between only: a Performance monitor name such as TIME_FPS."}}},
+                            {"expression", {{"type", "string"}, {"maxLength", 512}, {"description", "expression_between only: a sandbox expression evaluating to a number or a boolean, such as node.get('health')."}}},
+                            {"context_node", {{"type", "string"}, {"maxLength", 256}, {"description", "expression_between only: the node the expression is evaluated against."}}},
+                            {"minimum", {{"type", "number"}}},
+                            {"maximum", {{"type", "number"}}}
+                        }},
+                        {"required", json::array({"kind"})},
+                        {"additionalProperties", false}
+                    }}
+                }}
+            }},
+            {"required", json::array({"invariants"})},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleRuntimeWatchInvariants(binding, args, m_ipcClient);
         };
         registerTool(std::move(t));
     }

@@ -25,6 +25,9 @@ const std::unordered_set<std::string_view> kMutations = {
     "asset_reimport", "project_rename_references",
     "runtime_launch", "execute_test_session", "runtime_set_paused",
     "runtime_step", "runtime_stop", "runtime_inject_input", "input_map_set_action",
+    // It can stop the game, which is a state change the caller has to have
+    // asked for. Reversible with runtime_set_paused, so a dry run and no token.
+    "runtime_watch_invariants",
     "editor_undo", "editor_redo", "editor_save_scene", "editor_reload_project",
     "project_set_autoload", "project_remove_autoload", "project_set_input_action",
     "project_remove_input_action", "project_set_setting", "viewport_set_camera_transform",
