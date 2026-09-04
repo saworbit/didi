@@ -486,6 +486,36 @@ class StagedPatchMismatchTests(unittest.TestCase):
             self.assertEqual(git("diff", "--cached").stdout, graded)
 
 
+class RedEvidenceKindTests(unittest.TestCase):
+    """A build that failed and an assertion that failed are not the same evidence.
+
+    A native test calling a function the fix introduces cannot fail at runtime
+    without it: the translation unit does not compile and nothing runs. That is a
+    legitimate way to depend on a fix and much weaker than an assertion that ran
+    and disagreed. #228's harness genuinely would have failed against the old
+    message, but test_tools.cpp stopped the build first, so the loop never saw
+    it. The gate accepts both; the report must not call them the same thing.
+    """
+
+    def test_a_build_failure_is_reported_as_compile_evidence(self):
+        transcript = "=== build failed (exit 1) ===\n--- stdout ---\nerror C2039"
+        self.assertEqual(CYCLE.red_evidence_kind(transcript), "compile")
+
+    def test_a_failing_assertion_is_reported_as_behaviour_evidence(self):
+        transcript = "=== native tests failed (exit 1) ===\n--- stdout ---\nFAILED: Tools.Whatever"
+        self.assertEqual(CYCLE.red_evidence_kind(transcript), "behaviour")
+
+    def test_a_failing_harness_is_behaviour_evidence(self):
+        transcript = "=== live harness failed (exit 1) ===\n--- stdout ---\nAssert-True"
+        self.assertEqual(CYCLE.red_evidence_kind(transcript), "behaviour")
+
+    def test_both_kinds_have_wording_that_does_not_overclaim(self):
+        compile_words = CYCLE.RED_EVIDENCE_WORDING["compile"]
+        self.assertIn("no assertion ran", compile_words)
+        self.assertIn("failed", CYCLE.RED_EVIDENCE_WORDING["behaviour"])
+        self.assertNotEqual(compile_words, CYCLE.RED_EVIDENCE_WORDING["behaviour"])
+
+
 class BaseRefTests(unittest.TestCase):
     """Cycles branch from the remote tip, not from whatever `main` points at here.
 

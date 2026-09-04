@@ -209,6 +209,30 @@ def agent_failure_detail(stdout: str, stderr: str) -> str:
     return (stderr or stdout or "no output").strip()[-300:]
 
 
+def red_evidence_kind(red_transcript: str) -> str:
+    """Whether the red run proved a behaviour or only a missing symbol.
+
+    A native test that calls a function the fix introduces cannot fail at
+    runtime without it: the translation unit does not compile, the build stops,
+    and no assertion ever executes. That is a legitimate way for a C++ test to
+    depend on a fix, and it is much weaker evidence than an assertion that ran
+    and disagreed with what it saw. The gate accepts both; the report must not
+    call them the same thing.
+
+    #228 is the case in point. Its live harness asserts the new error text end to
+    end and would genuinely have failed against the old message, but the loop
+    never learned that, because test_tools.cpp stopped the build first.
+    """
+    return "compile" if red_transcript.startswith("=== build failed") else "behaviour"
+
+
+RED_EVIDENCE_WORDING = {
+    "behaviour": "a check ran and failed without the fix, and passed with it",
+    "compile": ("the patch did not build without the fix, so no assertion ran: "
+                "the reproduction depends on the change, but no behaviour was observed failing"),
+}
+
+
 def render_summary(summary: dict) -> str:
     lines = [
         f"# Cycle {summary['cycle_id']}",
@@ -482,7 +506,8 @@ def main(argv: list[str] | None = None) -> int:
         detail = red_detail if verdict == "not_red" else green_detail
         record("gate_red_green", "failed", f"{verdict}: {detail}")
         return finish(verdict)
-    record("gate_red_green", "ok", f"failed without the fix: {red_detail}")
+    evidence = red_evidence_kind(red_transcript)
+    record("gate_red_green", "ok", f"{RED_EVIDENCE_WORDING[evidence]} [{red_detail}]")
 
     # Re-stage, then refuse to commit anything but the patch that was graded.
     # `git stash pop` restores the working tree and leaves the index alone, so
@@ -504,8 +529,8 @@ def main(argv: list[str] | None = None) -> int:
     opened = run(["gh", "pr", "create", "--repo", args.repo, "--draft", "--base", "main",
                   "--head", branch, "--title", f"Fix #{issue_number}: {issue['title'][:70]}",
                   "--body", f"Closes #{issue_number}\n\nOpened by a fix cycle. "
-                            f"Reproduction failed without the change and passed with it. "
-                            f"Evidence in `{output}`."], worktree)
+                            f"Red/green evidence: {RED_EVIDENCE_WORDING[evidence]}. "
+                            f"Full output in `{output}`."], worktree)
     if opened.returncode != 0:
         record("report", "failed", opened.stderr[-300:])
         return finish("pr_failed")
