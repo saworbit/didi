@@ -150,7 +150,7 @@ void test_phase7_all_ten_alias_bindings_are_exact() {
     struct Row { const char* invoked; const char* canonical; const char* method; Policy policy; };
     const std::array<Row, 8> direct = {{
         {"get_scene_hierarchy", "scene_get_hierarchy", "scene.getHierarchy", Policy::editor_only},
-        {"capture_viewport", "viewport_capture_frame", "vision.captureViewport", Policy::editor_only},
+        {"capture_viewport", "viewport_capture_frame", "vision.captureViewport", Policy::editor_or_game},
         {"analyze_script_diagnostics", "script_check_syntax", "script.checkSyntax", Policy::editor_only},
         {"patch_script_symbols", "script_patch_method", "script.patchMethod", Policy::editor_only},
         {"create_visual_test_lab", "viewport_create_test_lab", "", Policy::editor_only},

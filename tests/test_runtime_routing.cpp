@@ -935,7 +935,7 @@ void test_wrong_kind_connected_route_does_not_advertise_unexecutable_offline_too
     didi::json metadata = didi::json::object();
     for (const auto& tool : tools) metadata[tool["name"].get<std::string>()] = tool["_meta"]["didi"];
     ASSERT_EQ(metadata["scene_get_hierarchy"]["currentMode"], "unavailable");
-    ASSERT_EQ(metadata["capture_viewport"]["currentMode"], "unavailable");
+    ASSERT_EQ(metadata["viewport_set_camera_transform"]["currentMode"], "unavailable");
 }
 
 void test_wrong_kind_tool_dispatch_is_rejected_before_ipc() {
@@ -966,7 +966,7 @@ void test_wrong_kind_tool_dispatch_is_rejected_before_ipc() {
                   didi::json::array({"editor"}));
         ASSERT_TRUE(game->last_method.empty());
         ++rejected_editor_tools;
-        if (definition.name == "capture_viewport") rejected_viewport = true;
+        if (definition.name == "viewport_set_camera_transform") rejected_viewport = true;
     }
     ASSERT_TRUE(rejected_editor_tools >= 20);
     ASSERT_TRUE(rejected_viewport);
@@ -1131,7 +1131,7 @@ void test_provider_only_routes_are_kind_gated_and_fail_closed() {
 
     auto game = std::make_shared<ProviderOnlyFake>(descriptorFor("game"));
     registry.setIpcClient(game);
-    const auto wrong_kind = registry.callTool("capture_viewport", didi::json::object());
+    const auto wrong_kind = registry.callTool("viewport_set_camera_transform", didi::json::object());
     ASSERT_TRUE(wrong_kind.isError);
     const auto wrong_kind_payload = payload(wrong_kind);
     ASSERT_EQ(wrong_kind_payload["execution_mode"], "live");
@@ -1303,8 +1303,8 @@ void test_nested_offline_call_cannot_inherit_outer_route_lease() {
 void test_extension_rejects_wrong_kind_methods_before_main_thread_dispatch() {
     // Break caught: direct authenticated IPC bypassed the MCP registry kind gate for viewport.
     const auto game = descriptorFor("game");
-    for (const auto& method : {"vision.captureViewport", "vision.diffViewport", "scene.getHierarchy",
-                               "editor.saveScene"}) {
+    for (const auto& method : {"scene.getHierarchy", "editor.saveScene",
+                               "vision.setCameraTransform"}) {
         const auto rejected = didi::godot::rejectDisallowedSessionMethod(method, game);
         ASSERT_TRUE(rejected.has_value());
         ASSERT_EQ((*rejected)["error"]["code"], 409);
@@ -1313,6 +1313,12 @@ void test_extension_rejects_wrong_kind_methods_before_main_thread_dispatch() {
     }
     ASSERT_FALSE(didi::godot::rejectDisallowedSessionMethod("runtime.getTree", game).has_value());
     ASSERT_FALSE(didi::godot::rejectDisallowedSessionMethod("runtime.getLogs", game).has_value());
+    // A running game can be driven and read; it can now also be seen. The
+    // editor-only camera identifiers are refused inside the renderer, not here.
+    ASSERT_FALSE(didi::godot::rejectDisallowedSessionMethod(
+        "vision.captureViewport", game).has_value());
+    ASSERT_FALSE(didi::godot::rejectDisallowedSessionMethod(
+        "vision.diffViewport", game).has_value());
 
     const auto editor = descriptorFor("editor");
     for (const auto& method : {"runtime.setPaused", "runtime.step", "runtime.stop"}) {

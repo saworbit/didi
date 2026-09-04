@@ -5645,24 +5645,22 @@ json GodotBridge::execute(const std::string& method, const json& params,
     return errorJson(501, "No trustworthy live implementation for method: " + method);
 }
 
-Result<ViewportPixels> GodotBridge::captureEditorViewport(const std::string& camera_identifier) {
-    auto editor_result = editorInterface();
-    if (editor_result.isErr()) return editor_result.error();
-    bool capture_2d = camera_identifier == "editor_2d" || camera_identifier == "active_editor_view_2d";
-    Result<VariantValue> viewport = capture_2d
-        ? callObject(editor_result.value(), "EditorInterface", "get_editor_viewport_2d", 3750751911LL)
-        : [&]() -> Result<VariantValue> {
-            auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
-            if (index.isErr()) return index.error();
-            return callObject(editor_result.value(), "EditorInterface", "get_editor_viewport_3d", 1970834490LL, {&index.value()});
-        }();
-    if (viewport.isErr()) return viewport.error();
-    auto viewport_object = objectFromVariant(viewport.value());
-    if (viewport_object.isErr() || !viewport_object.value()) return Error::notFound("Editor SubViewport is unavailable");
-    auto texture = callObject(viewport_object.value(), "Viewport", "get_texture", 1746695840LL);
+namespace {
+
+// A viewport control that is not the one on screen has no size, and Godot hands
+// back its 2x2 minimum rather than refusing. Capturing that produced a
+// four-pixel image reported as a successful live frame, which a caller cannot
+// tell from a scene that happens to be empty. Nothing smaller than this is a
+// picture of anything.
+constexpr int64_t kMinimumCaptureEdge = 8;
+
+Result<ViewportPixels> captureViewportObject(GDExtensionObjectPtr viewport_object,
+                                             const std::string& described_target) {
+    if (!viewport_object) return Error::notFound("Viewport is unavailable");
+    auto texture = callObject(viewport_object, "Viewport", "get_texture", 1746695840LL);
     if (texture.isErr()) return texture.error();
     auto texture_object = objectFromVariant(texture.value());
-    if (texture_object.isErr() || !texture_object.value()) return Error::notFound("Editor viewport texture is unavailable");
+    if (texture_object.isErr() || !texture_object.value()) return Error::notFound("Viewport texture is unavailable");
     auto texture_width_value = callObject(texture_object.value(), "Texture2D", "get_width", 3905245786LL);
     auto texture_height_value = callObject(texture_object.value(), "Texture2D", "get_height", 3905245786LL);
     if (texture_width_value.isErr()) return texture_width_value.error();
@@ -5672,14 +5670,21 @@ Result<ViewportPixels> GodotBridge::captureEditorViewport(const std::string& cam
     if (texture_width.isErr()) return texture_width.error();
     if (texture_height.isErr()) return texture_height.error();
     if (texture_width.value() <= 0 || texture_height.value() <= 0) {
-        return Error::notFound("Editor viewport has no rendered texture in the current display mode");
+        return Error::notFound("Viewport has no rendered texture in the current display mode");
+    }
+    if (texture_width.value() < kMinimumCaptureEdge || texture_height.value() < kMinimumCaptureEdge) {
+        return Error::notFound(
+            "Viewport '" + described_target + "' has no size on screen (" +
+            std::to_string(texture_width.value()) + "x" + std::to_string(texture_height.value()) +
+            "), so there is no frame to capture. For an editor viewport this means that main "
+            "screen is not the one selected; switch to it in the editor and call again.");
     }
     const auto texture_size = image::checkedRgbaSize(texture_width.value(), texture_height.value());
     if (texture_size.isErr()) return texture_size.error();
     auto image = callObject(texture_object.value(), "Texture2D", "get_image", 4190603485LL);
     if (image.isErr()) return image.error();
     auto image_object = objectFromVariant(image.value());
-    if (image_object.isErr() || !image_object.value()) return Error::notFound("Editor viewport image is unavailable");
+    if (image_object.isErr() || !image_object.value()) return Error::notFound("Viewport image is unavailable");
     auto rgba8 = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(5));
     auto converted = callObject(image_object.value(), "Image", "convert", 2120693146LL, {&rgba8.value()});
     if (converted.isErr()) return converted.error();
@@ -5714,6 +5719,39 @@ Result<ViewportPixels> GodotBridge::captureEditorViewport(const std::string& cam
     output.rgba.resize(static_cast<size_t>(expected));
     std::memcpy(output.rgba.data(), first, static_cast<size_t>(expected));
     return output;
+}
+
+} // namespace
+
+Result<ViewportPixels> GodotBridge::captureEditorViewport(const std::string& camera_identifier) {
+    auto editor_result = editorInterface();
+    if (editor_result.isErr()) return editor_result.error();
+    const bool capture_2d =
+        camera_identifier == "editor_2d" || camera_identifier == "active_editor_view_2d";
+    Result<VariantValue> viewport = capture_2d
+        ? callObject(editor_result.value(), "EditorInterface", "get_editor_viewport_2d", 3750751911LL)
+        : [&]() -> Result<VariantValue> {
+            auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+            if (index.isErr()) return index.error();
+            return callObject(editor_result.value(), "EditorInterface", "get_editor_viewport_3d", 1970834490LL, {&index.value()});
+        }();
+    if (viewport.isErr()) return viewport.error();
+    auto viewport_object = objectFromVariant(viewport.value());
+    if (viewport_object.isErr() || !viewport_object.value()) {
+        return Error::notFound("Editor SubViewport is unavailable");
+    }
+    return captureViewportObject(viewport_object.value(), camera_identifier);
+}
+
+// A game has one root viewport and no camera selection to make. The frame is
+// already in the process Didi is attached to, so a caller that can pause the
+// game, step it and read its tree can now also see it.
+Result<ViewportPixels> GodotBridge::captureGameViewport() {
+    auto tree = liveSceneTree();
+    if (tree.isErr()) return tree.error();
+    auto root = liveSceneTreeRoot(tree.value());
+    if (root.isErr()) return root.error();
+    return captureViewportObject(root.value(), "root_viewport");
 }
 
 Result<std::string> resolveGodotProjectPath() {
