@@ -40,7 +40,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         , "signal_list_connections", "signal_connect", "signal_disconnect", "signal_emit"
         // Reads a ShaderMaterial off a node in the edited scene, so it needs the
         // editor's scene and has no offline reading to fall back to.
-        , "shader_list_uniforms", "shader_set_uniform"
+        , "shader_list_uniforms", "shader_set_uniform", "shader_get_visual_graph"
         // Live only on purpose. Writing the layout file would change what the
         // project loads next time and not what anyone is listening to now.
         , "audio_configure_bus"
@@ -140,6 +140,7 @@ CallToolResult handleSpatialQueryRaycastBatch(const ResolvedToolBinding& binding
 CallToolResult handleSpatialQueryClearance(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleShaderListUniforms(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleShaderSetUniform(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleShaderGetVisualGraph(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handlePhysicsSimulateStep(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleNavBakeMesh(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleNavQueryPath(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -398,6 +399,7 @@ ResolvedToolBinding resolveAliasBinding(std::string_view invoked_name, const jso
         {"spatial_query_clearance", "physics.clearance"},
         {"shader_list_uniforms", "shader.listUniforms"},
         {"shader_set_uniform", "shader.setUniform"},
+        {"shader_get_visual_graph", "shader.getVisualGraph"},
     };
     for (const auto& entry : phase7_bindings) {
         if (entry.name != invoked_name) continue;
@@ -1365,6 +1367,25 @@ void ToolRegistry::registerAllDefaultTools() {
     // ==========================================
     // Domain 5: Physics, Animation & Navigation
     // ==========================================
+    {
+        ToolDefinition t;
+        t.name = "shader_get_visual_graph";
+        t.description = "Returns the nodes and connections of a VisualShader graph held by a node in the edited scene, per shader type, as structured JSON.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target_node", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}}},
+                {"property_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
+                                   {"description", "The property the ShaderMaterial sits in, the same pair shader_list_uniforms takes."}}}
+            }},
+            {"required", json::array({"target_node", "property_name"})},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleShaderGetVisualGraph(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
     {
         ToolDefinition t;
         t.name = "shader_set_uniform";

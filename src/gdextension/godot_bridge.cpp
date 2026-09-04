@@ -5978,10 +5978,12 @@ json GodotBridge::execute(const std::string& method, const json& params,
         return liveResult(hierarchy_result);
     }
 
-    if (method == "shader.listUniforms" || method == "shader.setUniform") {
-        // One path to the material for both, so a slot one of them accepts is
-        // never a slot the other refuses.
+    if (method == "shader.listUniforms" || method == "shader.setUniform" ||
+        method == "shader.getVisualGraph") {
+        // One path to the material for all three, so a slot one of them accepts
+        // is never a slot another refuses.
         const bool setting = method == "shader.setUniform";
+        const bool graphing = method == "shader.getVisualGraph";
         const bool shape_ok = setting
             ? (hasOnlyKeys(params, {"target_node", "property_name", "uniform_name", "value"}) &&
                params.contains("uniform_name") && params["uniform_name"].is_string() &&
@@ -5990,7 +5992,19 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (!shape_ok || !params.contains("target_node") || !params["target_node"].is_string() ||
             !params.contains("property_name") || !params["property_name"].is_string()) {
             return errorJson(400, setting ? "invalid_shader_set_uniform_request"
-                                          : "invalid_shader_list_uniforms_request");
+                                          : (graphing ? "invalid_shader_get_visual_graph_request"
+                                                      : "invalid_shader_list_uniforms_request"));
+        }
+        if (graphing) {
+            for (const auto& bind : {
+                     std::make_tuple("VisualShader", "get_node_list", 2370592410LL),
+                     std::make_tuple("VisualShader", "get_node", 3784670312LL),
+                     std::make_tuple("VisualShader", "get_node_position", 2175036082LL),
+                     std::make_tuple("VisualShader", "get_node_connections", 1441964831LL)}) {
+                if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) {
+                    return errorJson(501, "required_bind_unavailable");
+                }
+            }
         }
         for (const auto& bind : {
                  std::make_tuple("ShaderMaterial", "get_shader", 2078273437LL),
@@ -6072,6 +6086,129 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 result["shader_mode"] = (index >= 0 && index < 5) ? json(kModes[index])
                                                                   : json(nullptr);
             }
+        }
+
+        if (graphing) {
+            auto is_visual = objectIsClass(shader.value(), "VisualShader");
+            if (is_visual.isErr()) return errorJson(500, is_visual.error().message);
+            if (!is_visual.value()) {
+                // A hand written .gdshader has code and no graph. Returning an
+                // empty node list would read as a graph with nothing in it.
+                return errorJson(409, "The shader on this material is written in code, not built as "
+                                      "a VisualShader graph, so it has no nodes to report");
+            }
+            // The shader types a VisualShader can hold, in enum order. Named so
+            // a caller is not handed a bare number, and skipped entirely when a
+            // type holds nothing.
+            static const char* kGraphTypes[] = {"vertex", "fragment", "light", "start", "process",
+                                                "collide", "start_custom", "process_custom", "sky",
+                                                "fog"};
+            constexpr int64_t kMaxGraphNodes = 256;
+            constexpr int64_t kMaxGraphConnections = 512;
+            json types = json::array();
+            bool any_truncated = false;
+            for (int64_t type_index = 0; type_index < 10; ++type_index) {
+                auto type_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, type_index);
+                if (type_value.isErr()) return errorJson(500, type_value.error().message);
+                auto ids = callObject(shader.value(), "VisualShader", "get_node_list",
+                                      2370592410LL, {&type_value.value()});
+                if (ids.isErr()) continue;
+                auto id_count_value = callVariant(ids.value(), "size");
+                if (id_count_value.isErr()) continue;
+                auto id_count = scalarFromVariant<int64_t>(id_count_value.value(),
+                                                           GDEXTENSION_VARIANT_TYPE_INT);
+                if (id_count.isErr() || id_count.value() == 0) continue;
+
+                json nodes = json::array();
+                const int64_t reported_nodes = std::min<int64_t>(id_count.value(), kMaxGraphNodes);
+                for (int64_t slot = 0; slot < reported_nodes; ++slot) {
+                    auto slot_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, slot);
+                    if (slot_value.isErr()) return errorJson(500, slot_value.error().message);
+                    auto id_value = callVariant(ids.value(), "get", {&slot_value.value()});
+                    if (id_value.isErr()) continue;
+                    auto node_id = scalarFromVariant<int64_t>(id_value.value(),
+                                                              GDEXTENSION_VARIANT_TYPE_INT);
+                    if (node_id.isErr()) continue;
+                    auto graph_id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, node_id.value());
+                    if (graph_id.isErr()) return errorJson(500, graph_id.error().message);
+
+                    json node_entry = {{"id", node_id.value()}};
+                    auto node_object_value = callObject(shader.value(), "VisualShader", "get_node",
+                                                        3784670312LL,
+                                                        {&type_value.value(), &graph_id.value()});
+                    if (node_object_value.isOk()) {
+                        auto node_object = objectFromVariant(node_object_value.value());
+                        if (node_object.isOk() && node_object.value()) {
+                            auto class_name = callObject(node_object.value(), "Object", "get_class",
+                                                         201670096LL);
+                            if (class_name.isOk()) {
+                                auto text = stringFromVariant(class_name.value(),
+                                                              GDEXTENSION_VARIANT_TYPE_STRING);
+                                if (text.isOk()) {
+                                    node_entry["class"] = boundUtf8(text.value(), 256).value;
+                                }
+                            }
+                        }
+                    }
+                    auto position = callObject(shader.value(), "VisualShader", "get_node_position",
+                                               2175036082LL, {&type_value.value(), &graph_id.value()});
+                    if (position.isOk()) {
+                        auto point = pointVariantToJson(position.value(), 2);
+                        if (point.isOk()) node_entry["position"] = point.value();
+                    }
+                    nodes.push_back(std::move(node_entry));
+                }
+
+                json links = json::array();
+                int64_t connection_count = 0;
+                auto connections = callObject(shader.value(), "VisualShader", "get_node_connections",
+                                              1441964831LL, {&type_value.value()});
+                if (connections.isOk()) {
+                    auto connection_size = callVariant(connections.value(), "size");
+                    if (connection_size.isOk()) {
+                        auto total = scalarFromVariant<int64_t>(connection_size.value(),
+                                                                 GDEXTENSION_VARIANT_TYPE_INT);
+                        if (total.isOk()) {
+                            connection_count = total.value();
+                            const int64_t reported =
+                                std::min<int64_t>(connection_count, kMaxGraphConnections);
+                            for (int64_t link = 0; link < reported; ++link) {
+                                auto link_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, link);
+                                if (link_index.isErr()) break;
+                                auto entry = callVariant(connections.value(), "get",
+                                                          {&link_index.value()});
+                                if (entry.isErr()) continue;
+                                json link_entry = json::object();
+                                for (const auto* field : {"from_node", "from_port", "to_node",
+                                                          "to_port"}) {
+                                    auto field_key = makeString(field);
+                                    if (field_key.isErr()) continue;
+                                    auto field_value = callVariant(entry.value(), "get",
+                                                                    {&field_key.value()});
+                                    if (field_value.isErr()) continue;
+                                    auto number = scalarFromVariant<int64_t>(
+                                        field_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                                    if (number.isOk()) link_entry[field] = number.value();
+                                }
+                                if (!link_entry.empty()) links.push_back(std::move(link_entry));
+                            }
+                        }
+                    }
+                }
+
+                const bool truncated = id_count.value() > kMaxGraphNodes ||
+                                       connection_count > kMaxGraphConnections;
+                any_truncated = any_truncated || truncated;
+                types.push_back({{"type", kGraphTypes[type_index]},
+                                 {"nodes", std::move(nodes)},
+                                 {"node_count", id_count.value()},
+                                 {"connections", std::move(links)},
+                                 {"connection_count", connection_count},
+                                 {"truncated", truncated}});
+            }
+            result["shader_types"] = std::move(types);
+            result["truncated"] = any_truncated;
+            return liveResult(result);
         }
 
         auto groups = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));

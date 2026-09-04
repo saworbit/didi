@@ -33,7 +33,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-Didi v1.5.0 registers 101 canonical tool names. 98 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 98 canonical tools are implemented. Ten legacy names are registered separately, for exactly 111 `tools/list` entries.
+Didi v1.5.0 registers 102 canonical tool names. 99 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 99 canonical tools are implemented. Ten legacy names are registered separately, for exactly 112 `tools/list` entries.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
@@ -63,7 +63,7 @@ Didi v1.5.0 registers 101 canonical tool names. 98 are implemented in at least o
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `98/101`
+**Canonical implementation:** `99/102`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
@@ -150,6 +150,7 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 - Runtime logs retain 2,000 records. Messages are capped at 16 KiB and `details` at 64 KiB. `cursor` means the next sequence to inspect; filtered records still advance `next_cursor`, and `dropped_before_cursor` reports a retention gap.
 - `runtime_step` accepts 1–60 frames, requires an already-paused game, allows one active step, advances exactly the requested callbacks, and verifies re-pause. Shutdown cancels a pending step. `runtime_stop` only confirms that quit was requested; disappearance from discovery confirms exit.
 - `eval_gdscript` is expression-only and read-only. It rejects object traversal, direct/indexed property syntax, dynamic dispatch, mutation, reflection, statements, comments, assignment, and arbitrary callbacks. Its 1–5,000 ms timeout is cooperative, not preemptive; strict accepted operations are documented in [Tool Reference](TOOL_REFERENCE.md#eval_gdscript--live).
+- `shader_get_visual_graph` returns a VisualShader's nodes and connections per shader type, with node classes and editor positions. A shader written as code is refused rather than reported as an empty graph.
 - `shader_set_uniform` sets one uniform through the editor UndoRedo stack, taking the same JSON spellings `scene_set_property` takes, and refuses a name the shader does not declare. The write reaches the loaded material: an embedded one is saved with the scene, an external `.tres` is not saved by this surface, and a shared material is shared.
 - `shader_list_uniforms` reads a ShaderMaterial's uniforms from a node in the edited scene, with each declared type, its effective value, and whether the property contract can express that type. The effective value is the material's override or the shader's default, and the two are not distinguished. It does not set them.
 - `spatial_query_clearance` sweeps a box, sphere or capsule along a path and reports the safe and unsafe fractions the engine returned plus the position reached. Bodies block and areas do not, unlike the raycast, because a trigger volume is not geometry. It does not name what blocked the sweep.

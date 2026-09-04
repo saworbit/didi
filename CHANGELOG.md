@@ -13,6 +13,10 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Added
 
+- Added `shader_get_visual_graph`, which returns a VisualShader's nodes and connections per shader type as structured JSON. A project that builds its materials as graphs was opaque: the uniform tools read what a graph exposes, and nothing said what the graph itself was made of. Each node carries its id, its Godot class, and its position in the editor graph; each connection carries the node and port it runs from and to, because a graph is its links as much as its nodes. A shader written as code is refused with a message saying so, rather than reported as a graph with no nodes in it. Node and connection counts are reported separately from the returned lists, so a bounded response says how much it left out.
+
+### Added
+
 - Added `shader_set_uniform`, the write half of `shader_list_uniforms`. It takes the same JSON spellings `scene_set_property` takes for each Godot type, so a caller learns one contract rather than two, and a `res://` path fills a texture or other resource uniform after being loaded and checked against the class the uniform declares. A name the shader does not declare is refused rather than written: `set_shader_parameter` accepts any name and silently does nothing with an unknown one, so a typo would otherwise come back as a write that worked. The change goes through the editor UndoRedo stack on the material's own `shader_parameter/<name>` property, which is the one the scene file writes and the inspector edits, so undoing it is the undo a person expects. The result reports what the uniform holds afterwards rather than the value it was handed, with `applied` saying whether they match.
 
 ### Added
@@ -57,12 +61,12 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `98/101`
+**Canonical implementation:** `99/102`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 101 canonical tools plus 10 legacy registrations (111 total). 98 canonical tools are implemented and 3 remain unimplemented.
+Discovery now exposes 102 canonical tools plus 10 legacy registrations (112 total). 99 canonical tools are implemented and 3 remain unimplemented.
 
 ---
 
