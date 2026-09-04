@@ -393,12 +393,22 @@ def main(argv: list[str] | None = None) -> int:
     # Green: the whole patch must pass.
     green_passed, green_detail = verify(worktree, args.godot, build_script)
 
+    # Keep the red run's output even when the gate passes. "Failed without the
+    # fix" does not say which assertion failed, and a patch can carry one true
+    # reproduction alongside assertions that already passed: the gate is then
+    # satisfied by whichever one was red, which need not be the one the issue
+    # describes. Reading that back afterwards took a code audit, because the
+    # only record of it was a sentence saying it happened.
+    (output / "gate" ).mkdir(parents=True, exist_ok=True)
+    (output / "gate" / "red.txt").write_text(red_detail, encoding="utf-8")
+    (output / "gate" / "green.txt").write_text(green_detail, encoding="utf-8")
+
     verdict = gates.evaluate_red_green(pre_fix_failed=not red_passed, post_fix_passed=green_passed)
     if verdict != "ok":
         detail = red_detail if verdict == "not_red" else green_detail
         record("gate_red_green", "failed", f"{verdict}: {detail}")
         return finish(verdict)
-    record("gate_red_green", "ok", "failed without the fix, passed with it")
+    record("gate_red_green", "ok", f"failed without the fix: {red_detail}")
 
     # Re-stage, then refuse to commit anything but the patch that was graded.
     # `git stash pop` restores the working tree and leaves the index alone, so
