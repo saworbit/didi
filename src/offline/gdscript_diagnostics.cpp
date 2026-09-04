@@ -615,9 +615,17 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
             }
             start_line = actual_start;
 
-            // Find end of symbol block (next non-indented declaration or EOF)
+            // Find end of symbol block (next non-indented declaration or EOF).
+            //
+            // Blank lines inside the body belong to the symbol, but the ones
+            // after its last statement are the separator to whatever comes
+            // next. Ending the span at the next declaration swallowed those,
+            // so every patch quietly glued the following func to the end of
+            // the patched body. Track the last line that actually held code
+            // and stop there instead.
             size_t base_indent = getIndentLevel(lines[i]);
             size_t j = i + 1;
+            size_t last_body_line = i;
             while (j < lines.size()) {
                 std::string cur = lines[j];
                 std::string trimmed_cur = strings::trim(cur);
@@ -629,9 +637,10 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
                 if (cur_indent <= base_indent) {
                     break;
                 }
+                last_body_line = j;
                 j++;
             }
-            end_line = static_cast<int>(j);
+            end_line = static_cast<int>(last_body_line + 1);
             break;
         }
     }
