@@ -87,6 +87,30 @@ def cycle_summary(
     }
 
 
+def authentication_problem(status_stdout: str) -> str | None:
+    """Why the client cannot run an agent, or None when it can.
+
+    Checked before a cycle spends anything. The loop shells out to a separate
+    client that reads its own credential store, so this session being signed in
+    says nothing about whether the loop can run: the first live cycle built a
+    worktree and briefed an agent before discovering the stored login had
+    expired days earlier.
+    """
+    try:
+        status = json.loads(status_stdout or "{}")
+    except json.JSONDecodeError:
+        return "could not read authentication status from the client"
+    if not isinstance(status, dict):
+        return "could not read authentication status from the client"
+    if status.get("loggedIn") is True:
+        return None
+    return (
+        f"the client is not signed in (authMethod={status.get('authMethod', 'unknown')}). "
+        "Run `claude auth login` in a terminal and complete it in the browser, "
+        "then run this cycle again."
+    )
+
+
 def agent_failure_detail(stdout: str, stderr: str) -> str:
     """Why the agent run failed, in words.
 
@@ -234,7 +258,13 @@ def main(argv: list[str] | None = None) -> int:
     if blocking and not args.dry_run:
         record("preflight", "failed", f"working tree not clean: {blocking[:3]}")
         return finish("preflight_failed")
-    record("preflight", "ok", "tree clean")
+    if not args.dry_run:
+        status = run([runner.resolve_executable(), "auth", "status"], REPOSITORY)
+        problem = authentication_problem(status.stdout)
+        if problem:
+            record("preflight", "failed", problem)
+            return finish("not_authenticated")
+    record("preflight", "ok", "tree clean, client signed in")
 
     issue = select_from_tracker(args.repo, args.issue) if not args.dry_run else {
         "number": 0, "title": "dry run", "body": "dry run", "createdAt": "", "labels": []}

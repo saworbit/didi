@@ -370,6 +370,20 @@ class CycleSummaryTests(unittest.TestCase):
             "cycle-3", 1, [{"name": "fix", "status": "failed", "detail": "a | b"}], "fix_failed"))
         self.assertIn("a \\| b", rendered)
 
+    def test_a_signed_in_client_raises_no_problem(self):
+        self.assertIsNone(CYCLE.authentication_problem(
+            json.dumps({"loggedIn": True, "authMethod": "claudeai"})))
+
+    def test_a_signed_out_client_says_how_to_fix_it(self):
+        problem = CYCLE.authentication_problem(
+            json.dumps({"loggedIn": False, "authMethod": "none"}))
+        self.assertIn("not signed in", problem)
+        self.assertIn("claude auth login", problem)
+
+    def test_unreadable_status_is_treated_as_a_problem(self):
+        self.assertIsNotNone(CYCLE.authentication_problem("not json"))
+        self.assertIsNotNone(CYCLE.authentication_problem("[]"))
+
     def test_agent_failure_reads_the_json_the_client_prints(self):
         stdout = json.dumps({
             "is_error": True, "num_turns": 1, "total_cost_usd": 0,
