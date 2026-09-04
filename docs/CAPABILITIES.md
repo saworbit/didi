@@ -33,7 +33,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-Didi v1.5.0 registers 99 canonical tool names. 96 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 96 canonical tools are implemented. Ten legacy names are registered separately, for exactly 109 `tools/list` entries.
+Didi v1.5.0 registers 100 canonical tool names. 97 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 97 canonical tools are implemented. Ten legacy names are registered separately, for exactly 110 `tools/list` entries.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
@@ -63,7 +63,7 @@ Didi v1.5.0 registers 99 canonical tool names. 96 are implemented in at least on
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `96/99`
+**Canonical implementation:** `97/100`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
@@ -150,6 +150,7 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 - Runtime logs retain 2,000 records. Messages are capped at 16 KiB and `details` at 64 KiB. `cursor` means the next sequence to inspect; filtered records still advance `next_cursor`, and `dropped_before_cursor` reports a retention gap.
 - `runtime_step` accepts 1–60 frames, requires an already-paused game, allows one active step, advances exactly the requested callbacks, and verifies re-pause. Shutdown cancels a pending step. `runtime_stop` only confirms that quit was requested; disappearance from discovery confirms exit.
 - `eval_gdscript` is expression-only and read-only. It rejects object traversal, direct/indexed property syntax, dynamic dispatch, mutation, reflection, statements, comments, assignment, and arbitrary callbacks. Its 1–5,000 ms timeout is cooperative, not preemptive; strict accepted operations are documented in [Tool Reference](TOOL_REFERENCE.md#eval_gdscript--live).
+- `shader_list_uniforms` reads a ShaderMaterial's uniforms from a node in the edited scene, with each declared type, its effective value, and whether the property contract can express that type. The effective value is the material's override or the shader's default, and the two are not distinguished. It does not set them.
 - `spatial_query_clearance` sweeps a box, sphere or capsule along a path and reports the safe and unsafe fractions the engine returned plus the position reached. Bodies block and areas do not, unlike the raycast, because a trigger volume is not geometry. It does not name what blocked the sweep.
 - `spatial_query_raycast_batch` casts up to 64 rays in one dispatch against one space state. Each entry uses the `physics_raycast_query` contract unchanged. One batch is one dimension, and a ray that cannot be answered fails the batch rather than leaving a gap.
 - `runtime_watch_invariants` samples once per engine frame for a bounded window and stops the game on the first violation. Its outcome is `violated`, `held`, or `inconclusive`; an invariant that never produced a reading makes the run inconclusive rather than held. It sees error-level engine output, not a debugger, and carries no call stack.

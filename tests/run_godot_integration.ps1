@@ -987,6 +987,13 @@ try {
         (Tool-Request 961 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/TileLayer"; cells = @(@{ coords = @(1, 2); erase = $true }) }),
         # A layer with no TileSet is a property that was never set, not a tile
         # that could not be found and not a route that went away.
+        # A ShaderMaterial's parameters, which nothing else in the surface can
+        # reach: resource_inspect sees the file and scene_get_property sees the
+        # slot.
+        (Tool-Request 2286 "shader_list_uniforms" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override" }),
+        (Tool-Request 2287 "shader_list_uniforms" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_overlay" }),
+        (Tool-Request 2288 "shader_list_uniforms" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "not_a_property" }),
+        (Tool-Request 2289 "shader_list_uniforms" @{ target_node = "/root/SmokeRoot/Missing"; property_name = "material_override" }),
         (Tool-Request 2256 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/BareTileLayer"; cells = @(@{ coords = @(0, 0); source_id = 0; atlas_coords = @(0, 0) }) }),
         (Tool-Request 962 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(1, 2, 3); item = 0 }) }),
         (Tool-Request 971 "editor_undo" @{}),
@@ -1145,7 +1152,7 @@ try {
     $scalarEval = Tool-Payload $byId[130]
     Assert-True ($scalarEval.value -eq 7 -and $scalarEval.value_type -eq "int") "Editor scalar expression was incorrect."
     Assert-True ($scalarEval.context_node -eq "/root/SmokeRoot/Subject" -and $scalarEval.session_kind -eq "editor") "Editor expression context or provenance was incorrect."
-    Assert-True ((Tool-Payload $byId[131]).value -eq 7) "Editor default-context child count was incorrect."
+    Assert-True ((Tool-Payload $byId[131]).value -eq 8) "Editor default-context child count was incorrect."
     Assert-True (@((Tool-Payload $byId[132]).value).Count -eq 3) "Editor expression array was not preserved."
     Assert-True ((Tool-Payload $byId[133]).value.answer -eq 42) "Editor expression dictionary was not preserved."
     $editorVector = Tool-Payload $byId[134]
@@ -1524,6 +1531,32 @@ try {
     Assert-True (-not $byId[2252].result.isError) "A whole number was rejected for a float property."
     Assert-True ((Tool-Payload $byId[2253]).value -eq 55) "Accepted whole-number float write did not land."
     # A multi-property instantiate says which property failed.
+    $uniforms = Tool-Payload $byId[2286]
+    Assert-True ($uniforms.execution_mode -eq "live") "shader_list_uniforms did not run live."
+    Assert-True ($uniforms.shader_mode -eq "spatial") "The shader mode was not named."
+    Assert-True ($uniforms.shader_path -eq "res://probe_uniforms.gdshader") "The shader was not identified by path."
+    # The material sets this one, so the effective value is the material's.
+    $strength = @($uniforms.uniforms | Where-Object { $_.name -eq "strength" })
+    Assert-True ($strength.Count -eq 1) "The fixture shader's strength uniform was not reported."
+    Assert-True ($strength[0].type -eq "float") "The strength uniform did not carry its declared Godot type ($($strength[0].type))."
+    Assert-True ([Math]::Abs($strength[0].value - 0.75) -lt 0.01) "The strength uniform did not read back the material's value ($($strength[0].value))."
+    Assert-True ($strength[0].settable -eq $true) "A float uniform was not reported as settable."
+    # The material leaves this one alone, so the effective value is the shader's
+    # own default. Both cases read the same way on purpose: get_shader_parameter
+    # cannot tell them apart, so nothing here claims to.
+    $offset = @($uniforms.uniforms | Where-Object { $_.name -eq "offset" })
+    Assert-True ($offset.Count -eq 1) "A uniform the material does not override was left out of the list."
+    Assert-True ($offset[0].type -eq "Vector3") "The offset uniform did not carry its declared Godot type ($($offset[0].type))."
+    Assert-True ([Math]::Abs($offset[0].value.x - 1) -lt 0.01 -and [Math]::Abs($offset[0].value.z - 3) -lt 0.01) "A uniform on the shader default did not read back that default."
+    Assert-True ($uniforms.truncated -eq $false) "The uniform list reported truncation it did not do."
+
+    # An empty slot is not a shader with no uniforms, and neither is a missing
+    # property or a missing node.
+    Assert-True $byId[2287].result.isError "An empty material slot was read as a shader."
+    Assert-True ($byId[2287].result.content[0].text -match "holds nothing") "An empty material slot did not say so."
+    Assert-True $byId[2288].result.isError "A property the node does not have was accepted."
+    Assert-True $byId[2289].result.isError "A node that does not exist was accepted."
+
     $vector2Write = Tool-Payload $byId[2261]
     Assert-True ($vector2Write.applied -eq $true) "A Vector2 position write was not applied."
     Assert-True ($vector2Write.value.x -eq 96 -and $vector2Write.value.y -eq 48.5) "A Vector2 position did not read back as it was written."

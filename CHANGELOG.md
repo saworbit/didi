@@ -13,6 +13,10 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Added
 
+- Added `shader_list_uniforms`, which reads the shader uniforms of a `ShaderMaterial` held by a node in the edited scene. Nothing in the surface could see them: `resource_inspect` reports file metadata and `scene_get_property` reports the material slot, and neither reaches inside to the parameters an agent wants to read or tweak. Each uniform comes back with its declared Godot type and its effective value, which is the material's override where it has one and the shader's own default otherwise. There is deliberately no flag separating those two: `get_shader_parameter` returns the default for a uniform the material never set, so a flag built on the returned value would have claimed every uniform was overridden, and the live harness caught exactly that before it shipped. `settable` comes from the same decision `scene_set_property` makes about which JSON spellings exist, so the two cannot disagree about what a caller may write. A uniform of a type with no JSON spelling is still reported by name and type with a null value, rather than failing the whole read. A material slot holding something that is not a ShaderMaterial is refused and names what it found, because an empty uniform list would read as a shader with nothing to set.
+
+### Added
+
 - Added `spatial_query_clearance`, which sweeps a box, sphere or capsule along a path and reports how far it gets. A raycast answers whether a line is clear, which is not the same question as whether a body is: a corridor a ray passes down cleanly can still be too narrow for the character that has to walk it, and that is the question a doorway or a spawn point actually asks. It returns the safe and unsafe fractions the engine gave, plus the position the shape reached, and nothing in between interprets what a particular pair of fractions means. A zero-length sweep is accepted on purpose, unlike a ray of no length, because asking whether a shape fits where it stands is a real question. Bodies block; areas do not, because a trigger volume is not geometry and a corridor reported blocked by a checkpoint is answering a different question. Both dimensions, with `sphere` naming a circle in 2D so one request shape works either way.
 
 ### Added
@@ -49,12 +53,12 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `96/99`
+**Canonical implementation:** `97/100`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 99 canonical tools plus 10 legacy registrations (109 total). 96 canonical tools are implemented and 3 remain unimplemented.
+Discovery now exposes 100 canonical tools plus 10 legacy registrations (110 total). 97 canonical tools are implemented and 3 remain unimplemented.
 
 ---
 
