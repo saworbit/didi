@@ -527,7 +527,13 @@ def main(argv: list[str] | None = None) -> int:
         record("report", "failed", pushed.stderr[-300:])
         return finish("push_failed")
     opened = run(["gh", "pr", "create", "--repo", args.repo, "--draft", "--base", "main",
-                  "--head", branch, "--title", f"Fix #{issue_number}: {issue['title'][:70]}",
+                  # No closing keyword in the title. GitHub reads them from the
+                  # merge commit, which carries the title, so "Fix #216: ..."
+                  # closed #216 on merge even though the body had been changed
+                  # by hand to say "Refs #216" precisely because that issue was
+                  # misfiled. Whether an issue closes has to be decided in one
+                  # place, and the body is the place a human can edit.
+                  "--head", branch, "--title", f"#{issue_number}: {issue['title'][:70]}",
                   "--body", f"Closes #{issue_number}\n\nOpened by a fix cycle. "
                             f"Red/green evidence: {RED_EVIDENCE_WORDING[evidence]}. "
                             f"Full output in `{output}`."], worktree)

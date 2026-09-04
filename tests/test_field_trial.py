@@ -534,6 +534,34 @@ class BaseRefTests(unittest.TestCase):
         self.assertNotEqual(CYCLE.BASE_REF, "main")
 
 
+class PullRequestTitleTests(unittest.TestCase):
+    """Only the body decides whether merging closes an issue.
+
+    GitHub reads closing keywords from the merge commit, and a merge commit
+    carries the pull request title. `Fix #216: ...` closed #216 on merge even
+    though the body had been edited by hand to `Refs #216`, because that issue
+    turned out to be misfiled and closing it was wrong. A title that can
+    override a deliberate decision in the body is a second, invisible control.
+    """
+
+    KEYWORDS = ("close", "closes", "closed", "fix", "fixes", "fixed",
+                "resolve", "resolves", "resolved")
+
+    def _title_template(self):
+        source = Path(CYCLE.__file__).read_text(encoding="utf-8")
+        line = next(l for l in source.splitlines() if '"--title"' in l)
+        return line
+
+    def test_the_title_carries_no_closing_keyword_before_the_issue_number(self):
+        title = self._title_template().lower()
+        for keyword in self.KEYWORDS:
+            self.assertNotIn(f'{keyword} #', title,
+                             f"the title template still closes issues via '{keyword} #'")
+
+    def test_the_title_still_names_the_issue(self):
+        self.assertIn("{issue_number}", self._title_template())
+
+
 class FixBriefTests(unittest.TestCase):
     """The rules the agent is given have to cover the rules it is graded on.
 
