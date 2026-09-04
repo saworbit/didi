@@ -211,6 +211,16 @@ def main(argv: list[str] | None = None) -> int:
     def record(name: str, status: str, detail: str = "") -> None:
         phases.append({"name": name, "status": status, "detail": detail})
 
+    def discard_worktree() -> None:
+        """Remove a worktree that holds nothing worth reading.
+
+        An unattended loop that leaves debris behind stops being unattended. A
+        worktree is only kept when there is a patch in it to inspect.
+        """
+        run(["git", "worktree", "remove", "--force", str(worktree)], REPOSITORY)
+        run(["git", "branch", "-D", branch], REPOSITORY)
+        run(["git", "worktree", "prune"], REPOSITORY)
+
     def finish(outcome: str) -> int:
         summary = cycle_summary(cycle_id, issue_number, phases, outcome, pull_request)
         (output / "cycle.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -268,14 +278,16 @@ def main(argv: list[str] | None = None) -> int:
                                      output / "fix" / "agent.log")
     except subprocess.TimeoutExpired:
         record("fix", "failed", f"agent exceeded {args.timeout_seconds}s")
-        return finish("fix_timeout")
+        return finish("fix_timeout")  # kept: a timed-out agent may have left work
     except OSError as error:
         # A cycle that cannot start its agent must say so, not raise through the
         # orchestration and leave a worktree behind with an exit code of zero.
         record("fix", "failed", f"could not launch the agent: {error}")
+        discard_worktree()
         return finish("agent_unavailable")
     if completed.returncode != 0:
         record("fix", "failed", agent_failure_detail(completed.stdout or "", completed.stderr or ""))
+        discard_worktree()
         return finish("fix_failed")
 
     patch = run(["git", "diff"], worktree).stdout
@@ -283,6 +295,7 @@ def main(argv: list[str] | None = None) -> int:
     (output / "fix" / "patch.diff").write_text(patch, encoding="utf-8")
     if not patch.strip():
         record("fix", "failed", "agent produced no changes")
+        discard_worktree()
         return finish("no_changes")
     record("fix", "ok", f"{len(patch.splitlines())} diff lines")
 
