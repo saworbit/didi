@@ -107,12 +107,12 @@ Each is separately testable, and two already exist.
 | :--- | :--- | :--- |
 | `seed_trial.py` | exists | Write the bare project, client config and baseline |
 | `coverage.py` | exists | Score a transcript against the seeded manifest |
-| `editor.py` | new | Start Godot, wait for a session descriptor, relaunch on death, stop cleanly |
+| `editor.py` | Loop B only | Start Godot, wait for a session descriptor, relaunch on death, stop cleanly |
 | `runner.py` | new | Launch one `claude -p` with budget, session id and MCP config; return the transcript path |
 | `gates.py` | new | G1, G2 and G3 as pure functions over paths and diffs |
 | `cycle.py` | new | Orchestrate Loop A's phases and write the artifacts |
 
-The editor supervisor is required rather than optional: trial 01 lost its editor four times. With #203 fixed a run should survive on one editor, but a loop that assumes it will is a loop that stalls overnight.
+The editor supervisor belongs to Loop B and is not built with Loop A. The fix loop's live verification calls `run_godot_integration.ps1`, which already starts and stops its own editor, so Loop A needs no supervisor at all. Loop B does: trial 01 lost its editor four times, and with #203 fixed a run should survive on one, but a loop that assumes it will is a loop that stalls overnight.
 
 ---
 

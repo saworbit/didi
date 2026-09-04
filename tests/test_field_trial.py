@@ -1,4 +1,6 @@
+import contextlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -161,6 +163,207 @@ class SeedTests(unittest.TestCase):
                 godot_exe=self.godot,
                 repository=REPOSITORY_ROOT,
             )
+
+
+GATES_PATH = REPOSITORY_ROOT / "tools" / "field-trial" / "gates.py"
+GATES_SPEC = importlib.util.spec_from_file_location("field_trial_gates", GATES_PATH)
+if GATES_SPEC is None or GATES_SPEC.loader is None:
+    raise ImportError(f"Cannot load gates from {GATES_PATH}")
+GATES = importlib.util.module_from_spec(GATES_SPEC)
+GATES_SPEC.loader.exec_module(GATES)
+
+
+def issue(number, created, *labels):
+    return {"number": number, "createdAt": created, "labels": [{"name": n} for n in labels]}
+
+
+class SelectIssueTests(unittest.TestCase):
+    def test_picks_the_oldest_agent_ready_issue(self):
+        issues = [
+            issue(20, "2026-09-03T10:00:00Z", "bug", "agent-ready"),
+            issue(11, "2026-09-01T10:00:00Z", "bug", "agent-ready"),
+            issue(15, "2026-09-02T10:00:00Z", "agent-ready"),
+        ]
+        self.assertEqual(GATES.select_issue(issues)["number"], 11)
+
+    def test_ignores_issues_without_the_label(self):
+        issues = [issue(20, "2026-09-01T10:00:00Z", "bug", "field-trial")]
+        self.assertIsNone(GATES.select_issue(issues))
+
+    def test_returns_none_for_an_empty_queue(self):
+        self.assertIsNone(GATES.select_issue([]))
+
+
+class DiffPolicyTests(unittest.TestCase):
+    def test_accepts_a_fix_that_adds_a_test(self):
+        diff = (
+            "diff --git a/src/gdextension/godot_bridge.cpp b/src/gdextension/godot_bridge.cpp\n"
+            "--- a/src/gdextension/godot_bridge.cpp\n"
+            "+++ b/src/gdextension/godot_bridge.cpp\n"
+            "@@\n-    return old;\n+    return observed;\n"
+            "diff --git a/tests/run_godot_integration.ps1 b/tests/run_godot_integration.ps1\n"
+            "@@\n+    Assert-True ($x -eq 0) \"new guard\"\n"
+        )
+        self.assertEqual(GATES.diff_policy_violations(diff), [])
+
+    def test_rejects_removing_an_existing_test_assertion(self):
+        diff = (
+            "diff --git a/tests/run_godot_integration.ps1 b/tests/run_godot_integration.ps1\n"
+            "@@\n-    Assert-True ($x -eq 0) \"existing guard\"\n+    # removed\n"
+        )
+        violations = GATES.diff_policy_violations(diff)
+        self.assertTrue(any("assertion" in v for v in violations), violations)
+
+    def test_rejects_touching_ci_workflows(self):
+        diff = "diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml\n@@\n+    - run: exit 0\n"
+        violations = GATES.diff_policy_violations(diff)
+        self.assertTrue(any("workflow" in v for v in violations), violations)
+
+    def test_rejects_paths_outside_the_allowed_roots(self):
+        diff = "diff --git a/CMakeLists.txt b/CMakeLists.txt\n@@\n+set(X 1)\n"
+        violations = GATES.diff_policy_violations(diff)
+        self.assertTrue(any("outside" in v for v in violations), violations)
+
+    def test_rejects_deleting_a_file(self):
+        diff = (
+            "diff --git a/tests/test_phase5.cpp b/tests/test_phase5.cpp\n"
+            "deleted file mode 100644\n--- a/tests/test_phase5.cpp\n+++ /dev/null\n"
+        )
+        violations = GATES.diff_policy_violations(diff)
+        self.assertTrue(any("delete" in v for v in violations), violations)
+
+    def test_reports_each_offending_file_once(self):
+        diff = (
+            "diff --git a/tests/t.py b/tests/t.py\n"
+            "@@\n-    assert a == 1\n-    assert b == 2\n"
+        )
+        self.assertEqual(len(GATES.diff_policy_violations(diff)), 1)
+
+
+class RedGreenTests(unittest.TestCase):
+    def test_red_then_green_passes(self):
+        self.assertEqual(GATES.evaluate_red_green(pre_fix_failed=True, post_fix_passed=True), "ok")
+
+    def test_a_check_that_never_failed_is_rejected(self):
+        self.assertEqual(
+            GATES.evaluate_red_green(pre_fix_failed=False, post_fix_passed=True), "not_red"
+        )
+
+    def test_a_check_still_failing_after_the_fix_is_rejected(self):
+        self.assertEqual(
+            GATES.evaluate_red_green(pre_fix_failed=True, post_fix_passed=False), "not_green"
+        )
+
+
+RUNNER_PATH = REPOSITORY_ROOT / "tools" / "field-trial" / "runner.py"
+RUNNER_SPEC = importlib.util.spec_from_file_location("field_trial_runner", RUNNER_PATH)
+if RUNNER_SPEC is None or RUNNER_SPEC.loader is None:
+    raise ImportError(f"Cannot load runner from {RUNNER_PATH}")
+RUNNER = importlib.util.module_from_spec(RUNNER_SPEC)
+RUNNER_SPEC.loader.exec_module(RUNNER)
+
+
+class BuildCommandTests(unittest.TestCase):
+    def command(self, **overrides):
+        arguments = {
+            "prompt": "fix it",
+            "session_id": "11111111-2222-3333-4444-555555555555",
+            "budget_usd": 5.0,
+        }
+        arguments.update(overrides)
+        return RUNNER.build_command(**arguments)
+
+    def test_runs_non_interactively_with_a_parseable_result(self):
+        command = self.command()
+        self.assertIn("--print", command)
+        self.assertEqual(command[command.index("--output-format") + 1], "json")
+
+    def test_passes_the_session_id_so_the_transcript_can_be_found(self):
+        command = self.command()
+        self.assertEqual(
+            command[command.index("--session-id") + 1],
+            "11111111-2222-3333-4444-555555555555",
+        )
+
+    def test_carries_a_hard_cost_ceiling(self):
+        command = self.command(budget_usd=2.5)
+        self.assertEqual(command[command.index("--max-budget-usd") + 1], "2.5")
+
+    def test_prompt_is_the_final_argument(self):
+        self.assertEqual(self.command(prompt="do the thing")[-1], "do the thing")
+
+    def test_mcp_config_is_strict_when_supplied(self):
+        command = self.command(mcp_config="D:/t/.mcp.json")
+        self.assertEqual(command[command.index("--mcp-config") + 1], "D:/t/.mcp.json")
+        self.assertIn("--strict-mcp-config", command)
+
+    def test_no_mcp_flags_when_none_is_supplied(self):
+        command = self.command()
+        self.assertNotIn("--mcp-config", command)
+        self.assertNotIn("--strict-mcp-config", command)
+
+    def test_refuses_a_budget_that_is_not_a_ceiling(self):
+        for bad in (0, -1):
+            with self.assertRaises(ValueError):
+                self.command(budget_usd=bad)
+
+    def test_refuses_an_empty_prompt(self):
+        with self.assertRaises(ValueError):
+            self.command(prompt="   ")
+
+
+class TranscriptPathTests(unittest.TestCase):
+    def test_derives_the_transcript_from_cwd_and_session_id(self):
+        path = RUNNER.transcript_path(
+            Path(r"D:\didi-trials\trial-07"),
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            projects_root=Path(r"C:\Users\User\.claude\projects"),
+        )
+        self.assertEqual(path.name, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl")
+        self.assertEqual(path.parent.name, "D--didi-trials-trial-07")
+
+
+CYCLE_PATH = REPOSITORY_ROOT / "tools" / "field-trial" / "cycle.py"
+CYCLE_SPEC = importlib.util.spec_from_file_location("field_trial_cycle", CYCLE_PATH)
+if CYCLE_SPEC is None or CYCLE_SPEC.loader is None:
+    raise ImportError(f"Cannot load cycle from {CYCLE_PATH}")
+CYCLE = importlib.util.module_from_spec(CYCLE_SPEC)
+CYCLE_SPEC.loader.exec_module(CYCLE)
+
+
+class CycleSummaryTests(unittest.TestCase):
+    def test_names_the_phase_that_failed(self):
+        summary = CYCLE.cycle_summary(
+            "cycle-1", 213,
+            [{"name": "fix", "status": "ok", "detail": ""},
+             {"name": "gate_red_green", "status": "failed", "detail": "not_red"}],
+            "not_red",
+        )
+        self.assertEqual(summary["failed_phase"], "gate_red_green")
+        self.assertEqual(summary["outcome"], "not_red")
+
+    def test_a_clean_cycle_names_no_failed_phase(self):
+        summary = CYCLE.cycle_summary(
+            "cycle-2", 215, [{"name": "fix", "status": "ok", "detail": ""}],
+            "pull_request_opened", pull_request="https://example.invalid/pr/1",
+        )
+        self.assertIsNone(summary["failed_phase"])
+        self.assertEqual(summary["pull_request"], "https://example.invalid/pr/1")
+
+    def test_rendered_summary_survives_a_pipe_in_a_detail(self):
+        rendered = CYCLE.render_summary(CYCLE.cycle_summary(
+            "cycle-3", 1, [{"name": "fix", "status": "failed", "detail": "a | b"}], "fix_failed"))
+        self.assertIn("a \\| b", rendered)
+
+    def test_dry_run_completes_without_launching_anything(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = CYCLE.main(["--dry-run", "--artifacts", tmp])
+            self.assertEqual(code, 1)
+            written = list(Path(tmp).glob("cycle-*/cycle.json"))
+            self.assertEqual(len(written), 1)
+            summary = json.loads(written[0].read_text(encoding="utf-8"))
+            self.assertEqual(summary["outcome"], "dry_run")
 
 
 if __name__ == "__main__":
