@@ -54,6 +54,34 @@ struct RaycastBatchRequest {
     int dimension() const { return rays.empty() ? 3 : rays.front().dimension(); }
 };
 
+// Sweeping a shape along a path to ask whether something fits through.
+//
+// A raycast answers whether a line is clear, which is not the same question as
+// whether a body is: a corridor a ray passes down cleanly can still be too
+// narrow for the character that has to walk it. This is the question a doorway
+// or a spawn clearance actually is.
+//
+// The three shapes are the ones Godot has in both dimensions. `sphere` is a
+// circle in 2D, named once rather than twice so a caller writes the same
+// request either way.
+enum class ClearanceShapeKind { box, sphere, capsule };
+
+struct ClearanceRequest {
+    ClearanceShapeKind shape{ClearanceShapeKind::sphere};
+    // box: half-open extents per axis, y unused in 2D beyond the second axis.
+    SpatialPoint size;
+    // sphere and capsule
+    double radius{0.5};
+    // capsule only
+    double height{2.0};
+    SpatialPoint from;
+    SpatialPoint to;
+    int64_t collision_mask{1};
+    int dimension() const { return from.dimension; }
+};
+
+constexpr double kClearanceExtentLimit = 100000.0;
+
 // Both validate against the approved Phase 7B contracts and return 400 for
 // anything that does not match exactly: unknown keys, mixed dimensions,
 // non-finite or out-of-range coordinates, a zero-length ray, a mask outside
@@ -62,6 +90,7 @@ Result<RaycastRequest> parseRaycastRequest(const json& params);
 // Errors name the index of the ray that failed, because a batch rejected
 // without saying which entry is wrong is a batch the caller has to bisect.
 Result<RaycastBatchRequest> parseRaycastBatchRequest(const json& params);
+Result<ClearanceRequest> parseClearanceRequest(const json& params);
 Result<NavPathRequest> parseNavPathRequest(const json& params);
 
 } // namespace runtime

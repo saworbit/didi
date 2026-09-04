@@ -483,6 +483,17 @@ try {
         (Tool-Request 2280 "spatial_query_raycast_batch" @{ rays = @(
             @{ from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 4; y = 0; z = 0 } },
             @{ from = @{ x = 0; y = 0 }; to = @{ x = 4; y = 0 } }) }),
+        # Clearance against the same fixture body the rays above hit at x=1.5.
+        # A wide box cannot reach past it; a sweep along +y, where the ray
+        # missed, is clear.
+        (Tool-Request 2282 "spatial_query_clearance" @{ shape = @{ kind = "box"; size = @{ x = 0.5; y = 0.5; z = 0.5 } };
+            from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 4; y = 0; z = 0 } }),
+        (Tool-Request 2283 "spatial_query_clearance" @{ shape = @{ kind = "sphere"; radius = 0.25 };
+            from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 0; y = 4; z = 0 } }),
+        (Tool-Request 2284 "spatial_query_clearance" @{ shape = @{ kind = "capsule"; radius = 0.2; height = 1.0 };
+            from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 4; y = 0; z = 0 }; collision_mask = 2 }),
+        (Tool-Request 2285 "spatial_query_clearance" @{ shape = @{ kind = "sphere"; radius = 0 };
+            from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 1; y = 0; z = 0 } }),
         (Tool-Request 2281 "spatial_query_raycast_batch" @{ rays = @(
             @{ from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 4; y = 0; z = 0 } },
             @{ from = @{ x = 1; y = 1; z = 1 }; to = @{ x = 1; y = 1; z = 1 } }) }),
@@ -725,6 +736,24 @@ try {
     Assert-True $runtimeById[2280].result.isError "A raycast batch mixed 2D and 3D rays, which two space states cannot answer together."
     Assert-True $runtimeById[2281].result.isError "A raycast batch accepted a zero-length segment the single call refuses."
     Assert-True ($runtimeById[2281].result.content[0].text -match "rays\[1\]") "A rejected batch did not name which ray was wrong."
+
+    # A body is not a line. The box is stopped by the same fixture the ray hit,
+    # short of the full sweep.
+    $blocked = Tool-Payload $runtimeById[2282]
+    Assert-True ($blocked.execution_mode -eq "live" -and $blocked.dimension -eq 3) "Clearance sweep did not run live in 3D."
+    Assert-True ($blocked.clear -eq $false) "A box swept into the fixture body reported a clear path."
+    Assert-True ($blocked.safe_fraction -lt 1.0 -and $blocked.safe_fraction -ge 0.0) "Clearance safe_fraction $($blocked.safe_fraction) is not a fraction short of the full sweep."
+    Assert-True ($blocked.safe_position.x -lt 1.5) "The clearance stop point is past the body that stopped it ($($blocked.safe_position.x))."
+    Assert-True ($blocked.collide_with_areas -eq $false) "Clearance did not report that it ignores areas."
+
+    $open = Tool-Payload $runtimeById[2283]
+    Assert-True ($open.clear -eq $true -and $open.safe_fraction -ge 1.0) "A sweep along the axis the ray missed was not clear."
+    Assert-True ([Math]::Abs($open.safe_position.y - 4) -lt 0.01) "A clear sweep did not reach its destination ($($open.safe_position.y))."
+
+    $maskedSweep = Tool-Payload $runtimeById[2284]
+    Assert-True ($maskedSweep.clear -eq $true) "A collision mask that excludes layer 1 still blocked the sweep."
+
+    Assert-True $runtimeById[2285].result.isError "spatial_query_clearance accepted a shape with no extent."
 
     $path3d = Tool-Payload $runtimeById[405]
     Assert-True ($path3d.execution_mode -eq "live" -and $path3d.dimension -eq 3 -and $path3d.reachable -eq $true) "3D path query found no path across the fixture region."

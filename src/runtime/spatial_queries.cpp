@@ -1,6 +1,7 @@
 #include "didi/runtime/spatial_queries.hpp"
 
 #include <cmath>
+#include <string>
 #include <initializer_list>
 #include <limits>
 
@@ -147,6 +148,96 @@ Result<RaycastBatchRequest> parseRaycastBatchRequest(const json& params) {
                 "D; one batch is answered by one space state");
         }
         request.rays.push_back(std::move(ray.value()));
+    }
+    return request;
+}
+
+Result<ClearanceRequest> parseClearanceRequest(const json& params) {
+    if (!params.is_object()) return Error::invalidArgument("Clearance params must be an object");
+    if (!onlyKeys(params, {"shape", "from", "to", "collision_mask"})) {
+        return Error::invalidArgument("Clearance request contains an unknown property");
+    }
+    ClearanceRequest request;
+    auto from = parsePoint(params, "from");
+    if (from.isErr()) return from.error();
+    auto to = parsePoint(params, "to");
+    if (to.isErr()) return to.error();
+    request.from = from.value();
+    request.to = to.value();
+    if (request.from.dimension != request.to.dimension) {
+        return Error::invalidArgument("from and to must share one dimension");
+    }
+    // A zero-length sweep is allowed here, unlike a ray: asking whether a shape
+    // fits where it stands is a real question, and it is the one a spawn point
+    // asks.
+    auto mask = layerField(params, "collision_mask");
+    if (mask.isErr()) return mask.error();
+    request.collision_mask = mask.value();
+
+    if (!params.contains("shape") || !params["shape"].is_object()) {
+        return Error::invalidArgument("shape must be an object");
+    }
+    const auto& shape = params["shape"];
+    if (!shape.contains("kind") || !shape["kind"].is_string()) {
+        return Error::invalidArgument("shape.kind must be box, sphere, or capsule");
+    }
+    const auto kind = shape["kind"].get<std::string>();
+    const auto extent = [&](const char* field) -> Result<double> {
+        if (!shape.contains(field)) {
+            return Error::invalidArgument(std::string("shape.") + field + " is required for a " +
+                                          kind + " shape");
+        }
+        const auto& value = shape[field];
+        if (!value.is_number()) {
+            return Error::invalidArgument(std::string("shape.") + field + " must be a number");
+        }
+        const double number = value.get<double>();
+        if (!std::isfinite(number) || number <= 0.0 || number > kClearanceExtentLimit) {
+            return Error::invalidArgument(std::string("shape.") + field +
+                                          " must be finite and greater than 0 and at most 100000");
+        }
+        return number;
+    };
+
+    if (kind == "box") {
+        if (!onlyKeys(shape, {"kind", "size"})) {
+            return Error::invalidArgument("a box shape takes kind and size only");
+        }
+        auto size = parsePoint(shape, "size");
+        if (size.isErr()) return size.error();
+        if (size.value().dimension != request.from.dimension) {
+            return Error::invalidArgument("shape.size must have the same dimension as from and to");
+        }
+        // A zero or negative extent is a box that is not there, and Godot would
+        // answer about it rather than refuse.
+        const bool positive = size.value().x > 0.0 && size.value().y > 0.0 &&
+                              (size.value().dimension == 2 || size.value().z > 0.0);
+        if (!positive) {
+            return Error::invalidArgument("every component of shape.size must be greater than 0");
+        }
+        request.shape = ClearanceShapeKind::box;
+        request.size = size.value();
+    } else if (kind == "sphere") {
+        if (!onlyKeys(shape, {"kind", "radius"})) {
+            return Error::invalidArgument("a sphere shape takes kind and radius only");
+        }
+        auto radius = extent("radius");
+        if (radius.isErr()) return radius.error();
+        request.shape = ClearanceShapeKind::sphere;
+        request.radius = radius.value();
+    } else if (kind == "capsule") {
+        if (!onlyKeys(shape, {"kind", "radius", "height"})) {
+            return Error::invalidArgument("a capsule shape takes kind, radius and height only");
+        }
+        auto radius = extent("radius");
+        if (radius.isErr()) return radius.error();
+        auto height = extent("height");
+        if (height.isErr()) return height.error();
+        request.shape = ClearanceShapeKind::capsule;
+        request.radius = radius.value();
+        request.height = height.value();
+    } else {
+        return Error::invalidArgument("shape.kind must be box, sphere, or capsule");
     }
     return request;
 }
