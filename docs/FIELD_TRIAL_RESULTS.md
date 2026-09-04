@@ -54,6 +54,57 @@ Three implementation routes were abandoned to direct file authoring, each record
 
 ---
 
+## Trial 02, 2026-09-04
+
+**Seed:** commit `2292bae`, Godot 4.7.2 stable, Windows. Identical briefing and identical bare seed to trial 01. The briefing was deliberately left unchanged so the two runs stay comparable.
+
+**Outcome:** all six required features delivered again. Both endings reached live and driven entirely through `runtime_inject_input`. Logs clean.
+
+### Coverage against trial 01
+
+| Metric | Trial 01 | Trial 02 |
+| :--- | ---: | ---: |
+| Distinct implemented tools called | 36 | 37 |
+| Coverage | 39.6% | 40.7% |
+| Total invocations | 156 | 313 |
+| Ledger entries | 18 | 23 |
+| Entries verdicted `failed` | 6 | 9 |
+| Issues filed | 9 | 6 |
+
+Newly reached: `scene_add_to_group`, `scene_get_property`, `scene_remove_node`. No longer reached: `project_analyze_impact`, `scene_close`.
+
+### What the comparison says
+
+**Breadth held, depth doubled.** One net tool, and twice the calls. The surface an agent naturally reaches for is stable across runs and is about 40% of what is implemented. That number moving would be more surprising than it holding.
+
+**Removing the crash did not reduce friction, it revealed more of it.** The ledger halved in length, because trial 01's was dominated by four editor deaths and a full arena rebuild. Friction *events* rose from 18 to 23 and failures from 6 to 9. With the crash gone the run got further and met more walls, which is the expected and desirable shape.
+
+**52 implemented tools were called in neither run.** Across two independent runs of the same task, that set is now evidence rather than an accident. It includes `editor_undo` and `editor_redo`, never called once, though UndoRedo safety is the headline differentiator; all four `signal_*` tools; every `blackboard_*` tool except `blackboard_write`; and every project-level list/get tool.
+
+**The read-back instruction still did not land.** `LLM_INSTRUCTIONS.md` asks for a read-back after each write. `project_list_input_actions`, `project_list_autoloads` and `project_get_setting` were called zero times in both runs. This recurred on a clean run with the briefing untouched, so it is a property of the guidance rather than of one tester.
+
+### Issues filed
+
+Six new, #213 through #218, all labelled `field-trial`. Eight further findings were recognised as duplicates of #204 to #211 and recorded in the ledger instead of refiled, which is the behaviour the protocol asks for.
+
+### The dominant wall moved
+
+Trial 01's biggest cost was a crash. Trial 02's is the **Phase 1 scalar property contract**: `position`, `shape`, `tile_set`, `color`, `polygon` and `libraries` all had to be patched into `.tscn` text directly. Almost every fallback in the run traces to it.
+
+This corrects a prioritisation made after trial 01, which named `script_create` (#208) as the next most valuable addition. Two runs of evidence say the property contract (#210) is the larger lever. Authoring a script by hand is one fallback at the start; the scalar contract forces a fallback at every point where a node needs a position, a shape or a resource reference.
+
+### Mutations that report success without succeeding
+
+Three of the six new issues are one shape: a tool returns success while the project did not change as described. #213 (`scene_set_property` on a discarded `anchors_preset` write), #215 (`script_patch_method` returning clean diagnostics for a file it had just broken), and #217 (`project_set_autoload` persisting without the editor registering the singleton).
+
+This is the most serious class of defect the trials have produced, and worse than a crash. A crash is loud, in-band and recoverable. A false success silently corrupts the agent's model of the project, and every later decision is made against a world that does not exist. The tester put it well: an agent has no eyes, so the response is the entire world model.
+
+The pattern to fix it already exists in-house rather than needing invention. `viewport_set_camera_transform` uses UndoRedo and verified post-state; `anim_play_track` rereads state after dispatching and is explicit that `dispatched` is not completion; project settings writes roll back in memory when persistence fails. Newer tools verify themselves and Phase 1 tools do not.
+
+The cheapest correct form is for a mutation to **return the observed post-state rather than assert equality**. Returning what was read back is less work than a type-aware comparison across the scalar contract, it cannot itself be wrong in the way an equality check can, and it gives the caller the evidence to decide. For batch mutations such as `tilemap_set_cells`, verify the aggregate rather than each record, or the verification costs more than the write.
+
+---
+
 ## When to use Didi, and when not
 
 Drawn from what the run actually did rather than from the tool list. This belongs in agent-facing guidance.
