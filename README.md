@@ -1,3 +1,9 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/png/readme-banner.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/brand/png/readme-banner-light.png">
+  <img alt="Didi — godot-mcp-native" src="docs/brand/png/readme-banner.png" width="100%">
+</picture>
+
 # Didi (godot-mcp-native) 🎭
 
 [![Didi Fast & Efficient CI](https://github.com/saworbit/didi/actions/workflows/ci.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/ci.yml)
@@ -37,6 +43,7 @@ The current documented release is **1.5.0**.
 | 🤝 [**Contributing**](CONTRIBUTING.md) | **Contributors** | Build, test, and review expectations for a change you want merged. |
 | 💚 [**Code of Conduct**](CODE_OF_CONDUCT.md) | **Everyone** | How people here are expected to treat each other, and how to report a problem. |
 | 📦 [**Third Party Code**](THIRD_PARTY.md) | **Maintainers / Security** | The vendored sources no package manager resolves, their versions, and what Dependabot does not cover. |
+| 🎨 [**Brand Identity**](docs/brand/BRAND.md) | **Contributors / Maintainers** | The mark, wordmark, lockups, palette, and the assets they generate from. |
 
 ---
 
