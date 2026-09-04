@@ -5978,11 +5978,19 @@ json GodotBridge::execute(const std::string& method, const json& params,
         return liveResult(hierarchy_result);
     }
 
-    if (method == "shader.listUniforms") {
-        if (!hasOnlyKeys(params, {"target_node", "property_name"}) ||
-            !params.contains("target_node") || !params["target_node"].is_string() ||
+    if (method == "shader.listUniforms" || method == "shader.setUniform") {
+        // One path to the material for both, so a slot one of them accepts is
+        // never a slot the other refuses.
+        const bool setting = method == "shader.setUniform";
+        const bool shape_ok = setting
+            ? (hasOnlyKeys(params, {"target_node", "property_name", "uniform_name", "value"}) &&
+               params.contains("uniform_name") && params["uniform_name"].is_string() &&
+               params.contains("value"))
+            : hasOnlyKeys(params, {"target_node", "property_name"});
+        if (!shape_ok || !params.contains("target_node") || !params["target_node"].is_string() ||
             !params.contains("property_name") || !params["property_name"].is_string()) {
-            return errorJson(400, "invalid_shader_list_uniforms_request");
+            return errorJson(400, setting ? "invalid_shader_set_uniform_request"
+                                          : "invalid_shader_list_uniforms_request");
         }
         for (const auto& bind : {
                  std::make_tuple("ShaderMaterial", "get_shader", 2078273437LL),
@@ -5992,6 +6000,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) {
                 return errorJson(501, "required_bind_unavailable");
             }
+        }
+        if (setting && preflightUndoManagerBindings().isErr()) {
+            return errorJson(501, "required_bind_unavailable");
         }
         auto root = editedSceneRoot(editor);
         if (root.isErr()) return errorJson(root.error().code, root.error().message);
@@ -6072,6 +6083,119 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (size_value.isErr()) return errorJson(500, size_value.error().message);
         auto count = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
         if (count.isErr()) return errorJson(500, count.error().message);
+
+        if (setting) {
+            const auto requested_name = params["uniform_name"].get<std::string>();
+            // The shader list decides whether this uniform exists.
+            // set_shader_parameter accepts any name and does nothing with one
+            // the shader never declared, so a typo would otherwise come back as
+            // a write that worked.
+            auto name_key = makeString("name");
+            auto type_key = makeString("type");
+            auto class_key = makeString("class_name");
+            if (name_key.isErr() || type_key.isErr() || class_key.isErr()) {
+                return errorJson(500, "Failed to build uniform keys");
+            }
+            bool declared = false;
+            int64_t declared_type = 0;
+            std::string declared_class;
+            for (int64_t index = 0; index < count.value() && !declared; ++index) {
+                auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+                if (index_value.isErr()) return errorJson(500, index_value.error().message);
+                auto entry = callVariant(uniforms.value(), "get", {&index_value.value()});
+                if (entry.isErr()) return errorJson(500, entry.error().message);
+                auto name_value = callVariant(entry.value(), "get", {&name_key.value()});
+                if (name_value.isErr()) return errorJson(500, name_value.error().message);
+                const auto name_type = GodotApi::instance().variant_get_type(name_value.value().ptr());
+                if (name_type != GDEXTENSION_VARIANT_TYPE_STRING &&
+                    name_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+                    continue;
+                }
+                auto name = stringFromVariant(name_value.value(), name_type);
+                if (name.isErr()) return errorJson(500, name.error().message);
+                if (name.value() != requested_name) continue;
+                declared = true;
+                auto type_value = callVariant(entry.value(), "get", {&type_key.value()});
+                if (type_value.isOk()) {
+                    auto value = scalarFromVariant<int64_t>(type_value.value(),
+                                                            GDEXTENSION_VARIANT_TYPE_INT);
+                    if (value.isOk()) declared_type = value.value();
+                }
+                auto class_value = callVariant(entry.value(), "get", {&class_key.value()});
+                if (class_value.isOk()) {
+                    const auto class_type =
+                        GodotApi::instance().variant_get_type(class_value.value().ptr());
+                    if (class_type == GDEXTENSION_VARIANT_TYPE_STRING ||
+                        class_type == GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+                        auto text = stringFromVariant(class_value.value(), class_type);
+                        if (text.isOk()) declared_class = text.value();
+                    }
+                }
+            }
+            if (!declared) {
+                return errorJson(404, "The shader declares no uniform named " + requested_name);
+            }
+
+            // The same contract scene_set_property applies, so a caller learns
+            // one set of JSON spellings rather than two.
+            const auto uniform_type = static_cast<GDExtensionVariantType>(declared_type);
+            auto compatible = validateJsonForPropertyType(requested_name, params["value"], uniform_type);
+            if (compatible.isErr()) return errorJson(compatible.error().code, compatible.error().message);
+            auto new_value = uniform_type == GDEXTENSION_VARIANT_TYPE_OBJECT
+                ? makeResourceForProperty(requested_name, params["value"], declared_class)
+                : makeJsonVariantForProperty(params["value"], uniform_type);
+            if (new_value.isErr()) return errorJson(new_value.error().code, new_value.error().message);
+
+            auto uniform_name = makeStringName(requested_name);
+            if (uniform_name.isErr()) return errorJson(500, uniform_name.error().message);
+            auto old_value = callObject(material.value(), "ShaderMaterial", "get_shader_parameter",
+                                        2760726917LL, {&uniform_name.value()});
+            if (old_value.isErr()) return errorJson(500, old_value.error().message);
+
+            // Undo goes through the shader_parameter/<name> property on the
+            // material, which is the one the scene file writes and the one the
+            // inspector edits, so undoing this is the undo a person expects.
+            auto stored_name = makeStringName("shader_parameter/" + requested_name);
+            if (stored_name.isErr()) return errorJson(500, stored_name.error().message);
+            auto manager = undoManager(editor);
+            if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+            auto material_value = makeObject(material.value());
+            if (material_value.isErr()) return errorJson(500, material_value.error().message);
+            auto action = createAction(manager.value(), "Didi: set shader uniform " + requested_name,
+                                       material.value());
+            if (action.isErr()) return errorJson(500, action.error().message);
+            auto do_property = callObject(manager.value(), "EditorUndoRedoManager", "add_do_property",
+                                          1017172818LL,
+                                          {&material_value.value(), &stored_name.value(),
+                                           &new_value.value()});
+            auto undo_property = callObject(manager.value(), "EditorUndoRedoManager", "add_undo_property",
+                                            1017172818LL,
+                                            {&material_value.value(), &stored_name.value(),
+                                             &old_value.value()});
+            if (do_property.isErr()) return errorJson(500, do_property.error().message);
+            if (undo_property.isErr()) return errorJson(500, undo_property.error().message);
+            auto committed = commitAction(manager.value());
+            if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+
+            // Report what it now holds and not what was asked for, the same way
+            // scene_set_property does and for the same reason.
+            auto observed = callObject(material.value(), "ShaderMaterial", "get_shader_parameter",
+                                       2760726917LL, {&uniform_name.value()});
+            if (observed.isErr()) return errorJson(500, observed.error().message);
+            auto observed_json = variantToJson(observed.value(), 0, true);
+            auto old_json = variantToJson(old_value.value(), 0, true);
+            json observed_payload = observed_json.isOk() ? observed_json.value() : json(nullptr);
+            return liveResult({{"status", "success"},
+                               {"target_node", target_path},
+                               {"property_name", property},
+                               {"uniform_name", requested_name},
+                               {"type", godotVariantTypeName(static_cast<int>(declared_type))},
+                               {"value", observed_payload},
+                               {"requested_value", params["value"]},
+                               {"old_value", old_json.isOk() ? old_json.value() : json(nullptr)},
+                               {"applied", jsonScalarsEquivalent(observed_payload, params["value"])},
+                               {"undo_redo_registered", true}});
+        }
 
         constexpr int64_t kMaxUniforms = 256;
         const int64_t reported = std::min<int64_t>(count.value(), kMaxUniforms);

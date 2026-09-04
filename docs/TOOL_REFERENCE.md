@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 100 canonical tool names plus 10 legacy names (110 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 101 canonical tool names plus 10 legacy names (111 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `97/100`
+**Canonical implementation:** `98/101`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 97/100 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 98/101 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -819,6 +819,20 @@ All Phase 5 subprocess tools launch an executable with an argv array, never thro
 ### `csharp_check_build` — Offline
 
 Runs `dotnet build` with `configuration` (`Debug` or `Release`, default `Debug`) and `timeout_seconds` (`1..300`, default `60`). Optional `project_file` must be a normalized project-contained `.csproj`; when omitted, exactly one project-root `.csproj` must exist. The result includes exit/timeout/output metadata and bounded structured MSBuild diagnostics. This is a real build and may update normal `bin`/`obj` outputs.
+
+### `shader_set_uniform` — Live
+
+Sets one uniform on a `ShaderMaterial` held by a node in the edited scene.
+
+- `target_node`, `property_name` (`string`, required): the same pair `shader_list_uniforms` takes, resolved by the same rules.
+- `uniform_name` (`string`, required): must be a uniform the shader declares.
+- `value` (required): the same JSON spelling `scene_set_property` takes for that Godot type, including `{x,y,z}` for a vector, `{r,g,b}` or `"#rrggbb"` for a colour, and a `res://` path for a texture or other resource uniform, loaded and refused if it is not the class the uniform declares.
+
+A uniform name the shader does not declare is refused. `set_shader_parameter` accepts any name and does nothing with one it does not know, so a typo would otherwise be reported as a write that worked.
+
+The change is registered on the editor UndoRedo stack against the material's own `shader_parameter/<name>` property, which is the property the scene file writes and the inspector edits, so an undo here is the undo a person expects. The result reports what the uniform holds afterwards rather than the value it was handed, with `applied` saying whether the two match.
+
+The write reaches the loaded material. A material embedded in the scene is saved with the scene; an external `.tres` is not saved by this surface, so the change lives in the running editor until it is saved there. A shared material is shared: setting a uniform on it changes every node using it.
 
 ### `shader_list_uniforms` — Live
 

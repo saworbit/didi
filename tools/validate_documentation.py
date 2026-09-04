@@ -83,7 +83,7 @@ FUTURE_PHASE_COMPLETION_FIELDS = (
 # manifest IS supplied the built binary is authoritative and this constant is
 # checked against it, so a stale fallback fails the build jobs rather than
 # silently disagreeing with the software it stands in for.
-CANONICAL_IMPLEMENTATION_COUNTS = (100, 97, 3)
+CANONICAL_IMPLEMENTATION_COUNTS = (101, 98, 3)
 
 # How many names Phase 7 reserved in total. Distinct from the unimplemented
 # count above: they were equal only while no Phase 7 tool had been delivered,
@@ -148,7 +148,9 @@ NUMBER_WORDS = {
     95: "ninety-five",
     96: "ninety-six",
     97: "ninety-seven",
+    98: "ninety-eight",
     100: "one hundred",
+    101: "one hundred and one",
 }
 # Reverse lookup, so a document may spell a count in words without the
 # validator needing a branch for each individual number.

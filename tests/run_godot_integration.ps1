@@ -935,6 +935,16 @@ try {
         (Tool-Request 17 "editor_undo" @{}),
         (Tool-Request 18 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 3 }),
         (Tool-Request 19 "viewport_capture_frame" @{ camera_identifier = "active_editor_view" }),
+        # Writing a uniform, placed after the last undo and redo above so the
+        # undo below can only be this one. The undo is the assertion that
+        # matters: the flag saying a change was registered is not evidence that
+        # it was.
+        (Tool-Request 2290 "shader_set_uniform" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override"; uniform_name = "strength"; value = 0.25 }),
+        (Tool-Request 2291 "shader_list_uniforms" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override" }),
+        (Tool-Request 2292 "editor_undo" @{}),
+        (Tool-Request 2293 "shader_list_uniforms" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override" }),
+        (Tool-Request 2294 "shader_set_uniform" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override"; uniform_name = "no_such_uniform"; value = 1 }),
+        (Tool-Request 2295 "shader_set_uniform" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override"; uniform_name = "strength"; value = "0.25" }),
         # Signals are delivered, so this now exercises the real cycle: list, connect,
         # observe the connection, disconnect, observe it gone. The target method is a
         # harmless zero-arg Node method -- queue_free here would free a node the rest
@@ -1549,6 +1559,25 @@ try {
     Assert-True ($offset[0].type -eq "Vector3") "The offset uniform did not carry its declared Godot type ($($offset[0].type))."
     Assert-True ([Math]::Abs($offset[0].value.x - 1) -lt 0.01 -and [Math]::Abs($offset[0].value.z - 3) -lt 0.01) "A uniform on the shader default did not read back that default."
     Assert-True ($uniforms.truncated -eq $false) "The uniform list reported truncation it did not do."
+
+    $written = Tool-Payload $byId[2290]
+    Assert-True ($written.applied -eq $true) "A shader uniform write was not applied."
+    Assert-True ([Math]::Abs($written.value - 0.25) -lt 0.01) "A shader uniform write did not read back the value it set ($($written.value))."
+    Assert-True ([Math]::Abs($written.old_value - 0.75) -lt 0.01) "A shader uniform write did not report the value it replaced."
+    Assert-True ($written.undo_redo_registered -eq $true) "A shader uniform write did not claim an undo entry."
+    $afterWrite = @((Tool-Payload $byId[2291]).uniforms | Where-Object { $_.name -eq "strength" })
+    Assert-True ([Math]::Abs($afterWrite[0].value - 0.25) -lt 0.01) "A shader uniform write did not survive a separate read."
+    # And the claim is worth what the undo proves it is worth.
+    Assert-True (-not $byId[2292].result.isError) "The shader uniform write could not be undone."
+    $afterUndo = @((Tool-Payload $byId[2293]).uniforms | Where-Object { $_.name -eq "strength" })
+    Assert-True ([Math]::Abs($afterUndo[0].value - 0.75) -lt 0.01) "Undo did not restore the shader uniform ($($afterUndo[0].value))."
+
+    # set_shader_parameter accepts any name and does nothing with one the shader
+    # never declared, so an unknown name has to be refused here or it reads as a
+    # write that worked.
+    Assert-True $byId[2294].result.isError "A uniform the shader does not declare was accepted."
+    Assert-True $byId[2295].result.isError "A JSON string was accepted for a float uniform."
+    Assert-True ($byId[2295].result.content[0].text -match "float") "The uniform type mismatch does not name the type it wanted."
 
     # An empty slot is not a shader with no uniforms, and neither is a missing
     # property or a missing node.
