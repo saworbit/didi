@@ -251,6 +251,11 @@ def main(argv: list[str] | None = None) -> int:
     except subprocess.TimeoutExpired:
         record("fix", "failed", f"agent exceeded {args.timeout_seconds}s")
         return finish("fix_timeout")
+    except OSError as error:
+        # A cycle that cannot start its agent must say so, not raise through the
+        # orchestration and leave a worktree behind with an exit code of zero.
+        record("fix", "failed", f"could not launch the agent: {error}")
+        return finish("agent_unavailable")
     if completed.returncode != 0:
         record("fix", "failed", (completed.stderr or "")[-300:])
         return finish("fix_failed")

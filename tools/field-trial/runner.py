@@ -8,6 +8,7 @@ blast radius are unit-tested rather than discovered in a runaway run.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -76,6 +77,20 @@ def transcript_path(
     return root / slug / f"{session_id}.jsonl"
 
 
+def resolve_executable(name: str = CLAUDE) -> str:
+    """The real path to the client, because a bare name does not launch on Windows.
+
+    npm installs the CLI as `claude.cmd`, and CreateProcess will not resolve a
+    bare `claude` to it. Without this the loop dies before its first agent turn.
+    """
+    found = shutil.which(name)
+    if not found:
+        raise FileNotFoundError(
+            f"{name} is not on PATH. A cycle cannot run without the client that hosts the agent."
+        )
+    return found
+
+
 def run_agent(
     command: list[str],
     working_directory: Path,
@@ -87,8 +102,9 @@ def run_agent(
     A timeout is not the cost ceiling; `--max-budget-usd` is. This is the guard
     against a run that has stopped spending and stopped finishing.
     """
+    resolved = [resolve_executable(command[0]), *command[1:]]
     completed = subprocess.run(
-        command,
+        resolved,
         cwd=str(working_directory),
         capture_output=True,
         text=True,

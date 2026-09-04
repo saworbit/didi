@@ -312,6 +312,17 @@ class BuildCommandTests(unittest.TestCase):
             self.command(prompt="   ")
 
 
+class ResolveExecutableTests(unittest.TestCase):
+    def test_resolves_the_client_to_a_real_path(self):
+        # npm installs it as claude.cmd on Windows; a bare name never launches.
+        resolved = RUNNER.resolve_executable("python")
+        self.assertTrue(Path(resolved).exists(), resolved)
+
+    def test_says_so_plainly_when_the_client_is_absent(self):
+        with self.assertRaises(FileNotFoundError):
+            RUNNER.resolve_executable("definitely-not-installed-anywhere-xyz")
+
+
 class TranscriptPathTests(unittest.TestCase):
     def test_derives_the_transcript_from_cwd_and_session_id(self):
         path = RUNNER.transcript_path(
