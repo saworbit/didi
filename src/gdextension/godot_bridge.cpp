@@ -2356,6 +2356,8 @@ Result<VariantValue> makeUprightTransform(const runtime::SpatialPoint& origin) {
 
 // The shape the caller described, built through ClassDB the same way every
 // other object in this file is.
+constexpr int64_t kSetFloatHash = 373806689LL;
+
 Result<GDExtensionObjectPtr> makeClearanceShape(const runtime::ClearanceRequest& request) {
     const int dimension = request.dimension();
     const char* class_name = nullptr;
@@ -2378,7 +2380,7 @@ Result<GDExtensionObjectPtr> makeClearanceShape(const runtime::ClearanceRequest&
     const auto set_number = [&](const char* method, double value) -> Result<void> {
         auto argument = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, value);
         if (argument.isErr()) return argument.error();
-        auto called = callObject(shape, class_name, method, 373806689LL, {&argument.value()});
+        auto called = callObject(shape, class_name, method, kSetFloatHash, {&argument.value()});
         return called.isOk() ? Result<void>::ok() : Result<void>(called.error());
     };
 
@@ -2405,6 +2407,11 @@ Result<GDExtensionObjectPtr> makeClearanceShape(const runtime::ClearanceRequest&
     return shape;
 }
 
+// Named so a hash appears once and carries the same type wherever it is used.
+constexpr int64_t kSetShapeHash = 968641751LL;
+constexpr int64_t kSetCollisionMaskHash = 1286410249LL;
+constexpr int64_t kSetBoolHash = 2586408642LL;
+
 json physicsClearance(const json& params) {
     auto parsed = runtime::parseClearanceRequest(params);
     if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
@@ -2418,13 +2425,18 @@ json physicsClearance(const json& params) {
     const int64_t transform_hash = dimension == 2 ? 2761652528LL : 2952846383LL;
     const int64_t motion_hash = dimension == 2 ? 743155724LL : 3460891852LL;
 
-    for (const auto& bind : {std::make_tuple(state_class, "cast_motion", cast_hash),
-                             std::make_tuple(params_class, "set_shape", 968641751LL),
-                             std::make_tuple(params_class, "set_transform", transform_hash),
-                             std::make_tuple(params_class, "set_motion", motion_hash),
-                             std::make_tuple(params_class, "set_collision_mask", 1286410249LL),
-                             std::make_tuple(params_class, "set_collide_with_bodies", 2586408642LL),
-                             std::make_tuple(params_class, "set_collide_with_areas", 2586408642LL)}) {
+    // Spelled out rather than deduced. int64_t is long on Linux and long long on
+    // Windows, so a list mixing a hash variable with an LL literal has no common
+    // type on gcc and only fails there.
+    using ShapeBind = std::tuple<const char*, const char*, int64_t>;
+    for (const ShapeBind& bind : {
+             ShapeBind{state_class, "cast_motion", cast_hash},
+             ShapeBind{params_class, "set_shape", kSetShapeHash},
+             ShapeBind{params_class, "set_transform", transform_hash},
+             ShapeBind{params_class, "set_motion", motion_hash},
+             ShapeBind{params_class, "set_collision_mask", kSetCollisionMaskHash},
+             ShapeBind{params_class, "set_collide_with_bodies", kSetBoolHash},
+             ShapeBind{params_class, "set_collide_with_areas", kSetBoolHash}}) {
         auto required = requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind));
         if (required.isErr()) return errorJson(501, required.error().message);
     }
@@ -2454,10 +2466,12 @@ json physicsClearance(const json& params) {
     auto mask = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, request.collision_mask);
     if (mask.isErr()) return errorJson(500, mask.error().message);
 
-    for (const auto& call : {std::make_tuple("set_shape", 968641751LL, &shape_value.value()),
-                             std::make_tuple("set_transform", transform_hash, &transform.value()),
-                             std::make_tuple("set_motion", motion_hash, &motion.value()),
-                             std::make_tuple("set_collision_mask", 1286410249LL, &mask.value())}) {
+    using ShapeSetter = std::tuple<const char*, int64_t, const VariantValue*>;
+    for (const ShapeSetter& call : {
+             ShapeSetter{"set_shape", kSetShapeHash, &shape_value.value()},
+             ShapeSetter{"set_transform", transform_hash, &transform.value()},
+             ShapeSetter{"set_motion", motion_hash, &motion.value()},
+             ShapeSetter{"set_collision_mask", kSetCollisionMaskHash, &mask.value()}}) {
         auto called = callObject(query, params_class, std::get<0>(call), std::get<1>(call),
                                  {std::get<2>(call)});
         if (called.isErr()) return errorJson(500, called.error().message);
@@ -2471,7 +2485,7 @@ json physicsClearance(const json& params) {
         auto value = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
                                 static_cast<GDExtensionBool>(flag.second));
         if (value.isErr()) return errorJson(500, value.error().message);
-        auto called = callObject(query, params_class, flag.first, 2586408642LL, {&value.value()});
+        auto called = callObject(query, params_class, flag.first, kSetBoolHash, {&value.value()});
         if (called.isErr()) return errorJson(500, called.error().message);
     }
 
