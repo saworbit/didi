@@ -68,6 +68,12 @@ This gate is not theoretical. During the manual fix of #213 a regression test wa
 
 This is not hypothetical either. The fix for #216 passed G1 on an int property refusing a whole-number real, while the float case named in the issue title passes with or without the change — a float property already admitted any JSON number. The change is real and worth having; it is simply not the reported defect. The cycle therefore writes the red run's full output to `gate/red.txt` and puts it in the summary, so a reader can see *which* check was red without auditing the source. Closing the issue remains a human decision, and this is a large part of why.
 
+**Red by compilation is not red by behaviour.** A native test that calls a function the fix introduces cannot fail at runtime without it: the translation unit does not compile, the build stops, and no assertion executes. That is a legitimate way for a C++ test to depend on a fix, and it is much weaker than an assertion that ran and disagreed with what it saw.
+
+#228 is the case. Its live harness asserts the new error text end to end and would genuinely have failed against the old message, which named no property at all — but `test_tools.cpp` stopped the build first, so the loop only ever saw a compiler error. The gate accepts both kinds and should; the report must not call them the same thing. `red_evidence_kind` classifies the run as `behaviour` or `compile`, and both the summary and the pull request body say which.
+
+The stronger version of this gate would build and run each suite independently in the red run, so a harness assertion can fail at runtime even when a native test will not compile. That is not built.
+
 ### G4: the commit carries the patch that was graded
 
 The gates grade the working tree. The pull request carries the index. Those are two different things, and every place they can drift has now drifted at least once:
