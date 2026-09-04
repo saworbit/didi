@@ -105,6 +105,32 @@ def out_of_policy_paths(status_porcelain: str, allowed=gates.ALLOWED_PREFIXES) -
     return offenders
 
 
+def changed_paths(patch_text: str) -> set[str]:
+    """Every path a patch touches, from its +++ lines."""
+    return {
+        line[6:].strip() for line in patch_text.splitlines()
+        if line.startswith("+++ b/")
+    }
+
+
+def staged_patch_mismatch(approved: str, staged: str) -> str:
+    """Why the index no longer matches what the gates graded, in words.
+
+    Names the paths that came and went rather than printing two patches, because
+    the whole failure is that a file quietly stopped being part of the change.
+    """
+    lost = sorted(changed_paths(approved) - changed_paths(staged))
+    gained = sorted(changed_paths(staged) - changed_paths(approved))
+    parts = []
+    if lost:
+        parts.append(f"missing from the commit: {', '.join(lost)}")
+    if gained:
+        parts.append(f"not in the graded patch: {', '.join(gained)}")
+    if not parts:
+        parts.append("the staged patch differs from the graded one")
+    return "; ".join(parts)
+
+
 def authentication_problem(status_stdout: str) -> str | None:
     """Why the client cannot run an agent, or None when it can.
 
@@ -374,6 +400,18 @@ def main(argv: list[str] | None = None) -> int:
         return finish(verdict)
     record("gate_red_green", "ok", "failed without the fix, passed with it")
 
+    # Re-stage, then refuse to commit anything but the patch that was graded.
+    # `git stash pop` restores the working tree and leaves the index alone, so
+    # the source half of a fix comes back unstaged and a plain commit ships the
+    # tests without it: a pull request whose new test has nothing to pass
+    # against. Staging early was not enough. The index has to be checked against
+    # the approved bytes at the moment of the commit, which is the only moment
+    # that matters.
+    run(["git", "add", "-A", "--", *gates.ALLOWED_PREFIXES], worktree)
+    staged = run(["git", "diff", "--cached"], worktree).stdout
+    if staged != patch:
+        record("report", "failed", staged_patch_mismatch(patch, staged))
+        return finish("staged_patch_mismatch")
     run(["git", "commit", "-m", f"Fix #{issue_number}"], worktree)
     pushed = run(["git", "push", "-u", "origin", branch], worktree)
     if pushed.returncode != 0:

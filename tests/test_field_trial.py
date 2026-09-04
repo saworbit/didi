@@ -361,6 +361,109 @@ CYCLE = importlib.util.module_from_spec(CYCLE_SPEC)
 CYCLE_SPEC.loader.exec_module(CYCLE)
 
 
+FIX_PATCH = "\n".join([
+    "diff --git a/src/gdextension/godot_bridge.cpp b/src/gdextension/godot_bridge.cpp",
+    "--- a/src/gdextension/godot_bridge.cpp",
+    "+++ b/src/gdextension/godot_bridge.cpp",
+    "@@ -1 +1 @@",
+    "+    return value.is_number();",
+    "diff --git a/tests/test_tools.cpp b/tests/test_tools.cpp",
+    "--- a/tests/test_tools.cpp",
+    "+++ b/tests/test_tools.cpp",
+    "@@ -1 +1 @@",
+    "+    ASSERT_TRUE(accepts(1.0));",
+    "",
+])
+
+
+class StagedPatchMismatchTests(unittest.TestCase):
+    """The commit has to carry the patch the gates graded, and nothing else.
+
+    `git stash pop` puts files back in the working tree without restoring the
+    index, so the source half of a fix returns unstaged and a plain commit ships
+    only the tests. A pull request built that way looks complete and contains a
+    new test with nothing to pass against.
+    """
+
+    def test_names_the_file_that_fell_out_of_the_commit(self):
+        tests_only = "\n".join(FIX_PATCH.splitlines()[5:]) + "\n"
+        detail = CYCLE.staged_patch_mismatch(FIX_PATCH, tests_only)
+        self.assertIn("src/gdextension/godot_bridge.cpp", detail)
+        self.assertIn("missing from the commit", detail)
+
+    def test_names_a_file_that_appeared_after_grading(self):
+        extra = FIX_PATCH + "\n".join([
+            "diff --git a/docs/NOTES.md b/docs/NOTES.md",
+            "--- a/docs/NOTES.md",
+            "+++ b/docs/NOTES.md",
+            "@@ -1 +1 @@",
+            "+scratch",
+            "",
+        ])
+        detail = CYCLE.staged_patch_mismatch(FIX_PATCH, extra)
+        self.assertIn("docs/NOTES.md", detail)
+        self.assertIn("not in the graded patch", detail)
+
+    def test_reports_a_change_in_content_alone(self):
+        altered = FIX_PATCH.replace("is_number()", "is_number_float()")
+        detail = CYCLE.staged_patch_mismatch(FIX_PATCH, altered)
+        self.assertIn("differs", detail)
+
+    def test_changed_paths_reads_every_touched_file(self):
+        self.assertEqual(
+            CYCLE.changed_paths(FIX_PATCH),
+            {"src/gdextension/godot_bridge.cpp", "tests/test_tools.cpp"},
+        )
+
+    def test_a_stash_round_trip_empties_the_index_until_the_paths_are_restaged(self):
+        """The defect itself, against a real repository.
+
+        Asserting on git's actual behaviour rather than on a description of it,
+        because the bug was in what `git stash pop` does to the index and no
+        amount of testing our own string handling would have found it.
+        """
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+
+            def git(*arguments):
+                return subprocess.run(
+                    ["git", *arguments], cwd=str(repo), capture_output=True,
+                    text=True, encoding="utf-8", errors="replace", check=True,
+                )
+
+            git("init", "-q", "-b", "main")
+            git("config", "user.email", "cycle@example.invalid")
+            git("config", "user.name", "cycle")
+            (repo / "src").mkdir()
+            (repo / "tests").mkdir()
+            (repo / "src" / "bridge.cpp").write_text("original\n", encoding="utf-8")
+            (repo / "tests" / "test_bridge.cpp").write_text("original\n", encoding="utf-8")
+            git("add", "-A")
+            git("commit", "-qm", "base")
+
+            (repo / "src" / "bridge.cpp").write_text("fixed\n", encoding="utf-8")
+            (repo / "tests" / "test_bridge.cpp").write_text("asserts the fix\n", encoding="utf-8")
+            git("add", "-A", "--", "src/", "tests/")
+            graded = git("diff", "--cached").stdout
+            self.assertEqual(
+                CYCLE.changed_paths(graded), {"src/bridge.cpp", "tests/test_bridge.cpp"})
+
+            git("stash", "push", "--", "src")   # the red run: fix withdrawn
+            git("stash", "pop")                 # the green run: fix restored
+
+            # The source change is back on disk and gone from the index. A commit
+            # here would carry the test alone, which is how #223 shipped a test
+            # with nothing to pass against.
+            self.assertEqual(CYCLE.changed_paths(git("diff", "--cached").stdout),
+                             {"tests/test_bridge.cpp"})
+            self.assertIn("fixed\n", (repo / "src" / "bridge.cpp").read_text(encoding="utf-8"))
+
+            git("add", "-A", "--", "src/", "tests/")
+            self.assertEqual(git("diff", "--cached").stdout, graded)
+
+
 class CycleSummaryTests(unittest.TestCase):
     def test_names_the_phase_that_failed(self):
         summary = CYCLE.cycle_summary(
