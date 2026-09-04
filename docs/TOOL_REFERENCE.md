@@ -192,18 +192,20 @@ Diagnostics are computed against the file after it is written, so they include t
 
 ### `viewport_capture_frame` — Live + offline
 
-Live mode copies RGBA8 pixels from the active editor 3D viewport, or from the 2D editor viewport when `camera_identifier` is `editor_2d` or `active_editor_view_2d`, and encodes them as PNG. Offline mode returns an attributed synthetic grid preview.
+Live mode copies RGBA8 pixels from the active editor 3D viewport, or from the 2D editor viewport when `camera_identifier` is `editor_2d` or `active_editor_view_2d`, and encodes them as PNG. Attached to a game it captures the root viewport instead; a game has one and `camera_identifier` is refused there. `session_kind` says which process the pixels came from. Offline mode returns an attributed synthetic grid preview.
+
+A viewport that is not the one on screen has no size, and Godot returns its 2x2 minimum rather than refusing. A capture below 8 pixels on either edge is refused and says so, because a caller cannot tell a four-pixel image from a scene that happens to be empty. For an editor viewport it means the requested main screen is not the selected one.
 
 - `camera_identifier` (`string`, default `"active_editor_view"`).
 - `resolution` remains reserved for live capture; offline preview honors it with each dimension clamped to 16–1024. `render_debug_flags` remains unsupported.
-- `node_isolation_path` optionally names a node in the active edited scene. The live renderer preserves that branch and its ancestors, temporarily hides unrelated visible 2D/3D branches, and restores every saved value before success. `isolation_background` is `original` (default) or `transparent`.
+- `node_isolation_path` optionally names a node in the active edited scene. The live renderer preserves that branch and its ancestors, temporarily hides unrelated visible 2D/3D branches, and restores every saved value before success. `isolation_background` is `original` (default) or `transparent`. Isolation is editor-only and refused on a game session.
 - Legacy alias: `capture_viewport`.
 
 Successful live frames include a 32-lowercase-hex `capture_id` for the exact RGBA8 buffer encoded as PNG. IDs are extension-process-local and retained in an 8-entry/64 MiB LRU cache; each image is limited to 2,048 × 2,048. Offline previews never receive IDs.
 
 ### `viewport_diff_capture` — Live
 
-Captures a fresh editor frame and compares it with a cached live baseline without accepting caller-supplied image bytes.
+Captures a fresh frame from the same viewport the baseline came from and compares them without accepting caller-supplied image bytes. Available in an editor or a game session; capture IDs are extension-process-local, so a baseline and its comparison come from the same process.
 
 - `baseline_capture_id`: required 32-lowercase-hex live capture ID.
 - `threshold`: integer `0..255`, default `0`; a pixel changes when any RGBA channel delta is greater than the threshold.

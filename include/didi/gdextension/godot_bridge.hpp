@@ -37,6 +37,10 @@ public:
     json execute(const std::string& method, const json& params,
                  const std::string& session_kind = "editor");
     Result<ViewportPixels> captureEditorViewport(const std::string& camera_identifier);
+    // A game has one root viewport and no camera selection to make. Both paths
+    // share one capture body, so the size check, the RGBA8 conversion and the
+    // byte-count postcondition exist once rather than twice.
+    Result<ViewportPixels> captureGameViewport();
     // Split so the caller can publish its pending request before the reimport
     // starts. EditorFileSystem.reimport_files re-enters the main-loop callback,
     // and a nested frame that cannot see the request misses the scanning window.

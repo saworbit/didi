@@ -43,7 +43,7 @@ struct CapturedFrame {
     json metadata;
 };
 
-Result<CapturedFrame> captureSelectedFrame(const json& params) {
+Result<CapturedFrame> captureSelectedFrame(const json& params, const std::string& session_kind) {
     if (!params.is_object()) return Error::invalidArgument("Viewport capture params must be an object");
     if (params.contains("camera_identifier") && !params["camera_identifier"].is_string()) {
         return Error::invalidArgument("camera_identifier must be a string");
@@ -54,9 +54,17 @@ Result<CapturedFrame> captureSelectedFrame(const json& params) {
     if (params.contains("isolation_background") && !params["isolation_background"].is_string()) {
         return Error::invalidArgument("isolation_background must be a string");
     }
+    const bool game_session = session_kind == "game";
     const std::string camera = params.value("camera_identifier", "active_editor_view");
     const std::string node_path = params.value("node_isolation_path", "");
     const std::string background = params.value("isolation_background", "original");
+    // A game has one root viewport. Accepting an editor identifier there would
+    // answer a question about the editor with a picture of the game.
+    if (game_session && params.contains("camera_identifier")) {
+        return Error::invalidArgument(
+            "camera_identifier selects an editor viewport and a game session has only its root "
+            "viewport; omit it");
+    }
     if (background != "original" && background != "transparent") {
         return Error::invalidArgument("isolation_background must be original or transparent");
     }
@@ -84,7 +92,7 @@ Result<CapturedFrame> captureSelectedFrame(const json& params) {
         if (drawn.isErr()) return drawn.error();
     }
 
-    auto capture = bridge.captureEditorViewport(camera);
+    auto capture = game_session ? bridge.captureGameViewport() : bridge.captureEditorViewport(camera);
     if (capture.isErr()) return capture.error();
     if (guard) {
         auto restored = guard->restoreNow();
@@ -111,12 +119,17 @@ Result<CapturedFrame> captureSelectedFrame(const json& params) {
     CapturedFrame result;
     result.pixels = {capture.value().width, capture.value().height, capture.value().rgba};
     result.metadata = {
-        {"camera_identifier", camera},
         {"resolution", {{"width", capture.value().width}, {"height", capture.value().height}}},
-        {"source", "godot_editor_viewport_texture"},
+        {"source", game_session ? "godot_game_viewport_texture" : "godot_editor_viewport_texture"},
         {"execution_mode", "live"},
+        {"session_kind", session_kind},
         {"is_live_frame", true}
     };
+    if (game_session) {
+        result.metadata["camera_identifier"] = "root_viewport";
+    } else {
+        result.metadata["camera_identifier"] = camera;
+    }
     if (isolation) {
         result.metadata["isolated"] = true;
         result.metadata["node_isolation_path"] = isolation->canonical_node_path;
@@ -144,9 +157,9 @@ std::string ViewportRenderer::encodeImageToPngBase64(const uint8_t* rgba_data, i
     return encoded;
 }
 
-json ViewportRenderer::captureViewport(const json& params) {
+json ViewportRenderer::captureViewport(const json& params, const std::string& session_kind) {
     try {
-        auto frame = captureSelectedFrame(params);
+        auto frame = captureSelectedFrame(params, session_kind);
         if (frame.isErr()) return rendererError(frame.error());
         auto& pixels = frame.value().pixels;
         std::string b64_png = encodeImageToPngBase64(pixels.rgba.data(), pixels.width, pixels.height);
@@ -160,7 +173,9 @@ json ViewportRenderer::captureViewport(const json& params) {
         result["capture_id"] = capture_id.value();
         result["format"] = "image/png";
         result["image_base64"] = std::move(b64_png);
-        result["description"] = "Live Godot editor viewport frame from '" +
+        result["description"] = std::string("Live Godot ") +
+                                (session_kind == "game" ? "game" : "editor") +
+                                " viewport frame from '" +
                                 result["camera_identifier"].get<std::string>() + "' (" +
                                 std::to_string(pixels.width) + "x" + std::to_string(pixels.height) + ")";
         return result;
@@ -171,7 +186,7 @@ json ViewportRenderer::captureViewport(const json& params) {
     }
 }
 
-json ViewportRenderer::diffViewport(const json& params) {
+json ViewportRenderer::diffViewport(const json& params, const std::string& session_kind) {
     try {
         if (!params.is_object() || !params.contains("baseline_capture_id") ||
             !params["baseline_capture_id"].is_string()) {
@@ -198,7 +213,7 @@ json ViewportRenderer::diffViewport(const json& params) {
         }
         auto baseline = m_captureCache.find(baseline_id);
         if (!baseline) return rendererError(Error::notFound("Baseline capture ID is missing or has been evicted"));
-        auto frame = captureSelectedFrame(params);
+        auto frame = captureSelectedFrame(params, session_kind);
         if (frame.isErr()) return rendererError(frame.error());
         auto diff = image::diffRgba(*baseline, frame.value().pixels, static_cast<uint8_t>(threshold));
         if (diff.isErr()) return rendererError(diff.error());

@@ -86,8 +86,8 @@ class ViewportRenderer {
 public:
     static ViewportRenderer& instance();
 
-    json captureViewport(const json& params);
-    json diffViewport(const json& params);
+    json captureViewport(const json& params, const std::string& session_kind = "editor");
+    json diffViewport(const json& params, const std::string& session_kind = "editor");
 
     std::string encodeImageToPngBase64(const uint8_t* rgba_data, int width, int height);
 

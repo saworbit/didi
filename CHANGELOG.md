@@ -17,6 +17,8 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Fixed
 
+- `viewport_capture_frame` works on a game session. A running game could be paused, stepped, driven with injected input and read through its tree and both log streams, and never seen; the only way to look at it was an OS screenshot from outside Didi, which is useless headless and in CI. Attached to a game it captures the root viewport and reports `session_kind: "game"` and `camera_identifier: "root_viewport"`; the editor camera selectors stay editor-only and are refused there. `viewport_diff_capture` follows, which is how a stepped frame gets asserted. Node isolation stays editor-only, because it hides and restores nodes in the edited scene.
+- `viewport_capture_frame` refuses a viewport that has no size instead of returning it as a successful live frame. A 2D editor viewport that is not the selected main screen is a collapsed control, and Godot hands back its 2x2 minimum; the tool reported that as `is_live_frame: true` with nothing to distinguish it from a scene that happens to be empty. The refusal names the size and says the requested main screen is not the one on screen.
 - `resource_create` refuses a `save_path` that is not `.tres` or `.res`. It wrote Godot text-resource markup into whatever path it was handed, including a `.gd` file, and reported `created_offline` for a file `script_check_syntax` immediately called unparseable in the same session.
 
 <!-- phase7-current-status:start -->

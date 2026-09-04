@@ -557,7 +557,14 @@ try {
         (Tool-Request 318 "runtime_step" @{ frames = 1 }),
         (Tool-Request 319 "runtime_list_sessions" @{ project_path = $fixtureRoot }),
         (Tool-Request 320 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot:frame_counter"; max_depth = 1 }),
-        (Tool-Request 321 "runtime_get_tree" @{ root_path = "/root/%RuntimeRoot"; max_depth = 1 })
+        (Tool-Request 321 "runtime_get_tree" @{ root_path = "/root/%RuntimeRoot"; max_depth = 1 }),
+        # A running game could be driven and read but never seen. The frame is
+        # in the process Didi is attached to, so the session kind is no longer a
+        # reason to refuse. This run is headless, so the frame itself may still
+        # be unavailable; what must not come back is a session-kind rejection.
+        (Tool-Request 2258 "runtime_attach_session" @{ session_id = $gameSession.session_id }),
+        (Tool-Request 2259 "viewport_capture_frame" @{}),
+        (Tool-Request 2260 "viewport_capture_frame" @{ camera_identifier = "active_editor_view" })
     )
     $rawRuntimeResponses = $runtimeRequests | & $didiExecutable --project $fixtureRoot
     $runtimeResponses = @($rawRuntimeResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
@@ -565,6 +572,19 @@ try {
     Assert-True ($runtimeResponses.Count -eq $runtimeRequests.Count) "Runtime-control response count mismatch."
     $runtimeById = @{}
     foreach ($response in $runtimeResponses) { $runtimeById[[int]$response.id] = $response }
+
+    $gameCapture = $runtimeById[2259]
+    if ($gameCapture.result.isError) {
+        $gameCaptureText = $gameCapture.result.content[0].text
+        Assert-True ($gameCaptureText -notmatch "session kind" -and $gameCaptureText -notmatch "allowed_session_kinds") "viewport_capture_frame is still refused on a game session for being a game session."
+    } else {
+        $gameFrame = Tool-Payload $gameCapture
+        Assert-True ($gameFrame.session_kind -eq "game") "A game viewport capture did not report the session it came from."
+        Assert-True ($gameFrame.camera_identifier -eq "root_viewport") "A game viewport capture did not name the root viewport."
+    }
+    # A game has one root viewport, so an editor camera selector is a mistake
+    # worth naming rather than an argument to quietly ignore.
+    Assert-True $runtimeById[2260].result.isError "A game viewport capture accepted an editor camera_identifier."
 
     $selectedGame = Tool-Payload $runtimeById[376]
     Assert-True ($selectedGame.session.session_id -eq $gameSession.session_id -and $selectedGame.session.kind -eq "game") "Runtime get-session did not return the selected game route."
@@ -1091,13 +1111,28 @@ try {
         (Tool-Request 416 "viewport_diff_capture" @{ baseline_capture_id = $phase4Baseline.capture_id; camera_identifier = "active_editor_view"; threshold = 0 }),
         (Tool-Request 417 "editor_undo" @{}),
         (Tool-Request 418 "viewport_diff_capture" @{ baseline_capture_id = $phase4Baseline.capture_id; camera_identifier = "active_editor_view"; threshold = 0 }),
-        (Tool-Request 419 "scene_get_property" @{ target_node = "/root/SmokeRoot/Container"; property_name = "visible" })
+        (Tool-Request 419 "scene_get_property" @{ target_node = "/root/SmokeRoot/Container"; property_name = "visible" }),
+        # The 2D viewport control has no size while another main screen is
+        # selected. Godot hands back its 2x2 minimum rather than refusing, and
+        # capturing that used to be reported as a normal successful live frame.
+        (Tool-Request 2257 "viewport_capture_frame" @{ camera_identifier = "editor_2d" })
     )
     $rawPhase4Responses = $phase4Requests | & $didiExecutable --project $fixtureRoot
     $phase4Responses = @($rawPhase4Responses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
     Assert-True ($LASTEXITCODE -eq 0) "Phase 4 verification MCP process exited with $LASTEXITCODE."
     $phase4ById = @{}
     foreach ($response in $phase4Responses) { $phase4ById[[int]$response.id] = $response }
+    # Either a real frame or a refusal that says why. A four-pixel image
+    # described as a live capture is neither, and a caller cannot tell it from a
+    # scene that happens to be empty.
+    $collapsed = $phase4ById[2257]
+    if ($collapsed.result.isError) {
+        Assert-True ($collapsed.result.content[0].text -match "no size on screen") "A degenerate viewport capture was refused without saying why."
+    } else {
+        $collapsedFrame = Tool-Payload $collapsed
+        Assert-True ($collapsedFrame.resolution.width -ge 8 -and $collapsedFrame.resolution.height -ge 8) "viewport_capture_frame reported a degenerate frame as a successful live capture."
+    }
+
     $isolated = Tool-Payload $phase4ById[412]
     Assert-True ($isolated.isolated -eq $true -and $isolated.state_restored -eq $true) "Isolated capture did not confirm reversible state restoration."
     Assert-True ($isolated.node_isolation_path -eq "/root/SmokeRoot/Subject" -and $isolated.temporarily_hidden_count -ge 1) "Isolated capture did not canonicalize the target or hide unrelated visual branches."

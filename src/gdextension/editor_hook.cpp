@@ -685,19 +685,23 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
     }
 
     if (method == "vision.captureViewport") {
+        // Isolation hides and restores nodes in the edited scene, which is an
+        // editor concept. Capture itself is not: a game has a root viewport and
+        // the frame is already in this process.
         if (m_sessionKind != runtime::SessionKind::editor &&
             params.value("node_isolation_path", "") != "") {
             return {{"error", {{"code", 409},
                                 {"message", "Viewport node isolation is unavailable in a game session"}}}};
         }
-        return ViewportRenderer::instance().captureViewport(params);
+        return ViewportRenderer::instance().captureViewport(params, sessionKindName(m_sessionKind));
     }
     if (method == "vision.diffViewport") {
-        if (m_sessionKind != runtime::SessionKind::editor) {
+        if (m_sessionKind != runtime::SessionKind::editor &&
+            params.value("node_isolation_path", "") != "") {
             return {{"error", {{"code", 409},
-                                {"message", "Viewport diff capture is unavailable in a game session"}}}};
+                                {"message", "Viewport node isolation is unavailable in a game session"}}}};
         }
-        return ViewportRenderer::instance().diffViewport(params);
+        return ViewportRenderer::instance().diffViewport(params, sessionKindName(m_sessionKind));
     }
     // Both log streams answer the same query shape, so they share one reader.
     // Validation living in a single place is what keeps the two tools from
