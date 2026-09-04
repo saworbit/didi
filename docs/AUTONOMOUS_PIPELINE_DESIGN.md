@@ -42,6 +42,10 @@ The oldest open issue labelled `agent-ready`. That label is applied by a human a
 
 That restriction is the single highest-yield input control. A task with a failing case attached resolves cleanly; a vague one generates debt. It matches what the trials showed directly: #213 and #215 carried exact reproductions and were tractable, while #217 had no reachable mechanism at all and would have burned a cycle proving it.
 
+**An issue whose fix is already open in a pull request is skipped, however old it is.** This is not a nicety. Loop A deliberately never closes anything, so an issue keeps its label through the cycle that fixed it, and the queue's oldest entry is therefore routinely one that is already done. #214 still carried `agent-ready` while #222 waited to merge and was next in line; the following cycle would have spent a full agent run rebuilding a fix that already existed, then opened a second pull request competing with the first. Naming an issue explicitly still overrides this, because that is a human asking for it on purpose.
+
+**The brief carries the issue's comments, not just its body.** A report's first draft is often wrong and the correction arrives underneath it. #216 was filed as "float properties reject whole numbers"; the trial transcript later showed the client had sent the string `"1.0"` and the rejection was correct. An agent handed the body alone inherits the mistaken premise with none of the evidence that overturned it. The gates check the fix; nothing checks the premise, so the premise has to arrive complete.
+
 ### Phases
 
 1. **Preflight.** Clean tree, `main` current, build current, Godot present, `claude` present. Any failure stops before spending anything.
