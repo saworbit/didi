@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 95 canonical tool names plus 10 legacy names (105 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 96 canonical tool names plus 10 legacy names (106 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `92/95`
+**Canonical implementation:** `93/96`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 92/95 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 93/96 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -377,6 +377,20 @@ A name target also returns `declared_in`, so a caller knows what they are about 
 Node-path targets match complete captured paths: `Player/Sprite` does not match `Player/Sprite2`. Animation property suffixes are ignored when the node portion matches, so `NodePath("Player/Sprite:position:x")` is an impact of `Player/Sprite`. Static scene connection endpoints, serialized `NodePath` values, GDScript `$...`/`%...` shorthands, standalone `^"..."` node-path literals, and literal `get_node(...)`/`get_node_or_null(...)` calls are covered. Shorthand references remain matches when followed by ordinary member access such as `$Player/Sprite.position`. GDScript strings and comments, C# strings and comments, and `.tscn`/`.tres` semicolon comments are excluded from shorthand and constructor evidence.
 
 The results are evidence, not verdicts. A name or node path built at runtime cannot be followed, so an empty impact list is not proof that nothing depends on the target, and a local variable that happens to share a name is reported as a `code_reference`. These limits ship in a `limitations` array in the response.
+
+### `project_rename_references` — Offline
+
+Renames a symbol in the places Godot serializes it, across every file at once, and reports the code references it deliberately does not touch.
+
+- `target` (`string`, required): the identifier to rename. A `res://` path or a node path is a different operation and is refused.
+- `new_name` (`string`, required): the identifier to rename it to.
+- `max_impacts` (`integer`, default `500`): caps the reported code references.
+
+Rewritten: the `signal` and `method` attributes of a `[connection]`, and the property segment of a `NodePath` in an animation track. Not rewritten: node paths in `from` and `to`, node names, and anything in GDScript or C#. The language is dynamically typed, so a whole-word match may be this symbol or an unrelated local that shares the name; those are reported with file and line, and `script_patch_method` is the tool for them.
+
+Every file is staged before any is replaced, so the change cannot stop half applied because the last file was the one that could not be written. If a replacement still fails, the error names `committed_files` and `unchanged_files` rather than reporting a failure that sounds total.
+
+Refused: a `new_name` a connection or track already uses, because that merges two symbols with no way back; a target and `new_name` that are the same; and any run against a truncated project scan, because renaming the files that were read and leaving the rest is the breakage this exists to prevent. Always requires a confirmation token. Run `project_analyze_impact` on the same target first to see every site; the mutation preview shows the arguments, not the file list. Save or close open scenes first, since an editor holding unsaved changes will write over the files.
 
 ### `project_audit_assets` — Offline
 
@@ -782,4 +796,4 @@ Requires finite viewport-space `point.x` and `point.y`. Optional `root_path` def
 
 Every implemented mutating tool schema includes `dry_run: boolean`. A true dry-run stops at the registry boundary and returns `dry_run: true` plus `mutation_preview`; no tool handler, subprocess, filesystem writer, or Godot main-thread command runs. The preview reports the exact tool/arguments, canonical project, execution mode, optional session ID, route generation, binding hash, and a conservative planned-change record.
 
-`editor_reload_project`, `script_patch_method`/`patch_script_symbols`, and `overwrite: true` calls to `resource_create`, `script_create`, `viewport_create_test_lab`/`create_visual_test_lab`, `project_export`, and `gridmap_export_mesh_library` require confirmation. Call the exact tool with identical arguments plus `dry_run: true`, then repeat it without `dry_run` and with the returned `confirmation_token`. Tokens are cryptographically random, expire after 120 seconds, are consumed on the first attempt, and reject tool, argument, project, execution-mode, session, route-generation, expiry, and replay mismatches.
+`editor_reload_project`, `script_patch_method`/`patch_script_symbols`, `project_rename_references`, and `overwrite: true` calls to `resource_create`, `script_create`, `viewport_create_test_lab`/`create_visual_test_lab`, `project_export`, and `gridmap_export_mesh_library` require confirmation. Call the exact tool with identical arguments plus `dry_run: true`, then repeat it without `dry_run` and with the returned `confirmation_token`. Tokens are cryptographically random, expire after 120 seconds, are consumed on the first attempt, and reject tool, argument, project, execution-mode, session, route-generation, expiry, and replay mismatches.

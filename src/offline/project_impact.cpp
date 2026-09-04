@@ -2,6 +2,9 @@
 
 #include "didi/common/project_path.hpp"
 #include "didi/offline/project_text_scan.hpp"
+#include "didi/common/atomic_write.hpp"
+#include <string_view>
+#include <vector>
 
 #include <algorithm>
 #include <cctype>
@@ -221,17 +224,44 @@ void collectFileTargetImpacts(const ProjectTextScan& scan, const std::string& ta
     }
 }
 
+// The forms Godot serializes a symbol into, each split so the name it carries
+// can be replaced without touching anything else on the line.
+//
+// The analysis and the rewrite share these. Written twice they would drift, and
+// the drift would show up as a report that names five sites and an edit that
+// changes four, with nothing to say which.
+struct SerializedNameForms {
+    // Whole word, so renaming `health` does not report every `max_health`.
+    std::regex whole_word;
+    // A [connection] wires an emitter's signal to a receiver's method. from and
+    // to on the same line carry node paths, and a node that happens to share
+    // the name is a different thing, so only these two attributes are touched.
+    std::regex connection_signal;
+    std::regex connection_method;
+    // A track keyframes a property through a NodePath whose segment after the
+    // colon is the property name. This is the reference a text search for the
+    // symbol finds but cannot explain, and the one people forget. The leading
+    // group is greedy so `NodePath("health:health")` renames the property and
+    // not the node.
+    std::regex animation_track;
+};
+
+SerializedNameForms serializedNameForms(const std::string& target) {
+    return {
+        std::regex(R"re(\b)re" + target + R"re(\b)re"),
+        std::regex(R"re((\[connection[^\]]*signal="))re" + target + R"re(("))re"),
+        std::regex(R"re((\[connection[^\]]*method="))re" + target + R"re(("))re"),
+        std::regex(R"re((NodePath\("[^"]*:))re" + target + R"re(((?::[A-Za-z0-9_]+)?"\)))re"),
+    };
+}
+
 void collectNameTargetImpacts(const ProjectTextScan& scan, const std::string& target,
                               std::vector<Impact>& out) {
-    // Whole word, so renaming `health` does not report every `max_health`.
-    const std::regex whole_word(R"re(\b)re" + target + R"re(\b)re");
-    const std::regex connection_signal(R"re(\[connection[^\]]*signal=")re" + target + R"re(")re");
-    const std::regex connection_method(R"re(\[connection[^\]]*method=")re" + target + R"re(")re");
-    // A track keyframes a property through a NodePath whose last segment, after
-    // a colon, is the property name. This is the reference a text search for
-    // the symbol will find but not explain, and the one people forget.
-    const std::regex animation_track(R"re(NodePath\("[^"]*:)re" + target +
-                                     R"re((?::[A-Za-z0-9_]+)?"\))re");
+    const auto forms = serializedNameForms(target);
+    const auto& whole_word = forms.whole_word;
+    const auto& connection_signal = forms.connection_signal;
+    const auto& connection_method = forms.connection_method;
+    const auto& animation_track = forms.animation_track;
 
     for (const auto& source : scan.sources) {
         if (source.contents.find(target) == std::string::npos) continue;
@@ -547,6 +577,214 @@ json impactsToJson(const std::vector<Impact>& impacts, size_t limit, bool& trunc
 }
 
 } // namespace
+
+namespace {
+
+// Splits on newlines keeping every byte, so a CRLF file keeps its carriage
+// returns and rejoining reproduces the original exactly where nothing changed.
+std::vector<std::string> splitKeepingBytes(const std::string& text) {
+    return strings::split(text, '\n');
+}
+
+std::string joinKeepingBytes(const std::vector<std::string>& parts) {
+    std::string out;
+    for (size_t index = 0; index < parts.size(); ++index) {
+        if (index) out.push_back('\n');
+        out += parts[index];
+    }
+    return out;
+}
+
+struct RenamedFile {
+    std::string path;
+    std::string contents;
+    size_t changed_lines{0};
+};
+
+// Applies the serialized forms to one line. Every form is tried, because one
+// [connection] line can name the symbol as both the signal and the method.
+std::string renameLine(const std::string& line, const SerializedNameForms& forms,
+                       const std::string& new_name) {
+    const std::string replacement = "$1" + new_name + "$2";
+    auto updated = std::regex_replace(line, forms.connection_signal, replacement);
+    updated = std::regex_replace(updated, forms.connection_method, replacement);
+    updated = std::regex_replace(updated, forms.animation_track, replacement);
+    return updated;
+}
+
+} // namespace
+
+Result<json> renameReferences(const std::string& root_dir, const ProjectRenameOptions& options) {
+    const auto target = strings::trim(options.target);
+    const auto new_name = strings::trim(options.new_name);
+    if (!looksLikeIdentifier(target)) {
+        return Error::invalidArgument(
+            "target must be a single Godot identifier; a res:// path or a node path is a "
+            "different operation");
+    }
+    if (!looksLikeIdentifier(new_name)) {
+        return Error::invalidArgument("new_name must be a single Godot identifier");
+    }
+    if (target == new_name) {
+        return Error::invalidArgument("target and new_name are the same, so there is nothing to do");
+    }
+
+    const auto scan = scanProjectText(root_dir);
+    // A partial read of the project is the one input this must refuse. Renaming
+    // the references in the files that were read and leaving the rest is
+    // precisely the half-applied change this exists to prevent, and the caller
+    // would be told it succeeded.
+    if (scan.truncated) {
+        return Error(409,
+                     "The project scan was truncated, so some files were not read. Renaming now "
+                     "would update part of the project and leave the rest, which is the breakage "
+                     "this is meant to prevent.");
+    }
+
+    // Renaming onto a name that is already serialized somewhere would merge two
+    // different things into one, and no later analysis could separate them
+    // again. Report the collision rather than create it.
+    std::vector<Impact> collisions;
+    collectNameTargetImpacts(scan, new_name, collisions);
+    collisions.erase(std::remove_if(collisions.begin(), collisions.end(),
+                                    [](const Impact& impact) {
+                                        return impact.kind != "scene_connection" &&
+                                               impact.kind != "animation_track";
+                                    }),
+                     collisions.end());
+    if (!collisions.empty()) {
+        bool collisions_truncated = false;
+        return Error(409, "new_name is already used by a scene connection or an animation track, "
+                          "so renaming onto it would merge two different symbols",
+                     {{"conflicts", impactsToJson(collisions, options.max_impacts,
+                                                  collisions_truncated)}});
+    }
+
+    std::vector<Impact> impacts;
+    collectNameTargetImpacts(scan, target, impacts);
+
+    std::map<std::string, size_t> serialized_sites;
+    std::vector<Impact> code_references;
+    for (const auto& impact : impacts) {
+        if (impact.kind == "scene_connection" || impact.kind == "animation_track") {
+            ++serialized_sites[impact.path];
+        } else {
+            code_references.push_back(impact);
+        }
+    }
+
+    const auto forms = serializedNameForms(target);
+    std::vector<RenamedFile> planned;
+    for (const auto& source : scan.sources) {
+        if (source.contents.find(target) == std::string::npos) continue;
+        auto parts = splitKeepingBytes(source.contents);
+        size_t changed = 0;
+        for (auto& part : parts) {
+            auto updated = renameLine(part, forms, new_name);
+            if (updated != part) {
+                part = std::move(updated);
+                ++changed;
+            }
+        }
+        if (changed == 0) continue;
+        planned.push_back({source.path, joinKeepingBytes(parts), changed});
+    }
+
+    // The report and the edit come from one set of matchers, so they have to
+    // agree about every file. If they ever do not, the change is wrong in a way
+    // nobody would see, so it does not happen at all.
+    for (const auto& file : planned) {
+        const auto reported = serialized_sites.find(file.path);
+        if (reported == serialized_sites.end() || reported->second != file.changed_lines) {
+            return Error::internal(
+                "The rename plan and the impact report disagree about " + file.path +
+                ", so nothing was written");
+        }
+    }
+    if (planned.size() != serialized_sites.size()) {
+        return Error::internal(
+            "The rename plan and the impact report disagree about which files carry the symbol, "
+            "so nothing was written");
+    }
+
+    json updated_files = json::array();
+    size_t changed_lines = 0;
+    for (const auto& file : planned) {
+        updated_files.push_back({{"path", file.path}, {"changed_lines", file.changed_lines}});
+        changed_lines += file.changed_lines;
+    }
+
+    bool code_truncated = false;
+    json result = {
+        {"target", target},
+        {"new_name", new_name},
+        {"updated_files", std::move(updated_files)},
+        {"updated_file_count", planned.size()},
+        {"changed_lines", changed_lines},
+        {"code_references_not_updated",
+         impactsToJson(code_references, options.max_impacts, code_truncated)},
+        {"code_reference_count", code_references.size()},
+        {"scanned_files", scan.sources.size()},
+        {"limitations", json::array({
+            "GDScript and C# references are reported, never rewritten. The language is "
+            "dynamically typed, so a whole-word match may be this symbol or an unrelated local "
+            "that shares the name, and rewriting on that evidence would be its own silent "
+            "breakage. Use script_patch_method for those.",
+            "Only the forms Godot serializes are rewritten: the signal and method attributes of "
+            "a [connection], and the property segment of a NodePath in an animation track.",
+            "A reference built at runtime cannot be followed, so an empty report is not proof "
+            "that nothing else names the symbol.",
+            "Save or close the scenes in an open editor first. This writes the files on disk, "
+            "and an editor holding unsaved changes will write over them."
+        })}
+    };
+
+    // Everything that can fail on the way to disk fails here, before any
+    // destination is replaced. What is left after this loop is the renames, so a
+    // change cannot stop half applied because the last file was the one that
+    // could not be written.
+    static constexpr std::string_view kResourcePrefix = "res://";
+    std::vector<files::StagedWrite> staged;
+    staged.reserve(planned.size());
+    const auto root = paths::projectPathFromUtf8(root_dir);
+    for (const auto& file : planned) {
+        if (file.path.rfind(std::string(kResourcePrefix), 0) != 0) {
+            return Error::internal("The rename plan named " + file.path +
+                                   ", which is not a project path, so nothing was written");
+        }
+        auto relative = file.path.substr(kResourcePrefix.size());
+        auto write = files::stageFileWrite(root / paths::projectPathFromUtf8(relative),
+                                           file.contents);
+        if (write.isErr()) {
+            return Error::internal("Preparing the rename failed at " + file.path +
+                                   ", so nothing was written: " + write.error().message);
+        }
+        staged.push_back(std::move(write.value()));
+    }
+
+    json committed = json::array();
+    for (size_t index = 0; index < staged.size(); ++index) {
+        auto done = staged[index].commit();
+        if (done.isErr()) {
+            // The one outcome that is neither all nor nothing, so it says which
+            // files moved rather than reporting a failure that sounds total.
+            json remaining = json::array();
+            for (size_t rest = index; rest < planned.size(); ++rest) {
+                remaining.push_back(planned[rest].path);
+            }
+            return Error(500, "The rename was staged but a file could not be replaced. The files "
+                              "in committed_files were updated and the rest were not.",
+                         {{"committed_files", std::move(committed)},
+                          {"unchanged_files", std::move(remaining)},
+                          {"failed_file", planned[index].path}});
+        }
+        committed.push_back(planned[index].path);
+    }
+
+    ResourceIndexer::invalidateSharedIndex();
+    result["applied"] = true;
+    return result;
+}
 
 Result<json> analyzeImpact(const std::string& root_dir, const ProjectImpactOptions& options) {
     const auto target = strings::trim(options.target);

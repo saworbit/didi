@@ -188,7 +188,7 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 105u);
+    ASSERT_EQ(tools.size(), 106u);
     const std::unordered_set<std::string> legacy_names = {
         "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
         "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
@@ -200,7 +200,7 @@ static void test_tool_registry_default_tools() {
         if (legacy_names.count(tool.name) == 0) ++canonical_count;
     }
     ASSERT_EQ(legacy_names.size(), 10u);
-    ASSERT_EQ(canonical_count, 95u);
+    ASSERT_EQ(canonical_count, 96u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -322,7 +322,7 @@ static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract(
         if (legacy_names.count(tool.name) != 0) continue;
         tool.capability.implemented ? ++implemented : ++unimplemented;
     }
-    ASSERT_EQ(implemented, 92u);
+    ASSERT_EQ(implemented, 93u);
     ASSERT_EQ(unimplemented, 3u);
 }
 
@@ -2437,6 +2437,179 @@ static void test_resource_create_refuses_a_target_it_cannot_write() {
     registry.setIpcClient(nullptr);
 }
 
+static void test_rename_updates_serialized_references_and_reports_the_code() {
+    // The case from the report: an agent renames a variable in Player.gd, and
+    // forgets the signal connection in HUD.tscn and the animation track in
+    // Player.tscn. Godot says nothing until the game runs. Those two forms are
+    // the ones a text search finds but cannot explain, and they are the ones
+    // this rewrites.
+    ScopedToolProject project("rename-references");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("scripts/player.gd",
+                   "extends Node\n"
+                   "\n"
+                   "signal character_health(value: int)\n"
+                   "\n"
+                   "var character_health: int = 100\n");
+    writeAuditFile("scenes/hud.tscn",
+                   "[gd_scene format=3]\n"
+                   "\n"
+                   "[connection signal=\"character_health\" from=\"Player\" to=\"HUD\" "
+                   "method=\"character_health\"]\n");
+    writeAuditFile("scenes/player.tscn",
+                   "[gd_scene format=3]\n"
+                   "\n"
+                   "tracks/0/path = NodePath(\"Sprite:character_health\")\n"
+                   "tracks/1/path = NodePath(\"Sprite:character_health:x\")\n");
+    // A different file with a local of the same name. Rewriting this is the
+    // breakage the tool exists to prevent, so it must be reported and left.
+    writeAuditFile("scripts/enemy.gd",
+                   "extends Node\n"
+                   "\n"
+                   "func hit() -> void:\n"
+                   "\tvar character_health := 3\n"
+                   "\tprint(character_health)\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+
+    // The preview writes nothing, which is the only chance to see the file list
+    // before a multi-file change lands.
+    const auto preview = registry.callTool("project_rename_references", didi::json{
+        {"target", "character_health"}, {"new_name", "health"}, {"dry_run", true}});
+    ASSERT_TRUE(!preview.isError);
+    const auto preview_payload = didi::json::parse(preview.content[0].text);
+    ASSERT_TRUE(preview_payload["dry_run"].get<bool>());
+    ASSERT_TRUE(preview_payload["mutation_preview"]["requires_confirmation"].get<bool>());
+    ASSERT_TRUE(readToolTestFile("scenes/hud.tscn").find("character_health") != std::string::npos);
+
+    const auto token =
+        preview_payload["mutation_preview"]["confirmation_token"].get<std::string>();
+    const auto applied = registry.callTool("project_rename_references", didi::json{
+        {"target", "character_health"}, {"new_name", "health"}, {"confirmation_token", token}});
+    ASSERT_TRUE(!applied.isError);
+    const auto payload = didi::json::parse(applied.content[0].text);
+    ASSERT_TRUE(payload["applied"].get<bool>());
+    ASSERT_EQ(payload["updated_file_count"].get<size_t>(), 2u);
+    ASSERT_EQ(payload["changed_lines"].get<size_t>(), 3u);
+
+    // The connection names the symbol twice on one line, as the signal and as
+    // the method, and both are the symbol. The node paths on the same line are
+    // not, and must survive.
+    const auto hud = readToolTestFile("scenes/hud.tscn");
+    ASSERT_TRUE(hud.find("signal=\"health\"") != std::string::npos);
+    ASSERT_TRUE(hud.find("method=\"health\"") != std::string::npos);
+    ASSERT_TRUE(hud.find("from=\"Player\"") != std::string::npos);
+    ASSERT_TRUE(hud.find("character_health") == std::string::npos);
+
+    // A track keyframes through the segment after the colon, with or without a
+    // sub-property after it.
+    const auto scene = readToolTestFile("scenes/player.tscn");
+    ASSERT_TRUE(scene.find("NodePath(\"Sprite:health\")") != std::string::npos);
+    ASSERT_TRUE(scene.find("NodePath(\"Sprite:health:x\")") != std::string::npos);
+
+    // GDScript is untouched, in the declaring file and in the unrelated one,
+    // and both are reported so the caller knows what is left.
+    ASSERT_TRUE(readToolTestFile("scripts/player.gd").find("character_health") != std::string::npos);
+    ASSERT_TRUE(readToolTestFile("scripts/enemy.gd").find("character_health") != std::string::npos);
+    ASSERT_TRUE(payload["code_reference_count"].get<size_t>() >= 4u);
+    bool reported_enemy = false;
+    for (const auto& reference : payload["code_references_not_updated"]) {
+        if (reference["path"] == "res://scripts/enemy.gd") reported_enemy = true;
+    }
+    ASSERT_TRUE(reported_enemy);
+
+    registry.setIpcClient(nullptr);
+}
+
+static void test_rename_keeps_everything_it_is_not_renaming() {
+    // The three ways a careless replace corrupts a scene: it renames a node
+    // that shares the name, it renames the node half of a NodePath instead of
+    // the property half, and it rewrites every line ending in the project.
+    ScopedToolProject project("rename-precision");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("scenes/hud.tscn",
+                   "[gd_scene format=3]\r\n"
+                   "\r\n"
+                   "[node name=\"character_health\" type=\"Label\"]\r\n"
+                   "[connection signal=\"character_health\" from=\"character_health\" "
+                   "to=\"HUD\" method=\"on_hit\"]\r\n"
+                   "tracks/0/path = NodePath(\"character_health:character_health\")\r\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+
+    const auto preview = registry.callTool("project_rename_references", didi::json{
+        {"target", "character_health"}, {"new_name", "health"}, {"dry_run", true}});
+    ASSERT_TRUE(!preview.isError);
+    const auto token = didi::json::parse(preview.content[0].text)["mutation_preview"]
+                           ["confirmation_token"].get<std::string>();
+    const auto applied = registry.callTool("project_rename_references", didi::json{
+        {"target", "character_health"}, {"new_name", "health"}, {"confirmation_token", token}});
+    ASSERT_TRUE(!applied.isError);
+
+    const auto hud = readToolTestFile("scenes/hud.tscn");
+    // The node keeps its name. Renaming it would detach every path that reaches
+    // it, which is a bigger break than the one being fixed.
+    ASSERT_TRUE(hud.find("[node name=\"character_health\" type=\"Label\"]") != std::string::npos);
+    ASSERT_TRUE(hud.find("from=\"character_health\"") != std::string::npos);
+    ASSERT_TRUE(hud.find("signal=\"health\"") != std::string::npos);
+    // Node on the left of the colon, property on the right. Only the property
+    // is this symbol.
+    ASSERT_TRUE(hud.find("NodePath(\"character_health:health\")") != std::string::npos);
+    // Every line ending survives, so the change is the change and not a diff
+    // across the whole file.
+    ASSERT_TRUE(hud.find("[gd_scene format=3]\r\n") != std::string::npos);
+    ASSERT_TRUE(hud.find("\n\n") == std::string::npos);
+
+    registry.setIpcClient(nullptr);
+}
+
+static void test_rename_refuses_what_it_cannot_do_safely() {
+    // Every refusal here is a case where writing would be worse than not
+    // writing, and the caller cannot tell the difference afterwards.
+    ScopedToolProject project("rename-refusals");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("scenes/hud.tscn",
+                   "[gd_scene format=3]\n"
+                   "\n"
+                   "[connection signal=\"character_health\" from=\"Player\" to=\"HUD\" "
+                   "method=\"on_hit\"]\n"
+                   "[connection signal=\"health\" from=\"Player\" to=\"HUD\" method=\"on_heal\"]\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+
+    const auto rename = [&](const char* target, const char* new_name) {
+        const auto preview = registry.callTool("project_rename_references", didi::json{
+            {"target", target}, {"new_name", new_name}, {"dry_run", true}});
+        if (preview.isError) return preview;
+        const auto token = didi::json::parse(preview.content[0].text)["mutation_preview"]
+                               ["confirmation_token"].get<std::string>();
+        return registry.callTool("project_rename_references", didi::json{
+            {"target", target}, {"new_name", new_name}, {"confirmation_token", token}});
+    };
+
+    // Renaming onto a name a connection already uses merges two signals into
+    // one, and no later analysis can separate them again.
+    const auto collision = rename("character_health", "health");
+    ASSERT_TRUE(collision.isError);
+    ASSERT_TRUE(collision.content[0].text.find("merge") != std::string::npos);
+    ASSERT_TRUE(readToolTestFile("scenes/hud.tscn").find("character_health") != std::string::npos);
+
+    // A path is a different operation, and quietly treating it as an
+    // identifier would rewrite nothing while reporting success.
+    ASSERT_TRUE(rename("res://scenes/hud.tscn", "other").isError);
+    ASSERT_TRUE(rename("Player/Sprite", "other").isError);
+    ASSERT_TRUE(rename("character_health", "not an identifier").isError);
+    ASSERT_TRUE(rename("character_health", "character_health").isError);
+
+    registry.setIpcClient(nullptr);
+}
+
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.PropertyTypeMismatchNamesTheValue",
@@ -2531,6 +2704,12 @@ struct RegisterToolTests {
                      test_script_create_writes_a_gdscript_and_reports_its_diagnostics);
         registerTest("Tools.ResourceCreatePathGuard",
                      test_resource_create_refuses_a_target_it_cannot_write);
+        registerTest("Tools.RenameSerializedReferences",
+                     test_rename_updates_serialized_references_and_reports_the_code);
+        registerTest("Tools.RenameKeepsWhatItIsNotRenaming",
+                     test_rename_keeps_everything_it_is_not_renaming);
+        registerTest("Tools.RenameRefusals",
+                     test_rename_refuses_what_it_cannot_do_safely);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }
