@@ -33,6 +33,13 @@ def select_issue(issues: Iterable[dict]) -> dict | None:
     The label is an input control, not a priority: a task with a failing case
     attached resolves cleanly, and one without it turns into debt. Oldest first
     so the queue drains in order and nothing starves.
+
+    An issue whose fix is already sitting in an open pull request is skipped
+    however old it is. The label survives the cycle that acted on it, because
+    the loop deliberately never closes anything, so the queue's oldest entry is
+    routinely one that is already done: #214 kept its label while #222 waited to
+    merge, and the next cycle would have spent a full agent run rebuilding a fix
+    that already existed.
     """
     ready = [
         candidate
@@ -41,6 +48,7 @@ def select_issue(issues: Iterable[dict]) -> dict | None:
             label.get("name") == AGENT_READY_LABEL
             for label in candidate.get("labels", [])
         )
+        and not candidate.get("closedByPullRequestsReferences")
     ]
     if not ready:
         return None

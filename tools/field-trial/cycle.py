@@ -218,11 +218,11 @@ def render_summary(summary: dict) -> str:
 def select_from_tracker(repo: str, issue_number: int | None) -> dict | None:
     if issue_number is not None:
         result = run(["gh", "issue", "view", str(issue_number), "--repo", repo,
-                      "--json", "number,title,body,createdAt,labels,comments"], REPOSITORY)
+                      "--json", "number,title,body,createdAt,labels,comments,closedByPullRequestsReferences"], REPOSITORY)
         return json.loads(result.stdout) if result.returncode == 0 else None
     result = run(["gh", "issue", "list", "--repo", repo, "--state", "open",
                   "--label", gates.AGENT_READY_LABEL, "--limit", "50",
-                  "--json", "number,title,body,createdAt,labels,comments"], REPOSITORY)
+                  "--json", "number,title,body,createdAt,labels,comments,closedByPullRequestsReferences"], REPOSITORY)
     if result.returncode != 0:
         return None
     return gates.select_issue(json.loads(result.stdout or "[]"))

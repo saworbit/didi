@@ -193,6 +193,28 @@ class SelectIssueTests(unittest.TestCase):
     def test_returns_none_for_an_empty_queue(self):
         self.assertIsNone(GATES.select_issue([]))
 
+    def test_skips_an_issue_whose_fix_is_already_in_an_open_pull_request(self):
+        """The loop never closes an issue, so a finished one keeps its label.
+
+        #214 still carried `agent-ready` while #222 waited to merge, and it was
+        the oldest entry in the queue. Selecting it would have spent a whole
+        agent run rebuilding a fix that already existed.
+        """
+        done = issue(11, "2026-09-01T10:00:00Z", "bug", "agent-ready")
+        done["closedByPullRequestsReferences"] = [{"number": 222}]
+        waiting = issue(20, "2026-09-03T10:00:00Z", "bug", "agent-ready")
+        self.assertEqual(GATES.select_issue([done, waiting])["number"], 20)
+
+    def test_an_empty_reference_list_does_not_skip_the_issue(self):
+        candidate = issue(11, "2026-09-01T10:00:00Z", "bug", "agent-ready")
+        candidate["closedByPullRequestsReferences"] = []
+        self.assertEqual(GATES.select_issue([candidate])["number"], 11)
+
+    def test_a_queue_of_nothing_but_finished_work_selects_nothing(self):
+        done = issue(11, "2026-09-01T10:00:00Z", "bug", "agent-ready")
+        done["closedByPullRequestsReferences"] = [{"number": 222}]
+        self.assertIsNone(GATES.select_issue([done]))
+
 
 class DiffPolicyTests(unittest.TestCase):
     def test_accepts_a_fix_that_adds_a_test(self):
