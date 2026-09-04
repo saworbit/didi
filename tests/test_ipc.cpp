@@ -992,6 +992,110 @@ static void test_posix_socket_is_owner_only_before_it_listens() {
 }
 #endif
 
+// Restores the shipped idle-recycle numbers however the test leaves.
+struct ScopedIdleRecycleOverride {
+    ScopedIdleRecycleOverride(int server_recycle_ms, int client_reuse_ms) {
+        didi::ipc::testing::setIdleRecycleOverridesForTesting(server_recycle_ms, client_reuse_ms);
+    }
+    ~ScopedIdleRecycleOverride() {
+        didi::ipc::testing::clearIdleRecycleOverridesForTesting();
+    }
+};
+
+// Sleeps most of the way and spins the rest, because landing on a boundary
+// within a millisecond is the whole point and sleep_for on Windows rounds up to
+// the scheduler tick.
+void waitUntil(std::chrono::steady_clock::time_point target) {
+    const auto spin_from = target - std::chrono::milliseconds(4);
+    const auto now = std::chrono::steady_clock::now();
+    if (now < spin_from) std::this_thread::sleep_for(spin_from - now);
+    while (std::chrono::steady_clock::now() < target) std::this_thread::yield();
+}
+
+static void test_a_client_connects_while_the_server_is_between_instances() {
+    // Break caught: a server destroys its only endpoint instance before it
+    // creates the next, so for a moment the name has no instances at all.
+    // WaitNamedPipe fails with "not found" rather than "busy" in that moment,
+    // and connectUnlocked treated that as final: the call failed outright with
+    // seconds of its deadline unspent. Nothing was lost, so this is not the
+    // 502 in #227, but it fails a live tool call just as thoroughly, and the
+    // client reuse budget in the same change makes reconnecting the common
+    // case rather than a rare one.
+    //
+    // Found by writing the boundary test below, which failed on this rather
+    // than on the defect it was written for.
+    ScopedIdleRecycleOverride override_margin(40, 10);
+    const auto recycle = std::chrono::milliseconds(40);
+
+    auto server = didi::ipc::createIpcServer();
+    server->setHandler([](const didi::json& request) -> didi::json {
+        return {{"echo", request.value("params", didi::json::object())}};
+    });
+
+#if defined(_WIN32)
+    const std::string endpoint = "\\\\.\\pipe\\godot_didi_ipc_between_instances_test";
+#else
+    const auto endpoint = rawSocketPath("between-instances");
+#endif
+    ASSERT_TRUE(server->start(endpoint));
+
+    for (int attempt = 0; attempt < 16; ++attempt) {
+        // One client establishes a connection and goes quiet, so the server is
+        // recycling that instance at a moment this side can aim at.
+        auto holder = didi::ipc::createIpcClient();
+        ASSERT_TRUE(holder->connect(endpoint, 2000));
+        ASSERT_TRUE(holder->sendRequest("test.echo", {{"msg", "hold"}}).isOk());
+
+        waitUntil(std::chrono::steady_clock::now() + recycle);
+
+        // Whatever the server is in the middle of, a client with two seconds to
+        // spend must not give up in the first microsecond of it.
+        auto arriving = didi::ipc::createIpcClient();
+        ASSERT_TRUE(arriving->connect(endpoint, 2000));
+        ASSERT_TRUE(arriving->sendRequest("test.echo", {{"msg", "arriving"}}).isOk());
+        arriving->disconnect();
+        holder->disconnect();
+    }
+    server->stop();
+}
+
+static void test_a_client_does_not_reuse_a_connection_the_server_may_be_recycling() {
+    // The same boundary through the real client, with the margin the right way
+    // round. A probe cannot close this on its own: it answers about the instant
+    // it runs, and the recycle can happen after it and before the write. The
+    // client's own reuse budget is what has to keep it away from the boundary,
+    // so the budget is set well under the server's recycle window here exactly
+    // as it ships.
+    ScopedIdleRecycleOverride override_margin(60, 20);
+    const auto recycle = std::chrono::milliseconds(60);
+
+    auto server = didi::ipc::createIpcServer();
+    server->setHandler([](const didi::json& request) -> didi::json {
+        return {{"echo", request.value("params", didi::json::object())}};
+    });
+
+#if defined(_WIN32)
+    const std::string endpoint = "\\\\.\\pipe\\godot_didi_ipc_reuse_budget_test";
+#else
+    const auto endpoint = rawSocketPath("reuse-budget");
+#endif
+    ASSERT_TRUE(server->start(endpoint));
+
+    auto client = didi::ipc::createIpcClient();
+    ASSERT_TRUE(client->connect(endpoint, 2000));
+    ASSERT_TRUE(client->sendRequest("test.echo", {{"msg", "first"}}).isOk());
+
+    for (int attempt = 0; attempt < 24; ++attempt) {
+        waitUntil(std::chrono::steady_clock::now() + recycle);
+        const auto served = client->sendRequest("test.echo", {{"msg", "boundary"}});
+        ASSERT_TRUE(served.isOk());
+        ASSERT_EQ(served.value()["echo"]["msg"].get<std::string>(), "boundary");
+    }
+
+    client->disconnect();
+    server->stop();
+}
+
 struct RegisterIpcTests {
     RegisterIpcTests() {
         registerTest("IPC.Framing", test_ipc_framing);
@@ -1000,6 +1104,10 @@ struct RegisterIpcTests {
         registerTest("IPC.IdleClientServedAfterRecycle",
                      test_idle_client_is_served_after_the_server_recycles_its_connection);
         registerTest("IPC.SplitRequestAcrossIdleDeadline", test_split_request_across_the_idle_deadline_is_served);
+        registerTest("IPC.ConnectsWhileServerIsBetweenInstances",
+                     test_a_client_connects_while_the_server_is_between_instances);
+        registerTest("IPC.ClientReuseBudgetKeepsOffTheBoundary",
+                     test_a_client_does_not_reuse_a_connection_the_server_may_be_recycling);
         registerTest("IPC.NoTimeoutRoundtrip", test_ipc_negative_timeout_waits_for_definitive_response);
         registerTest("IPC.HandlerExceptionClassification", test_ipc_server_classifies_handler_exception_with_request_id);
 #if defined(_WIN32)

@@ -73,6 +73,14 @@ public:
 std::unique_ptr<IIpcClient> createIpcClient();
 std::unique_ptr<IIpcServer> createIpcServer();
 
+namespace testing {
+// Drives the idle-recycle contract in milliseconds instead of seconds, so a
+// test can sit on the boundary without taking seconds to do it, and can invert
+// the margin on purpose to exercise the server's half of it on its own.
+void setIdleRecycleOverridesForTesting(int server_recycle_ms, int client_reuse_ms);
+void clearIdleRecycleOverridesForTesting();
+} // namespace testing
+
 #if defined(_WIN32)
 namespace testing {
 using PipeSecurityDescriptorFactory = std::function<void*()>;

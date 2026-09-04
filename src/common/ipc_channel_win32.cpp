@@ -23,15 +23,61 @@
 namespace didi {
 namespace ipc {
 
+namespace {
+
+// A server holds one endpoint instance at a time: it accepts a connection,
+// serves it, and only listens again once that connection is gone. So an idle
+// connection has to be recycled or a second client can never get in, and this
+// is how long a server waits for a request before doing that.
+//
+// A client reusing a connection has to give up on it well before then. Writing
+// into a connection the server is recycling puts the request in a buffer that
+// the recycle discards, and the client is then told the outcome is unknown for
+// a request the engine never saw. That is the one failure it cannot tell from a
+// request that ran. Two independently chosen numbers in two processes is how
+// that comes back, so both come from here and the margin is asserted.
+constexpr int kServerIdleRecycleMs = 1000;
+constexpr int kClientIdleReuseMs = 300;
+static_assert(kClientIdleReuseMs * 3 <= kServerIdleRecycleMs,
+              "a client must stop reusing a connection well before a server recycles it");
+
+std::atomic<int> g_serverIdleRecycleMs{kServerIdleRecycleMs};
+std::atomic<int> g_clientIdleReuseMs{kClientIdleReuseMs};
+
+int serverIdleRecycleMs() { return g_serverIdleRecycleMs.load(std::memory_order_relaxed); }
+int clientIdleReuseMs() { return g_clientIdleReuseMs.load(std::memory_order_relaxed); }
+
+} // namespace
+
+namespace testing {
+
+void setIdleRecycleOverridesForTesting(int server_recycle_ms, int client_reuse_ms) {
+    g_serverIdleRecycleMs.store(server_recycle_ms, std::memory_order_relaxed);
+    g_clientIdleReuseMs.store(client_reuse_ms, std::memory_order_relaxed);
+}
+
+void clearIdleRecycleOverridesForTesting() {
+    g_serverIdleRecycleMs.store(kServerIdleRecycleMs, std::memory_order_relaxed);
+    g_clientIdleReuseMs.store(kClientIdleReuseMs, std::memory_order_relaxed);
+}
+
+} // namespace testing
+
 #if defined(_WIN32)
 
 namespace {
 
 constexpr uint32_t kMaximumFrameBytes = 128U * 1024U * 1024U;
 constexpr uint32_t kMaximumHandshakeResponseBytes = 64U * 1024U;
-// Also recycles an idle connection so the next client can be accepted; see the
-// comment at the read in Win32IpcServer::serverLoop.
+// Bounds a frame that has already started arriving. Recycling an idle
+// connection is a different question with a different number; see
+// kServerIdleRecycleMs.
 constexpr int kServerFrameTimeoutMs = 1000;
+// A response is the answer to a request the handler has already run. Giving up
+// on writing it back throws that work away and leaves the caller unable to tell
+// what happened, and a response larger than the pipe buffer needs the client to
+// drain it, so this is not a frame arrival deadline and does not share one.
+constexpr int kServerResponseTimeoutMs = 5000;
 // How long a cancelled overlapped operation gets to settle before we start
 // complaining. Cancellation is near-instant whenever it can happen at all.
 constexpr DWORD kCancelSettleMs = 250;
@@ -44,6 +90,15 @@ struct Win32Deadline {
 // False only when the server has dropped its end. Anything else, including a
 // pipe with bytes already waiting, counts as alive: this decides whether to
 // throw away a working connection, so it errs towards keeping it.
+// Whether bytes are sitting in the pipe waiting to be read. Used on the server
+// side to decide whether recycling this connection would discard a request the
+// client has already written.
+bool win32PipeHasPendingBytes(HANDLE pipe) {
+    DWORD available = 0;
+    if (!PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr)) return false;
+    return available > 0;
+}
+
 bool win32PipeServerEndIsAlive(HANDLE pipe) {
     DWORD available = 0;
     if (PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr)) return true;
@@ -237,6 +292,23 @@ public:
         // caller is then told the outcome is unknown for a request the server
         // never saw. Noticing it here is the one point where a reconnect is
         // unambiguously safe, because nothing has been sent yet.
+        //
+        // The probe alone is not enough, because it answers about the instant
+        // it runs and the recycle can happen after it and before the write.
+        // Deciding on elapsed time instead removes the race from this side: a
+        // connection that has been quiet for longer than the reuse budget is
+        // one the server may already be recycling, so it is replaced rather
+        // than trusted. A reconnect costs one CreateFile and nothing else,
+        // because authorization travels in every request rather than being
+        // established per connection.
+        if (m_pipe != INVALID_HANDLE_VALUE) {
+            const auto idle_for = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - m_lastActivity).count();
+            if (idle_for >= clientIdleReuseMs()) {
+                CloseHandle(m_pipe);
+                m_pipe = INVALID_HANDLE_VALUE;
+            }
+        }
         if (m_pipe != INVALID_HANDLE_VALUE && !win32PipeServerEndIsAlive(m_pipe)) {
             CloseHandle(m_pipe);
             m_pipe = INVALID_HANDLE_VALUE;
@@ -303,6 +375,7 @@ public:
                 return failLocked("IPC response ID does not match request ID",
                                   true, true, false);
             }
+            m_lastActivity = std::chrono::steady_clock::now();
             if (resp_json.contains("error") && !resp_json["error"].is_null()) {
                 auto err = resp_json["error"];
                 int code = err.value("code", 500);
@@ -347,6 +420,7 @@ private:
             );
 
             if (m_pipe != INVALID_HANDLE_VALUE) {
+                m_lastActivity = std::chrono::steady_clock::now();
                 DIDI_LOG_DEBUG("IPC_CLIENT", "Connected to pipe: ", m_pipeName);
                 return true;
             }
@@ -361,8 +435,19 @@ private:
             }
 
             const DWORD remaining = remainingWaitMilliseconds(deadline);
-            if (remaining == 0 || !WaitNamedPipeA(m_pipeName.c_str(), remaining)) {
-                return false;
+            if (remaining == 0) return false;
+            if (!WaitNamedPipeA(m_pipeName.c_str(), remaining)) {
+                // Not final, and treating it as final is a bug of its own. A
+                // server destroys its only endpoint instance before it creates
+                // the next, so for a moment the name has no instances at all
+                // and this fails with "not found" rather than "busy". Giving up
+                // there failed the call outright with seconds of the deadline
+                // unspent, and reconnecting is the common case rather than a
+                // rare one. Retry until the deadline says otherwise.
+                const DWORD left = remainingWaitMilliseconds(deadline);
+                if (left == 0) return false;
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(std::min<DWORD>(20, left)));
             }
         }
     }
@@ -370,6 +455,10 @@ private:
     HANDLE m_pipe{INVALID_HANDLE_VALUE};
     std::string m_pipeName{kDefaultPipeName};
     uint64_t m_nextRequestId{1};
+    // When this connection was last known to be carrying traffic. A server
+    // recycles one that has been quiet, so this is what decides whether reusing
+    // it is safe.
+    std::chrono::steady_clock::time_point m_lastActivity{std::chrono::steady_clock::now()};
     mutable std::recursive_mutex m_mutex;
 };
 
@@ -566,7 +655,7 @@ private:
                 // connection to the same endpoint has nothing to connect to and
                 // fails outright. See #65 for the churn this costs and what
                 // removing it would require first.
-                const auto idle_deadline = win32DeadlineAfter(kServerFrameTimeoutMs);
+                const auto idle_deadline = win32DeadlineAfter(serverIdleRecycleMs());
                 uint8_t len_buf[4] = {0};
                 auto header = readExactOverlapped(pipe, len_buf, sizeof(len_buf), hIoEvent,
                                                   m_stopEvent, idle_deadline);
@@ -580,6 +669,27 @@ private:
                                                  sizeof(len_buf) - header.transferred, hIoEvent,
                                                  m_stopEvent,
                                                  win32DeadlineAfter(kServerFrameTimeoutMs));
+                }
+                if (header.status == ExactIoStatus::timed_out && header.transferred == 0 &&
+                    win32PipeHasPendingBytes(pipe)) {
+                    // Nothing had arrived when the deadline expired and
+                    // something has arrived since. Recycling now calls
+                    // DisconnectNamedPipe, which discards bytes the client has
+                    // already written; the client then reads a broken pipe and
+                    // is told the outcome is unknown for a request the engine
+                    // never saw. Serve it instead.
+                    //
+                    // This narrows the window, it does not close it, and it is
+                    // not what keeps a client out of trouble. Bytes can still
+                    // arrive between this check and the disconnect below, and
+                    // no server-side check can cover that: recycling on a
+                    // deadline always has an edge. What keeps a well behaved
+                    // client away from the edge is its own reuse budget, which
+                    // is why kClientIdleReuseMs is a fraction of the recycle
+                    // window rather than close to it. This is here for the
+                    // client that does not honour it, an older build across a
+                    // version boundary being the case that motivates it.
+                    continue;
                 }
                 if (header.status != ExactIoStatus::completed) {
                     break; // Disconnected or stop requested
@@ -661,7 +771,7 @@ private:
                 }
 
                 std::vector<uint8_t> frame = frameMessage(response_json);
-                const auto response_deadline = win32DeadlineAfter(kServerFrameTimeoutMs);
+                const auto response_deadline = win32DeadlineAfter(kServerResponseTimeoutMs);
                 if (writeExactOverlapped(pipe, frame.data(), frame.size(), hIoEvent, m_stopEvent,
                                          response_deadline).status != ExactIoStatus::completed) {
                     break;
@@ -708,8 +818,13 @@ namespace {
 
 constexpr uint32_t kMaximumFrameBytes = 128U * 1024U * 1024U;
 constexpr uint32_t kMaximumHandshakeResponseBytes = 64U * 1024U;
-// Also recycles an idle connection so the next client can be accepted.
+// Bounds a frame that has already started arriving. Recycling an idle
+// connection is a different question with a different number; see
+// kServerIdleRecycleMs.
 constexpr int kServerFrameTimeoutMs = 5000;
+// A response is the answer to a request the handler has already run; see the
+// Win32 branch above.
+constexpr int kServerResponseTimeoutMs = 5000;
 // Slice length for a wait with no deadline, so stop() is still noticed.
 constexpr int kStopPollSliceMs = 100;
 #if defined(MSG_NOSIGNAL)
@@ -726,6 +841,17 @@ struct MonotonicDeadline {
 // False only when the peer has closed. A recv of 0 on a stream socket means
 // exactly that; EAGAIN means nothing is waiting, which is the normal state of a
 // healthy idle connection.
+// Whether bytes are sitting in the socket waiting to be read. Used on the
+// server side to decide whether closing this connection would discard a request
+// the client has already written.
+bool posixSocketHasPendingBytes(int sock) {
+    struct pollfd pfd{};
+    pfd.fd = sock;
+    pfd.events = POLLIN;
+    const int ready = poll(&pfd, 1, 0);
+    return ready > 0 && (pfd.revents & POLLIN) != 0;
+}
+
 bool posixPeerIsAlive(int sock) {
     char probe = 0;
     const ssize_t peeked = recv(sock, &probe, 1, MSG_PEEK | MSG_DONTWAIT);
@@ -877,6 +1003,18 @@ public:
         // catching it here rather than after a write: a socket whose peer has
         // closed still accepts a write, and the failure then looks like a lost
         // response to a request the server never read.
+        //
+        // And the same reason the probe is not enough on its own: it answers
+        // about the instant it runs, and the recycle can happen after it and
+        // before the write. Elapsed time decides instead.
+        if (m_sock >= 0) {
+            const auto idle_for = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - m_lastActivity).count();
+            if (idle_for >= clientIdleReuseMs()) {
+                close(m_sock);
+                m_sock = -1;
+            }
+        }
         if (m_sock >= 0 && !posixPeerIsAlive(m_sock)) {
             close(m_sock);
             m_sock = -1;
@@ -926,6 +1064,7 @@ public:
 
         try {
             json resp_json = json::parse(payload.begin(), payload.end());
+            m_lastActivity = std::chrono::steady_clock::now();
             if (!resp_json.is_object() || !resp_json.contains("id") ||
                 resp_json["id"] != req_id) {
                 return failLocked("IPC response ID does not match request ID",
@@ -955,6 +1094,7 @@ private:
             m_sock = socket(AF_UNIX, SOCK_STREAM, 0);
             if (m_sock >= 0 && setNonblockingCloseOnExec(m_sock)) {
                 if (::connect(m_sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
+                    m_lastActivity = std::chrono::steady_clock::now();
                     return true;
                 }
                 if (errno == EINPROGRESS && waitForSocket(m_sock, POLLOUT, deadline)) {
@@ -962,6 +1102,7 @@ private:
                     socklen_t length = sizeof(socket_error);
                     if (getsockopt(m_sock, SOL_SOCKET, SO_ERROR, &socket_error, &length) == 0 &&
                         socket_error == 0) {
+                        m_lastActivity = std::chrono::steady_clock::now();
                         return true;
                     }
                 }
@@ -989,6 +1130,9 @@ private:
     int m_sock{-1};
     std::string m_pipeName{kDefaultPipeName};
     uint64_t m_nextRequestId{1};
+    // When this connection was last known to be carrying traffic; see the Win32
+    // client above.
+    std::chrono::steady_clock::time_point m_lastActivity{std::chrono::steady_clock::now()};
     mutable std::recursive_mutex m_mutex;
 };
 
@@ -1102,9 +1246,17 @@ private:
                 // Load bearing for the same reason as the Win32 branch above:
                 // this loop serves one accepted client at a time and only
                 // accepts the next after it breaks.
-                const auto idle_deadline = deadlineAfter(kServerFrameTimeoutMs);
+                const auto idle_deadline = deadlineAfter(serverIdleRecycleMs());
                 uint8_t len_buf[4] = {0};
-                if (!readExact(client, len_buf, sizeof(len_buf), idle_deadline, &m_running)) break;
+                if (!readExact(client, len_buf, sizeof(len_buf), idle_deadline, &m_running)) {
+                    // A request that landed while this connection was being
+                    // recycled is served rather than closed on, for the reason
+                    // spelled out in the Win32 branch above: closing discards
+                    // bytes the client has already written and leaves it unable
+                    // to tell that from a request the engine ran.
+                    if (m_running.load() && posixSocketHasPendingBytes(client)) continue;
+                    break;
+                }
 
                 const uint32_t req_len = decodeFrameLength(len_buf);
                 if (req_len == 0 || req_len > kMaximumFrameBytes) break;
@@ -1155,7 +1307,7 @@ private:
                 }
 
                 auto frame = frameMessage(resp_json);
-                const auto response_deadline = deadlineAfter(kServerFrameTimeoutMs);
+                const auto response_deadline = deadlineAfter(kServerResponseTimeoutMs);
                 if (!writeExact(client, frame.data(), frame.size(), response_deadline, &m_running)) break;
             }
             int expected_client = client;
