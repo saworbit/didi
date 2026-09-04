@@ -39,7 +39,7 @@ When live, use focused tools:
 
 - `scene_instantiate_node` for built-in ClassDB node types only.
 - `scene_remove_node`, `scene_reparent_node`, and `scene_duplicate_node` for structural changes.
-- `scene_set_property` for existing scalar properties.
+- `scene_set_property` for existing scalar properties. Its `value` is the property read back after the commit, not the argument you sent. Check `applied`: a successful call with `applied: false` means Godot discarded the write, and the scene is not what you asked for.
 - `editor_undo` and `editor_redo` to verify reversibility.
 - `editor_save_scene` only when persistence is intended.
 - `editor_reload_project` to request a resource-filesystem source rescan.

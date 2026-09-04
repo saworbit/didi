@@ -352,10 +352,20 @@ try {
         (Tool-Request 921 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 922 "scene_instantiate_node" @{ node_type = "Label"; parent_path = "/root"; name = "PostInitLabel" }),
         (Tool-Request 923 "scene_instantiate_node" @{ node_type = "Button"; parent_path = "/root"; name = "PostInitButton" }),
+        # A write Godot discards, so the response has to report the property and
+        # not the request. anchors_preset is only honoured once the Control is in
+        # anchors layout mode, and a Control nested inside another Control starts
+        # in layout_mode 0. The same write to a Control whose parent is not a
+        # Control does apply, which is why the nesting here is deliberate.
+        (Tool-Request 924 "scene_instantiate_node" @{ node_type = "Control"; parent_path = "/root"; name = "PostInitPanel" }),
+        (Tool-Request 925 "scene_instantiate_node" @{ node_type = "Control"; parent_path = "/root/PostInitPanel"; name = "PostInitChild" }),
+        (Tool-Request 926 "scene_set_property" @{ target_node = "/root/PostInitPanel/PostInitChild"; property_name = "anchors_preset"; value = 15 }),
         # Put the edited scene back as it was found. Later assertions count the
         # children of this root, so a guard that leaves nodes behind fails them.
-        (Tool-Request 924 "scene_remove_node" @{ target_node = "/root/PostInitLabel" }),
-        (Tool-Request 925 "scene_remove_node" @{ target_node = "/root/PostInitButton" })
+        (Tool-Request 927 "scene_remove_node" @{ target_node = "/root/PostInitPanel/PostInitChild" }),
+        (Tool-Request 928 "scene_remove_node" @{ target_node = "/root/PostInitPanel" }),
+        (Tool-Request 929 "scene_remove_node" @{ target_node = "/root/PostInitLabel" }),
+        (Tool-Request 930 "scene_remove_node" @{ target_node = "/root/PostInitButton" })
     )
     $rawPostInitResponses = $postInitRequests | & $didiExecutable --project $fixtureRoot
     $postInitResponses = @($rawPostInitResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
@@ -366,6 +376,14 @@ try {
     Tool-Payload $postInitById[923] | Out-Null
     Tool-Payload $postInitById[924] | Out-Null
     Tool-Payload $postInitById[925] | Out-Null
+    $discardedWrite = Tool-Payload $postInitById[926]
+    Assert-True ($discardedWrite.requested_value -eq 15) "scene_set_property did not report the value it was asked for."
+    Assert-True ($discardedWrite.value -eq 0) "scene_set_property reported the requested anchors_preset rather than the value the property actually holds."
+    Assert-True ($discardedWrite.applied -eq $false) "scene_set_property claimed a discarded write was applied."
+    Tool-Payload $postInitById[927] | Out-Null
+    Tool-Payload $postInitById[928] | Out-Null
+    Tool-Payload $postInitById[929] | Out-Null
+    Tool-Payload $postInitById[930] | Out-Null
     Assert-True (-not $godot.HasExited) "Godot editor died constructing a themed Control; NOTIFICATION_POSTINITIALIZE is not reaching newly constructed objects."
 
     $game = Start-Process -FilePath $GodotExecutable `

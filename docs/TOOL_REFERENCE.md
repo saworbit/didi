@@ -72,6 +72,8 @@ Sets an existing scalar property through UndoRedo. Unknown properties and incomp
 - `property_name` (`string`, required).
 - `value` (required): JSON null, boolean, signed integer, real, or string compatible with the existing Godot property type.
 
+The property is read back after the commit, and the result reports what it now holds rather than what was requested. `value` is that observed state, `old_value` is what it held before, `requested_value` is the argument, and `applied` says whether the two now agree. A committed UndoRedo action is not a changed property: Godot discards some writes, such as `anchors_preset` on a Control still in `layout_mode` 0, and those return `applied: false` with `value` unchanged. Numbers are compared by value, so writing an integer to a float property is `applied: true`.
+
 ### `scene_get_property` — Live
 
 Returns one existing scalar property. Metadata and export hints are not returned.
