@@ -1,13 +1,16 @@
 const { Resvg } = require('@resvg/resvg-js');
 const fs = require('fs'), path = require('path');
-const SRC = 'dist/svg', OUT = 'dist/png';
+const SRC = 'svg', OUT = 'png';
 fs.mkdirSync(OUT, { recursive: true });
 
 const read = f => fs.readFileSync(path.join(SRC, f), 'utf8');
 const ink  = (svg, c) => svg.replace(/currentColor/g, c);
 
 function png(svg, w, name) {
-  const r = new Resvg(svg, { fitTo: { mode: 'width', value: w } });
+  const r = new Resvg(svg, {
+    fitTo: { mode: 'width', value: w },
+    font: { loadSystemFonts: true },
+  });
   fs.writeFileSync(path.join(OUT, name), r.render().asPng());
   return name;
 }
@@ -35,6 +38,7 @@ for (const [f, c, n] of [
 ]) out.push(png(ink(read(f), c), 1600, `${n}-1600.png`));
 out.push(png(ink(read('didi-lockup-stacked.svg'), '#F6F7F9'), 900, 'didi-stacked-white-900.png'));
 out.push(png(ink(read('didi-lockup-stacked.svg'), '#12151B'), 900, 'didi-stacked-ink-900.png'));
-for (const [f, w] of [['social-preview', 1280], ['readme-banner', 1280]])
+for (const [f, w] of [['social-preview', 1280], ['readme-banner', 1280],
+                      ['readme-banner-light', 1280]])
   out.push(png(read(f + '.svg'), w, f + '.png'));
 console.log(`${out.length} PNGs written`);

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """didi identity — single source of truth. Every asset derives from one grid."""
 import os
-D = "dist/svg"
+D = "svg"
 
 # ── Grid constants (one module system for mark + wordmark) ──────────────
 SW   = 11.5          # universal stroke weight

@@ -92,16 +92,22 @@ The mark must stay fully functional in one colour. Every source ships a `current
 
 ```
 docs/brand/svg/    13 sources, currentColor wherever one-colour use applies
-docs/brand/png/    the exports that are actually referenced or required by a platform
+docs/brand/png/    49 exports — the complete set, vendored so no toolchain is needed to use them
 docs/brand/build.py, raster.js
 ```
+
+The PNG set is committed in full (837 KB) rather than trimmed to what is referenced, so anyone
+writing docs, a slide, or a release post can take an asset straight from the tree without
+installing Python and Node first. `raster.js` reproduces it byte-for-byte from the SVG sources.
 
 | File | Where it is used |
 | :--- | :--- |
 | `png/social-preview.png` | 1280 × 640. Repository **Settings → Social preview**. |
 | `png/readme-banner.png`, `png/readme-banner-light.png` | 1280 × 300. Top of `README.md`, switched by `prefers-color-scheme`. |
 | `png/favicon-16/32/48.png`, `svg/favicon.svg` | Documentation site. |
-| `png/didi-icon-256/512.png` | MCP client and IDE listings, where a tile is expected. |
+| `png/didi-icon-{16…1024}.png` | MCP client and IDE listings, where a tile is expected. |
+| `png/didi-mark-{white,ink,gradient}-{16…1024}.png` | The bare mark in the three ink treatments, every standard size. |
+| `png/didi-signature-*-1600.png`, `png/didi-stacked-*-900.png` | Raster lockups for slides, posts, and anywhere SVG is awkward. |
 
 The banners and social preview are committed as **PNG** deliberately: their SVG sources set text in
 a system font, and GitHub's SVG sanitiser does not render that reliably across platforms.
@@ -115,7 +121,7 @@ derives from the constants at the top of `build.py`; nothing is hand-placed.
 cd docs/brand
 python build.py                  # SVG sources
 npm install @resvg/resvg-js      # one-time; prebuilt binary, no system dependencies
-node raster.js                   # PNG exports (writes the full set, not just the committed subset)
+node raster.js                   # PNG exports — regenerates exactly what is committed
 ```
 
 Change `SW`, `R` or `CY` and the whole system re-derives consistently.
