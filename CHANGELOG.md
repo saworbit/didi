@@ -11,6 +11,10 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
+### Added
+
+- Added `project_rename_references`, which renames a symbol in the places Godot serializes it: the `signal` and `method` attributes of a `[connection]`, and the property segment of a `NodePath` in an animation track. Those are exactly the references a text search finds but cannot explain, and exactly the ones an agent renaming a variable in a script forgets, so a project that looked clean broke at runtime. Every file is staged before any is replaced, so the change cannot stop half applied because the last file was the one that could not be written. GDScript and C# references are reported with their file and line and never rewritten: the language is dynamically typed, a whole-word match may be this symbol or an unrelated local that shares the name, and rewriting on that evidence would be a second source of the breakage this exists to prevent. It refuses a name a connection or track already uses, because that would merge two symbols with no way back, and it refuses to run at all on a truncated project scan, because renaming the files that were read and leaving the rest is the half-applied change itself. The rewrite and `project_analyze_impact` share one set of matchers and the plan is checked against the report before anything is written, so a disagreement between what was reported and what would be edited stops the whole change.
+
 ### Fixed
 
 - A live tool call no longer fails at the moment a connection is recycled. A server holds one endpoint instance and recycles it after a second of quiet so another client can have it, and recycling discards whatever the client has already written. A client that came back at that instant either had its request thrown away and was told the outcome was unknown for something the engine never ran, or had the write itself refused; both failed the call, and on a loaded CI runner that cost whole harness runs. The client now decides for itself, on elapsed time rather than on a liveness probe that can go stale between the check and the write: a connection quiet for longer than a fraction of the recycle window is replaced instead of trusted. Both numbers come from one place with the margin asserted, because two independently chosen timeouts in two processes is how this comes back. A server also serves, rather than discards, a request that arrives while it is tearing a connection down, which is what protects a client built before this change.
@@ -33,12 +37,12 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `92/95`
+**Canonical implementation:** `93/96`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 95 canonical tools plus 10 legacy registrations (105 total). 92 canonical tools are implemented and 3 remain unimplemented.
+Discovery now exposes 96 canonical tools plus 10 legacy registrations (106 total). 93 canonical tools are implemented and 3 remain unimplemented.
 
 ---
 

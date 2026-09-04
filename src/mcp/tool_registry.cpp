@@ -64,7 +64,8 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "script_get_symbols", "script_patch_method", "patch_script_symbols", "script_create",
         "viewport_create_test_lab", "create_visual_test_lab", "resource_create",
         "resource_inspect", "project_list_resources", "query_project_resources",
-        "project_get_uid_map", "project_audit_assets", "project_analyze_impact", "runtime_launch",
+        "project_get_uid_map", "project_audit_assets", "project_analyze_impact",
+        "project_rename_references", "runtime_launch",
         "blackboard_write", "blackboard_read", "blackboard_patch",
         "blackboard_list_keys", "blackboard_clear",
         "blackboard_task_create", "blackboard_task_claim", "blackboard_task_update",
@@ -155,6 +156,7 @@ CallToolResult handleBlackboardTaskComplete(const json& args, std::shared_ptr<ip
 CallToolResult handleBlackboardTaskList(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleSceneGetSelection(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectAnalyzeImpact(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleProjectRenameReferences(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAudioConfigureBus(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleInstantiateAsset(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -1825,6 +1827,25 @@ void ToolRegistry::registerAllDefaultTools() {
             {"additionalProperties", false}
         };
         t.handler = [this](const json& args) { return handleProjectAnalyzeImpact(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_rename_references";
+        t.description = "Renames a symbol in the scene connections and animation tracks that serialize it, atomically across every file, and reports the GDScript references it deliberately does not touch.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
+                            {"description", "The Godot identifier to rename: a variable, function or signal name. A res:// path or a node path is a different operation and is refused."}}},
+                {"new_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
+                              {"description", "The identifier to rename it to. Refused if a scene connection or animation track already uses it, because that would merge two different symbols."}}},
+                {"max_impacts", {{"type", "integer"}, {"minimum", 1}, {"maximum", 5000}, {"default", 500}}}
+            }},
+            {"required", json::array({"target", "new_name"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleProjectRenameReferences(args, m_ipcClient); };
         registerTool(std::move(t));
     }
     {

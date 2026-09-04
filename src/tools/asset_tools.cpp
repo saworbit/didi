@@ -287,6 +287,47 @@ CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcC
     return CallToolResult::successJson(std::move(payload));
 }
 
+CallToolResult handleProjectRenameReferences(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    (void)ipc;
+    if (!args.is_object()) {
+        return CallToolResult::error("Invalid rename request: arguments must be an object");
+    }
+    offline::ProjectRenameOptions options;
+    if (!args.contains("target") || !args["target"].is_string()) {
+        return CallToolResult::error("Invalid rename request: target must be a string");
+    }
+    if (!args.contains("new_name") || !args["new_name"].is_string()) {
+        return CallToolResult::error("Invalid rename request: new_name must be a string");
+    }
+    options.target = args["target"].get<std::string>();
+    options.new_name = args["new_name"].get<std::string>();
+    if (args.contains("max_impacts")) {
+        const auto& value = args["max_impacts"];
+        if (!value.is_number_integer() || value.get<int64_t>() < 1 || value.get<int64_t>() > 5000) {
+            return CallToolResult::error(
+                "Invalid rename request: max_impacts must be an integer from 1 to 5000");
+        }
+        options.max_impacts = static_cast<size_t>(value.get<int64_t>());
+    }
+
+    auto report = offline::renameReferences(".", options);
+    if (report.isErr()) {
+        // The conflict and truncation refusals carry the evidence a caller needs
+        // to act, so they travel with the message rather than being flattened
+        // into it.
+        const auto& failure = report.error();
+        if (failure.data.is_object() && !failure.data.empty()) {
+            return CallToolResult::error(
+                json{{"error", {{"code", failure.code}, {"message", failure.message},
+                                {"data", failure.data}}}}.dump());
+        }
+        return CallToolResult::error(failure.message);
+    }
+    auto payload = report.value();
+    payload["execution_mode"] = "offline_fallback";
+    return CallToolResult::successJson(std::move(payload));
+}
+
 CallToolResult handleProjectAnalyzeImpact(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     (void)ipc;
     if (!args.is_object()) {

@@ -33,7 +33,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-Didi v1.5.0 registers 95 canonical tool names. 92 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 92 canonical tools are implemented. Ten legacy names are registered separately, for exactly 105 `tools/list` entries.
+Didi v1.5.0 registers 96 canonical tool names. 93 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 93 canonical tools are implemented. Ten legacy names are registered separately, for exactly 106 `tools/list` entries.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
@@ -56,14 +56,14 @@ Didi v1.5.0 registers 95 canonical tool names. 92 are implemented in at least on
 | `live` | `runtime_inject_input` | Game only. Builds every event before dispatching any through `Input.parse_input_event`; the count is calls made, not events accepted. |
 | `live` | `runtime_read_profiler` | Editor or game. Samples `Performance` monitors from the frame callback over a bounded window; one collector per session. |
 | `live` | `ui_hit_test` | Editor-only. Traverses bounded live Control state at a viewport-space point without synthesizing or injecting input. |
-| `offline_fallback` | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method`, `script_create`, `viewport_create_test_lab`, `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map`, `project_audit_assets`, `project_analyze_impact`, `blackboard_write`, `blackboard_read`, `blackboard_patch`, `blackboard_list_keys`, `blackboard_clear`, `blackboard_task_create`, `blackboard_task_claim`, `blackboard_task_update`, `blackboard_task_complete`, `blackboard_task_list`, `project_search_text`, `project_search_symbols`, `runtime_launch`, `csharp_check_build`, `shader_check_compile`, `project_list_export_presets`, `project_export`, `gridmap_export_mesh_library` | Operates on bounded project files or launches a separate Godot/dotnet process. Results are not live editor state. |
+| `offline_fallback` | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method`, `script_create`, `viewport_create_test_lab`, `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map`, `project_audit_assets`, `project_analyze_impact`, `project_rename_references`, `blackboard_write`, `blackboard_read`, `blackboard_patch`, `blackboard_list_keys`, `blackboard_clear`, `blackboard_task_create`, `blackboard_task_claim`, `blackboard_task_update`, `blackboard_task_complete`, `blackboard_task_list`, `project_search_text`, `project_search_symbols`, `runtime_launch`, `csharp_check_build`, `shader_check_compile`, `project_list_export_presets`, `project_export`, `gridmap_export_mesh_library` | Operates on bounded project files or launches a separate Godot/dotnet process. Results are not live editor state. |
 | `unimplemented` | `physics_simulate_step`, `nav_bake_mesh`, `runtime_get_call_stack` | Registered schema only. Calls are rejected before legacy handlers execute. |
 
 ## Phase 7 feasibility status
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `92/95`
+**Canonical implementation:** `93/96`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
@@ -109,7 +109,7 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 
 - A runtime session has one MCP owner at a time. Attach acquires an OS-backed `<session-id>.lock`; another client receives `423`, and owner process exit/crash releases the kernel lock. Lock metadata contains no authentication token.
 - Every implemented mutation advertises `dry_run`. Dry-run requests stop before handlers and return a structured `mutation_preview` bound to the canonical project and live route context.
-- `editor_reload_project`, script patching, and overwrite-enabled `resource_create`, `script_create`, visual-test-lab creation, `project_export`, and `gridmap_export_mesh_library` require the preview's 64-hex `confirmation_token`. Tokens expire after 120 seconds, are single-use, and reject tool, argument, project, mode, session, generation, expiry, and replay mismatches.
+- `editor_reload_project`, script patching, `project_rename_references`, and overwrite-enabled `resource_create`, `script_create`, visual-test-lab creation, `project_export`, and `gridmap_export_mesh_library` require the preview's 64-hex `confirmation_token`. Tokens expire after 120 seconds, are single-use, and reject tool, argument, project, mode, session, generation, expiry, and replay mismatches.
 - Live node paths use `/root/<edited-scene-root>/...`; `/root` resolves to the active edited-scene root.
 - Live hierarchy output contains names, classes, logical paths, and children. Bulk properties, scripts, and signals are listed in `omitted_fields` rather than fabricated.
 - Property get/set supports JSON null, boolean, signed integer, real, and string values. Unknown properties, incompatible JSON types, and non-scalar Godot Variants are rejected.
@@ -135,6 +135,7 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 - `script_reflect_class` reflects the Godot API dump pinned in the repository, not live Godot ClassDB reflection. It covers every engine class, reports the `api_version` it describes, and knows nothing about script classes. It falls back to a small built-in map when the reference file is not installed beside the binary.
 - `resource_create` writes textual `.tres` content for scalar, array, and Vector2/Vector3-shaped JSON values. It does not instantiate and validate arbitrary Resource classes in Godot, and it preserves an existing target unless `overwrite: true` is explicit. `save_path` must end in `.tres` or `.res`; any other target is refused rather than written with resource markup in it.
 - `script_create` writes a `.gd` file under the project root and returns the diagnostics for what it wrote. It preserves an existing script unless `overwrite: true` is explicit.
+- `project_rename_references` rewrites only the forms Godot serializes: `[connection]` signal and method attributes, and the property segment of an animation track `NodePath`. GDScript and C# references are reported and never rewritten, because a whole-word match in a dynamically typed language may be an unrelated local. It refuses a colliding `new_name` and refuses to run on a truncated scan.
 - `scene_set_property` and the `properties` argument of `scene_instantiate_node` accept nil, bool, int, float, String, StringName, NodePath, Vector2/Vector2i/Vector3/Vector3i from `{x,y[,z]}` objects, Color from `{r,g,b[,a]}` or a hex string, and Resource slots from a `res://` path validated against the class the property holds. Other Godot types, Rect2 and Transform among them, are still refused rather than guessed at.
 - `viewport_create_test_lab` writes a sandbox `.tscn`; it preserves an existing sandbox unless `overwrite: true` is explicit, does not instance the target resource, and does not produce multi-angle live captures automatically.
 - Phase 2 tools are live-only: they never edit `project.godot`, script references, or `.tscn` files behind a disconnected editor.
