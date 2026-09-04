@@ -115,6 +115,7 @@ Once connected, ask your AI assistant any of the following:
 - 🧱 **Scene Mutation**: *"Create a Node named SpawnPoint under the edited scene root, then verify it exists."* (`scene_instantiate_node`, `scene_get_hierarchy`)
 - 🎚️ **Scalar Property**: *"Read the Player process priority, set it to 10, and verify the change."* (`scene_get_property`, `scene_set_property`)
 - 📖 **Limited Class Reference**: *"Check Didi's offline reference entry for CharacterBody3D."* (`script_reflect_class`)
+- 📝 **Script Creation**: *"Write `res://scripts/player.gd` with a jump function and tell me whether it parses."* (`script_create`)
 - 🐛 **Syntax & Error Check**: *"Check `res://scripts/player.gd` for syntax errors or deprecations."* (`script_check_syntax`)
 - 📸 **Visual Capture**: *"Capture a PNG of the active viewport and check the player positioning."* (`viewport_capture_frame`)
 - 🧪 **Sandbox Lab**: *"Generate a visual test lab with neutral lighting to inspect `res://models/hero.glb`."* (`viewport_create_test_lab`)

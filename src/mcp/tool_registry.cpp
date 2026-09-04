@@ -61,7 +61,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
     };
     static const std::unordered_set<std::string> offline = {
         "script_check_syntax", "analyze_script_diagnostics", "script_reflect_class",
-        "script_get_symbols", "script_patch_method", "patch_script_symbols",
+        "script_get_symbols", "script_patch_method", "patch_script_symbols", "script_create",
         "viewport_create_test_lab", "create_visual_test_lab", "resource_create",
         "resource_inspect", "project_list_resources", "query_project_resources",
         "project_get_uid_map", "project_audit_assets", "project_analyze_impact", "runtime_launch",
@@ -123,6 +123,7 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
 CallToolResult handleScriptReflectClass(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleScriptGetSymbols(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleScriptAttachToNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleScriptDetachFromNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
@@ -1191,6 +1192,22 @@ void ToolRegistry::registerAllDefaultTools() {
         };
         t.handler = [this](const json& args) { return handleScriptGetSymbols(args, m_ipcClient); };
         registerTool(std::move(t));
+    }
+    {
+        ToolDefinition create;
+        create.name = "script_create";
+        create.description = "Writes a new GDScript file under the project root and returns the diagnostics for what it wrote.";
+        create.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"script_path", {{"type", "string"}, {"description", "Target res:// path ending in .gd"}}},
+                {"source_text", {{"type", "string"}, {"description", "File contents"}}},
+                {"overwrite", {{"type", "boolean"}, {"default", false}}}
+            }},
+            {"required", {"script_path", "source_text"}}
+        };
+        create.handler = [this](const json& args) { return handleScriptCreate(args, m_ipcClient); };
+        registerTool(std::move(create));
     }
     {
         ToolDefinition t;

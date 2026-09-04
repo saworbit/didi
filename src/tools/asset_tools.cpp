@@ -7,6 +7,7 @@
 #include "didi/offline/audio_bus_layout.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/atomic_write.hpp"
+#include <cctype>
 #include <fstream>
 #include <initializer_list>
 #include <sstream>
@@ -119,6 +120,30 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
 
     if (save_path.empty()) {
         return CallToolResult::error("Parameter 'save_path' is required (e.g. res://materials/wood.tres).");
+    }
+
+    // The body written below is Godot text-resource markup and nothing else.
+    // Writing it to any path the caller names produced a .gd file full of
+    // [gd_resource] markup, reported as created, that script_check_syntax in
+    // the same session immediately called unparseable. Refuse the target
+    // instead of writing a file the engine cannot load.
+    {
+        const auto dot = save_path.find_last_of('.');
+        const auto slash = save_path.find_last_of('/');
+        std::string extension =
+            (dot == std::string::npos || (slash != std::string::npos && dot < slash))
+                ? std::string()
+                : save_path.substr(dot);
+        for (auto& character : extension) {
+            character = static_cast<char>(
+                std::tolower(static_cast<unsigned char>(character)));
+        }
+        if (extension != ".tres" && extension != ".res") {
+            return CallToolResult::error(
+                "resource_create writes Godot text-resource markup, so save_path must end in "
+                ".tres or .res; received \"" + save_path +
+                "\". Use script_create for a GDScript file.");
+        }
     }
 
     // Offline generator for common .tres resources

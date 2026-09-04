@@ -3,7 +3,9 @@
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/offline/gdscript_diagnostics.hpp"
+#include "didi/offline/resource_indexer.hpp"
 #include "didi/common/atomic_write.hpp"
+#include <cctype>
 #include <fstream>
 #include <sstream>
 #include <filesystem>
@@ -45,6 +47,87 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
     };
 
     return CallToolResult::successJson(result);
+}
+
+CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    (void)ipc;
+    const std::string script_path = args.value("script_path", args.value("file_path", ""));
+    if (script_path.empty()) {
+        return CallToolResult::error(
+            "Parameter 'script_path' is required (e.g. res://scripts/player.gd).");
+    }
+    if (!args.contains("source_text") || !args["source_text"].is_string()) {
+        return CallToolResult::error("Parameter 'source_text' is required and must be a string.");
+    }
+    if (args.contains("overwrite") && !args["overwrite"].is_boolean()) {
+        return CallToolResult::error("Parameter 'overwrite' must be a boolean.");
+    }
+    const std::string source_text = args["source_text"].get<std::string>();
+    const bool overwrite = args.value("overwrite", false);
+
+    std::string extension;
+    const auto dot = script_path.find_last_of('.');
+    const auto slash = script_path.find_last_of('/');
+    if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) {
+        extension = script_path.substr(dot);
+        for (auto& character : extension) {
+            character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+        }
+    }
+    if (extension != ".gd") {
+        return CallToolResult::error(
+            "script_create writes GDScript, so script_path must end in .gd; received \"" +
+            script_path + "\".");
+    }
+
+    namespace fs = std::filesystem;
+    auto resolved = paths::resolveProjectFileForWrite(script_path);
+    if (resolved.isErr()) {
+        return CallToolResult::error("Invalid script file path: " + resolved.error().message);
+    }
+    const fs::path disk_path = resolved.value();
+
+    std::error_code probe_error;
+    const bool already_there = fs::is_regular_file(disk_path, probe_error) && !probe_error;
+    if (already_there && !overwrite) {
+        return CallToolResult::error(
+            "Script already exists; pass overwrite: true to replace it: " + script_path);
+    }
+    if (disk_path.has_parent_path()) {
+        std::error_code directory_error;
+        fs::create_directories(disk_path.parent_path(), directory_error);
+        if (directory_error) {
+            return CallToolResult::error("Cannot create the directory for " + script_path + ": " +
+                                         directory_error.message());
+        }
+    }
+
+    auto written = files::writeFileAtomically(disk_path, source_text);
+    if (written.isErr()) {
+        return CallToolResult::error("Cannot write the script to disk: " + script_path + ": " +
+                                     written.error().message);
+    }
+    offline::ResourceIndexer::invalidateSharedIndex();
+
+    // Same check script_patch_method runs after its write, and against the file
+    // on disk for the same reason: a bad script should be visible here rather
+    // than at attach time.
+    auto diags = offline::GDScriptDiagnostics::analyze(disk_path.string());
+    json diag_arr = json::array();
+    bool has_error = false;
+    for (const auto& d : diags) {
+        if (d.severity == "error") has_error = true;
+        diag_arr.push_back(d.toJson());
+    }
+
+    return CallToolResult::successJson({
+        {"status", already_there ? "replaced_offline" : "created_offline"},
+        {"script_path", script_path},
+        {"bytes_written", source_text.size()},
+        {"diagnostics_count", diags.size()},
+        {"has_errors", has_error},
+        {"diagnostics", diag_arr}
+    });
 }
 
 CallToolResult handleScriptReflectClass(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

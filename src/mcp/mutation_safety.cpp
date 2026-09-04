@@ -17,7 +17,8 @@ const std::unordered_set<std::string_view> kMutations = {
     "scene_set_property", "scene_duplicate_node", "scene_add_to_group",
     "scene_remove_from_group", "scene_create", "scene_open", "scene_close",
     "scene_pack_branch", "signal_connect", "signal_disconnect", "signal_emit",
-    "script_patch_method", "patch_script_symbols", "script_attach_to_node",
+    "script_patch_method", "patch_script_symbols", "script_create",
+    "script_attach_to_node",
     "script_detach_from_node", "physics_simulate_step", "nav_bake_mesh",
     "anim_play_track", "anim_state_set", "tilemap_set_cells", "tilemap_set_region",
     "gridmap_set_cells", "resource_create", "instantiate_asset", "mutate_scene_tree",
@@ -51,7 +52,7 @@ const std::unordered_set<std::string_view> kAlwaysConfirmed = {
 };
 
 const std::unordered_set<std::string_view> kOverwriteConfirmed = {
-    "resource_create", "viewport_create_test_lab", "create_visual_test_lab",
+    "resource_create", "script_create", "viewport_create_test_lab", "create_visual_test_lab",
     "project_export", "gridmap_export_mesh_library"
 };
 
