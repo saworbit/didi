@@ -17,7 +17,6 @@ DEFAULT_PROJECTS_ROOT = Path.home() / ".claude" / "projects"
 
 
 def build_command(
-    prompt: str,
     session_id: str,
     budget_usd: float,
     mcp_config: str | None = None,
@@ -28,13 +27,16 @@ def build_command(
 ) -> list[str]:
     """The exact argv for one non-interactive agent run.
 
+    The prompt is deliberately absent: it goes in on stdin. Several of these
+    options take a variable number of values, so a trailing positional prompt is
+    swallowed by whichever variadic flag happens to come last. That is not a
+    hypothetical ordering worry, it is how the first live cycle failed.
+
     `--max-budget-usd` is the ceiling that makes an unattended loop safe to walk
     away from, and `--session-id` is what makes the transcript findable instead
     of guessed at, which matters because the transcript is the only honest record
     of which tools a run actually reached for.
     """
-    if not prompt.strip():
-        raise ValueError("An agent run needs a prompt")
     if budget_usd <= 0:
         raise ValueError("budget_usd must be a positive ceiling")
 
@@ -58,7 +60,6 @@ def build_command(
             command += ["--add-dir", directory]
     if model:
         command += ["--model", model]
-    command.append(prompt)
     return command
 
 
@@ -93,6 +94,7 @@ def resolve_executable(name: str = CLAUDE) -> str:
 
 def run_agent(
     command: list[str],
+    prompt: str,
     working_directory: Path,
     timeout_seconds: int,
     log_path: Path | None = None,
@@ -102,9 +104,12 @@ def run_agent(
     A timeout is not the cost ceiling; `--max-budget-usd` is. This is the guard
     against a run that has stopped spending and stopped finishing.
     """
+    if not prompt.strip():
+        raise ValueError("An agent run needs a prompt")
     resolved = [resolve_executable(command[0]), *command[1:]]
     completed = subprocess.run(
         resolved,
+        input=prompt,
         cwd=str(working_directory),
         capture_output=True,
         text=True,

@@ -241,12 +241,12 @@ def main(argv: list[str] | None = None) -> int:
         build_command=f'cmd /c "{build_script}"',
     )
     command = runner.build_command(
-        prompt=prompt, session_id=session_id, budget_usd=args.budget_usd,
+        session_id=session_id, budget_usd=args.budget_usd,
         add_dirs=[str(worktree)],
         allowed_tools=["Bash", "Read", "Edit", "Write", "Glob", "Grep"],
     )
     try:
-        completed = runner.run_agent(command, worktree, args.timeout_seconds,
+        completed = runner.run_agent(command, prompt, worktree, args.timeout_seconds,
                                      output / "fix" / "agent.log")
     except subprocess.TimeoutExpired:
         record("fix", "failed", f"agent exceeded {args.timeout_seconds}s")

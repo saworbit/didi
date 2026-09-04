@@ -266,7 +266,6 @@ RUNNER_SPEC.loader.exec_module(RUNNER)
 class BuildCommandTests(unittest.TestCase):
     def command(self, **overrides):
         arguments = {
-            "prompt": "fix it",
             "session_id": "11111111-2222-3333-4444-555555555555",
             "budget_usd": 5.0,
         }
@@ -289,8 +288,13 @@ class BuildCommandTests(unittest.TestCase):
         command = self.command(budget_usd=2.5)
         self.assertEqual(command[command.index("--max-budget-usd") + 1], "2.5")
 
-    def test_prompt_is_the_final_argument(self):
-        self.assertEqual(self.command(prompt="do the thing")[-1], "do the thing")
+    def test_no_positional_prompt_for_a_variadic_flag_to_swallow(self):
+        # --allowed-tools, --add-dir and --mcp-config all take a variable number
+        # of values, so a trailing prompt is consumed as one of them. It goes on
+        # stdin instead. This is how the first live cycle failed.
+        command = self.command(allowed_tools=["Bash", "Read"], add_dirs=["D:/w"])
+        self.assertEqual(command[-2:], ["--add-dir", "D:/w"])
+        self.assertNotIn("fix it", command)
 
     def test_mcp_config_is_strict_when_supplied(self):
         command = self.command(mcp_config="D:/t/.mcp.json")
@@ -307,9 +311,9 @@ class BuildCommandTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.command(budget_usd=bad)
 
-    def test_refuses_an_empty_prompt(self):
+    def test_refuses_an_empty_prompt_at_launch(self):
         with self.assertRaises(ValueError):
-            self.command(prompt="   ")
+            RUNNER.run_agent(["python"], "   ", REPOSITORY_ROOT, 5)
 
 
 class ResolveExecutableTests(unittest.TestCase):
