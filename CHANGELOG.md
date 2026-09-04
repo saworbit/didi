@@ -13,6 +13,10 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Added
 
+- Added `runtime_watch_invariants`, which watches declared conditions every frame of a running game and stops the game on the frame that breaks one. An agent could already drive a game and read values back out of it, one round trip at a time, but it could not notice a condition that is false for two frames, and by the time a poll returned the frame was gone. Three kinds, each one that can be answered honestly: `performance_between` on a Performance monitor, which is what a minimum frame rate is; `expression_between` on a bounded sandbox expression, which is what a bounded property is, and which covers a world-boundary check through a vector component; and `no_engine_errors`, which is what an unhandled script error looks like from outside the script. A violation reports the condition, the value that broke it, the bound it broke, and the elapsed time, and by default pauses the game on that frame so the state that failed is still there to read. The outcome has three values rather than two: an invariant that never produced a reading makes the run `inconclusive`, never `held`, because a condition nobody could measure is not a condition that stayed true. The request is refused if an invariant has no bound at all, since a condition that cannot be violated would report as held on nothing.
+
+### Added
+
 - Added `project_rename_references`, which renames a symbol in the places Godot serializes it: the `signal` and `method` attributes of a `[connection]`, and the property segment of a `NodePath` in an animation track. Those are exactly the references a text search finds but cannot explain, and exactly the ones an agent renaming a variable in a script forgets, so a project that looked clean broke at runtime. Every file is staged before any is replaced, so the change cannot stop half applied because the last file was the one that could not be written. GDScript and C# references are reported with their file and line and never rewritten: the language is dynamically typed, a whole-word match may be this symbol or an unrelated local that shares the name, and rewriting on that evidence would be a second source of the breakage this exists to prevent. It refuses a name a connection or track already uses, because that would merge two symbols with no way back, and it refuses to run at all on a truncated project scan, because renaming the files that were read and leaving the rest is the half-applied change itself. The rewrite and `project_analyze_impact` share one set of matchers and the plan is checked against the report before anything is written, so a disagreement between what was reported and what would be edited stops the whole change.
 
 ### Fixed
@@ -37,12 +41,12 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `93/96`
+**Canonical implementation:** `94/97`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 96 canonical tools plus 10 legacy registrations (106 total). 93 canonical tools are implemented and 3 remain unimplemented.
+Discovery now exposes 97 canonical tools plus 10 legacy registrations (107 total). 94 canonical tools are implemented and 3 remain unimplemented.
 
 ---
 

@@ -5,6 +5,7 @@
 #include "didi/gdextension/runtime_log.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
 #include "didi/runtime/profiler_collector.hpp"
+#include "didi/runtime/invariant_watch.hpp"
 #include <queue>
 #include <mutex>
 #include <future>
@@ -137,6 +138,12 @@ public:
     void scheduleProfilerRead(const json& params,
                               const std::shared_ptr<std::promise<json>>& promise,
                               const std::shared_ptr<CommandControl>& control);
+    // Starts a callback-driven invariant watch. Same shape as the profiler
+    // above and for the same reason: the window is measured in engine frames,
+    // and nothing blocks the main thread while it runs.
+    void scheduleInvariantWatch(const json& params,
+                                const std::shared_ptr<std::promise<json>>& promise,
+                                const std::shared_ptr<CommandControl>& control);
 
     // Asks for SceneTree.quit on a later frame instead of right now. runtime.stop
     // has to return its response over IPC before the main loop is allowed to
@@ -164,6 +171,7 @@ private:
     void processRuntimeStepFrame();
     void processAssetReimportFrame();
     void processProfilerFrame();
+    void processInvariantWatchFrame();
     void processPendingQuitFrame();
 
     struct PendingRuntimeStep {
@@ -189,6 +197,17 @@ private:
         std::shared_ptr<CommandControl> control;
     };
 
+    struct PendingInvariantWatch {
+        runtime::InvariantWatch watch;
+        std::chrono::steady_clock::time_point started_at;
+        bool awaiting_next_callback{true};
+        // The engine output sequence the watch began at, so an error counted is
+        // an error this run produced and not one already on the ring.
+        uint64_t error_cursor{0};
+        std::shared_ptr<std::promise<json>> response_promise;
+        std::shared_ptr<CommandControl> control;
+    };
+
     std::queue<EngineCommand> m_commandQueue;
     std::mutex m_queueMutex;
     std::mutex m_stepMutex;
@@ -201,6 +220,8 @@ private:
     std::optional<PendingAssetReimport> m_pendingAssetReimport;
     std::mutex m_profilerMutex;
     std::optional<PendingProfilerRead> m_pendingProfilerRead;
+    std::mutex m_invariantMutex;
+    std::optional<PendingInvariantWatch> m_pendingInvariantWatch;
     std::optional<runtime::SessionKind> m_sessionKind;
     // Main-thread only. Set while processQueue is dequeuing, so a nested pump
     // triggered from inside a command observes progress without starting work.

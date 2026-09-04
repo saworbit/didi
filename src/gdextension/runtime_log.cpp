@@ -115,6 +115,24 @@ Result<uint64_t> RuntimeLogRing::append(std::string_view level, std::string_view
     return sequence;
 }
 
+uint64_t RuntimeLogRing::nextSequence() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_nextSequence;
+}
+
+size_t RuntimeLogRing::countFrom(uint64_t cursor, std::string_view minimum_level) const {
+    if (!isValidLevel(minimum_level)) return 0;
+    const int minimum_rank = levelRank(minimum_level);
+    std::lock_guard<std::mutex> lock(m_mutex);
+    size_t counted = 0;
+    for (const auto& record : m_records) {
+        if (record.sequence < cursor) continue;
+        if (levelRank(record.level) < minimum_rank) continue;
+        ++counted;
+    }
+    return counted;
+}
+
 Result<json> RuntimeLogRing::read(uint64_t cursor, size_t limit, std::string_view minimum_level) const {
     if (limit < 1 || limit > 500) return Error::invalidArgument("Runtime log limit must be an integer from 1 to 500");
     if (!isValidLevel(minimum_level)) return Error::invalidArgument("Runtime log minimum_level must be debug, info, warning, or error");

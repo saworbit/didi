@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 96 canonical tool names plus 10 legacy names (106 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 97 canonical tool names plus 10 legacy names (107 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `93/96`
+**Canonical implementation:** `94/97`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 93/96 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 94/97 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -517,6 +517,28 @@ Launches a separate Godot process, optionally headless, captures stdout/stderr, 
 - `break_on_error` (`boolean`, default `true`): marks captured `ERROR:`/`SCRIPT ERROR:` lines as failure after the child exits; it does not stop the child early.
 - `extra_args` (`array` of strings, optional; unsafe shell metacharacters are rejected).
 - Legacy alias: `execute_test_session`.
+
+### `runtime_watch_invariants` — Live (game only)
+
+Watches declared conditions every frame of a running game and stops the game on the frame that breaks one. This is not `eval_gdscript` in a loop: sampling happens in the engine at frame rate, and the pause lands on the violating frame, which is what makes the result a reproduction rather than a description.
+
+- `invariants` (`array`, required, 1 to 8).
+- `duration_ms` (`integer`, default `2000`, 1 to 30000). The watch ends early on the first violation.
+- `pause_on_violation` (`boolean`, default `true`).
+
+Each invariant takes a `kind`:
+
+| kind | reads | bounds |
+| --- | --- | --- |
+| `performance_between` | `metric`, a Performance monitor name such as `TIME_FPS` | `minimum`, `maximum`, at least one |
+| `expression_between` | `expression` against an optional `context_node`, evaluating to a number or a boolean | `minimum`, `maximum`, at least one |
+| `no_engine_errors` | error-level engine output since the watch began | none; any error violates it |
+
+`outcome` is `violated`, `held`, or `inconclusive`. The third is not a failure mode of the tool: an invariant that never produced a reading, because its context node was missing or its expression failed, is reported with zero readings and makes the run inconclusive. A condition nobody could measure is not a condition that stayed true.
+
+An invariant with no bound at all is refused rather than accepted, because it could never be violated and would report as held on nothing.
+
+Evaluating expressions costs engine time inside the window being measured. A frame-rate invariant watched alongside several expression invariants is measuring a game that is also being watched.
 
 ### `runtime_read_profiler` — Live (editor or game)
 
