@@ -354,6 +354,11 @@ CallToolResult handleShaderSetUniform(const ResolvedToolBinding& binding, const 
     return sendPhase7LiveRequest(binding, args, ipc);
 }
 
+CallToolResult handleShaderGetVisualGraph(const ResolvedToolBinding& binding, const json& args,
+                                          std::shared_ptr<ipc::IIpcClient> ipc) {
+    return sendPhase7LiveRequest(binding, args, ipc);
+}
+
 CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     (void)ipc;
     if (!args.is_object() || !args.contains("shader_path") || !args["shader_path"].is_string()) {

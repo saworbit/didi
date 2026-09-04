@@ -1004,6 +1004,10 @@ try {
         (Tool-Request 2287 "shader_list_uniforms" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_overlay" }),
         (Tool-Request 2288 "shader_list_uniforms" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "not_a_property" }),
         (Tool-Request 2289 "shader_list_uniforms" @{ target_node = "/root/SmokeRoot/Missing"; property_name = "material_override" }),
+        # A graph built as nodes rather than written as code.
+        (Tool-Request 2296 "shader_get_visual_graph" @{ target_node = "/root/SmokeRoot/VisualShaderProbe"; property_name = "material_override" }),
+        # And the shader next door, which is written as code and has no graph.
+        (Tool-Request 2297 "shader_get_visual_graph" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override" }),
         (Tool-Request 2256 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/BareTileLayer"; cells = @(@{ coords = @(0, 0); source_id = 0; atlas_coords = @(0, 0) }) }),
         (Tool-Request 962 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(@{ position = @(1, 2, 3); item = 0 }) }),
         (Tool-Request 971 "editor_undo" @{}),
@@ -1162,7 +1166,7 @@ try {
     $scalarEval = Tool-Payload $byId[130]
     Assert-True ($scalarEval.value -eq 7 -and $scalarEval.value_type -eq "int") "Editor scalar expression was incorrect."
     Assert-True ($scalarEval.context_node -eq "/root/SmokeRoot/Subject" -and $scalarEval.session_kind -eq "editor") "Editor expression context or provenance was incorrect."
-    Assert-True ((Tool-Payload $byId[131]).value -eq 8) "Editor default-context child count was incorrect."
+    Assert-True ((Tool-Payload $byId[131]).value -eq 9) "Editor default-context child count was incorrect."
     Assert-True (@((Tool-Payload $byId[132]).value).Count -eq 3) "Editor expression array was not preserved."
     Assert-True ((Tool-Payload $byId[133]).value.answer -eq 42) "Editor expression dictionary was not preserved."
     $editorVector = Tool-Payload $byId[134]
@@ -1578,6 +1582,27 @@ try {
     Assert-True $byId[2294].result.isError "A uniform the shader does not declare was accepted."
     Assert-True $byId[2295].result.isError "A JSON string was accepted for a float uniform."
     Assert-True ($byId[2295].result.content[0].text -match "float") "The uniform type mismatch does not name the type it wanted."
+
+    $graph = Tool-Payload $byId[2296]
+    Assert-True ($graph.execution_mode -eq "live") "shader_get_visual_graph did not run live."
+    $fragment = @($graph.shader_types | Where-Object { $_.type -eq "fragment" })
+    Assert-True ($fragment.Count -eq 1) "The visual shader graph did not report its fragment type."
+    # The output node plus the colour constant the fixture wires into it.
+    Assert-True ($fragment[0].node_count -ge 2) "The fragment graph reported $($fragment[0].node_count) node(s); the fixture has an output and a colour constant."
+    $colour = @($fragment[0].nodes | Where-Object { $_.class -eq "VisualShaderNodeColorConstant" })
+    Assert-True ($colour.Count -eq 1) "The graph did not name the colour constant node by class."
+    Assert-True ($null -ne $colour[0].position.x) "A graph node carried no editor position."
+    # A graph is its links as much as its nodes, so the connection is the half
+    # that a node list alone would not tell anyone.
+    Assert-True ($fragment[0].connection_count -ge 1) "The fragment graph reported no connections, though the fixture wires one."
+    $link = @($fragment[0].connections)[0]
+    Assert-True ($link.from_node -eq $colour[0].id -and $link.to_node -eq 0) "The reported connection does not run from the colour constant to the output ($($link.from_node) to $($link.to_node))."
+    Assert-True ($graph.truncated -eq $false) "The graph reported truncation it did not do."
+
+    # A shader written as code has no graph, and an empty node list would read
+    # as a graph with nothing in it.
+    Assert-True $byId[2297].result.isError "A code shader was reported as a visual graph."
+    Assert-True ($byId[2297].result.content[0].text -match "written in code") "The refusal does not say why a code shader has no graph."
 
     # An empty slot is not a shader with no uniforms, and neither is a missing
     # property or a missing node.

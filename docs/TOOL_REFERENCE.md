@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 101 canonical tool names plus 10 legacy names (111 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 102 canonical tool names plus 10 legacy names (112 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `98/101`
+**Canonical implementation:** `99/102`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 98/101 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 99/102 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -819,6 +819,18 @@ All Phase 5 subprocess tools launch an executable with an argv array, never thro
 ### `csharp_check_build` — Offline
 
 Runs `dotnet build` with `configuration` (`Debug` or `Release`, default `Debug`) and `timeout_seconds` (`1..300`, default `60`). Optional `project_file` must be a normalized project-contained `.csproj`; when omitted, exactly one project-root `.csproj` must exist. The result includes exit/timeout/output metadata and bounded structured MSBuild diagnostics. This is a real build and may update normal `bin`/`obj` outputs.
+
+### `shader_get_visual_graph` — Live
+
+Returns the nodes and connections of a `VisualShader` graph, per shader type.
+
+- `target_node`, `property_name` (`string`, required): the same pair `shader_list_uniforms` takes, resolved by the same rules.
+
+Each shader type that holds nodes is reported by name — `vertex`, `fragment`, `light` and the particle, sky and fog types — rather than by the enum number. Each node carries its id, its Godot class, and its position in the editor graph. Each connection carries `from_node`, `from_port`, `to_node` and `to_port`, because a graph is its links as much as its nodes and a node list alone does not describe one.
+
+A shader written as code rather than built as a graph is refused with a message saying so. Returning an empty node list would read as a graph with nothing in it.
+
+At most 256 nodes and 512 connections are returned per shader type, with `node_count` and `connection_count` reported separately from the lists so a bounded response says how much it left out.
 
 ### `shader_set_uniform` — Live
 

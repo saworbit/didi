@@ -1,12 +1,16 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource path="res://malicious_probe.gd" type="Script" id="1_malicious"]
 [ext_resource path="res://reimport_probe.svg" type="Texture2D" id="2_tile_texture"]
 [ext_resource path="res://probe_uniforms.gdshader" type="Shader" id="3_probe_shader"]
+[ext_resource path="res://probe_visual.tres" type="Shader" id="4_probe_visual"]
 
 [sub_resource type="ShaderMaterial" id="probe_shader_material"]
 shader = ExtResource("3_probe_shader")
 shader_parameter/strength = 0.75
+
+[sub_resource type="ShaderMaterial" id="probe_visual_material"]
+shader = ExtResource("4_probe_visual")
 
 [sub_resource type="TileSetAtlasSource" id="tile_atlas"]
 texture = ExtResource("2_tile_texture")
@@ -64,6 +68,9 @@ tile_set = SubResource("tile_set")
 
 [node name="ShaderProbe" type="MeshInstance3D" parent="."]
 material_override = SubResource("probe_shader_material")
+
+[node name="VisualShaderProbe" type="MeshInstance3D" parent="."]
+material_override = SubResource("probe_visual_material")
 
 [node name="BareTileLayer" type="TileMapLayer" parent="."]
 
