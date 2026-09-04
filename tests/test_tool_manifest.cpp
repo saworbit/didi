@@ -305,12 +305,14 @@ static void test_output_schemas_are_declared_for_the_observed_tools() {
     }
 }
 
-// The set of JSON types a scalar Godot property will accept is fixed by
+// The set of JSON types a Godot property will accept is fixed by
 // validateJsonForPropertyType in src/gdextension/godot_bridge.cpp: null for
-// NIL, boolean for BOOL, integer for INT, any number for FLOAT, string for
-// STRING/STRING_NAME/NODE_PATH. Arrays and objects are refused outright.
+// NIL and for clearing a resource slot, boolean for BOOL, integer for INT, any
+// number for FLOAT, string for STRING/STRING_NAME/NODE_PATH, a hex Color or a
+// res:// resource path, and an object for a Vector or a Color. Arrays are
+// refused outright.
 static const std::vector<std::string> kScalarPropertyJsonTypes = {
-    "null", "boolean", "integer", "number", "string"};
+    "null", "boolean", "integer", "number", "string", "object"};
 
 // The schema is the only description of a parameter a client ever sees. An
 // untyped `value` leaves it guessing between 1.0 and "1.0", and a client that

@@ -827,11 +827,11 @@ void ToolRegistry::registerAllDefaultTools() {
                 // `value`, one level down, so they carry the same type contract.
                 {"properties", {{"type", "object"},
                                 {"additionalProperties",
-                                 {{"type", json::array({"null", "boolean", "integer", "number", "string"})}}},
-                                {"examples", json::array({json::object({{"position_x", 24.0},
+                                 {{"type", json::array({"null", "boolean", "integer", "number", "string", "object"})}}},
+                                {"examples", json::array({json::object({{"position", json{{"x", 480}, {"y", 270}}},
                                                                         {"visible", true},
                                                                         {"text", "Score"}})})},
-                                {"description", "Initial property values, keyed by property name. Each value takes the JSON type matching the property on the new node: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil. Arrays and objects are rejected."}}}
+                                {"description", "Initial property values, keyed by property name. Each value takes the JSON type matching the property on the new node: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil, {x,y} or {x,y,z} for Vector2/Vector2i/Vector3/Vector3i, {r,g,b} with optional a or a \"#rrggbb\" string for Color, and a res:// path for a Resource slot. Arrays are rejected."}}}
             }}
         };
         t.handler = [this](const json& args) { return handleSceneInstantiateNode(args, m_ipcClient); };
@@ -1012,9 +1012,12 @@ void ToolRegistry::registerAllDefaultTools() {
                 // learn them. Left untyped, a client guesses between 1.0 and
                 // "1.0", guesses differently from one turn to the next, and
                 // reads the rejection as a Didi bug rather than a type error.
-                {"value", {{"type", json::array({"null", "boolean", "integer", "number", "string"})},
-                           {"examples", json::array({1.0, 42, true, "Player", nullptr})},
-                           {"description", "New property value, as the JSON type matching the existing Godot property: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil. Arrays and objects are rejected."}}}
+                {"value", {{"type", json::array({"null", "boolean", "integer", "number", "string", "object"})},
+                           {"examples", json::array({1.0, 42, true, "Player", nullptr,
+                                                     json{{"x", 480}, {"y", 270}},
+                                                     json{{"r", 1}, {"g", 0.5}, {"b", 0}},
+                                                     "res://tiles/arena_tileset.tres"})},
+                           {"description", "New property value, as the JSON type matching the Godot property: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil, {x,y} or {x,y,z} for Vector2/Vector2i/Vector3/Vector3i (whole numbers for the integer ones), {r,g,b} with optional a or a \"#rrggbb\"/\"#rrggbbaa\" string for Color, and a res:// path for a Resource slot (null clears it). Arrays are rejected, and so is an object with a member the target type does not have."}}}
             }},
             {"required", {"target_node", "property_name", "value"}}
         };

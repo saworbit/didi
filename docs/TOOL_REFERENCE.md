@@ -47,7 +47,7 @@ Creates a built-in ClassDB node under the active edited scene and registers add/
 - `node_type` (`string`, default `"Node"`).
 - `parent_path` (`string`, default `"/root"`).
 - `name` (`string`, optional).
-- `properties` (`object`, optional): Initial scalar properties subject to the Phase 1 type contract. Each value is a JSON null, boolean, signed integer, real, or string compatible with that property's Godot type, the same contract as `scene_set_property`'s `value`.
+- `properties` (`object`, optional): Initial property values. Each value is a JSON null, boolean, signed integer, real, string, or a vector/colour object compatible with that property's Godot type, the same contract as `scene_set_property`'s `value`.
 - `scene_path` is present in the schema, but PackedScene instantiation currently returns `501`.
 
 ### `scene_remove_node` — Live
@@ -66,7 +66,20 @@ Calls Godot's `Node.reparent` through UndoRedo.
 
 ### `scene_set_property` — Live
 
-Sets an existing scalar property through UndoRedo. Unknown properties and incompatible types are rejected.
+Sets an existing property through UndoRedo. Unknown properties and incompatible types are rejected.
+
+The accepted JSON for each Godot type:
+
+| Godot type | JSON |
+| --- | --- |
+| `bool`, `int`, `float`, `String`, `StringName`, `NodePath` | the matching JSON scalar; a whole number is accepted for either `int` or `float` |
+| `Vector2`, `Vector3` | `{"x": .., "y": ..}` / `{"x": .., "y": .., "z": ..}` |
+| `Vector2i`, `Vector3i` | the same objects with whole numbers |
+| `Color` | `{"r": .., "g": .., "b": ..}` with an optional `a`, or a `"#rrggbb"` / `"#rrggbbaa"` string |
+| Resource slots | a `res://` path, loaded and refused if the loaded type is not the class the property holds; `null` clears the slot |
+| nil | `null` |
+
+An object with a member the target type does not have is refused rather than dropped, because a `z` written to a `Vector2` is a position nobody asked for. Every write is reread, so `value` is what the property now holds and `applied` says whether it changed.
 
 - `target_node` (`string`, required).
 - `property_name` (`string`, required).

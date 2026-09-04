@@ -190,6 +190,17 @@ Result<VariantValue> makeNodePath(const std::string& text) {
     return variantFromNative(GDEXTENSION_VARIANT_TYPE_NODE_PATH, native_path.ptr());
 }
 
+Result<VariantValue> makeColor(double r, double g, double b, double a) {
+    auto constructor = GodotApi::instance().variant_get_ptr_constructor(
+        GDEXTENSION_VARIANT_TYPE_COLOR, 4);
+    if (!constructor) return Error::internal("Godot Color constructor is unavailable");
+    NativeValue native(GDEXTENSION_VARIANT_TYPE_COLOR);
+    const void* arguments[] = {&r, &g, &b, &a};
+    constructor(native.ptr(), arguments);
+    native.markInitialized();
+    return variantFromNative(GDEXTENSION_VARIANT_TYPE_COLOR, native.ptr());
+}
+
 Result<VariantValue> makeVector2(double x, double y) {
     auto constructor = GodotApi::instance().variant_get_ptr_constructor(
         GDEXTENSION_VARIANT_TYPE_VECTOR2, 3);
@@ -270,6 +281,62 @@ bool isWholeNumberJsonReal(const json& value) {
     return number >= -9223372036854775808.0 && number < 9223372036854775808.0;
 }
 
+// A JSON object standing for a fixed set of numeric members, and nothing else.
+// Extra keys are refused rather than dropped: a caller who writes "z" on a
+// Vector2 has made a mistake worth seeing, and silently ignoring it writes a
+// position they did not ask for.
+bool isNumericMemberObject(const json& value, std::initializer_list<const char*> required,
+                           std::initializer_list<const char*> optional, bool whole_numbers) {
+    if (!value.is_object()) return false;
+    size_t matched = 0;
+    for (const auto* key : required) {
+        if (!value.contains(key)) return false;
+        const auto& member = value[key];
+        if (!member.is_number()) return false;
+        if (whole_numbers && !member.is_number_integer() && !member.is_number_unsigned() &&
+            !isWholeNumberJsonReal(member)) {
+            return false;
+        }
+        ++matched;
+    }
+    for (const auto* key : optional) {
+        if (!value.contains(key)) continue;
+        const auto& member = value[key];
+        if (!member.is_number()) return false;
+        if (whole_numbers && !member.is_number_integer() && !member.is_number_unsigned() &&
+            !isWholeNumberJsonReal(member)) {
+            return false;
+        }
+        ++matched;
+    }
+    return matched == value.size();
+}
+
+// #rrggbb or #rrggbbaa. Godot's own Color(String) accepts more spellings, but
+// the ones it guesses at are the ones a caller most easily gets wrong, so the
+// accepted set is the unambiguous pair.
+bool isHexColorString(const json& value) {
+    if (!value.is_string()) return false;
+    const auto text = value.get<std::string>();
+    if (text.size() != 7 && text.size() != 9) return false;
+    if (text.front() != '#') return false;
+    for (size_t index = 1; index < text.size(); ++index) {
+        if (!std::isxdigit(static_cast<unsigned char>(text[index]))) return false;
+    }
+    return true;
+}
+
+// A resource slot is filled by naming the resource, which is how a .tscn names
+// one and how script_attach_to_node already takes a Script.
+bool isResourcePathString(const json& value) {
+    if (!value.is_string()) return false;
+    const auto text = value.get<std::string>();
+    if (text.rfind("res://", 0) != 0 || text.size() <= 6) return false;
+    if (text.find('\0') != std::string::npos) return false;
+    if (text.find("..") != std::string::npos) return false;
+    return true;
+}
+
 bool propertyTypeAcceptsJson(const json& value, GDExtensionVariantType type) {
     switch (type) {
         case GDEXTENSION_VARIANT_TYPE_NIL:
@@ -288,6 +355,20 @@ bool propertyTypeAcceptsJson(const json& value, GDExtensionVariantType type) {
         case GDEXTENSION_VARIANT_TYPE_STRING_NAME:
         case GDEXTENSION_VARIANT_TYPE_NODE_PATH:
             return value.is_string();
+        case GDEXTENSION_VARIANT_TYPE_VECTOR2:
+            return isNumericMemberObject(value, {"x", "y"}, {}, false);
+        case GDEXTENSION_VARIANT_TYPE_VECTOR2I:
+            return isNumericMemberObject(value, {"x", "y"}, {}, true);
+        case GDEXTENSION_VARIANT_TYPE_VECTOR3:
+            return isNumericMemberObject(value, {"x", "y", "z"}, {}, false);
+        case GDEXTENSION_VARIANT_TYPE_VECTOR3I:
+            return isNumericMemberObject(value, {"x", "y", "z"}, {}, true);
+        case GDEXTENSION_VARIANT_TYPE_COLOR:
+            return isHexColorString(value) ||
+                   isNumericMemberObject(value, {"r", "g", "b"}, {"a"}, false);
+        case GDEXTENSION_VARIANT_TYPE_OBJECT:
+            // null clears the slot, which is the only way to empty one.
+            return value.is_null() || isResourcePathString(value);
         default:
             return false;
     }
@@ -330,19 +411,121 @@ Result<void> validateJsonForPropertyType(const std::string& property_name, const
         describePropertyTypeMismatch(property_name, value, static_cast<int>(type)));
 }
 
+double jsonMember(const json& value, const char* key, double fallback) {
+    return value.contains(key) ? value[key].get<double>() : fallback;
+}
+
+int64_t jsonWholeMember(const json& value, const char* key) {
+    const auto& member = value[key];
+    return member.is_number_float() ? static_cast<int64_t>(member.get<double>())
+                                    : member.get<int64_t>();
+}
+
+Result<VariantValue> makeColorFromJson(const json& value) {
+    if (value.is_string()) {
+        const auto text = value.get<std::string>();
+        const auto channel = [&](size_t offset) {
+            return static_cast<double>(std::stoi(text.substr(offset, 2), nullptr, 16)) / 255.0;
+        };
+        const double alpha = text.size() == 9 ? channel(7) : 1.0;
+        return makeColor(channel(1), channel(3), channel(5), alpha);
+    }
+    return makeColor(jsonMember(value, "r", 0.0), jsonMember(value, "g", 0.0),
+                     jsonMember(value, "b", 0.0), jsonMember(value, "a", 1.0));
+}
+
+struct PropertyDescriptor {
+    int declared_type{0};
+    std::string class_name;
+};
+
+Result<GDExtensionObjectPtr> objectFromVariant(VariantValue& value);
+Result<GDExtensionObjectPtr> singleton(const std::string& name);
+Result<bool> objectIsClass(GDExtensionObjectPtr object, const char* class_name);
+Result<std::string> stringFromVariant(VariantValue& value, GDExtensionVariantType type);
+Result<VariantValue> callObject(GDExtensionObjectPtr object, const char* class_name,
+                                const char* method_name, int64_t hash,
+                                const std::vector<const VariantValue*>& arguments = {});
+Result<VariantValue> makeVector3(double x, double y, double z);
+Result<VariantValue> makeVector2i(int64_t x, int64_t y);
+Result<VariantValue> makeVector3i(int64_t x, int64_t y, int64_t z);
+
+// Loads the resource the caller named and refuses it if it is not what the
+// property holds. Writing a Texture2D into a tile_set slot would either be
+// dropped by Godot or leave a scene nobody can open, and neither is something
+// to report as a successful write. Same check script_attach_to_node makes for a
+// Script.
+Result<VariantValue> makeResourceForProperty(const std::string& property_name,
+                                             const json& value,
+                                             const std::string& expected_class) {
+    if (value.is_null()) return VariantValue{};
+    auto loader = singleton("ResourceLoader");
+    if (loader.isErr()) return loader.error();
+    const auto path = value.get<std::string>();
+    auto path_value = makeString(path);
+    if (path_value.isErr()) return path_value.error();
+    auto type_hint = makeString("");
+    if (type_hint.isErr()) return type_hint.error();
+    auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
+    if (cache_mode.isErr()) return cache_mode.error();
+    auto loaded_value = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                                   {&path_value.value(), &type_hint.value(), &cache_mode.value()});
+    if (loaded_value.isErr()) return loaded_value.error();
+    auto loaded = objectFromVariant(loaded_value.value());
+    if (loaded.isErr()) return loaded.error();
+    if (!loaded.value()) {
+        return Error::notFound("Property \"" + property_name + "\": no resource could be loaded from " +
+                               path);
+    }
+    if (!expected_class.empty()) {
+        auto matches = objectIsClass(loaded.value(), expected_class.c_str());
+        if (matches.isErr()) return matches.error();
+        if (!matches.value()) {
+            auto actual = callObject(loaded.value(), "Object", "get_class", 201670096LL);
+            std::string actual_name = "an unrecognised type";
+            if (actual.isOk()) {
+                auto text = stringFromVariant(actual.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                if (text.isOk()) actual_name = text.value();
+            }
+            return Error::invalidArgument("Property \"" + property_name + "\" holds a " +
+                                          expected_class + "; " + path + " is " + actual_name);
+        }
+    }
+    return makeObject(loaded.value());
+}
+
 // Godot narrows a real to an int on assignment, but converting the whole
 // number here keeps the value that reaches the property the one the caller
 // named rather than one the engine derived.
 Result<VariantValue> makeJsonVariantForProperty(const json& value, GDExtensionVariantType type) {
-    if (type == GDEXTENSION_VARIANT_TYPE_INT && isWholeNumberJsonReal(value)) {
-        return makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(value.get<double>()));
+    switch (type) {
+        case GDEXTENSION_VARIANT_TYPE_INT:
+            if (isWholeNumberJsonReal(value)) {
+                return makeScalar(GDEXTENSION_VARIANT_TYPE_INT,
+                                  static_cast<int64_t>(value.get<double>()));
+            }
+            break;
+        case GDEXTENSION_VARIANT_TYPE_VECTOR2:
+            return makeVector2(value["x"].get<double>(), value["y"].get<double>());
+        case GDEXTENSION_VARIANT_TYPE_VECTOR2I:
+            return makeVector2i(jsonWholeMember(value, "x"), jsonWholeMember(value, "y"));
+        case GDEXTENSION_VARIANT_TYPE_VECTOR3:
+            return makeVector3(value["x"].get<double>(), value["y"].get<double>(),
+                               value["z"].get<double>());
+        case GDEXTENSION_VARIANT_TYPE_VECTOR3I:
+            return makeVector3i(jsonWholeMember(value, "x"), jsonWholeMember(value, "y"),
+                                jsonWholeMember(value, "z"));
+        case GDEXTENSION_VARIANT_TYPE_COLOR:
+            return makeColorFromJson(value);
+        default:
+            break;
     }
     return makeJsonVariant(value);
 }
 
 Result<VariantValue> callObject(GDExtensionObjectPtr object, const char* class_name,
                                 const char* method_name, int64_t hash,
-                                const std::vector<const VariantValue*>& arguments = {}) {
+                                const std::vector<const VariantValue*>& arguments) {
     if (!object) return Error::notFound(std::string("Cannot call ") + method_name + " on a null Godot object");
     auto& api = GodotApi::instance();
     NativeName klass(class_name);
@@ -481,6 +664,11 @@ Result<std::string> stringFromVariant(VariantValue& value, GDExtensionVariantTyp
 // failing the whole conversion. Only for callers that read structure and ignore
 // values -- method arity metadata, where a single default argument of an
 // uncoercible type would otherwise make an entire node's method list unreadable.
+Result<json> realVectorToJson(VariantValue& value, int dimensions);
+Result<json> wholeVectorToJson(VariantValue& value, int dimensions);
+Result<json> colorToJson(VariantValue& value);
+Result<json> resourcePathToJson(VariantValue& value);
+
 Result<json> variantToJson(VariantValue& value, int depth = 0, bool lenient = false) {
     if (depth > 16) return Error::invalidArgument("Godot Variant nesting exceeds the Phase 2 limit of 16 levels");
     auto& api = GodotApi::instance();
@@ -549,10 +737,91 @@ Result<json> variantToJson(VariantValue& value, int depth = 0, bool lenient = fa
             }
             return output;
         }
+        case GDEXTENSION_VARIANT_TYPE_VECTOR2:
+        case GDEXTENSION_VARIANT_TYPE_VECTOR3:
+            return realVectorToJson(value, type == GDEXTENSION_VARIANT_TYPE_VECTOR2 ? 2 : 3);
+        case GDEXTENSION_VARIANT_TYPE_VECTOR2I:
+        case GDEXTENSION_VARIANT_TYPE_VECTOR3I:
+            return wholeVectorToJson(value, type == GDEXTENSION_VARIANT_TYPE_VECTOR2I ? 2 : 3);
+        case GDEXTENSION_VARIANT_TYPE_COLOR:
+            return colorToJson(value);
+        case GDEXTENSION_VARIANT_TYPE_OBJECT:
+            // A resource is named by its path, which is what the write takes,
+            // so the reread can be compared with the request. Anything else in
+            // an object slot, a Node for instance, has no path to give.
+            return resourcePathToJson(value);
         default:
             if (lenient) return json(nullptr);
             return Error::invalidArgument("Godot Variant type " + std::to_string(type) + " is not JSON-coercible");
     }
+}
+
+// One member read for every fixed-size built-in the property contract accepts.
+// The axis list is the difference between them, so it is the only thing that
+// varies.
+Result<json> builtinMembersToJson(VariantValue& value, GDExtensionVariantType type,
+                                  std::initializer_list<const char*> members, bool whole_numbers) {
+    auto& api = GodotApi::instance();
+    if (api.variant_get_type(value.ptr()) != type || !api.variant_get_ptr_getter) {
+        return Error::internal("Godot value is not the built-in type it was read as");
+    }
+    auto converter = api.get_variant_to_type_constructor(type);
+    if (!converter) return Error::internal("Godot built-in conversion is unavailable");
+    NativeValue native(type);
+    converter(native.ptr(), value.ptr());
+    native.markInitialized();
+    json output = json::object();
+    for (const auto* member : members) {
+        NativeName name(member);
+        auto getter = name.valid() ? api.variant_get_ptr_getter(type, name.ptr()) : nullptr;
+        if (!getter) return Error::internal("Godot built-in member getter is unavailable");
+        if (whole_numbers) {
+            int64_t component = 0;
+            getter(native.ptr(), &component);
+            output[member] = component;
+        } else {
+            // The GDExtension pointer ABI marshals float and real_t members as
+            // double, which is why makeVector2 hands the constructor doubles
+            // and why every existing reader here uses one.
+            double component = 0.0;
+            getter(native.ptr(), &component);
+            output[member] = component;
+        }
+    }
+    return output;
+}
+
+Result<json> realVectorToJson(VariantValue& value, int dimensions) {
+    return dimensions == 2
+        ? builtinMembersToJson(value, GDEXTENSION_VARIANT_TYPE_VECTOR2, {"x", "y"}, false)
+        : builtinMembersToJson(value, GDEXTENSION_VARIANT_TYPE_VECTOR3, {"x", "y", "z"}, false);
+}
+
+Result<json> wholeVectorToJson(VariantValue& value, int dimensions) {
+    return dimensions == 2
+        ? builtinMembersToJson(value, GDEXTENSION_VARIANT_TYPE_VECTOR2I, {"x", "y"}, true)
+        : builtinMembersToJson(value, GDEXTENSION_VARIANT_TYPE_VECTOR3I, {"x", "y", "z"}, true);
+}
+
+Result<json> colorToJson(VariantValue& value) {
+    return builtinMembersToJson(value, GDEXTENSION_VARIANT_TYPE_COLOR, {"r", "g", "b", "a"}, false);
+}
+
+Result<json> resourcePathToJson(VariantValue& value) {
+    auto object = objectFromVariant(value);
+    if (object.isErr()) return object.error();
+    if (!object.value()) return json(nullptr);
+    auto is_resource = objectIsClass(object.value(), "Resource");
+    if (is_resource.isErr() || !is_resource.value()) return json(nullptr);
+    auto path_name = makeStringName("resource_path");
+    if (path_name.isErr()) return path_name.error();
+    auto path_value = callObject(object.value(), "Object", "get", 2760726917LL, {&path_name.value()});
+    if (path_value.isErr()) return path_value.error();
+    auto path = stringFromVariant(path_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+    if (path.isErr()) return path.error();
+    // A resource built in memory or embedded in a scene has no path of its own.
+    // Saying null is the honest answer; inventing one is not.
+    return path.value().empty() ? json(nullptr) : json(path.value());
 }
 
 Result<json> nativeVector2ToJson(const void* native_vector) {
@@ -993,7 +1262,12 @@ Result<std::string> logicalPathFromEditedRoot(GDExtensionObjectPtr root,
     return logical_root + "/" + relative_path.value();
 }
 
-Result<bool> objectHasProperty(GDExtensionObjectPtr object, const std::string& property) {
+// What the class says about a property, as opposed to what it currently holds.
+// An empty resource slot reads back as nil, so the value alone cannot say the
+// slot is a TileSet, and a resource write has nothing to validate against
+// without the declared class.
+Result<std::optional<PropertyDescriptor>> findPropertyDescriptor(GDExtensionObjectPtr object,
+                                                                 const std::string& property) {
     auto properties = callObject(object, "Object", "get_property_list", 3995934104LL);
     if (properties.isErr()) return properties.error();
     auto size_value = callVariant(properties.value(), "size");
@@ -1002,6 +1276,10 @@ Result<bool> objectHasProperty(GDExtensionObjectPtr object, const std::string& p
     if (size.isErr()) return size.error();
     auto name_key = makeString("name");
     if (name_key.isErr()) return name_key.error();
+    auto type_key = makeString("type");
+    if (type_key.isErr()) return type_key.error();
+    auto class_key = makeString("class_name");
+    if (class_key.isErr()) return class_key.error();
 
     for (int64_t i = 0; i < size.value(); ++i) {
         auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
@@ -1016,9 +1294,33 @@ Result<bool> objectHasProperty(GDExtensionObjectPtr object, const std::string& p
         }
         auto name = stringFromVariant(name_value.value(), type);
         if (name.isErr()) return name.error();
-        if (name.value() == property) return true;
+        if (name.value() != property) continue;
+
+        PropertyDescriptor found;
+        auto declared_value = callVariant(descriptor.value(), "get", {&type_key.value()});
+        if (declared_value.isOk()) {
+            auto declared = scalarFromVariant<int64_t>(declared_value.value(),
+                                                       GDEXTENSION_VARIANT_TYPE_INT);
+            if (declared.isOk()) found.declared_type = static_cast<int>(declared.value());
+        }
+        auto class_value = callVariant(descriptor.value(), "get", {&class_key.value()});
+        if (class_value.isOk()) {
+            const auto class_type = GodotApi::instance().variant_get_type(class_value.value().ptr());
+            if (class_type == GDEXTENSION_VARIANT_TYPE_STRING ||
+                class_type == GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+                auto class_text = stringFromVariant(class_value.value(), class_type);
+                if (class_text.isOk()) found.class_name = class_text.value();
+            }
+        }
+        return std::optional<PropertyDescriptor>(found);
     }
-    return false;
+    return std::optional<PropertyDescriptor>{};
+}
+
+Result<bool> objectHasProperty(GDExtensionObjectPtr object, const std::string& property) {
+    auto descriptor = findPropertyDescriptor(object, property);
+    if (descriptor.isErr()) return descriptor.error();
+    return descriptor.value().has_value();
 }
 
 // A safety cap, not a usability budget, and the difference matters. The walk had
@@ -5257,9 +5559,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (node.isErr()) return errorJson(node.error().code, node.error().message);
         std::string property = params.value("property_name", "");
         if (property.empty()) return errorJson(400, "property_name is required");
-        auto has_property = objectHasProperty(node.value(), property);
-        if (has_property.isErr()) return errorJson(has_property.error().code, has_property.error().message);
-        if (!has_property.value()) return errorJson(404, "Property not found on target node: " + property);
+        auto descriptor = findPropertyDescriptor(node.value(), property);
+        if (descriptor.isErr()) return errorJson(descriptor.error().code, descriptor.error().message);
+        if (!descriptor.value().has_value()) {
+            return errorJson(404, "Property not found on target node: " + property);
+        }
         auto property_name = makeStringName(property);
         if (property_name.isErr()) return errorJson(property_name.error().code, property_name.error().message);
         auto old_value = callObject(node.value(), "Object", "get", 2760726917LL, {&property_name.value()});
@@ -5271,10 +5575,19 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                {"property_name", property}, {"value", value.value()}});
         }
         if (!params.contains("value")) return errorJson(400, "value is required");
-        const auto property_type = GodotApi::instance().variant_get_type(old_value.value().ptr());
+        // An empty resource slot holds nil, so the current value cannot say what
+        // the slot is for. The class's own declaration can, and it is the same
+        // answer for a slot that is full.
+        auto property_type = GodotApi::instance().variant_get_type(old_value.value().ptr());
+        if (property_type == GDEXTENSION_VARIANT_TYPE_NIL &&
+            descriptor.value()->declared_type != GDEXTENSION_VARIANT_TYPE_NIL) {
+            property_type = static_cast<GDExtensionVariantType>(descriptor.value()->declared_type);
+        }
         auto compatible = validateJsonForPropertyType(property, params["value"], property_type);
         if (compatible.isErr()) return errorJson(compatible.error().code, compatible.error().message);
-        auto new_value = makeJsonVariantForProperty(params["value"], property_type);
+        auto new_value = property_type == GDEXTENSION_VARIANT_TYPE_OBJECT
+            ? makeResourceForProperty(property, params["value"], descriptor.value()->class_name)
+            : makeJsonVariantForProperty(params["value"], property_type);
         if (new_value.isErr()) return errorJson(new_value.error().code, new_value.error().message);
         auto manager = undoManager(editor);
         if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
@@ -5370,14 +5683,26 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 GodotApi::instance().object_destroy(node);
                 return errorJson(current_value.error().code, current_value.error().message);
             }
-            const auto property_type =
+            auto declared = findPropertyDescriptor(node, it.key());
+            auto property_type =
                 GodotApi::instance().variant_get_type(current_value.value().ptr());
+            std::string declared_class;
+            if (declared.isOk() && declared.value().has_value()) {
+                declared_class = declared.value()->class_name;
+                if (property_type == GDEXTENSION_VARIANT_TYPE_NIL &&
+                    declared.value()->declared_type != GDEXTENSION_VARIANT_TYPE_NIL) {
+                    property_type =
+                        static_cast<GDExtensionVariantType>(declared.value()->declared_type);
+                }
+            }
             auto compatible = validateJsonForPropertyType(it.key(), it.value(), property_type);
             if (compatible.isErr()) {
                 GodotApi::instance().object_destroy(node);
                 return errorJson(compatible.error().code, compatible.error().message);
             }
-            auto property_value = makeJsonVariantForProperty(it.value(), property_type);
+            auto property_value = property_type == GDEXTENSION_VARIANT_TYPE_OBJECT
+                ? makeResourceForProperty(it.key(), it.value(), declared_class)
+                : makeJsonVariantForProperty(it.value(), property_type);
             if (property_value.isErr()) {
                 GodotApi::instance().object_destroy(node);
                 return errorJson(property_value.error().code, property_value.error().message);
@@ -5793,6 +6118,12 @@ PropertyTypeMatch matchJsonToPropertyType(const json& value, int godot_type) {
         case GDEXTENSION_VARIANT_TYPE_STRING:
         case GDEXTENSION_VARIANT_TYPE_STRING_NAME:
         case GDEXTENSION_VARIANT_TYPE_NODE_PATH:
+        case GDEXTENSION_VARIANT_TYPE_VECTOR2:
+        case GDEXTENSION_VARIANT_TYPE_VECTOR2I:
+        case GDEXTENSION_VARIANT_TYPE_VECTOR3:
+        case GDEXTENSION_VARIANT_TYPE_VECTOR3I:
+        case GDEXTENSION_VARIANT_TYPE_COLOR:
+        case GDEXTENSION_VARIANT_TYPE_OBJECT:
             break;
         default:
             return PropertyTypeMatch::UnsupportedPropertyType;
@@ -5884,6 +6215,28 @@ std::string describePropertyTypeMismatch(const std::string& property_name, const
         case GDEXTENSION_VARIANT_TYPE_STRING_NAME:
         case GDEXTENSION_VARIANT_TYPE_NODE_PATH:
             remedy = "Send a quoted string, for example \"text\".";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_VECTOR2:
+            remedy = "Send an object with x and y numbers, for example {\"x\": 480, \"y\": 270}.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_VECTOR2I:
+            remedy = "Send an object with whole-number x and y, for example {\"x\": 32, \"y\": 32}.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_VECTOR3:
+            remedy = "Send an object with x, y and z numbers, for example "
+                     "{\"x\": 0, \"y\": 1.5, \"z\": -2}.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_VECTOR3I:
+            remedy = "Send an object with whole-number x, y and z, for example "
+                     "{\"x\": 1, \"y\": 0, \"z\": 3}.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_COLOR:
+            remedy = "Send an object with r, g and b numbers and an optional a, for example "
+                     "{\"r\": 1, \"g\": 0.5, \"b\": 0}, or a \"#rrggbb\" or \"#rrggbbaa\" string.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_OBJECT:
+            remedy = "Send a res:// path to the resource, for example "
+                     "\"res://tiles/arena_tileset.tres\", or null to clear the slot.";
             break;
         default:
             remedy = "Send a value of that type.";

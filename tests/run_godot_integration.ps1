@@ -878,6 +878,24 @@ try {
         # Put the camera back before anything renders through it.
         (Tool-Request 2254 "scene_set_property" @{ target_node = "/root/SmokeRoot/ViewportCamera"; property_name = "fov"; value = 70.0 }),
         (Tool-Request 2255 "scene_instantiate_node" @{ node_type = "Camera3D"; parent_path = "/root/SmokeRoot"; name = "MismatchSpawn"; properties = @{ fov = "70.0" } }),
+        # A 2D node could not be placed and a resource slot could not be filled,
+        # so the property contract now takes vectors, colours and res:// paths.
+        # Each write is reread, because a commit that succeeds is not a property
+        # that changed.
+        (Tool-Request 2261 "scene_set_property" @{ target_node = "/root/SmokeRoot/BareTileLayer"; property_name = "position"; value = @{ x = 96; y = 48.5 } }),
+        (Tool-Request 2262 "scene_set_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "position"; value = @{ x = 1; y = 2.5; z = -3 } }),
+        (Tool-Request 2263 "scene_set_property" @{ target_node = "/root/SmokeRoot/BareTileLayer"; property_name = "tile_set"; value = "res://probe_tileset.tres" }),
+        (Tool-Request 2264 "scene_get_property" @{ target_node = "/root/SmokeRoot/BareTileLayer"; property_name = "tile_set" }),
+        # A GDScript is a Resource and is not a TileSet. Writing it would leave a
+        # scene nobody can open, reported as a successful write.
+        (Tool-Request 2265 "scene_set_property" @{ target_node = "/root/SmokeRoot/BareTileLayer"; property_name = "tile_set"; value = "res://subject.gd" }),
+        (Tool-Request 2266 "scene_set_property" @{ target_node = "/root/SmokeRoot/BareTileLayer"; property_name = "tile_set"; value = "res://nothing_here.tres" }),
+        # A missing axis is a different position from the one intended.
+        (Tool-Request 2267 "scene_set_property" @{ target_node = "/root/SmokeRoot/BareTileLayer"; property_name = "position"; value = @{ x = 5 } }),
+        (Tool-Request 2268 "scene_instantiate_node" @{ node_type = "ColorRect"; parent_path = "/root/SmokeRoot"; name = "ColourProbe"; properties = @{ color = "#ff8800" } }),
+        (Tool-Request 2269 "scene_get_property" @{ target_node = "/root/SmokeRoot/ColourProbe"; property_name = "color" }),
+        (Tool-Request 2270 "scene_set_property" @{ target_node = "/root/SmokeRoot/ColourProbe"; property_name = "color"; value = @{ r = 0; g = 0.5; b = 1; a = 0.25 } }),
+        (Tool-Request 2271 "scene_set_property" @{ target_node = "/root/SmokeRoot/BareTileLayer"; property_name = "tile_set"; value = $null }),
         (Tool-Request 25 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/SmokeRoot"; name = "InvalidSpawn"; properties = @{ phase_one_typo = 1 } }),
         (Tool-Request 26 "scene_remove_node" @{ target_node = "/root/SmokeRoot/Subject" }),
         (Tool-Request 27 "editor_undo" @{}),
@@ -1352,6 +1370,29 @@ try {
     Assert-True (-not $byId[2252].result.isError) "A whole number was rejected for a float property."
     Assert-True ((Tool-Payload $byId[2253]).value -eq 55) "Accepted whole-number float write did not land."
     # A multi-property instantiate says which property failed.
+    $vector2Write = Tool-Payload $byId[2261]
+    Assert-True ($vector2Write.applied -eq $true) "A Vector2 position write was not applied."
+    Assert-True ($vector2Write.value.x -eq 96 -and $vector2Write.value.y -eq 48.5) "A Vector2 position did not read back as it was written."
+    $vector3Write = Tool-Payload $byId[2262]
+    Assert-True ($vector3Write.applied -eq $true -and $vector3Write.value.z -eq -3) "A Vector3 position write was not applied."
+    $resourceWrite = Tool-Payload $byId[2263]
+    Assert-True ($resourceWrite.applied -eq $true) "A resource path write was not applied."
+    Assert-True ($resourceWrite.value -eq "res://probe_tileset.tres") "A resource slot did not read back as the path that filled it."
+    Assert-True ((Tool-Payload $byId[2264]).value -eq "res://probe_tileset.tres") "scene_get_property did not report the resource in the slot."
+    Assert-True $byId[2265].result.isError "A GDScript was accepted into a TileSet slot."
+    Assert-True ($byId[2265].result.content[0].text -match "TileSet") "The wrong-class rejection does not name the class the slot holds."
+    Assert-True $byId[2266].result.isError "A resource path that loads nothing was accepted."
+    Assert-True $byId[2267].result.isError "A Vector2 write with a missing axis was accepted."
+    Assert-True (-not $byId[2268].result.isError) "A Color property could not be set at instantiation."
+    $colour = (Tool-Payload $byId[2269]).value
+    Assert-True ([math]::Abs([double]$colour.r - 1.0) -lt 0.01 -and [math]::Abs([double]$colour.b) -lt 0.01) "A hex Color did not reach the property."
+    $colourWrite = Tool-Payload $byId[2270]
+    Assert-True ($colourWrite.applied -eq $true) "A Color object write was not applied."
+    Assert-True ([math]::Abs([double]$colourWrite.value.a - 0.25) -lt 0.01) "A Color alpha did not survive the write."
+    # Clearing a slot is the only thing null is for on an object property.
+    $cleared = Tool-Payload $byId[2271]
+    Assert-True ($cleared.applied -eq $true -and $null -eq $cleared.value) "A resource slot could not be cleared."
+
     Assert-True $byId[2255].result.isError "Instantiate accepted a JSON string for a float property."
     Assert-True ($byId[2255].result.content[0].text -match "fov") "Instantiate type-mismatch rejection does not name the property that failed."
     Assert-True $byId[25].result.isError "Unknown initial property returned fake instantiate success."
