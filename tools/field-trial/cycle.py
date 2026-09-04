@@ -252,8 +252,29 @@ def build_batch(worktree: Path, vsdevcmd: str = DEFAULT_VSDEVCMD) -> str:
     )
 
 
-def verify(worktree: Path, godot: str | None, batch: Path) -> tuple[bool, str]:
+def failure_transcript(name: str, result: subprocess.CompletedProcess) -> str:
+    """Everything a failing step said, both streams, labelled.
+
+    `stderr or stdout` is the wrong choice for a test runner. Warnings land on
+    stderr routinely, so the moment a suite emits one, stderr is non-empty and
+    the stdout that names the failing test is never read. The red run for #224
+    reported an IPC warning and a shutdown notice, which is what the suite was
+    grumbling about, not what it was failing on.
+    """
+    return "\n".join([
+        f"=== {name} failed (exit {result.returncode}) ===",
+        "--- stdout ---", (result.stdout or "").strip(),
+        "--- stderr ---", (result.stderr or "").strip(),
+    ])
+
+
+def verify(worktree: Path, godot: str | None, batch: Path) -> tuple[bool, str, str]:
     """Build the worktree and run every suite. True only if all of them pass.
+
+    Returns the verdict, a one-line summary for the report table, and the whole
+    transcript for the artifacts. The summary is a truncation and has to stay
+    one: writing that truncation to disk and calling it the evidence is how the
+    red run's real output was lost the first time it was needed.
 
     The build script lives in the cycle's artifacts rather than in the worktree,
     so verification never shows up in the patch it is judging. The agent is given
@@ -261,7 +282,8 @@ def verify(worktree: Path, godot: str | None, batch: Path) -> tuple[bool, str]:
     """
     built = run(["cmd", "/c", str(batch)], worktree)
     if built.returncode != 0:
-        return False, f"build failed: {(built.stdout or built.stderr or '')[-400:]}"
+        transcript = failure_transcript("build", built)
+        return False, f"build failed: {(built.stdout or built.stderr or '')[-400:]}", transcript
 
     build_dir = worktree / "build-ninja"
     steps = [
@@ -278,8 +300,9 @@ def verify(worktree: Path, godot: str | None, batch: Path) -> tuple[bool, str]:
     for command, name in steps:
         result = run(command, worktree)
         if result.returncode != 0:
-            return False, f"{name} failed: {(result.stderr or result.stdout or '')[-300:]}"
-    return True, "all suites passed"
+            transcript = failure_transcript(name, result)
+            return False, f"{name} failed: {(result.stdout or result.stderr or '').strip()[-300:]}", transcript
+    return True, "all suites passed", "all suites passed"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -414,10 +437,10 @@ def main(argv: list[str] | None = None) -> int:
 
     # Red: the reproduction alone, without the fix, must fail.
     run(["git", "stash", "push", "--", "src", "include", "docs"], worktree)
-    red_passed, red_detail = verify(worktree, args.godot, build_script)
+    red_passed, red_detail, red_transcript = verify(worktree, args.godot, build_script)
     run(["git", "stash", "pop"], worktree)
     # Green: the whole patch must pass.
-    green_passed, green_detail = verify(worktree, args.godot, build_script)
+    green_passed, green_detail, green_transcript = verify(worktree, args.godot, build_script)
 
     # Keep the red run's output even when the gate passes. "Failed without the
     # fix" does not say which assertion failed, and a patch can carry one true
@@ -426,8 +449,8 @@ def main(argv: list[str] | None = None) -> int:
     # describes. Reading that back afterwards took a code audit, because the
     # only record of it was a sentence saying it happened.
     (output / "gate" ).mkdir(parents=True, exist_ok=True)
-    (output / "gate" / "red.txt").write_text(red_detail, encoding="utf-8")
-    (output / "gate" / "green.txt").write_text(green_detail, encoding="utf-8")
+    (output / "gate" / "red.txt").write_text(red_transcript, encoding="utf-8")
+    (output / "gate" / "green.txt").write_text(green_transcript, encoding="utf-8")
 
     verdict = gates.evaluate_red_green(pre_fix_failed=not red_passed, post_fix_passed=green_passed)
     if verdict != "ok":

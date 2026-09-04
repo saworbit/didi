@@ -486,6 +486,36 @@ class StagedPatchMismatchTests(unittest.TestCase):
             self.assertEqual(git("diff", "--cached").stdout, graded)
 
 
+class FailureTranscriptTests(unittest.TestCase):
+    """A failing suite's evidence is both streams, not whichever one is non-empty.
+
+    `stderr or stdout` reads as "the error output, falling back to normal
+    output", but a test runner puts the failing test on stdout and routine
+    warnings on stderr. One warning is enough to hide the whole result. The red
+    run for #224 reported an IPC warning and a shutdown notice while the actual
+    failing assertion sat unread in stdout.
+    """
+
+    @staticmethod
+    def _result(stdout, stderr, code=1):
+        import subprocess
+        return subprocess.CompletedProcess(args=[], returncode=code, stdout=stdout, stderr=stderr)
+
+    def test_keeps_stdout_even_when_stderr_is_noisy(self):
+        transcript = CYCLE.failure_transcript(
+            "native tests", self._result("FAILED: tool_input_schema.value_typed", "[WARN] quarantining route"))
+        self.assertIn("FAILED: tool_input_schema.value_typed", transcript)
+        self.assertIn("[WARN] quarantining route", transcript)
+
+    def test_labels_the_step_and_its_exit_code(self):
+        transcript = CYCLE.failure_transcript("documentation", self._result("", "boom", code=3))
+        self.assertIn("documentation failed (exit 3)", transcript)
+
+    def test_survives_a_step_that_printed_nothing(self):
+        transcript = CYCLE.failure_transcript("build", self._result(None, None))
+        self.assertIn("build failed", transcript)
+
+
 class RenderDiscussionTests(unittest.TestCase):
     """A brief that omits the comments hands the agent a premise nobody believes.
 
