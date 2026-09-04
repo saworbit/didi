@@ -60,7 +60,9 @@ std::string truncateUtf8(std::string_view value, size_t maximum_bytes) {
 } // namespace
 
 RuntimeLogRing::RuntimeLogRing(size_t capacity, uint64_t first_sequence)
-    : m_capacity(std::max<size_t>(1, capacity)), m_nextSequence(first_sequence == 0 ? 1 : first_sequence) {}
+    : m_capacity(std::max<size_t>(1, capacity)),
+      m_firstSequence(first_sequence == 0 ? 1 : first_sequence),
+      m_nextSequence(first_sequence == 0 ? 1 : first_sequence) {}
 
 bool RuntimeLogRing::isValidLevel(std::string_view level) {
     return level == "debug" || level == "info" || level == "warning" || level == "error";
@@ -119,8 +121,15 @@ Result<json> RuntimeLogRing::read(uint64_t cursor, size_t limit, std::string_vie
     std::lock_guard<std::mutex> lock(m_mutex);
 
     const uint64_t oldest = m_records.empty() ? m_nextSequence : m_records.front().sequence;
-    const bool dropped = !m_records.empty() && cursor < oldest;
-    const uint64_t start = cursor == 0 || cursor < oldest ? oldest : cursor;
+    // Cursor 0 is the documented way to ask for everything the ring still
+    // holds, not a position before a discarded record. Comparing it against the
+    // oldest sequence reported a retention gap on the very first read of every
+    // session, which is the opposite of what the flag is for. Read it as the
+    // ring's own first sequence and the answer is true again: a gap only when
+    // records really were evicted.
+    const uint64_t requested = cursor == 0 ? m_firstSequence : cursor;
+    const bool dropped = !m_records.empty() && requested < oldest;
+    const uint64_t start = requested < oldest ? oldest : requested;
     uint64_t next_cursor = start;
     json records = json::array();
     const int minimum_rank = levelRank(minimum_level);

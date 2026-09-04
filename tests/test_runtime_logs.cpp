@@ -37,6 +37,48 @@ static void test_runtime_log_ring_reports_gap_and_advances_past_filtered_records
     ASSERT_EQ(filtered["next_cursor"], 5u);
 }
 
+static void test_runtime_log_ring_reports_no_gap_on_the_first_read_from_zero() {
+    // Break caught: cursor 0 was compared against the oldest retained sequence,
+    // which is 1 on a ring that has never wrapped, so the documented first read
+    // of every session came back with dropped_before_cursor true and every
+    // record still in the payload. A client that trusts the flag concludes it
+    // missed engine output it never missed.
+    didi::godot::RuntimeLogRing ring(8);
+    ASSERT_TRUE(ring.append("info", "test", "one").isOk());
+    ASSERT_TRUE(ring.append("info", "test", "two").isOk());
+
+    const auto page = ring.read(0, 100, "debug").value();
+    ASSERT_TRUE(!page["dropped_before_cursor"]);
+    ASSERT_EQ(page["oldest_cursor"], 1u);
+    ASSERT_EQ(page["records"].size(), 2u);
+    ASSERT_EQ(page["records"][0]["sequence"], 1u);
+    ASSERT_EQ(page["next_cursor"], 3u);
+
+    // An empty ring has nothing to have dropped either.
+    didi::godot::RuntimeLogRing empty(8);
+    const auto empty_page = empty.read(0, 100, "debug").value();
+    ASSERT_TRUE(!empty_page["dropped_before_cursor"]);
+    ASSERT_EQ(empty_page["records"].size(), 0u);
+
+    // A ring that starts at a later sequence keeps the same answer: cursor 0
+    // means the beginning of what this ring ever held, not a lost record.
+    didi::godot::RuntimeLogRing resumed(8, 500);
+    ASSERT_TRUE(resumed.append("info", "test", "later").isOk());
+    const auto resumed_page = resumed.read(0, 100, "debug").value();
+    ASSERT_TRUE(!resumed_page["dropped_before_cursor"]);
+    ASSERT_EQ(resumed_page["oldest_cursor"], 500u);
+
+    // Eviction is still a real gap, whether the caller asks from 0 or from a
+    // cursor that named a discarded record.
+    didi::godot::RuntimeLogRing wrapped(2);
+    ASSERT_TRUE(wrapped.append("info", "test", "one").isOk());
+    ASSERT_TRUE(wrapped.append("info", "test", "two").isOk());
+    ASSERT_TRUE(wrapped.append("info", "test", "three").isOk());
+    ASSERT_TRUE(wrapped.read(0, 100, "debug").value()["dropped_before_cursor"]);
+    ASSERT_TRUE(wrapped.read(1, 100, "debug").value()["dropped_before_cursor"]);
+    ASSERT_TRUE(!wrapped.read(2, 100, "debug").value()["dropped_before_cursor"]);
+}
+
 static void test_runtime_log_ring_bounds_message_and_details() {
     // Break caught: an unbounded message or detail payload can exhaust the extension log buffer.
     didi::godot::RuntimeLogRing ring(1);
@@ -139,6 +181,8 @@ static void test_logger_sink_does_not_recurse_when_sink_logs() {
 struct RegisterRuntimeLogTests {
     RegisterRuntimeLogTests() {
         registerTest("RuntimeLogs.GapAndFiltering", test_runtime_log_ring_reports_gap_and_advances_past_filtered_records);
+        registerTest("RuntimeLogs.NoGapOnFirstRead",
+                     test_runtime_log_ring_reports_no_gap_on_the_first_read_from_zero);
         registerTest("RuntimeLogs.BoundedPayloads", test_runtime_log_ring_bounds_message_and_details);
         registerTest("RuntimeLogs.Utf8Truncation", test_runtime_log_ring_keeps_utf8_payloads_serializable_after_truncation);
         registerTest("RuntimeLogs.MalformedUtf8", test_runtime_log_ring_replaces_malformed_utf8_scalars);

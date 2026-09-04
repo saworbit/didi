@@ -40,6 +40,7 @@ private:
     static json boundedDetails(const json& details);
 
     size_t m_capacity;
+    uint64_t m_firstSequence{1};
     uint64_t m_nextSequence{1};
     bool m_exhausted{false};
     std::deque<Record> m_records;
