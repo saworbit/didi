@@ -18,6 +18,7 @@ namespace {
 
 using didi::json;
 using didi::runtime::parseNavPathRequest;
+using didi::runtime::parseClearanceRequest;
 using didi::runtime::parseRaycastBatchRequest;
 using didi::runtime::parseRaycastRequest;
 
@@ -28,7 +29,7 @@ void test_registry_advertises_live_reads() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
     for (const auto* name : {"physics_raycast_query", "spatial_query_raycast_batch",
-                             "nav_query_path"}) {
+                             "spatial_query_clearance", "nav_query_path"}) {
         const auto* tool = registry.getTool(name);
         ASSERT_TRUE(tool != nullptr);
         ASSERT_TRUE(tool->capability.implemented);
@@ -196,11 +197,64 @@ void test_raycast_batch_is_exactly_the_single_ray_contract_repeated() {
     ASSERT_TRUE(rejected({{"rays", "not an array"}}).isErr());
 }
 
+void test_clearance_describes_a_body_and_not_a_line() {
+    // A ray answers whether a line is clear. This answers whether a body is,
+    // which is the question a doorway asks, so the shape is the part that has
+    // to be described exactly.
+    auto box = parseClearanceRequest({
+        {"shape", {{"kind", "box"}, {"size", v3(1, 2, 1)}}},
+        {"from", v3(0, 0, 0)}, {"to", v3(4, 0, 0)}});
+    ASSERT_TRUE(box.isOk());
+    ASSERT_EQ(box.value().dimension(), 3);
+    ASSERT_EQ(box.value().collision_mask, 1);
+
+    auto capsule = parseClearanceRequest({
+        {"shape", {{"kind", "capsule"}, {"radius", 0.4}, {"height", 1.8}}},
+        {"from", v2(0, 0)}, {"to", v2(0, 5)}, {"collision_mask", 3}});
+    ASSERT_TRUE(capsule.isOk());
+    ASSERT_EQ(capsule.value().dimension(), 2);
+    ASSERT_EQ(capsule.value().collision_mask, 3);
+
+    // Asking whether a shape fits where it stands is a real question, unlike a
+    // ray of no length, so a zero-length sweep is accepted here on purpose.
+    ASSERT_TRUE(parseClearanceRequest({
+        {"shape", {{"kind", "sphere"}, {"radius", 1}}},
+        {"from", v3(2, 2, 2)}, {"to", v3(2, 2, 2)}}).isOk());
+
+    const auto rejected = [](const json& params) {
+        return parseClearanceRequest(params).isErr();
+    };
+    // A shape with no extent is not a body, and the engine would answer about
+    // it rather than refuse.
+    ASSERT_TRUE(rejected({{"shape", {{"kind", "sphere"}, {"radius", 0}}},
+                          {"from", v3(0, 0, 0)}, {"to", v3(1, 0, 0)}}));
+    ASSERT_TRUE(rejected({{"shape", {{"kind", "box"}, {"size", v3(1, 0, 1)}}},
+                          {"from", v3(0, 0, 0)}, {"to", v3(1, 0, 0)}}));
+    // Fields that belong to another shape are refused rather than ignored, so a
+    // capsule request missing its height cannot pass as a sphere.
+    ASSERT_TRUE(rejected({{"shape", {{"kind", "capsule"}, {"radius", 1}}},
+                          {"from", v3(0, 0, 0)}, {"to", v3(1, 0, 0)}}));
+    ASSERT_TRUE(rejected({{"shape", {{"kind", "sphere"}, {"radius", 1}, {"height", 2}}},
+                          {"from", v3(0, 0, 0)}, {"to", v3(1, 0, 0)}}));
+    // A 2D sweep of a 3D box is two different worlds in one request.
+    ASSERT_TRUE(rejected({{"shape", {{"kind", "box"}, {"size", v3(1, 1, 1)}}},
+                          {"from", v2(0, 0)}, {"to", v2(1, 0)}}));
+    ASSERT_TRUE(rejected({{"shape", {{"kind", "box"}, {"size", v3(1, 1, 1)}}},
+                          {"from", v3(0, 0, 0)}, {"to", v2(1, 0)}}));
+    ASSERT_TRUE(rejected({{"shape", {{"kind", "pyramid"}, {"radius", 1}}},
+                          {"from", v3(0, 0, 0)}, {"to", v3(1, 0, 0)}}));
+    ASSERT_TRUE(rejected({{"from", v3(0, 0, 0)}, {"to", v3(1, 0, 0)}}));
+    ASSERT_TRUE(rejected({{"shape", {{"kind", "sphere"}, {"radius", 1}}},
+                          {"from", v3(0, 0, 0)}, {"to", v3(1, 0, 0)}, {"unknown", 1}}));
+}
+
 struct RegisterPhase7bSpatial {
     RegisterPhase7bSpatial() {
         registerTest("phase7b_spatial.registry_live_reads", test_registry_advertises_live_reads);
         registerTest("phase7b_spatial.raycast_parses", test_raycast_parses_both_dimensions_with_defaults);
         registerTest("phase7b_spatial.raycast_rejects", test_raycast_rejects_contract_violations);
+        registerTest("phase7b_spatial.clearance_describes_a_body",
+                     test_clearance_describes_a_body_and_not_a_line);
         registerTest("phase7b_spatial.raycast_batch_matches_single",
                      test_raycast_batch_is_exactly_the_single_ray_contract_repeated);
         registerTest("phase7b_spatial.nav_parses_and_rejects", test_nav_path_parses_and_rejects);

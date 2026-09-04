@@ -2143,6 +2143,28 @@ Result<VariantValue> rootWorld(int dimension) {
 // The binds and the space state a ray needs, resolved once. A batch pays for
 // this lookup once rather than once per ray, and every ray in the batch is then
 // answered against the same physics state instead of against N successive ones.
+// The direct space state of the root viewport's world, which every physics
+// query in this file asks its question of. Shared so a ray and a shape sweep
+// cannot end up reading two different worlds.
+Result<GDExtensionObjectPtr> openDirectSpaceState(int dimension) {
+    const int64_t state_hash = dimension == 2 ? 2506717822LL : 2069328350LL;
+    auto required = requireMethodBind(dimension == 2 ? "World2D" : "World3D",
+                                      "get_direct_space_state", state_hash);
+    if (required.isErr()) return Error(501, required.error().message);
+    auto world = rootWorld(dimension);
+    if (world.isErr()) return world.error();
+    auto world_object = objectFromVariant(world.value());
+    if (world_object.isErr()) return Error::internal(world_object.error().message);
+    auto state = callObject(world_object.value(), dimension == 2 ? "World2D" : "World3D",
+                            "get_direct_space_state", state_hash);
+    if (state.isErr()) return Error::internal(state.error().message);
+    auto state_object = objectFromVariant(state.value());
+    if (state_object.isErr() || !state_object.value()) {
+        return Error(409, "Root viewport world has no direct space state");
+    }
+    return state_object.value();
+}
+
 struct RaycastSpace {
     int dimension{3};
     const char* params_class{nullptr};
@@ -2169,18 +2191,9 @@ Result<RaycastSpace> openRaycastSpace(int dimension) {
         if (required.isErr()) return Error(501, required.error().message);
     }
 
-    auto world = rootWorld(dimension);
-    if (world.isErr()) return world.error();
-    auto world_object = objectFromVariant(world.value());
-    if (world_object.isErr()) return Error::internal(world_object.error().message);
-    auto state = callObject(world_object.value(), dimension == 2 ? "World2D" : "World3D",
-                            "get_direct_space_state", state_hash);
-    if (state.isErr()) return Error::internal(state.error().message);
-    auto state_object = objectFromVariant(state.value());
-    if (state_object.isErr() || !state_object.value()) {
-        return Error(409, "Root viewport world has no direct space state");
-    }
-    space.state = state_object.value();
+    auto state = openDirectSpaceState(dimension);
+    if (state.isErr()) return state.error();
+    space.state = state.value();
     return space;
 }
 
@@ -2295,6 +2308,206 @@ Result<json> castOneRay(const RaycastSpace& space, const runtime::RaycastRequest
         }
     }
     return result;
+}
+
+// A transform with no rotation at a point. A sweep asks where a shape fits, not
+// which way it faces, so the basis is the identity and only the origin varies.
+Result<VariantValue> makeUprightTransform(const runtime::SpatialPoint& origin) {
+    auto& api = GodotApi::instance();
+    if (origin.dimension == 2) {
+        auto constructor = api.variant_get_ptr_constructor(GDEXTENSION_VARIANT_TYPE_TRANSFORM2D, 2);
+        if (!constructor) return Error::internal("Godot Transform2D constructor is unavailable");
+        double rotation = 0.0;
+        auto position = makeVector2(origin.x, origin.y);
+        if (position.isErr()) return position.error();
+        NativeValue native_position(GDEXTENSION_VARIANT_TYPE_VECTOR2);
+        auto to_native = api.get_variant_to_type_constructor(GDEXTENSION_VARIANT_TYPE_VECTOR2);
+        if (!to_native) return Error::internal("Godot Vector2 conversion is unavailable");
+        to_native(native_position.ptr(), position.value().ptr());
+        native_position.markInitialized();
+        NativeValue native(GDEXTENSION_VARIANT_TYPE_TRANSFORM2D);
+        const void* arguments[] = {&rotation, native_position.ptr()};
+        constructor(native.ptr(), arguments);
+        native.markInitialized();
+        return variantFromNative(GDEXTENSION_VARIANT_TYPE_TRANSFORM2D, native.ptr());
+    }
+    auto constructor = api.variant_get_ptr_constructor(GDEXTENSION_VARIANT_TYPE_TRANSFORM3D, 3);
+    if (!constructor) return Error::internal("Godot Transform3D constructor is unavailable");
+    auto to_native = api.get_variant_to_type_constructor(GDEXTENSION_VARIANT_TYPE_VECTOR3);
+    if (!to_native) return Error::internal("Godot Vector3 conversion is unavailable");
+    NativeValue axes[4] = {NativeValue(GDEXTENSION_VARIANT_TYPE_VECTOR3),
+                           NativeValue(GDEXTENSION_VARIANT_TYPE_VECTOR3),
+                           NativeValue(GDEXTENSION_VARIANT_TYPE_VECTOR3),
+                           NativeValue(GDEXTENSION_VARIANT_TYPE_VECTOR3)};
+    const double components[4][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1},
+                                     {origin.x, origin.y, origin.z}};
+    for (int index = 0; index < 4; ++index) {
+        auto vector = makeVector3(components[index][0], components[index][1], components[index][2]);
+        if (vector.isErr()) return vector.error();
+        to_native(axes[index].ptr(), vector.value().ptr());
+        axes[index].markInitialized();
+    }
+    NativeValue native(GDEXTENSION_VARIANT_TYPE_TRANSFORM3D);
+    const void* arguments[] = {axes[0].ptr(), axes[1].ptr(), axes[2].ptr(), axes[3].ptr()};
+    constructor(native.ptr(), arguments);
+    native.markInitialized();
+    return variantFromNative(GDEXTENSION_VARIANT_TYPE_TRANSFORM3D, native.ptr());
+}
+
+// The shape the caller described, built through ClassDB the same way every
+// other object in this file is.
+Result<GDExtensionObjectPtr> makeClearanceShape(const runtime::ClearanceRequest& request) {
+    const int dimension = request.dimension();
+    const char* class_name = nullptr;
+    switch (request.shape) {
+        case runtime::ClearanceShapeKind::box:
+            class_name = dimension == 2 ? "RectangleShape2D" : "BoxShape3D";
+            break;
+        case runtime::ClearanceShapeKind::sphere:
+            class_name = dimension == 2 ? "CircleShape2D" : "SphereShape3D";
+            break;
+        case runtime::ClearanceShapeKind::capsule:
+            class_name = dimension == 2 ? "CapsuleShape2D" : "CapsuleShape3D";
+            break;
+    }
+    NativeName type_name(class_name);
+    auto shape = constructObject(type_name.ptr());
+    if (!shape) return Error(501, std::string("Godot ClassDB could not construct ") + class_name);
+
+    // void(float), which is what set_radius and set_height both are.
+    const auto set_number = [&](const char* method, double value) -> Result<void> {
+        auto argument = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, value);
+        if (argument.isErr()) return argument.error();
+        auto called = callObject(shape, class_name, method, 373806689LL, {&argument.value()});
+        return called.isOk() ? Result<void>::ok() : Result<void>(called.error());
+    };
+
+    if (request.shape == runtime::ClearanceShapeKind::box) {
+        auto size = dimension == 2 ? makeVector2(request.size.x, request.size.y)
+                                   : makeVector3(request.size.x, request.size.y, request.size.z);
+        if (size.isErr()) return size.error();
+        // The same numbers as set_motion above, and not a copied constant. A
+        // Godot method bind hash is computed from the signature and not the
+        // name, so every void(Vector3) setter shares one, which is why
+        // BoxShape3D.set_size and PhysicsShapeQueryParameters3D.set_motion
+        // agree. Verified against the shipped extension_api dump.
+        const int64_t hash = dimension == 2 ? 743155724LL : 3460891852LL;
+        auto called = callObject(shape, class_name, "set_size", hash, {&size.value()});
+        if (called.isErr()) return called.error();
+    } else {
+        auto radius = set_number("set_radius", request.radius);
+        if (radius.isErr()) return radius.error();
+        if (request.shape == runtime::ClearanceShapeKind::capsule) {
+            auto height = set_number("set_height", request.height);
+            if (height.isErr()) return height.error();
+        }
+    }
+    return shape;
+}
+
+json physicsClearance(const json& params) {
+    auto parsed = runtime::parseClearanceRequest(params);
+    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    const auto& request = parsed.value();
+    const int dimension = request.dimension();
+    const char* params_class = dimension == 2 ? "PhysicsShapeQueryParameters2D"
+                                              : "PhysicsShapeQueryParameters3D";
+    const char* state_class = dimension == 2 ? "PhysicsDirectSpaceState2D"
+                                             : "PhysicsDirectSpaceState3D";
+    const int64_t cast_hash = dimension == 2 ? 711275086LL : 1778757334LL;
+    const int64_t transform_hash = dimension == 2 ? 2761652528LL : 2952846383LL;
+    const int64_t motion_hash = dimension == 2 ? 743155724LL : 3460891852LL;
+
+    for (const auto& bind : {std::make_tuple(state_class, "cast_motion", cast_hash),
+                             std::make_tuple(params_class, "set_shape", 968641751LL),
+                             std::make_tuple(params_class, "set_transform", transform_hash),
+                             std::make_tuple(params_class, "set_motion", motion_hash),
+                             std::make_tuple(params_class, "set_collision_mask", 1286410249LL),
+                             std::make_tuple(params_class, "set_collide_with_bodies", 2586408642LL),
+                             std::make_tuple(params_class, "set_collide_with_areas", 2586408642LL)}) {
+        auto required = requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind));
+        if (required.isErr()) return errorJson(501, required.error().message);
+    }
+
+    auto state = openDirectSpaceState(dimension);
+    if (state.isErr()) return errorJson(state.error().code, state.error().message);
+
+    auto shape = makeClearanceShape(request);
+    if (shape.isErr()) return errorJson(shape.error().code, shape.error().message);
+    auto shape_value = makeObject(shape.value());
+    if (shape_value.isErr()) return errorJson(500, shape_value.error().message);
+
+    NativeName query_name(params_class);
+    auto query = constructObject(query_name.ptr());
+    if (!query) return errorJson(501, std::string("Godot ClassDB could not construct ") + params_class);
+    auto query_value = makeObject(query);
+    if (query_value.isErr()) return errorJson(500, query_value.error().message);
+
+    auto transform = makeUprightTransform(request.from);
+    if (transform.isErr()) return errorJson(transform.error().code, transform.error().message);
+    runtime::SpatialPoint motion_point = request.to;
+    motion_point.x -= request.from.x;
+    motion_point.y -= request.from.y;
+    motion_point.z -= request.from.z;
+    auto motion = makePoint(motion_point);
+    if (motion.isErr()) return errorJson(500, motion.error().message);
+    auto mask = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, request.collision_mask);
+    if (mask.isErr()) return errorJson(500, mask.error().message);
+
+    for (const auto& call : {std::make_tuple("set_shape", 968641751LL, &shape_value.value()),
+                             std::make_tuple("set_transform", transform_hash, &transform.value()),
+                             std::make_tuple("set_motion", motion_hash, &motion.value()),
+                             std::make_tuple("set_collision_mask", 1286410249LL, &mask.value())}) {
+        auto called = callObject(query, params_class, std::get<0>(call), std::get<1>(call),
+                                 {std::get<2>(call)});
+        if (called.isErr()) return errorJson(500, called.error().message);
+    }
+    // Bodies block a body; an area does not. A trigger volume is not geometry,
+    // and a corridor that reports blocked because a checkpoint sits in it is
+    // answering a different question from the one asked. This differs from the
+    // raycast on purpose, and the tool reference says so.
+    for (const auto& flag : {std::make_pair("set_collide_with_bodies", true),
+                             std::make_pair("set_collide_with_areas", false)}) {
+        auto value = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
+                                static_cast<GDExtensionBool>(flag.second));
+        if (value.isErr()) return errorJson(500, value.error().message);
+        auto called = callObject(query, params_class, flag.first, 2586408642LL, {&value.value()});
+        if (called.isErr()) return errorJson(500, called.error().message);
+    }
+
+    auto swept = callObject(state.value(), state_class, "cast_motion", cast_hash, {&query_value.value()});
+    if (swept.isErr()) return errorJson(500, swept.error().message);
+    auto size_value = callVariant(swept.value(), "size");
+    if (size_value.isErr()) return errorJson(500, size_value.error().message);
+    auto count = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (count.isErr() || count.value() < 2) {
+        return errorJson(500, "cast_motion did not return a safe and an unsafe fraction");
+    }
+    const auto fraction = [&](int64_t index) -> Result<double> {
+        auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (index_value.isErr()) return index_value.error();
+        auto item = callVariant(swept.value(), "get", {&index_value.value()});
+        if (item.isErr()) return item.error();
+        return scalarFromVariant<double>(item.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+    };
+    auto safe = fraction(0);
+    auto unsafe = fraction(1);
+    if (safe.isErr() || unsafe.isErr()) return errorJson(500, "cast_motion fractions could not be read");
+
+    // Reported as the engine gave them, plus the arithmetic that turns a
+    // fraction into the point a caller can act on. Nothing here interprets what
+    // a particular pair of fractions means.
+    runtime::SpatialPoint reached = request.from;
+    reached.x += motion_point.x * safe.value();
+    reached.y += motion_point.y * safe.value();
+    if (dimension == 3) reached.z += motion_point.z * safe.value();
+
+    return liveResult({{"dimension", dimension},
+                       {"clear", safe.value() >= 1.0},
+                       {"safe_fraction", safe.value()},
+                       {"unsafe_fraction", unsafe.value()},
+                       {"safe_position", reached.toJson()},
+                       {"collide_with_areas", false}});
 }
 
 json physicsRaycastBatch(const json& params) {
@@ -2739,6 +2952,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
     }
     if (method == "physics.raycast") return physicsRaycast(params);
     if (method == "physics.raycastBatch") return physicsRaycastBatch(params);
+    if (method == "physics.clearance") return physicsClearance(params);
     if (method == "nav.queryPath") return navQueryPath(params);
     if (method == "anim.listTracks") return animListTracks(params, session_kind);
     if (method == "anim.playTrack") return animPlayTrack(params, session_kind);

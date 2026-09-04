@@ -13,6 +13,10 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Added
 
+- Added `spatial_query_clearance`, which sweeps a box, sphere or capsule along a path and reports how far it gets. A raycast answers whether a line is clear, which is not the same question as whether a body is: a corridor a ray passes down cleanly can still be too narrow for the character that has to walk it, and that is the question a doorway or a spawn point actually asks. It returns the safe and unsafe fractions the engine gave, plus the position the shape reached, and nothing in between interprets what a particular pair of fractions means. A zero-length sweep is accepted on purpose, unlike a ray of no length, because asking whether a shape fits where it stands is a real question. Bodies block; areas do not, because a trigger volume is not geometry and a corridor reported blocked by a checkpoint is answering a different question. Both dimensions, with `sphere` naming a circle in 2D so one request shape works either way.
+
+### Added
+
 - Added `spatial_query_raycast_batch`, which casts up to 64 rays against the attached session's physics world in one dispatch. Deciding whether a spawn point is in the player's line of sight, or whether a corridor has clearance, meant one round trip per ray or a viewport capture and a guess, and neither is affordable in a loop that pays per turn. The direct space state and the method binds are resolved once for the batch rather than once per ray, so every ray is also answered against the same physics state instead of against successive ones. Each entry goes through the `physics_raycast_query` contract unchanged and comes back with the same hit record, so a batch entry and a single call cannot describe the same hit differently; a rejection names the index of the ray that failed. One batch is one dimension, because a 2D and a 3D ray are answered by different space states and a batch that split across both would be answering from two worlds. A ray that cannot be answered fails the whole batch rather than leaving a gap, since a partial batch read as complete is a clear sightline that was never checked.
 
 ### Added
@@ -45,12 +49,12 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `95/98`
+**Canonical implementation:** `96/99`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 98 canonical tools plus 10 legacy registrations (108 total). 95 canonical tools are implemented and 3 remain unimplemented.
+Discovery now exposes 99 canonical tools plus 10 legacy registrations (109 total). 96 canonical tools are implemented and 3 remain unimplemented.
 
 ---
 

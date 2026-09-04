@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 98 canonical tool names plus 10 legacy names (108 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 99 canonical tool names plus 10 legacy names (109 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `95/98`
+**Canonical implementation:** `96/99`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 95/98 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 96/99 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -249,6 +249,20 @@ Updates an in-scene `Camera3D` in one editor UndoRedo action. `camera_path` and 
 Sets the public SceneTree `collision_shapes` and `navigation_mesh` debug hints used by future games run from that editor. At least one is required. Omitted hints are preserved, both are reread after mutation, and both original values are restored if a setter or postcondition fails. The retained `wireframe` field accepts only `false` because Godot exposes no supported live wireframe control. The result returns `previous`, `observed`, `effective_scope: "future_games_run_from_editor"`, and `rollback: "explicit_restore"`.
 
 ## 5. Physics, animation, and navigation
+
+### `spatial_query_clearance` — Live
+
+Sweeps a shape along a path and reports how far it gets. A raycast answers whether a line is clear; this answers whether a body is, which is the question a doorway or a navigation corridor asks.
+
+- `shape` (`object`, required): `kind` is `box` (with `size`), `sphere` (with `radius`), or `capsule` (with `radius` and `height`). `sphere` is a circle in 2D, so one request shape works in both dimensions.
+- `from`, `to` (`object`, required): `{x,y}` or `{x,y,z}`. Equal values ask whether the shape fits where it stands, which is accepted here even though a ray of no length is not.
+- `collision_mask` (`integer`, default `1`).
+
+Returns `safe_fraction` and `unsafe_fraction` exactly as the engine returned them, `clear` when the safe fraction reaches 1, and `safe_position`, which is the start plus the motion scaled by the safe fraction. Nothing interprets what a particular pair of fractions means beyond that.
+
+Bodies block the sweep and areas do not. This differs from `physics_raycast_query`, which collides with both, and the difference is deliberate: a trigger volume is not geometry, and a corridor reported blocked because a checkpoint sits in it is answering a different question. The result carries `collide_with_areas: false` so the choice is visible rather than assumed.
+
+It does not name what blocked the sweep. `cast_motion` reports how far a shape gets, not what stopped it.
 
 ### `spatial_query_raycast_batch` — Live
 

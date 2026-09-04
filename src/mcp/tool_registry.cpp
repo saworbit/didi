@@ -51,7 +51,8 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // drive the editor UI, which is nobody's intent.
         , "runtime_inject_input"
         // Phase 7B reads against the root viewport's existing worlds.
-        , "physics_raycast_query", "spatial_query_raycast_batch", "nav_query_path"
+        , "physics_raycast_query", "spatial_query_raycast_batch"
+        , "spatial_query_clearance", "nav_query_path"
         // Phase 7B animation: the list is a read in either session kind, the
         // play is a game-only transient mutation.
         , "anim_list_tracks", "anim_play_track"
@@ -133,6 +134,7 @@ CallToolResult handleScriptDetachFromNode(const json& args, std::shared_ptr<ipc:
 
 CallToolResult handlePhysicsRaycastQuery(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleSpatialQueryRaycastBatch(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleSpatialQueryClearance(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handlePhysicsSimulateStep(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleNavBakeMesh(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleNavQueryPath(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -388,6 +390,7 @@ ResolvedToolBinding resolveAliasBinding(std::string_view invoked_name, const jso
         {"runtime_read_profiler", "runtime.readProfiler"},
         {"runtime_watch_invariants", "runtime.watchInvariants"},
         {"spatial_query_raycast_batch", "physics.raycastBatch"},
+        {"spatial_query_clearance", "physics.clearance"},
     };
     for (const auto& entry : phase7_bindings) {
         if (entry.name != invoked_name) continue;
@@ -1355,6 +1358,37 @@ void ToolRegistry::registerAllDefaultTools() {
     // ==========================================
     // Domain 5: Physics, Animation & Navigation
     // ==========================================
+    {
+        ToolDefinition t;
+        t.name = "spatial_query_clearance";
+        t.description = "Sweeps a box, sphere, or capsule along a path in the attached session's physics world and reports how far it gets, which is the question a doorway or a spawn point asks and a ray cannot answer.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"shape", {
+                    {"type", "object"},
+                    {"description", "The body being fitted through. sphere is a circle in 2D."},
+                    {"properties", {
+                        {"kind", {{"type", "string"}, {"enum", json::array({"box", "sphere", "capsule"})}}},
+                        {"size", {{"type", "object"}, {"description", "box only: {x,y} or {x,y,z}, every component greater than 0."}}},
+                        {"radius", {{"type", "number"}, {"exclusiveMinimum", 0}, {"maximum", 100000}, {"description", "sphere and capsule only."}}},
+                        {"height", {{"type", "number"}, {"exclusiveMinimum", 0}, {"maximum", 100000}, {"description", "capsule only."}}}
+                    }},
+                    {"required", json::array({"kind"})},
+                    {"additionalProperties", false}
+                }},
+                {"from", {{"type", "object"}, {"description", "{x,y} for 2D or {x,y,z} for 3D."}}},
+                {"to", {{"type", "object"}, {"description", "Where the shape is sweeping to. Equal to from asks whether it fits where it stands."}}},
+                {"collision_mask", {{"type", "integer"}, {"minimum", 1}, {"maximum", 2147483647}, {"default", 1}}}
+            }},
+            {"required", json::array({"shape", "from", "to"})},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleSpatialQueryClearance(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
     {
         ToolDefinition t;
         t.name = "spatial_query_raycast_batch";
