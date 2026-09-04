@@ -275,6 +275,83 @@ static void test_gdscript_symbol_patch_preserves_next_sibling_preamble() {
     ASSERT_EQ(patch_res.value(), expected);
 }
 
+static void test_gdscript_symbol_patch_keeps_the_blank_lines_after_the_symbol() {
+    // Break caught: the replaced span ran from the declaration through the
+    // blank lines that separated it from the next symbol, so a patch reported
+    // success with no diagnostics and left the following func glued to the end
+    // of the patched body. Two patches in a row and the file's spacing is gone.
+    std::string original =
+        "extends Node\n"
+        "\n"
+        "signal score_changed(new_score: int)\n"
+        "\n"
+        "var score: int = 0\n"
+        "\n"
+        "\n"
+        "func add_points(amount: int) -> void:\n"
+        "\tscore += amount\n"
+        "\tscore_changed.emit(score)\n"
+        "\n"
+        "\n"
+        "func register_hit() -> int:\n"
+        "\treturn 0\n";
+
+    std::string new_func =
+        "func add_points(amount: int) -> void:\n"
+        "\tif amount <= 0:\n"
+        "\t\treturn\n"
+        "\tscore += amount\n"
+        "\tscore_changed.emit(score)";
+
+    auto patch_res =
+        didi::offline::GDScriptDiagnostics::patchSymbol(original, "add_points", new_func, "function");
+    ASSERT_TRUE(patch_res.isOk());
+
+    std::string expected =
+        "extends Node\n"
+        "\n"
+        "signal score_changed(new_score: int)\n"
+        "\n"
+        "var score: int = 0\n"
+        "\n"
+        "\n"
+        "func add_points(amount: int) -> void:\n"
+        "\tif amount <= 0:\n"
+        "\t\treturn\n"
+        "\tscore += amount\n"
+        "\tscore_changed.emit(score)\n"
+        "\n"
+        "\n"
+        "func register_hit() -> int:\n"
+        "\treturn 0\n";
+    ASSERT_EQ(patch_res.value(), expected);
+
+    // A blank line between two statements is part of the body, not a
+    // separator, so it has to survive as well.
+    std::string spaced_body =
+        "func run() -> void:\n"
+        "\tvar first := 1\n"
+        "\n"
+        "\tvar second := 2\n"
+        "\n"
+        "\n"
+        "func after() -> void:\n"
+        "\tpass\n";
+
+    auto body_res = didi::offline::GDScriptDiagnostics::patchSymbol(
+        spaced_body, "after", "func after() -> void:\n\treturn", "function");
+    ASSERT_TRUE(body_res.isOk());
+    ASSERT_EQ(body_res.value(),
+              "func run() -> void:\n"
+              "\tvar first := 1\n"
+              "\n"
+              "\tvar second := 2\n"
+              "\n"
+              "\n"
+              "func after() -> void:\n"
+              "\treturn\n");
+}
+
 static void test_gdscript_symbol_patch_parameterized_annotation() {
     // Break caught: patchSymbol matched annotations with (@\w+\s+)* only, so a
     // parameterized @export_* declaration was missed and a duplicate var was
@@ -463,6 +540,8 @@ struct RegisterScriptPatchTests {
         registerTest("GDScript.PatchSignal", test_gdscript_symbol_patch_signal);
         registerTest("GDScript.PatchPreservesOrdinaryComments", test_gdscript_symbol_patch_preserves_ordinary_comments);
         registerTest("GDScript.PatchPreservesSiblingPreamble", test_gdscript_symbol_patch_preserves_next_sibling_preamble);
+        registerTest("GDScript.PatchKeepsTrailingBlankLines",
+                     test_gdscript_symbol_patch_keeps_the_blank_lines_after_the_symbol);
         registerTest("GDScript.PatchParameterizedAnnotation", test_gdscript_symbol_patch_parameterized_annotation);
         registerTest("GDScript.PatchKeepsAnnotatedNeighbour", test_gdscript_symbol_patch_keeps_annotated_neighbour);
         registerTest("GDScript.ExtractConstantsAndContainerTypes", test_gdscript_extract_symbols_constants_and_container_types);
