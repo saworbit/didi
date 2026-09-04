@@ -49,8 +49,14 @@ Rules for this task:
    goes in tests/run_godot_integration.ps1.
 3. You may add test assertions. You must not modify or delete an existing one.
 4. Change only src/, include/, tests/ and docs/. Never .github/workflows. Never delete a file.
-5. Do not commit, branch, push, or open a pull request. Leave your work in the tree.
-6. If the issue cannot be fixed through a supported API, stop and say so plainly
+5. Work inside files the build already compiles. Do NOT create new .cpp or .hpp
+   files: registering one means editing CMakeLists.txt, that file is outside the
+   paths you may change, and the whole patch is rejected when it appears. Put new
+   native tests in an existing tests/*.cpp file and new code in the source file
+   that already owns the behaviour. If you believe a change genuinely cannot be
+   made this way, stop and say so rather than editing the build.
+6. Do not commit, branch, push, or open a pull request. Leave your work in the tree.
+7. If the issue cannot be fixed through a supported API, stop and say so plainly
    rather than working around it. Reporting the limitation honestly is a valid outcome.
 
 Build with: {build_command}

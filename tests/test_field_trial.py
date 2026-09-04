@@ -486,6 +486,32 @@ class StagedPatchMismatchTests(unittest.TestCase):
             self.assertEqual(git("diff", "--cached").stdout, graded)
 
 
+class FixBriefTests(unittest.TestCase):
+    """The rules the agent is given have to cover the rules it is graded on.
+
+    The brief said "add a check that fails" and "change only src/, include/,
+    tests/ and docs/". Registering a new native test file means editing
+    CMakeLists.txt, which those paths exclude, so an agent that needed a new file
+    could satisfy one rule or the other and not both. The cycle for #225 created
+    three files, edited the build to compile them, and lost the whole run at the
+    diff policy. It obeyed the brief it was given; the brief was wrong.
+    """
+
+    def test_the_brief_says_the_build_file_is_off_limits(self):
+        self.assertIn("CMakeLists.txt", CYCLE.FIX_BRIEF)
+
+    def test_the_build_file_really_is_outside_the_allowed_paths(self):
+        self.assertFalse("CMakeLists.txt".startswith(tuple(GATES.ALLOWED_PREFIXES)))
+
+    def test_the_brief_says_where_new_tests_go_instead(self):
+        self.assertIn("existing tests/*.cpp", CYCLE.FIX_BRIEF)
+
+    def test_the_brief_still_carries_every_placeholder_it_is_formatted_with(self):
+        rendered = CYCLE.FIX_BRIEF.format(
+            repository="R", number=1, title="T", body="B", discussion="", build_command="C")
+        self.assertIn("CMakeLists.txt", rendered)
+
+
 class FailureTranscriptTests(unittest.TestCase):
     """A failing suite's evidence is both streams, not whichever one is non-empty.
 
