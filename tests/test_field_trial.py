@@ -370,6 +370,21 @@ class CycleSummaryTests(unittest.TestCase):
             "cycle-3", 1, [{"name": "fix", "status": "failed", "detail": "a | b"}], "fix_failed"))
         self.assertIn("a \\| b", rendered)
 
+    def test_build_output_is_not_treated_as_a_stray_change(self):
+        status = "\n".join([" M build-ninja/build.ninja", "?? build-ninja/didi.exe", ""])
+        self.assertEqual(CYCLE.out_of_policy_paths(status), [])
+
+    def test_a_change_outside_the_allowed_roots_is_a_stray(self):
+        status = "\n".join([" M CMakeLists.txt", " M src/a.cpp", ""])
+        self.assertEqual(CYCLE.out_of_policy_paths(status), ["CMakeLists.txt"])
+
+    def test_untracked_files_count_as_strays_too(self):
+        # git diff never showed these, which is how ten build artifacts reached
+        # a pull request through a policy that had already passed.
+        self.assertEqual(
+            CYCLE.out_of_policy_paths("?? scratch/notes.txt\n"), ["scratch/notes.txt"]
+        )
+
     def test_a_signed_in_client_raises_no_problem(self):
         self.assertIsNone(CYCLE.authentication_problem(
             json.dumps({"loggedIn": True, "authMethod": "claudeai"})))

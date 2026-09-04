@@ -87,6 +87,24 @@ def cycle_summary(
     }
 
 
+def out_of_policy_paths(status_porcelain: str, allowed=gates.ALLOWED_PREFIXES) -> list[str]:
+    """Changed paths a fix is not allowed to touch, from git status.
+
+    The diff and the commit have to describe the same change. Checking `git
+    diff` and committing with `git add -A` does not: the first ignores untracked
+    files and the second sweeps them in, so the first cycle shipped ten build
+    artifacts through a policy that never saw them.
+    """
+    offenders = []
+    for line in status_porcelain.splitlines():
+        path = line[3:].strip().strip('"')
+        if not path or path.startswith("build-ninja/"):
+            continue
+        if not path.startswith(tuple(allowed)):
+            offenders.append(path)
+    return offenders
+
+
 def authentication_problem(status_stdout: str) -> str | None:
     """Why the client cannot run an agent, or None when it can.
 
@@ -320,7 +338,12 @@ def main(argv: list[str] | None = None) -> int:
         discard_worktree()
         return finish("fix_failed")
 
-    patch = run(["git", "diff"], worktree).stdout
+    # Stage exactly what a fix may change, then read the patch back from the
+    # index. What the policy inspects and what the commit carries are then the
+    # same bytes by construction rather than by coincidence.
+    run(["git", "add", "-A", "--", *gates.ALLOWED_PREFIXES], worktree)
+    patch = run(["git", "diff", "--cached"], worktree).stdout
+    stray = out_of_policy_paths(run(["git", "status", "--porcelain"], worktree).stdout)
     (output / "fix").mkdir(parents=True, exist_ok=True)
     (output / "fix" / "patch.diff").write_text(patch, encoding="utf-8")
     if not patch.strip():
@@ -329,7 +352,9 @@ def main(argv: list[str] | None = None) -> int:
         return finish("no_changes")
     record("fix", "ok", f"{len(patch.splitlines())} diff lines")
 
-    violations = gates.diff_policy_violations(patch)
+    violations = gates.diff_policy_violations(patch) + [
+        f"{path}: changed outside the paths a fix may touch" for path in stray
+    ]
     if violations:
         record("gate_diff_policy", "failed", "; ".join(violations)[:400])
         return finish("diff_policy_violated")
@@ -349,7 +374,6 @@ def main(argv: list[str] | None = None) -> int:
         return finish(verdict)
     record("gate_red_green", "ok", "failed without the fix, passed with it")
 
-    run(["git", "add", "-A"], worktree)
     run(["git", "commit", "-m", f"Fix #{issue_number}"], worktree)
     pushed = run(["git", "push", "-u", "origin", branch], worktree)
     if pushed.returncode != 0:
