@@ -305,6 +305,69 @@ static void test_output_schemas_are_declared_for_the_observed_tools() {
     }
 }
 
+// The set of JSON types a scalar Godot property will accept is fixed by
+// validateJsonForPropertyType in src/gdextension/godot_bridge.cpp: null for
+// NIL, boolean for BOOL, integer for INT, any number for FLOAT, string for
+// STRING/STRING_NAME/NODE_PATH. Arrays and objects are refused outright.
+static const std::vector<std::string> kScalarPropertyJsonTypes = {
+    "null", "boolean", "integer", "number", "string"};
+
+// The schema is the only description of a parameter a client ever sees. An
+// untyped `value` leaves it guessing between 1.0 and "1.0", and a client that
+// guesses does not guess consistently -- field trial 02 sent both for the same
+// float property one turn apart and misread the rejection as a Didi bug.
+static void test_scalar_property_value_declares_its_accepted_json_types() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto* tool = registry.getTool("scene_set_property");
+    ASSERT_TRUE(tool != nullptr);
+    const auto& value = tool->inputSchema.at("properties").at("value");
+    ASSERT_TRUE(value.contains("type"));
+    ASSERT_TRUE(value.at("type").is_array());
+    auto declared = value.at("type").get<std::vector<std::string>>();
+    std::sort(declared.begin(), declared.end());
+    auto accepted = kScalarPropertyJsonTypes;
+    std::sort(accepted.begin(), accepted.end());
+    ASSERT_TRUE(declared == accepted);
+    // A type list alone still does not say that a float property wants 1.0 and
+    // not "1.0". An example carries the rest of the meaning.
+    ASSERT_TRUE(value.contains("examples"));
+    ASSERT_TRUE(value.at("examples").is_array());
+    ASSERT_TRUE(!value.at("examples").empty());
+}
+
+// scene_instantiate_node's initial properties reach the same validator one
+// level down, so its values need the same description.
+static void test_instantiate_node_property_values_are_described() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto* tool = registry.getTool("scene_instantiate_node");
+    ASSERT_TRUE(tool != nullptr);
+    const auto& properties = tool->inputSchema.at("properties").at("properties");
+    ASSERT_EQ(properties.at("type"), "object");
+    ASSERT_TRUE(properties.contains("additionalProperties"));
+    const auto& values = properties.at("additionalProperties");
+    ASSERT_TRUE(values.is_object());
+    ASSERT_TRUE(values.contains("type"));
+    auto declared = values.at("type").get<std::vector<std::string>>();
+    std::sort(declared.begin(), declared.end());
+    auto accepted = kScalarPropertyJsonTypes;
+    std::sort(accepted.begin(), accepted.end());
+    ASSERT_TRUE(declared == accepted);
+}
+
+// The converse guard. A genuinely free-form value -- the memory store keeps
+// whatever JSON it is handed, verbatim -- is correctly untyped, and narrowing
+// it to the scalar property set would be a regression, not a fix.
+static void test_free_form_values_stay_untyped() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto* tool = registry.getTool("blackboard_write");
+    ASSERT_TRUE(tool != nullptr);
+    const auto& value = tool->inputSchema.at("properties").at("value");
+    ASSERT_TRUE(!value.contains("type"));
+}
+
 // A tool that cannot execute has no observed shape, so it must not promise one.
 static void test_unimplemented_tools_declare_no_output_schema() {
     auto& registry = didi::mcp::ToolRegistry::instance();
@@ -353,5 +416,11 @@ struct RegisterToolManifestTests {
                      test_output_schemas_are_declared_for_the_observed_tools);
         registerTest("tool_output_schema.none_for_unimplemented",
                      test_unimplemented_tools_declare_no_output_schema);
+        registerTest("tool_input_schema.scalar_property_value_typed",
+                     test_scalar_property_value_declares_its_accepted_json_types);
+        registerTest("tool_input_schema.instantiate_property_values_typed",
+                     test_instantiate_node_property_values_are_described);
+        registerTest("tool_input_schema.free_form_values_untyped",
+                     test_free_form_values_stay_untyped);
     }
 } g_register_tool_manifest_tests;

@@ -822,7 +822,15 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"scene_path", {{"type", "string"}, {"description", "Optional .tscn path"}}},
                 {"parent_path", {{"type", "string"}, {"default", "/root"}}},
                 {"name", {{"type", "string"}, {"description", "Node name"}}},
-                {"properties", {{"type", "object"}, {"description", "Initial property values"}}}
+                // These values reach the same validator as scene_set_property's
+                // `value`, one level down, so they carry the same type contract.
+                {"properties", {{"type", "object"},
+                                {"additionalProperties",
+                                 {{"type", json::array({"null", "boolean", "integer", "number", "string"})}}},
+                                {"examples", json::array({json::object({{"position_x", 24.0},
+                                                                        {"visible", true},
+                                                                        {"text", "Score"}})})},
+                                {"description", "Initial property values, keyed by property name. Each value takes the JSON type matching the property on the new node: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil. Arrays and objects are rejected."}}}
             }}
         };
         t.handler = [this](const json& args) { return handleSceneInstantiateNode(args, m_ipcClient); };
@@ -998,7 +1006,14 @@ void ToolRegistry::registerAllDefaultTools() {
             {"properties", {
                 {"target_node", {{"type", "string"}, {"description", "Target NodePath"}}},
                 {"property_name", {{"type", "string"}, {"description", "Property name"}}},
-                {"value", {{"description", "New property value"}}}
+                // The accepted JSON types are fixed by validateJsonForPropertyType
+                // in the bridge, and the schema is the only place a client can
+                // learn them. Left untyped, a client guesses between 1.0 and
+                // "1.0", guesses differently from one turn to the next, and
+                // reads the rejection as a Didi bug rather than a type error.
+                {"value", {{"type", json::array({"null", "boolean", "integer", "number", "string"})},
+                           {"examples", json::array({1.0, 42, true, "Player", nullptr})},
+                           {"description", "New property value, as the JSON type matching the existing Godot property: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil. Arrays and objects are rejected."}}}
             }},
             {"required", {"target_node", "property_name", "value"}}
         };

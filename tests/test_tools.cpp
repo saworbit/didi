@@ -1632,6 +1632,37 @@ static void test_scene_get_selection_contract() {
     ASSERT_TRUE(rejected.isError);
 }
 
+// A JSON client has one number type to write with. A real that names a whole
+// number is the only thing it can send for 3, exactly as an integer is the
+// only thing it can send for 1.0, and Godot converts either way without losing
+// anything. So the property tools admit both. A real with a fraction is still
+// refused for an int property, because narrowing it would quietly store a
+// number nobody asked for.
+static void test_property_admission_reads_the_number_not_its_json_spelling() {
+    using didi::godot::jsonValueFitsPropertyType;
+    const int int_property = 2;    // GDEXTENSION_VARIANT_TYPE_INT
+    const int float_property = 3;  // GDEXTENSION_VARIANT_TYPE_FLOAT
+
+    ASSERT_TRUE(jsonValueFitsPropertyType(didi::json(3), int_property));
+    ASSERT_TRUE(jsonValueFitsPropertyType(didi::json(3.0), int_property));
+    ASSERT_TRUE(jsonValueFitsPropertyType(didi::json(-7.0), int_property));
+    ASSERT_TRUE(jsonValueFitsPropertyType(didi::json(0.0), int_property));
+    ASSERT_TRUE(!jsonValueFitsPropertyType(didi::json(3.5), int_property));
+    // Whole, but no int64 holds it, so admitting it would promise a value the
+    // property cannot take.
+    ASSERT_TRUE(!jsonValueFitsPropertyType(didi::json(1e30), int_property));
+
+    ASSERT_TRUE(jsonValueFitsPropertyType(didi::json(1.0), float_property));
+    ASSERT_TRUE(jsonValueFitsPropertyType(didi::json(1), float_property));
+    ASSERT_TRUE(jsonValueFitsPropertyType(didi::json(0.5), float_property));
+
+    // A number named as text is not a number: the client chose a different
+    // type, and guessing at it is how a typo becomes a silent write.
+    ASSERT_TRUE(!jsonValueFitsPropertyType(didi::json("3"), int_property));
+    ASSERT_TRUE(!jsonValueFitsPropertyType(didi::json("1.0"), float_property));
+    ASSERT_TRUE(!jsonValueFitsPropertyType(didi::json(true), int_property));
+}
+
 static void test_resource_registry() {
     auto& reg = didi::mcp::ResourceRegistry::instance();
     reg.registerAllDefaultResources();
@@ -2324,6 +2355,8 @@ struct RegisterToolTests {
         registerTest("Tools.ProjectAuditImportHealth",
                      test_project_audit_exposes_optional_import_health);
         registerTest("Tools.SceneGetSelectionContract", test_scene_get_selection_contract);
+        registerTest("Tools.PropertyAdmissionReadsTheNumber",
+                     test_property_admission_reads_the_number_not_its_json_spelling);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }

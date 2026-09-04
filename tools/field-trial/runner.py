@@ -1,0 +1,140 @@
+"""Launch one agent session as a subprocess and find what it left behind.
+
+A session cannot be started from inside another session: it needs its own client
+and its own MCP connection, which is the whole point of the trial. So the loop
+shells out. Keeping command construction pure means the flags that bound cost and
+blast radius are unit-tested rather than discovered in a runaway run.
+"""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+from pathlib import Path
+
+CLAUDE = "claude"
+DEFAULT_PROJECTS_ROOT = Path.home() / ".claude" / "projects"
+
+
+def build_command(
+    session_id: str,
+    budget_usd: float,
+    mcp_config: str | None = None,
+    permission_mode: str = "acceptEdits",
+    allowed_tools: list[str] | None = None,
+    add_dirs: list[str] | None = None,
+    model: str | None = None,
+) -> list[str]:
+    """The exact argv for one non-interactive agent run.
+
+    The prompt is deliberately absent: it goes in on stdin. Several of these
+    options take a variable number of values, so a trailing positional prompt is
+    swallowed by whichever variadic flag happens to come last. That is not a
+    hypothetical ordering worry, it is how the first live cycle failed.
+
+    `--max-budget-usd` is the ceiling that makes an unattended loop safe to walk
+    away from, and `--session-id` is what makes the transcript findable instead
+    of guessed at, which matters because the transcript is the only honest record
+    of which tools a run actually reached for.
+    """
+    if budget_usd <= 0:
+        raise ValueError("budget_usd must be a positive ceiling")
+
+    command = [
+        CLAUDE,
+        "--print",
+        "--output-format", "json",
+        "--session-id", session_id,
+        "--max-budget-usd", str(budget_usd),
+        "--permission-mode", permission_mode,
+    ]
+    if mcp_config:
+        # Strict, so the run sees the server under test and nothing this machine
+        # happens to have configured. A trial scored against a different tool set
+        # than it was seeded with is not a trial.
+        command += ["--mcp-config", mcp_config, "--strict-mcp-config"]
+    if allowed_tools:
+        command += ["--allowed-tools", *allowed_tools]
+    if add_dirs:
+        for directory in add_dirs:
+            command += ["--add-dir", directory]
+    if model:
+        command += ["--model", model]
+    return command
+
+
+def transcript_slug(absolute_path: str) -> str:
+    """The directory name the client files a transcript under.
+
+    Separate from `transcript_path` because it is the only part of that lookup
+    with a platform-independent answer. `Path.resolve()` is not: given a Windows
+    path it returns it unchanged on Windows and glues the current directory onto
+    the front of it on Linux, so a test that asserts a slug for a Windows path
+    through the resolving function passes on the machine the loop runs on and
+    fails in CI. The rule itself, colon and both separators become hyphens, holds
+    everywhere and is what is worth asserting.
+    """
+    return absolute_path.replace(":", "-").replace("\\", "-").replace("/", "-")
+
+
+def transcript_path(
+    working_directory: Path,
+    session_id: str,
+    projects_root: Path | None = None,
+) -> Path:
+    """Where the client will have written this session's transcript.
+
+    The client keys transcripts by a slug of the working directory, so the
+    directory is resolved to the absolute form the client itself would have seen.
+    """
+    root = projects_root or DEFAULT_PROJECTS_ROOT
+    return root / transcript_slug(str(Path(working_directory).resolve())) / f"{session_id}.jsonl"
+
+
+def resolve_executable(name: str = CLAUDE) -> str:
+    """The real path to the client, because a bare name does not launch on Windows.
+
+    npm installs the CLI as `claude.cmd`, and CreateProcess will not resolve a
+    bare `claude` to it. Without this the loop dies before its first agent turn.
+    """
+    found = shutil.which(name)
+    if not found:
+        raise FileNotFoundError(
+            f"{name} is not on PATH. A cycle cannot run without the client that hosts the agent."
+        )
+    return found
+
+
+def run_agent(
+    command: list[str],
+    prompt: str,
+    working_directory: Path,
+    timeout_seconds: int,
+    log_path: Path | None = None,
+) -> subprocess.CompletedProcess:
+    """Run the agent to completion, recording everything it printed.
+
+    A timeout is not the cost ceiling; `--max-budget-usd` is. This is the guard
+    against a run that has stopped spending and stopped finishing.
+    """
+    if not prompt.strip():
+        raise ValueError("An agent run needs a prompt")
+    resolved = [resolve_executable(command[0]), *command[1:]]
+    completed = subprocess.run(
+        resolved,
+        input=prompt,
+        cwd=str(working_directory),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout_seconds,
+        check=False,
+    )
+    if log_path is not None:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(
+            (completed.stdout or "") + "\n--- stderr ---\n" + (completed.stderr or ""),
+            encoding="utf-8",
+        )
+    return completed

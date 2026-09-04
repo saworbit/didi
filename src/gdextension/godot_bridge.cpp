@@ -259,6 +259,58 @@ Result<VariantValue> makeJsonVariant(const json& value, int depth = 0) {
     return Error::invalidArgument("JSON value cannot be converted to a supported Godot Variant");
 }
 
+// A JSON real that names a whole number, inside the range an int64 holds
+// exactly. JSON has one number type, so a client with a real in hand sends
+// 3.0 where it means 3 and there is nothing else it can write. 2^63 is a
+// double but not an int64, so the upper bound is exclusive.
+bool isWholeNumberJsonReal(const json& value) {
+    if (!value.is_number_float()) return false;
+    const double number = value.get<double>();
+    if (!std::isfinite(number) || std::trunc(number) != number) return false;
+    return number >= -9223372036854775808.0 && number < 9223372036854775808.0;
+}
+
+bool propertyTypeAcceptsJson(const json& value, GDExtensionVariantType type) {
+    switch (type) {
+        case GDEXTENSION_VARIANT_TYPE_NIL:
+            return value.is_null();
+        case GDEXTENSION_VARIANT_TYPE_BOOL:
+            return value.is_boolean();
+        case GDEXTENSION_VARIANT_TYPE_INT:
+            // The whole-number real belongs here for the same reason an int
+            // belongs on a float property below: the client wrote the only
+            // number JSON gave it, and Godot converts either way losslessly.
+            return value.is_number_integer() || value.is_number_unsigned() ||
+                   isWholeNumberJsonReal(value);
+        case GDEXTENSION_VARIANT_TYPE_FLOAT:
+            return value.is_number();
+        case GDEXTENSION_VARIANT_TYPE_STRING:
+        case GDEXTENSION_VARIANT_TYPE_STRING_NAME:
+        case GDEXTENSION_VARIANT_TYPE_NODE_PATH:
+            return value.is_string();
+        default:
+            return false;
+    }
+}
+
+// Did a property end up holding what the caller asked for?
+//
+// Compares by value rather than by JSON type, because Godot legitimately
+// changes the type on the way in: an integer written to a float property reads
+// back as a real, and reporting that as "not applied" would be a false alarm
+// on a write that worked perfectly. Only a genuine difference should be
+// reported as one.
+bool jsonScalarsEquivalent(const json& observed, const json& requested) {
+    if (observed.is_number() && requested.is_number()) {
+        const double a = observed.get<double>();
+        const double b = requested.get<double>();
+        if (!std::isfinite(a) || !std::isfinite(b)) return observed == requested;
+        const double scale = std::max({1.0, std::fabs(a), std::fabs(b)});
+        return std::fabs(a - b) <= 1e-9 * scale;
+    }
+    return observed == requested;
+}
+
 // The property name is not decoration. A scene_instantiate_node call carries
 // several properties, and a rejection that does not say which one leaves the
 // caller guessing at the very moment they have nothing else to look at.
@@ -276,6 +328,16 @@ Result<void> validateJsonForPropertyType(const std::string& property_name, const
     }
     return Error::invalidArgument(
         describePropertyTypeMismatch(property_name, value, static_cast<int>(type)));
+}
+
+// Godot narrows a real to an int on assignment, but converting the whole
+// number here keeps the value that reaches the property the one the caller
+// named rather than one the engine derived.
+Result<VariantValue> makeJsonVariantForProperty(const json& value, GDExtensionVariantType type) {
+    if (type == GDEXTENSION_VARIANT_TYPE_INT && isWholeNumberJsonReal(value)) {
+        return makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(value.get<double>()));
+    }
+    return makeJsonVariant(value);
 }
 
 Result<VariantValue> callObject(GDExtensionObjectPtr object, const char* class_name,
@@ -1187,6 +1249,13 @@ json liveResult(const json& fields) {
 }
 
 } // namespace
+
+// The admission rule the property tools apply, reading the JSON alone. It is
+// the same call the bridge makes, so a test that asserts it here asserts what
+// a live editor session will answer.
+bool jsonValueFitsPropertyType(const json& value, int variant_type) {
+    return propertyTypeAcceptsJson(value, static_cast<GDExtensionVariantType>(variant_type));
+}
 
 GodotBridge& GodotBridge::instance() {
     static GodotBridge bridge;
@@ -4175,8 +4244,28 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (rollback.isErr()) return errorJson(500, "Autoload save failed and rollback failed: " + rollback.error().message);
             return errorJson(500, "ProjectSettings.save failed; autoload mutation was rolled back");
         }
+        // Say what this did and did not do. Writing the setting is not the same
+        // as the attached editor knowing about it: Godot registers an autoload's
+        // global name through editor-internal paths a GDExtension cannot reach,
+        // so scripts referring to the singleton keep failing to compile in this
+        // editor session until it restarts. `editor_reload_project` does not
+        // clear it either. Reporting only `persisted: true` left callers
+        // debugging their own scripts for a state this call had created.
         return liveResult({{"status", "success"}, {"name", autoload_name}, {"path", resource_path},
-                           {"singleton", autoload_singleton}, {"removed", removing}, {"persisted", true}});
+                           {"singleton", autoload_singleton}, {"removed", removing}, {"persisted", true},
+                           {"registered_in_attached_editor", false},
+                           {"requires_editor_restart", true},
+                           {"limitation",
+                            removing
+                                ? std::string(
+                                      "The setting is removed from project.godot, but this editor "
+                                      "session keeps resolving the singleton until it is restarted. "
+                                      "editor_reload_project does not change that.")
+                                : std::string(
+                                      "The setting is written to project.godot, but this editor "
+                                      "session will not resolve the singleton until it is restarted. "
+                                      "Scripts referencing it report 'Identifier not found' until "
+                                      "then, and editor_reload_project does not change that.")}});
     }
 
     if (method == "project.listInputActions" || method == "project.setInputAction" ||
@@ -5173,11 +5262,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                {"property_name", property}, {"value", value.value()}});
         }
         if (!params.contains("value")) return errorJson(400, "value is required");
-        auto compatible = validateJsonForPropertyType(
-            property, params["value"],
-            GodotApi::instance().variant_get_type(old_value.value().ptr()));
+        const auto property_type = GodotApi::instance().variant_get_type(old_value.value().ptr());
+        auto compatible = validateJsonForPropertyType(property, params["value"], property_type);
         if (compatible.isErr()) return errorJson(compatible.error().code, compatible.error().message);
-        auto new_value = makeJsonVariant(params["value"]);
+        auto new_value = makeJsonVariantForProperty(params["value"], property_type);
         if (new_value.isErr()) return errorJson(new_value.error().code, new_value.error().message);
         auto manager = undoManager(editor);
         if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
@@ -5195,8 +5283,24 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (undo_property.isErr()) return errorJson(undo_property.error().code, undo_property.error().message);
         auto committed = commitAction(manager.value());
         if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+
+        // Report what the property now holds, not what was asked for. A commit
+        // that succeeds is not a property that changed: Godot discards some
+        // writes outright, `anchors_preset` on a Control still in layout_mode 0
+        // being the case that found this, and echoing the request back reported
+        // success for a scene that had not moved. The caller has no other way
+        // to see the difference. Same shape as vision.setCameraTransform, which
+        // returns observed state rather than the values it was handed.
+        auto observed = callObject(node.value(), "Object", "get", 2760726917LL, {&property_name.value()});
+        if (observed.isErr()) return errorJson(observed.error().code, observed.error().message);
+        auto observed_json = variantToJson(observed.value());
+        if (observed_json.isErr()) return errorJson(observed_json.error().code, observed_json.error().message);
+        auto old_json = variantToJson(old_value.value());
+        if (old_json.isErr()) return errorJson(old_json.error().code, old_json.error().message);
         return liveResult({{"status", "success"}, {"target_node", params.value("target_node", "")},
-                           {"property_name", property}, {"value", params["value"]},
+                           {"property_name", property}, {"value", observed_json.value()},
+                           {"requested_value", params["value"]}, {"old_value", old_json.value()},
+                           {"applied", jsonScalarsEquivalent(observed_json.value(), params["value"])},
                            {"undo_redo_registered", true}});
     }
 
@@ -5257,14 +5361,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 GodotApi::instance().object_destroy(node);
                 return errorJson(current_value.error().code, current_value.error().message);
             }
-            auto compatible = validateJsonForPropertyType(
-                it.key(), it.value(),
-                GodotApi::instance().variant_get_type(current_value.value().ptr()));
+            const auto property_type =
+                GodotApi::instance().variant_get_type(current_value.value().ptr());
+            auto compatible = validateJsonForPropertyType(it.key(), it.value(), property_type);
             if (compatible.isErr()) {
                 GodotApi::instance().object_destroy(node);
                 return errorJson(compatible.error().code, compatible.error().message);
             }
-            auto property_value = makeJsonVariant(it.value());
+            auto property_value = makeJsonVariantForProperty(it.value(), property_type);
             if (property_value.isErr()) {
                 GodotApi::instance().object_destroy(node);
                 return errorJson(property_value.error().code, property_value.error().message);
@@ -5665,29 +5769,28 @@ Result<std::vector<double>> GodotBridge::samplePerformanceMonitors(
 // into describing a rule the check does not apply.
 
 PropertyTypeMatch matchJsonToPropertyType(const json& value, int godot_type) {
-    bool compatible = false;
+    // Delegates the accept/reject decision to propertyTypeAcceptsJson rather
+    // than repeating it. Two copies of this rule already disagreed once: the
+    // rewrite that produced this function was written before an int property
+    // learned to take a whole-number real such as 9.0, and merging the two
+    // without noticing would have quietly reverted that while every unit test
+    // kept passing, because those exercise the helper and not this path. One
+    // source of truth is the only version of this that stays true.
     switch (godot_type) {
         case GDEXTENSION_VARIANT_TYPE_NIL:
-            compatible = value.is_null();
-            break;
         case GDEXTENSION_VARIANT_TYPE_BOOL:
-            compatible = value.is_boolean();
-            break;
         case GDEXTENSION_VARIANT_TYPE_INT:
-            compatible = value.is_number_integer() || value.is_number_unsigned();
-            break;
         case GDEXTENSION_VARIANT_TYPE_FLOAT:
-            compatible = value.is_number();
-            break;
         case GDEXTENSION_VARIANT_TYPE_STRING:
         case GDEXTENSION_VARIANT_TYPE_STRING_NAME:
         case GDEXTENSION_VARIANT_TYPE_NODE_PATH:
-            compatible = value.is_string();
             break;
         default:
             return PropertyTypeMatch::UnsupportedPropertyType;
     }
-    return compatible ? PropertyTypeMatch::Compatible : PropertyTypeMatch::Incompatible;
+    return propertyTypeAcceptsJson(value, static_cast<GDExtensionVariantType>(godot_type))
+               ? PropertyTypeMatch::Compatible
+               : PropertyTypeMatch::Incompatible;
 }
 
 std::string godotVariantTypeName(int godot_type) {

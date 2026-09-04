@@ -352,10 +352,20 @@ try {
         (Tool-Request 921 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 922 "scene_instantiate_node" @{ node_type = "Label"; parent_path = "/root"; name = "PostInitLabel" }),
         (Tool-Request 923 "scene_instantiate_node" @{ node_type = "Button"; parent_path = "/root"; name = "PostInitButton" }),
+        # A write Godot discards, so the response has to report the property and
+        # not the request. anchors_preset is only honoured once the Control is in
+        # anchors layout mode, and a Control nested inside another Control starts
+        # in layout_mode 0. The same write to a Control whose parent is not a
+        # Control does apply, which is why the nesting here is deliberate.
+        (Tool-Request 924 "scene_instantiate_node" @{ node_type = "Control"; parent_path = "/root"; name = "PostInitPanel" }),
+        (Tool-Request 925 "scene_instantiate_node" @{ node_type = "Control"; parent_path = "/root/PostInitPanel"; name = "PostInitChild" }),
+        (Tool-Request 926 "scene_set_property" @{ target_node = "/root/PostInitPanel/PostInitChild"; property_name = "anchors_preset"; value = 15 }),
         # Put the edited scene back as it was found. Later assertions count the
         # children of this root, so a guard that leaves nodes behind fails them.
-        (Tool-Request 924 "scene_remove_node" @{ target_node = "/root/PostInitLabel" }),
-        (Tool-Request 925 "scene_remove_node" @{ target_node = "/root/PostInitButton" })
+        (Tool-Request 927 "scene_remove_node" @{ target_node = "/root/PostInitPanel/PostInitChild" }),
+        (Tool-Request 928 "scene_remove_node" @{ target_node = "/root/PostInitPanel" }),
+        (Tool-Request 929 "scene_remove_node" @{ target_node = "/root/PostInitLabel" }),
+        (Tool-Request 930 "scene_remove_node" @{ target_node = "/root/PostInitButton" })
     )
     $rawPostInitResponses = $postInitRequests | & $didiExecutable --project $fixtureRoot
     $postInitResponses = @($rawPostInitResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
@@ -366,6 +376,14 @@ try {
     Tool-Payload $postInitById[923] | Out-Null
     Tool-Payload $postInitById[924] | Out-Null
     Tool-Payload $postInitById[925] | Out-Null
+    $discardedWrite = Tool-Payload $postInitById[926]
+    Assert-True ($discardedWrite.requested_value -eq 15) "scene_set_property did not report the value it was asked for."
+    Assert-True ($discardedWrite.value -eq 0) "scene_set_property reported the requested anchors_preset rather than the value the property actually holds."
+    Assert-True ($discardedWrite.applied -eq $false) "scene_set_property claimed a discarded write was applied."
+    Tool-Payload $postInitById[927] | Out-Null
+    Tool-Payload $postInitById[928] | Out-Null
+    Tool-Payload $postInitById[929] | Out-Null
+    Tool-Payload $postInitById[930] | Out-Null
     Assert-True (-not $godot.HasExited) "Godot editor died constructing a themed Control; NOTIFICATION_POSTINITIALIZE is not reaching newly constructed objects."
 
     $game = Start-Process -FilePath $GodotExecutable `
@@ -1464,6 +1482,42 @@ try {
     foreach ($record in @($secondLogPage.records)) {
         Assert-True ($record.sequence -ge $firstLogPage.next_cursor) "Sequential runtime log reads repeated sequence $($record.sequence)."
     }
+
+    # Whole numbers through the property surface, in both directions. JSON has
+    # one number type, so a client with a real in hand writes 9.0 for an int
+    # property and an integer for a float one, and there is nothing else it can
+    # write. Both must reach the engine, which converts each without loss.
+    #
+    # These four writes are spelled out rather than built with Tool-Request:
+    # ConvertTo-Json renders 9.0 as 9 and 1.0 as 1, which is the opposite of
+    # the case under test.
+    $wholeNumberRequests = @(
+        (@{ jsonrpc = "2.0"; id = 340; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 341 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 342 "scene_open" @{ scene_path = "res://main.tscn" }),
+        '{"jsonrpc":"2.0","id":343,"method":"tools/call","params":{"name":"scene_set_property","arguments":{"target_node":"/root/SmokeRoot/Subject","property_name":"process_priority","value":9.0}}}',
+        (Tool-Request 344 "scene_get_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "process_priority" }),
+        '{"jsonrpc":"2.0","id":345,"method":"tools/call","params":{"name":"scene_set_property","arguments":{"target_node":"/root/SmokeRoot/Subject","property_name":"process_priority","value":9.5}}}',
+        (Tool-Request 346 "scene_get_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "process_priority" }),
+        (Tool-Request 347 "scene_instantiate_node" @{ node_type = "Control"; parent_path = "/root/SmokeRoot"; name = "AnchorProbe" }),
+        '{"jsonrpc":"2.0","id":348,"method":"tools/call","params":{"name":"scene_set_property","arguments":{"target_node":"/root/SmokeRoot/AnchorProbe","property_name":"anchor_right","value":1.0}}}',
+        (Tool-Request 349 "scene_get_property" @{ target_node = "/root/SmokeRoot/AnchorProbe"; property_name = "anchor_right" }),
+        '{"jsonrpc":"2.0","id":350,"method":"tools/call","params":{"name":"scene_set_property","arguments":{"target_node":"/root/SmokeRoot/AnchorProbe","property_name":"anchor_left","value":1}}}',
+        (Tool-Request 351 "scene_get_property" @{ target_node = "/root/SmokeRoot/AnchorProbe"; property_name = "anchor_left" })
+    )
+    $rawWholeNumberResponses = $wholeNumberRequests | & $didiExecutable --project $fixtureRoot
+    $wholeNumberResponses = @($rawWholeNumberResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
+    Assert-True ($LASTEXITCODE -eq 0) "Whole-number property MCP process exited with $LASTEXITCODE."
+    $wholeNumberById = @{}
+    foreach ($response in $wholeNumberResponses) { $wholeNumberById[[int]$response.id] = $response }
+    Assert-True (-not $wholeNumberById[343].result.isError) "A fractionless JSON real was refused for an int property: $($wholeNumberById[343].result.content[0].text)"
+    Assert-True ((Tool-Payload $wholeNumberById[344]).value -eq 9) "The whole-number real did not reach the int property."
+    Assert-True $wholeNumberById[345].result.isError "A real with a fraction was accepted for an int property."
+    Assert-True ((Tool-Payload $wholeNumberById[346]).value -eq 9) "The refused fractional write still changed the live node."
+    Assert-True (-not $wholeNumberById[348].result.isError) "A whole number was refused for a float property: $($wholeNumberById[348].result.content[0].text)"
+    Assert-True ((Tool-Payload $wholeNumberById[349]).value -eq 1) "The whole number did not reach the float property."
+    Assert-True (-not $wholeNumberById[350].result.isError) "An integer was refused for a float property: $($wholeNumberById[350].result.content[0].text)"
+    Assert-True ((Tool-Payload $wholeNumberById[351]).value -eq 1) "The integer did not reach the float property."
 
     $stopRequests = @(
         (@{ jsonrpc = "2.0"; id = 330; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
