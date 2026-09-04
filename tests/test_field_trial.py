@@ -486,6 +486,24 @@ class StagedPatchMismatchTests(unittest.TestCase):
             self.assertEqual(git("diff", "--cached").stdout, graded)
 
 
+class BaseRefTests(unittest.TestCase):
+    """Cycles branch from the remote tip, not from whatever `main` points at here.
+
+    A local branch is only as current as the last pull. The cycle for #225 cut
+    its worktree from a local `main` that sat six merges behind the remote, so it
+    built, gated and would have shipped a fix against code that had already been
+    superseded. Nothing in the summary showed it; the staleness was visible only
+    in `git worktree list`.
+    """
+
+    def test_the_base_is_the_remote_tip(self):
+        self.assertEqual(CYCLE.BASE_REF, "origin/main")
+
+    def test_the_base_is_not_a_local_branch_name(self):
+        self.assertIn("/", CYCLE.BASE_REF)
+        self.assertNotEqual(CYCLE.BASE_REF, "main")
+
+
 class FixBriefTests(unittest.TestCase):
     """The rules the agent is given have to cover the rules it is graded on.
 

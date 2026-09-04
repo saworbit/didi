@@ -23,6 +23,11 @@ import importlib.util
 HERE = Path(__file__).resolve().parent
 REPOSITORY = HERE.parents[1]
 
+# Cycles branch from the remote tip, never from the local `main` ref. A local
+# branch is only as current as the last pull, and a fix graded against a stale
+# base proves nothing about the tree it will merge into.
+BASE_REF = "origin/main"
+
 
 def _load(name: str):
     spec = importlib.util.spec_from_file_location(name, HERE / f"{name}.py")
@@ -362,7 +367,21 @@ def main(argv: list[str] | None = None) -> int:
         if problem:
             record("preflight", "failed", problem)
             return finish("not_authenticated")
-    record("preflight", "ok", "tree clean, client signed in")
+
+    # Fetch before branching. The worktree used to be cut from the local `main`
+    # ref, which is whatever the last person to pull left behind: the cycle for
+    # #225 branched six merges back and graded its fix against code that had
+    # already been superseded. Nothing about that is visible in the summary,
+    # which is what makes it worth removing rather than remembering.
+    base_revision = "unknown"
+    if not args.dry_run:
+        run(["git", "fetch", "origin", "--quiet"], REPOSITORY)
+        resolved = run(["git", "rev-parse", BASE_REF], REPOSITORY)
+        if resolved.returncode != 0:
+            record("preflight", "failed", f"cannot resolve {BASE_REF}: {resolved.stderr.strip()[-200:]}")
+            return finish("preflight_failed")
+        base_revision = resolved.stdout.strip()
+    record("preflight", "ok", f"tree clean, client signed in, {BASE_REF} at {base_revision[:9]}")
 
     issue = select_from_tracker(args.repo, args.issue) if not args.dry_run else {
         "number": 0, "title": "dry run", "body": "dry run", "createdAt": "", "labels": []}
@@ -382,11 +401,11 @@ def main(argv: list[str] | None = None) -> int:
         record("report", "skipped", "dry run")
         return finish("dry_run")
 
-    created = run(["git", "worktree", "add", "-b", branch, str(worktree), "main"], REPOSITORY)
+    created = run(["git", "worktree", "add", "-b", branch, str(worktree), BASE_REF], REPOSITORY)
     if created.returncode != 0:
         record("isolate", "failed", created.stderr[-300:])
         return finish("isolate_failed")
-    record("isolate", "ok", str(worktree))
+    record("isolate", "ok", f"{worktree} from {BASE_REF} at {base_revision[:9]}")
 
     build_script = output / "build.bat"
     build_script.write_text(build_batch(worktree), encoding="utf-8")
