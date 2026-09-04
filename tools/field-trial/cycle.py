@@ -117,15 +117,44 @@ def select_from_tracker(repo: str, issue_number: int | None) -> dict | None:
     return gates.select_issue(json.loads(result.stdout or "[]"))
 
 
-def verify(worktree: Path, godot: str | None) -> tuple[bool, str]:
-    """Build and run every suite. True only if all of them pass.
+DEFAULT_VSDEVCMD = (
+    r"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools"
+    r"\Common7\Tools\VsDevCmd.bat"
+)
 
-    Run against a tree the agent no longer controls, so a doctored local artifact
-    cannot decide its own verdict.
+
+def build_batch(worktree: Path, vsdevcmd: str = DEFAULT_VSDEVCMD) -> str:
+    """A build script that compiles the worktree, not the checkout beside it.
+
+    This has to configure its own build directory under the worktree. Reusing the
+    main tree's `build-ninja` compiles the main tree's sources, so the agent's
+    change is never built and both the red run and the green run grade code
+    nobody edited. A cycle that does that verifies nothing while looking green.
     """
+    tree = str(worktree)
+    return (
+        "@echo off\r\n"
+        f'call "{vsdevcmd}" -no_logo -arch=x64 -host_arch=x64\r\n'
+        f'cmake -S "{tree}" -B "{tree}\\build-ninja" -G Ninja '
+        "-DCMAKE_BUILD_TYPE=Release || exit /b 1\r\n"
+        f'cmake --build "{tree}\\build-ninja" --parallel || exit /b 1\r\n'
+    )
+
+
+def verify(worktree: Path, godot: str | None, batch: Path) -> tuple[bool, str]:
+    """Build the worktree and run every suite. True only if all of them pass.
+
+    The build script lives in the cycle's artifacts rather than in the worktree,
+    so verification never shows up in the patch it is judging. The agent is given
+    the same script, so what it checks its work with is what grades it.
+    """
+    built = run(["cmd", "/c", str(batch)], worktree)
+    if built.returncode != 0:
+        return False, f"build failed: {(built.stdout or built.stderr or '')[-400:]}"
+
+    build_dir = worktree / "build-ninja"
     steps = [
-        (["cmake", "--build", str(REPOSITORY / "build-ninja"), "--parallel"], "build"),
-        ([str(REPOSITORY / "build-ninja" / "didi_tests.exe")], "native tests"),
+        ([str(build_dir / "didi_tests.exe")], "native tests"),
         (["python", "-m", "unittest", "discover", "-s", "tests", "-t", "tests",
           "-p", "test_*.py"], "python tests"),
         (["python", "tools/validate_documentation.py"], "documentation"),
@@ -133,7 +162,7 @@ def verify(worktree: Path, godot: str | None) -> tuple[bool, str]:
     if godot:
         steps.append((["powershell", "-File", "tests/run_godot_integration.ps1",
                        "-GodotExecutable", godot,
-                       "-McpExecutable", str(REPOSITORY / "build-ninja" / "didi.exe")],
+                       "-McpExecutable", str(build_dir / "didi.exe")],
                       "live harness"))
     for command, name in steps:
         result = run(command, worktree)
@@ -203,14 +232,18 @@ def main(argv: list[str] | None = None) -> int:
         return finish("isolate_failed")
     record("isolate", "ok", str(worktree))
 
+    build_script = output / "build.bat"
+    build_script.write_text(build_batch(worktree), encoding="utf-8")
+
     session_id = str(uuid.uuid4())
     prompt = FIX_BRIEF.format(
         repository=worktree, number=issue_number, title=issue["title"], body=issue["body"],
-        build_command=f'cmake --build {REPOSITORY / "build-ninja"} --parallel',
+        build_command=f'cmd /c "{build_script}"',
     )
     command = runner.build_command(
         prompt=prompt, session_id=session_id, budget_usd=args.budget_usd,
         add_dirs=[str(worktree)],
+        allowed_tools=["Bash", "Read", "Edit", "Write", "Glob", "Grep"],
     )
     try:
         completed = runner.run_agent(command, worktree, args.timeout_seconds,
@@ -238,10 +271,10 @@ def main(argv: list[str] | None = None) -> int:
 
     # Red: the reproduction alone, without the fix, must fail.
     run(["git", "stash", "push", "--", "src", "include", "docs"], worktree)
-    red_passed, red_detail = verify(worktree, args.godot)
+    red_passed, red_detail = verify(worktree, args.godot, build_script)
     run(["git", "stash", "pop"], worktree)
     # Green: the whole patch must pass.
-    green_passed, green_detail = verify(worktree, args.godot)
+    green_passed, green_detail = verify(worktree, args.godot, build_script)
 
     verdict = gates.evaluate_red_green(pre_fix_failed=not red_passed, post_fix_passed=green_passed)
     if verdict != "ok":

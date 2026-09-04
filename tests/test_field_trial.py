@@ -355,6 +355,14 @@ class CycleSummaryTests(unittest.TestCase):
             "cycle-3", 1, [{"name": "fix", "status": "failed", "detail": "a | b"}], "fix_failed"))
         self.assertIn("a \\| b", rendered)
 
+    def test_build_script_targets_the_worktree_not_the_checkout(self):
+        script = CYCLE.build_batch(Path(r"D:\didi-trials\cycle-1-worktree"))
+        self.assertIn(r"-S \"D:\didi-trials\cycle-1-worktree\"".replace('\\"', '"'), script)
+        self.assertIn(r"cycle-1-worktree\build-ninja", script)
+        # The checkout beside it must never be the build source, or the agent's
+        # change is never compiled and both verification runs grade the wrong tree.
+        self.assertNotIn(f'-S "{REPOSITORY_ROOT}"', script)
+
     def test_dry_run_completes_without_launching_anything(self):
         with tempfile.TemporaryDirectory() as tmp:
             with contextlib.redirect_stdout(io.StringIO()):
