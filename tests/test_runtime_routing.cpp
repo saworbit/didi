@@ -521,6 +521,25 @@ void test_engine_liveness_has_three_answers_and_not_two() {
     ASSERT_EQ(std::string(didi::runtime::processInstanceStateName(
                   didi::runtime::ProcessInstanceState::unverifiable)),
               std::string("unknown"));
+
+    // Break caught: "unknown" on its own leaves a reader exactly where they
+    // were, because a process that crashed and a query that was refused are
+    // different problems reported with the same word. An answer that can be
+    // given plainly carries no reason; one that cannot has to say why.
+    const auto alive = didi::runtime::describeProcessInstance(currentPid(),
+                                                              identity.value().started_at_ms);
+    ASSERT_TRUE(alive.state == didi::runtime::ProcessInstanceState::alive);
+    ASSERT_TRUE(alive.reason.empty());
+
+    const auto missing = didi::runtime::describeProcessInstance(
+        std::numeric_limits<uint64_t>::max(), identity.value().started_at_ms);
+    ASSERT_TRUE(missing.state == didi::runtime::ProcessInstanceState::proven_stale);
+    ASSERT_TRUE(missing.reason.empty());
+
+    // The two words are the only two, so a reader can match on them.
+    for (const auto* reason : {"open_denied", "running_but_unidentified"}) {
+        ASSERT_TRUE(std::string(reason).find(' ') == std::string::npos);
+    }
 }
 
 class SessionDirectoryFixture {

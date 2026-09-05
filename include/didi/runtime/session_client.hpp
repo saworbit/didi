@@ -30,6 +30,30 @@ enum class ProcessInstanceState { alive, proven_stale, unverifiable };
 
 ProcessInstanceState processInstanceState(uint64_t pid, int64_t started_at_ms);
 
+// The same answer, with the reason behind an unverifiable one.
+//
+// "unknown" is honest and, on its own, useless. A transport failure that
+// reports it leaves a reader exactly where they were: the engine may have
+// crashed, or the query may simply have been refused. The two are different
+// problems and the payload could not tell them apart, which is how #227 spent
+// several rounds on inference.
+//
+// `reason` is empty for a plain alive or gone, which need no explaining, and
+// otherwise one of:
+//
+//   open_denied               the process could not be opened, and not because
+//                             there is no such process
+//   running_but_unidentified  something with that pid is running, and it could
+//                             not be confirmed as the one the session opened
+struct ProcessInstanceReport {
+    ProcessInstanceState state{ProcessInstanceState::unverifiable};
+    std::string reason;
+    // The operating system's own error, when there was one. Zero otherwise.
+    unsigned long os_error{0};
+};
+
+ProcessInstanceReport describeProcessInstance(uint64_t pid, int64_t started_at_ms);
+
 // The same three states as the word a transport failure reports.
 const char* processInstanceStateName(ProcessInstanceState state);
 

@@ -372,6 +372,18 @@ try {
     Assert-True ($postInitResponses.Count -eq $postInitRequests.Count) "Themed Control construction returned an incomplete transcript; the editor route did not survive."
     $postInitById = @{}
     foreach ($response in $postInitResponses) { $postInitById[[int]$response.id] = $response }
+    # A tool failure in this block is a symptom. If the editor went, its exit
+    # code is the cause, and this is the only place it can still be read: the
+    # payload reads below throw first, and by the time anything else looks the
+    # process object is all that is left of it. #227 spent several rounds
+    # inferring this from log timestamps because nothing recorded it.
+    if (@($postInitResponses | Where-Object { $_.result.isError }).Count -gt 0) {
+        $exitDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        while ([DateTime]::UtcNow -lt $exitDeadline -and -not $godot.HasExited) {
+            Start-Sleep -Milliseconds 100
+        }
+        Assert-True (-not $godot.HasExited) "Godot editor died during the themed Control block and left exit code 0x$('{0:X8}' -f $godot.ExitCode). The tool errors in this block are the transport reporting that, not faults in the requests."
+    }
     Tool-Payload $postInitById[922] | Out-Null
     Tool-Payload $postInitById[923] | Out-Null
     Tool-Payload $postInitById[924] | Out-Null
@@ -384,7 +396,7 @@ try {
     Tool-Payload $postInitById[928] | Out-Null
     Tool-Payload $postInitById[929] | Out-Null
     Tool-Payload $postInitById[930] | Out-Null
-    Assert-True (-not $godot.HasExited) "Godot editor died constructing a themed Control; NOTIFICATION_POSTINITIALIZE is not reaching newly constructed objects."
+    Assert-True (-not $godot.HasExited) "Godot editor died constructing a themed Control; NOTIFICATION_POSTINITIALIZE is not reaching newly constructed objects. Exit code 0x$('{0:X8}' -f $godot.ExitCode)."
 
     $game = Start-Process -FilePath $GodotExecutable `
         -ArgumentList @("--headless", "--path", $fixtureRoot, "--log-file", $gameEngineLogPath, "res://runtime_main.tscn") `
