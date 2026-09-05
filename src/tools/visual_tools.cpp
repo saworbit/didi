@@ -81,6 +81,16 @@ bool isFiniteVector3(const json& value, double limit) {
 
 } // namespace
 
+CallToolResult handleEditorRenderGhostPreview(const ResolvedToolBinding& binding, const json& args,
+                                             std::shared_ptr<ipc::IIpcClient> ipc) {
+    return sendPhase7LiveRequest(binding, args, ipc);
+}
+
+CallToolResult handleEditorClearGhostPreviews(const ResolvedToolBinding& binding, const json& args,
+                                              std::shared_ptr<ipc::IIpcClient> ipc) {
+    return sendPhase7LiveRequest(binding, args, ipc);
+}
+
 CallToolResult handleViewportCapturePasses(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!ipc || !ipc->isConnected()) {
         return CallToolResult::error(

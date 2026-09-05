@@ -56,6 +56,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // Phase 7B reads against the root viewport's existing worlds.
         , "physics_raycast_query", "spatial_query_raycast_batch"
         , "spatial_query_clearance", "spatial_query_frustum", "nav_query_path"
+        , "editor_render_ghost_preview", "editor_clear_ghost_previews"
         // Phase 7B animation: the list is a read in either session kind, the
         // play is a game-only transient mutation.
         , "anim_list_tracks", "anim_play_track"
@@ -101,6 +102,8 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
 // External handler forward declarations
 CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleViewportCapturePasses(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleEditorRenderGhostPreview(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleEditorClearGhostPreviews(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleViewportDiffCapture(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleViewportSetCameraTransform(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -400,6 +403,8 @@ ResolvedToolBinding resolveAliasBinding(std::string_view invoked_name, const jso
         {"spatial_query_raycast_batch", "physics.raycastBatch"},
         {"spatial_query_clearance", "physics.clearance"},
         {"spatial_query_frustum", "vision.frustumQuery"},
+        {"editor_render_ghost_preview", "preview.renderGhost"},
+        {"editor_clear_ghost_previews", "preview.clearGhosts"},
         {"shader_list_uniforms", "shader.listUniforms"},
         {"shader_set_uniform", "shader.setUniform"},
         {"shader_get_visual_graph", "shader.getVisualGraph"},
@@ -1460,6 +1465,60 @@ void ToolRegistry::registerAllDefaultTools() {
         };
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleSpatialQueryClearance(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "editor_render_ghost_preview";
+        t.description = "Draws translucent wireframe boxes in the open editor viewport to show where a proposed mutation would land, without adding anything to the scene, so the scene never becomes dirty and there is nothing to undo.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"previews", {
+                    {"type", "array"}, {"minItems", 1}, {"maxItems", 64},
+                    {"description", "Shapes to draw. All of them share one dimension, because a 2D rectangle and a 3D box are drawn into different worlds."},
+                    {"items", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"position", {{"type", "object"}, {"description", "Centre of the shape: {x,y} for 2D or {x,y,z} for 3D."}}},
+                            {"size", {{"type", "object"}, {"description", "Full extents, the size a person would type into the inspector. Every axis must be greater than 0."}}},
+                            {"rotation_degrees", {{"type", "object"}, {"description", "3D only: {x,y,z} Euler degrees. A 2D preview is an axis-aligned rectangle."}}},
+                            {"kind", {{"type", "string"}, {"enum", json::array({"addition", "translation", "deletion"})},
+                                      {"default", "addition"},
+                                      {"description", "Chooses the colour: cyan for an addition, yellow for a translation, red for a deletion."}}},
+                            {"color", {{"type", "object"}, {"description", "Overrides the colour the kind would pick. Components r, g and b from 0 to 1."}}},
+                            {"label", {{"type", "string"}, {"maxLength", 256}, {"description", "Echoed back so a caller can tell one shape from another. It is not drawn."}}}
+                        }},
+                        {"required", json::array({"position", "size"})},
+                        {"additionalProperties", false}
+                    }}
+                }},
+                {"replace", {{"type", "boolean"}, {"default", true},
+                             {"description", "Clear the previews already on screen first. A preview usually stands for one proposal, so replacing is the default."}}}
+            }},
+            {"required", json::array({"previews"})},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleEditorRenderGhostPreview(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "editor_clear_ghost_previews";
+        t.description = "Removes wireframe previews from the editor viewport. With no argument it clears every preview, which is the call that works whatever left them behind.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"preview_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", 64},
+                                {"description", "Clear just this batch. Omit to clear all of them."}}}
+            }},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleEditorClearGhostPreviews(binding, args, m_ipcClient);
         };
         registerTool(std::move(t));
     }

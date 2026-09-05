@@ -109,6 +109,7 @@ set(CORE_SOURCES
     src/runtime/profiler_collector.cpp
     src/runtime/invariant_watch.cpp
     src/runtime/input_injection.cpp
+    src/runtime/ghost_preview.cpp
     src/runtime/spatial_queries.cpp
     src/runtime/animation_requests.cpp
     src/offline/class_reference.cpp
@@ -252,6 +253,7 @@ set(TEST_SOURCES
     tests/test_runtime_sessions.cpp
     tests/test_runtime_routing.cpp
     tests/test_runtime_logs.cpp
+    tests/test_ghost_preview.cpp
     tests/test_invariant_watch.cpp
     tests/test_runtime_output.cpp
     tests/test_expression_sandbox.cpp
