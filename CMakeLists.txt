@@ -108,6 +108,7 @@ set(CORE_SOURCES
     src/runtime/session_lock.cpp
     src/runtime/profiler_collector.cpp
     src/runtime/invariant_watch.cpp
+    src/runtime/segmentation.cpp
     src/runtime/input_injection.cpp
     src/offline/speculative_verify.cpp
     src/runtime/ghost_preview.cpp
@@ -269,6 +270,7 @@ set(TEST_SOURCES
     tests/test_speculative_verify.cpp
     tests/test_ghost_preview.cpp
     tests/test_invariant_watch.cpp
+    tests/test_segmentation.cpp
     tests/test_runtime_output.cpp
     tests/test_expression_sandbox.cpp
     tests/test_tools.cpp
