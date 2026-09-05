@@ -112,7 +112,12 @@ CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcCli
     // Same check script_patch_method runs after its write, and against the file
     // on disk for the same reason: a bad script should be visible here rather
     // than at attach time.
-    auto diags = offline::GDScriptDiagnostics::analyze(disk_path.string());
+    //
+    // The res:// path, not the absolute one. A narrow string of an absolute
+    // path goes through the active code page on Windows and throws for anything
+    // the code page cannot hold, and Godot reports its errors against res://,
+    // which is what the location patterns here match.
+    auto diags = offline::GDScriptDiagnostics::analyze(script_path);
     json diag_arr = json::array();
     bool has_error = false;
     for (const auto& d : diags) {
@@ -219,7 +224,11 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
     // with `has_errors: false` and an empty diagnostics array, and only a
     // separate `script_check_syntax` call revealed it. The write above already
     // put this exact content on disk, so the file is the same evidence.
-    auto diags = offline::GDScriptDiagnostics::analyze(disk_path.string());
+    //
+    // The res:// path for the same reason script_create passes it: a narrow
+    // absolute path throws on Windows for characters outside the code page, and
+    // Godot's diagnostics name res:// paths.
+    auto diags = offline::GDScriptDiagnostics::analyze(file_path);
     json diag_arr = json::array();
     bool has_error = false;
     for (const auto& d : diags) {
