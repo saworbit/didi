@@ -606,11 +606,8 @@ Result<std::string> readDescriptorFromValidatedHandle(
 #endif
 }
 
-enum class ProcessInstanceState {
-    alive,
-    proven_stale,
-    unverifiable,
-};
+
+} // namespace
 
 ProcessInstanceState processInstanceState(uint64_t pid, int64_t started_at_ms) {
     const auto identity = queryProcessIdentity(pid);
@@ -641,6 +638,24 @@ ProcessInstanceState processInstanceState(uint64_t pid, int64_t started_at_ms) {
     return ProcessInstanceState::unverifiable;
 #endif
 }
+
+void annotateEngineState(Error& error, const std::optional<SessionDescriptor>& session) {
+    if (!session.has_value() || session->pid == 0) return;
+    if (!error.data.is_object()) error.data = json::object();
+    error.data["engine"] =
+        processInstanceStateName(processInstanceState(session->pid, session->started_at_ms));
+}
+
+const char* processInstanceStateName(ProcessInstanceState state) {
+    switch (state) {
+        case ProcessInstanceState::alive: return "alive";
+        case ProcessInstanceState::proven_stale: return "gone";
+        case ProcessInstanceState::unverifiable: break;
+    }
+    return "unknown";
+}
+
+namespace {
 
 struct DiscoveredSession {
     SessionDescriptor descriptor;

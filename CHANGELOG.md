@@ -11,6 +11,14 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
+### Added
+
+- A transport failure on a route with a known session now reports `error.data.engine` as `alive`, `gone`, or `unknown`. A failure saying the peer closed the pipe does not say why it went, and that is the difference between an engine that crashed and one that is alive and simply not answering. `unknown` stays distinct from `gone`, because a process that could not be queried is not a process that has ended, and filing one as the other would invent the fact a caller most wants. The check compares the recorded start time as well as the pid, so a recycled pid reads as `gone` rather than as the session that used to own it. All four routes that classify a transport failure share one implementation, so they cannot answer the question differently; the tool route, which every live tool takes, previously had no session in scope to answer it with at all.
+
+### Fixed
+
+- Removed a message prefix that nothing can emit any more. `Failed or timed out reading response` was a fallback for transport failures carrying no structured state, and the messages it matched were replaced when failures started naming their cause.
+
 ### Fixed
 
 - A transport failure could not say why it failed. A peer that hung up and a deadline that expired shared one message, "Failed or timed out reading response length", alongside `timed_out: false` denying the timeout that message offered, which is the payload in #227 and left nobody able to say which had happened. The failure now carries `reason` in `error.data.transport`, one of `peer_closed`, `deadline`, `io_error` or `stopped`, and `waited_ms` saying how long that operation actually waited. An operation ended at five seconds under a ten second deadline is being ended by something other than its own deadline, and the number is what shows that. Messages name the cause instead of offering two. Both the Windows pipe and the Unix socket report it, and the three existing flags are unchanged so nothing reading them has to move.

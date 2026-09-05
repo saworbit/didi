@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <limits>
 #include <string>
 #include <unordered_map>
 
@@ -428,6 +429,41 @@ private:
     std::string endpoint_;
     bool connected_{false};
 };
+
+// A transport failure that says the peer hung up cannot say why it went. This
+// is the fact that separates an engine that died from one that is alive and
+// merely stopped answering, and it is the question #227 turned out to need.
+void test_engine_liveness_has_three_answers_and_not_two() {
+    const auto identity = didi::runtime::queryProcessIdentity(currentPid());
+    if (identity.isErr()) throw std::runtime_error(identity.error().message);
+
+    // This process, described correctly, is alive.
+    ASSERT_TRUE(didi::runtime::processInstanceState(currentPid(),
+                                                    identity.value().started_at_ms) ==
+                didi::runtime::ProcessInstanceState::alive);
+    ASSERT_EQ(std::string(didi::runtime::processInstanceStateName(
+                  didi::runtime::ProcessInstanceState::alive)),
+              std::string("alive"));
+
+    // The same pid claimed to have started at a very different time is not this
+    // process. Answering "alive" there is how a recycled pid gets mistaken for
+    // the session that used to own it.
+    const auto reused = didi::runtime::processInstanceState(
+        currentPid(), identity.value().started_at_ms - 86400000);
+    ASSERT_TRUE(reused == didi::runtime::ProcessInstanceState::proven_stale);
+    ASSERT_EQ(std::string(didi::runtime::processInstanceStateName(reused)), std::string("gone"));
+
+    // A pid that cannot exist is gone rather than unknown.
+    const auto absent = didi::runtime::processInstanceState(
+        std::numeric_limits<uint64_t>::max(), identity.value().started_at_ms);
+    ASSERT_TRUE(absent == didi::runtime::ProcessInstanceState::proven_stale);
+
+    // And "cannot tell" keeps a word of its own, because filing it as gone
+    // would be reporting the one fact a caller most wants without having it.
+    ASSERT_EQ(std::string(didi::runtime::processInstanceStateName(
+                  didi::runtime::ProcessInstanceState::unverifiable)),
+              std::string("unknown"));
+}
 
 class SessionDirectoryFixture {
 public:
@@ -1040,6 +1076,14 @@ void test_generic_live_transport_failure_is_structured_and_quarantined() {
     ASSERT_EQ(value["error"]["code"], 504);
     ASSERT_EQ(value["error"]["data"]["outcome"], "unknown_outcome");
     ASSERT_TRUE(value["error"]["data"]["route_quarantine"].get<bool>());
+    // A transport failure has to say whether the engine behind the session is
+    // still there, because "the peer closed the pipe" does not say why it went.
+    // Which of the three words applies depends on what pid 77 happens to be on
+    // the machine running this; that it is one of them, and that the field is
+    // there at all, is the part this route owes the caller.
+    ASSERT_TRUE(value["error"]["data"].contains("engine"));
+    const auto engine = value["error"]["data"]["engine"].get<std::string>();
+    ASSERT_TRUE(engine == "alive" || engine == "gone" || engine == "unknown");
     ASSERT_EQ(editor->quarantines, 1);
     ASSERT_FALSE(editor->connected);
     registry.setIpcClient(nullptr);
@@ -1531,6 +1575,8 @@ void test_authoritative_handshake_compares_every_public_identity_field() {
 
 struct RegisterRuntimeRoutingTests {
     RegisterRuntimeRoutingTests() {
+        registerTest("RuntimeRouting.EngineLivenessTriState",
+                     test_engine_liveness_has_three_answers_and_not_two);
         registerTest("RuntimeRouting.LiveEnvelopeAndFiniteDeadline",
                      test_live_runtime_tools_return_session_envelopes_and_finite_deadlines);
         registerTest("RuntimeRouting.ErrorsAndUnknownOutcomeQuarantine",
