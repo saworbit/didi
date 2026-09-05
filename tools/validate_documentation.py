@@ -60,6 +60,11 @@ VERSION_SOURCES = (
     "SECURITY.md",
 )
 
+# Files inside addons/didi that the demo copy is not expected to carry.
+# viewport_create_test_lab writes its sandbox scene into whichever project it is
+# run against, so the canonical directory can hold one that the demo does not.
+ADDON_PARITY_EXEMPT = frozenset({"test_lab_sandbox.tscn"})
+
 TRACKED_ONLY_ARTIFACT_PATHS = (".superpowers",)
 FILESYSTEM_FORBIDDEN_ARTIFACT_PATHS = ("docs/superpowers",)
 
@@ -1450,12 +1455,25 @@ def validate_addon_copies_match(root: Path) -> list[str]:
     running a different addon from the one Didi ships.
     """
     errors: list[str] = []
-    for name in ("plugin.cfg", "didi.gdextension", "didi_plugin.gd"):
-        canonical = root / "addons" / "didi" / name
+    canonical_dir = root / "addons" / "didi"
+    if not canonical_dir.is_dir():
+        return ["addons/didi: canonical addon directory is missing"]
+
+    # Enumerated rather than listed, so a file added to the addon is covered the
+    # moment it exists. The named list this replaced covered three files and the
+    # console shipped eight more; a hand-kept list is exactly the thing that goes
+    # stale while looking like it is checking something.
+    names = sorted(
+        entry.name
+        for entry in canonical_dir.iterdir()
+        if entry.is_file() and entry.name not in ADDON_PARITY_EXEMPT
+    )
+    if not names:
+        return ["addons/didi: canonical addon directory has no files to compare"]
+
+    for name in names:
+        canonical = canonical_dir / name
         demo = root / "demo" / "addons" / "didi" / name
-        if not canonical.is_file():
-            errors.append(f"addons/didi/{name}: canonical addon file is missing")
-            continue
         if not demo.is_file():
             errors.append(f"demo/addons/didi/{name}: demo addon copy is missing")
             continue

@@ -25,6 +25,8 @@ The four possible `currentMode` values are:
 - `unavailable`: the tool is implemented only live, but no editor is connected.
 - `unimplemented`: the name is reserved and calls will be rejected.
 
+When live tools report `unavailable`, the cause is in the editor and the fix is not yours to make. Say so plainly and point the person at Godot's **Didi** main screen tab: its dashboard distinguishes an extension that is not loaded from one that is loaded without a published session, names the file, path or pid behind each, and lists any session published for a different project. Do not retry the call on a schedule, and never describe an `offline_fallback` result as observed editor state because the live route was closed.
+
 ## Supported workflows
 
 ### Inspect the edited scene

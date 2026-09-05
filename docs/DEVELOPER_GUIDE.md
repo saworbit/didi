@@ -49,7 +49,8 @@ didi/
 │   ├── gdextension/      # In-engine GDExtension module & renderer
 │   └── standalone/       # main.cpp entry point for didi.exe
 ├── tests/                # Native suite plus real Godot smoke fixture/harness
-├── addons/didi/          # Godot addon manifest; the built addon is staged in build/addons/didi
+├── addons/didi/          # Godot addon manifest, including the editor console's GDScript
+│                         # and brand marks; the built addon is staged in build/addons/didi
 └── demo/                 # Reference Godot 4 test project
 ```
 
@@ -77,6 +78,33 @@ The Windows live integration harness copies the tracked fixture into `build/` an
 The harness runs to completion on Windows PowerShell 5.1, including the persistence-rollback case that denies write rights through `icacls`. That case previously aborted the run: it selects its platform branch with `$IsWindows`, an automatic variable introduced in PowerShell 6, which is undefined on 5.1 and so took the POSIX branch and called `chmod`.
 
 The Phase 1 substrate has also been run against Godot 4.6.2 and 4.7.2. The compatibility floor remains Godot 4.5.1; the live CI matrix runs the complete integration harness on 4.5.1 and 4.7.2, and bridge method hashes must remain valid on both versions.
+
+---
+
+## 🎛️ Working on the editor console
+
+`addons/didi/` carries the plugin that draws Didi's main screen tab. It is
+GDScript, it compiles nothing, and it is the one part of Didi that is not behind
+the native test boundary, so it is worked on differently from the rest.
+
+- **Adding a file to the addon** means adding it to `DIDI_ADDON_MANIFEST_FILES`
+  in `CMakeLists.txt`, to the `expected` list in the staged-addon step of
+  `.github/workflows/ci.yml` (which compares against `LC_ALL=C sort` order), and
+  to `demo/addons/didi/`. `tests/test_editor_console.py` fails the build when any
+  of those disagree with the addon directory, so the list cannot go stale
+  silently — but it will not add the file for you.
+- **The console must not become an MCP client.** It reads the session
+  descriptors Didi publishes and reports them. It calls no tool, speaks no part
+  of the IPC protocol, and never reads the token out of a descriptor; a test
+  enforces the last of those.
+- **Verify it in a real editor, on the floor and the ceiling.** Copy the addon
+  into a scratch project and open it headless on 4.5.1 and on the newest engine
+  in CI: `Godot --headless --editor --path <project> --quit-after 6000`. A
+  GDScript parse error, a missing API on the 4.5 floor, and a tab that fails to
+  build all show up there, and none of them show up in the native suite.
+- **Brand marks are copies, not forks.** The three SVGs in the addon are
+  byte-identical to `docs/brand/svg`, held so by a test. Change the geometry in
+  `docs/brand/build.py` and copy the regenerated source across.
 
 ---
 

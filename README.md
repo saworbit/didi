@@ -167,8 +167,11 @@ See the [Roadmap](docs/ROADMAP.md), [Phase 7 feasibility evidence](docs/PHASE_7_
    ```
 2. **Enable Godot Plugin**:
    Copy `addons/didi` to your project and check **Enable** in **Project Settings $\rightarrow$ Plugins**.
+   A **Didi** tab appears beside 2D, 3D and Script.
 3. **Connect AI Assistant**:
-   Add to `claude_desktop_config.json` or `.cursor/mcp.json`:
+   Open the Didi tab, go to **Connect**, and copy the generated configuration — it already
+   carries the located binary and this project's path. Or write it by hand into
+   `claude_desktop_config.json` or `.cursor/mcp.json`:
    ```json
    {
      "mcpServers": {
@@ -179,6 +182,43 @@ See the [Roadmap](docs/ROADMAP.md), [Phase 7 feasibility evidence](docs/PHASE_7_
      }
    }
    ```
+
+---
+
+## 🎛️ The In-Editor Console
+
+Enabling the plugin adds a **Didi** main screen to the Godot editor, carrying Didi's own mark. It
+answers, without anyone having to read a log, the question every bridge raises first: can my
+assistant actually reach this project right now?
+
+The **Dashboard** is six cards, each with a red, amber or green light, the fact behind it, and the
+one thing to do about it:
+
+| Card | Green | Amber | Red |
+| :--- | :--- | :--- | :--- |
+| **Live bridge** | Up, with how long for | Extension loaded, no endpoint | Closed |
+| **Extension** | Loaded, with the library path | Present but not loaded — *Load it* | Library missing for this platform |
+| **Server binary** | Verified by running it | Found but not verified — *Verify it* | Not found — *Detect* |
+| **Client configuration** | Present in the project | Absent — *Write it* | — |
+| **This editor** | Session id, pid and project | Publishing nothing | — |
+| **Other sessions** | None competing | Others published — *List them* | — |
+
+Three switches sit above them. **Live bridge** opens and closes the bridge for real: it loads and
+unloads the extension and reports the status Godot returns, including the one that means "not
+without a restart". **Auto refresh** decides whether the dashboard re-reads state on a timer, and
+**Technical detail** reveals the session id, endpoint, descriptor path and the list of other
+sessions.
+
+| Tab | What it is for |
+| :--- | :--- |
+| **Dashboard** | The lights, the switches, and the exact values behind them. |
+| **Connect** | The launch configuration your client needs, generated with the binary located and the project path filled in, for Claude Code, Cursor, Claude Desktop and VS Code. Copy it, or write it straight into the project for the clients that read one from there. |
+| **Log** | Two sources, filterable by level and by text: the console's own timestamped record of every state change and action, and the log Godot writes for the last *run* of the project. Didi's server logs to its own standard error, which your MCP client captures — the page says so rather than showing an empty view. |
+| **Settings** | Refresh rate, whether the binary may be verified by running it, and the log level, endpoint name and confirmation policy the generated configuration carries. Stored in Godot's `EditorSettings` under `didi/`, which lives with your editor rather than inside the project, so nothing Didi can write to the project can change them. |
+| **Diagnostics** | Every check names the path or pid it looked at, and the report is copyable into an issue. Nothing here starts a process unless you ask it to. |
+
+The console never displays, copies, or reports a session token. It reads the descriptors Didi
+publishes and keeps the fields it names; the shared secret in them is not one of those fields.
 
 ---
 

@@ -46,6 +46,10 @@ demo/addons/didi/bin/*
 
 # Godot Engine Import and Cache
 .godot/
+# Import metadata Godot regenerates on scan. Nothing here is tracked, and the
+# addon's SVG sources are rasterised by the console rather than loaded as
+# imported textures, so an .import beside one describes an import nobody uses.
+*.import
 *.translation
 *.tmp
 # Generated on demand by viewport_create_test_lab, in whichever project the
