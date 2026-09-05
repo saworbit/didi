@@ -144,6 +144,10 @@ enum class ExactIoStatus {
 struct ExactIoResult {
     ExactIoStatus status{ExactIoStatus::failed};
     size_t transferred{0};
+    // What the operating system said when the operation failed. A broken pipe
+    // is the peer hanging up, which reads very differently from a deadline and
+    // used to be reported identically to one.
+    unsigned long os_error{0};
 };
 
 class ScopedWinHandle {
@@ -182,13 +186,14 @@ ExactIoResult exactOverlappedIo(HANDLE pipe,
             ? WriteFile(pipe, bytes + offset, chunk, &transferred, &operation)
             : ReadFile(pipe, bytes + offset, chunk, &transferred, &operation);
         if (initiated) {
-            if (transferred == 0) return {ExactIoStatus::failed, offset};
+            if (transferred == 0) return {ExactIoStatus::failed, offset, GetLastError()};
             offset += transferred;
             continue;
         }
 
-        if (GetLastError() != ERROR_IO_PENDING) {
-            return {ExactIoStatus::failed, offset};
+        const DWORD initiate_error = GetLastError();
+        if (initiate_error != ERROR_IO_PENDING) {
+            return {ExactIoStatus::failed, offset, initiate_error};
         }
 
         const DWORD remaining = remainingWaitMilliseconds(deadline);
@@ -232,11 +237,11 @@ ExactIoResult exactOverlappedIo(HANDLE pipe,
             }
             if (stopped) return {ExactIoStatus::stopped, offset};
             if (wait_result == WAIT_TIMEOUT) return {ExactIoStatus::timed_out, offset};
-            return {ExactIoStatus::failed, offset};
+            return {ExactIoStatus::failed, offset, GetLastError()};
         }
 
         if (!GetOverlappedResult(pipe, &operation, &transferred, FALSE) || transferred == 0) {
-            return {ExactIoStatus::failed, offset};
+            return {ExactIoStatus::failed, offset, GetLastError()};
         }
         offset += transferred;
     }
@@ -263,6 +268,37 @@ ExactIoResult writeExactOverlapped(HANDLE pipe,
 }
 
 } // namespace
+
+// A closed pipe is the peer deciding to stop; a deadline is this side
+// deciding to. Reporting them with one message is what left a live-harness
+// failure saying "Failed or timed out" beside timed_out: false.
+const char* transportReasonFor(const ExactIoResult& result) {
+    switch (result.status) {
+        case ExactIoStatus::timed_out: return "deadline";
+        case ExactIoStatus::stopped: return "stopped";
+        case ExactIoStatus::completed: return "";
+        case ExactIoStatus::failed: break;
+    }
+    if (result.os_error == ERROR_BROKEN_PIPE || result.os_error == ERROR_PIPE_NOT_CONNECTED ||
+        result.os_error == ERROR_NO_DATA) {
+        return "peer_closed";
+    }
+    return "io_error";
+}
+
+std::string transportMessageFor(const ExactIoResult& result, const char* what) {
+    const std::string reason = transportReasonFor(result);
+    if (reason == "peer_closed") {
+        return std::string("The Godot side closed the IPC pipe while ") + what;
+    }
+    if (reason == "deadline") {
+        return std::string("Timed out ") + what + " over the IPC pipe";
+    }
+    if (reason == "stopped") {
+        return std::string("Stopped while ") + what + " over the IPC pipe";
+    }
+    return std::string("Failed ") + what + " over the IPC pipe";
+}
 
 class Win32IpcClient : public IIpcClient {
 public:
@@ -342,19 +378,28 @@ public:
             return failLocked("Unable to create IPC request event", false, false, false);
         }
 
+        const auto started_at = std::chrono::steady_clock::now();
+        const auto waited_since = [&started_at]() {
+            return static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                        std::chrono::steady_clock::now() - started_at)
+                                        .count());
+        };
+
         const auto write_result = writeExactOverlapped(
             m_pipe, frame.data(), frame.size(), io_event.get(), nullptr, deadline);
         if (write_result.status != ExactIoStatus::completed) {
-            return failLocked("Failed or timed out writing request to IPC pipe", false, false,
-                              write_result.status == ExactIoStatus::timed_out);
+            return failLocked(transportMessageFor(write_result, "writing the request"), false, false,
+                              write_result.status == ExactIoStatus::timed_out,
+                              transportReasonFor(write_result), waited_since());
         }
 
         uint8_t len_buf[4] = {0};
         const auto header_result = readExactOverlapped(
             m_pipe, len_buf, sizeof(len_buf), io_event.get(), nullptr, deadline);
         if (header_result.status != ExactIoStatus::completed) {
-            return failLocked("Failed or timed out reading response length from IPC pipe", true,
-                              true, header_result.status == ExactIoStatus::timed_out);
+            return failLocked(transportMessageFor(header_result, "reading the response length"),
+                              true, true, header_result.status == ExactIoStatus::timed_out,
+                              transportReasonFor(header_result), waited_since());
         }
 
         uint32_t resp_len = static_cast<uint32_t>(len_buf[0]) |
@@ -373,8 +418,9 @@ public:
         const auto payload_result = readExactOverlapped(
             m_pipe, resp_payload.data(), resp_payload.size(), io_event.get(), nullptr, deadline);
         if (payload_result.status != ExactIoStatus::completed) {
-            return failLocked("Failed or timed out reading response payload from IPC pipe", true,
-                              true, payload_result.status == ExactIoStatus::timed_out);
+            return failLocked(transportMessageFor(payload_result, "reading the response payload"),
+                              true, true, payload_result.status == ExactIoStatus::timed_out,
+                              transportReasonFor(payload_result), waited_since());
         }
         try {
             json resp_json = json::parse(resp_payload.begin(), resp_payload.end());
@@ -401,10 +447,13 @@ private:
     Result<json> failLocked(const std::string& message,
                             bool request_started,
                             bool outcome_unknown,
-                            bool timed_out) {
+                            bool timed_out,
+                            std::string reason = {},
+                            int waited_ms = -1) {
         if (m_pipe != INVALID_HANDLE_VALUE) CloseHandle(m_pipe);
         m_pipe = INVALID_HANDLE_VALUE;
-        return transportFailure(message, {request_started, outcome_unknown, timed_out});
+        return transportFailure(message, {request_started, outcome_unknown, timed_out,
+                                          std::move(reason), waited_ms});
     }
 
     bool connectUnlocked(const std::string& pipe_name, const Win32Deadline& deadline) {
@@ -913,26 +962,67 @@ bool waitForSocket(int socket_fd,
     return false;
 }
 
+// Why a socket transfer stopped short. A peer that closed the socket is a
+// different diagnosis from a deadline this side set, and reporting them
+// identically is what left a transport failure unable to say which happened.
+enum class SocketIoCause { none, deadline, peer_closed, io_error, stopped };
+
+const char* socketCauseName(SocketIoCause cause) {
+    switch (cause) {
+        case SocketIoCause::deadline: return "deadline";
+        case SocketIoCause::peer_closed: return "peer_closed";
+        case SocketIoCause::io_error: return "io_error";
+        case SocketIoCause::stopped: return "stopped";
+        case SocketIoCause::none: break;
+    }
+    return "";
+}
+
+std::string socketMessageFor(SocketIoCause cause, const char* what) {
+    switch (cause) {
+        case SocketIoCause::peer_closed:
+            return std::string("The Godot side closed the Unix socket while ") + what;
+        case SocketIoCause::deadline:
+            return std::string("Timed out ") + what + " over the Unix socket";
+        case SocketIoCause::stopped:
+            return std::string("Stopped while ") + what + " over the Unix socket";
+        default: break;
+    }
+    return std::string("Failed ") + what + " over the Unix socket";
+}
+
 bool readExact(int socket_fd,
                void* buffer,
                size_t length,
                const MonotonicDeadline& deadline,
-               const std::atomic<bool>* running = nullptr) {
+               const std::atomic<bool>* running = nullptr,
+               SocketIoCause* cause = nullptr) {
+    const auto note = [cause](SocketIoCause value) {
+        if (cause) *cause = value;
+        return false;
+    };
     auto* bytes = static_cast<uint8_t*>(buffer);
     size_t offset = 0;
-    while (offset < length && (!running || running->load())) {
+    while (offset < length) {
+        if (running && !running->load()) return note(SocketIoCause::stopped);
         if (deadline.finite && std::chrono::steady_clock::now() >= deadline.expires_at) {
-            return false;
+            return note(SocketIoCause::deadline);
         }
         const ssize_t count = recv(socket_fd, bytes + offset, length - offset, 0);
         if (count > 0) {
             offset += static_cast<size_t>(count);
             continue;
         }
-        if (count == 0) return false;
+        // An orderly shutdown reads as zero bytes. That is the peer deciding to
+        // stop, which a deadline is not.
+        if (count == 0) return note(SocketIoCause::peer_closed);
         if (errno == EINTR) continue;
-        if (errno != EAGAIN && errno != EWOULDBLOCK) return false;
-        if (!waitForSocket(socket_fd, POLLIN, deadline, running)) return false;
+        if (errno != EAGAIN && errno != EWOULDBLOCK) return note(SocketIoCause::io_error);
+        if (!waitForSocket(socket_fd, POLLIN, deadline, running)) {
+            const bool expired =
+                deadline.finite && std::chrono::steady_clock::now() >= deadline.expires_at;
+            return note(expired ? SocketIoCause::deadline : SocketIoCause::io_error);
+        }
     }
     return offset == length;
 }
@@ -1030,17 +1120,26 @@ public:
             {"params", params}
         };
 
+        const auto started_at = std::chrono::steady_clock::now();
+        const auto waited_since = [&started_at]() {
+            return static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                        std::chrono::steady_clock::now() - started_at)
+                                        .count());
+        };
+
         const std::vector<uint8_t> frame = frameMessage(request_json);
         if (!writeExact(m_sock, frame.data(), frame.size(), deadline)) {
             const bool timed_out = deadline.finite && remainingPollMilliseconds(deadline) == 0;
-            return failLocked("Failed or timed out writing to Unix socket", false, false, timed_out);
+            return failLocked("Failed or timed out writing to Unix socket", false, false, timed_out,
+                              timed_out ? "deadline" : "", waited_since());
         }
 
         uint8_t len_buf[4] = {0};
-        if (!readExact(m_sock, len_buf, sizeof(len_buf), deadline)) {
-            const bool timed_out = deadline.finite && remainingPollMilliseconds(deadline) == 0;
-            return failLocked("Failed or timed out reading response length from Unix socket",
-                              true, true, timed_out);
+        SocketIoCause header_cause = SocketIoCause::none;
+        if (!readExact(m_sock, len_buf, sizeof(len_buf), deadline, nullptr, &header_cause)) {
+            return failLocked(socketMessageFor(header_cause, "reading the response length"), true,
+                              true, header_cause == SocketIoCause::deadline,
+                              socketCauseName(header_cause), waited_since());
         }
 
         const uint32_t resp_len = decodeFrameLength(len_buf);
@@ -1053,10 +1152,11 @@ public:
         }
 
         std::vector<char> payload(resp_len);
-        if (!readExact(m_sock, payload.data(), payload.size(), deadline)) {
-            const bool timed_out = deadline.finite && remainingPollMilliseconds(deadline) == 0;
-            return failLocked("Failed or timed out reading response payload from Unix socket",
-                              true, true, timed_out);
+        SocketIoCause payload_cause = SocketIoCause::none;
+        if (!readExact(m_sock, payload.data(), payload.size(), deadline, nullptr, &payload_cause)) {
+            return failLocked(socketMessageFor(payload_cause, "reading the response payload"), true,
+                              true, payload_cause == SocketIoCause::deadline,
+                              socketCauseName(payload_cause), waited_since());
         }
 
         try {
@@ -1118,10 +1218,13 @@ private:
     Result<json> failLocked(const std::string& message,
                             bool request_started,
                             bool outcome_unknown,
-                            bool timed_out) {
+                            bool timed_out,
+                            std::string reason = {},
+                            int waited_ms = -1) {
         if (m_sock >= 0) close(m_sock);
         m_sock = -1;
-        return transportFailure(message, {request_started, outcome_unknown, timed_out});
+        return transportFailure(message, {request_started, outcome_unknown, timed_out,
+                                          std::move(reason), waited_ms});
     }
 
     int m_sock{-1};
