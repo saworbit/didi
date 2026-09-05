@@ -2077,6 +2077,31 @@ Result<json> integerVectorToJson(VariantValue& value, int dimensions) {
     return output;
 }
 
+bool isNilVariant(VariantValue& value) {
+    return GodotApi::instance().variant_get_type(value.ptr()) == GDEXTENSION_VARIANT_TYPE_NIL;
+}
+
+// What a shader declares a uniform to be when nothing overrides it.
+//
+// The default lives in the rendering server rather than on the Shader resource,
+// so this needs the shader's RID and a renderer behind it. A session running
+// without one answers nil, and the caller is told nothing rather than told
+// something invented.
+Result<VariantValue> shaderParameterDefault(GDExtensionObjectPtr shader, VariantValue& uniform_name) {
+    for (const auto& bind : {std::make_tuple("Resource", "get_rid", 2944877500LL),
+                             std::make_tuple("RenderingServer", "shader_get_parameter_default",
+                                             2621281810LL)}) {
+        auto required = requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind));
+        if (required.isErr()) return Error(501, required.error().message);
+    }
+    auto server = singleton("RenderingServer");
+    if (server.isErr()) return server.error();
+    auto rid = callObject(shader, "Resource", "get_rid", 2944877500LL);
+    if (rid.isErr()) return rid.error();
+    return callObject(server.value(), "RenderingServer", "shader_get_parameter_default",
+                      2621281810LL, {&rid.value(), &uniform_name});
+}
+
 Result<bool> objectIsClass(GDExtensionObjectPtr object, const char* class_name) {
     auto name = makeStringName(class_name);
     if (name.isErr()) return name.error();
@@ -7013,6 +7038,20 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (observed.isErr()) return errorJson(500, observed.error().message);
             auto observed_json = variantToJson(observed.value(), 0, true);
             auto old_json = variantToJson(old_value.value(), 0, true);
+            json old_payload = old_json.isOk() ? old_json.value() : json(nullptr);
+            if (isNilVariant(old_value.value())) {
+                // The undo entry above restores nil on purpose, which takes the
+                // override off again rather than pinning the default in its
+                // place. What gets reported is the value that was in effect,
+                // and for a uniform the material did not set that is the
+                // shader's declared default, read the same way the list reads
+                // it.
+                auto fallback = shaderParameterDefault(shader.value(), uniform_name.value());
+                if (fallback.isOk() && !isNilVariant(fallback.value())) {
+                    auto encoded = variantToJson(fallback.value(), 0, true);
+                    if (encoded.isOk()) old_payload = encoded.value();
+                }
+            }
             json observed_payload = observed_json.isOk() ? observed_json.value() : json(nullptr);
             return liveResult({{"status", "success"},
                                {"target_node", target_path},
@@ -7021,7 +7060,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                {"type", godotVariantTypeName(static_cast<int>(declared_type))},
                                {"value", observed_payload},
                                {"requested_value", params["value"]},
-                               {"old_value", old_json.isOk() ? old_json.value() : json(nullptr)},
+                               {"old_value", old_payload},
                                {"applied", jsonScalarsEquivalent(observed_payload, params["value"])},
                                {"undo_redo_registered", true}});
         }
@@ -7066,16 +7105,29 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                       2760726917LL, {&uniform_name.value()});
             if (current.isErr()) return errorJson(500, current.error().message);
             // The effective value: the material's override where it has one and
-            // the shader's default otherwise. There is deliberately no flag
-            // separating the two. get_shader_parameter returns the default for a
-            // uniform the material never set, so a flag built on the returned
-            // value would have claimed every uniform was overridden, which the
-            // live harness caught. Reporting one value and saying what it is
-            // beats reporting a fact this cannot establish.
+            // the shader's own declared default otherwise.
+            //
+            // get_shader_parameter alone cannot supply that. In a running game
+            // on 4.5.1, 4.6.2 and 4.7.2 it answers nil for a uniform the
+            // material does not set, so the declared default was reported as no
+            // value at all. The shader keeps its defaults in the rendering
+            // server, and that is where they have to be read from.
+            //
+            // There is still deliberately no flag separating an override from a
+            // default. The same call that answers nil in a game answers with the
+            // default in a 4.7.2 editor, so nil is not evidence of anything and
+            // a flag built on it would be wrong in one context or the other.
+            if (isNilVariant(current.value())) {
+                auto fallback = shaderParameterDefault(shader.value(), uniform_name.value());
+                if (fallback.isOk()) current = std::move(fallback.value());
+            }
             // Lenient: a uniform of a type this cannot encode is reported by
             // name and type with a null value, rather than failing the whole
             // read and leaving the caller with nothing.
             auto encoded = variantToJson(current.value(), 0, true);
+            // A null value here is not a uniform without one. It is a value
+            // neither the material nor the rendering server could supply, which
+            // is what a session with no renderer looks like.
             uniform["value"] = encoded.isOk() ? encoded.value() : json(nullptr);
             listed.push_back(std::move(uniform));
         }

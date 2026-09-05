@@ -93,7 +93,7 @@ Use `viewport_capture_frame`.
 - `script_patch_method` rewrites a matching project file and then runs available diagnostics.
 - `shader_get_visual_graph` describes a VisualShader as nodes and links. It is refused on a shader written as code, which is the answer, not a failure.
 - `shader_set_uniform` writes one, in the same JSON spelling `scene_set_property` uses for that type. Check `applied`, and remember the material may be shared with other nodes.
-- `shader_list_uniforms` reads a ShaderMaterial's parameters. `value` is the effective value, the material's override where it has one and the shader's default otherwise; the two are not distinguished, so do not read a value as proof the material set it.
+- `shader_list_uniforms` reads a ShaderMaterial's parameters. `value` is the effective value, the material's override where it has one and the shader's declared default otherwise; the two are not distinguished, so do not read a value as proof the material set it. A null value means the engine could not supply one, not that the uniform has none.
 - `spatial_query_frustum` asks what a camera can see. `containment` is geometry and `sightline` is sampled against colliders, so a node with no collision shape never blocks anything.
 - `spatial_query_clearance` asks whether a body fits along a path, which a raycast cannot answer: a line can be clear where a character is too wide. Use it before placing a door, a corridor or a spawn point.
 - `spatial_query_raycast_batch` answers many sightline or clearance questions in one call. Prefer it over a viewport capture for anything numeric, and over repeated `physics_raycast_query` calls for anything more than one ray.

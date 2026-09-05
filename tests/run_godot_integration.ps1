@@ -1036,6 +1036,11 @@ try {
         (Tool-Request 2293 "shader_list_uniforms" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override" }),
         (Tool-Request 2294 "shader_set_uniform" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override"; uniform_name = "no_such_uniform"; value = 1 }),
         (Tool-Request 2295 "shader_set_uniform" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override"; uniform_name = "strength"; value = "0.25" }),
+        # Writing a uniform the material does not override. The value it
+        # replaced is the shader's declared default, not nothing.
+        (Tool-Request 2308 "shader_set_uniform" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override"; uniform_name = "offset"; value = @{ x = 9; y = 9; z = 9 } }),
+        (Tool-Request 2309 "editor_undo" @{}),
+        (Tool-Request 2310 "shader_list_uniforms" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override" }),
         # Signals are delivered, so this now exercises the real cycle: list, connect,
         # observe the connection, disconnect, observe it gone. The target method is a
         # harmless zero-arg Node method -- queue_free here would free a node the rest
@@ -1647,8 +1652,12 @@ try {
     Assert-True ([Math]::Abs($strength[0].value - 0.75) -lt 0.01) "The strength uniform did not read back the material's value ($($strength[0].value))."
     Assert-True ($strength[0].settable -eq $true) "A float uniform was not reported as settable."
     # The material leaves this one alone, so the effective value is the shader's
-    # own default. Both cases read the same way on purpose: get_shader_parameter
-    # cannot tell them apart, so nothing here claims to.
+    # own declared default. get_shader_parameter answers nil for it, so the
+    # default has to come from the rendering server; before it did, this read
+    # back null on 4.5.1 and the uniform looked like it had no value at all.
+    # Both cases still read the same way on purpose, because the same call that
+    # answers nil in a game answers with the default in a 4.7.2 editor and so
+    # cannot be used to tell an override from a default.
     $offset = @($uniforms.uniforms | Where-Object { $_.name -eq "offset" })
     Assert-True ($offset.Count -eq 1) "A uniform the material does not override was left out of the list."
     Assert-True ($offset[0].type -eq "Vector3") "The offset uniform did not carry its declared Godot type ($($offset[0].type))."
@@ -1706,6 +1715,18 @@ try {
     $editorPaths = @($editorFrustum.nodes | ForEach-Object { $_.path })
     Assert-True ($editorPaths -contains "/root/SmokeRoot/Subject") "The box in front of the fixture camera is not in the editor frustum."
     Assert-True ($editorFrustum.node_count -ge 1 -and $editorFrustum.examined -ge $editorFrustum.node_count) "An editor frustum examined fewer nodes than it reported finding."
+
+    # A write over a uniform the material never set has to report the value it
+    # actually replaced. Reporting null there says the uniform had no value,
+    # which is not what the shader declares.
+    $overDefault = Tool-Payload $byId[2308]
+    Assert-True ($overDefault.applied -eq $true) "A write over a shader default was not applied."
+    Assert-True ([Math]::Abs($overDefault.old_value.x - 1) -lt 0.01 -and [Math]::Abs($overDefault.old_value.z - 3) -lt 0.01) "A write over a shader default reported the replaced value as $($overDefault.old_value | ConvertTo-Json -Compress) rather than the declared default."
+    # Undoing it takes the override off again rather than pinning the default
+    # in place, so the uniform reads as the default once more.
+    Assert-True (-not $byId[2309].result.isError) "The write over a shader default could not be undone."
+    $restored = @((Tool-Payload $byId[2310]).uniforms | Where-Object { $_.name -eq "offset" })
+    Assert-True ([Math]::Abs($restored[0].value.x - 1) -lt 0.01 -and [Math]::Abs($restored[0].value.z - 3) -lt 0.01) "Undo did not put the uniform back on the shader default ($($restored[0].value | ConvertTo-Json -Compress))."
 
     # An empty slot is not a shader with no uniforms, and neither is a missing
     # property or a missing node.
