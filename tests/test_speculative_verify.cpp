@@ -45,6 +45,16 @@ void test_speculative_request_describes_a_whole_proposal() {
         {{"changes", json::array({change("scripts/a.gd", "")})}});
     ASSERT_TRUE(bare.isOk());
     ASSERT_EQ(bare.value().changes[0].relative, std::string("scripts/a.gd"));
+
+    // A path the active Windows code page has no mapping for. The relative
+    // form was built with narrow generic_string(), which throws
+    // std::system_error for exactly these characters, so a proposal that
+    // touched one failed with an internal error instead of being checked.
+    const std::string outside_code_page = "\xE9\xA1\xB9\xE7\x9B\xAE/\xE6\x96\xB0\xE8\x84\x9A\xE6\x9C\xAC.gd";
+    auto unmappable = parseSpeculativeVerifyRequest(
+        {{"changes", json::array({change("res://" + outside_code_page, "extends Node\n")})}});
+    ASSERT_TRUE(unmappable.isOk());
+    ASSERT_EQ(unmappable.value().changes[0].relative, outside_code_page);
 }
 
 void test_speculative_request_refuses_what_it_could_not_honestly_check() {

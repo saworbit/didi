@@ -18,25 +18,6 @@ const std::set<std::string> kSkippedDirectories = {
     ".git", ".godot", ".worktrees", "build", "build-clean", "build-vs", "out", "bin", ".vs"
 };
 
-std::string normalizedPath(const fs::path& path) {
-    auto value = path.generic_string();
-#if defined(_WIN32)
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-#endif
-    return value;
-}
-
-bool isWithin(const fs::path& root, const fs::path& candidate) {
-    const auto root_value = normalizedPath(root.lexically_normal());
-    const auto candidate_value = normalizedPath(candidate.lexically_normal());
-    if (candidate_value == root_value) return true;
-    return candidate_value.size() > root_value.size() &&
-           candidate_value.compare(0, root_value.size(), root_value) == 0 &&
-           candidate_value[root_value.size()] == '/';
-}
-
 Result<fs::path> resolveSearchRoot(const fs::path& project_root, const std::string& search_path) {
     if (!strings::startsWith(search_path, "res://")) {
         return Error::invalidArgument("search_path must begin with res://");
@@ -53,7 +34,7 @@ Result<fs::path> resolveSearchRoot(const fs::path& project_root, const std::stri
     }
     std::error_code ec;
     const auto target = fs::weakly_canonical(project_root / relative, ec);
-    if (ec || !isWithin(project_root, target)) {
+    if (ec || !paths::isWithinProject(project_root, target)) {
         return Error::invalidArgument("search_path resolves outside the project root");
     }
     if (!fs::is_directory(target, ec) || ec) {
@@ -190,7 +171,7 @@ Result<std::vector<FileRecord>> collectFiles(const fs::path& root,
             continue;
         }
         if (fs::is_directory(status)) {
-            if (kSkippedDirectories.count(iterator->path().filename().string())) {
+            if (kSkippedDirectories.count(paths::nativePathToUtf8(iterator->path().filename()))) {
                 iterator.disable_recursion_pending();
             }
             continue;
@@ -200,7 +181,7 @@ Result<std::vector<FileRecord>> collectFiles(const fs::path& root,
             response.truncated = true;
             break;
         }
-        auto extension = asciiFold(iterator->path().extension().string());
+        auto extension = asciiFold(paths::nativePathToUtf8(iterator->path().extension()));
         if (!extensions.count(extension)) continue;
         const auto size = iterator->file_size(ec);
         if (ec || size > kSearchMaxFileBytes || response.scanned_bytes + size > kSearchMaxTotalBytes) {
@@ -215,7 +196,7 @@ Result<std::vector<FileRecord>> collectFiles(const fs::path& root,
         // do not need a canonical() and a relative() syscall pair per file.
         const auto& entry_path = iterator->path();
         const auto relative = entry_path.lexically_relative(root);
-        if (relative.empty() || *relative.begin() == ".." || !isWithin(root, entry_path)) {
+        if (relative.empty() || *relative.begin() == ".." || !paths::isWithinProject(root, entry_path)) {
             ++response.skipped_files;
             continue;
         }
@@ -547,7 +528,7 @@ Result<SearchResponse> ProjectSearch::searchText(const SearchOptions& options) c
     if (search_root.isErr()) return search_root.error();
 
     SearchResponse response;
-    response.project_root = m_projectRoot.string();
+    response.project_root = paths::projectPathToUtf8(m_projectRoot);
     response.search_kind = "text";
     const auto files = collectFiles(m_projectRoot, search_root.value(), extensions.value(), response);
     if (files.isErr()) return files.error();
@@ -596,7 +577,7 @@ Result<SearchResponse> ProjectSearch::searchSymbols(const SymbolSearchOptions& o
     if (search_root.isErr()) return search_root.error();
 
     SearchResponse response;
-    response.project_root = m_projectRoot.string();
+    response.project_root = paths::projectPathToUtf8(m_projectRoot);
     response.search_kind = "symbols";
     response.lexical = true;
     const auto files = collectFiles(m_projectRoot, search_root.value(), extensions.value(), response);

@@ -58,7 +58,7 @@ Result<std::string> projectRelativePath(const std::string& path) {
     if (error) return Error::internal("project root cannot be resolved");
     const auto relative = fs::relative(resolved.value(), root, error);
     if (error) return Error::internal("project-relative path cannot be resolved");
-    return paths::projectPathToUtf8(relative.generic_string());
+    return paths::projectPathToUtf8(relative);
 }
 
 Result<ProcessResult> runGit(const fs::path& working_directory,

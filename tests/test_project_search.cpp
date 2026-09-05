@@ -330,6 +330,49 @@ void test_unicode_search_path_resolves_to_its_directory() {
     ASSERT_EQ(scoped.value().matches[0].path, "res://" + directory_utf8 + "/inimigo.gd");
 }
 
+void test_paths_outside_the_active_code_page_survive() {
+    // Break caught: the search converted paths with narrow generic_string(),
+    // which on Windows goes through the active code page. The Latin-1 cases
+    // above pass on a 1252 console because those characters have a mapping.
+    // These do not, so the conversion threw std::system_error and the tool
+    // answered "No mapping for the Unicode character exists in the target
+    // multi-byte code page" instead of searching.
+    const std::string directory_utf8 = "\xE9\xA1\xB9\xE7\x9B\xAE";
+    const std::string file_utf8 = "\xE9\xA1\xB9\xE7\x9B\xAE/\xE6\x96\xB0\xE8\x84\x9A\xE6\x9C\xAC.gd";
+    SearchFixture fixture;
+    fixture.write(didi::paths::projectPathFromUtf8(file_utf8),
+                  "class_name \xE6\x95\x8C\xE4\xBA\xBA\n"
+                  "func atacar():\tpass\n");
+
+    didi::offline::ProjectSearch search(fixture.root());
+    didi::offline::SearchOptions text_options;
+    text_options.query = "atacar";
+    const auto text = search.searchText(text_options);
+    ASSERT_TRUE(text.isOk());
+    ASSERT_EQ(text.value().matches.size(), 1u);
+    ASSERT_EQ(text.value().matches[0].path, "res://" + file_utf8);
+    // The constructor canonicalises, and on macOS the temporary directory
+    // reaches it through a symlink, so canonicalise here too rather than
+    // comparing against the path handed in.
+    ASSERT_EQ(text.value().project_root,
+              didi::paths::projectPathToUtf8(std::filesystem::weakly_canonical(fixture.root())));
+
+    didi::offline::SearchOptions scoped_options;
+    scoped_options.query = "atacar";
+    scoped_options.search_path = "res://" + directory_utf8;
+    const auto scoped = search.searchText(scoped_options);
+    ASSERT_TRUE(scoped.isOk());
+    ASSERT_EQ(scoped.value().matches.size(), 1u);
+
+    didi::offline::SymbolSearchOptions symbol_options;
+    symbol_options.query = "atacar";
+    symbol_options.search_path = "res://" + directory_utf8;
+    const auto symbols = search.searchSymbols(symbol_options);
+    ASSERT_TRUE(symbols.isOk());
+    ASSERT_EQ(symbols.value().matches.size(), 1u);
+    ASSERT_EQ(symbols.value().matches[0].path, "res://" + file_utf8);
+}
+
 struct RegisterProjectSearchTests {
     RegisterProjectSearchTests() {
         registerTest("ProjectSearch.TextAndGdscriptSymbols", test_text_and_gdscript_symbols);
@@ -343,6 +386,8 @@ struct RegisterProjectSearchTests {
         registerTest("ProjectSearch.ResultOrderAndWholeWordBoundary", test_result_order_and_whole_word_boundary);
         registerTest("ProjectSearch.UnicodePathsRoundTripAsUtf8", test_unicode_paths_round_trip_as_utf8);
         registerTest("ProjectSearch.UnicodeSearchPathResolves", test_unicode_search_path_resolves_to_its_directory);
+        registerTest("ProjectSearch.PathsOutsideTheActiveCodePageSurvive",
+                     test_paths_outside_the_active_code_page_survive);
     }
 } g_register_project_search_tests;
 

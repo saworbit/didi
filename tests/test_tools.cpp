@@ -2409,6 +2409,38 @@ static void test_script_create_writes_a_gdscript_and_reports_its_diagnostics() {
     ASSERT_TRUE(broken_payload["has_errors"].get<bool>());
     ASSERT_TRUE(broken_payload["diagnostics_count"].get<size_t>() > 0u);
 
+    // A path the active Windows code page has no mapping for. The diagnostics
+    // step was handed disk_path.string(), which throws std::system_error for
+    // these characters, so the file landed on disk and the call still came back
+    // as an internal error. That absolute path was also what Godot was given,
+    // and Godot names res:// paths in its diagnostics, so every compiler line
+    // and its line number were dropped by the location patterns.
+    const std::string outside_code_page = "\xE9\xA1\xB9\xE7\x9B\xAE/\xE6\x96\xB0\xE8\x84\x9A\xE6\x9C\xAC.gd";
+    const auto unmappable = registry.callTool("script_create", didi::json{
+        {"script_path", "res://" + outside_code_page},
+        {"source_text", "extends Node\n\nvar score: int = 0\n\nfunc reset():\n\tpass\n"}});
+    ASSERT_TRUE(!unmappable.isError);
+    ASSERT_TRUE(readToolTestFile(didi::paths::projectPathFromUtf8(outside_code_page))
+                    .find("var score: int = 0") != std::string::npos);
+
+    didi::json patch_args{{"file_path", "res://" + outside_code_page},
+                          {"method_name", "reset"},
+                          {"new_definition", "func reset():\n\tscore = 0\n"}};
+    auto patch_preview_args = patch_args;
+    patch_preview_args["dry_run"] = true;
+    const auto patch_preview = registry.callTool("script_patch_method", patch_preview_args);
+    if (patch_preview.isError) {
+        throw std::runtime_error("patch preview failed: " + patch_preview.content[0].text);
+    }
+    patch_args["confirmation_token"] = didi::json::parse(patch_preview.content[0].text)
+                                           ["mutation_preview"]["confirmation_token"];
+    const auto patched = registry.callTool("script_patch_method", patch_args);
+    if (patched.isError) {
+        throw std::runtime_error("patch failed: " + patched.content[0].text);
+    }
+    ASSERT_TRUE(readToolTestFile(didi::paths::projectPathFromUtf8(outside_code_page))
+                    .find("score = 0") != std::string::npos);
+
     registry.setIpcClient(nullptr);
 }
 
