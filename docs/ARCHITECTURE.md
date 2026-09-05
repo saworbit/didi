@@ -29,7 +29,7 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
 ┌─────────────────────────────────────────────────────────────┐
 │        Didi (C++ MCP Core Engine - didi / didi.exe)         │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2026-07-28 + 2024-11-05)    │
-│  - Registry (107 canonical tools + 10 legacy names)          │
+│  - Registry (107 canonical tools + 10 legacy names)         │
 │  - Dynamic Resources (project tree, editor state, logs)     │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
 │  - Offline file/process tools and capability metadata       │
@@ -44,9 +44,21 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
 │  ├───────────────────────┼───────────────────────────────┤  │
 │  │ Live SceneTree & Undo │ IPC lifecycle and timeout     │  │
 │  │ (EditorUndoRedoManager│ cancellation                  │  │
-│  └───────────────────────┴───────────────────────────────┘  │
+│  ├───────────────────────┴───────────────────────────────┤  │
+│  │ Didi console (GDScript editor plugin, off the IPC     │  │
+│  │ path: reads published descriptors, calls no tool)     │  │
+│  └───────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+The console shares the Godot process and nothing else. It is the plugin that
+draws Didi's main screen tab, and it reaches the bridge the same way any other
+observer would -- by reading the session descriptor the extension published --
+rather than by opening the endpoint. That keeps the surface that must be kept
+honest on one side of the boundary: the extension decides, the console reports.
+It is also the only surface that can say anything at all when the MCP connection
+itself is down, which is why it exists; see
+[Human Interaction Design](HUMAN_INTERACTION_DESIGN.md).
 
 ---
 

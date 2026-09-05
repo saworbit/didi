@@ -23,14 +23,28 @@ This guide walks through configuring Didi with popular AI coding assistants and 
    │       ├── didi.gdextension
    │       ├── plugin.cfg
    │       ├── didi_plugin.gd
+   │       ├── didi_console.gd        # the in-editor console
+   │       ├── didi_brand.gd          # and the scripts and marks it is built from
+   │       ├── didi_client_config.gd
+   │       ├── didi_diagnostics.gd
+   │       ├── didi_log.gd
+   │       ├── didi_session.gd
+   │       ├── didi_settings.gd
+   │       ├── didi_mark.svg
+   │       ├── didi_mark_compact.svg
+   │       ├── didi_signature.svg
    │       └── bin/
    │           └── <platform extension library>
    └── project.godot
    ```
+   Copy the directory whole. `plugin.cfg` names the plugin script, that script
+   preloads the rest, and the console rasterises the marks for the editor's
+   theme, so a partial copy is an addon whose console cannot open.
 2. Open your project in the **Godot Editor**.
 3. Navigate to **Project $\rightarrow$ Project Settings $\rightarrow$ Plugins**.
 4. Check the **Enable** box next to **Didi Native MCP Bridge**.
-5. The GDExtension starts a process-unique token-authenticated endpoint and atomically publishes its private descriptor under the platform registry: Windows `<OS temp>/didi-sessions`; POSIX `$XDG_RUNTIME_DIR/didi-sessions` when set and absolute, otherwise `<OS temp>/didi-sessions-<euid>`. POSIX defaults are owner-only, while Windows grants the owning SID and local administrators.
+5. A **Didi** tab appears in the main screen bar, beside 2D, 3D, Script and Asset Store. Its Dashboard reports whether an assistant can reach this editor, and its Connect page generates the configuration for section 2 below with the binary located and this project's path already filled in.
+6. The GDExtension starts a process-unique token-authenticated endpoint and atomically publishes its private descriptor under the platform registry: Windows `<OS temp>/didi-sessions`; POSIX `$XDG_RUNTIME_DIR/didi-sessions` when set and absolute, otherwise `<OS temp>/didi-sessions-<euid>`. POSIX defaults are owner-only, while Windows grants the owning SID and local administrators.
 
 ---
 
