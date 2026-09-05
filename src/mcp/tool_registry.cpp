@@ -209,7 +209,8 @@ CallToolResult handleEditorReloadProject(const json& args, std::shared_ptr<ipc::
 
 namespace {
 
-Error normalizeLiveRouteError(Error error) {
+Error normalizeLiveRouteError(Error error,
+                              const std::optional<runtime::SessionDescriptor>& session = {}) {
     const auto transport = ipc::transportFailureState(error);
     const bool explicit_quarantine = error.data.is_object() &&
                                      error.data.value("route_quarantine", false);
@@ -220,6 +221,7 @@ Error normalizeLiveRouteError(Error error) {
     } else if (!error.data.contains("outcome")) {
         error.data["outcome"] = "unknown_outcome";
     }
+    runtime::annotateEngineState(error, session);
     error.data["route_quarantine"] = true;
     return error;
 }
@@ -296,7 +298,7 @@ public:
                                  ? m_source->sendRequest(method, params, timeout_ms)
                                  : Result<json>(Error::notConnected()));
         if (state && state->lease.has_value() && result.isErr()) {
-            auto error = normalizeLiveRouteError(result.error());
+            auto error = normalizeLiveRouteError(result.error(), state->lease->descriptor);
             const bool quarantine = error.data.is_object() &&
                                     error.data.value("route_quarantine", false);
             if (quarantine) (void)runtime::quarantineRuntimeRoute(m_source, *state->lease);

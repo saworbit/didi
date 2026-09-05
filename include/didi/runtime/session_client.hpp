@@ -18,6 +18,34 @@ struct ProcessIdentity {
 };
 
 Result<ProcessIdentity> queryProcessIdentity(uint64_t pid);
+
+// Whether the process behind a session is still the process that opened it.
+//
+// Three states rather than two on purpose. A process that cannot be queried is
+// not a process that has gone, and reporting one as the other would be
+// inventing the fact a caller most wants. proven_stale means the pid is gone or
+// belongs to something started at a different time; unverifiable means the
+// question could not be answered.
+enum class ProcessInstanceState { alive, proven_stale, unverifiable };
+
+ProcessInstanceState processInstanceState(uint64_t pid, int64_t started_at_ms);
+
+// The same three states as the word a transport failure reports.
+const char* processInstanceStateName(ProcessInstanceState state);
+
+struct SessionDescriptor;
+
+// Records whether the engine behind a session is still there, on a transport
+// failure that is about to be reported.
+//
+// A failure saying the peer closed the pipe does not say why it went, and that
+// is the difference between an engine that crashed and one that is alive and
+// merely stopped answering. Every route that classifies a transport failure
+// calls this, so the four of them cannot answer the question differently.
+//
+// Silent when there is no session or no pid: an absent fact is reported by
+// being absent, not by a default.
+void annotateEngineState(Error& error, const std::optional<SessionDescriptor>& session);
 Result<std::filesystem::path> resolveSessionDescriptorDirectory();
 
 using DescriptorOpenedHook = std::function<void(const std::filesystem::path&)>;

@@ -66,6 +66,7 @@ bool conditionallyQuarantineLease(Error& error,
     } else if (!error.data.contains("outcome")) {
         error.data["outcome"] = "unknown_outcome";
     }
+    runtime::annotateEngineState(error, lease.descriptor);
     error.data["route_quarantine"] = true;
     (void)runtime::quarantineRuntimeRoute(router, lease);
     return true;
@@ -262,7 +263,6 @@ void ResourceRegistry::registerAllDefaultResources() {
             const auto transport = ipc::transportFailureState(error);
             const bool known_transport_timeout = error.code == 500 &&
                 (error.message.rfind("Timeout waiting for response", 0) == 0 ||
-                 error.message.rfind("Failed or timed out reading response", 0) == 0 ||
                  error.message.rfind("Failed or timed out writing to", 0) == 0);
             const bool transport_deadline =
                 (error.code == 504 || known_transport_timeout) &&
@@ -277,6 +277,7 @@ void ResourceRegistry::registerAllDefaultResources() {
                 } else {
                     error.data["outcome"] = "unknown_outcome";
                 }
+                runtime::annotateEngineState(error, session);
                 error.data["route_quarantine"] = true;
                 const auto wrapped = liveResourceError(
                     error, session, "Failed to retrieve live runtime logs: ");
