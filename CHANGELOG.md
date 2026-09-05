@@ -13,6 +13,10 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Added
 
+- Added `project_verify_changes`, which checks a set of proposed file contents together in an isolated copy of the project. `script_check_syntax` already answers whether one file parses, from source text, without writing anything. What it cannot answer is whether a set of files is consistent with each other, because a script that preloads a sibling is only correct when that sibling is the proposed one rather than the one still on disk. So the whole proposal is written into a git worktree built from HEAD, checked there, and the worktree is taken away again, on the failing paths as well. Nothing it does can be seen from the working tree. Uncommitted work is carried across, because a check that ignored it would answer a question about a project nobody has open, and the commit it was checked against is reported. Untracked files cannot be carried and are named rather than counted, so a proposal that depends on one is not silently checked against a project missing it. It refuses rather than falling back to copying a project directory, which for a Godot project means its imported assets too.
+
+### Added
+
 - A transport failure on a route with a known session now reports `error.data.engine` as `alive`, `gone`, or `unknown`. A failure saying the peer closed the pipe does not say why it went, and that is the difference between an engine that crashed and one that is alive and simply not answering. `unknown` stays distinct from `gone`, because a process that could not be queried is not a process that has ended, and filing one as the other would invent the fact a caller most wants. The check compares the recorded start time as well as the pid, so a recycled pid reads as `gone` rather than as the session that used to own it. All four routes that classify a transport failure share one implementation, so they cannot answer the question differently; the tool route, which every live tool takes, previously had no session in scope to answer it with at all.
 
 ### Fixed
@@ -97,12 +101,12 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `103/106`
+**Canonical implementation:** `104/107`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 106 canonical tools plus 10 legacy registrations (116 total). 103 canonical tools are implemented and 3 remain unimplemented.
+Discovery now exposes 107 canonical tools plus 10 legacy registrations (117 total). 104 canonical tools are implemented and 3 remain unimplemented.
 
 ---
 
