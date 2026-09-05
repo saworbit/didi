@@ -22,7 +22,7 @@ const std::unordered_set<std::string_view> kMutations = {
     "script_detach_from_node", "physics_simulate_step", "nav_bake_mesh",
     "anim_play_track", "anim_state_set", "tilemap_set_cells", "tilemap_set_region",
     "gridmap_set_cells", "resource_create", "instantiate_asset", "mutate_scene_tree",
-    "asset_reimport", "project_rename_references",
+    "asset_reimport", "project_rename_references", "project_apply_changes",
     "runtime_launch", "execute_test_session", "runtime_set_paused",
     "runtime_step", "runtime_stop", "runtime_inject_input", "input_map_set_action",
     // It can stop the game, which is a state change the caller has to have
@@ -56,6 +56,10 @@ const std::unordered_set<std::string_view> kAlwaysConfirmed = {
     // editor undo stack behind a file on disk, and the preview is the only
     // chance to see which files it is about to touch.
     "project_rename_references",
+    // Always, not on an overwrite flag: it writes a set of files at once, there
+    // is no editor undo stack behind a file on disk, and unlike the writers that
+    // take one path it can replace several existing files in one call.
+    "project_apply_changes",
     // Always, not on an overwrite flag: there is no non-destructive clear. It
     // removes a subtree, or the whole board, that another agent is working
     // from, with no undo stack behind it and no engine to ask.

@@ -3,6 +3,7 @@
 #include "didi/common/json.hpp"
 #include "didi/common/types.hpp"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,17 @@ constexpr size_t kMaxSpeculativeContentBytes = 1024u * 1024u;
 struct SpeculativeVerifyRequest {
     std::vector<SpeculativeChange> changes;
     int timeout_seconds{120};
+    // A scene to open in the copy once the proposal is written, so the check is
+    // more than a parse. Parsing says a file is well formed; it says nothing
+    // about a scene that fails to load, an @onready path that resolves to
+    // nothing, or a _ready() that divides by zero. Empty when no run was asked
+    // for, because a run costs an engine start and not every proposal needs one.
+    std::string run_scene;
+    // Project-relative and already checked for traversal and containment.
+    std::string run_scene_relative;
+    // Iterations to let the scene run before Godot quits by itself, so a game
+    // that would never exit still ends.
+    int run_frames{120};
 };
 
 struct SpeculativeScriptVerdict {
@@ -42,6 +54,27 @@ struct SpeculativeScriptVerdict {
     bool ok{false};
     // What the engine said, bounded. Empty when it said nothing.
     std::string detail;
+};
+
+// What happened when the scene was opened in the copy.
+//
+// The exit code is not the whole answer. Godot leaves a runtime script error on
+// its error stream and still exits 0, so a run judged on the exit code alone
+// would call a broken scene fine. The error lines are read as well, which is
+// what execute_test_session already does for a scene in the working tree.
+struct SpeculativeSceneRun {
+    std::string path;
+    // False when a proposed script did not parse. Running then costs an engine
+    // start to learn what the parse already said, and the load failure it
+    // produces reads as a runtime fault when it is not one. Reported rather
+    // than left out, so an absent run and a skipped run cannot be confused.
+    bool ran{false};
+    bool ok{false};
+    int exit_code{0};
+    int frames{0};
+    bool timed_out{false};
+    // Error-level lines the engine printed, bounded and in order.
+    std::vector<std::string> errors;
 };
 
 struct SpeculativeVerifyResult {
@@ -56,8 +89,25 @@ struct SpeculativeVerifyResult {
     // be checked against a project missing it. Named rather than counted.
     std::vector<std::string> untracked_excluded;
     std::vector<SpeculativeScriptVerdict> scripts;
+    // Present only when a run was asked for.
+    std::optional<SpeculativeSceneRun> scene_run;
     int written{0};
     bool all_ok{false};
+
+    json toJson() const;
+};
+
+// A proposal that was checked and then, only if it passed, put in place.
+//
+// The verification is run here rather than taken on trust from an earlier call.
+// A caller that verified a minute ago is describing a project that may have
+// moved since, and the point of this is that what reaches the working tree is
+// the thing that was just proved, not the thing that was proved earlier.
+struct SpeculativeApplyResult {
+    SpeculativeVerifyResult verification;
+    bool applied{false};
+    // The paths that reached the working tree, as the caller wrote them.
+    std::vector<std::string> written;
 
     json toJson() const;
 };
@@ -71,5 +121,12 @@ Result<SpeculativeVerifyRequest> parseSpeculativeVerifyRequest(const json& param
 // falling back to copying a whole project directory, which for a Godot project
 // means its imported assets too.
 Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRequest& request);
+
+// Checks the proposal in the sandbox and, if it passed, writes it into the
+// working tree. Every file is staged before any is replaced, so the change
+// cannot stop half applied because the last file was the one that could not be
+// written. A verification that did not pass writes nothing and is reported as
+// it stands.
+Result<SpeculativeApplyResult> applyVerifiedChanges(const SpeculativeVerifyRequest& request);
 
 } // namespace didi::offline

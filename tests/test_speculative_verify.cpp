@@ -86,6 +86,60 @@ void test_speculative_request_refuses_what_it_could_not_honestly_check() {
     ASSERT_TRUE(refused.error().message.find("changes[1]") != std::string::npos);
 }
 
+void test_speculative_request_takes_a_scene_to_run() {
+    auto with_scene = parseSpeculativeVerifyRequest(
+        {{"changes", json::array({change("res://a.gd", "")})},
+         {"run_scene", "res://levels/main.tscn"},
+         {"run_frames", 30}});
+    ASSERT_TRUE(with_scene.isOk());
+    ASSERT_EQ(with_scene.value().run_scene_relative, std::string("levels/main.tscn"));
+    ASSERT_EQ(with_scene.value().run_frames, 30);
+
+    auto without = parseSpeculativeVerifyRequest(
+        {{"changes", json::array({change("res://a.gd", "")})}});
+    ASSERT_TRUE(without.isOk());
+    ASSERT_TRUE(without.value().run_scene_relative.empty());
+    // A default that only applies when a run was asked for.
+    ASSERT_EQ(without.value().run_frames, 120);
+
+    const auto rejected = [](const json& params) {
+        return parseSpeculativeVerifyRequest(params).isErr();
+    };
+    const auto proposal = json::array({change("res://a.gd", "")});
+    // Only a scene can be run. A script handed to run_scene would start Godot
+    // and produce a failure about the wrong thing.
+    ASSERT_TRUE(rejected({{"changes", proposal}, {"run_scene", "res://a.gd"}}));
+    ASSERT_TRUE(rejected({{"changes", proposal}, {"run_scene", "res://../out.tscn"}}));
+    ASSERT_TRUE(rejected({{"changes", proposal}, {"run_scene", ""}}));
+    ASSERT_TRUE(rejected({{"changes", proposal}, {"run_scene", 7}}));
+    ASSERT_TRUE(rejected({{"changes", proposal}, {"run_scene", "res://m.tscn"}, {"run_frames", 0}}));
+    ASSERT_TRUE(rejected({{"changes", proposal}, {"run_scene", "res://m.tscn"}, {"run_frames", 6001}}));
+    // run_frames without run_scene is a caller who thinks they asked for a run
+    // and did not. Accepting it silently would let them believe the parse-only
+    // result was a run.
+    ASSERT_TRUE(rejected({{"changes", proposal}, {"run_frames", 30}}));
+}
+
+void test_apply_tool_is_registered_as_a_confirmed_mutation() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto* tool = registry.getTool("project_apply_changes");
+    ASSERT_TRUE(tool != nullptr);
+    ASSERT_TRUE(tool->capability.implemented);
+    const auto description = tool->toJson();
+    // It writes several files at once with no undo stack behind them, so it
+    // gets both halves of the mutation contract rather than just a dry run.
+    ASSERT_TRUE(description["inputSchema"]["properties"].contains("dry_run"));
+    ASSERT_TRUE(description["inputSchema"]["properties"].contains("confirmation_token"));
+    ASSERT_TRUE(!description["annotations"]["readOnlyHint"].get<bool>());
+
+    // The check half is still a read, and must not have acquired a dry run by
+    // sharing a request shape with the write half.
+    const auto* verify = registry.getTool("project_verify_changes");
+    ASSERT_TRUE(verify != nullptr);
+    ASSERT_TRUE(!verify->toJson()["inputSchema"]["properties"].contains("dry_run"));
+}
+
 void test_speculative_tool_is_registered_as_an_offline_read() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
@@ -107,6 +161,10 @@ struct RegisterSpeculativeVerify {
                      test_speculative_request_refuses_what_it_could_not_honestly_check);
         registerTest("SpeculativeVerify.RegisteredOffline",
                      test_speculative_tool_is_registered_as_an_offline_read);
+        registerTest("SpeculativeVerify.RequestTakesASceneToRun",
+                     test_speculative_request_takes_a_scene_to_run);
+        registerTest("SpeculativeVerify.ApplyIsAConfirmedMutation",
+                     test_apply_tool_is_registered_as_a_confirmed_mutation);
     }
 } g_registerSpeculativeVerify;
 
