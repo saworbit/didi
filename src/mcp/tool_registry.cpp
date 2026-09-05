@@ -617,7 +617,8 @@ json ToolManifest::toJson() const {
             {"legacy", legacy},
             {"implemented", implemented},
             {"unimplemented", unimplemented}
-        }}
+        }},
+        {"required", required}
     };
 }
 
@@ -632,6 +633,18 @@ ToolManifest ToolRegistry::buildManifest() const {
         manifest.canonical.push_back(tool.name);
         if (tool.capability.implemented) {
             manifest.implemented.push_back(tool.name);
+            std::vector<std::string> required;
+            const auto& schema = tool.inputSchema;
+            if (schema.is_object() && schema.contains("required") &&
+                schema["required"].is_array()) {
+                for (const auto& field : schema["required"]) {
+                    if (field.is_string() && field.get<std::string>() != "dry_run") {
+                        required.push_back(field.get<std::string>());
+                    }
+                }
+            }
+            std::sort(required.begin(), required.end());
+            manifest.required.emplace(tool.name, std::move(required));
         } else {
             manifest.unimplemented.push_back(tool.name);
         }

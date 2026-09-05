@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -23,6 +24,11 @@ struct ToolManifest {
     std::vector<std::string> legacy;         // registrations from kLegacyToolNames
     std::vector<std::string> implemented;    // canonical names with a real execution path
     std::vector<std::string> unimplemented;  // canonical names reserved for compatibility
+    // Required request fields per implemented canonical tool, so documentation
+    // can be checked against the schema a caller actually has to satisfy
+    // rather than against prose about it. dry_run is excluded: it is on every
+    // mutation by construction and is documented once, centrally.
+    std::map<std::string, std::vector<std::string>> required;
 
     json toJson() const;
 };

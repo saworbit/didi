@@ -1297,6 +1297,57 @@ def validate_capability_name_tables(
     return errors
 
 
+TOOL_REFERENCE_HEADING = re.compile(r"^### (.+)$", re.MULTILINE)
+BACKTICKED_NAME = re.compile(r"`([a-z0-9_]+)`")
+
+
+def validate_documented_request_shapes(
+    root: Path, required: dict[str, list[str]]
+) -> list[str]:
+    """Every required request field must be named where its tool is documented.
+
+    The counts and the name tables both passed while `project_export` told
+    readers to send a preset `name`, which the schema has never accepted; the
+    call fails with a 400 for anyone who follows the page. Prose about a tool
+    is not the same as the request a caller has to build, so this checks the
+    documented shape against the schema the binary actually enforces.
+
+    Only tools with a heading of their own are checked. A tool documented in a
+    grouped section is covered by the heading it shares.
+    """
+    path = root / "docs" / "TOOL_REFERENCE.md"
+    if not path.is_file():
+        return ["docs/TOOL_REFERENCE.md: not found"]
+    text = path.read_text(encoding="utf-8")
+
+    # Split the reference into the body that follows each heading.
+    sections: list[tuple[list[str], str]] = []
+    matches = list(TOOL_REFERENCE_HEADING.finditer(text))
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        sections.append((BACKTICKED_NAME.findall(match.group(1)), text[match.end():end]))
+
+    bodies: dict[str, str] = {}
+    for names, body in sections:
+        for name in names:
+            if name in required:
+                bodies[name] = body
+
+    errors: list[str] = []
+    for tool in sorted(bodies):
+        body = bodies[tool]
+        for field in required[tool]:
+            # `field` names it, and so does `field.x` for a field documented by
+            # its components rather than as a whole.
+            if f"`{field}`" in body or f"`{field}." in body:
+                continue
+            errors.append(
+                f"docs/TOOL_REFERENCE.md: the section documenting `{tool}` never names its "
+                f"required `{field}` field; a reader cannot build the call from this page"
+            )
+    return errors
+
+
 def load_tool_manifest(
     path: Path,
 ) -> tuple[dict[str, int] | None, dict[str, list[str]], list[str]]:
@@ -1307,25 +1358,25 @@ def load_tool_manifest(
     count checks.
     """
     if not path.is_file():
-        return None, {}, [
+        return None, {}, {}, [
             f"{path}: tool manifest not found. Build didi and generate it with: "
             f"didi --dump-tool-manifest > {path}"
         ]
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
-        return None, {}, [f"{path}: cannot read tool manifest: {error}"]
+        return None, {}, {}, [f"{path}: cannot read tool manifest: {error}"]
 
     counts = document.get("counts")
     if not isinstance(counts, dict):
-        return None, {}, [f"{path}: tool manifest has no 'counts' object"]
+        return None, {}, {}, [f"{path}: tool manifest has no 'counts' object"]
     missing = [k for k in TOOL_MANIFEST_COUNT_KEYS if not isinstance(counts.get(k), int)]
     if missing:
-        return None, {}, [f"{path}: tool manifest is missing integer counts: {', '.join(missing)}"]
+        return None, {}, {}, [f"{path}: tool manifest is missing integer counts: {', '.join(missing)}"]
     if counts["canonical"] + counts["legacy"] != counts["total"]:
-        return None, {}, [f"{path}: tool manifest total does not equal canonical + legacy"]
+        return None, {}, {}, [f"{path}: tool manifest total does not equal canonical + legacy"]
     if counts["implemented"] + counts["unimplemented"] != counts["canonical"]:
-        return None, {}, [
+        return None, {}, {}, [
             f"{path}: tool manifest canonical does not equal implemented + unimplemented"
         ]
     raw_names = document.get("names")
@@ -1334,7 +1385,16 @@ def load_tool_manifest(
         for key, value in raw_names.items():
             if isinstance(value, list) and all(isinstance(item, str) for item in value):
                 names[key] = value
-    return counts, names, []
+    # The required-parameter map rides in the same manifest under its own key.
+    # An older binary that does not emit it is not an error; the check that
+    # reads it simply has nothing to check.
+    required: dict[str, list[str]] = {}
+    raw_required = document.get("required")
+    if isinstance(raw_required, dict):
+        for key, value in raw_required.items():
+            if isinstance(value, list) and all(isinstance(item, str) for item in value):
+                required[key] = value
+    return counts, names, required, []
 CURRENT_PROJECT_MANIFESTS = (
     "demo/project.godot",
     "tests/godot_smoke/project.godot",
@@ -1546,7 +1606,9 @@ def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[s
 
     expected_counts = CANONICAL_IMPLEMENTATION_COUNTS
     if tool_manifest is not None:
-        manifest_counts, manifest_names, manifest_errors = load_tool_manifest(tool_manifest)
+        manifest_counts, manifest_names, manifest_required, manifest_errors = load_tool_manifest(
+            tool_manifest
+        )
         errors.extend(manifest_errors)
         if manifest_counts is not None:
             expected_counts = (
@@ -1560,6 +1622,7 @@ def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[s
                 manifest_counts["unimplemented"],
             )
             errors.extend(validate_capability_name_tables(root, manifest_names))
+            errors.extend(validate_documented_request_shapes(root, manifest_required))
             if manifest_triple != CANONICAL_IMPLEMENTATION_COUNTS:
                 errors.append(
                     "tools/validate_documentation.py: CANONICAL_IMPLEMENTATION_COUNTS is "

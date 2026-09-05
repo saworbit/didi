@@ -368,11 +368,33 @@ Both are API-blocked under the approved contracts and are not callable.
 
 ## 6. TileMap and GridMap
 
-All three tools are implemented live in editor sessions:
+All three tools are implemented live in editor sessions.
 
-- `tilemap_set_cells`
-- `tilemap_get_used_rect`
-- `gridmap_set_cells`
+### `tilemap_set_cells` — Live
+
+Writes or erases cells on a `TileMapLayer` in one undoable batch.
+
+- `tilemap_path` (`string`, required): the layer to edit.
+- `cells` (`array`, required): 1 to 256 records. Each is either a write or an erase, and nothing else is accepted.
+  - A write carries `coords` (`[x, y]`, each `-1048576..1048576`), `source_id` (`integer`, `0..2147483647`), `atlas_coords` (`[x, y]`, each `0..1048576`), and optionally `alternative_tile` (`integer`, `0..65535`, default `0`).
+  - An erase carries `coords` and `erase: true`.
+- `dry_run` (`boolean`, default `false`).
+
+### `tilemap_get_used_rect` — Live
+
+Returns the used cell boundaries of a `TileMapLayer` without changing it.
+
+- `tilemap_path` (`string`, required).
+
+The response carries exact integer `position`, `size`, and end fields.
+
+### `gridmap_set_cells` — Live
+
+Places or clears `MeshLibrary` items in a `GridMap` in one undoable batch.
+
+- `gridmap_path` (`string`, required).
+- `cells` (`array`, required): 1 to 256 records, each carrying `position` (`[x, y, z]`, each `-1048576..1048576`) and `item` (`integer`, `-1..2147483647`, where `-1` clears the cell), and optionally `orientation` (`integer`, `0..23`, default `0`).
+- `dry_run` (`boolean`, default `false`).
 
 Set/clear batches preflight every record, every required undo/rollback binding, and every referenced TileSetAtlasSource or MeshLibrary item before creating one UndoRedo action. Integer fields outside their documented bounds, including unsigned JSON values above `INT64_MAX`, are rejected before conversion. Duplicate coordinates/positions are rejected, no-op batches create no undo history, and `tilemap_get_used_rect` returns exact integer position, size, and end fields without mutation. The live integration gate performs an actual undo and redo for both TileMapLayer and GridMap edits rather than trusting only the registration metadata.
 
@@ -530,6 +552,12 @@ Each entry carries `node_path` relative to the edited scene root, plus `class` a
 Asset or PackedScene instantiation is not implemented.
 
 ### `project_search_text` and `project_search_symbols` — Offline
+
+- `query` (`string`, required): the text or symbol name to look for, at most 256 UTF-8 bytes.
+- `search_path` (`string`): where to look, defaulting to the project root.
+- `extensions` (`array`), `case_sensitive` (`boolean`), `max_results` (`integer`): common to both.
+- `whole_word` (`boolean`): `project_search_text` only.
+- `match` (`string`) and `kinds` (`array`): `project_search_symbols` only. `match` is `exact`, `prefix`, or `contains`.
 
 Both tools search only `.gd`, `.cs`, `.tscn`, and `.tres` beneath a normalized in-project `search_path`. They reject traversal/absolute paths, skip symlinks plus `.git`, `.godot`, `.worktrees`, and build outputs, and cap each file at 4 MiB, each request at 10,000 files/64 MiB, results at 500, queries at 256 UTF-8 bytes, and previews at 1,024 bytes.
 
@@ -906,7 +934,7 @@ Accepts no arguments and parses the project-root `export_presets.cfg` without la
 
 ### `project_export` — Offline
 
-Requires an existing preset `name` and normalized project-contained `output_path`. `mode` is `release` (default), `debug`, or `pack`; `timeout_seconds` is `1..900` (default `300`). The destination is preserved unless `overwrite: true`. Didi invokes the corresponding headless Godot export operation and verifies that a non-empty output artifact exists before reporting success. Installed export templates and platform SDKs remain Godot/operator prerequisites.
+Requires an existing `preset` and a normalized project-contained `output_path`. `mode` is `release` (default), `debug`, or `pack`; `timeout_seconds` is `1..900` (default `300`). The destination is preserved unless `overwrite: true`. Didi invokes the corresponding headless Godot export operation and verifies that a non-empty output artifact exists before reporting success. Installed export templates and platform SDKs remain Godot/operator prerequisites.
 
 ### `gridmap_export_mesh_library` — Offline
 
