@@ -30,6 +30,7 @@ inline LiveSessionKindPolicy livePolicyForTool(std::string_view name) {
         // frame is in the process Didi is attached to; the editor-only camera
         // identifiers stay editor-only.
         name == "viewport_capture_frame" || name == "capture_viewport" ||
+        name == "viewport_capture_passes" ||
         name == "viewport_diff_capture") {
         return LiveSessionKindPolicy::editor_or_game;
     }
@@ -50,7 +51,8 @@ inline LiveSessionKindPolicy livePolicyForMethod(std::string_view method) {
         method == "nav.queryPath" ||
         method == "anim.listTracks" || method == "runtime.readProfiler" ||
         method == "profiler.sample" ||
-        method == "vision.captureViewport" || method == "vision.diffViewport") {
+        method == "vision.captureViewport" || method == "vision.capturePasses" ||
+        method == "vision.diffViewport") {
         return LiveSessionKindPolicy::editor_or_game;
     }
     return LiveSessionKindPolicy::editor_only;

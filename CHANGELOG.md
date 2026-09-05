@@ -11,6 +11,10 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
+### Added
+
+- Added `viewport_capture_passes`, which draws the live 3D scene again with every geometry node's material replaced and returns a depth or world-space normal image next to the ordinary colour frame. A flat colour picture cannot say whether one thing is nearer than another or which way a surface faces, and these can. Each pass comes back as its own image, in the order it was asked for, rather than as one stacked picture that would need labels drawn on it to be read. Depth divides by the rendering camera's own far plane unless one is given, and the value used is reported. The passes are orderings rather than measurements, and say so: the shaders undo the sRGB curve the framebuffer applies, but the viewport post-processes afterwards by an amount that depends on the engine, with a 4.7.2 editor returning the written values unchanged and a 4.5.1 editor returning them scaled by about a quarter. A semantic segmentation pass was left out for the same reason, since a legend mapping colours to node paths would not match its own pixels on every engine. Every `material_override` is put back before the call returns, including on the paths that fail, and a restore that does not succeed is the error the caller gets, because a scene left wearing a debug material matters more than a frame that did not arrive.
+
 ### Fixed
 
 - `shader_list_uniforms` reported `value: null` for every uniform a material does not override, where the value actually in effect is the shader's own declared default. `ShaderMaterial.get_shader_parameter` answers nil for such a uniform on 4.5.1, 4.6.2 and 4.7.2, so a shader's declared defaults were reported as no value at all. The default lives in the rendering server, and it is now read from there when the material has none. A null value now means neither source could supply one, which is what a session with no renderer looks like, and the documentation says so. `shader_set_uniform` reports the same effective value in `old_value`, while its undo entry still restores nil so that undoing a write takes the override off rather than pinning the default in its place. There is still no flag separating an override from a default: the same call that answers nil in a running game answers with the default in a 4.7.2 editor, so it cannot establish that difference in every session.
@@ -69,12 +73,12 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `100/103`
+**Canonical implementation:** `101/104`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 103 canonical tools plus 10 legacy registrations (113 total). 100 canonical tools are implemented and 3 remain unimplemented.
+Discovery now exposes 104 canonical tools plus 10 legacy registrations (114 total). 101 canonical tools are implemented and 3 remain unimplemented.
 
 ---
 

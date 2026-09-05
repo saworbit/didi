@@ -872,6 +872,12 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         }
         return ViewportRenderer::instance().captureViewport(params, sessionKindName(m_sessionKind));
     }
+    if (method == "vision.capturePasses") {
+        // Replacement materials go on nodes in whichever scene is open, which
+        // both kinds of session have. Only the editor has cameras to choose
+        // between, and capturePasses refuses that argument in a game itself.
+        return ViewportRenderer::instance().capturePasses(params, sessionKindName(m_sessionKind));
+    }
     if (method == "vision.diffViewport") {
         if (m_sessionKind != runtime::SessionKind::editor &&
             params.value("node_isolation_path", "") != "") {

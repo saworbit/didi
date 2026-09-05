@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 103 canonical tool names plus 10 legacy names (113 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 104 canonical tool names plus 10 legacy names (114 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `100/103`
+**Canonical implementation:** `101/104`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 100/103 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 101/104 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -215,6 +215,26 @@ A viewport that is not the one on screen has no size, and Godot returns its 2x2 
 - Legacy alias: `capture_viewport`.
 
 Successful live frames include a 32-lowercase-hex `capture_id` for the exact RGBA8 buffer encoded as PNG. IDs are extension-process-local and retained in an 8-entry/64 MiB LRU cache; each image is limited to 2,048 × 2,048. Offline previews never receive IDs.
+
+### `viewport_capture_passes` — Live
+
+Draws the live 3D scene again with replacement materials and returns one image per requested pass. Available in an editor or a game session. 3D only: a depth pass has no meaning on a canvas, so only `GeometryInstance3D` nodes are painted.
+
+- `passes` (`array`, required): 1 to 3 of `color`, `depth`, `normal`, with no repeats. Each comes back as its own image block, in the order given, and `pass_order` names them.
+- `camera_identifier` (`string`): editor sessions only. A game has one root viewport and the argument is refused there.
+- `depth_far` (`number`): the distance mapped to white. Defaults to the rendering camera's own far plane, which is the distance past which that camera draws nothing. The value used is reported as `depth_far`.
+
+`depth` paints geometry a grey that rises with distance in front of the camera, with `depth_far` mapped to white. `normal` paints the world-space surface normal as `n * 0.5 + 0.5`, in world space rather than view space so a surface that faces up reads the same whichever way the camera is turned. `color` is the ordinary frame, captured with nothing replaced.
+
+**These are orderings, not measurements.** The pass shaders undo the sRGB curve the framebuffer applies, which stops a mid grey arriving as a much lighter one, but the viewport post-processes after that and how much it changes depends on the engine: a 4.7.2 editor returns the written values unchanged and a 4.5.1 editor returns them scaled by about a quarter. So a depth pass will reliably tell you that one thing is nearer than another, and will not reliably tell you how far away either of them is. `encoding` reports `srgb8_relative` to say exactly this.
+
+Only geometry is repainted. The viewport still draws its own background, grid and gizmos behind it, so a pass image is the scene's geometry answered in one channel over an ordinary editor backdrop rather than a clean buffer.
+
+At most 4096 nodes are walked. `painted_node_count`, `examined_node_count` and `scan_limit_reached` say how much of the scene the passes actually cover.
+
+Every `material_override` is restored before the call returns, on the failing paths as well. A restore that does not succeed is reported as the error, ahead of any capture failure, because a scene left wearing a debug material is the worse outcome.
+
+A semantic segmentation pass is not here. It would need each node to come back as an exactly identifiable colour, and the viewport post-processing above means the colour written is not always the colour stored, so a legend mapping colours to node paths would not match its own pixels on every engine.
 
 ### `viewport_diff_capture` — Live
 

@@ -7634,6 +7634,324 @@ Result<ViewportPixels> captureViewportObject(GDExtensionObjectPtr viewport_objec
 
 } // namespace
 
+namespace {
+
+// The scene drawn again with every geometry node's material replaced, so the
+// picture answers one question instead of showing one appearance.
+//
+// Every pass writes the inverse of the sRGB curve the framebuffer applies on
+// the way out, which is what keeps a mid grey from arriving as a much lighter
+// one. It does not make the stored byte the written byte: the viewport applies
+// its own post-processing after this, and how much it changes depends on the
+// engine. A 4.7.2 editor returns these values unchanged and a 4.5.1 editor
+// returns them scaled by about a quarter. So a pass is an ordering that can be
+// read and compared, not a calibrated measurement, and nothing here claims
+// otherwise.
+constexpr const char* kPassStoreHelper = R"(
+vec3 didi_store(vec3 c) {
+	vec3 lo = c / 12.92;
+	vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
+	return mix(hi, lo, step(c, vec3(0.04045)));
+}
+)";
+
+std::string passShaderSource(const std::string& kind) {
+    std::string source = "shader_type spatial;\nrender_mode unshaded, cull_disabled;\n";
+    if (kind == "depth") {
+        source += "uniform float didi_far = 100.0;\n";
+        source += kPassStoreHelper;
+        // VERTEX is view space in a fragment shader and the camera looks down
+        // -Z, so -VERTEX.z is the distance in front of the camera.
+        source += "void fragment() {\n"
+                  "\tALBEDO = didi_store(vec3(clamp(-VERTEX.z / didi_far, 0.0, 1.0)));\n"
+                  "}\n";
+        return source;
+    }
+    // World space rather than view space, so a surface that faces up reads the
+    // same whichever way the camera happens to be turned.
+    source += kPassStoreHelper;
+    source += "void fragment() {\n"
+              "\tvec3 world_normal = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);\n"
+              "\tALBEDO = didi_store(world_normal * 0.5 + 0.5);\n"
+              "}\n";
+    return source;
+}
+
+struct PassSubject {
+    GDExtensionObjectPtr node{nullptr};
+    std::string path;
+    std::string class_name;
+};
+
+constexpr size_t kMaxPassNodes = 4096;
+
+Result<void> collectPassSubjects(GDExtensionObjectPtr node, GDExtensionObjectPtr root, bool editor,
+                                 std::vector<PassSubject>& subjects, size_t& examined,
+                                 bool& limit_reached) {
+    if (examined >= kMaxPassNodes) {
+        limit_reached = true;
+        return Result<void>::ok();
+    }
+    ++examined;
+    auto paintable = objectIsClass(node, "GeometryInstance3D");
+    if (paintable.isErr()) return paintable.error();
+    if (paintable.value()) {
+        PassSubject subject;
+        subject.node = node;
+        auto class_name = nodeString(node, "get_class", 201670096LL);
+        if (class_name.isErr()) return class_name.error();
+        subject.class_name = boundUtf8(class_name.value(), 256).value;
+        auto path = editor ? logicalPathFromEditedRoot(root, node)
+                           : nodeString(node, "get_path", 4075236667LL);
+        if (path.isErr()) return path.error();
+        subject.path = boundUtf8(path.value(), 1024).value;
+        subjects.push_back(std::move(subject));
+    }
+
+    auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    if (include_internal.isErr()) return include_internal.error();
+    auto children = callObject(node, "Node", "get_children", 873284517LL, {&include_internal.value()});
+    if (children.isErr()) return children.error();
+    auto size_value = callVariant(children.value(), "size");
+    if (size_value.isErr()) return size_value.error();
+    auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (size.isErr()) return size.error();
+    for (int64_t index = 0; index < size.value(); ++index) {
+        auto slot = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (slot.isErr()) return slot.error();
+        auto child_value = callVariant(children.value(), "get", {&slot.value()});
+        if (child_value.isErr()) return child_value.error();
+        auto child = objectFromVariant(child_value.value());
+        if (child.isErr() || !child.value()) return Error::internal("Godot returned an invalid child node");
+        auto walked = collectPassSubjects(child.value(), root, editor, subjects, examined, limit_reached);
+        if (walked.isErr()) return walked.error();
+        if (limit_reached) break;
+    }
+    return Result<void>::ok();
+}
+
+// Holds what every painted node had before, and puts it back.
+//
+// The previous material is kept as a Variant rather than as a pointer on
+// purpose: an inline material's only reference is often the override itself, so
+// a raw pointer would be left pointing at a freed resource the moment the
+// replacement went on.
+class MaterialOverrides {
+public:
+    ~MaterialOverrides() { (void)restore(); }
+
+    Result<void> paint(const std::vector<PassSubject>& subjects,
+                       const std::vector<GDExtensionObjectPtr>& materials) {
+        for (size_t index = 0; index < subjects.size(); ++index) {
+            auto previous = callObject(subjects[index].node, "GeometryInstance3D",
+                                       "get_material_override", 5934680LL);
+            if (previous.isErr()) return previous.error();
+            m_previous.emplace_back(subjects[index].node, std::move(previous.value()));
+            auto replacement = makeObject(materials[index]);
+            if (replacement.isErr()) return replacement.error();
+            auto applied = callObject(subjects[index].node, "GeometryInstance3D",
+                                      "set_material_override", 2757459619LL, {&replacement.value()});
+            if (applied.isErr()) return applied.error();
+        }
+        return Result<void>::ok();
+    }
+
+    // Every node is attempted even when one fails, because stopping at the
+    // first failure would leave the rest of the scene wearing a debug material.
+    Result<void> restore() {
+        Result<void> outcome = Result<void>::ok();
+        for (auto& entry : m_previous) {
+            auto applied = callObject(entry.first, "GeometryInstance3D", "set_material_override",
+                                      2757459619LL, {&entry.second});
+            if (applied.isErr() && outcome.isOk()) outcome = applied.error();
+        }
+        m_previous.clear();
+        return outcome;
+    }
+
+private:
+    std::vector<std::pair<GDExtensionObjectPtr, VariantValue>> m_previous;
+};
+
+Result<GDExtensionObjectPtr> makePassShader(const std::string& kind) {
+    NativeName shader_class("Shader");
+    auto shader = constructObject(shader_class.ptr());
+    if (!shader) return Error(501, "Godot ClassDB could not construct a Shader");
+    auto code = makeString(passShaderSource(kind));
+    if (code.isErr()) return code.error();
+    auto applied = callObject(shader, "Shader", "set_code", 83702148LL, {&code.value()});
+    if (applied.isErr()) return applied.error();
+    return shader;
+}
+
+Result<GDExtensionObjectPtr> makePassMaterial(GDExtensionObjectPtr shader) {
+    NativeName material_class("ShaderMaterial");
+    auto material = constructObject(material_class.ptr());
+    if (!material) return Error(501, "Godot ClassDB could not construct a ShaderMaterial");
+    auto shader_value = makeObject(shader);
+    if (shader_value.isErr()) return shader_value.error();
+    auto applied = callObject(material, "ShaderMaterial", "set_shader", 3341921675LL,
+                              {&shader_value.value()});
+    if (applied.isErr()) return applied.error();
+    return material;
+}
+
+Result<void> setPassParameter(GDExtensionObjectPtr material, const char* name, VariantValue& value) {
+    auto parameter = makeStringName(name);
+    if (parameter.isErr()) return parameter.error();
+    auto applied = callObject(material, "ShaderMaterial", "set_shader_parameter", 3776071444LL,
+                              {&parameter.value(), &value});
+    return applied.isOk() ? Result<void>::ok() : Result<void>(applied.error());
+}
+
+// The far distance a depth pass divides by. The camera's own far plane is the
+// honest default: it is the distance past which that camera draws nothing.
+Result<double> cameraFarPlane(const std::string& camera_identifier, const std::string& session_kind) {
+    auto required = requireMethodBind("Camera3D", "get_far", 1740695150LL);
+    if (required.isErr()) return Error(501, required.error().message);
+    Result<GDExtensionObjectPtr> camera = Error::notFound("No camera");
+    if (session_kind == "game") {
+        auto tree = liveSceneTree();
+        if (tree.isErr()) return tree.error();
+        auto root = liveSceneTreeRoot(tree.value());
+        if (root.isErr()) return root.error();
+        auto found = callObject(root.value(), "Viewport", "get_camera_3d", 2285090890LL);
+        if (found.isErr()) return found.error();
+        auto object = objectFromVariant(found.value());
+        if (object.isErr() || !object.value()) {
+            return Error(409, "The game viewport has no 3D camera to take a far plane from");
+        }
+        camera = object.value();
+    } else {
+        (void)camera_identifier;
+        auto editor = editorInterface();
+        if (editor.isErr()) return editor.error();
+        auto root = editedSceneRoot(editor.value());
+        if (root.isErr()) return root.error();
+        auto viewport = callObject(root.value(), "Node", "get_viewport", 3596683776LL);
+        if (viewport.isErr()) return viewport.error();
+        auto viewport_object = objectFromVariant(viewport.value());
+        if (viewport_object.isErr() || !viewport_object.value()) {
+            return Error(409, "The edited scene is not in a viewport with a camera");
+        }
+        auto found = callObject(viewport_object.value(), "Viewport", "get_camera_3d", 2285090890LL);
+        if (found.isErr()) return found.error();
+        auto object = objectFromVariant(found.value());
+        if (object.isErr() || !object.value()) {
+            return Error(409, "No 3D camera is rendering this viewport to take a far plane from");
+        }
+        camera = object.value();
+    }
+    if (camera.isErr()) return camera.error();
+    auto far_value = callObject(camera.value(), "Camera3D", "get_far", 1740695150LL);
+    if (far_value.isErr()) return far_value.error();
+    auto number = scalarFromVariant<double>(far_value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+    if (number.isErr()) return number.error();
+    if (!(number.value() > 0.0)) return Error(409, "The camera far plane is not a distance");
+    return number.value();
+}
+
+} // namespace
+
+Result<MultipassCapture> GodotBridge::captureViewportPasses(const std::vector<std::string>& passes,
+                                                            const std::string& camera_identifier,
+                                                            const std::string& session_kind,
+                                                            double requested_depth_far) {
+    for (const auto& bind : {std::make_tuple("GeometryInstance3D", "get_material_override", 5934680LL),
+                             std::make_tuple("GeometryInstance3D", "set_material_override", 2757459619LL),
+                             std::make_tuple("Shader", "set_code", 83702148LL),
+                             std::make_tuple("ShaderMaterial", "set_shader", 3341921675LL),
+                             std::make_tuple("ShaderMaterial", "set_shader_parameter", 3776071444LL)}) {
+        auto required = requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind));
+        if (required.isErr()) return Error(501, required.error().message);
+    }
+
+    const bool editor = session_kind != "game";
+    Result<GDExtensionObjectPtr> root = Error::internal("unresolved");
+    if (editor) {
+        auto interface = editorInterface();
+        if (interface.isErr()) return interface.error();
+        root = editedSceneRoot(interface.value());
+    } else {
+        auto tree = liveSceneTree();
+        if (tree.isErr()) return tree.error();
+        root = liveSceneTreeRoot(tree.value());
+    }
+    if (root.isErr()) return root.error();
+
+    MultipassCapture capture;
+    const bool wants_depth =
+        std::find(passes.begin(), passes.end(), "depth") != passes.end();
+    if (wants_depth) {
+        if (requested_depth_far > 0.0) {
+            capture.depth_far = requested_depth_far;
+        } else {
+            auto far_plane = cameraFarPlane(camera_identifier, session_kind);
+            if (far_plane.isErr()) return far_plane.error();
+            capture.depth_far = far_plane.value();
+        }
+    }
+
+    std::vector<PassSubject> subjects;
+    size_t examined = 0;
+    bool limit_reached = false;
+    const bool needs_geometry =
+        std::any_of(passes.begin(), passes.end(),
+                    [](const std::string& kind) { return kind != "color"; });
+    if (needs_geometry) {
+        auto walked = collectPassSubjects(root.value(), root.value(), editor, subjects, examined,
+                                          limit_reached);
+        if (walked.isErr()) return walked.error();
+    }
+    capture.examined = static_cast<int>(examined);
+    capture.painted = static_cast<int>(subjects.size());
+    capture.scan_limit_reached = limit_reached;
+
+    for (const auto& kind : passes) {
+        if (kind == "color") {
+            auto frame = editor ? captureEditorViewport(camera_identifier) : captureGameViewport();
+            if (frame.isErr()) return frame.error();
+            capture.frames.push_back(PassFrame{kind, std::move(frame.value())});
+            continue;
+        }
+        // A scene with nothing to paint still answers, with a picture of an
+        // empty pass rather than an error about a scene that is simply bare.
+        auto shader = makePassShader(kind);
+        if (shader.isErr()) return shader.error();
+
+        auto material = makePassMaterial(shader.value());
+        if (material.isErr()) return material.error();
+        if (kind == "depth") {
+            auto far_value = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, capture.depth_far);
+            if (far_value.isErr()) return far_value.error();
+            auto applied = setPassParameter(material.value(), "didi_far", far_value.value());
+            if (applied.isErr()) return applied.error();
+        }
+        std::vector<GDExtensionObjectPtr> materials(subjects.size(), material.value());
+
+        MaterialOverrides overrides;
+        auto painted = overrides.paint(subjects, materials);
+        if (painted.isErr()) return painted.error();
+        auto drawn = forceDraw();
+        if (drawn.isErr()) return drawn.error();
+        auto frame = editor ? captureEditorViewport(camera_identifier) : captureGameViewport();
+        // The restore runs whatever the capture did, and its failure is the one
+        // that gets reported: a scene left wearing a debug material matters more
+        // than a frame that did not arrive.
+        auto restored = overrides.restore();
+        auto redrawn = forceDraw();
+        if (restored.isErr()) {
+            DIDI_LOG_ERROR("GODOT_BRIDGE", "Pass materials could not be restored: ",
+                           restored.error().message);
+            return restored.error();
+        }
+        if (redrawn.isErr()) return redrawn.error();
+        if (frame.isErr()) return frame.error();
+        capture.frames.push_back(PassFrame{kind, std::move(frame.value())});
+    }
+    return capture;
+}
+
 Result<ViewportPixels> GodotBridge::captureEditorViewport(const std::string& camera_identifier) {
     auto editor_result = editorInterface();
     if (editor_result.isErr()) return editor_result.error();
