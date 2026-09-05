@@ -36,14 +36,35 @@ The addon is assembled in the build directory rather than in the source tree, so
    │       ├── didi.gdextension
    │       ├── plugin.cfg
    │       ├── didi_plugin.gd
+   │       ├── didi_console.gd        # the in-editor console
+   │       ├── didi_brand.gd          # and the scripts and marks it is built from
+   │       ├── didi_client_config.gd
+   │       ├── didi_diagnostics.gd
+   │       ├── didi_session.gd
+   │       ├── didi_settings.gd
+   │       ├── didi_mark.svg
+   │       ├── didi_mark_compact.svg
+   │       ├── didi_signature.svg
    │       └── bin/
    │           └── didi_extension.dll
    └── project.godot
    ```
+   Copy the folder whole. Every file in it is loaded: `plugin.cfg` names the plugin script, that
+   script preloads the rest, and the console rasterises the marks for the editor's theme.
 2. Open your project in the **Godot Editor**.
 3. Go to **Project $\rightarrow$ Project Settings $\rightarrow$ Plugins**.
 4. Check **Enable** next to **Didi Native MCP Bridge**.
 5. Godot will output: `[Didi] Didi Native MCP Editor Plugin active.`
+6. A **Didi** tab appears in the main screen bar, beside 2D, 3D, Script and Asset Store, carrying
+   Didi's mark. Open it. The **Dashboard** shows six red/amber/green cards — the bridge, the
+   extension, the server binary, the client configuration, this editor's session, and any other
+   sessions on the machine — each with the path or pid behind it and a button for the obvious next
+   step. The switch marked **Live bridge** opens and closes it for real.
+
+> The console generates the configuration in Step 3 for you, with the binary already located and
+> this project's path already filled in: open **Connect**, pick your client, and copy it. For
+> Claude Code and Cursor, whose configuration lives inside the project, it can write the file.
+> The rest of this page is the same thing done by hand.
 
 ---
 

@@ -14,7 +14,10 @@ on:
       - 'include/didi/mcp/mcp_protocol.hpp'
       - 'src/standalone/main.cpp'
       - 'src/mcp/tool_registry.cpp'
-      - 'addons/didi/plugin.cfg'
+      - 'addons/didi/**'
+      - 'demo/addons/didi/**'
+      - 'tests/test_editor_console.py'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [ main, master ]
     paths:
@@ -28,7 +31,10 @@ on:
       - 'include/didi/mcp/mcp_protocol.hpp'
       - 'src/standalone/main.cpp'
       - 'src/mcp/tool_registry.cpp'
-      - 'addons/didi/plugin.cfg'
+      - 'addons/didi/**'
+      - 'demo/addons/didi/**'
+      - 'tests/test_editor_console.py'
+      - '.github/workflows/ci.yml'
   workflow_dispatch:
 
 concurrency:
@@ -49,4 +55,5 @@ jobs:
         run: |
           python -m unittest tests.test_documentation_validator -v
           python -m unittest tests.test_field_trial -v
+          python -m unittest tests.test_editor_console -v
           python tools/validate_documentation.py

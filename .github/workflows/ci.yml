@@ -161,7 +161,7 @@ jobs:
             macOS)   library="bin/libdidi_extension.dylib" ;;
             *)       library="bin/libdidi_extension.so" ;;
           esac
-          expected="$library didi.gdextension didi_plugin.gd plugin.cfg "
+          expected="$library didi.gdextension didi_brand.gd didi_client_config.gd didi_console.gd didi_diagnostics.gd didi_log.gd didi_mark.svg didi_mark_compact.svg didi_plugin.gd didi_session.gd didi_settings.gd didi_signature.svg plugin.cfg "
           actual=$(cd build/addons/didi && LC_ALL=C find . -type f | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' ')
           if [ "$actual" != "$expected" ]; then
             echo "Staged addon is [$actual]" >&2

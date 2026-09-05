@@ -193,11 +193,23 @@ endif()
 # them in one place means the staged copy, the installed copy, and the packaged
 # archive cannot disagree about what an addon contains. didi_plugin.gd is on the
 # list because plugin.cfg names it as the plugin script: without it Godot loads
-# an addon that cannot start.
+# an addon that cannot start, and the same is true of every script that plugin
+# preloads and every brand source those scripts rasterise -- an addon missing
+# one of them is an addon whose console cannot open.
 set(DIDI_ADDON_MANIFEST_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/plugin.cfg"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi.gdextension"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_plugin.gd"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_brand.gd"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_client_config.gd"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_console.gd"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_diagnostics.gd"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_log.gd"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_session.gd"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_settings.gd"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_mark.svg"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_mark_compact.svg"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_signature.svg"
 )
 set(DIDI_ADDON_STAGE_DIR "${CMAKE_BINARY_DIR}/addons/didi")
 
