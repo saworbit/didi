@@ -41,8 +41,22 @@ struct PassFrame {
     ViewportPixels pixels;
 };
 
+// A node a segmentation pass painted, and the entry it was painted with.
+struct SegmentedNode {
+    std::string path;
+    std::string class_name;
+    size_t entry{0};
+};
+
 struct MultipassCapture {
     std::vector<PassFrame> frames;
+    // Only when a segmentation pass ran. In palette order, which is the order
+    // the legend reads the frame back in.
+    std::vector<SegmentedNode> segmented;
+    // Nodes there was no entry left for. Named rather than counted, because a
+    // node missing from a legend is otherwise indistinguishable from a node
+    // that was hidden behind another one.
+    std::vector<std::string> unsegmented;
     // The distance mapped to white in a depth pass, so the grey is a length
     // again rather than a ratio to something unstated.
     double depth_far{0.0};

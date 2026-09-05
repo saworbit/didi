@@ -9,6 +9,7 @@
 #include "didi/runtime/input_injection.hpp"
 #include "didi/runtime/ghost_preview.hpp"
 #include "didi/runtime/spatial_queries.hpp"
+#include "didi/runtime/segmentation.hpp"
 #include "didi/runtime/animation_requests.hpp"
 #include <array>
 #include <algorithm>
@@ -8108,6 +8109,16 @@ vec3 didi_store(vec3 c) {
 
 std::string passShaderSource(const std::string& kind) {
     std::string source = "shader_type spatial;\nrender_mode unshaded, cull_disabled;\n";
+    if (kind == "segmentation") {
+        // One flat colour a material sets per node, so the picture is a map
+        // from pixel to node rather than a picture of the scene.
+        source += "uniform vec3 didi_colour = vec3(1.0);\n";
+        source += kPassStoreHelper;
+        source += "void fragment() {\n"
+                  "\tALBEDO = didi_store(didi_colour);\n"
+                  "}\n";
+        return source;
+    }
     if (kind == "depth") {
         source += "uniform float didi_far = 100.0;\n";
         source += kPassStoreHelper;
@@ -8247,6 +8258,14 @@ Result<GDExtensionObjectPtr> makePassMaterial(GDExtensionObjectPtr shader) {
     return material;
 }
 
+// The shader takes the colour in the 0..1 range the framebuffer will store, so
+// the byte the legend matches on is the byte the palette names.
+Result<VariantValue> makeColorVector3(const runtime::SegmentationColor& colour) {
+    return makeVector3(static_cast<double>(colour.r) / 255.0,
+                       static_cast<double>(colour.g) / 255.0,
+                       static_cast<double>(colour.b) / 255.0);
+}
+
 Result<void> setPassParameter(GDExtensionObjectPtr material, const char* name, VariantValue& value) {
     auto parameter = makeStringName(name);
     if (parameter.isErr()) return parameter.error();
@@ -8378,10 +8397,41 @@ Result<MultipassCapture> GodotBridge::captureViewportPasses(const std::vector<st
             auto applied = setPassParameter(material.value(), "didi_far", far_value.value());
             if (applied.isErr()) return applied.error();
         }
-        std::vector<GDExtensionObjectPtr> materials(subjects.size(), material.value());
+        // Who this pass paints, which is everyone except where segmentation
+        // runs out of palette. A pass after it must still paint the whole
+        // scene, so the shared subject list is not what gets shortened.
+        std::vector<PassSubject> painted_subjects = subjects;
+        std::vector<GDExtensionObjectPtr> materials(painted_subjects.size(), material.value());
+        if (kind == "segmentation") {
+            // The one pass where every node wears a different material, because
+            // the colour is the answer rather than the subject.
+            const auto& palette = runtime::segmentationPalette();
+            if (painted_subjects.size() > palette.size()) {
+                // A node with no entry left is not painted at all, so it keeps
+                // the colour it already had rather than borrowing another
+                // node's and being reported as it.
+                for (size_t index = palette.size(); index < painted_subjects.size(); ++index) {
+                    capture.unsegmented.push_back(painted_subjects[index].path);
+                }
+                painted_subjects.resize(palette.size());
+                materials.resize(palette.size());
+            }
+            for (size_t index = 0; index < painted_subjects.size(); ++index) {
+                auto node_material = makePassMaterial(shader.value());
+                if (node_material.isErr()) return node_material.error();
+                auto colour = makeColorVector3(palette[index]);
+                if (colour.isErr()) return colour.error();
+                auto applied = setPassParameter(node_material.value(), "didi_colour", colour.value());
+                if (applied.isErr()) return applied.error();
+                materials[index] = node_material.value();
+                capture.segmented.push_back(
+                    SegmentedNode{painted_subjects[index].path, painted_subjects[index].class_name,
+                                  index});
+            }
+        }
 
         MaterialOverrides overrides;
-        auto painted = overrides.paint(subjects, materials);
+        auto painted = overrides.paint(painted_subjects, materials);
         if (painted.isErr()) return painted.error();
         auto drawn = forceDraw();
         if (drawn.isErr()) return drawn.error();

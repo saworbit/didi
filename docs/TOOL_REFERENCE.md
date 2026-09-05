@@ -240,11 +240,11 @@ Removes wireframe previews. `preview_id` clears one batch; omitting it clears ev
 
 Draws the live 3D scene again with replacement materials and returns one image per requested pass. Available in an editor or a game session. 3D only: a depth pass has no meaning on a canvas, so only `GeometryInstance3D` nodes are painted.
 
-- `passes` (`array`, required): 1 to 3 of `color`, `depth`, `normal`, with no repeats. Each comes back as its own image block, in the order given, and `pass_order` names them.
+- `passes` (`array`, required): 1 to 4 of `color`, `depth`, `normal`, `segmentation`, with no repeats. Each comes back as its own image block, in the order given, and `pass_order` names them.
 - `camera_identifier` (`string`): editor sessions only. A game has one root viewport and the argument is refused there.
 - `depth_far` (`number`): the distance mapped to white. Defaults to the rendering camera's own far plane, which is the distance past which that camera draws nothing. The value used is reported as `depth_far`.
 
-`depth` paints geometry a grey that rises with distance in front of the camera, with `depth_far` mapped to white. `normal` paints the world-space surface normal as `n * 0.5 + 0.5`, in world space rather than view space so a surface that faces up reads the same whichever way the camera is turned. `color` is the ordinary frame, captured with nothing replaced.
+`depth` paints geometry a grey that rises with distance in front of the camera, with `depth_far` mapped to white. `normal` paints the world-space surface normal as `n * 0.5 + 0.5`, in world space rather than view space so a surface that faces up reads the same whichever way the camera is turned. `color` is the ordinary frame, captured with nothing replaced. `segmentation` paints each node a flat colour of its own and returns a legend saying which is which.
 
 **These are orderings, not measurements.** The pass shaders undo the sRGB curve the framebuffer applies, which stops a mid grey arriving as a much lighter one, but the viewport post-processes after that and how much it changes depends on the engine: a 4.7.2 editor returns the written values unchanged and a 4.5.1 editor returns them scaled by about a quarter. So a depth pass will reliably tell you that one thing is nearer than another, and will not reliably tell you how far away either of them is. `encoding` reports `srgb8_relative` to say exactly this.
 
@@ -254,7 +254,18 @@ At most 4096 nodes are walked. `painted_node_count`, `examined_node_count` and `
 
 Every `material_override` is restored before the call returns, on the failing paths as well. A restore that does not succeed is reported as the error, ahead of any capture failure, because a scene left wearing a debug material is the worse outcome.
 
-A semantic segmentation pass is not here. It would need each node to come back as an exactly identifiable colour, and the viewport post-processing above means the colour written is not always the colour stored, so a legend mapping colours to node paths would not match its own pixels on every engine.
+**The segmentation legend reports what it saw, not what it asked for.** The same post-processing is why: a legend naming the colour the shader was given would describe pixels that are not in the picture on 4.5.1. So the frame is read back, every pixel is matched to the entry it is nearest, and each entry reports the commonest colour among the pixels it claimed. That colour is in the image by construction, on whichever engine drew it.
+
+`segmentation` returns:
+
+- `segmentation`: one entry per painted node, with `id`, `node_path`, `class`, the `color` it was given, the `observed_color` that came back, `pixels`, and `bounds` as `{x, y, width, height}`. Those bounds are the 2D box the node occupies, taken from the picture rather than projected onto it.
+- A node with `pixels: 0` has `observed_color` and `bounds` as `null`. It was painted and is not visible: behind something, outside the frame, or drawing nothing. That is an answer, so it is reported rather than left out.
+- `segmentation_unclaimed_pixels`: pixels that are not near any entry. Background, and the edges where two colours blended.
+- `segmentation_capacity` and `segmentation_unpainted`: the palette holds a fixed number of entries, and nodes past it are not painted at all rather than sharing a colour with another node. The ones that missed out are named.
+
+The palette uses three levels a channel and no neutral colours. Three because a shifted level has to stay nearer its own written value than its neighbour's, and four levels puts two of them close enough after the shift that the answer would depend on the engine. No neutrals because a viewport background is far more likely to be grey than coloured, and an entry the background could sit on is an entry that would claim pixels no node painted.
+
+A pixel further from every entry than the match radius belongs to nobody. That is what keeps an antialiased edge, where two node colours blended, from being filed under whichever node it landed closer to.
 
 ### `viewport_diff_capture` — Live
 

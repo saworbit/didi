@@ -1,4 +1,5 @@
 #include "didi/gdextension/viewport_renderer.hpp"
+#include "didi/runtime/segmentation.hpp"
 #include "didi/gdextension/gdextension_api.hpp"
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/common/base64.hpp"
@@ -161,22 +162,26 @@ namespace {
 
 // The passes a caller may ask for, in the order they are named here when the
 // request does not fix one.
-const char* const kPassKinds[] = {"color", "depth", "normal"};
+const char* const kPassKinds[] = {"color", "depth", "normal", "segmentation"};
+
+json colorJson(const runtime::SegmentationColor& colour) {
+    return {{"r", colour.r}, {"g", colour.g}, {"b", colour.b}};
+}
 
 Result<std::vector<std::string>> parseRequestedPasses(const json& params) {
     if (!params.contains("passes") || !params["passes"].is_array()) {
         return Error::invalidArgument("passes must be an array");
     }
     const auto& requested = params["passes"];
-    if (requested.empty() || requested.size() > 3) {
-        return Error::invalidArgument("passes must contain 1 to 3 entries");
+    if (requested.empty() || requested.size() > 4) {
+        return Error::invalidArgument("passes must contain 1 to 4 entries");
     }
     std::vector<std::string> kinds;
     for (const auto& entry : requested) {
         if (!entry.is_string()) return Error::invalidArgument("passes entries must be strings");
         const auto kind = entry.get<std::string>();
         if (std::find(std::begin(kPassKinds), std::end(kPassKinds), kind) == std::end(kPassKinds)) {
-            return Error::invalidArgument("passes entries must be color, depth, or normal");
+            return Error::invalidArgument("passes entries must be color, depth, normal, or segmentation");
         }
         // A pass asked for twice would be drawn twice and returned twice, which
         // is a request nobody means to make.
@@ -231,9 +236,46 @@ json ViewportRenderer::capturePasses(const json& params, const std::string& sess
         auto& capture = captured.value();
 
         json passes = json::array();
+        json legend = json::array();
+        uint64_t unclaimed = 0;
         int width = 0;
         int height = 0;
         for (auto& frame : capture.frames) {
+            // Read the segmentation frame back before it is encoded. The legend
+            // reports the colour that is in the picture rather than the one the
+            // shader was given, because the viewport post-processes after the
+            // shader writes and by how much depends on the engine.
+            if (frame.kind == "segmentation") {
+                const auto scan = runtime::readSegmentation(
+                    frame.pixels.rgba.data(), frame.pixels.width, frame.pixels.height,
+                    capture.segmented.size());
+                unclaimed = scan.unclaimed_pixels;
+                const auto& palette = runtime::segmentationPalette();
+                for (const auto& node : capture.segmented) {
+                    const auto& region = scan.regions[node.entry];
+                    json entry = {
+                        {"id", static_cast<int>(node.entry)},
+                        {"node_path", node.path},
+                        {"class", node.class_name},
+                        {"color", colorJson(palette[node.entry])},
+                        {"pixels", region.pixels}
+                    };
+                    if (region.pixels > 0) {
+                        entry["observed_color"] = colorJson(region.observed);
+                        entry["bounds"] = {{"x", region.min_x}, {"y", region.min_y},
+                                           {"width", region.max_x - region.min_x + 1},
+                                           {"height", region.max_y - region.min_y + 1}};
+                    } else {
+                        // Painted and not visible: behind something, outside the
+                        // frame, or drawing nothing. Reported rather than left
+                        // out, because a node missing from a legend reads as a
+                        // node that was never painted.
+                        entry["observed_color"] = nullptr;
+                        entry["bounds"] = nullptr;
+                    }
+                    legend.push_back(std::move(entry));
+                }
+            }
             auto encoded = encodeImageToPngBase64(frame.pixels.rgba.data(), frame.pixels.width,
                                                   frame.pixels.height);
             if (encoded.empty()) {
@@ -260,6 +302,13 @@ json ViewportRenderer::capturePasses(const json& params, const std::string& sess
             {"examined_node_count", capture.examined},
             {"scan_limit_reached", capture.scan_limit_reached}
         };
+        if (std::find(kinds.value().begin(), kinds.value().end(), "segmentation") !=
+            kinds.value().end()) {
+            result["segmentation"] = std::move(legend);
+            result["segmentation_unclaimed_pixels"] = unclaimed;
+            result["segmentation_unpainted"] = capture.unsegmented;
+            result["segmentation_capacity"] = static_cast<int>(runtime::segmentationPalette().size());
+        }
         const bool wants_depth = std::find(kinds.value().begin(), kinds.value().end(), "depth") !=
                                  kinds.value().end();
         if (wants_depth) {
