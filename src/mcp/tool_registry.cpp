@@ -73,6 +73,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "viewport_create_test_lab", "create_visual_test_lab", "resource_create",
         "resource_inspect", "project_list_resources", "query_project_resources",
         "project_get_uid_map", "project_audit_assets", "project_analyze_impact",
+        "project_verify_changes",
         "project_rename_references", "runtime_launch",
         "blackboard_write", "blackboard_read", "blackboard_patch",
         "blackboard_list_keys", "blackboard_clear",
@@ -132,6 +133,7 @@ CallToolResult handleSignalDisconnect(const ResolvedToolBinding& binding, const 
 CallToolResult handleSignalEmit(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
 CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleProjectVerifyChanges(const json& args);
 CallToolResult handleScriptReflectClass(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleScriptGetSymbols(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -1481,6 +1483,34 @@ void ToolRegistry::registerAllDefaultTools() {
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleSpatialQueryClearance(binding, args, m_ipcClient);
         };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_verify_changes";
+        t.description = "Checks a set of proposed file contents together in an isolated copy of the project, so a script that preloads a sibling sees the proposed sibling, and nothing reaches the working tree whether the proposal is good or not.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"changes", {
+                    {"type", "array"}, {"minItems", 1}, {"maxItems", 64},
+                    {"description", "The proposal. Each file is written into the isolated copy before anything is checked, so the set is checked as a set."},
+                    {"items", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"path", {{"type", "string"}, {"description", "A res:// path inside the project. The same containment rules script_create applies."}}},
+                            {"content", {{"type", "string"}, {"description", "The whole proposed contents of that file, at most 1 MiB."}}}
+                        }},
+                        {"required", json::array({"path", "content"})},
+                        {"additionalProperties", false}
+                    }}
+                }},
+                {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 600}, {"default", 120}}}
+            }},
+            {"required", json::array({"changes"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [](const json& args) { return handleProjectVerifyChanges(args); };
         registerTool(std::move(t));
     }
     {

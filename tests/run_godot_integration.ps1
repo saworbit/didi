@@ -1635,6 +1635,82 @@ try {
     if ($dotnetAvailable) {
         $phase5Requests += Tool-Request 510 "csharp_check_build" @{ project_file = "res://Phase5.csproj"; configuration = "Debug"; timeout_seconds = 120 }
     }
+    # Speculative verification needs the project to sit in a git work tree,
+    # which the copied fixture is not until this makes it one. The nested repo
+    # keeps the sandbox entirely inside build/ rather than reaching the repo
+    # this suite is running from.
+    Push-Location $fixtureRoot
+    try {
+        # The import cache and session directory are build output, not project
+        # source, and committing them makes every checkout of the sandbox carry
+        # thousands of files it will regenerate anyway.
+        Set-Content -LiteralPath (Join-Path $fixtureRoot ".gitignore") -Encoding utf8 -Value @(".godot/", ".didi-sessions/")
+        & git init --quiet *> $null
+        & git -c core.autocrlf=false add -A *> $null
+        & git -c core.autocrlf=false -c user.email=didi@example.invalid -c user.name=didi commit --quiet -m "fixture baseline" *> $null
+        $insideWorkTree = (& git rev-parse --is-inside-work-tree 2>$null | Select-Object -First 1)
+        $fixtureIsRepo = ("$insideWorkTree".Trim() -eq "true")
+    } finally {
+        Pop-Location
+    }
+    Assert-True $fixtureIsRepo "The fixture project could not be made into a git work tree."
+
+    # A script that preloads a sibling is only correct when the sibling is the
+    # proposed one. Checked together it passes; checked without its sibling the
+    # same script must not, which is the whole reason this tool exists rather
+    # than checking one file at a time from source text.
+    $siblingSource = "extends Node`nclass_name SandboxSibling`n`nstatic func greet() -> String:`n`treturn `"hi`"`n"
+    $consumerSource = "extends Node`n`nconst Sibling = preload(`"res://sandbox_sibling.gd`")`n`nfunc _ready() -> void:`n`tprint(Sibling.greet())`n"
+    $verifyRequests = @(
+        (@{ jsonrpc = "2.0"; id = 620; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 621 "project_verify_changes" @{ changes = @(
+            @{ path = "res://sandbox_sibling.gd"; content = $siblingSource },
+            @{ path = "res://sandbox_user.gd"; content = $consumerSource }) }),
+        (Tool-Request 622 "project_verify_changes" @{ changes = @(
+            @{ path = "res://sandbox_user.gd"; content = $consumerSource }) }),
+        (Tool-Request 623 "project_verify_changes" @{ changes = @(
+            @{ path = "res://../escape.gd"; content = "extends Node`n" }) })
+    )
+    $previousVerifyGodotBin = $env:GODOT_BIN
+    try {
+        $env:GODOT_BIN = $GodotExecutable
+        Push-Location $fixtureRoot
+        try {
+            $rawVerifyResponses = $verifyRequests | & $didiExecutable --project $fixtureRoot
+        } finally {
+            Pop-Location
+        }
+    } finally {
+        $env:GODOT_BIN = $previousVerifyGodotBin
+    }
+    $verifyResponses = @($rawVerifyResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
+    $verifyById = @{}
+    foreach ($response in $verifyResponses) { $verifyById[[int]$response.id] = $response }
+
+    $together = Tool-Payload $verifyById[621]
+    Assert-True ($together.execution_mode -eq "offline") "Speculative verification did not report itself as offline."
+    Assert-True ($together.written -eq 2) "Speculative verification wrote $($together.written) of 2 proposed files."
+    Assert-True ($together.base_commit.Length -ge 7) "Speculative verification did not say which commit it checked against."
+    Assert-True ($together.all_ok -eq $true) "A proposal checked with its own sibling did not pass: $($together | ConvertTo-Json -Depth 6 -Compress)"
+    Assert-True ($together.sandbox_removed -eq $true) "Speculative verification did not report removing its sandbox."
+
+    $alone = Tool-Payload $verifyById[622]
+    Assert-True ($alone.all_ok -eq $false) "A script preloading a file that does not exist was reported as fine."
+    Assert-True (@($alone.scripts)[0].detail -match "sandbox_sibling") "The failure does not name the file that was missing."
+
+    Assert-True $verifyById[623].result.isError "Speculative verification accepted a path outside the project."
+
+    # Nothing reached the working tree, which is the point of doing it in a copy.
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot "sandbox_user.gd"))) "Speculative verification wrote a proposed file into the project."
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot "sandbox_sibling.gd"))) "Speculative verification wrote a proposed file into the project."
+    Push-Location $fixtureRoot
+    try {
+        $leftoverWorktrees = @(& git worktree list) | Where-Object { $_ -match "didi-verify-" }
+    } finally {
+        Pop-Location
+    }
+    Assert-True ($leftoverWorktrees.Count -eq 0) "Speculative verification left a worktree behind: $($leftoverWorktrees -join '; ')."
+
     $previousGodotBin = $env:GODOT_BIN
     try {
         $env:GODOT_BIN = $GodotExecutable

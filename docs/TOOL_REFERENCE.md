@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 106 canonical tool names plus 10 legacy names (116 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 107 canonical tool names plus 10 legacy names (117 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `103/106`
+**Canonical implementation:** `104/107`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 103/106 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 104/107 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -452,6 +452,21 @@ Scans the project working directory for resources.
 ### `project_get_uid_map` — Offline
 
 Returns UID-to-path mappings discovered in indexed project resources. Embedded UIDs take precedence; modern Godot `.uid` sidecars are read for every resource type as a bounded fallback and accepted only when they match Godot's lowercase-alphanumeric textual UID format.
+
+### `project_verify_changes` — Offline
+
+Checks a set of proposed file contents together in an isolated copy of the project, without writing anything to the working tree.
+
+- `changes` (`array`, required): 1 to 64 entries, each with a `path` and the whole proposed `content` of that file. `path` follows the same containment rules `script_create` applies, and each file may appear once.
+- `timeout_seconds` (`integer`, 1 to 600, default 120).
+
+`script_check_syntax` already answers whether one file parses, from source text, without writing anything. What it cannot answer is whether a set of files is consistent with each other: a script that preloads a sibling is only correct when that sibling is the proposed one rather than the one still on disk. That needs the whole set present together, somewhere that is not the project someone is working in.
+
+So the proposal is written into a git worktree built from `HEAD`, every proposed `.gd` file is checked there with the rest of the proposal in place, and the worktree is removed again, including on the paths that fail. The project must sit inside a git work tree; the tool refuses otherwise rather than falling back to copying a project directory, which for a Godot project means its imported assets too.
+
+Uncommitted work is carried across, because a check that ignored it would answer a question about a project nobody has open. `base_commit` reports what the copy was built from and `carried_uncommitted` whether that patch was applied. Untracked files cannot be carried, so they are named in `untracked_excluded` rather than counted: a proposal that depends on one would otherwise be checked against a project missing it.
+
+Each entry in `scripts` carries `ok` and, when it failed, the engine's own `detail`. `all_ok` is the verdict for the set. Verification is GDScript parsing only; it does not run the project's tests or capture frames.
 
 ### `project_analyze_impact` — Offline
 

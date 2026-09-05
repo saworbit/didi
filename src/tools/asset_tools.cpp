@@ -1,3 +1,4 @@
+#include "didi/offline/speculative_verify.hpp"
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
@@ -326,6 +327,18 @@ CallToolResult handleProjectRenameReferences(const json& args, std::shared_ptr<i
     auto payload = report.value();
     payload["execution_mode"] = "offline_fallback";
     return CallToolResult::successJson(std::move(payload));
+}
+
+CallToolResult handleProjectVerifyChanges(const json& args) {
+    auto parsed = offline::parseSpeculativeVerifyRequest(args);
+    if (parsed.isErr()) {
+        return CallToolResult::error("Invalid verification request: " + parsed.error().message);
+    }
+    auto verified = offline::verifyChangesInSandbox(parsed.value());
+    if (verified.isErr()) {
+        return CallToolResult::error(verified.error().message);
+    }
+    return CallToolResult::successJson(verified.value().toJson());
 }
 
 CallToolResult handleProjectAnalyzeImpact(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
