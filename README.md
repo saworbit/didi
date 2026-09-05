@@ -26,6 +26,7 @@ The current documented release is **1.5.0**.
 
 | Document | Target Audience | Description |
 | :--- | :--- | :--- |
+| 📚 [**Documentation Index**](docs/README.md) | **Everyone** | Every page under `docs/`, grouped, with the status of each design record. |
 | 🚀 [**Quickstart Guide**](docs/QUICKSTART.md) | **Developers / Humans** | 5-minute step-by-step setup for Godot, Cursor, Claude, and VS Code. |
 | 🤖 [**LLM Agent Instructions**](docs/LLM_INSTRUCTIONS.md) | **AI Assistants / LLMs** | Dedicated system prompt & decision tree for Claude, Cursor, Windsurf, Antigravity. |
 | ✅ [**Current Capability Matrix**](docs/CAPABILITIES.md) | **Everyone** | Authoritative live, offline, unavailable, and unimplemented behavior. |
