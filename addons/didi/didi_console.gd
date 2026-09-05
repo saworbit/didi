@@ -114,6 +114,11 @@ func _init() -> void:
 
 
 func _ready() -> void:
+	# A status console opens on its status. Which tab a TabContainer lands on
+	# otherwise is not something this asks the editor to remember, and a console
+	# that came back on Settings answers a question nobody had.
+	if _tabs != null:
+		_tabs.current_tab = 0
 	_apply_theme()
 	_reload_settings_controls()
 	_refresh()
