@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 102 canonical tool names plus 10 legacy names (112 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 103 canonical tool names plus 10 legacy names (113 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `99/102`
+**Canonical implementation:** `100/103`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 99/102 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 100/103 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -249,6 +249,23 @@ Updates an in-scene `Camera3D` in one editor UndoRedo action. `camera_path` and 
 Sets the public SceneTree `collision_shapes` and `navigation_mesh` debug hints used by future games run from that editor. At least one is required. Omitted hints are preserved, both are reread after mutation, and both original values are restored if a setter or postcondition fails. The retained `wireframe` field accepts only `false` because Godot exposes no supported live wireframe control. The result returns `previous`, `observed`, `effective_scope: "future_games_run_from_editor"`, and `rollback: "explicit_restore"`.
 
 ## 5. Physics, animation, and navigation
+
+### `spatial_query_frustum` — Live
+
+Lists the 3D nodes inside a camera frustum, nearest first, in either an editor or a game session.
+
+- `camera_node` (`string`): a `Camera3D` already in the scene. Its global transform, projection mode, field of view and near and far planes are read from the node.
+- `camera` (`object`): a frustum written out by hand, with `position`, `look_at`, `fov_degrees`, `near`, `far` and `aspect` all required, and `up` defaulting to `{0,1,0}`. `fov_degrees` is vertical, matching a Godot camera's default. A frustum is a 3D shape, so 2D points are refused rather than lifted.
+- Exactly one of `camera_node` and `camera` is required. Two would be two answers to one question.
+- `sightline` (`boolean`, default `false`), `collision_mask` (`integer`, default `1`) and `max_results` (`integer`, 1 to 256, default `64`).
+
+Both forms build the same six planes, so a node one form calls visible is never a node the other calls hidden. The response echoes the frustum that answered under `camera`: position, the three basis axes, near, far, aspect, projection mode and the field of view or orthogonal size. Nothing about the frustum is left to be assumed by the caller.
+
+Each entry carries `path`, `class`, `containment`, `tested`, `visible_in_tree` and `distance`. A node with geometry is tested by its own bounding box, transformed by the engine's own `to_global`, and is `inside` when every corner is within all six planes or `intersecting` when it straddles one. A node without geometry is tested at its origin and can only be `inside`, which is what `tested` reports. Containment is conservative in the usual direction: a box that straddles two planes without entering the volume is called `intersecting` rather than dropped. Hidden nodes are reported with `visible_in_tree` set to false rather than filtered out, because whether to ignore them is the caller's decision.
+
+With `sightline` set, rays are cast from the camera to each node's eight bounding-box corners and its centre, or to its origin, and `samples`, `samples_clear` and a `status` of `clear`, `partial` or `blocked` are reported. A hit on the node itself, on its own body, or at or beyond the sample point is not an obstruction. Two limits are worth stating plainly. Rays see physics colliders only, so a wall without a collision shape does not block, and sampling nine points is not a proof that no part of a node is hidden. Sampling stops after 512 rays, and a node past that carries no `sightline` field at all rather than one saying it is clear.
+
+`node_count` counts every node found inside the frustum, `examined` counts every node walked, and `truncated` says whether either limit cut the answer short.
 
 ### `spatial_query_clearance` — Live
 

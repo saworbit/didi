@@ -33,7 +33,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-Didi v1.5.0 registers 102 canonical tool names. 99 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 99 canonical tools are implemented. Ten legacy names are registered separately, for exactly 112 `tools/list` entries.
+Didi v1.5.0 registers 103 canonical tool names. 100 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 100 canonical tools are implemented. Ten legacy names are registered separately, for exactly 113 `tools/list` entries.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
@@ -63,7 +63,7 @@ Didi v1.5.0 registers 102 canonical tool names. 99 are implemented in at least o
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `99/102`
+**Canonical implementation:** `100/103`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
@@ -153,6 +153,7 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 - `shader_get_visual_graph` returns a VisualShader's nodes and connections per shader type, with node classes and editor positions. A shader written as code is refused rather than reported as an empty graph.
 - `shader_set_uniform` sets one uniform through the editor UndoRedo stack, taking the same JSON spellings `scene_set_property` takes, and refuses a name the shader does not declare. The write reaches the loaded material: an embedded one is saved with the scene, an external `.tres` is not saved by this surface, and a shared material is shared.
 - `shader_list_uniforms` reads a ShaderMaterial's uniforms from a node in the edited scene, with each declared type, its effective value, and whether the property contract can express that type. The effective value is the material's override or the shader's default, and the two are not distinguished. It does not set them.
+- `spatial_query_frustum` lists the 3D nodes inside a camera frustum, nearest first, from either a Camera3D in the scene or hand written parameters, and can sample whether anything with a collider stands between the camera and each one. Sightline rays see physics colliders only.
 - `spatial_query_clearance` sweeps a box, sphere or capsule along a path and reports the safe and unsafe fractions the engine returned plus the position reached. Bodies block and areas do not, unlike the raycast, because a trigger volume is not geometry. It does not name what blocked the sweep.
 - `spatial_query_raycast_batch` casts up to 64 rays in one dispatch against one space state. Each entry uses the `physics_raycast_query` contract unchanged. One batch is one dimension, and a ray that cannot be answered fails the batch rather than leaving a gap.
 - `runtime_watch_invariants` samples once per engine frame for a bounded window and stops the game on the first violation. Its outcome is `violated`, `held`, or `inconclusive`; an invariant that never produced a reading makes the run inconclusive rather than held. It sees error-level engine output, not a debugger, and carries no call stack.

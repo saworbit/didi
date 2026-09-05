@@ -13,6 +13,10 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Added
 
+- Added `spatial_query_frustum`, which lists the 3D nodes inside a camera frustum in the attached session, nearest first. The frustum comes either from a Camera3D already in the scene, whose transform, projection, near and far planes are read, or from parameters written out by hand; both build the same six planes, so a node one form calls visible is never a node the other calls hidden. A node with geometry is tested by its own bounding box and reported as `inside` or `intersecting`; a node without geometry is tested at its origin, and which test ran is reported. Aspect ratio does not live on a camera, so its source is reported too: a running game is measured through the camera's own viewport, while an edited scene uses the project's configured viewport size, because the shape of an editor pane is a fact about the window rather than about the game. With `sightline` set, rays are cast from the camera to each node's corners and centre, and the count that arrived is reported alongside `clear`, `partial` or `blocked`. Rays see physics colliders only, so geometry without one does not block, and a node whose sightline was not sampled carries no sightline field rather than a clear one.
+
+### Added
+
 - Added `shader_get_visual_graph`, which returns a VisualShader's nodes and connections per shader type as structured JSON. A project that builds its materials as graphs was opaque: the uniform tools read what a graph exposes, and nothing said what the graph itself was made of. Each node carries its id, its Godot class, and its position in the editor graph; each connection carries the node and port it runs from and to, because a graph is its links as much as its nodes. A shader written as code is refused with a message saying so, rather than reported as a graph with no nodes in it. Node and connection counts are reported separately from the returned lists, so a bounded response says how much it left out.
 
 ### Added
@@ -61,12 +65,12 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `99/102`
+**Canonical implementation:** `100/103`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 102 canonical tools plus 10 legacy registrations (112 total). 99 canonical tools are implemented and 3 remain unimplemented.
+Discovery now exposes 103 canonical tools plus 10 legacy registrations (113 total). 100 canonical tools are implemented and 3 remain unimplemented.
 
 ---
 
