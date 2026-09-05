@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 107 canonical tool names plus 10 legacy names (117 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 108 canonical tool names plus 10 legacy names (118 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `104/107`
+**Canonical implementation:** `105/108`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 104/107 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 105/108 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -458,6 +458,8 @@ Returns UID-to-path mappings discovered in indexed project resources. Embedded U
 Checks a set of proposed file contents together in an isolated copy of the project, without writing anything to the working tree.
 
 - `changes` (`array`, required): 1 to 64 entries, each with a `path` and the whole proposed `content` of that file. `path` follows the same containment rules `script_create` applies, and each file may appear once.
+- `run_scene` (`string`, optional): a `.tscn` or `.scn` inside the project to open in the copy once the proposal is written.
+- `run_frames` (`integer`, 1 to 6000, default 120): iterations to let that scene run before Godot quits by itself. Only meaningful with `run_scene`.
 - `timeout_seconds` (`integer`, 1 to 600, default 120).
 
 `script_check_syntax` already answers whether one file parses, from source text, without writing anything. What it cannot answer is whether a set of files is consistent with each other: a script that preloads a sibling is only correct when that sibling is the proposed one rather than the one still on disk. That needs the whole set present together, somewhere that is not the project someone is working in.
@@ -466,7 +468,26 @@ So the proposal is written into a git worktree built from `HEAD`, every proposed
 
 Uncommitted work is carried across, because a check that ignored it would answer a question about a project nobody has open. `base_commit` reports what the copy was built from and `carried_uncommitted` whether that patch was applied. Untracked files cannot be carried, so they are named in `untracked_excluded` rather than counted: a proposal that depends on one would otherwise be checked against a project missing it.
 
-Each entry in `scripts` carries `ok` and, when it failed, the engine's own `detail`. `all_ok` is the verdict for the set. Verification is GDScript parsing only; it does not run the project's tests or capture frames.
+Each entry in `scripts` carries `ok` and, when it failed, the engine's own `detail`. `all_ok` is the verdict for the set. A script is judged by the engine's error stream as well as its exit code: `--check-only` exits 0 for a plain syntax error while printing the parse error, and exits 1 for a `preload` that resolves to nothing, so the exit code alone calls half of the broken scripts fine.
+
+`run_scene` makes the check more than a parse. Parsing says a file is well formed; it says nothing about a scene that fails to load, an `@onready` path that resolves to nothing, or a `_ready()` that divides by zero. The scene is opened headless in the copy and Godot quits after `run_frames` iterations, so a game that would never exit still ends. `scene_run` reports `ran`, `ok`, `exit_code`, `frames`, `timed_out`, and up to 32 of the engine's error lines. A proposal whose scripts did not parse is not run at all: the load failure that would produce reads as a runtime fault when the parse has already given the reason. `ran` says which happened, so a run that was skipped cannot be read as one that passed. The exit code is not the whole answer here either, so `ok` requires a clean exit, no timeout, and no error lines. Error lines are matched at the start of a line, so a game that prints one beginning with `ERROR:` is read as the engine reporting one.
+
+Two things a run costs. The copy is built from a commit and carries no import cache, because Godot keeps that in `.godot`, which projects gitignore. The first run therefore imports whatever the scene touches, and that time comes out of `timeout_seconds`; a run that does not finish reports `timed_out` rather than passing. And the run is headless, so there is no renderer: anything that depends on drawing behaves differently there than it does on screen. Frames are not captured.
+
+### `project_apply_changes` — Offline
+
+Checks a proposal in an isolated copy and, only if it passes, writes it into the working tree.
+
+- `changes` (`array`, required): the same shape `project_verify_changes` takes.
+- `run_scene` (`string`, optional), `run_frames` (`integer`, default 120), `timeout_seconds` (`integer`, default 120): the same arguments, doing the same thing, before the decision to write.
+
+The verification runs here rather than being taken on trust from an earlier call. A caller that verified a minute ago is describing a project that may have moved since, and the point of this tool is that what reaches the working tree is the thing that was just proved.
+
+A proposal that does not pass writes nothing. The response is the verification report with `applied: false`, and the result is marked as an error so a caller cannot read it as a success with a footnote.
+
+Every file is staged before any is replaced, so the write cannot stop half applied because the last file was the one that could not be written. If a replacement still fails, the error names `committed_files` and `unchanged_files` rather than reporting a failure that sounds total. `applied_files` lists what reached the working tree.
+
+Always requires a confirmation token. It writes a set of files at once, there is no editor undo stack behind a file on disk, and unlike the writers that take one path it can replace several existing files in one call. Save or close open scenes first, since an editor holding unsaved changes will write over them.
 
 ### `project_analyze_impact` — Offline
 
@@ -983,4 +1004,4 @@ Requires finite viewport-space `point.x` and `point.y`. Optional `root_path` def
 
 Every implemented mutating tool schema includes `dry_run: boolean`. A true dry-run stops at the registry boundary and returns `dry_run: true` plus `mutation_preview`; no tool handler, subprocess, filesystem writer, or Godot main-thread command runs. The preview reports the exact tool/arguments, canonical project, execution mode, optional session ID, route generation, binding hash, and a conservative planned-change record.
 
-`editor_reload_project`, `script_patch_method`/`patch_script_symbols`, `project_rename_references`, and `overwrite: true` calls to `resource_create`, `script_create`, `viewport_create_test_lab`/`create_visual_test_lab`, `project_export`, and `gridmap_export_mesh_library` require confirmation. Call the exact tool with identical arguments plus `dry_run: true`, then repeat it without `dry_run` and with the returned `confirmation_token`. Tokens are cryptographically random, expire after 120 seconds, are consumed on the first attempt, and reject tool, argument, project, execution-mode, session, route-generation, expiry, and replay mismatches.
+`editor_reload_project`, `script_patch_method`/`patch_script_symbols`, `project_rename_references`, `project_apply_changes`, and `overwrite: true` calls to `resource_create`, `script_create`, `viewport_create_test_lab`/`create_visual_test_lab`, `project_export`, and `gridmap_export_mesh_library` require confirmation. Call the exact tool with identical arguments plus `dry_run: true`, then repeat it without `dry_run` and with the returned `confirmation_token`. Tokens are cryptographically random, expire after 120 seconds, are consumed on the first attempt, and reject tool, argument, project, execution-mode, session, route-generation, expiry, and replay mismatches.

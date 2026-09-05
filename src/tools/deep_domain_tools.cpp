@@ -166,43 +166,11 @@ private:
     std::filesystem::path path_;
 };
 
-class ScopedOfflineHelperEnvironment {
-public:
-    ScopedOfflineHelperEnvironment() {
-        if (const auto* current = std::getenv(offline::kOfflineHelperEnvironment)) {
-            previous_ = current;
-        }
-#if defined(_WIN32)
-        ready_ = _putenv_s(offline::kOfflineHelperEnvironment, "1") == 0;
-#else
-        ready_ = setenv(offline::kOfflineHelperEnvironment, "1", 1) == 0;
-#endif
-    }
-
-    ~ScopedOfflineHelperEnvironment() {
-        if (!ready_) return;
-#if defined(_WIN32)
-        (void)_putenv_s(offline::kOfflineHelperEnvironment,
-                        previous_.has_value() ? previous_->c_str() : "");
-#else
-        if (previous_.has_value()) (void)setenv(offline::kOfflineHelperEnvironment, previous_->c_str(), 1);
-        else (void)unsetenv(offline::kOfflineHelperEnvironment);
-#endif
-    }
-
-    bool ready() const { return ready_; }
-
-private:
-    std::optional<std::string> previous_;
-    bool ready_{false};
-};
-
 Result<offline::ProcessResult> runGodot(const std::filesystem::path& root,
                                         std::vector<std::string> arguments,
                                         int timeout_seconds) {
-    static std::mutex environment_mutex;
-    std::lock_guard<std::mutex> environment_lock(environment_mutex);
-    ScopedOfflineHelperEnvironment offline_environment;
+    // The guard serialises isolated launches itself.
+    offline::ScopedOfflineHelperEnvironment offline_environment;
     if (!offline_environment.ready()) {
         return Error::internal("Unable to isolate the offline Godot helper environment");
     }

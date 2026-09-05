@@ -73,7 +73,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "viewport_create_test_lab", "create_visual_test_lab", "resource_create",
         "resource_inspect", "project_list_resources", "query_project_resources",
         "project_get_uid_map", "project_audit_assets", "project_analyze_impact",
-        "project_verify_changes",
+        "project_verify_changes", "project_apply_changes",
         "project_rename_references", "runtime_launch",
         "blackboard_write", "blackboard_read", "blackboard_patch",
         "blackboard_list_keys", "blackboard_clear",
@@ -134,6 +134,7 @@ CallToolResult handleSignalEmit(const ResolvedToolBinding& binding, const json& 
 
 CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectVerifyChanges(const json& args);
+CallToolResult handleProjectApplyChanges(const json& args);
 CallToolResult handleScriptReflectClass(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleScriptGetSymbols(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -1549,12 +1550,48 @@ void ToolRegistry::registerAllDefaultTools() {
                         {"additionalProperties", false}
                     }}
                 }},
+                {"run_scene", {{"type", "string"},
+                               {"description", "Optional. A .tscn or .scn inside the project to open in the copy once the proposal is written, so the check is more than a parse. The copy has no import cache, so the first run also imports what the scene touches."}}},
+                {"run_frames", {{"type", "integer"}, {"minimum", 1}, {"maximum", 6000}, {"default", 120},
+                                {"description", "Iterations to let the scene run before Godot quits by itself. Only meaningful with run_scene."}}},
                 {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 600}, {"default", 120}}}
             }},
             {"required", json::array({"changes"})},
             {"additionalProperties", false}
         };
         t.handler = [](const json& args) { return handleProjectVerifyChanges(args); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_apply_changes";
+        t.description = "Checks a proposal in an isolated copy of the project and, only if it passes, writes it into the working tree in one staged pass. A proposal that does not pass is reported and nothing is written.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"changes", {
+                    {"type", "array"}, {"minItems", 1}, {"maxItems", 64},
+                    {"description", "The proposal. The same shape project_verify_changes takes, checked the same way before any of it reaches the working tree."},
+                    {"items", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"path", {{"type", "string"}, {"description", "A res:// path inside the project. The same containment rules script_create applies."}}},
+                            {"content", {{"type", "string"}, {"description", "The whole proposed contents of that file, at most 1 MiB."}}}
+                        }},
+                        {"required", json::array({"path", "content"})},
+                        {"additionalProperties", false}
+                    }}
+                }},
+                {"run_scene", {{"type", "string"},
+                               {"description", "Optional. A .tscn or .scn to open in the copy before deciding, so a scene that fails to load stops the write."}}},
+                {"run_frames", {{"type", "integer"}, {"minimum", 1}, {"maximum", 6000}, {"default", 120},
+                                {"description", "Iterations to let the scene run before Godot quits by itself. Only meaningful with run_scene."}}},
+                {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 600}, {"default", 120}}}
+            }},
+            {"required", json::array({"changes"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [](const json& args) { return handleProjectApplyChanges(args); };
         registerTool(std::move(t));
     }
     {

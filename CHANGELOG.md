@@ -11,7 +11,15 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
+### Added
+
+- `project_verify_changes` now takes `run_scene`, and a new `project_apply_changes` writes a proposal into the working tree once it has passed. Checking a proposal was only ever a parse, and nothing could act on the answer: a caller who liked the result had to apply the same writes itself through the ordinary writers, one file at a time, with no relationship between what was proved and what was written. `run_scene` opens a scene in the isolated copy, headless and bounded by `run_frames`, so a scene that fails to load, an `@onready` path that resolves to nothing, or a `_ready()` that divides by zero is caught by the thing that catches it, which is running. The exit code is not the whole answer there, because Godot leaves a runtime script error on its error stream and still exits 0, so the error lines are read as well. A proposal whose scripts did not parse is not run at all, and `ran` says so, because paying for an engine start to be told what the parse already said produces a load failure that reads as a runtime fault. `project_apply_changes` runs that same check and writes only if it passes, staging every file before replacing any, so the change cannot stop half applied. It runs the verification itself rather than trusting an earlier call, because a caller who verified a minute ago is describing a project that may have moved since. A proposal that does not pass writes nothing and comes back as the report, marked as an error so it cannot be read as a success with a footnote. It always requires a confirmation token. The surface is now 108 canonical tools, 105 implemented, 118 registrations.
+
 ### Fixed
+
+- A Godot that Didi starts to answer a question no longer publishes a runtime session. The extension starts an authenticated IPC session and writes a descriptor whenever it loads, which is right for an editor or a game someone is running and wrong for an engine started to check a proposal: it leaves another session for the next discovery to find, and a run killed at its timeout leaves the descriptor behind for the tombstone reaper. The isolation the C# and shader helpers already used now covers the verification sandbox as well, and the guard that sets it lives in one place instead of two.
+
+- `project_verify_changes` reported a script with a plain syntax error as fine. It judged each proposed file by the exit code of `godot --headless --check-only`, and Godot exits 0 for a parse error while printing it, reserving a non-zero exit for cases like a `preload` that resolves to nothing. So a proposal whose scripts do not parse came back `all_ok: true`, which is the one answer this tool must never give wrongly. It now reads the engine's error stream as well, which is what `script_check_syntax` has always done, and the failing script's `detail` carries those lines. Found by red-teaming the run half of this change: the same mistake would have let a scene run pass on an engine that had refused to load its script.
 
 - A live call that changes nothing is now sent once more, on a new connection to the same session, when the transport fails. A broken pipe leaves a caller unable to say whether the engine ran the request, and for a mutation that has to be reported, because applying it twice is worse than not knowing. For a call that changes nothing, repeating it is the same as making it, so asking again is what settles it and the failure no longer has to be reported as an unknown outcome. This is what #227 costs a CI run for: an `eval_gdscript` that lost its connection failed a harness run for a reason that had nothing to do with what the run was testing. Repeatability comes from the same mutation table that decides dry runs and confirmation tokens, so a tool cannot be repeatable in one place and a mutation in another, and `editor_render_ghost_preview` asked to accumulate rather than replace is excluded because a second attempt would draw the same proposal twice. One repeat, before the quarantine that would otherwise retire the route, never in a loop. A result that took two attempts carries `transport.repeats`; a failure asked twice and answered neither time carries `transport.repeated`. Mutations are untouched.
 
@@ -105,12 +113,12 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `104/107`
+**Canonical implementation:** `105/108`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 107 canonical tools plus 10 legacy registrations (117 total). 104 canonical tools are implemented and 3 remain unimplemented.
+Discovery now exposes 108 canonical tools plus 10 legacy registrations (118 total). 105 canonical tools are implemented and 3 remain unimplemented.
 
 ---
 

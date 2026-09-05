@@ -1711,6 +1711,109 @@ try {
     }
     Assert-True ($leftoverWorktrees.Count -eq 0) "Speculative verification left a worktree behind: $($leftoverWorktrees -join '; ')."
 
+    # Running the proposal is the part a parse cannot do. Both scripts below
+    # parse: the broken one calls a method on a node that is not there, which
+    # only shows up when the scene actually runs.
+    $runSceneSource = "[gd_scene load_steps=2 format=3]`n`n[ext_resource type=`"Script`" path=`"res://sandbox_run.gd`" id=`"1`"]`n`n[node name=`"Root`" type=`"Node`"]`nscript = ExtResource(`"1`")`n"
+    $goodRunScript = "extends Node`n`nfunc _ready() -> void:`n`tprint(`"sandbox ready`")`n"
+    $brokenRunScript = "extends Node`n`nfunc _ready() -> void:`n`tvar missing := get_node_or_null(`"Nope`")`n`tmissing.queue_free()`n"
+    $runProposal = { param($script) @(
+        @{ path = "res://sandbox_run.tscn"; content = $runSceneSource },
+        @{ path = "res://sandbox_run.gd"; content = $script }) }
+
+    $runRequests = @(
+        (@{ jsonrpc = "2.0"; id = 630; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 631 "project_verify_changes" @{ changes = (& $runProposal $goodRunScript); run_scene = "res://sandbox_run.tscn"; run_frames = 5 }),
+        (Tool-Request 632 "project_verify_changes" @{ changes = (& $runProposal $brokenRunScript); run_scene = "res://sandbox_run.tscn"; run_frames = 5 }),
+        (Tool-Request 633 "project_verify_changes" @{ changes = (& $runProposal $goodRunScript); run_scene = "res://not_a_scene.tscn" }),
+        (Tool-Request 635 "project_verify_changes" @{ changes = (& $runProposal "extends Node`nfunc _ready() -> void`n"); run_scene = "res://sandbox_run.tscn"; run_frames = 5 }),
+        # The gate, before the write that follows uses --yolo to get past it.
+        (Tool-Request 634 "project_apply_changes" @{ changes = (& $runProposal $goodRunScript) })
+    )
+    $previousRunGodotBin = $env:GODOT_BIN
+    try {
+        $env:GODOT_BIN = $GodotExecutable
+        Push-Location $fixtureRoot
+        try {
+            $rawRunResponses = $runRequests | & $didiExecutable --project $fixtureRoot
+        } finally {
+            Pop-Location
+        }
+    } finally {
+        $env:GODOT_BIN = $previousRunGodotBin
+    }
+    $runResponses = @($rawRunResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
+    $runById = @{}
+    foreach ($response in $runResponses) { $runById[[int]$response.id] = $response }
+
+    $ranClean = Tool-Payload $runById[631]
+    Assert-True ($ranClean.all_ok -eq $true) "A proposal that parses and runs was not reported as passing: $($ranClean | ConvertTo-Json -Depth 6 -Compress)"
+    Assert-True ($ranClean.scene_run.ran -eq $true) "The scene run of a working proposal did not happen."
+    Assert-True ($ranClean.scene_run.ok -eq $true) "The scene run of a working proposal did not pass: $($ranClean.scene_run | ConvertTo-Json -Depth 6 -Compress)"
+    Assert-True ($ranClean.scene_run.frames -eq 5) "The scene run did not report the frame budget it was given."
+    Assert-True ($ranClean.scene_run.timed_out -eq $false) "The scene run of a working proposal timed out."
+
+    $ranBroken = Tool-Payload $runById[632]
+    # The premise of the whole argument: every file parsed and the run still failed.
+    Assert-True (@(@($ranBroken.scripts) | Where-Object { -not $_.ok }).Count -eq 0) "The broken proposal failed to parse, so the run is not what caught it."
+    Assert-True ($ranBroken.scene_run.ok -eq $false) "A scene that errors at _ready was reported as running cleanly."
+    Assert-True (@($ranBroken.scene_run.errors).Count -gt 0) "A failed scene run reported no error lines."
+    Assert-True ($ranBroken.all_ok -eq $false) "A proposal whose scene run failed was still reported as passing."
+
+    Assert-True $runById[633].result.isError "Verification accepted a run_scene that is not in the project."
+
+    # A script that does not parse stops the run rather than paying for an
+    # engine start to be told the same thing in a worse way.
+    $notRun = Tool-Payload $runById[635]
+    Assert-True (@(@($notRun.scripts) | Where-Object { -not $_.ok }).Count -gt 0) "The unparseable proposal parsed."
+    Assert-True ($notRun.scene_run.ran -eq $false) "A proposal that does not parse was still run."
+    Assert-True ($notRun.scene_run.ok -eq $false) "A run that never happened was reported as passing."
+    Assert-True ($notRun.all_ok -eq $false) "A proposal that does not parse was reported as passing."
+    Assert-True $runById[634].result.isError "project_apply_changes wrote without a confirmation token."
+
+    # The write half. Tokens live in the process that issued them and this suite
+    # builds its request list before the process starts, so the confirmation is
+    # turned off for this invocation rather than round-tripped. The refusal
+    # above is what proves the gate is there.
+    $applyRequests = @(
+        (@{ jsonrpc = "2.0"; id = 640; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 641 "project_apply_changes" @{ changes = (& $runProposal $goodRunScript); run_scene = "res://sandbox_run.tscn"; run_frames = 5 }),
+        (Tool-Request 642 "project_apply_changes" @{ changes = (& $runProposal $brokenRunScript); run_scene = "res://sandbox_run.tscn"; run_frames = 5 })
+    )
+    $previousApplyGodotBin = $env:GODOT_BIN
+    try {
+        $env:GODOT_BIN = $GodotExecutable
+        Push-Location $fixtureRoot
+        try {
+            $rawApplyResponses = $applyRequests | & $didiExecutable --project $fixtureRoot --yolo
+        } finally {
+            Pop-Location
+        }
+    } finally {
+        $env:GODOT_BIN = $previousApplyGodotBin
+    }
+    $applyResponses = @($rawApplyResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
+    $applyById = @{}
+    foreach ($response in $applyResponses) { $applyById[[int]$response.id] = $response }
+
+    $applied = Tool-Payload $applyById[641]
+    Assert-True ($applied.applied -eq $true) "A proposal that passed was not applied: $($applied | ConvertTo-Json -Depth 6 -Compress)"
+    Assert-True (@($applied.applied_files).Count -eq 2) "The apply reported $(@($applied.applied_files).Count) written files instead of 2."
+    $appliedScriptPath = Join-Path $fixtureRoot "sandbox_run.gd"
+    Assert-True (Test-Path -LiteralPath $appliedScriptPath) "The applied proposal is not in the project."
+    Assert-True (Test-Path -LiteralPath (Join-Path $fixtureRoot "sandbox_run.tscn")) "The applied proposal is not in the project."
+    $appliedContent = Get-Content -LiteralPath $appliedScriptPath -Raw
+
+    # Read directly rather than through Tool-Payload: this response is meant to
+    # be an error, and the report is the payload of it.
+    Assert-True $applyById[642].result.isError "A proposal that was not applied came back as a plain success."
+    $refused = $applyById[642].result.content[0].text | ConvertFrom-Json
+    Assert-True ($refused.applied -eq $false) "A proposal whose scene run failed was written into the project anyway."
+    Assert-True ($refused.scene_run.ok -eq $false) "The refused apply did not say the scene run is what stopped it."
+    Assert-True (@($refused.applied_files).Count -eq 0) "A refused apply reported files it had written."
+    # The file that was already there is the one that is still there.
+    Assert-True ((Get-Content -LiteralPath $appliedScriptPath -Raw) -eq $appliedContent) "A refused apply changed a file it had decided not to write."
+
     $previousGodotBin = $env:GODOT_BIN
     try {
         $env:GODOT_BIN = $GodotExecutable

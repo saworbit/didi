@@ -1,9 +1,12 @@
 #include "didi/offline/speculative_verify.hpp"
 
+#include "didi/common/atomic_write.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/offline/test_runner.hpp"
+#include "didi/offline/deep_domain_support.hpp"
 #include "didi/offline/process_runner.hpp"
+#include "didi/offline/resource_indexer.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -19,6 +22,8 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr size_t kMaxDetailBytes = 4096;
+constexpr size_t kMaxRunErrors = 32;
+constexpr char kDetailSeparator = '\n';
 
 // Truncates on a character boundary rather than mid-sequence, so a bounded
 // diagnostic is still valid UTF-8 and still renders.
@@ -29,13 +34,31 @@ std::string boundedText(const std::string& text, size_t maximum_bytes) {
     return text.substr(0, cut) + "...";
 }
 
-bool endsWithGdscript(const std::string& path) {
-    if (path.size() < 3) return false;
-    std::string tail = path.substr(path.size() - 3);
+bool endsWithExtension(const std::string& path, const std::string& extension) {
+    if (path.size() < extension.size()) return false;
+    std::string tail = path.substr(path.size() - extension.size());
     for (auto& character : tail) {
         character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
     }
-    return tail == ".gd";
+    return tail == extension;
+}
+
+bool endsWithGdscript(const std::string& path) {
+    return endsWithExtension(path, ".gd");
+}
+
+// The project-relative form of a path a caller wrote, under the same
+// containment rules every writer applies. Used for the proposed files and for
+// the scene to run, so a path one of them accepts is a path the other accepts.
+Result<std::string> projectRelativePath(const std::string& path) {
+    auto resolved = paths::resolveProjectFileForWrite(path);
+    if (resolved.isErr()) return resolved.error();
+    std::error_code error;
+    const auto root = fs::weakly_canonical(fs::current_path(), error);
+    if (error) return Error::internal("project root cannot be resolved");
+    const auto relative = fs::relative(resolved.value(), root, error);
+    if (error) return Error::internal("project-relative path cannot be resolved");
+    return paths::projectPathToUtf8(relative.generic_string());
 }
 
 Result<ProcessResult> runGit(const fs::path& working_directory,
@@ -103,6 +126,75 @@ private:
     bool m_armed{true};
 };
 
+// The error-level lines Godot printed, in order and bounded.
+//
+// The exit code is not the whole answer and never was. `--check-only` exits 0
+// for a plain syntax error and 1 for a preload that resolves to nothing, and a
+// scene that throws at runtime exits 0 as well, so a verdict taken from the
+// exit code alone calls a broken file fine. `script_check_syntax` has always
+// read the stream for exactly this reason; this is the same rule.
+//
+// Anchored rather than a substring search, so a line that merely contains the
+// word is not mistaken for the engine reporting one. A running game printing a
+// line that starts with ERROR: still can be, and the run says its verdict comes
+// from the error stream.
+std::vector<std::string> engineErrorLines(const std::string& output, size_t limit) {
+    std::vector<std::string> errors;
+    std::istringstream lines(output);
+    std::string line;
+    while (std::getline(lines, line) && errors.size() < limit) {
+        std::string text = trimmed(line);
+        if (text.rfind("USER ", 0) == 0) text = text.substr(5);
+        if (text.rfind("ERROR:", 0) != 0 && text.rfind("SCRIPT ERROR:", 0) != 0) continue;
+        errors.push_back(boundedText(trimmed(line), kMaxDetailBytes));
+    }
+    return errors;
+}
+
+// Opens the proposed project in the copy and reports what the engine said.
+//
+// The copy is built from a commit and carries no import cache, because Godot
+// keeps that in .godot, which a project gitignores. The first run therefore
+// pays for the import of every asset the scene touches, and that time comes out
+// of the same timeout as the run. A run that does not finish says so rather
+// than being reported as a pass.
+Result<SpeculativeSceneRun> runSceneInSandbox(const std::string& godot,
+                                              const fs::path& sandbox_project,
+                                              const SpeculativeVerifyRequest& request,
+                                              bool scripts_parsed) {
+    if (!fs::exists(sandbox_project / paths::projectPathFromUtf8(request.run_scene_relative))) {
+        return Error(404, "run_scene names " + request.run_scene +
+                              ", which is not in the project and is not one of the proposed "
+                              "files, so there is nothing to run");
+    }
+    SpeculativeSceneRun run;
+    run.path = request.run_scene;
+    if (!scripts_parsed) {
+        run.errors.push_back("Not run: a proposed script did not parse, so the scene could not "
+                             "have loaded for a reason the parse had not already given.");
+        return run;
+    }
+    run.ran = true;
+    run.frames = request.run_frames;
+
+    ProcessRequest play;
+    play.executable = godot;
+    play.arguments = {"--headless", "--quit-after", std::to_string(request.run_frames),
+                      request.run_scene_relative};
+    play.working_directory = sandbox_project;
+    play.timeout = std::chrono::milliseconds(request.timeout_seconds * 1000);
+    auto ran = runProcess(play);
+    if (ran.isErr()) {
+        run.errors.push_back("Godot could not be run: " + ran.error().message);
+        return run;
+    }
+    run.exit_code = ran.value().exit_code;
+    run.timed_out = ran.value().timed_out;
+    run.errors = engineErrorLines(ran.value().output, kMaxRunErrors);
+    run.ok = !run.timed_out && run.exit_code == 0 && run.errors.empty();
+    return run;
+}
+
 } // namespace
 
 json SpeculativeVerifyResult::toJson() const {
@@ -112,14 +204,31 @@ json SpeculativeVerifyResult::toJson() const {
         if (!verdict.detail.empty()) entry["detail"] = verdict.detail;
         scripts_json.push_back(std::move(entry));
     }
-    return json{{"execution_mode", "offline"},
-                {"base_commit", base_commit},
-                {"carried_uncommitted", carried_uncommitted},
-                {"untracked_excluded", untracked_excluded},
-                {"written", written},
-                {"scripts", std::move(scripts_json)},
-                {"all_ok", all_ok},
-                {"sandbox_removed", true}};
+    json payload = {{"execution_mode", "offline"},
+                    {"base_commit", base_commit},
+                    {"carried_uncommitted", carried_uncommitted},
+                    {"untracked_excluded", untracked_excluded},
+                    {"written", written},
+                    {"scripts", std::move(scripts_json)},
+                    {"all_ok", all_ok},
+                    {"sandbox_removed", true}};
+    if (scene_run.has_value()) {
+        payload["scene_run"] = {{"path", scene_run->path},
+                                {"ran", scene_run->ran},
+                                {"ok", scene_run->ok},
+                                {"exit_code", scene_run->exit_code},
+                                {"frames", scene_run->frames},
+                                {"timed_out", scene_run->timed_out},
+                                {"errors", scene_run->errors}};
+    }
+    return payload;
+}
+
+json SpeculativeApplyResult::toJson() const {
+    json payload = verification.toJson();
+    payload["applied"] = applied;
+    payload["applied_files"] = written;
+    return payload;
 }
 
 Result<SpeculativeVerifyRequest> parseSpeculativeVerifyRequest(const json& params) {
@@ -127,7 +236,8 @@ Result<SpeculativeVerifyRequest> parseSpeculativeVerifyRequest(const json& param
         return Error::invalidArgument("Verification params must be an object");
     }
     for (auto it = params.begin(); it != params.end(); ++it) {
-        if (it.key() != "changes" && it.key() != "timeout_seconds") {
+        if (it.key() != "changes" && it.key() != "timeout_seconds" &&
+            it.key() != "run_scene" && it.key() != "run_frames") {
             return Error::invalidArgument("Verification request contains an unknown property");
         }
     }
@@ -151,6 +261,39 @@ Result<SpeculativeVerifyRequest> parseSpeculativeVerifyRequest(const json& param
             return Error::invalidArgument("timeout_seconds must be from 1 to 600");
         }
         request.timeout_seconds = static_cast<int>(seconds);
+    }
+
+    if (params.contains("run_frames")) {
+        const auto& value = params["run_frames"];
+        if (!value.is_number_integer() && !value.is_number_unsigned()) {
+            return Error::invalidArgument("run_frames must be an integer");
+        }
+        const auto frames = value.get<int64_t>();
+        if (frames < 1 || frames > 6000) {
+            return Error::invalidArgument("run_frames must be from 1 to 6000");
+        }
+        request.run_frames = static_cast<int>(frames);
+    }
+    if (params.contains("run_scene")) {
+        if (!params["run_scene"].is_string()) {
+            return Error::invalidArgument("run_scene must be a string");
+        }
+        request.run_scene = params["run_scene"].get<std::string>();
+        if (request.run_scene.empty()) {
+            return Error::invalidArgument("run_scene must name a scene, or be left out");
+        }
+        auto relative = projectRelativePath(request.run_scene);
+        if (relative.isErr()) {
+            return Error::invalidArgument("run_scene is not inside the project: " +
+                                          relative.error().message);
+        }
+        request.run_scene_relative = relative.value();
+        if (!endsWithExtension(request.run_scene_relative, ".tscn") &&
+            !endsWithExtension(request.run_scene_relative, ".scn")) {
+            return Error::invalidArgument("run_scene must be a .tscn or .scn scene");
+        }
+    } else if (params.contains("run_frames")) {
+        return Error::invalidArgument("run_frames only means something with run_scene");
     }
 
     request.changes.reserve(entries.size());
@@ -177,17 +320,12 @@ Result<SpeculativeVerifyRequest> parseSpeculativeVerifyRequest(const json& param
         }
         // The same containment rules every writer uses, so a path this accepts
         // is a path script_create would have accepted.
-        auto resolved = paths::resolveProjectFileForWrite(change.path);
-        if (resolved.isErr()) {
+        auto relative = projectRelativePath(change.path);
+        if (relative.isErr()) {
             return Error::invalidArgument(where + ".path is not inside the project: " +
-                                          resolved.error().message);
+                                          relative.error().message);
         }
-        std::error_code error;
-        const auto root = fs::weakly_canonical(fs::current_path(), error);
-        if (error) return Error::internal("project root cannot be resolved");
-        const auto relative = fs::relative(resolved.value(), root, error);
-        if (error) return Error::internal("project-relative path cannot be resolved");
-        change.relative = paths::projectPathToUtf8(relative.generic_string());
+        change.relative = relative.value();
 
         for (const auto& existing : request.changes) {
             if (existing.relative == change.relative) {
@@ -297,6 +435,11 @@ Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRe
         ++result.written;
     }
 
+    // Neither the checks nor the run wants a Godot that publishes a runtime
+    // session. Both are engines Didi started to answer a question, and a
+    // session from one of them is a session the next discovery would find.
+    const ScopedOfflineHelperEnvironment offline_helper;
+
     // Every proposed script is checked with the whole proposal present, which
     // is the part a single-file check cannot do: a script that preloads a
     // sibling has to see the proposed sibling, not the one still on disk.
@@ -319,14 +462,90 @@ Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRe
             verdict.ok = false;
             verdict.detail = "The check did not finish within the timeout";
         } else {
-            verdict.ok = ran.value().exit_code == 0;
+            // Break caught: this judged the exit code alone, and Godot exits 0
+            // for a script with a plain syntax error while printing the parse
+            // error. A proposal full of them read back as all_ok, which is the
+            // one answer this tool must never give wrongly.
+            const auto errors = engineErrorLines(ran.value().output, kMaxRunErrors);
+            verdict.ok = ran.value().exit_code == 0 && errors.empty();
             if (!verdict.ok) {
-                verdict.detail = boundedText(trimmed(ran.value().output), kMaxDetailBytes);
+                std::string detail;
+                for (const auto& error : errors) {
+                    if (!detail.empty()) detail.push_back(kDetailSeparator);
+                    detail += error;
+                }
+                if (detail.empty()) detail = trimmed(ran.value().output);
+                verdict.detail = boundedText(detail, kMaxDetailBytes);
             }
         }
         if (!verdict.ok) result.all_ok = false;
         result.scripts.push_back(std::move(verdict));
     }
+
+    if (!request.run_scene_relative.empty()) {
+        auto run = runSceneInSandbox(godot, sandbox_project, request, result.all_ok);
+        if (run.isErr()) return run.error();
+        if (!run.value().ok) result.all_ok = false;
+        result.scene_run = std::move(run.value());
+    }
+    return result;
+}
+
+Result<SpeculativeApplyResult> applyVerifiedChanges(const SpeculativeVerifyRequest& request) {
+    auto verified = verifyChangesInSandbox(request);
+    if (verified.isErr()) return verified.error();
+
+    SpeculativeApplyResult result;
+    result.verification = std::move(verified.value());
+    // A proposal that did not pass is reported exactly as it stands. Writing it
+    // anyway would make the check decoration.
+    if (!result.verification.all_ok) return result;
+
+    std::error_code error;
+    const auto project_root = fs::weakly_canonical(fs::current_path(), error);
+    if (error) return Error::internal("The project root cannot be resolved");
+
+    // Everything that can fail on the way to disk fails here, before any
+    // destination is replaced, so the proposal cannot stop half applied because
+    // the last file was the one that could not be written.
+    std::vector<files::StagedWrite> staged;
+    staged.reserve(request.changes.size());
+    for (const auto& change : request.changes) {
+        const auto target = project_root / paths::projectPathFromUtf8(change.relative);
+        std::error_code directory_error;
+        fs::create_directories(target.parent_path(), directory_error);
+        if (directory_error) {
+            return Error(500, "Could not create the directory for " + change.path +
+                                  ", so nothing was written");
+        }
+        auto write = files::stageFileWrite(target, change.content);
+        if (write.isErr()) {
+            return Error(500, "Preparing the write failed at " + change.path +
+                                  ", so nothing was written: " + write.error().message);
+        }
+        staged.push_back(std::move(write.value()));
+    }
+
+    for (size_t index = 0; index < staged.size(); ++index) {
+        auto done = staged[index].commit();
+        if (done.isErr()) {
+            // The one outcome that is neither all nor nothing, so it says which
+            // files moved rather than reporting a failure that sounds total.
+            json remaining = json::array();
+            for (size_t rest = index; rest < request.changes.size(); ++rest) {
+                remaining.push_back(request.changes[rest].path);
+            }
+            return Error(500, "The proposal was staged but a file could not be replaced. The "
+                              "files in committed_files were written and the rest were not.",
+                         {{"committed_files", result.written},
+                          {"unchanged_files", std::move(remaining)},
+                          {"failed_file", request.changes[index].path}});
+        }
+        result.written.push_back(request.changes[index].path);
+    }
+
+    ResourceIndexer::invalidateSharedIndex();
+    result.applied = true;
     return result;
 }
 

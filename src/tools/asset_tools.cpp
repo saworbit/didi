@@ -341,6 +341,31 @@ CallToolResult handleProjectVerifyChanges(const json& args) {
     return CallToolResult::successJson(verified.value().toJson());
 }
 
+CallToolResult handleProjectApplyChanges(const json& args) {
+    auto parsed = offline::parseSpeculativeVerifyRequest(args);
+    if (parsed.isErr()) {
+        return CallToolResult::error("Invalid apply request: " + parsed.error().message);
+    }
+    auto applied = offline::applyVerifiedChanges(parsed.value());
+    if (applied.isErr()) {
+        const auto& failure = applied.error();
+        if (failure.data.is_object() && !failure.data.empty()) {
+            return CallToolResult::error(
+                json{{"error", {{"code", failure.code}, {"message", failure.message},
+                                {"data", failure.data}}}}.dump());
+        }
+        return CallToolResult::error(failure.message);
+    }
+    auto payload = applied.value().toJson();
+    payload["execution_mode"] = "offline_fallback";
+    // A proposal the check rejected is not an error in this tool. The tool did
+    // what it promises, which is to write nothing when the proposal does not
+    // hold up, and the report says why.
+    auto result = CallToolResult::successJson(std::move(payload));
+    result.isError = !applied.value().applied;
+    return result;
+}
+
 CallToolResult handleProjectAnalyzeImpact(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     (void)ipc;
     if (!args.is_object()) {
