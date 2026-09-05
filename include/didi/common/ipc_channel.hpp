@@ -21,15 +21,36 @@ struct TransportFailureState {
     bool request_started{false};
     bool outcome_unknown{false};
     bool timed_out{false};
+    // Why the transport gave up, when it can tell.
+    //
+    // "the peer hung up" and "we ran out of time" used to share one message and
+    // one false timed_out flag, which is how a live-harness failure could say
+    // "Failed or timed out reading response length" alongside timed_out: false
+    // and leave nobody able to say which had happened. They are different
+    // diagnoses: a closed pipe means the other side decided to stop, and a
+    // deadline means this side did.
+    //
+    // Empty when the cause is not established. Otherwise "peer_closed",
+    // "deadline", "io_error", or "stopped".
+    std::string reason;
+    // How long this operation actually waited before failing, or -1 when that
+    // was not measured. A read that dies at five seconds under a ten second
+    // deadline is being ended by something other than its own deadline, and
+    // the number is what shows that.
+    int waited_ms{-1};
 };
 
 inline Error transportFailure(std::string message, TransportFailureState state) {
     if (!state.request_started) state.outcome_unknown = false;
-    return Error(
-        state.timed_out ? 504 : 502, std::move(message),
-        {{"transport", {{"request_started", state.request_started},
-                         {"outcome_unknown", state.outcome_unknown},
-                         {"timed_out", state.timed_out}}}});
+    json transport = {{"request_started", state.request_started},
+                      {"outcome_unknown", state.outcome_unknown},
+                      {"timed_out", state.timed_out}};
+    // Added rather than substituted: the three flags above are what existing
+    // callers read, and these say why.
+    if (!state.reason.empty()) transport["reason"] = state.reason;
+    if (state.waited_ms >= 0) transport["waited_ms"] = state.waited_ms;
+    return Error(state.timed_out ? 504 : 502, std::move(message),
+                 {{"transport", std::move(transport)}});
 }
 
 inline std::optional<TransportFailureState> transportFailureState(const Error& error) {
@@ -43,9 +64,18 @@ inline std::optional<TransportFailureState> transportFailureState(const Error& e
         !state.contains("timed_out") || !state["timed_out"].is_boolean()) {
         return std::nullopt;
     }
-    return TransportFailureState{state["request_started"].get<bool>(),
+    TransportFailureState parsed{state["request_started"].get<bool>(),
                                  state["outcome_unknown"].get<bool>(),
                                  state["timed_out"].get<bool>()};
+    // Optional, because a failure whose cause was not established says nothing
+    // rather than guessing, and because an older peer emits neither.
+    if (state.contains("reason") && state["reason"].is_string()) {
+        parsed.reason = state["reason"].get<std::string>();
+    }
+    if (state.contains("waited_ms") && state["waited_ms"].is_number_integer()) {
+        parsed.waited_ms = state["waited_ms"].get<int>();
+    }
+    return parsed;
 }
 
 class IIpcClient {

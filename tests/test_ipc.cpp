@@ -676,6 +676,77 @@ static void test_win32_post_accept_failure_is_structured_and_quarantines() {
     ASSERT_TRUE(!still_connected);
 }
 
+// The two ways a request can end without an answer, told apart.
+//
+// Both used to arrive as "Failed or timed out reading response length from IPC
+// pipe" with timed_out false, which is the payload in #227: a message naming a
+// timeout beside a flag denying one, and no way to tell a peer that hung up
+// from a deadline that expired. They are different diagnoses and now say so.
+static void test_win32_peer_hangup_is_not_reported_as_a_timeout() {
+    const auto name = rawPipeName("hangup-reason");
+    const HANDLE pipe = createRawPipe(name);
+    ASSERT_TRUE(pipe != INVALID_HANDLE_VALUE);
+    std::thread peer([pipe] {
+        // Take the request, then hang up without answering it.
+        if (rawConnectPipe(pipe)) (void)rawReadFrame(pipe);
+        CloseHandle(pipe);
+    });
+
+    auto client = didi::ipc::createIpcClient();
+    const bool connected = client->connect(name, 1000);
+    const auto result = client->sendRequest("runtime.step", {}, 4000);
+    client->disconnect();
+    peer.join();
+
+    ASSERT_TRUE(connected);
+    ASSERT_TRUE(result.isErr());
+    const auto state = didi::ipc::transportFailureState(result.error());
+    ASSERT_TRUE(state.has_value());
+    ASSERT_EQ(state->reason, std::string("peer_closed"));
+    // The write landed, so the outcome is still unknown; that part was already
+    // right and stays right.
+    ASSERT_TRUE(state->request_started);
+    ASSERT_TRUE(state->outcome_unknown);
+    ASSERT_TRUE(!state->timed_out);
+    // A hangup ends the wait early. Sitting out the deadline would mean this
+    // was a deadline after all.
+    ASSERT_TRUE(state->waited_ms >= 0);
+    ASSERT_TRUE(state->waited_ms < 3000);
+    // And the message no longer offers a timeout as one of two possibilities.
+    ASSERT_TRUE(result.error().message.find("closed") != std::string::npos);
+    ASSERT_TRUE(result.error().message.find("timed out") == std::string::npos);
+}
+
+static void test_win32_silent_peer_is_reported_as_a_deadline() {
+    const auto name = rawPipeName("silent-reason");
+    const HANDLE pipe = createRawPipe(name);
+    ASSERT_TRUE(pipe != INVALID_HANDLE_VALUE);
+    std::atomic<bool> release{false};
+    std::thread peer([pipe, &release] {
+        // Take the request and hold the connection open, saying nothing.
+        if (rawConnectPipe(pipe)) (void)rawReadFrame(pipe);
+        while (!release.load()) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        CloseHandle(pipe);
+    });
+
+    auto client = didi::ipc::createIpcClient();
+    const bool connected = client->connect(name, 1000);
+    const auto result = client->sendRequest("runtime.step", {}, 400);
+    release.store(true);
+    client->disconnect();
+    peer.join();
+
+    ASSERT_TRUE(connected);
+    ASSERT_TRUE(result.isErr());
+    const auto state = didi::ipc::transportFailureState(result.error());
+    ASSERT_TRUE(state.has_value());
+    ASSERT_EQ(state->reason, std::string("deadline"));
+    ASSERT_TRUE(state->timed_out);
+    ASSERT_TRUE(state->request_started);
+    // This one did sit out its deadline, which is the difference.
+    ASSERT_TRUE(state->waited_ms >= 300);
+}
+
 static void test_win32_malformed_response_is_structured_and_quarantines() {
     const auto name = rawPipeName("malformed-response");
     const HANDLE pipe = createRawPipe(name);
@@ -1119,6 +1190,8 @@ struct RegisterIpcTests {
         registerTest("IPC.Win32TrickleState", test_win32_client_trickle_timeout_is_structured_and_quarantines);
         registerTest("IPC.Win32HandshakeCap", test_win32_handshake_cap_rejects_before_payload_read);
         registerTest("IPC.Win32PostAcceptFailure", test_win32_post_accept_failure_is_structured_and_quarantines);
+        registerTest("IPC.Win32PeerHangupReason", test_win32_peer_hangup_is_not_reported_as_a_timeout);
+        registerTest("IPC.Win32SilentPeerDeadline", test_win32_silent_peer_is_reported_as_a_deadline);
         registerTest("IPC.Win32MalformedResponse", test_win32_malformed_response_is_structured_and_quarantines);
         registerTest("IPC.Win32ResponseIdCorrelation", test_win32_client_rejects_mismatched_response_id);
         registerTest("IPC.Win32ServerFrameDeadline", test_win32_server_drops_slow_partial_frame);
