@@ -69,11 +69,19 @@ CallToolResult sendPhase7LiveRequest(const ResolvedToolBinding& binding,
     // straight to the client produced a 401 on every request. No Phase 7 tool
     // had ever executed against a real session, so nothing caught it until the
     // first one shipped.
-    const auto response = lease->sendRequest(
-        std::string(binding.ipc_method), arguments, runtime::kMaxPublicLiveRequestMs);
+    //
+    // The repeat has to happen before the quarantine below, which retires the
+    // route and leaves nothing to ask on.
+    auto sent = runtime::sendLiveRouteRequest(
+        *lease, std::string(binding.ipc_method), arguments, runtime::kMaxPublicLiveRequestMs,
+        liveCallIsRepeatable(binding, arguments));
+    auto response = std::move(sent.response);
+    const bool repeated = sent.repeat_attempted;
+    const int transport_repeats = sent.repeat_answered ? 1 : 0;
     if (response.isErr()) {
-        const auto& failure = response.error();
+        auto failure = response.error();
         const auto transport = ipc::transportFailureState(failure);
+        ipc::markTransportRepeated(failure, repeated);
         const bool explicit_quarantine =
             failure.data.is_object() && failure.data.value("route_quarantine", false);
         // Quarantine is for a broken transport, not for an engine that
@@ -145,6 +153,11 @@ CallToolResult sendPhase7LiveRequest(const ResolvedToolBinding& binding,
 
     payload["tool"] = binding.invoked_name;
     payload["canonical_tool"] = binding.canonical_name;
+    // Only when it happened, so an ordinary result is unchanged and a result
+    // that survived a lost connection says so.
+    if (transport_repeats > 0 && !payload.contains("transport")) {
+        payload["transport"] = {{"repeats", transport_repeats}};
+    }
     return CallToolResult::successJson(payload);
 }
 

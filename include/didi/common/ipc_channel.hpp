@@ -53,6 +53,16 @@ inline Error transportFailure(std::string message, TransportFailureState state) 
                  {{"transport", std::move(transport)}});
 }
 
+// Records that a transport failure was already asked a second time, so a reader
+// can tell an engine that answered nothing twice from one that was asked once.
+// Does nothing when nothing was repeated or when the error carries no transport
+// state, which is every failure the engine itself produced.
+inline void markTransportRepeated(Error& error, bool repeated) {
+    if (!repeated || !error.data.is_object()) return;
+    if (!error.data.contains("transport") || !error.data["transport"].is_object()) return;
+    error.data["transport"]["repeated"] = true;
+}
+
 inline std::optional<TransportFailureState> transportFailureState(const Error& error) {
     if (!error.data.is_object() || !error.data.contains("transport") ||
         !error.data["transport"].is_object()) {

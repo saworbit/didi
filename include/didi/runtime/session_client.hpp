@@ -136,6 +136,45 @@ std::optional<RuntimeRouteLease> acquireRuntimeRouteLease(
 bool quarantineRuntimeRoute(const std::shared_ptr<ipc::IIpcClient>& router,
                             const RuntimeRouteLease& lease);
 
+// How long a repeat attempt gets to open a new connection to the same session.
+// The endpoint is a local pipe or socket that either accepts immediately or is
+// not there, so this is a bound on a stall rather than a budget to spend.
+inline constexpr int kRouteReconnectMs = 2000;
+
+// Opens a new connection for a lease whose old one a transport failure closed,
+// so a call that is safe to repeat can be repeated on the same session. The
+// session token travels in every request, so a new connection needs no second
+// handshake. False means the endpoint would not take a connection, which is
+// the answer when the engine has gone.
+bool reconnectRuntimeRoute(const RuntimeRouteLease& lease,
+                           int timeout_ms = kRouteReconnectMs);
+
+// What a live request came back with, and whether it took two attempts.
+struct RouteRequestResult {
+    Result<json> response;
+    // A repeat was made. Present on a failure so a reader can tell an engine
+    // that answered nothing twice from one that was asked once.
+    bool repeat_attempted{false};
+    // The repeat is the attempt that answered.
+    bool repeat_answered{false};
+};
+
+// Sends one live request, and asks again once when the transport fails and
+// repeating the call cannot change anything.
+//
+// A transport failure leaves the caller unable to say whether the engine ran
+// the request. For a mutation that ambiguity has to be reported, because
+// applying it twice is worse than not knowing. For a call that changes nothing,
+// asking again is what settles it, and it costs one reconnect: the failure took
+// the old connection with it, so the repeat opens a new one on the same
+// session.
+//
+// One repeat, not a loop. The point is to survive a connection that went away,
+// not to keep knocking on an engine that has.
+RouteRequestResult sendLiveRouteRequest(const RuntimeRouteLease& lease,
+                                        const std::string& method, const json& params,
+                                        int timeout_ms, bool repeatable);
+
 std::shared_ptr<IRuntimeSessionClient> createRuntimeSessionClient(
     const std::string& project_root,
     ipc::IpcClientFactory ipc_client_factory = ipc::createIpcClient,

@@ -1,5 +1,6 @@
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/tools/phase7_live_forward.hpp"
+#include "didi/mcp/mutation_safety.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/gdextension/expression_sandbox.hpp"
@@ -146,7 +147,7 @@ CallToolResult localSessionSuccess(json payload) {
     return CallToolResult::successJson(payload);
 }
 
-CallToolResult forwardLiveRuntime(const std::string& method, const json& args,
+CallToolResult forwardLiveRuntime(const char* tool, const std::string& method, const json& args,
                                   const std::shared_ptr<ipc::IIpcClient>& ipc) {
     const auto lease = runtime::acquireRuntimeRouteLease(ipc);
     if (!lease.has_value()) {
@@ -160,9 +161,15 @@ CallToolResult forwardLiveRuntime(const std::string& method, const json& args,
                                {{"allowed_session_kinds", json::array({"game"})}}), session);
     }
     constexpr int kEndToEndLiveDeadlineMs = 17000;
-    auto result = lease->sendRequest(method, args, kEndToEndLiveDeadlineMs);
+    // The repeat has to happen before the quarantine below, which retires the
+    // route and leaves nothing to ask on.
+    auto sent = runtime::sendLiveRouteRequest(
+        *lease, method, args, kEndToEndLiveDeadlineMs,
+        liveCallIsRepeatable(resolveAliasBinding(tool, args), args));
+    auto result = std::move(sent.response);
     if (result.isErr()) {
         auto error = result.error();
+        ipc::markTransportRepeated(error, sent.repeat_attempted);
         const bool explicit_quarantine = error.data.is_object() &&
             error.data.value("route_quarantine", false);
         const auto transport = ipc::transportFailureState(error);
@@ -193,6 +200,9 @@ CallToolResult forwardLiveRuntime(const std::string& method, const json& args,
                         : json{{"result", result.value()}};
     response["execution_mode"] = "live";
     response["session"] = session.has_value() ? session->toJson() : json(nullptr);
+    // Only when it happened, so an ordinary result is unchanged and one that
+    // survived a lost connection says so.
+    if (sent.repeat_answered) response["transport"] = {{"repeats", 1}};
     return CallToolResult::successJson(response);
 }
 
@@ -238,7 +248,7 @@ CallToolResult handleRuntimeReadLogs(const json& args, std::shared_ptr<ipc::IIpc
     if (const auto error = validateRuntimeLogRequest(args); error.has_value()) {
         return liveValidationError("Invalid runtime log request: " + *error, ipc);
     }
-    return forwardLiveRuntime("runtime.getLogs", args, ipc);
+    return forwardLiveRuntime("runtime_read_logs", "runtime.getLogs", args, ipc);
 }
 
 // Engine output shares the log query shape, so it shares the validator. What
@@ -247,14 +257,14 @@ CallToolResult handleRuntimeReadOutput(const json& args, std::shared_ptr<ipc::II
     if (const auto error = validateRuntimeLogRequest(args); error.has_value()) {
         return liveValidationError("Invalid runtime output request: " + *error, ipc);
     }
-    return forwardLiveRuntime("runtime.getOutput", args, ipc);
+    return forwardLiveRuntime("runtime_read_output", "runtime.getOutput", args, ipc);
 }
 
 CallToolResult handleRuntimeSetPaused(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object() || !args.contains("paused") || !args["paused"].is_boolean()) {
         return liveValidationError("Invalid runtime pause request: paused must be a boolean", ipc);
     }
-    return forwardLiveRuntime("runtime.setPaused", args, ipc);
+    return forwardLiveRuntime("runtime_set_paused", "runtime.setPaused", args, ipc);
 }
 
 CallToolResult handleRuntimeStep(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -263,7 +273,7 @@ CallToolResult handleRuntimeStep(const json& args, std::shared_ptr<ipc::IIpcClie
         return liveValidationError(
             "Invalid runtime step request: frames must be an integer from 1 to 60", ipc);
     }
-    return forwardLiveRuntime("runtime.step", args, ipc);
+    return forwardLiveRuntime("runtime_step", "runtime.step", args, ipc);
 }
 
 CallToolResult handleRuntimeStop(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -272,7 +282,7 @@ CallToolResult handleRuntimeStop(const json& args, std::shared_ptr<ipc::IIpcClie
         return liveValidationError(
             "Invalid runtime stop request: exit_code must be an integer from 0 to 255", ipc);
     }
-    return forwardLiveRuntime("runtime.stop", args, ipc);
+    return forwardLiveRuntime("runtime_stop", "runtime.stop", args, ipc);
 }
 
 CallToolResult handleRuntimeGetTree(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -292,7 +302,7 @@ CallToolResult handleRuntimeGetTree(const json& args, std::shared_ptr<ipc::IIpcC
         return liveValidationError(
             "Invalid runtime tree request: max_depth must be an integer from 0 to 16", ipc);
     }
-    return forwardLiveRuntime("runtime.getTree", args, ipc);
+    return forwardLiveRuntime("runtime_get_tree", "runtime.getTree", args, ipc);
 }
 
 CallToolResult handleEvalGdscript(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -318,7 +328,7 @@ CallToolResult handleEvalGdscript(const json& args, std::shared_ptr<ipc::IIpcCli
         return liveValidationError(
             "Invalid expression request: timeout_ms must be an integer from 1 to 5000", ipc);
     }
-    return forwardLiveRuntime("runtime.evalGdscript", args, ipc);
+    return forwardLiveRuntime("eval_gdscript", "runtime.evalGdscript", args, ipc);
 }
 
 CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

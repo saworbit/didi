@@ -184,12 +184,99 @@ TEST_CASE(phase7_application_error_does_not_quarantine_the_route) {
     ASSERT_EQ(internal_error.at("data").at("upstream_code"), 500);
 }
 
+// Loses its connection on the first request the way a pipe that went away does,
+// and answers the next one.
+class FlakyRoute final : public didi::ipc::IIpcClient,
+                         public didi::runtime::IRuntimeRouteLeaseProvider,
+                         public std::enable_shared_from_this<FlakyRoute> {
+public:
+    FlakyRoute() {
+        descriptor_.schema_version = 1;
+        descriptor_.session_id = "11111111111111111111111111111111";
+        descriptor_.token = std::string(64, '2');
+        descriptor_.pid = 1;
+        descriptor_.kind = "editor";
+#if defined(_WIN32)
+        descriptor_.project_path = "C:/phase7-signal-test";
+        descriptor_.endpoint = "\\\\.\\pipe\\godot_didi_1_" + descriptor_.session_id;
+#else
+        descriptor_.project_path = "/tmp/phase7-signal-test";
+        descriptor_.endpoint = (std::filesystem::temp_directory_path() /
+                                ("godot_didi_1_" + descriptor_.session_id + ".sock")).string();
+#endif
+        descriptor_.started_at_ms = 1;
+        descriptor_.protocol_version = "1.3";
+    }
+
+    bool connect(const std::string& endpoint, int) override {
+        ++connects;
+        connected = endpoint == descriptor_.endpoint;
+        return connected;
+    }
+    void disconnect() override { connected = false; }
+    bool isConnected() const override { return connected; }
+    didi::Result<didi::json> sendRequest(const std::string&, const didi::json&, int) override {
+        ++calls;
+        if (remaining_failures > 0) {
+            --remaining_failures;
+            connected = false;
+            return didi::ipc::transportFailure(
+                "The Godot side closed the IPC pipe while reading the response length",
+                {true, true, false, "peer_closed", 5300});
+        }
+        return didi::json{{"status", "ok"}};
+    }
+    std::optional<didi::runtime::RuntimeRouteLease> acquireRouteLease() override {
+        if (!connected) return std::nullopt;
+        return didi::runtime::RuntimeRouteLease{shared_from_this(), descriptor_, 41};
+    }
+    bool quarantineRoute(const didi::runtime::RuntimeRouteLease&) override {
+        ++quarantines;
+        connected = false;
+        return true;
+    }
+
+    int remaining_failures{1};
+    bool connected{true};
+    int calls{0};
+    int connects{0};
+    int quarantines{0};
+
+private:
+    didi::runtime::SessionDescriptor descriptor_;
+};
+
+TEST_CASE(phase7_repeatable_read_survives_one_lost_connection) {
+    // Break caught: a Phase 7 read that changes nothing reported an unknown
+    // outcome and retired the route because the connection under it went away.
+    auto route = std::make_shared<FlakyRoute>();
+    const auto result = didi::mcp::sendPhase7LiveRequest(
+        didi::mcp::resolveAliasBinding("tilemap_get_used_rect"), didi::json::object(), route);
+    ASSERT_TRUE(!result.isError);
+    const auto payload = didi::json::parse(result.content.front().text);
+    ASSERT_EQ(payload.at("transport").at("repeats"), 1);
+    ASSERT_EQ(route->calls, 2);
+    ASSERT_EQ(route->connects, 1);
+    ASSERT_EQ(route->quarantines, 0);
+
+    // A mutation with the same failure keeps the ambiguity and the route goes.
+    auto mutating = std::make_shared<FlakyRoute>();
+    const auto refused = errorPayload(didi::mcp::sendPhase7LiveRequest(
+        didi::mcp::resolveAliasBinding("tilemap_set_cells"), didi::json::object(), mutating));
+    ASSERT_EQ(refused.at("message"), "unknown_outcome");
+    ASSERT_EQ(mutating->calls, 1);
+    ASSERT_EQ(mutating->connects, 0);
+    ASSERT_EQ(mutating->quarantines, 1);
+}
+
 struct RegisterPhase7SignalFollowup {
     RegisterPhase7SignalFollowup() {
         registerTest("Phase7Signals.ApplicationErrorKeepsRoute",
                      [] { phase7_application_error_does_not_quarantine_the_route(); });
         registerTest("Phase7Signals.PostDispatchForwarderContract",
                      [] { phase7_signal_forwarder_post_dispatch_contract(); });
+        registerTest("Phase7Signals.RepeatableReadSurvivesLostConnection",
+                     [] { phase7_repeatable_read_survives_one_lost_connection(); });
     }
 } g_registerPhase7SignalFollowup;
 

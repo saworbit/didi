@@ -30,6 +30,18 @@ struct MutationDecision {
 // code that ends up running is chosen by the project rather than by Didi.
 bool toolRunsProjectControlledCode(const ResolvedToolBinding& binding);
 
+// True when making this exact call a second time cannot change anything the
+// first attempt may already have done.
+//
+// A live call that fails on the wire leaves the caller unable to say whether
+// the engine ran it. For a mutation that ambiguity has to be reported, because
+// repeating it could apply the change twice. For a call that changes nothing it
+// costs nothing to ask again, and asking is how the ambiguity is resolved.
+// Arguments matter, not only the tool: the same tool can be asked to accumulate
+// rather than replace, and then a second attempt is not the first one over
+// again.
+bool liveCallIsRepeatable(const ResolvedToolBinding& binding, const json& arguments);
+
 class MutationSafety {
 public:
     using Clock = std::function<int64_t()>;

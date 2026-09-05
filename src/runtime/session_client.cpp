@@ -2,6 +2,7 @@
 #include "didi/runtime/session_lock.hpp"
 #include "didi/common/secure_random.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/common/logger.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1264,6 +1265,30 @@ std::optional<RuntimeRouteLease> acquireRuntimeRouteLease(
         return lease;
     }
     return RuntimeRouteLease{router, std::nullopt, 0};
+}
+
+bool reconnectRuntimeRoute(const RuntimeRouteLease& lease, int timeout_ms) {
+    if (!lease.client || !lease.descriptor.has_value()) return false;
+    if (lease.client->isConnected()) return true;
+    if (lease.descriptor->endpoint.empty()) return false;
+    return lease.client->connect(lease.descriptor->endpoint, timeout_ms);
+}
+
+RouteRequestResult sendLiveRouteRequest(const RuntimeRouteLease& lease,
+                                        const std::string& method, const json& params,
+                                        int timeout_ms, bool repeatable) {
+    auto response = lease.sendRequest(method, params, timeout_ms);
+    if (!response.isErr() || !repeatable ||
+        !ipc::transportFailureState(response.error()).has_value() ||
+        !reconnectRuntimeRoute(lease)) {
+        return RouteRequestResult{std::move(response), false, false};
+    }
+    DIDI_LOG_WARN("RUNTIME_ROUTE", "Repeating ", method,
+                  " on a new connection after a transport failure: ",
+                  response.error().message);
+    auto repeat = lease.sendRequest(method, params, timeout_ms);
+    const bool answered = !repeat.isErr();
+    return RouteRequestResult{std::move(repeat), true, answered};
 }
 
 bool quarantineRuntimeRoute(const std::shared_ptr<ipc::IIpcClient>& router,

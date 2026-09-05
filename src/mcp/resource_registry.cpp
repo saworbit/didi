@@ -34,10 +34,14 @@ bool managedRouteMustFailClosed(const std::shared_ptr<ipc::IIpcClient>& ipc_clie
     return !sessions || sessions->activeSession().has_value();
 }
 
-json liveResourcePayload(json payload, const std::optional<runtime::SessionDescriptor>& session) {
+json liveResourcePayload(json payload, const std::optional<runtime::SessionDescriptor>& session,
+                         int transport_repeats = 0) {
     if (!payload.is_object()) payload = {{"result", std::move(payload)}};
     payload["execution_mode"] = "live";
     payload["session"] = session.has_value() ? session->toJson() : json(nullptr);
+    // Only when it happened, so an ordinary read is unchanged and one that
+    // survived a lost connection says so.
+    if (transport_repeats > 0) payload["transport"] = {{"repeats", transport_repeats}};
     return payload;
 }
 
@@ -216,12 +220,19 @@ void ResourceRegistry::registerAllDefaultResources() {
                            {"allowed_session_kinds", json::array({"editor"})}}),
                     session, "");
             }
-            auto res = lease->sendRequest("editor.getState", {},
-                                          ipc::kWaitForDefinitiveResponse);
+            // Reading editor state changes nothing, so a connection that went
+            // away is worth one repeat before the read is reported as a
+            // failure. It has to happen before the quarantine below, which
+            // retires the route and leaves nothing to ask on.
+            auto sent = runtime::sendLiveRouteRequest(*lease, "editor.getState", {},
+                                                      ipc::kWaitForDefinitiveResponse, true);
+            auto res = std::move(sent.response);
             if (res.isOk()) {
-                return liveResourcePayload(res.value(), session).dump();
+                return liveResourcePayload(res.value(), session,
+                                           sent.repeat_answered ? 1 : 0).dump();
             }
             auto error = res.error();
+            ipc::markTransportRepeated(error, sent.repeat_attempted);
             (void)conditionallyQuarantineLease(error, m_ipcClient, *lease);
             return liveResourceError(error, session,
                                      "Failed to retrieve editor state: ");
@@ -252,12 +263,17 @@ void ResourceRegistry::registerAllDefaultResources() {
         const auto lease = runtime::acquireRuntimeRouteLease(m_ipcClient);
         if (lease.has_value()) {
             const auto session = lease->descriptor;
-            auto res = lease->sendRequest("runtime.getLogs", {},
-                                          runtime::kMaxPublicLiveRequestMs);
+            // Same as editor state: reading logs changes nothing, so one
+            // repeat settles a connection that went away.
+            auto sent = runtime::sendLiveRouteRequest(*lease, "runtime.getLogs", {},
+                                                      runtime::kMaxPublicLiveRequestMs, true);
+            auto res = std::move(sent.response);
             if (res.isOk()) {
-                return liveResourcePayload(res.value(), session).dump();
+                return liveResourcePayload(res.value(), session,
+                                           sent.repeat_answered ? 1 : 0).dump();
             }
             auto error = res.error();
+            ipc::markTransportRepeated(error, sent.repeat_attempted);
             const bool explicit_quarantine = error.data.is_object() &&
                 error.data.value("route_quarantine", false);
             const auto transport = ipc::transportFailureState(error);
