@@ -610,41 +610,69 @@ Result<std::string> readDescriptorFromValidatedHandle(
 
 } // namespace
 
-ProcessInstanceState processInstanceState(uint64_t pid, int64_t started_at_ms) {
+ProcessInstanceReport describeProcessInstance(uint64_t pid, int64_t started_at_ms) {
     const auto identity = queryProcessIdentity(pid);
     if (identity.isOk()) {
-        return std::llabs(identity.value().started_at_ms - started_at_ms) <=
-                       identity.value().resolution_ms
-                   ? ProcessInstanceState::alive
-                   : ProcessInstanceState::proven_stale;
+        return {std::llabs(identity.value().started_at_ms - started_at_ms) <=
+                        identity.value().resolution_ms
+                    ? ProcessInstanceState::alive
+                    : ProcessInstanceState::proven_stale,
+                {}, 0};
     }
 #if defined(_WIN32)
-    if (pid > std::numeric_limits<DWORD>::max()) return ProcessInstanceState::proven_stale;
+    if (pid > std::numeric_limits<DWORD>::max()) {
+        return {ProcessInstanceState::proven_stale, {}, 0};
+    }
     ScopedNativeHandle process(OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(pid)));
     if (process.get() == INVALID_HANDLE_VALUE || process.get() == nullptr) {
-        return GetLastError() == ERROR_INVALID_PARAMETER ? ProcessInstanceState::proven_stale
-                                                         : ProcessInstanceState::unverifiable;
+        const unsigned long error = GetLastError();
+        // Windows answers a pid nothing owns with ERROR_INVALID_PARAMETER, so
+        // that one is a fact about the process. Any other refusal is a fact
+        // about this process's rights, and saying so is the difference between
+        // "it died" and "we were not allowed to look".
+        if (error == ERROR_INVALID_PARAMETER) {
+            return {ProcessInstanceState::proven_stale, {}, 0};
+        }
+        return {ProcessInstanceState::unverifiable, "open_denied", error};
     }
-    return WaitForSingleObject(process.get(), 0) == WAIT_OBJECT_0
-               ? ProcessInstanceState::proven_stale
-               : ProcessInstanceState::unverifiable;
+    if (WaitForSingleObject(process.get(), 0) == WAIT_OBJECT_0) {
+        return {ProcessInstanceState::proven_stale, {}, 0};
+    }
+    // Something with that pid is running. It could not be confirmed as the
+    // process the session opened, so this is not "alive", but it is a long way
+    // from a corpse and a reader deserves to know which.
+    return {ProcessInstanceState::unverifiable, "running_but_unidentified", 0};
 #else
     if (pid > static_cast<uint64_t>(std::numeric_limits<pid_t>::max())) {
-        return ProcessInstanceState::proven_stale;
+        return {ProcessInstanceState::proven_stale, {}, 0};
     }
     errno = 0;
-    if (kill(static_cast<pid_t>(pid), 0) != 0 && errno == ESRCH) {
-        return ProcessInstanceState::proven_stale;
+    if (kill(static_cast<pid_t>(pid), 0) != 0) {
+        if (errno == ESRCH) return {ProcessInstanceState::proven_stale, {}, 0};
+        return {ProcessInstanceState::unverifiable, "open_denied",
+                static_cast<unsigned long>(errno)};
     }
-    return ProcessInstanceState::unverifiable;
+    return {ProcessInstanceState::unverifiable, "running_but_unidentified", 0};
 #endif
+}
+
+ProcessInstanceState processInstanceState(uint64_t pid, int64_t started_at_ms) {
+    return describeProcessInstance(pid, started_at_ms).state;
 }
 
 void annotateEngineState(Error& error, const std::optional<SessionDescriptor>& session) {
     if (!session.has_value() || session->pid == 0) return;
     if (!error.data.is_object()) error.data = json::object();
-    error.data["engine"] =
-        processInstanceStateName(processInstanceState(session->pid, session->started_at_ms));
+    const auto report = describeProcessInstance(session->pid, session->started_at_ms);
+    error.data["engine"] = processInstanceStateName(report.state);
+    // Only when the answer is "unknown", because that is the only answer that
+    // needs one. Alive and gone say everything they mean.
+    if (!report.reason.empty()) {
+        error.data["engine_reason"] = report.reason;
+        if (report.os_error != 0) {
+            error.data["engine_os_error"] = static_cast<uint64_t>(report.os_error);
+        }
+    }
 }
 
 const char* processInstanceStateName(ProcessInstanceState state) {
