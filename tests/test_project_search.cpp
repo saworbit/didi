@@ -351,7 +351,11 @@ void test_paths_outside_the_active_code_page_survive() {
     ASSERT_TRUE(text.isOk());
     ASSERT_EQ(text.value().matches.size(), 1u);
     ASSERT_EQ(text.value().matches[0].path, "res://" + file_utf8);
-    ASSERT_EQ(text.value().project_root, didi::paths::projectPathToUtf8(fixture.root()));
+    // The constructor canonicalises, and on macOS the temporary directory
+    // reaches it through a symlink, so canonicalise here too rather than
+    // comparing against the path handed in.
+    ASSERT_EQ(text.value().project_root,
+              didi::paths::projectPathToUtf8(std::filesystem::weakly_canonical(fixture.root())));
 
     didi::offline::SearchOptions scoped_options;
     scoped_options.query = "atacar";
