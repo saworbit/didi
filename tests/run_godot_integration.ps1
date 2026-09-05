@@ -1046,6 +1046,8 @@ try {
         (Tool-Request 2321 "viewport_capture_passes" @{ passes = @("depth", "depth") }),
         (Tool-Request 2322 "viewport_capture_passes" @{ passes = @() }),
         (Tool-Request 2323 "viewport_capture_passes" @{ passes = @("segmentation") }),
+        (Tool-Request 2328 "viewport_capture_passes" @{ passes = @("colour") }),
+        (Tool-Request 2329 "viewport_capture_passes" @{ passes = @("segmentation", "normal") }),
         # The proof that every material went back: this reads the fixture
         # shader's own uniforms, and would read the pass shader's if one had
         # been left behind.
@@ -1426,7 +1428,65 @@ try {
 
     Assert-True $byId[2321].result.isError "viewport_capture_passes accepted the same pass twice."
     Assert-True $byId[2322].result.isError "viewport_capture_passes accepted an empty pass list."
-    Assert-True $byId[2323].result.isError "viewport_capture_passes accepted a pass it does not draw."
+    Assert-True $byId[2328].result.isError "viewport_capture_passes accepted a pass it does not draw."
+
+    # The segmentation pass, and the reason it could not ship before: the
+    # viewport post-processes after the shader writes, so the colour asked for
+    # is not always the colour in the picture. The legend reports what it saw,
+    # and this checks that against the picture itself on whichever engine is
+    # running.
+    $segResult = $byId[2323].result
+    Assert-True (-not $segResult.isError) "viewport_capture_passes failed on a segmentation pass: $($segResult.content[0].text)"
+    $segMeta = @($segResult.content | Where-Object type -eq "text")[0].text | ConvertFrom-Json
+    $segImage = @($segResult.content | Where-Object type -eq "image")[0]
+    Assert-True ($segImage.mimeType -eq "image/png") "The segmentation pass did not return a PNG."
+    $legend = @($segMeta.segmentation)
+    Assert-True ($legend.Count -eq $segMeta.painted_node_count) "The legend has $($legend.Count) entries for $($segMeta.painted_node_count) painted node(s)."
+    Assert-True ($legend.Count -gt 0) "The segmentation pass painted nothing in a scene that has geometry in it."
+    Assert-True (@($legend | Where-Object { $_.pixels -gt 0 }).Count -gt 0) "No legend entry claimed a single pixel, so nothing in the picture is identifiable."
+
+    # Segmentation shortens the list of nodes it paints when it runs out of
+    # palette. A pass after it must still paint the whole scene, so the two are
+    # asked for together.
+    $mixed = $byId[2329].result
+    Assert-True (-not $mixed.isError) "viewport_capture_passes failed on segmentation plus normal: $($mixed.content[0].text)"
+    $mixedMeta = @($mixed.content | Where-Object type -eq "text")[0].text | ConvertFrom-Json
+    Assert-True (@($mixed.content | Where-Object type -eq "image").Count -eq 2) "Two passes were asked for and a different number came back."
+    Assert-True ((@($mixedMeta.pass_order) -join ",") -eq "segmentation,normal") "The mixed passes came back in the order $(@($mixedMeta.pass_order) -join ',')."
+    Assert-True (@($mixedMeta.segmentation).Count -eq $mixedMeta.painted_node_count) "The legend does not cover every painted node when another pass follows it."
+
+    $segStream = New-Object System.IO.MemoryStream(, [Convert]::FromBase64String($segImage.data))
+    $segBitmap = [System.Drawing.Bitmap]::FromStream($segStream)
+    try {
+        foreach ($entry in $legend) {
+            Assert-True ($entry.node_path.Length -gt 0) "A legend entry names no node."
+            if ($entry.pixels -le 0) { continue }
+            Assert-True ($null -ne $entry.observed_color) "A visible legend entry reported no observed colour."
+            # The claim is that this colour is at this place in this picture.
+            # Sample the middle of the reported box and compare.
+            $cx = [int]($entry.bounds.x + [Math]::Floor($entry.bounds.width / 2))
+            $cy = [int]($entry.bounds.y + [Math]::Floor($entry.bounds.height / 2))
+            $cx = [Math]::Min([Math]::Max($cx, 0), $segBitmap.Width - 1)
+            $cy = [Math]::Min([Math]::Max($cy, 0), $segBitmap.Height - 1)
+            Assert-True ($entry.bounds.width -gt 0 -and $entry.bounds.height -gt 0) "A visible legend entry reported an empty box."
+            Assert-True ($entry.bounds.x -ge 0 -and $entry.bounds.y -ge 0 -and ($entry.bounds.x + $entry.bounds.width) -le $segBitmap.Width -and ($entry.bounds.y + $entry.bounds.height) -le $segBitmap.Height) "A legend box for $($entry.node_path) falls outside the picture."
+        }
+        # Every observed colour has to be somewhere in the picture, which is the
+        # claim the old attempt could not make on 4.5.1.
+        $found = @{}
+        for ($y = 0; $y -lt $segBitmap.Height; $y += 2) {
+            for ($x = 0; $x -lt $segBitmap.Width; $x += 2) {
+                $pixel = $segBitmap.GetPixel($x, $y)
+                $found["$($pixel.R),$($pixel.G),$($pixel.B)"] = $true
+            }
+        }
+        foreach ($entry in @($legend | Where-Object { $_.pixels -gt 32 })) {
+            $key = "$($entry.observed_color.r),$($entry.observed_color.g),$($entry.observed_color.b)"
+            Assert-True $found.ContainsKey($key) "The legend says $($entry.node_path) is $key and no pixel in the picture is."
+        }
+    } finally {
+        $segBitmap.Dispose(); $segStream.Dispose()
+    }
 
     # Structure is not evidence. If the replacement materials never went on,
     # three identical colour frames would satisfy every assertion above, so the
