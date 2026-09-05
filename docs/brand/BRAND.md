@@ -6,6 +6,13 @@
 
 ## The mark
 
+<p>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="png/didi-mark-white-256.png">
+    <img alt="The didi mark" src="png/didi-mark-ink-256.png" width="132">
+  </picture>
+</p>
+
 A lowercase **d** whose bowl is entered from the left by a **node** and a **pipe**.
 
 It carries three readings at once, and all three are literally true of Didi:
