@@ -11,6 +11,14 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
+### Fixed
+
+- `docs/TOOL_REFERENCE.md` told readers that `project_export` takes a preset `name`. The schema has never accepted that field and never will, so the call it documented fails with a 400 for anyone who follows the page; the required field is `preset`. Documented the request shapes of `tilemap_set_cells`, `tilemap_get_used_rect` and `gridmap_set_cells`, which were named in a bullet list and never described, and of `project_search_text` and `project_search_symbols`, whose section explained every limit but never said what to send. Added `scene_get_selection` to the capability matrix, which was the one implemented tool it never mentioned.
+
+### Added
+
+- `didi --dump-tool-manifest` now emits the required request fields of every implemented tool, and the documentation validator checks that the section documenting a tool names each of them. The counts and the name tables both passed while the `project_export` page described a call that cannot succeed, because nothing compared the documented request against the schema the binary enforces. A field documented by its components, such as `point.x` and `point.y`, counts as named. A manifest from an older binary carries no such map and the check simply has nothing to read.
+
 ### Added
 
 - Added `editor_render_ghost_preview` and `editor_clear_ghost_previews`, which draw wireframe boxes in the open editor viewport to show where a proposed mutation would land before anything on disk changes. A developer asked to approve `Vector3(12.4, 0.0, -8.2)` in chat can now look at it instead. The shapes are handed to the rendering server directly rather than added to the scene, so the scene tree, the scene dock and the saved file are all untouched and the editor never becomes dirty; there is nothing to undo because nothing was done, and the responses say `scene_modified: false`. Cyan marks an addition, yellow a translation and red a deletion, and a caller that wants a different colour can give one. Both 2D rectangles and 3D boxes are drawn, each into its own world, and one call draws into one world rather than splitting across both. Previews stay up until they are cleared, which is what makes them useful to look at, so `editor_clear_ghost_previews` with no argument clears everything whatever left it behind, and no more than 256 shapes can be on screen at once.

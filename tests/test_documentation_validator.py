@@ -167,6 +167,11 @@ Didi exposes 106 canonical tool names plus 10 legacy names (116 registrations).
 Phase 7 is PARTIAL_DELIVERY at 103/106 implemented. All 3 remaining Phase 7 names are unimplemented and API-blocked; 15/18 implementation-feasible names are delivered.
 
 Session lock conflicts return 423. Mutations expose dry_run and protected writes use confirmation_token.
+
+### `signal_connect` — Live
+
+- `emitter_node` (`string`, required).
+- `signal_name` (`string`, required).
 """,
         )
         self.write("docs/ROADMAP.md", self.make_future_phase_roadmap())
@@ -413,6 +418,7 @@ Second section.
             "implemented": 103, "unimplemented": 3, "total": 116,
         }
         counts.update(overrides)
+        required = counts.pop("required", {"signal_connect": ["emitter_node", "signal_name"]})
         path = self.root / "tool_manifest.json"
         # Names, not just counts. The name lists are what catch a shipped tool
         # still sitting in the unimplemented table, which the counts cannot see
@@ -422,13 +428,53 @@ Second section.
             "implemented": list(DELIVERED_TOOL_NAMES),
         }
         path.write_text(
-            json.dumps({"schema": 1, "counts": counts, "names": names}), encoding="utf-8"
+            json.dumps({"schema": 1, "counts": counts, "names": names, "required": required}),
+            encoding="utf-8",
         )
         return path
 
     def test_manifest_matching_documentation_passes(self):
         root = self.make_valid_repository()
         self.assertEqual(VALIDATOR.validate_repository(root, self.write_manifest()), [])
+
+    def test_documented_tool_missing_a_required_field_fails(self):
+        # Break caught: the counts and the name tables both passed while
+        # project_export told readers to send a preset `name`, which the schema
+        # has never accepted. Prose about a tool is not the request a caller
+        # has to build, so the documented shape is checked against the schema.
+        root = self.make_valid_repository()
+        path = root / "docs" / "TOOL_REFERENCE.md"
+        text = path.read_text(encoding="utf-8")
+        path.write_text(text.replace("- `signal_name` (`string`, required).", ""), encoding="utf-8")
+        errors = VALIDATOR.validate_repository(root, self.write_manifest())
+        self.assertTrue(
+            any("`signal_connect`" in e and "`signal_name`" in e for e in errors), errors
+        )
+
+    def test_a_field_documented_by_its_components_counts_as_named(self):
+        # ui_hit_test documents `point.x` and `point.y` rather than `point`,
+        # which tells a reader everything they need. Demanding the bare name
+        # would report a page that is already complete.
+        root = self.make_valid_repository()
+        path = root / "docs" / "TOOL_REFERENCE.md"
+        text = path.read_text(encoding="utf-8")
+        path.write_text(
+            text.replace("- `signal_name` (`string`, required).",
+                         "- `signal_name.text` carries the signal being connected."),
+            encoding="utf-8",
+        )
+        errors = VALIDATOR.validate_repository(root, self.write_manifest())
+        self.assertFalse(any("`signal_name`" in e for e in errors), errors)
+
+    def test_a_manifest_without_required_fields_skips_the_shape_check(self):
+        # An older binary emits no required map. That is not a failure; the
+        # check simply has nothing to read.
+        root = self.make_valid_repository()
+        manifest = self.write_manifest()
+        document = json.loads(manifest.read_text(encoding="utf-8"))
+        del document["required"]
+        manifest.write_text(json.dumps(document), encoding="utf-8")
+        self.assertEqual(VALIDATOR.validate_repository(root, manifest), [])
 
     def test_shipped_tool_left_in_the_unimplemented_table_fails(self):
         # Break caught: the count checks alone let a delivered tool keep sitting
