@@ -81,6 +81,49 @@ bool isFiniteVector3(const json& value, double limit) {
 
 } // namespace
 
+CallToolResult handleViewportCapturePasses(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!ipc || !ipc->isConnected()) {
+        return CallToolResult::error(
+            "Rendering the scene again with replacement materials needs a live Godot session; there "
+            "is no offline frame to draw passes from.");
+    }
+    auto res = ipc->sendRequest("vision.capturePasses", args, ::didi::ipc::kWaitForDefinitiveResponse);
+    if (res.isErr()) {
+        return CallToolResult::error("Failed to capture viewport passes via Godot GDExtension: " +
+                                     res.error().message);
+    }
+    json data = res.value();
+    if (!data.is_object() || !data.contains("passes") || !data["passes"].is_array() ||
+        data["passes"].empty()) {
+        return CallToolResult::error("Live pass capture returned a malformed response.");
+    }
+
+    // One image block per pass, in the order they were asked for, rather than
+    // one stacked picture. A stacked image would need labels to be read, and
+    // there is no font here to draw them with; separate blocks keep each pass
+    // its own picture and let the text below name them in order.
+    CallToolResult result;
+    std::vector<std::string> order;
+    for (auto& pass : data["passes"]) {
+        if (!pass.is_object() || !pass.contains("kind") || !pass["kind"].is_string() ||
+            !pass.contains("image_base64") || !pass["image_base64"].is_string()) {
+            return CallToolResult::error("Live pass capture returned a malformed pass entry.");
+        }
+        auto image = pass["image_base64"].get<std::string>();
+        if (image.empty()) {
+            return CallToolResult::error("Live pass capture returned a pass with no PNG image.");
+        }
+        order.push_back(pass["kind"].get<std::string>());
+        result.content.push_back(ContentItem::makeImagePng(std::move(image)));
+    }
+    data.erase("passes");
+    data["pass_order"] = order;
+    result.content.push_back(ContentItem::makeText(data.dump()));
+    result.structuredContent = data;
+    result.isError = false;
+    return result;
+}
+
 CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (ipc && ipc->isConnected()) {
         auto res = ipc->sendRequest("vision.captureViewport", args, ::didi::ipc::kWaitForDefinitiveResponse);

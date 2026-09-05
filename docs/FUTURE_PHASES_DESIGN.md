@@ -22,12 +22,12 @@ Complete the original 79-tool canonical surface, then extend Didi through projec
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `100/103`
+**Canonical implementation:** `101/104`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-**Goal:** The implementation remains 100/103 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. All 15 feasible names are delivered. The original delivery goal was atomic 83/83 without adding public tool names.
+**Goal:** The implementation remains 101/104 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. All 15 feasible names are delivered. The original delivery goal was atomic 83/83 without adding public tool names.
 
 **Scope:** Phase 7A-7C define the approved contracts for editor authoring, simulation and animation, and runtime debugging. All fifteen implementation-feasible operations are delivered; the three API-blocked contracts remain discoverable and reject calls honestly.
 

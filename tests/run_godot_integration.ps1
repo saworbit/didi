@@ -636,7 +636,9 @@ try {
         # be unavailable; what must not come back is a session-kind rejection.
         (Tool-Request 2258 "runtime_attach_session" @{ session_id = $gameSession.session_id }),
         (Tool-Request 2259 "viewport_capture_frame" @{}),
-        (Tool-Request 2260 "viewport_capture_frame" @{ camera_identifier = "active_editor_view" })
+        (Tool-Request 2260 "viewport_capture_frame" @{ camera_identifier = "active_editor_view" }),
+        (Tool-Request 2326 "viewport_capture_passes" @{ passes = @("color") }),
+        (Tool-Request 2327 "viewport_capture_passes" @{ passes = @("color"); camera_identifier = "active_editor_view" })
     )
     $rawRuntimeResponses = $runtimeRequests | & $didiExecutable --project $fixtureRoot
     $runtimeResponses = @($rawRuntimeResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
@@ -657,6 +659,18 @@ try {
     # A game has one root viewport, so an editor camera selector is a mistake
     # worth naming rather than an argument to quietly ignore.
     Assert-True $runtimeById[2260].result.isError "A game viewport capture accepted an editor camera_identifier."
+
+    # A headless game may have no frame to draw, so the pass capture is allowed
+    # to fail here. What it must not do is refuse for being a game session.
+    $gamePasses = $runtimeById[2326]
+    if ($gamePasses.result.isError) {
+        $gamePassText = $gamePasses.result.content[0].text
+        Assert-True ($gamePassText -notmatch "session kind" -and $gamePassText -notmatch "Editor-only") "viewport_capture_passes is refused on a game session for being a game session."
+    } else {
+        $gamePassMeta = @($gamePasses.result.content | Where-Object type -eq "text")[0].text | ConvertFrom-Json
+        Assert-True ($gamePassMeta.session_kind -eq "game") "A game pass capture did not report the session it came from."
+    }
+    Assert-True $runtimeById[2327].result.isError "A game pass capture accepted an editor camera_identifier."
 
     # A watch that held, over a real window of engine frames.
     $held = Tool-Payload $runtimeById[2272]
@@ -1025,6 +1039,17 @@ try {
         (Tool-Request 17 "editor_undo" @{}),
         (Tool-Request 18 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 3 }),
         (Tool-Request 19 "viewport_capture_frame" @{ camera_identifier = "active_editor_view" }),
+        # The scene drawn again with replacement materials. depth_far is given
+        # so the pass does not depend on which editor camera happens to be
+        # rendering the pane.
+        (Tool-Request 2320 "viewport_capture_passes" @{ passes = @("color", "depth", "normal"); depth_far = 50 }),
+        (Tool-Request 2321 "viewport_capture_passes" @{ passes = @("depth", "depth") }),
+        (Tool-Request 2322 "viewport_capture_passes" @{ passes = @() }),
+        (Tool-Request 2323 "viewport_capture_passes" @{ passes = @("segmentation") }),
+        # The proof that every material went back: this reads the fixture
+        # shader's own uniforms, and would read the pass shader's if one had
+        # been left behind.
+        (Tool-Request 2325 "shader_list_uniforms" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override" }),
         (Tool-Request 2306 "spatial_query_frustum" @{ camera_node = "/root/SmokeRoot/ViewportCamera" }),
         # Writing a uniform, placed after the last undo and redo above so the
         # undo below can only be this one. The undo is the assertion that
@@ -1311,6 +1336,71 @@ try {
     Assert-True (@($container.children.name) -contains "SpawnedCopy") "Reparent did not move the duplicate under Container."
     $restoredHierarchy = Tool-Payload $byId[18]
     Assert-True (@($restoredHierarchy.scene_tree.children.name) -contains "SpawnedCopy") "Undo did not restore the duplicate's original parent."
+
+    $passResult = $byId[2320].result
+    Assert-True (-not $passResult.isError) "viewport_capture_passes failed: $($passResult.content[0].text)"
+    $passImages = @($passResult.content | Where-Object type -eq "image")
+    $passTextContent = @($passResult.content | Where-Object type -eq "text")
+    Assert-True ($passImages.Count -eq 3) "Three passes were asked for and $($passImages.Count) image(s) came back."
+    Assert-True ($passTextContent.Count -eq 1) "The pass capture did not return exactly one metadata payload."
+    foreach ($passImage in $passImages) {
+        Assert-True ($passImage.mimeType -eq "image/png") "A pass image is not a PNG."
+        Assert-True ($passImage.data.Length -gt 0) "A pass image carried no data."
+    }
+    $passMeta = $passTextContent[0].text | ConvertFrom-Json
+    Assert-True ($passMeta.execution_mode -eq "live") "The pass capture did not run live."
+    # The order the images arrive in is the order they were asked for, or a
+    # caller cannot tell which picture is which.
+    Assert-True ((@($passMeta.pass_order) -join ",") -eq "color,depth,normal") "The passes came back in the order $(@($passMeta.pass_order) -join ',')."
+    Assert-True ($passMeta.depth_far -eq 50) "The depth pass did not use the far distance it was given ($($passMeta.depth_far))."
+    Assert-True ($passMeta.resolution.width -ge 8 -and $passMeta.resolution.height -ge 8) "The pass capture reported a degenerate frame."
+    Assert-True ($passMeta.painted_node_count -ge 1) "The pass capture painted no nodes in a scene that has geometry in it."
+    Assert-True ($passMeta.scan_limit_reached -eq $false) "The pass walk ran out of budget on the fixture scene."
+
+    Assert-True $byId[2321].result.isError "viewport_capture_passes accepted the same pass twice."
+    Assert-True $byId[2322].result.isError "viewport_capture_passes accepted an empty pass list."
+    Assert-True $byId[2323].result.isError "viewport_capture_passes accepted a pass it does not draw."
+
+    # Structure is not evidence. If the replacement materials never went on,
+    # three identical colour frames would satisfy every assertion above, so the
+    # pictures themselves have to be looked at.
+    $passBytes = @($passImages | ForEach-Object { $_.data })
+    Assert-True (@($passBytes | Sort-Object -Unique).Count -eq 3) "The three passes produced fewer than three distinct images; replacement materials did not reach the frame."
+
+    Add-Type -AssemblyName System.Drawing
+    function Pass-Pixels($Base64) {
+        $stream = New-Object System.IO.MemoryStream(, [Convert]::FromBase64String($Base64))
+        $bitmap = [System.Drawing.Bitmap]::FromStream($stream)
+        $grey = 0
+        $coloured = 0
+        for ($y = 0; $y -lt $bitmap.Height; $y += 3) {
+            for ($x = 0; $x -lt $bitmap.Width; $x += 3) {
+                $pixel = $bitmap.GetPixel($x, $y)
+                if ($pixel.R -eq $pixel.G -and $pixel.G -eq $pixel.B) { $grey++ } else { $coloured++ }
+            }
+        }
+        $bitmap.Dispose(); $stream.Dispose()
+        return @{ Grey = $grey; Coloured = $coloured }
+    }
+    $order = @($passMeta.pass_order)
+    $depthPixels = Pass-Pixels $passBytes[[array]::IndexOf($order, "depth")]
+    $normalPixels = Pass-Pixels $passBytes[[array]::IndexOf($order, "normal")]
+    $colorPixels = Pass-Pixels $passBytes[[array]::IndexOf($order, "color")]
+    # Only geometry is repainted; the viewport still draws its own background
+    # behind it. So the test is not that a depth pass is grey everywhere, but
+    # that painting the geometry grey left more grey than the ordinary frame
+    # had. The viewport may shift the values afterwards, and nothing it does
+    # turns a grey into a colour, so this holds whatever the engine does.
+    Assert-True ($depthPixels.Grey -gt $colorPixels.Grey) "The depth pass has $($depthPixels.Grey) grey pixels against the colour frame's $($colorPixels.Grey); the depth material did not reach the geometry."
+    # A normal pass is the opposite: surfaces facing different ways come back
+    # different colours, so it must not collapse to the depth pass.
+    Assert-True ($normalPixels.Coloured -gt $depthPixels.Coloured) "The normal pass has no more colour than the depth pass, so surface orientation did not reach the frame."
+    Assert-True ($colorPixels.Coloured -gt 0) "The colour pass is entirely grey, which the fixture scene is not."
+
+    $afterPasses = Tool-Payload $byId[2325]
+    $afterNames = @($afterPasses.uniforms | ForEach-Object { $_.name })
+    Assert-True ($afterNames -contains "strength" -and $afterNames -contains "offset") "The fixture shader did not survive the pass capture; uniforms are $($afterNames -join ',')."
+    Assert-True (-not ($afterNames -contains "didi_far")) "A pass material was left on the node after the capture."
 
     $capture = $byId[19].result
     Assert-True (-not $capture.isError) "Live viewport capture failed: $($capture.content[0].text)"

@@ -157,6 +157,121 @@ std::string ViewportRenderer::encodeImageToPngBase64(const uint8_t* rgba_data, i
     return encoded;
 }
 
+namespace {
+
+// The passes a caller may ask for, in the order they are named here when the
+// request does not fix one.
+const char* const kPassKinds[] = {"color", "depth", "normal"};
+
+Result<std::vector<std::string>> parseRequestedPasses(const json& params) {
+    if (!params.contains("passes") || !params["passes"].is_array()) {
+        return Error::invalidArgument("passes must be an array");
+    }
+    const auto& requested = params["passes"];
+    if (requested.empty() || requested.size() > 3) {
+        return Error::invalidArgument("passes must contain 1 to 3 entries");
+    }
+    std::vector<std::string> kinds;
+    for (const auto& entry : requested) {
+        if (!entry.is_string()) return Error::invalidArgument("passes entries must be strings");
+        const auto kind = entry.get<std::string>();
+        if (std::find(std::begin(kPassKinds), std::end(kPassKinds), kind) == std::end(kPassKinds)) {
+            return Error::invalidArgument("passes entries must be color, depth, or normal");
+        }
+        // A pass asked for twice would be drawn twice and returned twice, which
+        // is a request nobody means to make.
+        if (std::find(kinds.begin(), kinds.end(), kind) != kinds.end()) {
+            return Error::invalidArgument("passes names " + kind + " more than once");
+        }
+        kinds.push_back(kind);
+    }
+    return kinds;
+}
+
+} // namespace
+
+json ViewportRenderer::capturePasses(const json& params, const std::string& session_kind) {
+    try {
+        if (!params.is_object()) {
+            return rendererError(Error::invalidArgument("Viewport pass params must be an object"));
+        }
+        for (auto it = params.begin(); it != params.end(); ++it) {
+            if (it.key() != "passes" && it.key() != "camera_identifier" &&
+                it.key() != "depth_far") {
+                return rendererError(Error::invalidArgument("Viewport pass request contains an unknown property"));
+            }
+        }
+        auto kinds = parseRequestedPasses(params);
+        if (kinds.isErr()) return rendererError(kinds.error());
+
+        const bool game_session = session_kind == "game";
+        if (game_session && params.contains("camera_identifier")) {
+            return rendererError(Error::invalidArgument(
+                "camera_identifier selects an editor viewport and a game session has only its root "
+                "viewport; omit it"));
+        }
+        if (params.contains("camera_identifier") && !params["camera_identifier"].is_string()) {
+            return rendererError(Error::invalidArgument("camera_identifier must be a string"));
+        }
+        const std::string camera = params.value("camera_identifier", "active_editor_view");
+
+        double depth_far = 0.0;
+        if (params.contains("depth_far")) {
+            if (!params["depth_far"].is_number()) {
+                return rendererError(Error::invalidArgument("depth_far must be a number"));
+            }
+            depth_far = params["depth_far"].get<double>();
+            if (!std::isfinite(depth_far) || depth_far <= 0.0 || depth_far > 1000000.0) {
+                return rendererError(Error::invalidArgument("depth_far must be greater than 0 and at most 1000000"));
+            }
+        }
+        auto captured = GodotBridge::instance().captureViewportPasses(kinds.value(), camera,
+                                                                     session_kind, depth_far);
+        if (captured.isErr()) return rendererError(captured.error());
+        auto& capture = captured.value();
+
+        json passes = json::array();
+        int width = 0;
+        int height = 0;
+        for (auto& frame : capture.frames) {
+            auto encoded = encodeImageToPngBase64(frame.pixels.rgba.data(), frame.pixels.width,
+                                                  frame.pixels.height);
+            if (encoded.empty()) {
+                return rendererError(Error::internal("Failed to encode a captured pass"));
+            }
+            width = frame.pixels.width;
+            height = frame.pixels.height;
+            passes.push_back({{"kind", frame.kind}, {"image_base64", std::move(encoded)}});
+        }
+
+        json result = {
+            {"execution_mode", "live"},
+            {"session_kind", session_kind},
+            {"camera_identifier", game_session ? "root_viewport" : camera},
+            {"format", "image/png"},
+            // The pass shaders undo the sRGB curve the framebuffer applies, but
+            // the viewport post-processes after that and by how much depends on
+            // the engine. A pass is an ordering to read and compare, not a
+            // calibrated measurement.
+            {"encoding", "srgb8_relative"},
+            {"resolution", {{"width", width}, {"height", height}}},
+            {"passes", std::move(passes)},
+            {"painted_node_count", capture.painted},
+            {"examined_node_count", capture.examined},
+            {"scan_limit_reached", capture.scan_limit_reached}
+        };
+        const bool wants_depth = std::find(kinds.value().begin(), kinds.value().end(), "depth") !=
+                                 kinds.value().end();
+        if (wants_depth) {
+            result["depth_far"] = capture.depth_far;
+            result["depth_encoding"] = "grey rises with distance in front of the camera, with depth_far mapped to white; read it as an ordering rather than as calibrated distances";
+        }
+        return result;
+    } catch (const std::exception& error) {
+        return rendererError(Error::internal(std::string("Viewport pass capture failed: ") + error.what()));
+    }
+}
+
 json ViewportRenderer::captureViewport(const json& params, const std::string& session_kind) {
     try {
         auto frame = captureSelectedFrame(params, session_kind);

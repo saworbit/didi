@@ -94,6 +94,7 @@ Use `viewport_capture_frame`.
 - `shader_get_visual_graph` describes a VisualShader as nodes and links. It is refused on a shader written as code, which is the answer, not a failure.
 - `shader_set_uniform` writes one, in the same JSON spelling `scene_set_property` uses for that type. Check `applied`, and remember the material may be shared with other nodes.
 - `shader_list_uniforms` reads a ShaderMaterial's parameters. `value` is the effective value, the material's override where it has one and the shader's declared default otherwise; the two are not distinguished, so do not read a value as proof the material set it. A null value means the engine could not supply one, not that the uniform has none.
+- `viewport_capture_passes` is how to see depth and orientation rather than guess them. Use it to tell which of two things is nearer or which way a surface faces. Do not read a grey as a distance: the viewport shifts the values by an amount that varies with the engine, so the passes rank things and do not measure them.
 - `spatial_query_frustum` asks what a camera can see. `containment` is geometry and `sightline` is sampled against colliders, so a node with no collision shape never blocks anything.
 - `spatial_query_clearance` asks whether a body fits along a path, which a raycast cannot answer: a line can be clear where a character is too wide. Use it before placing a door, a corridor or a spawn point.
 - `spatial_query_raycast_batch` answers many sightline or clearance questions in one call. Prefer it over a viewport capture for anything numeric, and over repeated `physics_raycast_query` calls for anything more than one ray.
@@ -131,7 +132,7 @@ Use `runtime_launch` to start a separate Godot process, optionally headless, for
 
 ### Observe or control an already-running session
 
-Didi v1.5.0 starts detached and exposes 103 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
+Didi v1.5.0 starts detached and exposes 104 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
 
 1. Call `runtime_list_sessions`, preferably with the canonical project path.
 2. Choose the intended `editor` or `game` descriptor and call `runtime_attach_session` if deterministic auto-selection did not choose it.
@@ -148,12 +149,12 @@ Treat `eval_gdscript` as a small read-only expression language. Prefer literals,
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `100/103`
+**Canonical implementation:** `101/104`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 100/103 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 101/104 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
 All 15 feasible Phase 7 names are delivered and callable, including `tilemap_set_cells`, `tilemap_get_used_rect`, and `gridmap_set_cells` in editor sessions. Do not call or advertise the remaining 3 as available; feasibility is not implementation. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 

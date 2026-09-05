@@ -15,7 +15,7 @@ namespace mcp {
 static ExecutionCapability capabilityForTool(const std::string& name) {
     static const std::unordered_set<std::string> live_and_offline = {
         "scene_get_hierarchy", "get_scene_hierarchy",
-        "viewport_capture_frame", "capture_viewport",
+        "viewport_capture_frame", "capture_viewport", "viewport_capture_passes",
         // The layout file answers the routing question without an engine; only
         // the effect chain and a runtime change need one.
         "audio_list_buses"
@@ -100,6 +100,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
 
 // External handler forward declarations
 CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleViewportCapturePasses(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleViewportDiffCapture(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleViewportSetCameraTransform(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -1459,6 +1460,31 @@ void ToolRegistry::registerAllDefaultTools() {
         };
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleSpatialQueryClearance(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "viewport_capture_passes";
+        t.description = "Draws the live 3D scene again with replacement materials and returns a depth or world-space normal image alongside the ordinary colour frame, so which thing is nearer and which way a surface faces can be read off the pixels rather than guessed.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"passes", {
+                    {"type", "array"}, {"minItems", 1}, {"maxItems", 3},
+                    {"description", "Which pictures to take, returned as one image each in this order. A pass named twice is refused."},
+                    {"items", {{"type", "string"},
+                               {"enum", json::array({"color", "depth", "normal"})}}}
+                }},
+                {"camera_identifier", {{"type", "string"}, {"description", "Editor sessions only; a game has one root viewport."}}},
+                {"depth_far", {{"type", "number"}, {"exclusiveMinimum", 0}, {"maximum", 1000000},
+                               {"description", "The distance mapped to white in the depth pass. Defaults to the rendering camera's own far plane, and the value used is reported back."}}}
+            }},
+            {"required", json::array({"passes"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) {
+            return handleViewportCapturePasses(args, m_ipcClient);
         };
         registerTool(std::move(t));
     }

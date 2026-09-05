@@ -30,6 +30,27 @@ struct ViewportIsolationState {
     bool original_transparent_background{false};
 };
 
+// One rendered pass, and what the bytes in it mean.
+//
+// A pass is the scene drawn again with every geometry node's material replaced,
+// so the picture answers one question rather than showing one appearance. The
+// shaders write the inverse of the sRGB curve the framebuffer applies, so the
+// stored byte is the number the pass is about rather than a bent version of it.
+struct PassFrame {
+    std::string kind;
+    ViewportPixels pixels;
+};
+
+struct MultipassCapture {
+    std::vector<PassFrame> frames;
+    // The distance mapped to white in a depth pass, so the grey is a length
+    // again rather than a ratio to something unstated.
+    double depth_far{0.0};
+    int painted{0};
+    int examined{0};
+    bool scan_limit_reached{false};
+};
+
 class GodotBridge {
 public:
     static GodotBridge& instance();
@@ -52,6 +73,13 @@ public:
                                                           const std::string& camera_identifier,
                                                           const std::string& isolation_background);
     Result<void> restoreViewportIsolation(const ViewportIsolationState& state);
+    // Draws the scene once per requested pass with replacement materials, and
+    // puts every material_override back before returning, including on the
+    // paths that fail. 3D only: a depth pass has no meaning on a canvas.
+    Result<MultipassCapture> captureViewportPasses(const std::vector<std::string>& passes,
+                                                   const std::string& camera_identifier,
+                                                   const std::string& session_kind,
+                                                   double requested_depth_far);
     Result<void> forceDraw();
     // Performance.get_monitor support for runtime.readProfiler. Preflight is
     // the availability check the contract names: the pinned bind exists.
