@@ -1050,6 +1050,25 @@ try {
         # shader's own uniforms, and would read the pass shader's if one had
         # been left behind.
         (Tool-Request 2325 "shader_list_uniforms" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override" }),
+        # A proposal drawn over the scene, and the proof it did not touch it.
+        # The captures on either side are what show the boxes arrived and left.
+        (Tool-Request 2330 "viewport_capture_frame" @{ camera_identifier = "active_editor_view" }),
+        (Tool-Request 2331 "editor_render_ghost_preview" @{ previews = @(
+            @{ position = @{ x = 0; y = 0; z = 0 }; size = @{ x = 3; y = 3; z = 3 }; kind = "addition"; label = "proposed torch" },
+            @{ position = @{ x = 0; y = 1; z = 0 }; size = @{ x = 2; y = 2; z = 2 }; kind = "deletion" }) }),
+        (Tool-Request 2332 "viewport_capture_frame" @{ camera_identifier = "active_editor_view" }),
+        (Tool-Request 2333 "scene_get_hierarchy" @{ max_depth = 1 }),
+        (Tool-Request 2334 "editor_clear_ghost_previews" @{}),
+        (Tool-Request 2335 "viewport_capture_frame" @{ camera_identifier = "active_editor_view" }),
+        # A shape flat on one axis draws a gap that reads as a fault in the
+        # scene rather than in the request.
+        (Tool-Request 2336 "editor_render_ghost_preview" @{ previews = @(
+            @{ position = @{ x = 0; y = 0; z = 0 }; size = @{ x = 1; y = 0; z = 1 } }) }),
+        # One call draws into one world.
+        (Tool-Request 2337 "editor_render_ghost_preview" @{ previews = @(
+            @{ position = @{ x = 0; y = 0; z = 0 }; size = @{ x = 1; y = 1; z = 1 } },
+            @{ position = @{ x = 0; y = 0 }; size = @{ x = 1; y = 1 } }) }),
+        (Tool-Request 2338 "editor_clear_ghost_previews" @{ preview_id = "ghost_does_not_exist" }),
         (Tool-Request 2306 "spatial_query_frustum" @{ camera_node = "/root/SmokeRoot/ViewportCamera" }),
         # Writing a uniform, placed after the last undo and redo above so the
         # undo below can only be this one. The undo is the assertion that
@@ -1337,6 +1356,54 @@ try {
     $restoredHierarchy = Tool-Payload $byId[18]
     Assert-True (@($restoredHierarchy.scene_tree.children.name) -contains "SpawnedCopy") "Undo did not restore the duplicate's original parent."
 
+    # A preview is only worth anything if it shows up, and only safe if it
+    # leaves nothing behind. Both are read off the frames on either side of it.
+    $ghost = Tool-Payload $byId[2331]
+    Assert-True ($ghost.execution_mode -eq "live") "editor_render_ghost_preview did not run live."
+    Assert-True ($ghost.drawn -eq 2 -and $ghost.dimension -eq 3) "The preview drew $($ghost.drawn) shape(s) in $($ghost.dimension)D."
+    Assert-True ($ghost.scene_modified -eq $false) "A ghost preview reported that it changed the scene."
+    Assert-True ($ghost.preview_id.Length -gt 0) "A ghost preview returned no id to clear it by."
+    $ghostShapes = @($ghost.previews)
+    # Cyan for an addition and red for a deletion, without the caller choosing.
+    Assert-True ($ghostShapes[0].kind -eq "addition" -and $ghostShapes[0].color.g -eq 1 -and $ghostShapes[0].color.r -eq 0) "An addition was not tinted cyan."
+    Assert-True ($ghostShapes[1].kind -eq "deletion" -and $ghostShapes[1].color.r -eq 1 -and $ghostShapes[1].color.g -eq 0) "A deletion was not tinted red."
+    Assert-True ($ghostShapes[0].color_defaulted -eq $true) "A colour the caller did not give was not reported as defaulted."
+    Assert-True ($ghostShapes[0].label -eq "proposed torch") "A preview label did not come back."
+
+    Add-Type -AssemblyName System.Drawing
+    function Ghost-Signature($Response) {
+        $data = @($Response.result.content | Where-Object type -eq "image")[0].data
+        $stream = New-Object System.IO.MemoryStream(, [Convert]::FromBase64String($data))
+        $bitmap = [System.Drawing.Bitmap]::FromStream($stream)
+        $cyan = 0
+        for ($y = 0; $y -lt $bitmap.Height; $y += 2) {
+            for ($x = 0; $x -lt $bitmap.Width; $x += 2) {
+                $pixel = $bitmap.GetPixel($x, $y)
+                if ($pixel.G -gt 180 -and $pixel.B -gt 180 -and $pixel.R -lt 120) { $cyan++ }
+            }
+        }
+        $bitmap.Dispose(); $stream.Dispose()
+        return $cyan
+    }
+    $cyanBefore = Ghost-Signature $byId[2330]
+    $cyanDuring = Ghost-Signature $byId[2332]
+    $cyanAfter = Ghost-Signature $byId[2335]
+    Assert-True ($cyanDuring -gt $cyanBefore) "The wireframe preview did not appear in the viewport ($cyanBefore then $cyanDuring cyan pixels)."
+    Assert-True ($cyanAfter -le $cyanBefore) "Clearing the previews did not take them off the viewport ($cyanDuring then $cyanAfter cyan pixels)."
+
+    # Drawn without touching the scene: nothing new is in the tree.
+    $ghostTree = Tool-Payload $byId[2333]
+    $ghostNames = @($ghostTree.scene_tree.children | ForEach-Object { $_.name })
+    Assert-True (-not ($ghostNames -match "ghost|preview|Ghost|Preview")) "A ghost preview added a node to the scene: $($ghostNames -join ',')."
+
+    $cleared = Tool-Payload $byId[2334]
+    Assert-True ($cleared.cleared_shapes -eq 2 -and $cleared.live_shapes -eq 0) "Clearing removed $($cleared.cleared_shapes) shape(s) and left $($cleared.live_shapes)."
+    Assert-True ($cleared.scene_modified -eq $false) "Clearing a ghost preview reported that it changed the scene."
+
+    Assert-True $byId[2336].result.isError "A preview shape with no extent on an axis was accepted."
+    Assert-True $byId[2337].result.isError "One preview call drew a 2D and a 3D shape together."
+    Assert-True $byId[2338].result.isError "Clearing an unknown preview id was reported as a success."
+
     $passResult = $byId[2320].result
     Assert-True (-not $passResult.isError) "viewport_capture_passes failed: $($passResult.content[0].text)"
     $passImages = @($passResult.content | Where-Object type -eq "image")
@@ -1554,7 +1621,15 @@ try {
         (Tool-Request 511 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 507 "scene_open" @{ scene_path = "res://phase5_ui.tscn" }),
         (Tool-Request 508 "ui_hit_test" @{ point = @{ x = 32; y = 32 }; root_path = "/root/Phase5Ui"; max_results = 16 }),
-        (Tool-Request 509 "ui_hit_test" @{ point = @{ x = 32; y = 32 }; root_path = "/root/Phase5Ui"; include_mouse_filter_ignore = $true; max_results = 16 })
+        (Tool-Request 509 "ui_hit_test" @{ point = @{ x = 32; y = 32 }; root_path = "/root/Phase5Ui"; include_mouse_filter_ignore = $true; max_results = 16 }),
+        # The 2D half of the preview, which needs a scene whose root is a
+        # CanvasItem. main.tscn is a Node3D, so this is the only place in the
+        # run where a canvas exists to draw into.
+        (Tool-Request 2340 "editor_render_ghost_preview" @{ previews = @(
+            @{ position = @{ x = 64; y = 48 }; size = @{ x = 40; y = 24 }; kind = "translation"; label = "proposed panel" }) }),
+        (Tool-Request 2341 "editor_render_ghost_preview" @{ previews = @(
+            @{ position = @{ x = 0; y = 0 }; size = @{ x = 8; y = 8 }; rotation_degrees = @{ x = 0; y = 0; z = 45 } }) }),
+        (Tool-Request 2342 "editor_clear_ghost_previews" @{})
     )
     $dotnetAvailable = $null -ne (Get-Command dotnet -ErrorAction SilentlyContinue)
     if ($dotnetAvailable) {
@@ -1579,6 +1654,17 @@ try {
     Assert-True ($LASTEXITCODE -eq 0) "Phase 5 MCP process exited with $LASTEXITCODE."
     $phase5ById = @{}
     foreach ($response in $phase5Responses) { $phase5ById[[int]$response.id] = $response }
+    # A rectangle drawn on the canvas of a Control scene, which is the only
+    # scene in this run with a canvas to draw into.
+    $flatGhost = Tool-Payload $phase5ById[2340]
+    Assert-True ($flatGhost.dimension -eq 2 -and $flatGhost.drawn -eq 1) "A 2D ghost preview drew $($flatGhost.drawn) shape(s) in $($flatGhost.dimension)D."
+    Assert-True ($flatGhost.scene_modified -eq $false) "A 2D ghost preview reported that it changed the scene."
+    Assert-True (@($flatGhost.previews)[0].color.r -eq 1 -and @($flatGhost.previews)[0].color.b -eq 0) "A 2D translation preview was not tinted yellow."
+    # Rotation is a 3D idea, and a 2D preview is an axis-aligned rectangle.
+    Assert-True $phase5ById[2341].result.isError "A 2D preview accepted a rotation it cannot draw."
+    $flatCleared = Tool-Payload $phase5ById[2342]
+    Assert-True ($flatCleared.cleared_shapes -eq 1 -and $flatCleared.live_shapes -eq 0) "Clearing left $($flatCleared.live_shapes) 2D shape(s) behind."
+
     $phase5Presets = Tool-Payload $phase5ById[502]
     Assert-True (@($phase5Presets.presets).Count -eq 1 -and $phase5Presets.presets[0].name -eq "Phase5 Pack") "Phase 5 export preset was not listed."
     Assert-True ($phase5ById[502].result.content[0].text -notmatch "phase5-secret") "Export preset options leaked a secret value."

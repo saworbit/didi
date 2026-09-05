@@ -13,6 +13,10 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Added
 
+- Added `editor_render_ghost_preview` and `editor_clear_ghost_previews`, which draw wireframe boxes in the open editor viewport to show where a proposed mutation would land before anything on disk changes. A developer asked to approve `Vector3(12.4, 0.0, -8.2)` in chat can now look at it instead. The shapes are handed to the rendering server directly rather than added to the scene, so the scene tree, the scene dock and the saved file are all untouched and the editor never becomes dirty; there is nothing to undo because nothing was done, and the responses say `scene_modified: false`. Cyan marks an addition, yellow a translation and red a deletion, and a caller that wants a different colour can give one. Both 2D rectangles and 3D boxes are drawn, each into its own world, and one call draws into one world rather than splitting across both. Previews stay up until they are cleared, which is what makes them useful to look at, so `editor_clear_ghost_previews` with no argument clears everything whatever left it behind, and no more than 256 shapes can be on screen at once.
+
+### Added
+
 - Added `viewport_capture_passes`, which draws the live 3D scene again with every geometry node's material replaced and returns a depth or world-space normal image next to the ordinary colour frame. A flat colour picture cannot say whether one thing is nearer than another or which way a surface faces, and these can. Each pass comes back as its own image, in the order it was asked for, rather than as one stacked picture that would need labels drawn on it to be read. Depth divides by the rendering camera's own far plane unless one is given, and the value used is reported. The passes are orderings rather than measurements, and say so: the shaders undo the sRGB curve the framebuffer applies, but the viewport post-processes afterwards by an amount that depends on the engine, with a 4.7.2 editor returning the written values unchanged and a 4.5.1 editor returning them scaled by about a quarter. A semantic segmentation pass was left out for the same reason, since a legend mapping colours to node paths would not match its own pixels on every engine. Every `material_override` is put back before the call returns, including on the paths that fail, and a restore that does not succeed is the error the caller gets, because a scene left wearing a debug material matters more than a frame that did not arrive.
 
 ### Fixed
@@ -73,12 +77,12 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `101/104`
+**Canonical implementation:** `103/106`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 104 canonical tools plus 10 legacy registrations (114 total). 101 canonical tools are implemented and 3 remain unimplemented.
+Discovery now exposes 106 canonical tools plus 10 legacy registrations (116 total). 103 canonical tools are implemented and 3 remain unimplemented.
 
 ---
 

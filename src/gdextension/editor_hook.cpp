@@ -840,6 +840,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "anim.listTracks", "anim.playTrack", "vision.setCameraTransform",
         "vision.toggleDebugDraw", "tilemap.setCells", "tilemap.getUsedRect",
         "gridmap.setCells", "shader.listUniforms", "shader.setUniform",
+        "preview.renderGhost", "preview.clearGhosts",
         "shader.getVisualGraph"
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
         , "phase7SignalTest.configure"

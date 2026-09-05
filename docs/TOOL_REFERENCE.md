@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 104 canonical tool names plus 10 legacy names (114 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 106 canonical tool names plus 10 legacy names (116 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `101/104`
+**Canonical implementation:** `103/106`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 101/104 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 103/106 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -215,6 +215,26 @@ A viewport that is not the one on screen has no size, and Godot returns its 2x2 
 - Legacy alias: `capture_viewport`.
 
 Successful live frames include a 32-lowercase-hex `capture_id` for the exact RGBA8 buffer encoded as PNG. IDs are extension-process-local and retained in an 8-entry/64 MiB LRU cache; each image is limited to 2,048 × 2,048. Offline previews never receive IDs.
+
+### `editor_render_ghost_preview` — Live
+
+Draws wireframe boxes in the open editor viewport to show where a proposed mutation would land. Editor sessions only, which is where someone is looking at the scene.
+
+- `previews` (`array`, required): 1 to 64 shapes. Each takes `position` and `size`, and optionally `rotation_degrees`, `kind`, `color` and `label`.
+- `position` is the centre and `size` is the full extents, the size a person would type into the inspector. Every axis of `size` must be greater than 0, because a shape flat on one axis draws a gap that reads as a fault in the scene rather than in the request.
+- `kind` is `addition`, `translation` or `deletion`, and picks the colour: cyan, yellow, red. `color` overrides it with `r`, `g` and `b` from 0 to 1. `label` is echoed back so a caller can tell shapes apart; it is not drawn.
+- `rotation_degrees` applies to a 3D box. A 2D preview is an axis-aligned rectangle and the field is refused there.
+- `replace` (`boolean`, default `true`): clear what is already on screen first. A preview usually stands for one proposal, so replacing is the default and accumulating is what a caller asks for.
+
+Every shape in one call shares one dimension. A 2D rectangle and a 3D box are drawn by different servers into different worlds, and a call that split across both would be drawing in two places at once.
+
+**Nothing here reaches the scene.** The shapes go to the rendering server directly rather than into the scene tree, so the tree, the scene dock and the file on disk are untouched and the editor does not become dirty. That is why there is no `dry_run` on these tools and nothing to undo afterwards: `scene_modified` is `false` on both responses because it is a fact about the design, not a hope.
+
+The cost of that is that nothing in the editor owns these shapes, so they stay until they are cleared or the editor closes. That persistence is the point during a proposal, and `live_shapes` on every response says how many are up. At most 256 can be on screen at once.
+
+### `editor_clear_ghost_previews` — Live
+
+Removes wireframe previews. `preview_id` clears one batch; omitting it clears every preview, which is the call that works whatever left them behind.
 
 ### `viewport_capture_passes` — Live
 

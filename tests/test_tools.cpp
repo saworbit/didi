@@ -188,7 +188,7 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 114u);
+    ASSERT_EQ(tools.size(), 116u);
     const std::unordered_set<std::string> legacy_names = {
         "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
         "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
@@ -200,7 +200,7 @@ static void test_tool_registry_default_tools() {
         if (legacy_names.count(tool.name) == 0) ++canonical_count;
     }
     ASSERT_EQ(legacy_names.size(), 10u);
-    ASSERT_EQ(canonical_count, 104u);
+    ASSERT_EQ(canonical_count, 106u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -237,6 +237,8 @@ static void test_tool_registry_default_tools() {
     ASSERT_TRUE(reg.getTool("spatial_query_clearance") != nullptr);
     ASSERT_TRUE(reg.getTool("spatial_query_frustum") != nullptr);
     ASSERT_TRUE(reg.getTool("viewport_capture_passes") != nullptr);
+    ASSERT_TRUE(reg.getTool("editor_render_ghost_preview") != nullptr);
+    ASSERT_TRUE(reg.getTool("editor_clear_ghost_previews") != nullptr);
     ASSERT_TRUE(reg.getTool("shader_list_uniforms") != nullptr);
     ASSERT_TRUE(reg.getTool("shader_set_uniform") != nullptr);
     ASSERT_TRUE(reg.getTool("shader_get_visual_graph") != nullptr);
@@ -330,7 +332,7 @@ static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract(
         if (legacy_names.count(tool.name) != 0) continue;
         tool.capability.implemented ? ++implemented : ++unimplemented;
     }
-    ASSERT_EQ(implemented, 101u);
+    ASSERT_EQ(implemented, 103u);
     ASSERT_EQ(unimplemented, 3u);
 }
 
