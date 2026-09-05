@@ -55,7 +55,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         , "runtime_inject_input"
         // Phase 7B reads against the root viewport's existing worlds.
         , "physics_raycast_query", "spatial_query_raycast_batch"
-        , "spatial_query_clearance", "nav_query_path"
+        , "spatial_query_clearance", "spatial_query_frustum", "nav_query_path"
         // Phase 7B animation: the list is a read in either session kind, the
         // play is a game-only transient mutation.
         , "anim_list_tracks", "anim_play_track"
@@ -138,6 +138,7 @@ CallToolResult handleScriptDetachFromNode(const json& args, std::shared_ptr<ipc:
 CallToolResult handlePhysicsRaycastQuery(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleSpatialQueryRaycastBatch(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleSpatialQueryClearance(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleSpatialQueryFrustum(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleShaderListUniforms(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleShaderSetUniform(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleShaderGetVisualGraph(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -397,6 +398,7 @@ ResolvedToolBinding resolveAliasBinding(std::string_view invoked_name, const jso
         {"runtime_watch_invariants", "runtime.watchInvariants"},
         {"spatial_query_raycast_batch", "physics.raycastBatch"},
         {"spatial_query_clearance", "physics.clearance"},
+        {"spatial_query_frustum", "vision.frustumQuery"},
         {"shader_list_uniforms", "shader.listUniforms"},
         {"shader_set_uniform", "shader.setUniform"},
         {"shader_get_visual_graph", "shader.getVisualGraph"},
@@ -1457,6 +1459,44 @@ void ToolRegistry::registerAllDefaultTools() {
         };
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleSpatialQueryClearance(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "spatial_query_frustum";
+        t.description = "Lists the 3D nodes inside a camera frustum in the attached session, nearest first, and can sample whether anything with a collider stands between the camera and each one.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"camera_node", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024},
+                                 {"description", "A Camera3D already in the scene, whose transform, projection, near and far planes are used. Exactly one of camera_node and camera is required."}}},
+                {"camera", {
+                    {"type", "object"},
+                    {"description", "A frustum written out by hand. fov_degrees is vertical, matching a Godot camera's default."},
+                    {"properties", {
+                        {"position", {{"type", "object"}, {"description", "{x,y,z}. A frustum has no 2D form."}}},
+                        {"look_at", {{"type", "object"}, {"description", "{x,y,z} the camera points at, which must differ from position."}}},
+                        {"up", {{"type", "object"}, {"description", "{x,y,z}. Defaults to {0,1,0}, and the value used is reported back."}}},
+                        {"fov_degrees", {{"type", "number"}, {"minimum", 1}, {"maximum", 179}}},
+                        {"near", {{"type", "number"}, {"exclusiveMinimum", 0}}},
+                        {"far", {{"type", "number"}, {"exclusiveMinimum", 0}}},
+                        {"aspect", {{"type", "number"}, {"minimum", 0.01}, {"maximum", 100},
+                                    {"description", "Width over height. Required, because the frustum is a different shape without it."}}}
+                    }},
+                    {"required", json::array({"position", "look_at", "fov_degrees", "near", "far", "aspect"})},
+                    {"additionalProperties", false}
+                }},
+                {"sightline", {{"type", "boolean"}, {"default", false},
+                               {"description", "Sample rays from the camera to each node. Rays see physics colliders only, so geometry without one does not block."}}},
+                {"collision_mask", {{"type", "integer"}, {"minimum", 1}, {"maximum", 2147483647}, {"default", 1},
+                                    {"description", "Applies to the sightline rays only."}}},
+                {"max_results", {{"type", "integer"}, {"minimum", 1}, {"maximum", 256}, {"default", 64}}}
+            }},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleSpatialQueryFrustum(binding, args, m_ipcClient);
         };
         registerTool(std::move(t));
     }

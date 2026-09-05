@@ -497,6 +497,29 @@ try {
         (Tool-Request 2281 "spatial_query_raycast_batch" @{ rays = @(
             @{ from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 4; y = 0; z = 0 } },
             @{ from = @{ x = 1; y = 1; z = 1 }; to = @{ x = 1; y = 1; z = 1 } }) }),
+        # What the fixture camera can see, and what stands in the way. The
+        # camera sits at z=6 looking down -Z, so the boxes at the origin are in
+        # front of it and the box at z=12 is behind it.
+        (Tool-Request 2300 "spatial_query_frustum" @{ camera_node = "/root/RuntimeRoot/Spatial/FrustumCamera"; sightline = $true }),
+        # The same volume written out by hand. Two ways of describing one
+        # frustum have to name the same nodes.
+        (Tool-Request 2301 "spatial_query_frustum" @{ camera = @{
+            position = @{ x = 0; y = 0; z = 6 }; look_at = @{ x = 0; y = 0; z = 0 };
+            fov_degrees = 70; near = 0.05; far = 100; aspect = 1.7777778 } }),
+        # A frustum answers about one camera, so neither and both are the same
+        # mistake seen from two sides.
+        (Tool-Request 2302 "spatial_query_frustum" @{}),
+        (Tool-Request 2303 "spatial_query_frustum" @{ camera_node = "/root/RuntimeRoot/Spatial/FrustumCamera"; camera = @{
+            position = @{ x = 0; y = 0; z = 6 }; look_at = @{ x = 0; y = 0; z = 0 };
+            fov_degrees = 70; near = 0.05; far = 100; aspect = 1.7777778 } }),
+        (Tool-Request 2304 "spatial_query_frustum" @{ camera_node = "/root/RuntimeRoot/Spatial/FrustumVisible" }),
+        (Tool-Request 2305 "spatial_query_frustum" @{ camera = @{
+            position = @{ x = 0; y = 0 }; look_at = @{ x = 0; y = 1 };
+            fov_degrees = 70; near = 0.05; far = 100; aspect = 1.7777778 } }),
+        # The same volume with no perspective in it. An orthogonal camera does
+        # not widen with depth, so the same six planes have to be built from a
+        # flat extent instead of an angle.
+        (Tool-Request 2307 "spatial_query_frustum" @{ camera_node = "/root/RuntimeRoot/Spatial/FrustumOrtho" }),
         (Tool-Request 405 "nav_query_path" @{ start_point = @{ x = -1; y = 0; z = 0 }; end_point = @{ x = 1; y = 0; z = 0 } }),
         (Tool-Request 406 "nav_query_path" @{ start_point = @{ x = -1; y = 0 }; end_point = @{ x = 1; y = 0 } }),
         (Tool-Request 407 "nav_query_path" @{ start_point = @{ x = -1; y = 0; z = 0 }; end_point = @{ x = 1; y = 0 } }),
@@ -687,7 +710,7 @@ try {
     $runtimeTree = Tool-Payload $runtimeById[302]
     Assert-True ($runtimeTree.scene_tree.path -eq "/root/RuntimeRoot") "Runtime tree root was not canonical."
     Assert-True ($runtimeTree.scene_tree.child_count -eq 4) "Runtime tree did not report child_count."
-    Assert-True ($runtimeTree.node_count -eq 13 -and $runtimeTree.truncated) "Runtime tree bounds metadata did not report the deliberately large truncated subtree."
+    Assert-True ($runtimeTree.node_count -eq 19 -and $runtimeTree.truncated) "Runtime tree bounds metadata did not report the deliberately large truncated subtree."
     $inputBefore = Runtime-InputCounter (Tool-Payload $runtimeById[391])
     $injected = Tool-Payload $runtimeById[392]
     Assert-True ($injected.execution_mode -eq "live" -and $injected.session_kind -eq "game") "runtime_inject_input did not run against the game session."
@@ -754,6 +777,73 @@ try {
     Assert-True ($maskedSweep.clear -eq $true) "A collision mask that excludes layer 1 still blocked the sweep."
 
     Assert-True $runtimeById[2285].result.isError "spatial_query_clearance accepted a shape with no extent."
+
+    # A camera frustum, from the camera itself.
+    $frustum = Tool-Payload $runtimeById[2300]
+    Assert-True ($frustum.execution_mode -eq "live") "spatial_query_frustum did not run live."
+    Assert-True ($frustum.camera.source -eq "camera_node" -and $frustum.camera.projection -eq "perspective") "The frustum did not report the camera it came from."
+    Assert-True ([Math]::Abs($frustum.camera.fov_degrees - 70) -lt 0.01) "The frustum did not read the camera field of view ($($frustum.camera.fov_degrees))."
+    Assert-True ([Math]::Abs($frustum.camera.forward.z + 1) -lt 0.001 -and [Math]::Abs($frustum.camera.forward.x) -lt 0.001) "The frustum forward axis is not the direction the camera faces ($($frustum.camera.forward.x), $($frustum.camera.forward.z))."
+    # A running game renders through the camera's own viewport, so that is where
+    # the aspect ratio has to come from.
+    Assert-True ($frustum.camera.aspect_source -eq "viewport") "A game frustum took its aspect ratio from $($frustum.camera.aspect_source) rather than the viewport it renders through."
+    $frustumPaths = @($frustum.nodes | ForEach-Object { $_.path })
+    Assert-True ($frustumPaths -contains "/root/RuntimeRoot/Spatial/FrustumVisible") "The box in front of the camera is not in the frustum."
+    Assert-True ($frustumPaths -contains "/root/RuntimeRoot/Spatial/FrustumClear") "The second box in front of the camera is not in the frustum."
+    # The box behind the camera is the half of the answer a list of everything
+    # would get wrong.
+    Assert-True (-not ($frustumPaths -contains "/root/RuntimeRoot/Spatial/FrustumBehind")) "A box behind the camera was reported as inside the frustum."
+    $visible = @($frustum.nodes | Where-Object { $_.path -eq "/root/RuntimeRoot/Spatial/FrustumVisible" })[0]
+    Assert-True ($visible.tested -eq "bounds" -and $visible.containment -eq "inside") "A mesh in front of the camera was not tested by its own bounds ($($visible.tested), $($visible.containment))."
+    Assert-True ($visible.visible_in_tree -eq $true) "A visible mesh was not reported as visible in the tree."
+    # A body has no geometry of its own, so it is tested where it stands and can
+    # only ever be inside.
+    $body = @($frustum.nodes | Where-Object { $_.path -eq "/root/RuntimeRoot/Spatial/RayTarget3D" })[0]
+    Assert-True ($null -ne $body -and $body.tested -eq "origin" -and $body.containment -eq "inside") "A node without geometry was not tested at its origin."
+    $distances = @($frustum.nodes | ForEach-Object { $_.distance })
+    $ordered = $true
+    for ($i = 1; $i -lt $distances.Count; $i++) { if ($distances[$i] -lt $distances[$i - 1]) { $ordered = $false } }
+    Assert-True $ordered "The frustum nodes are not ordered nearest first."
+
+    # The sightline is the half a containment test cannot answer. The blocker
+    # stands in front of one box and beside the other.
+    $clear = @($frustum.nodes | Where-Object { $_.path -eq "/root/RuntimeRoot/Spatial/FrustumClear" })[0]
+    Assert-True ($visible.sightline.status -eq "blocked") "The box behind the blocker reported a $($visible.sightline.status) sightline."
+    Assert-True ($visible.sightline.samples -eq 9 -and $visible.sightline.samples_clear -eq 0) "The blocked box reported $($visible.sightline.samples_clear) of $($visible.sightline.samples) samples arriving."
+    Assert-True ($clear.sightline.status -eq "clear") "The box beside the blocker reported a $($clear.sightline.status) sightline."
+    Assert-True ($clear.sightline.samples_clear -eq $clear.sightline.samples) "A clear sightline did not have every sample arrive."
+    # A ray aimed at a body hits that body, which is not something standing in
+    # the way of it.
+    $blocker = @($frustum.nodes | Where-Object { $_.path -eq "/root/RuntimeRoot/Spatial/FrustumBlocker" })[0]
+    Assert-True ($blocker.sightline.status -eq "clear") "A body reported itself as blocking its own sightline."
+    Assert-True ($frustum.sightline_rays -gt 0 -and $frustum.sightline_truncated -eq $false) "The sightline pass reported no rays or a truncation it did not do."
+    # The fixture puts ten thousand nodes in one subtree ahead of the spatial
+    # ones. A walk that ran out of budget inside it would reach none of the
+    # geometry and report an empty frustum for a scene full of it.
+    Assert-True ($frustum.scan_limit_reached -eq $false) "The frustum walk ran out of budget before it had seen the scene."
+    Assert-True ($frustum.examined -gt 10000) "The frustum walk examined only $($frustum.examined) nodes; the fixture subtree alone is larger than that."
+
+    # An orthogonal camera has extent rather than an angle, so it is a second
+    # way to build the same six planes and not a variation on the first.
+    $ortho = Tool-Payload $runtimeById[2307]
+    Assert-True ($ortho.camera.projection -eq "orthogonal") "An orthogonal camera was read as $($ortho.camera.projection)."
+    Assert-True ([Math]::Abs($ortho.camera.orthogonal_size - 8) -lt 0.01 -and $null -eq $ortho.camera.fov_degrees) "An orthogonal frustum did not report its size, or reported a field of view it does not have."
+    $orthoPaths = @($ortho.nodes | ForEach-Object { $_.path })
+    Assert-True ($orthoPaths -contains "/root/RuntimeRoot/Spatial/FrustumVisible") "The orthogonal camera did not see the box in front of it."
+    Assert-True (-not ($orthoPaths -contains "/root/RuntimeRoot/Spatial/FrustumBehind")) "The orthogonal camera saw the box behind it."
+
+    # The same volume described by hand has to name the same nodes.
+    $written = Tool-Payload $runtimeById[2301]
+    Assert-True ($written.camera.source -eq "parameters" -and $written.camera.up_defaulted -eq $true) "A hand written frustum did not report its source or its defaulted up."
+    $writtenPaths = @($written.nodes | ForEach-Object { $_.path })
+    Assert-True ($writtenPaths -contains "/root/RuntimeRoot/Spatial/FrustumVisible") "The hand written frustum missed the box the camera frustum found."
+    Assert-True (-not ($writtenPaths -contains "/root/RuntimeRoot/Spatial/FrustumBehind")) "The hand written frustum included the box behind the camera."
+    Assert-True ($null -eq @($written.nodes)[0].sightline) "A frustum query that did not ask for sightlines reported one."
+
+    Assert-True $runtimeById[2302].result.isError "spatial_query_frustum accepted a request with no camera at all."
+    Assert-True $runtimeById[2303].result.isError "spatial_query_frustum accepted two cameras for one question."
+    Assert-True $runtimeById[2304].result.isError "spatial_query_frustum accepted a node that is not a Camera3D."
+    Assert-True $runtimeById[2305].result.isError "spatial_query_frustum accepted a 2D point for a shape that has no 2D form."
 
     $path3d = Tool-Payload $runtimeById[405]
     Assert-True ($path3d.execution_mode -eq "live" -and $path3d.dimension -eq 3 -and $path3d.reachable -eq $true) "3D path query found no path across the fixture region."
@@ -935,6 +1025,7 @@ try {
         (Tool-Request 17 "editor_undo" @{}),
         (Tool-Request 18 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 3 }),
         (Tool-Request 19 "viewport_capture_frame" @{ camera_identifier = "active_editor_view" }),
+        (Tool-Request 2306 "spatial_query_frustum" @{ camera_node = "/root/SmokeRoot/ViewportCamera" }),
         # Writing a uniform, placed after the last undo and redo above so the
         # undo below can only be this one. The undo is the assertion that
         # matters: the flag saying a change was registered is not evidence that
@@ -1603,6 +1694,18 @@ try {
     # as a graph with nothing in it.
     Assert-True $byId[2297].result.isError "A code shader was reported as a visual graph."
     Assert-True ($byId[2297].result.content[0].text -match "written in code") "The refusal does not say why a code shader has no graph."
+
+    $editorFrustum = Tool-Payload $byId[2306]
+    Assert-True ($editorFrustum.execution_mode -eq "live") "spatial_query_frustum did not run live in the editor."
+    Assert-True ($editorFrustum.camera.projection -eq "perspective" -and [Math]::Abs($editorFrustum.camera.fov_degrees - 70) -lt 0.01) "The editor frustum did not read the fixture camera."
+    # The shape of an editor pane is a fact about the window, not about the
+    # game, so the aspect ratio comes from what the project is configured to
+    # run at.
+    Assert-True ($editorFrustum.camera.aspect_source -eq "project_settings") "An editor frustum took its aspect ratio from $($editorFrustum.camera.aspect_source)."
+    Assert-True ($editorFrustum.camera.aspect -gt 0) "An editor frustum reported no aspect ratio."
+    $editorPaths = @($editorFrustum.nodes | ForEach-Object { $_.path })
+    Assert-True ($editorPaths -contains "/root/SmokeRoot/Subject") "The box in front of the fixture camera is not in the editor frustum."
+    Assert-True ($editorFrustum.node_count -ge 1 -and $editorFrustum.examined -ge $editorFrustum.node_count) "An editor frustum examined fewer nodes than it reported finding."
 
     # An empty slot is not a shader with no uniforms, and neither is a missing
     # property or a missing node.

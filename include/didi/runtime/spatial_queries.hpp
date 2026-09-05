@@ -82,6 +82,58 @@ struct ClearanceRequest {
 
 constexpr double kClearanceExtentLimit = 100000.0;
 
+// Which scene nodes a camera can see, and whether anything stands in the way.
+//
+// A frustum is a 3D shape, so this is 3D only. There is no 2D analogue to fall
+// back to and pretending otherwise would answer a different question.
+//
+// The frustum can come from a Camera3D already in the scene or from parameters
+// written out by hand. Both end up as the same six planes, computed the same
+// way, so a node the one form calls visible is never a node the other form
+// calls hidden.
+//
+// `up` is the one field with a default. Roll changes which nodes fall inside a
+// frustum that is not square, so the value used is echoed back in the response
+// rather than left to be assumed.
+enum class FrustumSource { camera_node, parameters };
+
+constexpr int64_t kMaxFrustumResults = 256;
+constexpr int64_t kDefaultFrustumResults = 64;
+// The walk stops here whatever the result cap is, so a large scene cannot turn
+// one query into an unbounded traversal of it.
+//
+// The number is high because the cheap way to be wrong is to set it low. A
+// depth-first walk that runs out of budget inside one large subtree never
+// reaches the rest of the scene, and would report an empty frustum for a room
+// full of geometry. Walking a node that is not a Node3D costs two engine calls,
+// so a scene of this size is tens of milliseconds, and a query that does hit
+// the limit says so in scan_limit_reached rather than answering as if it had
+// seen everything.
+constexpr int64_t kMaxFrustumNodesExamined = 40000;
+// Sightline sampling casts up to nine rays per node. The budget is on rays
+// rather than nodes so the cost of a query is bounded by one number.
+constexpr int64_t kMaxSightlineRays = 512;
+
+struct FrustumRequest {
+    FrustumSource source{FrustumSource::camera_node};
+    // source == camera_node
+    std::string camera_node;
+    // source == parameters
+    SpatialPoint position{3, 0.0, 0.0, 0.0};
+    SpatialPoint look_at{3, 0.0, 0.0, -1.0};
+    SpatialPoint up{3, 0.0, 1.0, 0.0};
+    bool up_given{false};
+    double fov_degrees{70.0};
+    double near_plane{0.05};
+    double far_plane{100.0};
+    double aspect{1.0};
+
+    int64_t collision_mask{1};
+    bool sightline{false};
+    int64_t max_results{kDefaultFrustumResults};
+};
+
+
 // Both validate against the approved Phase 7B contracts and return 400 for
 // anything that does not match exactly: unknown keys, mixed dimensions,
 // non-finite or out-of-range coordinates, a zero-length ray, a mask outside
@@ -91,6 +143,10 @@ Result<RaycastRequest> parseRaycastRequest(const json& params);
 // without saying which entry is wrong is a batch the caller has to bisect.
 Result<RaycastBatchRequest> parseRaycastBatchRequest(const json& params);
 Result<ClearanceRequest> parseClearanceRequest(const json& params);
+// Exactly one of camera_node and camera must be present: a query cannot be
+// answered by two frustums, and the pair being optional would let a caller
+// think it had supplied one when it had supplied neither.
+Result<FrustumRequest> parseFrustumRequest(const json& params);
 Result<NavPathRequest> parseNavPathRequest(const json& params);
 
 } // namespace runtime

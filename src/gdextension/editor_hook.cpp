@@ -836,7 +836,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         // shipping binary. Only the seam configurator stays gated.
         "signal.listConnections", "signal.connect", "signal.disconnect", "signal.emit",
         "runtime.injectInput", "physics.raycast", "physics.raycastBatch",
-        "physics.clearance", "nav.queryPath",
+        "physics.clearance", "vision.frustumQuery", "nav.queryPath",
         "anim.listTracks", "anim.playTrack", "vision.setCameraTransform",
         "vision.toggleDebugDraw", "tilemap.setCells", "tilemap.getUsedRect",
         "gridmap.setCells", "shader.listUniforms", "shader.setUniform",
@@ -851,7 +851,8 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         const bool game_admitted = method.rfind("runtime.", 0) == 0 ||
                                    method == "physics.raycast" ||
                                    method == "physics.raycastBatch" ||
-                                   method == "physics.clearance" || method == "nav.queryPath" ||
+                                   method == "physics.clearance" ||
+                                   method == "vision.frustumQuery" || method == "nav.queryPath" ||
                                    method == "anim.listTracks" || method == "anim.playTrack";
         if (m_sessionKind == runtime::SessionKind::game && !game_admitted) {
             return {{"error", {{"code", 409},

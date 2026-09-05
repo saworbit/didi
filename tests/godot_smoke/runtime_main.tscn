@@ -1,9 +1,15 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource path="res://runtime_probe.gd" type="Script" id="1_runtime"]
 
 [sub_resource type="BoxShape3D" id="box_3d"]
 size = Vector3(1, 1, 1)
+
+[sub_resource type="BoxMesh" id="frustum_box"]
+size = Vector3(1, 1, 1)
+
+[sub_resource type="BoxShape3D" id="frustum_blocker"]
+size = Vector3(1.5, 1.5, 0.5)
 
 [sub_resource type="RectangleShape2D" id="rect_2d"]
 size = Vector2(1, 1)
@@ -75,3 +81,33 @@ navigation_polygon = SubResource("nav_polygon_2d")
 libraries = {
 "": SubResource("anim_library")
 }
+
+[node name="FrustumCamera" type="Camera3D" parent="Spatial"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 6)
+fov = 70.0
+near = 0.05
+far = 100.0
+
+[node name="FrustumOrtho" type="Camera3D" parent="Spatial"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 6)
+projection = 1
+size = 8.0
+near = 0.05
+far = 100.0
+
+[node name="FrustumVisible" type="MeshInstance3D" parent="Spatial"]
+mesh = SubResource("frustum_box")
+
+[node name="FrustumClear" type="MeshInstance3D" parent="Spatial"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.5, 0)
+mesh = SubResource("frustum_box")
+
+[node name="FrustumBlocker" type="StaticBody3D" parent="Spatial"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 3)
+
+[node name="Shape" type="CollisionShape3D" parent="Spatial/FrustumBlocker"]
+shape = SubResource("frustum_blocker")
+
+[node name="FrustumBehind" type="MeshInstance3D" parent="Spatial"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 12)
+mesh = SubResource("frustum_box")

@@ -22,6 +22,7 @@
 #include <set>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 namespace didi {
 namespace godot {
@@ -2535,6 +2536,696 @@ json physicsClearance(const json& params) {
                        {"collide_with_areas", false}});
 }
 
+// A frustum reduced to the six half-spaces every point in this file is tested
+// against. Both request forms end here, so a node one form calls visible is
+// never a node the other calls hidden.
+//
+// The frustum is stored as an origin and three unit axes rather than as a
+// matrix, because that is what a half-space test actually reads and because a
+// basis assembled once cannot drift from the one the response reports.
+struct FrustumBasis {
+    double origin[3]{0.0, 0.0, 0.0};
+    double forward[3]{0.0, 0.0, -1.0};
+    double up[3]{0.0, 1.0, 0.0};
+    double right[3]{1.0, 0.0, 0.0};
+    double near_plane{0.05};
+    double far_plane{100.0};
+    // Perspective: half extents at unit depth. Orthogonal: half extents flat.
+    double half_x{1.0};
+    double half_y{1.0};
+    bool orthogonal{false};
+    double aspect{1.0};
+    // Reported back so the caller can see the frustum that answered, rather
+    // than the one it believes it asked for.
+    double fov_degrees{0.0};
+    double ortho_size{0.0};
+    std::string aspect_source{"parameters"};
+};
+
+void frustumAxis(double* out, double x, double y, double z) {
+    const double length = std::sqrt(x * x + y * y + z * z);
+    if (length < 1e-12) {
+        out[0] = 0.0;
+        out[1] = 0.0;
+        out[2] = 0.0;
+        return;
+    }
+    out[0] = x / length;
+    out[1] = y / length;
+    out[2] = z / length;
+}
+
+void frustumCross(double* out, const double* a, const double* b) {
+    out[0] = a[1] * b[2] - a[2] * b[1];
+    out[1] = a[2] * b[0] - a[0] * b[2];
+    out[2] = a[0] * b[1] - a[1] * b[0];
+}
+
+double frustumDot(const double* a, const double* b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+json frustumAxisJson(const double* axis) {
+    return json{{"x", axis[0]}, {"y", axis[1]}, {"z", axis[2]}};
+}
+
+// Right and up are rebuilt from forward so a caller-supplied up that is merely
+// near the view direction still yields an orthogonal basis.
+Result<void> orientFrustum(FrustumBasis& basis, double fx, double fy, double fz,
+                           double ux, double uy, double uz) {
+    frustumAxis(basis.forward, fx, fy, fz);
+    double raw_up[3];
+    frustumAxis(raw_up, ux, uy, uz);
+    if (frustumDot(basis.forward, basis.forward) < 0.5 || frustumDot(raw_up, raw_up) < 0.5) {
+        return Error(409, "The camera basis has no direction to look along");
+    }
+    frustumCross(basis.right, basis.forward, raw_up);
+    frustumAxis(basis.right, basis.right[0], basis.right[1], basis.right[2]);
+    if (frustumDot(basis.right, basis.right) < 0.5) {
+        return Error(409, "The camera up direction is parallel to the view direction, which leaves "
+                          "the roll of the frustum undefined");
+    }
+    frustumCross(basis.up, basis.right, basis.forward);
+    frustumAxis(basis.up, basis.up[0], basis.up[1], basis.up[2]);
+    return Result<void>::ok();
+}
+
+// Inside is every value at or above zero. The planes are not unit length, which
+// does not matter: only the sign is ever read.
+void frustumHalfSpaces(const FrustumBasis& basis, const double* point, double* out) {
+    const double delta[3] = {point[0] - basis.origin[0], point[1] - basis.origin[1],
+                             point[2] - basis.origin[2]};
+    const double depth = frustumDot(delta, basis.forward);
+    const double lateral = frustumDot(delta, basis.right);
+    const double vertical = frustumDot(delta, basis.up);
+    out[0] = depth - basis.near_plane;
+    out[1] = basis.far_plane - depth;
+    if (basis.orthogonal) {
+        out[2] = basis.half_x + lateral;
+        out[3] = basis.half_x - lateral;
+        out[4] = basis.half_y + vertical;
+        out[5] = basis.half_y - vertical;
+        return;
+    }
+    out[2] = basis.half_x * depth + lateral;
+    out[3] = basis.half_x * depth - lateral;
+    out[4] = basis.half_y * depth + vertical;
+    out[5] = basis.half_y * depth - vertical;
+}
+
+enum class FrustumContainment { outside, intersecting, inside };
+
+// Whole corners inside means inside. Every corner outside one single plane
+// means outside. Anything else is called intersecting, which is the ordinary
+// conservative frustum test: a box that straddles two planes without entering
+// the volume is reported as intersecting rather than missed, because saying a
+// node might be visible when it is not is the safe direction to be wrong in.
+FrustumContainment frustumContains(const FrustumBasis& basis,
+                                   const std::vector<std::array<double, 3>>& corners) {
+    if (corners.empty()) return FrustumContainment::outside;
+    bool all_inside = true;
+    bool outside_plane[6] = {true, true, true, true, true, true};
+    for (const auto& corner : corners) {
+        double values[6];
+        frustumHalfSpaces(basis, corner.data(), values);
+        for (int plane = 0; plane < 6; ++plane) {
+            if (values[plane] >= 0.0) {
+                outside_plane[plane] = false;
+            } else {
+                all_inside = false;
+            }
+        }
+    }
+    for (int plane = 0; plane < 6; ++plane) {
+        if (outside_plane[plane]) return FrustumContainment::outside;
+    }
+    return all_inside ? FrustumContainment::inside : FrustumContainment::intersecting;
+}
+
+Result<double> projectViewportAspect(std::string& source) {
+    auto settings = singleton("ProjectSettings");
+    if (settings.isErr()) return settings.error();
+    const auto read = [&](const char* key) -> Result<double> {
+        auto name = makeString(key);
+        if (name.isErr()) return name.error();
+        VariantValue fallback;
+        auto value = callObject(settings.value(), "ProjectSettings", "get_setting", 223050753LL,
+                                {&name.value(), &fallback});
+        if (value.isErr()) return value.error();
+        auto number = scalarFromVariant<int64_t>(value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (number.isErr()) return number.error();
+        return static_cast<double>(number.value());
+    };
+    auto width = read("display/window/size/viewport_width");
+    auto height = read("display/window/size/viewport_height");
+    if (width.isErr() || height.isErr() || width.value() <= 0.0 || height.value() <= 0.0) {
+        return Error(409, "The project has no viewport size to take an aspect ratio from");
+    }
+    source = "project_settings";
+    return width.value() / height.value();
+}
+
+// The frustum of a Camera3D already in the scene.
+//
+// Aspect ratio does not live on the camera, so where it comes from is a real
+// choice and the answer changes with it. A running game renders through the
+// camera's own viewport, so that is the frustum being drawn. An edited scene
+// renders through an editor pane whose shape is a fact about the window, not
+// about the game, so the project's configured viewport size is the honest
+// source there. Which one was used is reported either way.
+Result<FrustumBasis> frustumFromCamera(GDExtensionObjectPtr camera, const std::string& session_kind) {
+    for (const auto& bind : {std::make_tuple("Node3D", "get_global_position", 3360562783LL),
+                             std::make_tuple("Node3D", "to_global", 192990374LL),
+                             std::make_tuple("Camera3D", "get_fov", 1740695150LL),
+                             std::make_tuple("Camera3D", "get_near", 1740695150LL),
+                             std::make_tuple("Camera3D", "get_far", 1740695150LL),
+                             std::make_tuple("Camera3D", "get_size", 1740695150LL),
+                             std::make_tuple("Camera3D", "get_projection", 2624185235LL),
+                             std::make_tuple("Camera3D", "get_keep_aspect_mode", 2790278316LL)}) {
+        auto required = requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind));
+        if (required.isErr()) return Error(501, required.error().message);
+    }
+
+    const auto read_point = [&](const char* method, int64_t hash,
+                                const std::vector<const VariantValue*>& args)
+        -> Result<std::array<double, 3>> {
+        auto value = callObject(camera, "Node3D", method, hash, args);
+        if (value.isErr()) return value.error();
+        auto point = pointVariantToJson(value.value(), 3);
+        if (point.isErr()) return point.error();
+        return std::array<double, 3>{point.value()["x"].get<double>(), point.value()["y"].get<double>(),
+                                     point.value()["z"].get<double>()};
+    };
+    auto origin = read_point("get_global_position", 3360562783LL, {});
+    if (origin.isErr()) return origin.error();
+    auto local_forward = makeVector3(0.0, 0.0, -1.0);
+    auto local_up = makeVector3(0.0, 1.0, 0.0);
+    if (local_forward.isErr() || local_up.isErr()) {
+        return Error::internal("Failed to construct camera basis probes");
+    }
+    auto ahead = read_point("to_global", 192990374LL, {&local_forward.value()});
+    if (ahead.isErr()) return ahead.error();
+    auto above = read_point("to_global", 192990374LL, {&local_up.value()});
+    if (above.isErr()) return above.error();
+
+    FrustumBasis basis;
+    basis.origin[0] = origin.value()[0];
+    basis.origin[1] = origin.value()[1];
+    basis.origin[2] = origin.value()[2];
+    auto oriented = orientFrustum(basis,
+                                  ahead.value()[0] - origin.value()[0],
+                                  ahead.value()[1] - origin.value()[1],
+                                  ahead.value()[2] - origin.value()[2],
+                                  above.value()[0] - origin.value()[0],
+                                  above.value()[1] - origin.value()[1],
+                                  above.value()[2] - origin.value()[2]);
+    if (oriented.isErr()) return oriented.error();
+
+    const auto read_number = [&](const char* method, int64_t hash) -> Result<double> {
+        auto value = callObject(camera, "Camera3D", method, hash);
+        if (value.isErr()) return value.error();
+        auto number = scalarFromVariant<double>(value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+        if (number.isErr()) return number.error();
+        return number.value();
+    };
+    const auto read_enum = [&](const char* method, int64_t hash) -> Result<int64_t> {
+        auto value = callObject(camera, "Camera3D", method, hash);
+        if (value.isErr()) return value.error();
+        return scalarFromVariant<int64_t>(value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    };
+    auto projection = read_enum("get_projection", 2624185235LL);
+    if (projection.isErr()) return projection.error();
+    if (projection.value() == 2) {
+        // A frustum-mode camera carries an off-axis offset that this basis has
+        // no place to put. Answering with the centred frustum would describe a
+        // volume the camera is not looking through.
+        return Error(409, "The camera uses the frustum projection mode, whose off-axis offset this "
+                          "query does not model");
+    }
+    if (projection.value() != 0 && projection.value() != 1) {
+        return Error(409, "The camera uses a projection mode this query does not model");
+    }
+    auto near_plane = read_number("get_near", 1740695150LL);
+    auto far_plane = read_number("get_far", 1740695150LL);
+    if (near_plane.isErr()) return near_plane.error();
+    if (far_plane.isErr()) return far_plane.error();
+    basis.near_plane = near_plane.value();
+    basis.far_plane = far_plane.value();
+    if (!(basis.near_plane > 0.0) || !(basis.far_plane > basis.near_plane)) {
+        return Error(409, "The camera near and far planes do not describe a volume");
+    }
+
+    if (session_kind == "game") {
+        auto required = requireMethodBind("Viewport", "get_visible_rect", 1639390495LL);
+        if (required.isErr()) return Error(501, required.error().message);
+        auto viewport_value = callObject(camera, "Node", "get_viewport", 3596683776LL);
+        if (viewport_value.isErr()) return viewport_value.error();
+        auto viewport = objectFromVariant(viewport_value.value());
+        if (viewport.isErr() || !viewport.value()) {
+            return Error(409, "The camera is not inside a viewport to take an aspect ratio from");
+        }
+        auto rect_value = callObject(viewport.value(), "Viewport", "get_visible_rect", 1639390495LL);
+        if (rect_value.isErr()) return rect_value.error();
+        auto rect = rect2ToJson(rect_value.value());
+        if (rect.isErr()) return rect.error();
+        const double width = rect.value()["size"]["x"].get<double>();
+        const double height = rect.value()["size"]["y"].get<double>();
+        if (!(width > 0.0) || !(height > 0.0)) {
+            return Error(409, "The camera viewport has no visible size to take an aspect ratio from");
+        }
+        basis.aspect = width / height;
+        basis.aspect_source = "viewport";
+    } else {
+        auto aspect = projectViewportAspect(basis.aspect_source);
+        if (aspect.isErr()) return aspect.error();
+        basis.aspect = aspect.value();
+    }
+
+    auto keep_aspect = read_enum("get_keep_aspect_mode", 2790278316LL);
+    if (keep_aspect.isErr()) return keep_aspect.error();
+    // Godot names the enum after the axis the value is held on: KEEP_WIDTH is
+    // 0 and makes fov horizontal, KEEP_HEIGHT is 1 and makes it vertical.
+    const bool keep_width = keep_aspect.value() == 0;
+    basis.orthogonal = projection.value() == 1;
+    if (basis.orthogonal) {
+        auto size = read_number("get_size", 1740695150LL);
+        if (size.isErr()) return size.error();
+        if (!(size.value() > 0.0)) return Error(409, "The orthogonal camera has no size");
+        basis.ortho_size = size.value();
+        if (keep_width) {
+            basis.half_x = size.value() / 2.0;
+            basis.half_y = basis.half_x / basis.aspect;
+        } else {
+            basis.half_y = size.value() / 2.0;
+            basis.half_x = basis.half_y * basis.aspect;
+        }
+    } else {
+        auto fov = read_number("get_fov", 1740695150LL);
+        if (fov.isErr()) return fov.error();
+        if (!(fov.value() > 0.0) || fov.value() >= 180.0) {
+            return Error(409, "The camera field of view does not describe a frustum");
+        }
+        basis.fov_degrees = fov.value();
+        const double half_angle = fov.value() * 3.14159265358979323846 / 360.0;
+        if (keep_width) {
+            basis.half_x = std::tan(half_angle);
+            basis.half_y = basis.half_x / basis.aspect;
+        } else {
+            basis.half_y = std::tan(half_angle);
+            basis.half_x = basis.half_y * basis.aspect;
+        }
+    }
+    return basis;
+}
+
+// One node that survived the frustum test, held until every node has been seen
+// so the nearest can be reported first.
+struct FrustumCandidate {
+    std::string path;
+    std::string class_name;
+    FrustumContainment containment{FrustumContainment::inside};
+    bool bounded{false};
+    bool visible_in_tree{true};
+    double distance{0.0};
+    std::vector<std::array<double, 3>> samples;
+};
+
+const char* frustumContainmentName(FrustumContainment containment) {
+    return containment == FrustumContainment::inside ? "inside" : "intersecting";
+}
+
+// The eight corners of a node's own bounding box in world space.
+//
+// Node3D.to_global is asked for each corner rather than the transform being
+// read and multiplied here, so a scaled, sheared or deeply nested node is
+// placed by the same code the engine places it with.
+Result<std::vector<std::array<double, 3>>> worldBoundsCorners(GDExtensionObjectPtr node) {
+    auto aabb_value = callObject(node, "VisualInstance3D", "get_aabb", 1068685055LL);
+    if (aabb_value.isErr()) return aabb_value.error();
+    auto& api = GodotApi::instance();
+    if (api.variant_get_type(aabb_value.value().ptr()) != GDEXTENSION_VARIANT_TYPE_AABB ||
+        !api.variant_get_ptr_getter) {
+        return Error::internal("Godot did not return an AABB for the node bounds");
+    }
+    auto converter = api.get_variant_to_type_constructor(GDEXTENSION_VARIANT_TYPE_AABB);
+    if (!converter) return Error::internal("Godot AABB conversion is unavailable");
+    NativeValue native_aabb(GDEXTENSION_VARIANT_TYPE_AABB);
+    converter(native_aabb.ptr(), aabb_value.value().ptr());
+    native_aabb.markInitialized();
+    double corner[3] = {0.0, 0.0, 0.0};
+    double extent[3] = {0.0, 0.0, 0.0};
+    for (const auto& member : {std::make_pair("position", corner), std::make_pair("size", extent)}) {
+        NativeName name(member.first);
+        auto getter = name.valid()
+            ? api.variant_get_ptr_getter(GDEXTENSION_VARIANT_TYPE_AABB, name.ptr()) : nullptr;
+        if (!getter) return Error::internal("Godot AABB member getter is unavailable");
+        NativeValue native_vector(GDEXTENSION_VARIANT_TYPE_VECTOR3);
+        getter(native_aabb.ptr(), native_vector.ptr());
+        native_vector.markInitialized();
+        int axis_index = 0;
+        for (const auto* axis : {"x", "y", "z"}) {
+            NativeName axis_name(axis);
+            auto axis_getter = axis_name.valid()
+                ? api.variant_get_ptr_getter(GDEXTENSION_VARIANT_TYPE_VECTOR3, axis_name.ptr()) : nullptr;
+            if (!axis_getter) return Error::internal("Godot Vector3 member getter is unavailable");
+            axis_getter(native_vector.ptr(), &member.second[axis_index]);
+            ++axis_index;
+        }
+    }
+
+    std::vector<std::array<double, 3>> corners;
+    corners.reserve(8);
+    for (int mask = 0; mask < 8; ++mask) {
+        const double local_x = corner[0] + ((mask & 1) ? extent[0] : 0.0);
+        const double local_y = corner[1] + ((mask & 2) ? extent[1] : 0.0);
+        const double local_z = corner[2] + ((mask & 4) ? extent[2] : 0.0);
+        auto local = makeVector3(local_x, local_y, local_z);
+        if (local.isErr()) return local.error();
+        auto world = callObject(node, "Node3D", "to_global", 192990374LL, {&local.value()});
+        if (world.isErr()) return world.error();
+        auto point = pointVariantToJson(world.value(), 3);
+        if (point.isErr()) return point.error();
+        corners.push_back({point.value()["x"].get<double>(), point.value()["y"].get<double>(),
+                           point.value()["z"].get<double>()});
+    }
+    return corners;
+}
+
+// Nearest first, and no more of them held than will be reported.
+//
+// A scene can put far more nodes inside a frustum than a caller asked to see,
+// and keeping all of them only to throw most away would make the cost of the
+// query depend on the scene rather than on the question. The kept set is a
+// max-heap on distance, so the furthest held node is the one displaced.
+bool frustumFurther(const FrustumCandidate& a, const FrustumCandidate& b) {
+    return a.distance < b.distance;
+}
+
+struct FrustumScan {
+    const FrustumBasis* basis{nullptr};
+    GDExtensionObjectPtr root{nullptr};
+    bool editor{true};
+    int64_t keep{64};
+    int64_t examined{0};
+    int64_t inside_count{0};
+    bool examine_limit_hit{false};
+    std::vector<FrustumCandidate> candidates;
+
+    void offer(FrustumCandidate&& candidate) {
+        if (static_cast<int64_t>(candidates.size()) < keep) {
+            candidates.push_back(std::move(candidate));
+            std::push_heap(candidates.begin(), candidates.end(), frustumFurther);
+            return;
+        }
+        if (!(candidate.distance < candidates.front().distance)) return;
+        std::pop_heap(candidates.begin(), candidates.end(), frustumFurther);
+        candidates.back() = std::move(candidate);
+        std::push_heap(candidates.begin(), candidates.end(), frustumFurther);
+    }
+};
+
+Result<void> scanFrustumNode(GDExtensionObjectPtr node, FrustumScan& scan) {
+    if (scan.examined >= runtime::kMaxFrustumNodesExamined) {
+        scan.examine_limit_hit = true;
+        return Result<void>::ok();
+    }
+    ++scan.examined;
+
+    auto spatial = objectIsClass(node, "Node3D");
+    if (spatial.isErr()) return spatial.error();
+    if (spatial.value()) {
+        auto bounded = objectIsClass(node, "VisualInstance3D");
+        if (bounded.isErr()) return bounded.error();
+        std::vector<std::array<double, 3>> corners;
+        if (bounded.value()) {
+            auto world_corners = worldBoundsCorners(node);
+            if (world_corners.isErr()) return world_corners.error();
+            corners = std::move(world_corners.value());
+        } else {
+            auto origin = callObject(node, "Node3D", "get_global_position", 3360562783LL);
+            if (origin.isErr()) return origin.error();
+            auto point = pointVariantToJson(origin.value(), 3);
+            if (point.isErr()) return point.error();
+            corners.push_back({point.value()["x"].get<double>(), point.value()["y"].get<double>(),
+                               point.value()["z"].get<double>()});
+        }
+        const auto containment = frustumContains(*scan.basis, corners);
+        if (containment != FrustumContainment::outside) {
+            ++scan.inside_count;
+            FrustumCandidate candidate;
+            candidate.containment = containment;
+            candidate.bounded = bounded.value();
+            auto class_name = nodeString(node, "get_class", 201670096LL);
+            if (class_name.isErr()) return class_name.error();
+            candidate.class_name = boundUtf8(class_name.value(), 256).value;
+            auto path = scan.editor ? logicalPathFromEditedRoot(scan.root, node)
+                                    : nodeString(node, "get_path", 4075236667LL);
+            if (path.isErr()) return path.error();
+            candidate.path = boundUtf8(path.value(), 1024).value;
+            auto visible = callObject(node, "Node3D", "is_visible_in_tree", 36873697LL);
+            if (visible.isErr()) return visible.error();
+            auto visible_flag = scalarFromVariant<GDExtensionBool>(visible.value(),
+                                                                   GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (visible_flag.isErr()) return visible_flag.error();
+            candidate.visible_in_tree = visible_flag.value() != 0;
+
+            double centre[3] = {0.0, 0.0, 0.0};
+            for (const auto& point : corners) {
+                centre[0] += point[0] / static_cast<double>(corners.size());
+                centre[1] += point[1] / static_cast<double>(corners.size());
+                centre[2] += point[2] / static_cast<double>(corners.size());
+            }
+            const double delta[3] = {centre[0] - scan.basis->origin[0],
+                                     centre[1] - scan.basis->origin[1],
+                                     centre[2] - scan.basis->origin[2]};
+            candidate.distance = std::sqrt(frustumDot(delta, delta));
+            candidate.samples = std::move(corners);
+            if (candidate.bounded) {
+                candidate.samples.push_back({centre[0], centre[1], centre[2]});
+            }
+            scan.offer(std::move(candidate));
+        }
+    }
+
+    // A node with no place in the world can still hold children that have one,
+    // so the walk descends whatever the node itself turned out to be.
+    auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    if (include_internal.isErr()) return include_internal.error();
+    auto children = callObject(node, "Node", "get_children", 873284517LL, {&include_internal.value()});
+    if (children.isErr()) return children.error();
+    auto size_value = callVariant(children.value(), "size");
+    if (size_value.isErr()) return size_value.error();
+    auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (size.isErr()) return size.error();
+    for (int64_t index = 0; index < size.value(); ++index) {
+        auto slot = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (slot.isErr()) return slot.error();
+        auto child_value = callVariant(children.value(), "get", {&slot.value()});
+        if (child_value.isErr()) return child_value.error();
+        auto child = objectFromVariant(child_value.value());
+        if (child.isErr() || !child.value()) return Error::internal("Godot returned an invalid child node");
+        auto walked = scanFrustumNode(child.value(), scan);
+        if (walked.isErr()) return walked.error();
+        if (scan.examine_limit_hit) break;
+    }
+    return Result<void>::ok();
+}
+
+// Whether a hit stands between the camera and the node, or is the node itself.
+//
+// A ray aimed at a node's own bounding box normally hits that node's collider
+// just short of the sample point, which is not an obstruction. Godot puts a
+// collider on a body that may be the node, its child, or its parent, so a hit
+// is treated as the node when either path contains the other.
+bool frustumHitIsSelf(const std::string& node_path, const std::string& collider_path) {
+    if (collider_path.empty()) return false;
+    if (collider_path == node_path) return true;
+    // Equal lengths that are not equal strings are two different nodes, and the
+    // separator check below would be reading one past the end of the shorter.
+    if (collider_path.size() == node_path.size()) return false;
+    const std::string& longer = collider_path.size() > node_path.size() ? collider_path : node_path;
+    const std::string& shorter = collider_path.size() > node_path.size() ? node_path : collider_path;
+    return longer.compare(0, shorter.size(), shorter) == 0 && longer[shorter.size()] == '/';
+}
+
+json visionFrustumQuery(const json& params, const std::string& session_kind) {
+    auto parsed = runtime::parseFrustumRequest(params);
+    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    const auto& request = parsed.value();
+
+    for (const auto& bind : {std::make_tuple("Node", "get_children", 873284517LL),
+                             std::make_tuple("Node3D", "is_visible_in_tree", 36873697LL),
+                             std::make_tuple("Node3D", "get_global_position", 3360562783LL),
+                             std::make_tuple("Node3D", "to_global", 192990374LL),
+                             std::make_tuple("VisualInstance3D", "get_aabb", 1068685055LL)}) {
+        auto required = requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind));
+        if (required.isErr()) return errorJson(501, required.error().message);
+    }
+
+    Result<GDExtensionObjectPtr> root = Error::internal("unresolved");
+    const bool editor = session_kind == "editor";
+    if (editor) {
+        auto interface = editorInterface();
+        if (interface.isErr()) return errorJson(interface.error().code, interface.error().message);
+        root = editedSceneRoot(interface.value());
+    } else {
+        auto tree = liveSceneTree();
+        if (tree.isErr()) return errorJson(tree.error().code, tree.error().message);
+        root = liveSceneTreeRoot(tree.value());
+    }
+    if (root.isErr()) return errorJson(root.error().code, root.error().message);
+
+    FrustumBasis basis;
+    json camera_json = json::object();
+    if (request.source == runtime::FrustumSource::camera_node) {
+        auto node = resolveNode(root.value(), request.camera_node);
+        if (node.isErr()) return errorJson(node.error().code, node.error().message);
+        auto is_camera = objectIsClass(node.value(), "Camera3D");
+        if (is_camera.isErr()) return errorJson(500, is_camera.error().message);
+        if (!is_camera.value()) {
+            return errorJson(409, "The node at " + request.camera_node + " is not a Camera3D");
+        }
+        auto built = frustumFromCamera(node.value(), session_kind);
+        if (built.isErr()) return errorJson(built.error().code, built.error().message);
+        basis = std::move(built.value());
+        camera_json["source"] = "camera_node";
+        camera_json["node_path"] = request.camera_node;
+    } else {
+        basis.origin[0] = request.position.x;
+        basis.origin[1] = request.position.y;
+        basis.origin[2] = request.position.z;
+        auto oriented = orientFrustum(basis, request.look_at.x - request.position.x,
+                                      request.look_at.y - request.position.y,
+                                      request.look_at.z - request.position.z,
+                                      request.up.x, request.up.y, request.up.z);
+        if (oriented.isErr()) return errorJson(oriented.error().code, oriented.error().message);
+        basis.near_plane = request.near_plane;
+        basis.far_plane = request.far_plane;
+        basis.aspect = request.aspect;
+        basis.fov_degrees = request.fov_degrees;
+        // The parameter form takes a vertical field of view, which is what a
+        // Godot camera holds by default.
+        basis.half_y = std::tan(request.fov_degrees * 3.14159265358979323846 / 360.0);
+        basis.half_x = basis.half_y * basis.aspect;
+        camera_json["source"] = "parameters";
+        camera_json["node_path"] = nullptr;
+        camera_json["up_defaulted"] = !request.up_given;
+    }
+    camera_json["position"] = frustumAxisJson(basis.origin);
+    camera_json["forward"] = frustumAxisJson(basis.forward);
+    camera_json["up"] = frustumAxisJson(basis.up);
+    camera_json["right"] = frustumAxisJson(basis.right);
+    camera_json["near"] = basis.near_plane;
+    camera_json["far"] = basis.far_plane;
+    camera_json["aspect"] = basis.aspect;
+    camera_json["aspect_source"] = basis.aspect_source;
+    camera_json["projection"] = basis.orthogonal ? "orthogonal" : "perspective";
+    camera_json["fov_degrees"] = basis.orthogonal ? json(nullptr) : json(basis.fov_degrees);
+    camera_json["orthogonal_size"] = basis.orthogonal ? json(basis.ortho_size) : json(nullptr);
+
+    FrustumScan scan;
+    scan.basis = &basis;
+    scan.root = root.value();
+    scan.editor = editor;
+    scan.keep = request.max_results;
+    auto walked = scanFrustumNode(root.value(), scan);
+    if (walked.isErr()) return errorJson(walked.error().code, walked.error().message);
+
+    std::sort_heap(scan.candidates.begin(), scan.candidates.end(), frustumFurther);
+    const size_t reported = scan.candidates.size();
+
+    // Sightline sampling opens the space state once for the whole answer, for
+    // the same reason a ray batch does.
+    std::optional<RaycastSpace> space;
+    int64_t rays_cast = 0;
+    bool sightline_truncated = false;
+    if (request.sightline && reported > 0) {
+        auto opened = openRaycastSpace(3);
+        if (opened.isErr()) return errorJson(opened.error().code, opened.error().message);
+        space = opened.value();
+    }
+
+    json nodes = json::array();
+    for (size_t index = 0; index < reported; ++index) {
+        auto& candidate = scan.candidates[index];
+        json entry = {{"path", candidate.path},
+                      {"class", candidate.class_name},
+                      {"containment", frustumContainmentName(candidate.containment)},
+                      {"tested", candidate.bounded ? "bounds" : "origin"},
+                      {"visible_in_tree", candidate.visible_in_tree},
+                      {"distance", candidate.distance}};
+        if (space.has_value()) {
+            if (rays_cast + static_cast<int64_t>(candidate.samples.size()) >
+                runtime::kMaxSightlineRays) {
+                // The field is left off rather than filled in, because an
+                // unmeasured sightline reported as clear is a claim nobody
+                // made.
+                sightline_truncated = true;
+                nodes.push_back(std::move(entry));
+                continue;
+            }
+            int64_t clear = 0;
+            for (const auto& sample : candidate.samples) {
+                runtime::RaycastRequest ray;
+                ray.from = runtime::SpatialPoint{3, basis.origin[0], basis.origin[1], basis.origin[2]};
+                ray.to = runtime::SpatialPoint{3, sample[0], sample[1], sample[2]};
+                ray.collision_mask = request.collision_mask;
+                const double span[3] = {sample[0] - basis.origin[0], sample[1] - basis.origin[1],
+                                        sample[2] - basis.origin[2]};
+                const double reach = std::sqrt(frustumDot(span, span));
+                if (reach < 1e-6) {
+                    // The camera stands on the sample, so nothing can be
+                    // between them.
+                    ++clear;
+                    continue;
+                }
+                auto cast = castOneRay(space.value(), ray);
+                if (cast.isErr()) return errorJson(cast.error().code, cast.error().message);
+                ++rays_cast;
+                const json& hit = cast.value();
+                if (!hit["hit"].get<bool>()) {
+                    ++clear;
+                    continue;
+                }
+                const std::string collider = hit["collider_path"].is_string()
+                    ? hit["collider_path"].get<std::string>() : std::string();
+                if (frustumHitIsSelf(candidate.path, collider)) {
+                    ++clear;
+                    continue;
+                }
+                const double hit_point[3] = {hit["position"]["x"].get<double>(),
+                                             hit["position"]["y"].get<double>(),
+                                             hit["position"]["z"].get<double>()};
+                const double gap[3] = {hit_point[0] - basis.origin[0], hit_point[1] - basis.origin[1],
+                                       hit_point[2] - basis.origin[2]};
+                const double hit_distance = std::sqrt(frustumDot(gap, gap));
+                // An obstruction at or past the sample point is not between the
+                // camera and the node.
+                if (hit_distance >= reach - (0.001 + reach * 0.001)) ++clear;
+            }
+            const int64_t samples = static_cast<int64_t>(candidate.samples.size());
+            entry["sightline"] = {
+                {"samples", samples},
+                {"samples_clear", clear},
+                {"status", clear == samples ? "clear" : (clear == 0 ? "blocked" : "partial")}};
+        }
+        nodes.push_back(std::move(entry));
+    }
+
+    json result = {{"camera", std::move(camera_json)},
+                   {"nodes", std::move(nodes)},
+                   {"node_count", scan.inside_count},
+                   {"examined", scan.examined},
+                   {"truncated", static_cast<int64_t>(reported) < scan.inside_count ||
+                                 scan.examine_limit_hit},
+                   {"scan_limit_reached", scan.examine_limit_hit}};
+    if (request.sightline) {
+        result["sightline_rays"] = rays_cast;
+        result["sightline_truncated"] = sightline_truncated;
+    }
+    return liveResult(result);
+}
+
 json physicsRaycastBatch(const json& params) {
     auto parsed = runtime::parseRaycastBatchRequest(params);
     if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
@@ -2978,6 +3669,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
     if (method == "physics.raycast") return physicsRaycast(params);
     if (method == "physics.raycastBatch") return physicsRaycastBatch(params);
     if (method == "physics.clearance") return physicsClearance(params);
+    if (method == "vision.frustumQuery") return visionFrustumQuery(params, session_kind);
     if (method == "nav.queryPath") return navQueryPath(params);
     if (method == "anim.listTracks") return animListTracks(params, session_kind);
     if (method == "anim.playTrack") return animPlayTrack(params, session_kind);

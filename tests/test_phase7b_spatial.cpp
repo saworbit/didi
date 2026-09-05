@@ -20,6 +20,7 @@ using didi::json;
 using didi::runtime::parseNavPathRequest;
 using didi::runtime::parseClearanceRequest;
 using didi::runtime::parseRaycastBatchRequest;
+using didi::runtime::parseFrustumRequest;
 using didi::runtime::parseRaycastRequest;
 
 json v2(double x, double y) { return {{"x", x}, {"y", y}}; }
@@ -29,7 +30,8 @@ void test_registry_advertises_live_reads() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
     for (const auto* name : {"physics_raycast_query", "spatial_query_raycast_batch",
-                             "spatial_query_clearance", "nav_query_path"}) {
+                             "spatial_query_clearance", "spatial_query_frustum",
+                             "nav_query_path"}) {
         const auto* tool = registry.getTool(name);
         ASSERT_TRUE(tool != nullptr);
         ASSERT_TRUE(tool->capability.implemented);
@@ -123,10 +125,11 @@ void test_hook_admits_both_session_kinds_by_policy() {
     hook.cancelPendingCommands("test reset");
     for (const auto kind : {didi::runtime::SessionKind::editor, didi::runtime::SessionKind::game}) {
         didi::godot::EditorHookTestAccess::setSessionKind(hook, kind);
-        for (const auto* method : {"physics.raycast", "nav.queryPath"}) {
+        for (const auto* method : {"physics.raycast", "vision.frustumQuery", "nav.queryPath"}) {
             const auto response = didi::godot::EditorHookTestAccess::executeOnMainThread(
                 hook, method, {{"from", v3(0, 0, 0)}, {"to", v3(1, 0, 0)},
-                               {"start_point", v3(0, 0, 0)}, {"end_point", v3(1, 0, 0)}});
+                               {"start_point", v3(0, 0, 0)}, {"end_point", v3(1, 0, 0)},
+                               {"camera_node", "/root/Scene/Camera3D"}});
             ASSERT_TRUE(response.contains("error"));
             ASSERT_TRUE(response["error"]["message"] != "session_kind_rejected");
             ASSERT_TRUE(response["error"]["message"].get<std::string>().find("Editor-only method") ==
@@ -248,6 +251,77 @@ void test_clearance_describes_a_body_and_not_a_line() {
                           {"from", v3(0, 0, 0)}, {"to", v3(1, 0, 0)}, {"unknown", 1}}));
 }
 
+void test_frustum_takes_one_camera_and_no_hidden_shape() {
+    // A frustum can come from a camera in the scene or from parameters written
+    // out by hand, and both must be a complete description. Two would be two
+    // answers to one question, and neither would be none.
+    auto from_node = parseFrustumRequest({{"camera_node", "/root/Scene/Camera3D"}});
+    ASSERT_TRUE(from_node.isOk());
+    ASSERT_TRUE(from_node.value().source == didi::runtime::FrustumSource::camera_node);
+    ASSERT_EQ(from_node.value().collision_mask, 1);
+    ASSERT_TRUE(!from_node.value().sightline);
+    ASSERT_EQ(from_node.value().max_results, didi::runtime::kDefaultFrustumResults);
+
+    const json camera = {{"position", v3(0, 2, 0)}, {"look_at", v3(0, 2, -10)},
+                         {"fov_degrees", 70}, {"near", 0.1}, {"far", 50}, {"aspect", 1.777}};
+    auto explicit_frustum = parseFrustumRequest({{"camera", camera}, {"sightline", true},
+                                                 {"collision_mask", 3}, {"max_results", 10}});
+    ASSERT_TRUE(explicit_frustum.isOk());
+    ASSERT_TRUE(explicit_frustum.value().source == didi::runtime::FrustumSource::parameters);
+    ASSERT_TRUE(explicit_frustum.value().sightline);
+    ASSERT_EQ(explicit_frustum.value().collision_mask, 3);
+    ASSERT_EQ(explicit_frustum.value().max_results, 10);
+    // The one field with a default records that it was defaulted, so the
+    // response can say which roll answered rather than leave it assumed.
+    ASSERT_TRUE(!explicit_frustum.value().up_given);
+    ASSERT_EQ(explicit_frustum.value().up.toJson(), v3(0, 1, 0));
+
+    const auto with = [&](const char* key, const json& value) {
+        json body = camera;
+        body[key] = value;
+        return json{{"camera", body}};
+    };
+    const auto without = [&](const char* key) {
+        json body = camera;
+        body.erase(key);
+        return json{{"camera", body}};
+    };
+    // A quarter turn of roll, which is a different frustum and not a rejected one.
+    ASSERT_TRUE(parseFrustumRequest(with("up", v3(1, 0, 0))).isOk());
+    ASSERT_TRUE(parseFrustumRequest(with("up", v3(1, 0, 0))).value().up_given);
+
+    const auto rejected = [](const json& params) { return parseFrustumRequest(params).isErr(); };
+    // Neither form and both forms are the same mistake seen from two sides.
+    ASSERT_TRUE(rejected(json::object()));
+    ASSERT_TRUE(rejected({{"camera_node", "/root/Scene/Camera3D"}, {"camera", camera}}));
+    // Every part of a hand written frustum changes which nodes fall inside it,
+    // so none of them may be left out and filled in quietly.
+    for (const auto* required : {"position", "look_at", "fov_degrees", "near", "far", "aspect"}) {
+        ASSERT_TRUE(rejected(without(required)));
+    }
+    // A frustum is a 3D shape and has no 2D form to fall back to.
+    ASSERT_TRUE(rejected(with("position", v2(0, 2))));
+    ASSERT_TRUE(rejected(with("look_at", v2(0, 2))));
+    // A camera that looks at itself has no direction, and an up along the view
+    // direction leaves the roll undefined rather than merely odd.
+    ASSERT_TRUE(rejected(with("look_at", v3(0, 2, 0))));
+    ASSERT_TRUE(rejected(with("up", v3(0, 0, -1))));
+    ASSERT_TRUE(rejected(with("up", v3(0, 0, 0))));
+    // A volume needs a near in front of its far.
+    ASSERT_TRUE(rejected(with("far", 0.05)));
+    ASSERT_TRUE(rejected(with("near", 0)));
+    ASSERT_TRUE(rejected(with("fov_degrees", 180)));
+    ASSERT_TRUE(rejected(with("aspect", 0)));
+    ASSERT_TRUE(rejected(with("elevation", 3)));
+    ASSERT_TRUE(rejected({{"camera_node", ""}}));
+    ASSERT_TRUE(rejected({{"camera_node", "/root/Scene/Camera3D"}, {"sightline", "yes"}}));
+    ASSERT_TRUE(rejected({{"camera_node", "/root/Scene/Camera3D"}, {"max_results", 0}}));
+    ASSERT_TRUE(rejected({{"camera_node", "/root/Scene/Camera3D"},
+                          {"max_results", didi::runtime::kMaxFrustumResults + 1}}));
+    ASSERT_TRUE(rejected({{"camera_node", "/root/Scene/Camera3D"}, {"collision_mask", 0}}));
+    ASSERT_TRUE(rejected({{"camera_node", "/root/Scene/Camera3D"}, {"unknown", 1}}));
+}
+
 struct RegisterPhase7bSpatial {
     RegisterPhase7bSpatial() {
         registerTest("phase7b_spatial.registry_live_reads", test_registry_advertises_live_reads);
@@ -257,6 +331,8 @@ struct RegisterPhase7bSpatial {
                      test_clearance_describes_a_body_and_not_a_line);
         registerTest("phase7b_spatial.raycast_batch_matches_single",
                      test_raycast_batch_is_exactly_the_single_ray_contract_repeated);
+        registerTest("phase7b_spatial.frustum_takes_one_camera",
+                     test_frustum_takes_one_camera_and_no_hidden_shape);
         registerTest("phase7b_spatial.nav_parses_and_rejects", test_nav_path_parses_and_rejects);
         registerTest("phase7b_spatial.hook_admits_both_kinds", test_hook_admits_both_session_kinds_by_policy);
     }
