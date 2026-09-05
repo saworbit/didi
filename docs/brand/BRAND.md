@@ -119,6 +119,16 @@ installing Python and Node first. `raster.js` reproduces it byte-for-byte from t
 The banners and social preview are committed as **PNG** deliberately: their SVG sources set text in
 a system font, and GitHub's SVG sanitiser does not render that reliably across platforms.
 
+`svg/didi-mark.svg`, `svg/didi-mark-compact.svg` and `svg/didi-signature.svg` are
+also **shipped inside the addon**, as `addons/didi/didi_mark.svg`,
+`didi_mark_compact.svg` and `didi_signature.svg`. The Godot editor console reads
+them as text and rasterises them at the editor's own scale, substituting the
+theme's font colour for `currentColor` — which is why each of the three must keep
+a `currentColor` variant, and why the compact cut earns its place: the main
+screen tab icon is 16 px. The copies are byte-identical to these sources and
+`tests/test_editor_console.py` fails the build if they drift, so the geometry
+still lives in exactly one place.
+
 ## Regenerating
 
 Geometry lives in exactly one place. Every asset — mark, wordmark, lockups, icons, banners —

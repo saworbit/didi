@@ -1,7 +1,10 @@
 # Human Interaction Design
 
-> **Status:** Partly implemented. Steps 1 and 2 of the recommended order have
-> shipped; steps 3 and 4 remain conditional and unstarted. This supersedes the
+> **Status:** Partly implemented. Steps 1, 2 and 4 of the recommended order have
+> shipped; step 3 remains conditional and unstarted. Step 4 shipped larger than
+> this document recommended, and [What was built, and where it exceeded
+> this](#what-was-built-and-where-it-exceeded-this) records the difference rather
+> than editing the recommendation to match. This supersedes the
 > editor-dock proposal previously recorded as `EDITOR_SURFACE_DESIGN.md`, whose
 > central recommendation was wrong; see [What changed and why](#what-changed-and-why).
 > Current runtime behavior is in [Current Capability Matrix](CAPABILITIES.md) and
@@ -106,6 +109,49 @@ client that can reach those does not need the editor.
 reported by users. It is cheap, but it is not urgent, and every line of GDScript
 is a line outside the tested boundary.
 
+## What was built, and where it exceeded this
+
+The condition was met in the strongest available form: the maintainer asked for
+an in-editor console directly, which is a stronger signal than a bug report,
+and asked for it to be dashboard-shaped. What shipped is larger than the status
+line recommended above, and the differences are worth naming.
+
+**A main screen, not a status line and not a dock.** The three states this
+section named -- extension not loaded, no session attached, engine reachable --
+are what the dashboard's lights distinguish, and each carries the path, pid or
+session behind it plus a button for the next step. A status line can report the
+first half and not the second. The main screen was chosen over the bottom panel
+on evidence rather than taste: a bottom-panel button renders text only, and an
+icon set on one is not drawn, including an icon taken from the editor's own
+theme. The main screen is the only surface in Godot that shows a plugin's mark.
+
+**It can close and open the bridge.** The endpoint belongs to the GDExtension,
+so the switch unloads and reloads the extension and reports the status Godot
+returns, including the one that means *not without a restart*. This is the one
+place the console acts on the engine rather than reporting on it, and it acts on
+the extension's lifecycle -- not through the tool surface.
+
+**It has a log page, which this section argued against.** The objection was that
+log tails already have a home in `runtime_read_logs` and `runtime_read_output`,
+and a client that can reach those does not need the editor. That still holds,
+and the console shows neither of them. Its two sources are the console's own
+record of the state changes it watched, and the log Godot writes for the last
+*run* of the project. Both are readable precisely when the MCP connection is
+down, which is the case this section exists to serve, and neither is reachable
+through a tool at all. Didi's own native logging goes to the process's standard
+error, which an editor started from a desktop shortcut has nowhere to show; the
+page says so rather than presenting an empty view.
+
+**The GDScript cost is real and was not waved away.** The addon went from one
+script to eight. What covers it: `tests/test_editor_console.py` holds the CMake
+manifest, the CI staged-addon check and the demo copy to the addon directory
+itself, proves every `preload` resolves, proves the shipped marks are
+byte-identical to `docs/brand/svg`, and fails the build if any addon script ever
+names the descriptor token field. Behaviour that Python cannot assert was
+verified by running the addon in a fresh project on Godot 4.5.1, 4.6.2 and
+4.7.2: the plugin loads, the mark rasterises, all five tabs build, and the
+extension unloads and reloads without taking the editor with it.
+
 ## The prerequisite: protocol revision — done
 
 Didi shipped MCP revision `2024-11-05` when this was written, and elicitation
@@ -146,23 +192,44 @@ window, so a staged migration remains comfortable.
 3. **MCP Apps status and log view.** Still conditional on host support being
    broad enough to be worth it. Not started, and should not start on a schedule
    -- start it when a client people actually use can render it.
-4. **Editor status line.** Still conditional on the broken-connection case being
-   reported by a real user. Not started.
+4. **Editor status line.** *Done, and larger than this list described.* Shipped
+   as a main screen console: a red/amber/green dashboard over the published
+   session descriptors, a switch that opens and closes the bridge, generated
+   client configuration, a log page, and diagnostics that name the path or pid
+   behind every check. See [What was built, and where it exceeded
+   this](#what-was-built-and-where-it-exceeded-this).
 
-Steps 3 and 4 were written conditionally on purpose. Neither condition has been
-met, and building them anyway would be manufacturing work rather than following
-the reasoning that produced the list.
+Steps 3 and 4 were written conditionally on purpose. Step 3's condition -- host
+support for MCP Apps being broad enough to be worth it -- has still not been met,
+and building it anyway would be manufacturing work rather than following the
+reasoning that produced the list.
 
 ## Explicitly out of scope
 
 **Buttons in the editor that invoke tools.** That makes the editor a second MCP
-client and doubles the surface that must be kept honest.
+client and doubles the surface that must be kept honest. This still holds and the
+console holds it: its buttons load and unload the extension, write a client
+configuration file, and run `didi --version`. None of them calls a tool, and the
+console speaks no part of the IPC protocol.
 
-**Any settings UI.** Configuration has one source: the project and the launch
-arguments.
+**A settings UI that configures the server.** The original wording was "any
+settings UI", and the console has a Settings page, so the line is restated rather
+than quietly dropped. What it protects is that configuration has one source: the
+project and the launch arguments. That is intact. The page composes the launch
+arguments a client will start Didi with and shows the resulting configuration
+before anything is written; the server still reads nothing but its own arguments
+and the project. Preferences that are the editor's own live in `EditorSettings`
+under `didi/`, stored with the editor rather than inside `res://`, so a
+preference governing an assistant is not a file that assistant can rewrite.
+Nothing the console stores is read by the server at runtime.
 
 **Reimplementing tool logic in GDScript.** Whatever editor surface exists, the
-rule holds: the UI renders, the extension decides.
+rule holds: the UI renders, the extension decides. The console reads published
+descriptors and reports them; where its view is weaker than the extension's it
+says so rather than guessing. Liveness is the example: Godot can only answer
+whether a process it started itself is running, so the console does not claim a
+foreign session is alive or dead, and defers to the verification Didi performs
+when a client attaches.
 
 ## Packaging note
 
@@ -171,3 +238,10 @@ project cannot reference an addon outside its own `res://`, so the demo project
 ships a copy; that copy had drifted two minor versions and is now held in line by
 the documentation validator. Any editor-side work inherits that copy and should
 not add a third.
+
+The validator's parity check named three files by hand, which was fine while the
+addon was three files. It now enumerates the addon directory instead, so a file
+added to the addon is covered the moment it exists rather than the moment someone
+remembers the list. The same directory is the reference for the CMake manifest
+and for the staged-addon check in CI, and `tests/test_editor_console.py` fails
+the build when any of the three disagree with it.
