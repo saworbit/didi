@@ -4,6 +4,7 @@
 #include "didi/tools/phase7_live_forward.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/offline/resource_indexer.hpp"
 #include "didi/offline/test_runner.hpp"
 #include "didi/common/png.hpp"
 #include <algorithm>
@@ -394,6 +395,7 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
         return CallToolResult::error("Failed to generate visual test lab sandbox scene file: " +
                                      written.error().message);
     }
+    offline::ResourceIndexer::invalidateSharedIndex();
 
     json res = {
         {"status", "created_offline"},

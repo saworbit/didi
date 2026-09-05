@@ -15,8 +15,19 @@ namespace {
 
 const std::set<std::string> kAllowedExtensions = {".gd", ".cs", ".tscn", ".tres"};
 const std::set<std::string> kSkippedDirectories = {
-    ".git", ".godot", ".worktrees", "build", "build-clean", "build-vs", "out", "bin", ".vs"
+    ".git", ".godot", ".gemini", ".worktrees", "build", "out", "bin", ".vs"
 };
+
+// Out of source build trees sit beside build/ and are named after the generator
+// that made them, which is why .gitignore covers build*/ rather than a list.
+// Naming them one at a time meant build-ninja/ was searched in full and hits
+// inside generated files came back as project matches. Matched by prefix here
+// for the same reason import_health does, and not by the wider build* glob, so
+// a project directory that merely starts with the word, buildings/ say, is
+// still a project directory.
+bool isSkippedDirectory(const std::string& name) {
+    return kSkippedDirectories.count(name) != 0 || strings::startsWith(name, "build-");
+}
 
 Result<fs::path> resolveSearchRoot(const fs::path& project_root, const std::string& search_path) {
     if (!strings::startsWith(search_path, "res://")) {
@@ -171,7 +182,7 @@ Result<std::vector<FileRecord>> collectFiles(const fs::path& root,
             continue;
         }
         if (fs::is_directory(status)) {
-            if (kSkippedDirectories.count(paths::nativePathToUtf8(iterator->path().filename()))) {
+            if (isSkippedDirectory(paths::nativePathToUtf8(iterator->path().filename()))) {
                 iterator.disable_recursion_pending();
             }
             continue;

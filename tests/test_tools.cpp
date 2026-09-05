@@ -2444,6 +2444,71 @@ static void test_script_create_writes_a_gdscript_and_reports_its_diagnostics() {
     registry.setIpcClient(nullptr);
 }
 
+static void test_writers_drop_the_shared_index_so_the_next_read_sees_them() {
+    // Break caught: the mutation contract on ResourceIndexer says a tool that
+    // changes the tree calls invalidateSharedIndex. script_patch_method and
+    // create_visual_test_lab wrote files and did not, so for the next five
+    // seconds project_audit_assets, project_find_referencing_scenes,
+    // project_search_symbols and resource_inspect all answered from the tree as
+    // it was before the write.
+    ScopedToolProject project("index-invalidation");
+    writeAuditFile("project.godot", "config_version=5\n");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+
+    const auto created = registry.callTool("script_create", didi::json{
+        {"script_path", "res://scripts/level.gd"},
+        {"source_text", "extends Node\n\nfunc tick():\n\tpass\n"}});
+    ASSERT_TRUE(!created.isError);
+
+    // Warm the shared index, then patch. The two calls sit next to each other
+    // so the five second lifetime cannot be what refreshes it.
+    const auto* before = didi::offline::ResourceIndexer::sharedIndex(".")
+                             ->findExact("res://scripts/level.gd");
+    ASSERT_TRUE(before != nullptr);
+    const auto size_before = before->file_size;
+
+    didi::json patch_args{{"file_path", "res://scripts/level.gd"},
+                          {"method_name", "tick"},
+                          {"new_definition",
+                           "func tick():\n\tvar accumulated := 0\n\tfor step in range(64):"
+                           "\n\t\taccumulated += step\n"}};
+    auto patch_preview_args = patch_args;
+    patch_preview_args["dry_run"] = true;
+    const auto patch_preview = registry.callTool("script_patch_method", patch_preview_args);
+    if (patch_preview.isError) {
+        throw std::runtime_error("patch preview failed: " + patch_preview.content[0].text);
+    }
+    patch_args["confirmation_token"] = didi::json::parse(patch_preview.content[0].text)
+                                           ["mutation_preview"]["confirmation_token"];
+    const auto patched = registry.callTool("script_patch_method", patch_args);
+    if (patched.isError) {
+        throw std::runtime_error("patch failed: " + patched.content[0].text);
+    }
+
+    const auto* after = didi::offline::ResourceIndexer::sharedIndex(".")
+                            ->findExact("res://scripts/level.gd");
+    ASSERT_TRUE(after != nullptr);
+    ASSERT_TRUE(after->file_size != size_before);
+    ASSERT_EQ(after->file_size,
+              std::filesystem::file_size(std::filesystem::path("scripts") / "level.gd"));
+
+    // The lab writes a scene that was not there at all, so a stale index does
+    // not merely describe it wrongly, it does not know it exists.
+    ASSERT_TRUE(didi::offline::ResourceIndexer::sharedIndex(".")
+                    ->findExact("res://addons/didi/test_lab_sandbox.tscn") == nullptr);
+    const auto lab = registry.callTool("viewport_create_test_lab", didi::json{
+        {"target_resource", "res://scripts/level.gd"}, {"lighting", "studio"},
+        {"orthographic", false}});
+    ASSERT_TRUE(!lab.isError);
+    ASSERT_TRUE(didi::offline::ResourceIndexer::sharedIndex(".")
+                    ->findExact("res://addons/didi/test_lab_sandbox.tscn") != nullptr);
+
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+    registry.setIpcClient(nullptr);
+}
+
 static void test_resource_create_refuses_a_target_it_cannot_write() {
     // Break caught: resource_create wrote [gd_resource] markup to whatever
     // save_path it was handed, including a .gd path, and reported
@@ -2745,6 +2810,8 @@ struct RegisterToolTests {
                      test_property_admission_reads_the_number_not_its_json_spelling);
         registerTest("Tools.ScriptCreate",
                      test_script_create_writes_a_gdscript_and_reports_its_diagnostics);
+        registerTest("Tools.WritersDropTheSharedIndex",
+                     test_writers_drop_the_shared_index_so_the_next_read_sees_them);
         registerTest("Tools.ResourceCreatePathGuard",
                      test_resource_create_refuses_a_target_it_cannot_write);
         registerTest("Tools.RenameSerializedReferences",

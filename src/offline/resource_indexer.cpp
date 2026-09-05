@@ -218,9 +218,15 @@ void ResourceIndexer::scan(const std::string& root_dir) {
             }
             if (entry.is_directory()) {
                 const auto name = entry.path().filename();
+                // build-clean and build-vs used to be named one at a time, so
+                // build-ninja was indexed in full. Every artifact in it counts
+                // against kMaxIndexedResources, and a large enough build tree
+                // pushed real project files out of the index entirely. Prefix,
+                // for the same reason project_search uses one.
+                const auto name_text = paths::projectPathToUtf8(name);
                 if (name == ".godot" || name == ".git" || name == "build" || name == ".gemini" ||
                     name == ".vs" || name == "out" || name == "bin" || name == ".worktrees" ||
-                    name == "build-clean" || name == "build-vs") {
+                    strings::startsWith(name_text, "build-")) {
                     it.disable_recursion_pending();
                 }
                 continue;
