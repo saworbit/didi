@@ -1,5 +1,22 @@
 # Didi Realignment Program Plan
 
+> **Status:** Partly implemented, and the checkboxes below were never maintained
+> — every one of them is still unticked while parts of this plan demonstrably
+> shipped. Read them as the original proposal, not as progress.
+>
+> Verifiably shipped: the dual-era protocol front end serving `2026-07-28`
+> alongside `2024-11-05`, `server/discover`, and `resultType` on every result.
+> Not shipped: moving Didi's metadata out of `_meta.didi` into a namespaced
+> extension that can be switched off — `_meta.didi` is still what
+> [LLM Agent Instructions](LLM_INSTRUCTIONS.md) tells clients to read — and the
+> four-tier documentation restructure with a `docs/history/` directory, which
+> does not exist.
+>
+> For what Didi does today, [Current Capability Matrix](CAPABILITIES.md) and
+> [Tool Reference](TOOL_REFERENCE.md) are authoritative; this file is a record of
+> intent. Files it names, such as `src/mcp/protocol_era.cpp`, are proposals and
+> several were implemented elsewhere or not at all.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Bring Didi to the current MCP specification as a dual-era server, close the capability gaps that break the agent verification loop, and consolidate documentation and roadmap so the project has one honest source of truth.
