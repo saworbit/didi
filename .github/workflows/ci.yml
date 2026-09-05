@@ -9,6 +9,10 @@ on:
       - 'tests/**'
       - 'addons/**'
       - 'docs/**/*.md'
+      # Brand docs document the mark, not the tool surface, so they cannot
+      # invalidate the tool manifest this workflow checks docs against.
+      # Fast Lint & Docs still validates them on every change.
+      - '!docs/brand/**'
       - 'README.md'
       - 'CHANGELOG.md'
       - 'CMakeLists.txt'
@@ -27,6 +31,10 @@ on:
       - 'tests/**'
       - 'addons/**'
       - 'docs/**/*.md'
+      # Brand docs document the mark, not the tool surface, so they cannot
+      # invalidate the tool manifest this workflow checks docs against.
+      # Fast Lint & Docs still validates them on every change.
+      - '!docs/brand/**'
       - 'README.md'
       - 'CHANGELOG.md'
       - 'CMakeLists.txt'
