@@ -859,7 +859,7 @@ Sets one uniform on a `ShaderMaterial` held by a node in the edited scene.
 
 A uniform name the shader does not declare is refused. `set_shader_parameter` accepts any name and does nothing with one it does not know, so a typo would otherwise be reported as a write that worked.
 
-The change is registered on the editor UndoRedo stack against the material's own `shader_parameter/<name>` property, which is the property the scene file writes and the inspector edits, so an undo here is the undo a person expects. The result reports what the uniform holds afterwards rather than the value it was handed, with `applied` saying whether the two match.
+The change is registered on the editor UndoRedo stack against the material's own `shader_parameter/<name>` property, which is the property the scene file writes and the inspector edits, so an undo here is the undo a person expects. Undoing a write over a uniform the material did not set takes the override off again rather than pinning the default in its place. The result reports what the uniform holds afterwards rather than the value it was handed, with `applied` saying whether the two match, and `old_value` reports the value that was actually in effect, which for a uniform the material did not set is the shader's declared default.
 
 The write reaches the loaded material. A material embedded in the scene is saved with the scene; an external `.tres` is not saved by this surface, so the change lives in the running editor until it is saved there. A shared material is shared: setting a uniform on it changes every node using it.
 
@@ -870,11 +870,11 @@ Reads the shader uniforms of a `ShaderMaterial` held by a node in the edited sce
 - `target_node` (`string`, required).
 - `property_name` (`string`, required): the property the material sits in, such as `material_override` on a MeshInstance3D or `material` on a CanvasItem. Named rather than guessed, because the right property differs by node type and `scene_get_property` will say which a node has.
 
-Each uniform carries its declared Godot type, its effective value, and `settable`. The value is the material's override where it has one and the shader's own default otherwise; the two are not distinguished, because `get_shader_parameter` returns the default for a uniform the material never set and there is no honest flag to build from that. `settable` says whether the property contract has a JSON spelling for that type at all, and comes from the same decision `scene_set_property` makes, so the two cannot disagree.
+Each uniform carries its declared Godot type, its effective value, and `settable`. The value is the material's override where it has one and the shader's own declared default otherwise. Reaching the default takes two calls: `get_shader_parameter` answers nil for a uniform the material does not set, so the default is read from the rendering server, where the shader keeps it. The two are still not distinguished, because that same call answers with the default rather than nil in a 4.7.2 editor, so it cannot be used to tell an override from a default in every session. `settable` says whether the property contract has a JSON spelling for that type at all, and comes from the same decision `scene_set_property` makes, so the two cannot disagree.
 
-A uniform whose type has no JSON spelling is still reported by name and type, with a null value, rather than failing the whole read. A material slot holding something that is not a `ShaderMaterial` is refused and names what it found, since an empty uniform list would read as a shader with nothing to set. At most 256 uniforms are returned, with `uniform_count` and `truncated` reported separately.
+A uniform whose type has no JSON spelling is still reported by name and type, with a null value, rather than failing the whole read. A null value also appears where neither the material nor the rendering server could supply one, which is what a session with no renderer looks like: it means the value could not be read, not that the uniform has none. A material slot holding something that is not a `ShaderMaterial` is refused and names what it found, since an empty uniform list would read as a shader with nothing to set. At most 256 uniforms are returned, with `uniform_count` and `truncated` reported separately.
 
-Setting a uniform is not here. It is a write to a resource rather than to a node, so it does not sit on the editor UndoRedo stack the way `scene_set_property` does, and that is a decision worth making on its own rather than in passing.
+Setting a uniform is `shader_set_uniform`, above.
 
 ### `shader_check_compile` — Offline
 
