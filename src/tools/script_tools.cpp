@@ -214,6 +214,7 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
         return CallToolResult::error("Cannot write patched file to disk: " + file_path +
                                      ": " + written.error().message);
     }
+    offline::ResourceIndexer::invalidateSharedIndex();
 
     // Verify syntax of the patched file.
     //

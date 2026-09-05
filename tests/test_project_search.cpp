@@ -373,6 +373,34 @@ void test_paths_outside_the_active_code_page_survive() {
     ASSERT_EQ(symbols.value().matches[0].path, "res://" + file_utf8);
 }
 
+void test_out_of_source_build_trees_are_not_searched() {
+    // Break caught: the skip list named build, build-clean and build-vs one at
+    // a time, so a text search walked build-ninja and returned hits inside
+    // generated files as project matches. .gemini was skipped by the indexer
+    // and not by the search, so the two disagreed about the same tree.
+    //
+    // A prefix is not a glob on purpose. buildings/ is a project directory.
+    SearchFixture fixture;
+    fixture.write("scripts/player.gd", "func atacar():\n\tpass\n");
+    fixture.write("buildings/tower.gd", "func atacar():\n\tpass\n");
+    fixture.write("build-ninja/generated.gd", "func atacar():\n\tpass\n");
+    fixture.write("build-debug/other.gd", "func atacar():\n\tpass\n");
+    fixture.write("build/old.gd", "func atacar():\n\tpass\n");
+    fixture.write(".gemini/notes.gd", "func atacar():\n\tpass\n");
+
+    didi::offline::ProjectSearch search(fixture.root());
+    didi::offline::SearchOptions options;
+    options.query = "atacar";
+    const auto text = search.searchText(options);
+    ASSERT_TRUE(text.isOk());
+
+    std::set<std::string> found;
+    for (const auto& match : text.value().matches) found.insert(match.path);
+    ASSERT_EQ(found.size(), 2u);
+    ASSERT_TRUE(found.count("res://scripts/player.gd") == 1u);
+    ASSERT_TRUE(found.count("res://buildings/tower.gd") == 1u);
+}
+
 struct RegisterProjectSearchTests {
     RegisterProjectSearchTests() {
         registerTest("ProjectSearch.TextAndGdscriptSymbols", test_text_and_gdscript_symbols);
@@ -388,6 +416,8 @@ struct RegisterProjectSearchTests {
         registerTest("ProjectSearch.UnicodeSearchPathResolves", test_unicode_search_path_resolves_to_its_directory);
         registerTest("ProjectSearch.PathsOutsideTheActiveCodePageSurvive",
                      test_paths_outside_the_active_code_page_survive);
+        registerTest("ProjectSearch.OutOfSourceBuildTreesAreNotSearched",
+                     test_out_of_source_build_trees_are_not_searched);
     }
 } g_register_project_search_tests;
 

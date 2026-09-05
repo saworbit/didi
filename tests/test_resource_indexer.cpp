@@ -259,6 +259,33 @@ static void test_invalidate_drops_the_per_file_memo_as_well() {
     didi::offline::ResourceIndexer::invalidateSharedIndex();
 }
 
+static void test_out_of_source_build_trees_are_not_project_resources() {
+    // Break caught: the skip list named build, build-clean and build-vs one at
+    // a time, so build-ninja was indexed in full. .gitignore already gave up on
+    // naming them and covers build*/. Every artifact under one counts against
+    // kMaxIndexedResources, and a large enough build tree pushes real project
+    // files out of the index.
+    //
+    // A prefix is not a glob on purpose. buildings/ is a project directory.
+    IndexFixture fixture;
+    fixture.write("scenes/level.tscn", "[gd_scene format=3]\n");
+    fixture.write("buildings/tower.tscn", "[gd_scene format=3]\n");
+    fixture.write("build-ninja/generated.tscn", "[gd_scene format=3]\n");
+    fixture.write("build-debug/CMakeFiles/other.tres", "[gd_resource type=\"Resource\"]\n");
+    fixture.write("build/old.tscn", "[gd_scene format=3]\n");
+
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+    didi::offline::ResourceIndexer indexer;
+    indexer.scan(fixture.root());
+
+    ASSERT_TRUE(indexer.findExact("res://scenes/level.tscn") != nullptr);
+    ASSERT_TRUE(indexer.findExact("res://buildings/tower.tscn") != nullptr);
+    ASSERT_TRUE(indexer.findExact("res://build-ninja/generated.tscn") == nullptr);
+    ASSERT_TRUE(indexer.findExact("res://build-debug/CMakeFiles/other.tres") == nullptr);
+    ASSERT_TRUE(indexer.findExact("res://build/old.tscn") == nullptr);
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+}
+
 static void test_imported_assets_take_their_uid_from_import_metadata() {
     // Break caught: Godot writes no .uid sidecar for an imported asset, it
     // writes the uid into the .import file it generates beside it. Nothing read
@@ -312,6 +339,8 @@ struct RegisterResourceIndexerTests {
                      test_rescan_reuses_unchanged_files_and_notices_changed_ones);
         registerTest("ResourceIndexer.InvalidateDropsFileMemo",
                      test_invalidate_drops_the_per_file_memo_as_well);
+        registerTest("ResourceIndexer.OutOfSourceBuildTreesAreSkipped",
+                     test_out_of_source_build_trees_are_not_project_resources);
         registerTest("ResourceIndexer.TypeDetection", test_resource_type_detection);
         registerTest("ResourceIndexer.UidSidecar", test_uid_sidecar_fallback);
         registerTest("ResourceIndexer.ExternalUidSidecar", test_uid_sidecars_are_indexed_for_external_resources);
