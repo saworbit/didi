@@ -121,6 +121,41 @@ void test_blackboard_write_read_round_trip() {
     ASSERT_TRUE(!listed.value()["truncated"].get<bool>());
 }
 
+// saveBoard used to delete the board when its rename failed, then rename again
+// onto the freed name. That is how a board is lost: on Windows the delete can
+// go pending behind an open handle, the second rename is refused, and the
+// temporary is cleaned up too, so every key and task is gone.
+//
+// A read-only board reproduces the same branch deterministically. MoveFileEx
+// with MOVEFILE_REPLACE_EXISTING refuses a read-only destination, while remove
+// clears the attribute and succeeds, so the old code deleted the file the user
+// had protected and wrote over it anyway. The save has to report the failure
+// and leave the board exactly as it was.
+#if defined(_WIN32)
+void test_blackboard_save_never_deletes_the_board() {
+    BoardFixture fixture("no-board-delete");
+
+    writeValue("architecture.inventory.slots", 12);
+    const auto file = std::filesystem::current_path() / ".didi" / "blackboard" / "default.json";
+    const auto before = fixture.rawBoardFile();
+    ASSERT_TRUE(!before.empty());
+
+    std::filesystem::permissions(file, std::filesystem::perms::owner_read);
+
+    BlackboardWriteRequest request;
+    request.path = "architecture.inventory.stacking";
+    request.value = "by_type";
+    auto result = blackboardWrite(request);
+
+    std::filesystem::permissions(file, std::filesystem::perms::owner_read |
+                                           std::filesystem::perms::owner_write);
+
+    ASSERT_TRUE(result.isErr());
+    ASSERT_TRUE(std::filesystem::is_regular_file(file));
+    ASSERT_EQ(fixture.rawBoardFile(), before);
+}
+#endif
+
 void test_blackboard_path_rejection() {
     BoardFixture fixture("paths");
 
@@ -694,6 +729,10 @@ struct Register {
     Register() {
         registerTest("Blackboard.WriteReadRoundTrip", test_blackboard_write_read_round_trip);
         registerTest("Blackboard.PathRejection", test_blackboard_path_rejection);
+#if defined(_WIN32)
+        registerTest("Blackboard.SaveNeverDeletesTheBoard",
+                     test_blackboard_save_never_deletes_the_board);
+#endif
         registerTest("Blackboard.PatchIsAtomic", test_blackboard_patch_is_atomic);
         registerTest("Blackboard.ConcurrentWritersDoNotLose",
                      test_blackboard_concurrent_writers_do_not_lose);

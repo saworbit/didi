@@ -1,5 +1,6 @@
 #include "didi/offline/blackboard.hpp"
 
+#include "didi/common/atomic_write.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/runtime/session_lock.hpp"
@@ -213,26 +214,16 @@ Result<bool> saveBoard(const std::filesystem::path& file, const Board& board) {
     std::filesystem::create_directories(file.parent_path(), error);
     if (error) return Error::internal("blackboard directory cannot be created");
 
-    auto temporary = file;
-    temporary += ".tmp";
-    {
-        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-        if (!output) return Error::internal("blackboard file cannot be written");
-        output << serialized;
-        if (!output) return Error::internal("blackboard file could not be written in full");
-    }
-    std::filesystem::rename(temporary, file, error);
-    if (error) {
-        // Some Windows volumes refuse a rename onto an existing file.
-        error.clear();
-        std::filesystem::remove(file, error);
-        error.clear();
-        std::filesystem::rename(temporary, file, error);
-        if (error) {
-            std::error_code cleanup;
-            std::filesystem::remove(temporary, cleanup);
-            return Error::internal("blackboard file could not be replaced");
-        }
+    // The board goes through the same staged write every other file writer
+    // uses. The earlier version deleted the board and retried the rename when
+    // the first rename failed, which on Windows is exactly when a reader holds
+    // the file open: the delete goes pending, the retry is denied, and the
+    // temporary is cleaned up too. That lost every key and task on the board.
+    // A rename over an existing file already replaces it, so the delete bought
+    // nothing and could only destroy the board it was meant to update.
+    auto written = files::writeFileAtomically(file, serialized);
+    if (written.isErr()) {
+        return Error::internal("blackboard file could not be replaced; the board on disk is unchanged");
     }
     return true;
 }
