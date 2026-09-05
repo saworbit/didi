@@ -236,9 +236,13 @@ public:
 
     class Binding {
     public:
-        Binding(LeaseDispatchClient* owner, std::optional<runtime::RuntimeRouteLease> lease)
+        Binding(LeaseDispatchClient* owner, std::optional<runtime::RuntimeRouteLease> lease,
+                bool repeatable)
             : m_owner(owner) {
-            m_owner->m_bound[thisThreadKey(m_owner)].push_back({std::move(lease), std::nullopt});
+            BoundState state;
+            state.lease = std::move(lease);
+            state.repeatable = repeatable;
+            m_owner->m_bound[thisThreadKey(m_owner)].push_back(std::move(state));
         }
         Binding(const Binding&) = delete;
         Binding& operator=(const Binding&) = delete;
@@ -258,13 +262,21 @@ public:
         LeaseDispatchClient* m_owner;
     };
 
-    Binding bind(std::optional<runtime::RuntimeRouteLease> lease) {
-        return Binding(this, std::move(lease));
+    // No default for repeatable: a new call site has to say whether making
+    // this call twice is the same as making it once.
+    Binding bind(std::optional<runtime::RuntimeRouteLease> lease, bool repeatable) {
+        return Binding(this, std::move(lease), repeatable);
     }
 
     std::optional<Error> lastError() const {
         const auto* state = current();
         return state ? state->last_error : std::optional<Error>{};
+    }
+
+    // How many requests in this call had to be sent a second time.
+    int transportRepeats() const {
+        const auto* state = current();
+        return state ? state->transport_repeats : 0;
     }
 
     bool connect(const std::string& endpoint, int timeout_ms) override {
@@ -292,15 +304,20 @@ public:
     Result<json> sendRequest(const std::string& method, const json& params,
                              int timeout_ms) override {
         auto* state = current();
+        // One repeat per tool call, however many requests that call makes. The
+        // repeat has to happen before the quarantine below, because
+        // quarantining retires the route and leaves nothing to ask on.
+        bool repeated = false;
         auto result = state
                           ? (state->lease.has_value()
-                                 ? state->lease->sendRequest(method, params, timeout_ms)
+                                 ? sendThroughLease(*state, method, params, timeout_ms, repeated)
                                  : Result<json>(Error::notConnected()))
                           : (!m_sessions && m_source
                                  ? m_source->sendRequest(method, params, timeout_ms)
                                  : Result<json>(Error::notConnected()));
         if (state && state->lease.has_value() && result.isErr()) {
             auto error = normalizeLiveRouteError(result.error(), state->lease->descriptor);
+            ipc::markTransportRepeated(error, repeated);
             const bool quarantine = error.data.is_object() &&
                                     error.data.value("route_quarantine", false);
             if (quarantine) (void)runtime::quarantineRuntimeRoute(m_source, *state->lease);
@@ -323,7 +340,23 @@ private:
     struct BoundState {
         std::optional<runtime::RuntimeRouteLease> lease;
         std::optional<Error> last_error;
+        // Whether repeating a request in this call is the same as making it
+        // once, decided from the tool and its arguments before dispatch.
+        bool repeatable{false};
+        bool repeat_spent{false};
+        int transport_repeats{0};
     };
+
+    Result<json> sendThroughLease(BoundState& state, const std::string& method,
+                                  const json& params, int timeout_ms, bool& repeated) {
+        const bool repeatable = state.repeatable && !state.repeat_spent;
+        auto sent = runtime::sendLiveRouteRequest(*state.lease, method, params, timeout_ms,
+                                                  repeatable);
+        if (sent.repeat_attempted) state.repeat_spent = true;
+        if (sent.repeat_answered) ++state.transport_repeats;
+        repeated = sent.repeat_attempted;
+        return std::move(sent.response);
+    }
 
     BoundState* current() {
         auto found = m_bound.find(this);
@@ -741,7 +774,10 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
     try {
         const auto dispatcher = std::dynamic_pointer_cast<LeaseDispatchClient>(m_ipcClient);
         std::optional<LeaseDispatchClient::Binding> route_binding;
-        if (dispatcher) route_binding.emplace(dispatcher->bind(lease));
+        if (dispatcher) {
+            route_binding.emplace(
+                dispatcher->bind(lease, liveCallIsRepeatable(binding, authorized_arguments)));
+        }
         auto result = tool->boundHandler
                           ? tool->boundHandler(binding, authorized_arguments)
                           : tool->handler(authorized_arguments);
@@ -761,6 +797,7 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
 
         const bool live = supports_live && lease.has_value();
         const std::string execution_mode = live ? "live" : (supports_offline ? "offline_fallback" : "");
+        const int transport_repeats = dispatcher ? dispatcher->transportRepeats() : 0;
 
         if (!execution_mode.empty()) {
             bool structured_captured = false;
@@ -773,6 +810,13 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
                     if (live && payload.value("execution_mode", "") == "live" &&
                         lease->descriptor.has_value() && !payload.contains("session")) {
                         payload["session"] = lease->descriptor->toJson();
+                    }
+                    // Only when it happened. A result that came back first time
+                    // says nothing about the transport, and a caller comparing
+                    // two runs should be able to see which one lost a
+                    // connection on the way rather than having it hidden.
+                    if (transport_repeats > 0 && !payload.contains("transport")) {
+                        payload["transport"] = {{"repeats", transport_repeats}};
                     }
                     item.text = payload.dump();
                     // Attribution is added to the text here, so structuredContent

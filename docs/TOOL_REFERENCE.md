@@ -418,7 +418,7 @@ Places or clears `MeshLibrary` items in a `GridMap` in one undoable batch.
 
 Set/clear batches preflight every record, every required undo/rollback binding, and every referenced TileSetAtlasSource or MeshLibrary item before creating one UndoRedo action. Integer fields outside their documented bounds, including unsigned JSON values above `INT64_MAX`, are rejected before conversion. Duplicate coordinates/positions are rejected, no-op batches create no undo history, and `tilemap_get_used_rect` returns exact integer position, size, and end fields without mutation. The live integration gate performs an actual undo and redo for both TileMapLayer and GridMap edits rather than trusting only the registration metadata.
 
-Like every mutating Phase 7 live tool, these setters return `504 unknown_outcome` with `retryable: false` when transport fails after dispatch and the result cannot be determined. Do not automatically retry that response; inspect live state first.
+Like every mutating Phase 7 live tool, these setters return `504 unknown_outcome` with `retryable: false` when transport fails after dispatch and the result cannot be determined. Do not automatically retry that response; inspect live state first. A live tool that changes nothing is different: Didi sends it once more on a new connection before reporting a transport failure, and says so with `transport.repeats` on the result.
 
 ## 7. Resources and project files
 

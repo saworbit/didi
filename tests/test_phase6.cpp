@@ -295,6 +295,30 @@ TEST(Phase6, LegacyMutationAliasesAdvertiseDryRunAndAcceptPreviews) {
     }
 }
 
+TEST(Phase6, RepeatabilityFollowsTheMutationBoundaryAndTheArguments) {
+    // Break caught: repeatability read the tool name alone, so a ghost preview
+    // asked to accumulate was treated as safe to send twice and drew the same
+    // proposal on screen twice.
+    const auto repeatable = [](const char* name, didi::json arguments) {
+        return didi::mcp::liveCallIsRepeatable(didi::mcp::resolveAliasBinding(name, arguments),
+                                               arguments);
+    };
+
+    for (const char* name : {"eval_gdscript", "runtime_get_tree", "scene_get_property",
+                             "viewport_capture_frame", "tilemap_get_used_rect",
+                             "spatial_query_frustum", "shader_list_uniforms"}) {
+        ASSERT_TRUE(repeatable(name, didi::json::object()));
+    }
+    for (const char* name : {"scene_remove_node", "runtime_step", "signal_emit",
+                             "tilemap_set_cells", "shader_set_uniform", "editor_save_scene"}) {
+        ASSERT_FALSE(repeatable(name, didi::json::object()));
+    }
+
+    ASSERT_TRUE(repeatable("editor_render_ghost_preview", didi::json::object()));
+    ASSERT_TRUE(repeatable("editor_render_ghost_preview", {{"replace", true}}));
+    ASSERT_FALSE(repeatable("editor_render_ghost_preview", {{"replace", false}}));
+}
+
 TEST(Phase6, RegistryDryRunNeverDispatchesMutationHandler) {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();

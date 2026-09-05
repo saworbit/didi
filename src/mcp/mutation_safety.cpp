@@ -99,6 +99,20 @@ bool toolRunsProjectControlledCode(const ResolvedToolBinding& binding) {
     return kRunsProjectCode.count(binding.canonical_name) != 0;
 }
 
+bool liveCallIsRepeatable(const ResolvedToolBinding& binding, const json& arguments) {
+    if (MutationSafety::isMutation(binding)) return false;
+    // Ghost previews are not a mutation: nothing they draw reaches the scene
+    // tree or the file on disk. They still leave something on screen, and the
+    // default is to replace what is there, which repeats without a trace. Asked
+    // to accumulate, a repeat draws the same shapes again beside the first set,
+    // and a person looking at the viewport sees two proposals where they made
+    // one.
+    if (binding.canonical_name == "editor_render_ghost_preview") {
+        return !arguments.is_object() || arguments.value("replace", true);
+    }
+    return true;
+}
+
 bool MutationSafety::canRequireConfirmation(const ResolvedToolBinding& binding) {
     return kAlwaysConfirmed.count(binding.policy_source) != 0 ||
            kOverwriteConfirmed.count(binding.policy_source) != 0;

@@ -116,6 +116,64 @@ public:
     std::string last_method;
 };
 
+// Fails its first requests the way a pipe that went away does: a transport
+// failure whose outcome is unknown, and a connection that is gone afterwards.
+// The number of failures is set per test, so one route can stand for a
+// connection that came back and for an engine that did not.
+class FlakyRouteFake final : public didi::runtime::IRuntimeSessionClient,
+                             public std::enable_shared_from_this<FlakyRouteFake> {
+public:
+    FlakyRouteFake(std::string kind, int failures)
+        : session(descriptorFor(kind)), remaining_failures(failures) {}
+
+    bool connect(const std::string& endpoint, int) override {
+        ++connects;
+        connected = endpoint == session.endpoint;
+        return connected;
+    }
+    void disconnect() override { connected = false; }
+    bool isConnected() const override { return connected; }
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json&, int) override {
+        ++requests;
+        last_method = method;
+        if (remaining_failures > 0) {
+            --remaining_failures;
+            connected = false;
+            return didi::ipc::transportFailure(
+                "The Godot side closed the IPC pipe while reading the response length",
+                {true, true, false, "peer_closed", 5300});
+        }
+        return didi::json{{"status", "ok"}, {"method", method}};
+    }
+    didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
+        return didi::json{{"sessions", didi::json::array()}, {"diagnostics", didi::json::array()}};
+    }
+    didi::Result<didi::json> attachSession(const std::string&) override { return didi::json::object(); }
+    didi::Result<didi::json> detachSession() override { connected = false; return didi::json::object(); }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override { return session; }
+    std::optional<didi::runtime::RuntimeRouteLease> acquireRouteLease() override {
+        if (!connected) return std::nullopt;
+        return didi::runtime::RuntimeRouteLease{
+            std::static_pointer_cast<didi::ipc::IIpcClient>(shared_from_this()), session, generation};
+    }
+    bool quarantineRoute(const didi::runtime::RuntimeRouteLease& lease) override {
+        if (lease.generation != generation || lease.client.get() != this) return false;
+        disconnect();
+        ++generation;
+        ++quarantines;
+        return true;
+    }
+
+    didi::runtime::SessionDescriptor session;
+    int remaining_failures{0};
+    bool connected{true};
+    uint64_t generation{1};
+    int quarantines{0};
+    int connects{0};
+    int requests{0};
+    std::string last_method;
+};
+
 class RouteSwapFake final : public didi::runtime::IRuntimeSessionClient,
                             public std::enable_shared_from_this<RouteSwapFake> {
 public:
@@ -1089,6 +1147,63 @@ void test_generic_live_transport_failure_is_structured_and_quarantined() {
     registry.setIpcClient(nullptr);
 }
 
+void test_repeatable_live_call_survives_one_lost_connection() {
+    // Break caught: a read that changes nothing was reported as an unknown
+    // outcome because the connection under it went away, so a harness run
+    // failed for a reason that had nothing to do with what it was testing.
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    auto editor = std::make_shared<FlakyRouteFake>("editor", 1);
+    registry.setIpcClient(editor);
+    const auto recovered = registry.callTool("eval_gdscript", {{"expression", "1"}});
+    if (recovered.isError) throw std::runtime_error(recovered.content[0].text);
+    const auto value = payload(recovered);
+    ASSERT_EQ(value["execution_mode"], "live");
+    ASSERT_EQ(value["transport"]["repeats"], 1);
+    ASSERT_EQ(editor->requests, 2);
+    // The old connection was gone, so the repeat had to open a new one, and the
+    // route it ran on is the one that just answered rather than a retired one.
+    ASSERT_EQ(editor->connects, 1);
+    ASSERT_EQ(editor->quarantines, 0);
+
+    // An engine that is not coming back gets one repeat, not a queue of them.
+    auto dead = std::make_shared<FlakyRouteFake>("editor", 5);
+    registry.setIpcClient(dead);
+    const auto failed = registry.callTool("eval_gdscript", {{"expression", "1"}});
+    ASSERT_TRUE(failed.isError);
+    const auto failed_value = payload(failed);
+    ASSERT_EQ(failed_value["error"]["data"]["outcome"], "unknown_outcome");
+    ASSERT_TRUE(failed_value["error"]["data"]["route_quarantine"].get<bool>());
+    ASSERT_EQ(failed_value["error"]["data"]["transport"]["repeated"], true);
+    ASSERT_EQ(dead->requests, 2);
+    ASSERT_EQ(dead->quarantines, 1);
+
+    registry.setIpcClient(nullptr);
+}
+
+void test_mutating_live_call_is_never_repeated_after_a_lost_connection() {
+    // Break caught: repeating a call whose outcome is unknown applies it twice.
+    // The engine may well have run the first attempt, so a mutation keeps the
+    // ambiguity and reports it rather than resolving it by guessing.
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    auto game = std::make_shared<FlakyRouteFake>("game", 1);
+    registry.setIpcClient(game);
+    const auto result = registry.callTool("runtime_step", {{"frames", 1}});
+    ASSERT_TRUE(result.isError);
+    const auto value = payload(result);
+    ASSERT_EQ(value["error"]["data"]["outcome"], "unknown_outcome");
+    ASSERT_TRUE(value["error"]["data"]["route_quarantine"].get<bool>());
+    ASSERT_FALSE(value["error"]["data"]["transport"].contains("repeated"));
+    ASSERT_EQ(game->requests, 1);
+    ASSERT_EQ(game->connects, 0);
+    ASSERT_EQ(game->quarantines, 1);
+
+    registry.setIpcClient(nullptr);
+}
+
 void test_editor_state_transport_failure_is_structured_and_quarantined() {
     // Break caught: editor-state reads retained a selected descriptor after Wave-D closed its pipe.
     auto& resources = didi::mcp::ResourceRegistry::instance();
@@ -1615,6 +1730,10 @@ struct RegisterRuntimeRoutingTests {
                      test_disconnected_old_lease_keeps_exact_failure_provenance);
         registerTest("RuntimeRouting.GenericTransportQuarantine",
                      test_generic_live_transport_failure_is_structured_and_quarantined);
+        registerTest("RuntimeRouting.RepeatableCallSurvivesLostConnection",
+                     test_repeatable_live_call_survives_one_lost_connection);
+        registerTest("RuntimeRouting.MutationIsNeverRepeated",
+                     test_mutating_live_call_is_never_repeated_after_a_lost_connection);
         registerTest("RuntimeRouting.EditorStateTransportQuarantine",
                      test_editor_state_transport_failure_is_structured_and_quarantined);
         registerTest("RuntimeRouting.NonAtomicSessionFailsClosed",
