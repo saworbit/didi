@@ -11,6 +11,21 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
+Nothing yet. The surface below is what 1.6.0 shipped and is current.
+
+<!-- phase7-current-status:start -->
+**Status:** `PARTIAL_DELIVERY`
+**Canonical implementation:** `106/109`
+**Phase 7 registrations:** `3/18` unimplemented
+**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
+<!-- phase7-current-status:end -->
+
+Discovery now exposes 109 canonical tools plus 10 legacy registrations (119 total). 106 canonical tools are implemented and 3 remain unimplemented.
+
+---
+
+## [1.6.0] - 2026-09-06
+
 ### Added
 
 - `runtime_explore_scene` drives a running game and reports what happened. `runtime_inject_input` presses a button and returns; `runtime_watch_invariants` samples every frame and presses nothing. Neither pair makes a playtest, because each injected event is its own IPC round trip: an agent driving from outside presses at whatever rate the transport allows and looks between presses, so a character that walks into a wall and stops responding is invisible to it. There is a position before the press and a position after it, and never the second in between where nothing happened. This runs the loop in the engine. It holds one InputMap action at a time on a schedule drawn from `seed` and from nothing else, samples the probes the caller named every frame through the same bounded sandbox the invariant watch uses, and reports the intervals in which nothing it pressed moved anything, each one naming the action that was down for it. It pauses on the first interval by default, so the state that stopped responding is still there to look at, or surveys the whole window when asked.
@@ -126,15 +141,6 @@ Historical entries describe the surface advertised by those releases. For the ex
 - `viewport_capture_frame` works on a game session. A running game could be paused, stepped, driven with injected input and read through its tree and both log streams, and never seen; the only way to look at it was an OS screenshot from outside Didi, which is useless headless and in CI. Attached to a game it captures the root viewport and reports `session_kind: "game"` and `camera_identifier: "root_viewport"`; the editor camera selectors stay editor-only and are refused there. `viewport_diff_capture` follows, which is how a stepped frame gets asserted. Node isolation stays editor-only, because it hides and restores nodes in the edited scene.
 - `viewport_capture_frame` refuses a viewport that has no size instead of returning it as a successful live frame. A 2D editor viewport that is not the selected main screen is a collapsed control, and Godot hands back its 2x2 minimum; the tool reported that as `is_live_frame: true` with nothing to distinguish it from a scene that happens to be empty. The refusal names the size and says the requested main screen is not the one on screen.
 - `resource_create` refuses a `save_path` that is not `.tres` or `.res`. It wrote Godot text-resource markup into whatever path it was handed, including a `.gd` file, and reported `created_offline` for a file `script_check_syntax` immediately called unparseable in the same session.
-
-<!-- phase7-current-status:start -->
-**Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `106/109`
-**Phase 7 registrations:** `3/18` unimplemented
-**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
-<!-- phase7-current-status:end -->
-
-Discovery now exposes 109 canonical tools plus 10 legacy registrations (119 total). 106 canonical tools are implemented and 3 remain unimplemented.
 
 ---
 
