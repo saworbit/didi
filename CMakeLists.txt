@@ -238,10 +238,21 @@ add_custom_command(TARGET didi_extension POST_BUILD
 
 # The standalone server and the extension are the installable products. Without
 # these, `cmake --install` did nothing at all.
+# didi and didi_tests both land in the build root on a single-config generator,
+# so both of these write one path, and ninja runs the two post-build steps at
+# the same time. Two copies into one destination is a race, and it failed a
+# macOS CI run with "No such file or directory" on a file that is committed and
+# was never missing. Each target stages under a name of its own and renames,
+# which replaces atomically, so whichever finishes last wins and neither can
+# read a half-written file. The generator expression is kept because a
+# multi-config generator puts the two binaries in different directories.
 if(DIDI_CLASS_REFERENCE)
     add_custom_command(TARGET didi POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${DIDI_CLASS_REFERENCE}" "$<TARGET_FILE_DIR:didi>/didi_class_reference.json"
+        COMMAND ${CMAKE_COMMAND} -E copy
+                "${DIDI_CLASS_REFERENCE}" "$<TARGET_FILE_DIR:didi>/didi_class_reference.json.didi"
+        COMMAND ${CMAKE_COMMAND} -E rename
+                "$<TARGET_FILE_DIR:didi>/didi_class_reference.json.didi"
+                "$<TARGET_FILE_DIR:didi>/didi_class_reference.json"
         COMMENT "Placing the class reference next to didi"
         VERBATIM
     )
@@ -307,8 +318,12 @@ if(DIDI_BUILD_TESTS)
     # it has to exist next to the test binary even when only this target builds.
     if(DIDI_CLASS_REFERENCE)
         add_custom_command(TARGET didi_tests POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${DIDI_CLASS_REFERENCE}" "$<TARGET_FILE_DIR:didi_tests>/didi_class_reference.json"
+            COMMAND ${CMAKE_COMMAND} -E copy
+                    "${DIDI_CLASS_REFERENCE}"
+                    "$<TARGET_FILE_DIR:didi_tests>/didi_class_reference.json.didi_tests"
+            COMMAND ${CMAKE_COMMAND} -E rename
+                    "$<TARGET_FILE_DIR:didi_tests>/didi_class_reference.json.didi_tests"
+                    "$<TARGET_FILE_DIR:didi_tests>/didi_class_reference.json"
             VERBATIM
         )
     endif()
