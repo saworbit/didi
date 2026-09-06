@@ -626,7 +626,7 @@ Asset or PackedScene instantiation is not implemented.
 - `whole_word` (`boolean`): `project_search_text` only.
 - `match` (`string`) and `kinds` (`array`): `project_search_symbols` only. `match` is `exact`, `prefix`, or `contains`.
 
-Both tools search only `.gd`, `.cs`, `.tscn`, and `.tres` beneath a normalized in-project `search_path`. They reject traversal/absolute paths, skip symlinks plus `.git`, `.godot`, `.worktrees`, and build outputs, and cap each file at 4 MiB, each request at 10,000 files/64 MiB, results at 500, queries at 256 UTF-8 bytes, and previews at 1,024 bytes.
+Both tools search only `.gd`, `.cs`, `.tscn`, and `.tres` beneath a normalized in-project `search_path`. They reject traversal/absolute paths, skip symlinks plus `.git`, `.godot`, `.gemini`, `.worktrees`, `.vs`, `out`, `bin`, `build` and any directory whose name starts with `build-`, and cap each file at 4 MiB, each request at 10,000 files/64 MiB, results at 500, queries at 256 UTF-8 bytes, and previews at 1,024 bytes.
 
 Text matching is literal with optional ASCII case folding and whole-word boundaries; regular expressions are not supported. Symbol matching is lexical (`exact`, `prefix`, or `contains`) across GDScript and C# declarations after comments and strings are excluded. GDScript recognition includes inline annotations, static functions, and inner classes. Symbol kinds are `class`, `function`, `signal`, `variable`, `constant`, and `enum`. Results use one-based locations and canonical `res://` paths; diagnostics are bounded per file.
 
