@@ -469,6 +469,24 @@ Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRe
     }
 
     const auto sandbox_project = sandbox_root / project_within_repository;
+
+    // Neither the checks nor the run wants a Godot that publishes a runtime
+    // session. Both are engines Didi started to answer a question, and a
+    // session from one of them is a session the next discovery would find.
+    const ScopedOfflineHelperEnvironment offline_helper;
+    const std::string godot = resolveGodotExecutable();
+
+    // Before the proposal is written, and that ordering is the whole point.
+    //
+    // Measured after, the probe loads a project the proposal had already
+    // changed, so a proposal that breaks startup -- an invalid autoload, a
+    // project.godot naming a bus layout that is not there -- printed its own
+    // errors into the baseline and had them subtracted from every check that
+    // followed. The tool would have answered all_ok on the proposals it exists
+    // to catch, and project_apply_changes would then have written them into the
+    // working tree on the strength of that answer.
+    const auto baseline = sandboxBaselineErrors(godot, sandbox_project, request.timeout_seconds);
+
     for (const auto& change : request.changes) {
         const auto target = sandbox_project / paths::projectPathFromUtf8(change.relative);
         std::error_code create_error;
@@ -482,16 +500,9 @@ Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRe
         ++result.written;
     }
 
-    // Neither the checks nor the run wants a Godot that publishes a runtime
-    // session. Both are engines Didi started to answer a question, and a
-    // session from one of them is a session the next discovery would find.
-    const ScopedOfflineHelperEnvironment offline_helper;
-
     // Every proposed script is checked with the whole proposal present, which
     // is the part a single-file check cannot do: a script that preloads a
     // sibling has to see the proposed sibling, not the one still on disk.
-    const std::string godot = resolveGodotExecutable();
-    const auto baseline = sandboxBaselineErrors(godot, sandbox_project, request.timeout_seconds);
     result.all_ok = true;
     for (const auto& change : request.changes) {
         if (!endsWithGdscript(change.relative)) continue;
