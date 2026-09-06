@@ -117,21 +117,54 @@ private:
 void test_windows_exit_code_259_is_completed_not_timed_out() {
     ScopedEnvironmentVariable godot_bin("GODOT_BIN");
     godot_bin.set(commandShell());
+    // The timeout is generous on purpose, and the bound is derived from it
+    // rather than from how long this took on one machine.
+    //
+    // 259 is STILL_ACTIVE. What this proves is that it is read as a process
+    // that finished rather than one still going, and one still going would be
+    // waited out to the timeout. So the two answers are "returns as soon as the
+    // process exits" and "takes the whole timeout", and the bound only has to
+    // separate them.
+    //
+    // A short timeout made that separation two tenths of a second, which is not
+    // a property of the code under test, it is a bet on how quickly a loaded
+    // runner can spawn a process. Five seconds against a three second bound
+    // leaves two seconds of margin above a correct run and two below a wrong
+    // one. A passing run still returns immediately, so none of this is paid for
+    // unless the test is failing.
     const auto result = didi::offline::TestRunner::runSession(
-        "", 1, false, false, {"/d", "/c", "exit", "259"});
+        "", 5, false, false, {"/d", "/c", "exit", "259"});
     ASSERT_EQ(result.exit_code, 259);
-    ASSERT_TRUE(result.duration_seconds < 0.8);
+    ASSERT_TRUE(result.duration_seconds < 3.0);
 }
 
 void test_windows_completed_parent_does_not_wait_for_inherited_stdout() {
     // Break caught: blocking EOF drain waits for a descendant that inherited the output pipe.
     ScopedEnvironmentVariable godot_bin("GODOT_BIN");
     godot_bin.set(commandShell());
+    // `ping -n 8` sends eight probes a second apart, so the descendant that
+    // inherits the pipe lives for about seven seconds, measured at 7.12, while
+    // the shell that started it returns at once. Those seven seconds are the
+    // floor for the bug: a drain that blocks on EOF cannot come back before the
+    // descendant closes the pipe.
+    //
+    // The bound is read off that floor rather than off a stopwatch, and the
+    // descendant is deliberately long so the floor and a correct run are far
+    // apart. Four seconds sits three below the floor, which is what makes the
+    // test discriminate, and nearly four above a correct run, which is what
+    // stops a loaded runner failing it.
+    //
+    // The previous shape was `ping -n 4` against a 1.2 second bound. Its floor
+    // was 3.07 seconds and CI was observed taking more than 1.2 for a correct
+    // run, so the margin above a pass was smaller than the noise, and it failed
+    // a release on a diff of one version digit and some markdown. A passing run
+    // returns as soon as the shell exits and never waits for the descendant, so
+    // the longer ping costs a passing run nothing.
     const auto result = didi::offline::TestRunner::runSession(
-        "", 5, false, false,
-        {"/d", "/c", "start", "/b", "ping", "-n", "4", "127.0.0.1"});
+        "", 12, false, false,
+        {"/d", "/c", "start", "/b", "ping", "-n", "8", "127.0.0.1"});
     ASSERT_EQ(result.exit_code, 0);
-    ASSERT_TRUE(result.duration_seconds < 1.2);
+    ASSERT_TRUE(result.duration_seconds < 4.0);
 }
 
 void test_windows_batch_wrapper_is_launched_through_command_shell() {
