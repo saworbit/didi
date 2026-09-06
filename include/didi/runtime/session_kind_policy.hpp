@@ -17,7 +17,11 @@ inline LiveSessionKindPolicy livePolicyForTool(std::string_view name) {
         // that broke one. An editor has a SceneTree and monitors of its own,
         // but neither is a game running, so the answer would describe the
         // wrong thing.
-        name == "runtime_watch_invariants") {
+        name == "runtime_watch_invariants" ||
+        // Driving a game with its own input actions. In an editor those
+        // actions would drive the editor, which is nobody's intent, and
+        // a soft lock is a thing that happens to a game being played.
+        name == "runtime_explore_scene") {
         return LiveSessionKindPolicy::game_only;
     }
     if (name == "runtime_read_logs" || name == "runtime_read_output" || name == "runtime_get_tree" ||
@@ -41,7 +45,7 @@ inline LiveSessionKindPolicy livePolicyForMethod(std::string_view method) {
     if (method == "runtime.setPaused" || method == "runtime.step" ||
         method == "runtime.stop" || method == "physics.simulateStep" ||
         method == "anim.playTrack" || method == "runtime.injectInput" ||
-        method == "runtime.watchInvariants") {
+        method == "runtime.watchInvariants" || method == "runtime.exploreScene") {
         return LiveSessionKindPolicy::game_only;
     }
     if (method == "runtime.getLogs" || method == "runtime.getOutput" || method == "runtime.getTree" ||

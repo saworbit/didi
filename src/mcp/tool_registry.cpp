@@ -50,6 +50,9 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // Game only. The window is measured in engine frames, and the pause on
         // a violation happens on the frame that broke it.
         , "runtime_watch_invariants"
+        // Game only for the same reason, and one more: it presses the project's
+        // own input actions, which in an editor would drive the editor.
+        , "runtime_explore_scene"
         // Phase 7C. Game only: Input.parse_input_event in the editor would
         // drive the editor UI, which is nobody's intent.
         , "runtime_inject_input"
@@ -193,6 +196,7 @@ CallToolResult handleInjectInputEvent(const ResolvedToolBinding& binding, const 
 CallToolResult handleRuntimeGetCallStack(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleRuntimeReadProfiler(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleRuntimeWatchInvariants(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleRuntimeExploreScene(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleRuntimeListSessions(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
 CallToolResult handleRuntimeAttachSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
 CallToolResult handleRuntimeDetachSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
@@ -438,6 +442,7 @@ ResolvedToolBinding resolveAliasBinding(std::string_view invoked_name, const jso
         {"runtime_get_call_stack", "runtime.getCallStack"},
         {"runtime_read_profiler", "runtime.readProfiler"},
         {"runtime_watch_invariants", "runtime.watchInvariants"},
+        {"runtime_explore_scene", "runtime.exploreScene"},
         {"spatial_query_raycast_batch", "physics.raycastBatch"},
         {"spatial_query_clearance", "physics.clearance"},
         {"spatial_query_frustum", "vision.frustumQuery"},
@@ -2397,6 +2402,57 @@ void ToolRegistry::registerAllDefaultTools() {
         };
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleRuntimeWatchInvariants(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "runtime_explore_scene";
+        t.description = "Drives a running game for a bounded window by holding the project's own input actions on a seeded schedule, samples values you name every frame, and reports where they went and the intervals in which nothing it pressed moved anything. It reports observations, not a verdict: it does not decide whether a level is beatable or whether a stuck interval is a bug.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"actions", {
+                    {"type", "array"}, {"minItems", 1}, {"maxItems", 8},
+                    {"items", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128}}},
+                    {"description", "InputMap action names the bot may hold, and the only way it moves anything. An arbitrary project moves its player with its own controller, so pressing the project's own actions is what runs that controller. Names must not repeat."}
+                }},
+                {"probes", {
+                    {"type", "array"}, {"minItems", 1}, {"maxItems", 4},
+                    {"description", "What counts as movement in this project, which this cannot know for itself. A frame in which no probe changed is a still frame."},
+                    {"items", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 64}}},
+                            {"expression", {{"type", "string"}, {"minLength", 1}, {"maxLength", 512},
+                                            {"description", "A sandbox expression evaluating to a number or a boolean, such as position.x. The same sandbox runtime_watch_invariants uses."}}},
+                            {"context_node", {{"type", "string"}, {"maxLength", 256},
+                                              {"description", "The node the expression is evaluated against."}}}
+                        }},
+                        {"required", json::array({"expression"})},
+                        {"additionalProperties", false}
+                    }}
+                }},
+                {"duration_ms", {{"type", "integer"}, {"minimum", 250}, {"maximum", 60000}, {"default", 5000},
+                                 {"description", "How long to drive for. The run ends early on a stuck interval or an engine error unless you turn those off."}}},
+                {"action_hold_ms", {{"type", "integer"}, {"minimum", 16}, {"maximum", 10000}, {"default", 250},
+                                    {"description", "How long one action is held before the schedule moves on. One action is down at a time."}}},
+                {"stuck_ms", {{"type", "integer"}, {"minimum", 100}, {"maximum", 60000}, {"default", 3000},
+                              {"description", "How long every probe has to stay still before that is reported as a stuck interval. Must not exceed duration_ms."}}},
+                {"movement_epsilon", {{"type", "number"}, {"minimum", 0}, {"default", 0.001},
+                                      {"description", "What counts as a value having moved. A float position never repeats exactly, so any change at all would report a standing character as a moving one."}}},
+                {"pause_on_stuck", {{"type", "boolean"}, {"default", true},
+                                    {"description", "Stop on the first stuck interval and pause the game there, so the state that stopped responding is still on screen. False surveys the whole window and reports every interval it found."}}},
+                {"stop_on_engine_error", {{"type", "boolean"}, {"default", true},
+                                          {"description", "Stop on the first error-level engine record, which is what an unhandled script error looks like from outside the script. The elapsed time in the response is when it happened."}}},
+                {"seed", {{"type", "integer"}, {"minimum", 0}, {"default", 1},
+                          {"description", "The action schedule is drawn from this and from nothing else, so a report names a run that can be made again."}}}
+            }},
+            {"required", json::array({"actions", "probes"})},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleRuntimeExploreScene(binding, args, m_ipcClient);
         };
         registerTool(std::move(t));
     }

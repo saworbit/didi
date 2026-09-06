@@ -6,6 +6,7 @@
 #include "didi/runtime/session_kind_policy.hpp"
 #include "didi/runtime/profiler_collector.hpp"
 #include "didi/runtime/invariant_watch.hpp"
+#include "didi/runtime/scene_exploration.hpp"
 #include <queue>
 #include <mutex>
 #include <future>
@@ -145,6 +146,14 @@ public:
                                 const std::shared_ptr<std::promise<json>>& promise,
                                 const std::shared_ptr<CommandControl>& control);
 
+    // Starts a callback-driven exploration run. Same shape again, and for one
+    // more reason on top of the others: this one also presses buttons, and an
+    // action has to go down on one frame and come up on another for the game's
+    // own input handling to see a press at all.
+    void scheduleSceneExploration(const json& params,
+                                  const std::shared_ptr<std::promise<json>>& promise,
+                                  const std::shared_ptr<CommandControl>& control);
+
     // Asks for SceneTree.quit on a later frame instead of right now. runtime.stop
     // has to return its response over IPC before the main loop is allowed to
     // exit, or the client sees a broken pipe rather than the exit code.
@@ -172,6 +181,11 @@ private:
     void processAssetReimportFrame();
     void processProfilerFrame();
     void processInvariantWatchFrame();
+    void processSceneExplorationFrame();
+    // Releases whatever the exploration is holding. Called when the run ends
+    // for any reason, including the ones that are not success, because an
+    // action left down outlives the run and keeps driving the game.
+    void releaseExplorationAction(size_t action_index);
     void processPendingQuitFrame();
 
     struct PendingRuntimeStep {
@@ -208,6 +222,20 @@ private:
         std::shared_ptr<CommandControl> control;
     };
 
+    struct PendingSceneExploration {
+        runtime::SceneExploration exploration;
+        std::chrono::steady_clock::time_point started_at;
+        bool awaiting_next_callback{true};
+        uint64_t error_cursor{0};
+        // Which action is currently down, and the slot it went down for. No
+        // action is held before the first frame, which is what the empty
+        // optional means rather than "action zero".
+        std::optional<size_t> held_action;
+        int64_t held_slot{-1};
+        std::shared_ptr<std::promise<json>> response_promise;
+        std::shared_ptr<CommandControl> control;
+    };
+
     std::queue<EngineCommand> m_commandQueue;
     std::mutex m_queueMutex;
     std::mutex m_stepMutex;
@@ -222,6 +250,8 @@ private:
     std::optional<PendingProfilerRead> m_pendingProfilerRead;
     std::mutex m_invariantMutex;
     std::optional<PendingInvariantWatch> m_pendingInvariantWatch;
+    std::mutex m_explorationMutex;
+    std::optional<PendingSceneExploration> m_pendingSceneExploration;
     std::optional<runtime::SessionKind> m_sessionKind;
     // Main-thread only. Set while processQueue is dequeuing, so a nested pump
     // triggered from inside a command observes progress without starting work.

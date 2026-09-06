@@ -378,5 +378,10 @@ CallToolResult handleRuntimeWatchInvariants(const ResolvedToolBinding& binding, 
     return sendPhase7LiveRequest(binding, args, ipc);
 }
 
+CallToolResult handleRuntimeExploreScene(const ResolvedToolBinding& binding, const json& args,
+                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    return sendPhase7LiveRequest(binding, args, ipc);
+}
+
 } // namespace mcp
 } // namespace didi

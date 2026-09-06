@@ -589,6 +589,45 @@ try {
         # A condition that cannot be violated is refused rather than reported held.
         (Tool-Request 2277 "runtime_watch_invariants" @{ duration_ms = 100; invariants = @(
             @{ name = "unbounded"; kind = "performance_between"; metric = "TIME_FPS" }) }),
+        # Scene exploration, against the same running game. ui_accept and
+        # ui_cancel are built into every Godot InputMap, so the bot is pressing
+        # real actions rather than names invented for a test.
+        #
+        # The child count of the runtime root does not change while nothing is
+        # touching the tree, so a run watching it is a run that will find a
+        # stuck interval. That is the whole loop end to end: the press reached
+        # the engine, the probe was sampled every frame, the stillness was
+        # measured, and the game was paused where it stopped.
+        (Tool-Request 2360 "runtime_explore_scene" @{ duration_ms = 1500; stuck_ms = 300;
+            action_hold_ms = 100; seed = 11; actions = @("ui_accept", "ui_cancel");
+            probes = @(
+            @{ name = "children"; expression = "node.get_child_count()";
+               context_node = "/root/RuntimeRoot" }) }),
+        (Tool-Request 2361 "runtime_get_session" @{}),
+        (Tool-Request 2362 "runtime_set_paused" @{ paused = $false }),
+        # A probe nobody could read is not a probe that stayed still. This must
+        # come back having found nothing rather than calling a broken
+        # expression a soft lock.
+        (Tool-Request 2363 "runtime_explore_scene" @{ duration_ms = 400; stuck_ms = 200;
+            action_hold_ms = 100; pause_on_stuck = $false; actions = @("ui_accept");
+            probes = @(
+            @{ name = "unreadable"; expression = "node.get_child_count()";
+               context_node = "/root/NoSuchNode" }) }),
+        # An action the project does not define is a run that could not have
+        # driven anything, and saying it explored is the answer that would be
+        # a lie.
+        (Tool-Request 2364 "runtime_explore_scene" @{ duration_ms = 300; stuck_ms = 200;
+            actions = @("didi_no_such_action");
+            probes = @(
+            @{ name = "children"; expression = "node.get_child_count()";
+               context_node = "/root/RuntimeRoot" }) }),
+        # A stuck window that cannot close inside the run is refused rather
+        # than accepted and never reported.
+        (Tool-Request 2365 "runtime_explore_scene" @{ duration_ms = 300; stuck_ms = 2000;
+            actions = @("ui_accept");
+            probes = @(
+            @{ name = "children"; expression = "node.get_child_count()";
+               context_node = "/root/RuntimeRoot" }) }),
         (Tool-Request 323 "eval_gdscript" @{ expression = "node.get_child_count()"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 324 "eval_gdscript" @{ expression = "[1, 2, 3]"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 325 "eval_gdscript" @{ expression = "{'answer': 42, 'ok': true}"; context_node = "/root/RuntimeRoot" }),
@@ -716,6 +755,33 @@ try {
 
     $selectedGame = Tool-Payload $runtimeById[376]
     Assert-True ($selectedGame.session.session_id -eq $gameSession.session_id -and $selectedGame.session.kind -eq "game") "Runtime get-session did not return the selected game route."
+
+    # --- runtime_explore_scene -------------------------------------------
+    $explored = Tool-Payload $runtimeById[2360]
+    Assert-True ($explored.session_kind -eq "game") "The exploration did not report the session it ran in."
+    Assert-True ($explored.frames -ge 1) "The exploration reported no frames, so it drove nothing."
+    Assert-True ($explored.stopped_reason -eq "stuck") "A probe that never changes did not produce a stuck interval; the run stopped for $($explored.stopped_reason)."
+    Assert-True (@($explored.stuck_intervals).Count -ge 1) "The exploration stopped for being stuck and reported no interval."
+    Assert-True ($explored.stuck_intervals[0].duration_ms -ge 300) "The reported stuck interval is shorter than the window that defines one."
+    $heldAction = $explored.stuck_intervals[0].action_held
+    Assert-True ($heldAction -eq "ui_accept" -or $heldAction -eq "ui_cancel") "The stuck interval did not name which action was down for it."
+    Assert-True ($explored.paused -eq $true) "The game was not paused where the exploration stopped."
+    Assert-True ($explored.verdict -eq "none") "The exploration reported a verdict, which is not a judgment it is entitled to make."
+    $pressedTotal = 0
+    foreach ($entry in $explored.actions) { $pressedTotal += $entry.frames_held }
+    Assert-True ($pressedTotal -eq $explored.frames) "The per-action frame counts do not add up to the frames observed."
+    Assert-True ((Tool-Payload $runtimeById[2361]).session.kind -eq "game") "The session was not usable after an exploration pause."
+    Assert-True (-not $runtimeById[2362].result.isError) "The game could not be resumed after an exploration pause."
+
+    $blind = Tool-Payload $runtimeById[2363]
+    Assert-True ($blind.stopped_reason -eq "duration_elapsed") "An unreadable probe ended the run early instead of being reported as unread."
+    Assert-True (@($blind.stuck_intervals).Count -eq 0) "An expression nobody could read was reported as a soft lock."
+    Assert-True ($blind.probes[0].readings -eq 0) "An unreadable probe reported readings it did not take."
+    Assert-True ($null -ne $blind.probes[0].last_read_error) "An unreadable probe did not say why it could not be read."
+
+    Assert-True $runtimeById[2364].result.isError "An action the project does not define was accepted, and the run reported driving a game it never touched."
+    Assert-True $runtimeById[2365].result.isError "A stuck window longer than the run was accepted, and nothing could ever have reported it."
+
     Assert-True ($null -eq $selectedGame.session.PSObject.Properties["token"]) "Runtime get-session leaked the game token."
     Assert-True ((Tool-Payload $runtimeById[377]).session.session_id -eq $gameSession.session_id) "Runtime detach did not report the route it released."
     Assert-True ((Tool-Payload $runtimeById[378]).handshake.status -eq "ok") "Runtime reattach did not restore the authenticated game route."
