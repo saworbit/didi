@@ -12,6 +12,7 @@
 #include <chrono>
 #include <filesystem>
 #include <random>
+#include <set>
 #include <fstream>
 #include <sstream>
 
@@ -151,6 +152,43 @@ std::vector<std::string> engineErrorLines(const std::string& output, size_t limi
     return errors;
 }
 
+// What the copy says before any proposal is checked.
+//
+// The sandbox is a worktree with no `.godot`, because a project gitignores it,
+// so nothing in it can resolve a `uid://`. A project that names any resource by
+// uid, which `project.godot` does for its audio bus layout by default, makes
+// Godot print `ERROR: Unrecognized UID` at load. That is a fact about the copy,
+// not about the proposal, and it arrives in the output of every single check.
+//
+// Attributing it to the scripts reported every proposal as broken on Godot
+// 4.5.1 and 4.6.2 while 4.7.2 passed, which is a verdict that had nothing to do
+// with the files being checked. So the copy is asked what it says on its own,
+// once, and those lines are not counted against anybody.
+//
+// Deliberately not a denylist of known engine messages. A pattern list would
+// need extending for every engine version, and it would also hide a genuinely
+// unresolved uid in a proposed resource. Subtracting a measured baseline keeps
+// anything the proposal actually added.
+std::set<std::string> sandboxBaselineErrors(const std::string& godot,
+                                            const fs::path& sandbox_project,
+                                            int timeout_seconds) {
+    ProcessRequest probe;
+    probe.executable = godot;
+    // Loads the project and leaves. Enough to produce whatever the project
+    // itself reports, without checking anything of the caller's.
+    probe.arguments = {"--headless", "--quit"};
+    probe.working_directory = sandbox_project;
+    probe.timeout = std::chrono::milliseconds(timeout_seconds * 1000);
+    auto ran = runProcess(probe);
+    if (ran.isErr() || ran.value().timed_out) {
+        // No baseline is not a reason to fail the verification. It means every
+        // line is attributed, which is the behaviour this had before.
+        return {};
+    }
+    const auto lines = engineErrorLines(ran.value().output, kMaxRunErrors);
+    return {lines.begin(), lines.end()};
+}
+
 // Opens the proposed project in the copy and reports what the engine said.
 //
 // The copy is built from a commit and carries no import cache, because Godot
@@ -161,7 +199,8 @@ std::vector<std::string> engineErrorLines(const std::string& output, size_t limi
 Result<SpeculativeSceneRun> runSceneInSandbox(const std::string& godot,
                                               const fs::path& sandbox_project,
                                               const SpeculativeVerifyRequest& request,
-                                              bool scripts_parsed) {
+                                              bool scripts_parsed,
+                                              const std::set<std::string>& baseline) {
     if (!fs::exists(sandbox_project / paths::projectPathFromUtf8(request.run_scene_relative))) {
         return Error(404, "run_scene names " + request.run_scene +
                               ", which is not in the project and is not one of the proposed "
@@ -191,6 +230,14 @@ Result<SpeculativeSceneRun> runSceneInSandbox(const std::string& godot,
     run.exit_code = ran.value().exit_code;
     run.timed_out = ran.value().timed_out;
     run.errors = engineErrorLines(ran.value().output, kMaxRunErrors);
+    // The same subtraction the script checks make. Opening a scene loads the
+    // project first, so every line the copy produces on its own arrives here
+    // too, and a proposal is not answerable for them.
+    run.errors.erase(std::remove_if(run.errors.begin(), run.errors.end(),
+                                    [&baseline](const std::string& line) {
+                                        return baseline.count(line) != 0;
+                                    }),
+                     run.errors.end());
     run.ok = !run.timed_out && run.exit_code == 0 && run.errors.empty();
     return run;
 }
@@ -444,6 +491,7 @@ Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRe
     // is the part a single-file check cannot do: a script that preloads a
     // sibling has to see the proposed sibling, not the one still on disk.
     const std::string godot = resolveGodotExecutable();
+    const auto baseline = sandboxBaselineErrors(godot, sandbox_project, request.timeout_seconds);
     result.all_ok = true;
     for (const auto& change : request.changes) {
         if (!endsWithGdscript(change.relative)) continue;
@@ -466,7 +514,14 @@ Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRe
             // for a script with a plain syntax error while printing the parse
             // error. A proposal full of them read back as all_ok, which is the
             // one answer this tool must never give wrongly.
-            const auto errors = engineErrorLines(ran.value().output, kMaxRunErrors);
+            auto errors = engineErrorLines(ran.value().output, kMaxRunErrors);
+            // What the copy already said with nothing of the caller's in it is
+            // not something the caller's file did.
+            errors.erase(std::remove_if(errors.begin(), errors.end(),
+                                        [&baseline](const std::string& line) {
+                                            return baseline.count(line) != 0;
+                                        }),
+                         errors.end());
             verdict.ok = ran.value().exit_code == 0 && errors.empty();
             if (!verdict.ok) {
                 std::string detail;
@@ -483,7 +538,7 @@ Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRe
     }
 
     if (!request.run_scene_relative.empty()) {
-        auto run = runSceneInSandbox(godot, sandbox_project, request, result.all_ok);
+        auto run = runSceneInSandbox(godot, sandbox_project, request, result.all_ok, baseline);
         if (run.isErr()) return run.error();
         if (!run.value().ok) result.all_ok = false;
         result.scene_run = std::move(run.value());
