@@ -121,6 +121,7 @@ void EditorHook::processQueue() {
         processAssetReimportFrame();
         processProfilerFrame();
         processInvariantWatchFrame();
+        processSceneExplorationFrame();
         return;
     }
     m_pumping = true;
@@ -171,6 +172,10 @@ void EditorHook::processQueue() {
                 scheduleInvariantWatch(cmd.params, cmd.response_promise, cmd.control);
                 continue;
             }
+            if (cmd.method == "runtime.exploreScene") {
+                scheduleSceneExploration(cmd.params, cmd.response_promise, cmd.control);
+                continue;
+            }
             if (cmd.method == "runtime.step") {
                 if (!cmd.params.is_object() ||
                     (cmd.params.contains("frames") &&
@@ -215,6 +220,7 @@ void EditorHook::processQueue() {
     processAssetReimportFrame();
     processProfilerFrame();
     processInvariantWatchFrame();
+    processSceneExplorationFrame();
     processPendingQuitFrame();
 }
 
@@ -487,6 +493,252 @@ void EditorHook::processInvariantWatchFrame() {
 
     completed->control->markCompleted();
     auto response = completed->watch.response(paused);
+    response["execution_mode"] = "live";
+    response["is_live_engine"] = true;
+    response["session_kind"] = sessionKindName(m_sessionKind);
+    fulfillCommand(completed->response_promise, completed->control, std::move(response));
+}
+
+void EditorHook::scheduleSceneExploration(
+    const json& params, const std::shared_ptr<std::promise<json>>& promise,
+    const std::shared_ptr<CommandControl>& control) {
+    auto request = runtime::parseSceneExplorationRequest(params);
+    if (request.isErr()) {
+        control->markCompleted();
+        fulfillCommand(promise, control,
+                       {{"error", {{"code", request.error().code},
+                                    {"message", request.error().message}}}});
+        return;
+    }
+
+    // An action nobody declared dispatches without complaint and moves nothing,
+    // so a run driving one would report its own stillness as a stuck interval.
+    // Checked here rather than on the first frame, because a run that has
+    // already started has already told the caller it was driving the game.
+    json action_names = json::array();
+    for (const auto& action : request.value().actions) action_names.push_back(action);
+    const auto missing = GodotBridge::instance().execute(
+        "runtime.missingInputActions", {{"actions", std::move(action_names)}},
+        sessionKindName(m_sessionKind));
+    if (missing.contains("error")) {
+        control->markCompleted();
+        fulfillCommand(promise, control,
+                       {{"error", {{"code", missing["error"].value("code", 500)},
+                                    {"message", "Could not check the input actions: " +
+                                                    missing["error"].value("message", "unknown")}}}});
+        return;
+    }
+    const auto undefined = missing.value("missing", json::array());
+    if (!undefined.empty()) {
+        control->markCompleted();
+        fulfillCommand(promise, control,
+                       {{"error", {{"code", 400},
+                                    {"message", "The project's InputMap does not define every action "
+                                                "this run was told to press, so it would have driven "
+                                                "nothing and reported the stillness as a stuck "
+                                                "interval"},
+                                    {"data", {{"undefined_actions", undefined}}}}}});
+        return;
+    }
+
+    int duration_ms = 0;
+    size_t action_count = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_explorationMutex);
+        if (m_pendingSceneExploration.has_value()) {
+            control->markCompleted();
+            fulfillCommand(promise, control,
+                           {{"error", {{"code", 423},
+                                        {"message", "A scene exploration is already running"},
+                                        {"data", {{"retryable", true}}}}}});
+            return;
+        }
+        duration_ms = request.value().duration_ms;
+        action_count = request.value().actions.size();
+        m_pendingSceneExploration = PendingSceneExploration{
+            runtime::SceneExploration(std::move(request.value())),
+            std::chrono::steady_clock::now(), true, engineOutput().nextSequence(),
+            std::nullopt, -1, promise, control};
+    }
+    DIDI_LOG_INFO("EDITOR_HOOK", "Scheduled a scene exploration pressing ", action_count,
+                  " action(s) over ", duration_ms, " ms");
+}
+
+void EditorHook::releaseExplorationAction(size_t action_index) {
+    std::string action_name;
+    {
+        std::lock_guard<std::mutex> lock(m_explorationMutex);
+        if (!m_pendingSceneExploration.has_value()) return;
+        const auto& actions = m_pendingSceneExploration->exploration.request().actions;
+        if (action_index >= actions.size()) return;
+        action_name = actions[action_index];
+    }
+    const json release = {{"events", json::array({{{"type", "action"},
+                                                   {"action_name", action_name},
+                                                   {"pressed", false}}})}};
+    const auto result = GodotBridge::instance().execute("runtime.injectInput", release,
+                                                        sessionKindName(m_sessionKind));
+    if (result.contains("error")) {
+        DIDI_LOG_WARN("EDITOR_HOOK", "Could not release the exploration action ", action_name,
+                      ": ", result["error"].value("message", "unknown"));
+    }
+}
+
+void EditorHook::processSceneExplorationFrame() {
+    // Same discipline as processInvariantWatchFrame: every call into the engine
+    // happens outside the lock, because a nested callback reaching this
+    // function must never find the mutex held by its own thread.
+    std::vector<runtime::ExplorationProbe> probes;
+    std::shared_ptr<CommandControl> running_for;
+    uint64_t error_cursor = 0;
+    int64_t elapsed = 0;
+    int64_t slot = 0;
+    std::optional<size_t> previously_held;
+    int64_t previously_held_slot = -1;
+    size_t action_now = 0;
+    std::string action_now_name;
+    {
+        std::lock_guard<std::mutex> lock(m_explorationMutex);
+        if (!m_pendingSceneExploration.has_value()) return;
+        auto& pending = *m_pendingSceneExploration;
+        if (pending.awaiting_next_callback) {
+            // The command was dequeued this callback. The window starts at a
+            // frame boundary, the same as the watch's, so the first press and
+            // the first sample belong to the same frame.
+            pending.awaiting_next_callback = false;
+            pending.started_at = std::chrono::steady_clock::now();
+            pending.error_cursor = engineOutput().nextSequence();
+            return;
+        }
+        elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now() - pending.started_at)
+                      .count();
+        probes = pending.exploration.request().probes;
+        running_for = pending.control;
+        error_cursor = pending.error_cursor;
+        slot = pending.exploration.slotAt(elapsed);
+        previously_held = pending.held_action;
+        previously_held_slot = pending.held_slot;
+        action_now = pending.exploration.actionForSlot(slot);
+        action_now_name = pending.exploration.request().actions[action_now];
+    }
+
+    // The schedule moved, so what was down comes up before the next thing goes
+    // down. Two actions held at once would be a combination the caller never
+    // asked for, and a report naming one of them would be describing the wrong
+    // input.
+    if (slot != previously_held_slot) {
+        if (previously_held.has_value()) releaseExplorationAction(*previously_held);
+        const json press = {{"events", json::array({{{"type", "action"},
+                                                     {"action_name", action_now_name},
+                                                     {"pressed", true}}})}};
+        const auto pressed = GodotBridge::instance().execute("runtime.injectInput", press,
+                                                             sessionKindName(m_sessionKind));
+        std::lock_guard<std::mutex> lock(m_explorationMutex);
+        if (!m_pendingSceneExploration.has_value() ||
+            m_pendingSceneExploration->control != running_for) {
+            return;
+        }
+        if (pressed.contains("error")) {
+            // An action the project does not define is a request that named a
+            // button nobody can press. Reporting the run as if it had driven
+            // the game would be the dishonest answer.
+            auto finished = std::move(m_pendingSceneExploration);
+            m_pendingSceneExploration.reset();
+            finished->control->markCompleted();
+            fulfillCommand(finished->response_promise, finished->control,
+                           {{"error", {{"code", 400},
+                                        {"message", "Could not press the action " +
+                                                        action_now_name + ": " +
+                                                        pressed["error"].value("message",
+                                                                               "unknown")}}}});
+            return;
+        }
+        m_pendingSceneExploration->held_action = action_now;
+        m_pendingSceneExploration->held_slot = slot;
+    }
+
+    runtime::ExplorationSample sample;
+    sample.readings.resize(probes.size());
+    for (size_t index = 0; index < probes.size(); ++index) {
+        json expression_params = {{"expression", probes[index].expression},
+                                  // Short on purpose, for the reason the watch
+                                  // gives: this runs inside a frame, and an
+                                  // expression allowed a second would be
+                                  // measuring a game it had itself stalled.
+                                  {"timeout_ms", 50}};
+        if (!probes[index].context_node.empty()) {
+            expression_params["context_node"] = probes[index].context_node;
+        }
+        const auto evaluated = executeExpression(expression_params,
+                                                 sessionKindName(m_sessionKind));
+        auto& target = sample.readings[index];
+        if (evaluated.contains("error")) {
+            target.read_error = evaluated["error"].value("message", "expression failed");
+            continue;
+        }
+        const json value = evaluated.value("value", json());
+        if (value.is_number()) {
+            target.value = value.get<double>();
+        } else if (value.is_boolean()) {
+            target.value = value.get<bool>() ? 1.0 : 0.0;
+        } else {
+            target.read_error = "expression did not evaluate to a number or a boolean";
+        }
+    }
+
+    sample.engine_errors = static_cast<int64_t>(
+        engineOutput().countFrom(error_cursor, "error"));
+
+    std::optional<PendingSceneExploration> completed;
+    bool stuck = false;
+    {
+        std::lock_guard<std::mutex> lock(m_explorationMutex);
+        if (!m_pendingSceneExploration.has_value() ||
+            m_pendingSceneExploration->control != running_for) {
+            return;
+        }
+        auto& pending = *m_pendingSceneExploration;
+        if (!pending.exploration.observe(elapsed, sample)) return;
+        stuck = pending.exploration.stuck();
+        completed = std::move(m_pendingSceneExploration);
+        m_pendingSceneExploration.reset();
+    }
+
+    // Whatever is down comes up. The run is over either way, and an action
+    // left pressed would go on driving the game after the report said the bot
+    // had stopped.
+    if (completed->held_action.has_value()) {
+        const auto& actions = completed->exploration.request().actions;
+        if (*completed->held_action < actions.size()) {
+            const json release = {{"events", json::array({{{"type", "action"},
+                                                           {"action_name",
+                                                            actions[*completed->held_action]},
+                                                           {"pressed", false}}})}};
+            const auto released = GodotBridge::instance().execute(
+                "runtime.injectInput", release, sessionKindName(m_sessionKind));
+            if (released.contains("error")) {
+                DIDI_LOG_WARN("EDITOR_HOOK", "Could not release the last exploration action: ",
+                              released["error"].value("message", "unknown"));
+            }
+        }
+    }
+
+    // The pause happens on the frame the run stopped on, which is what makes
+    // a stuck interval a reproduction somebody can look at rather than a note
+    // about a game that has since moved on.
+    bool paused = false;
+    if (stuck && completed->exploration.request().pause_on_stuck) {
+        auto stopped = setLiveSceneTreePaused(true);
+        paused = stopped.isOk();
+        if (stopped.isErr()) {
+            DIDI_LOG_WARN("EDITOR_HOOK", "Could not pause on a stuck interval: ",
+                          stopped.error().message);
+        }
+    }
+
+    completed->control->markCompleted();
+    auto response = completed->exploration.response(paused);
     response["execution_mode"] = "live";
     response["is_live_engine"] = true;
     response["session_kind"] = sessionKindName(m_sessionKind);

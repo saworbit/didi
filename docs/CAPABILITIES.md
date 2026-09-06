@@ -33,7 +33,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-Didi v1.5.0 registers 108 canonical tool names. 105 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 105 canonical tools are implemented. Ten legacy names are registered separately, for exactly 118 `tools/list` entries.
+Didi v1.5.0 registers 109 canonical tool names. 106 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 106 canonical tools are implemented. Ten legacy names are registered separately, for exactly 119 `tools/list` entries.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
@@ -43,7 +43,7 @@ Didi v1.5.0 registers 108 canonical tool names. 105 are implemented in at least 
 | `live` | `project_list_autoloads`, `project_set_autoload`, `project_remove_autoload`, `project_list_input_actions`, `project_set_input_action`, `project_remove_input_action`, `project_get_setting`, `project_set_setting` | Uses Godot `ProjectSettings`; writes save atomically and roll back in memory if persistence fails. Input actions reload the live `InputMap`. |
 | `live` | `scene_create`, `scene_open`, `scene_close`, `scene_pack_branch` | Uses `PackedScene`, `ResourceLoader`, `ResourceSaver`, and `EditorInterface` with path and overwrite guards. |
 | `offline_fallback` (local management) | `runtime_list_sessions`, `runtime_attach_session`, `runtime_detach_session`, `runtime_get_session` | Scans validated access-controlled descriptors and changes the selected route in the standalone MCP process. Public payloads use `execution_mode: "local_session_management"` and never return the private token. |
-| `live` | `runtime_read_logs`, `runtime_read_output`, `runtime_set_paused`, `runtime_step`, `runtime_stop`, `runtime_get_tree`, `eval_gdscript`, `runtime_watch_invariants`, `spatial_query_raycast_batch` | Requires an authenticated auto-selected or explicitly attached editor/game session. Operations execute on that Godot process's main thread and identify `session_kind`; game-only control rejects editor sessions. |
+| `live` | `runtime_read_logs`, `runtime_read_output`, `runtime_set_paused`, `runtime_step`, `runtime_stop`, `runtime_get_tree`, `eval_gdscript`, `runtime_watch_invariants`, `runtime_explore_scene`, `spatial_query_raycast_batch` | Requires an authenticated auto-selected or explicitly attached editor/game session. Operations execute on that Godot process's main thread and identify `session_kind`; game-only control rejects editor sessions. |
 | `live` | `asset_reimport`, `viewport_diff_capture` | Editor-only. Reimport validates a complete batch before mutation and waits for stable idle. Diff captures a fresh live frame against an exact cached baseline. |
 | `live_and_offline` | `audio_list_buses` | Live reports effect chains and any runtime change; offline reads the project bus layout. |
 | `live` | `audio_configure_bus` | Bus state lives in the running engine; the layout file is not what anyone is listening to. |
@@ -63,7 +63,7 @@ Didi v1.5.0 registers 108 canonical tool names. 105 are implemented in at least 
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `105/108`
+**Canonical implementation:** `106/109`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->

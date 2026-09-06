@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 108 canonical tool names plus 10 legacy names (118 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 109 canonical tool names plus 10 legacy names (119 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `105/108`
+**Canonical implementation:** `106/109`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 105/108 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 106/109 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -697,6 +697,32 @@ Each invariant takes a `kind`:
 An invariant with no bound at all is refused rather than accepted, because it could never be violated and would report as held on nothing.
 
 Evaluating expressions costs engine time inside the window being measured. A frame-rate invariant watched alongside several expression invariants is measuring a game that is also being watched.
+
+### `runtime_explore_scene` — Live (game only)
+
+Drives a running game for a bounded window and reports what happened. It holds one InputMap action at a time on a schedule drawn from `seed`, samples the probes you name every frame, and reports where those values went and the intervals in which nothing it pressed moved any of them.
+
+This is the pairing `runtime_inject_input` and `runtime_watch_invariants` cannot make between them. Injection presses a button and returns; watching samples every frame but presses nothing. A character that walks into a wall and stops responding is only visible to something doing both at frame rate, because from outside you see a position before the press and a position after it, never the second in between where nothing happened.
+
+- `actions` (`array`, required, 1 to 8). InputMap action names. Names must not repeat, and one action is down at a time.
+- `probes` (`array`, required, 1 to 4). Each takes an `expression` against an optional `context_node`, evaluating to a number or a boolean, through the same sandbox `runtime_watch_invariants` uses.
+- `duration_ms` (`integer`, default `5000`, 250 to 60000).
+- `action_hold_ms` (`integer`, default `250`, 16 to 10000). How long one action is held before the schedule moves on.
+- `stuck_ms` (`integer`, default `3000`, 100 to 60000). How long every probe must stay still for that to be reported. Must not exceed `duration_ms`.
+- `movement_epsilon` (`number`, default `0.001`).
+- `pause_on_stuck` (`boolean`, default `true`). Stops on the first interval and pauses the game there. `false` surveys the whole window and reports every interval, to a cap of 16.
+- `stop_on_engine_error` (`boolean`, default `true`).
+- `seed` (`integer`, default `1`).
+
+`stopped_reason` is `duration_elapsed`, `stuck`, or `engine_error`. Each stuck interval carries `started_ms`, `ended_ms`, `duration_ms` and the `action_held` that was down for it, because an interval that does not say what was being pressed does not say what provoked it.
+
+**Input actions, not movement.** Nothing outside a project's own controller knows how that project moves its player. Setting a position directly would move the sprite without running any of that, which proves nothing about whether the game can be played. Pressing the project's own actions runs the project's own code. `nav_query_path` and the `spatial_query_*` family are how an agent decides where to go; this is how it gets there.
+
+**A probe that cannot be read is not a probe that stayed still.** An expression that fails every frame produces no value, and no value is not stillness. It is reported with zero readings and its `last_read_error`, and it never contributes a stuck interval. A typo in an expression must not come back as a frozen game.
+
+**It reports, it does not judge.** The response carries `verdict: "none"` in as many words. A cutscene, an open menu and a genuine soft lock are the same thing from here: a window in which nothing moved. Which one it was is the caller's to know. Nothing in the response says whether a level is beatable.
+
+An action the project does not define fails the run rather than being skipped, because a report of a drive that never happened is worse than no report.
 
 ### `runtime_read_profiler` — Live (editor or game)
 

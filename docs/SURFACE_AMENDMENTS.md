@@ -52,9 +52,10 @@ and verification, and it fails visibly wherever the surface has a hole.
 
 ## Amendment log
 
-Five amendments are implemented: `runtime_read_output`, `audio_list_buses` and
+Six amendments are implemented: `runtime_read_output`, `audio_list_buses` and
 `audio_configure_bus`, all recorded below with tri-engine feasibility evidence,
-plus `project_audit_assets` and `project_analyze_impact`. One is withdrawn: raising the engine floor to
+plus `project_audit_assets`, `project_analyze_impact` and
+`runtime_explore_scene`. One is withdrawn: raising the engine floor to
 Godot 4.7, refused in favour of runtime capability detection so that 4.5 and 4.6
 users keep support. The remaining candidates come from the
 August 2026 competitive review and are proposed, not accepted, in
@@ -519,6 +520,53 @@ one has no path from the edited root, so it is counted in `selected_total` and
 not named. A node freed between the engine building the list and this reading it
 is skipped, because a path that resolves to nothing is worse than a shorter
 list.
+
+### ACCEPTED (IMPLEMENTED): `runtime_explore_scene`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `runtime_explore_scene` |
+| **Failing workflow** | *"Make the player double-jump and prove it works."* The agent writes the controller, launches the game, and then has to find out whether the character can actually move. It can press a button with `runtime_inject_input` and read a position back with `eval_gdscript`, but each of those is its own IPC round trip, so it presses at whatever rate the transport allows and looks between presses. A character that walks into a wall and stops responding is invisible to that: the agent sees a position before the press and a position after it, never the second and a half in between where nothing happened. `runtime_watch_invariants` samples every frame but presses nothing, so it can watch a game nobody is playing. Nothing in the surface drives and watches at the same time, which is what a playtest is. |
+| **Execution modes** | `live`, game only. There is no offline answer: a soft lock is a thing that happens over time in a running game, and a file cannot be asked whether pressing left moved anything. Editor sessions are refused because the actions it presses would drive the editor. |
+| **Safety class** | `create/set`. It presses buttons in a running game and can pause it, so it takes `dry_run` and is classified as a mutation, alongside `runtime_watch_invariants` and `runtime_inject_input`. No confirmation token: it is reversible with `runtime_set_paused` and it writes nothing to disk. |
+| **Proving test** | Native: `SceneExploration.*` in `tests/test_scene_exploration.cpp` covers the schedule being a pure function of the seed, a moving value never being called stuck, a value that stops being reported with the action that was down for it, an unreadable probe not being reported as a soft lock, a survey run recording several intervals, an engine error stopping the run, and the per-action frame counts reconciling with the frames observed. Live: the Godot integration harness drives `ui_accept` and `ui_cancel` against a real running game, requires a constant probe to produce a stuck interval and pause the game there, requires an unreadable probe to produce none, and requires an undefined action to fail rather than report a drive that never happened. |
+| **Reviewer** | Unassigned. It is a mutation, so it is worth saying what it can reach: it presses InputMap actions the caller named and it can pause the game. It writes no file, changes no scene, and evaluates probes through the same bounded expression sandbox `runtime_watch_invariants` and `eval_gdscript` already use, under the same 50 ms per-frame budget. |
+
+**Why input actions and not movement.** The report this came from, #143, asks
+for a bot that "automatically navigates reachable navmesh zones". Nothing
+outside a project's own controller knows how that project moves its player: the
+character might be a `CharacterBody2D` integrating velocity, a `RigidBody3D`
+taking impulses, or a tween on a path. Setting a position directly would move
+the sprite without running any of that, which proves nothing about whether the
+game can be played. Pressing the project's own actions runs the project's own
+code, which is the only general way to move a character that is not Didi's to
+move. `nav_query_path` and the `spatial_query_*` family remain how an agent
+picks where to go; this is how it gets there.
+
+**Why it reports and does not judge.** [Gogo Design](GOGO_DESIGN.md) records the
+rule this had to be built under: do not market an AI playtesting farm from input
+dispatch alone, because Didi does not observe whether the game accepted an event
+or autonomously judge playtest success. So the response is observations. It
+reports the intervals in which nothing it pressed moved anything, and the
+engine errors it saw, and it carries `verdict: "none"` in as many words. It does
+not decide whether a level is beatable, and it does not call a stuck interval a
+bug: a cutscene, a menu and a genuine soft lock look identical from here, and
+the difference is the caller's to know.
+
+**What the report already covered.** #143 asked for two tools. The second,
+`qa_register_invariants`, shipped as `runtime_watch_invariants`, and two of the
+three detections it listed come with it: a floor fallout is an
+`expression_between` on a position component with no upper bound, and an
+unhandled script error is `no_engine_errors`. The stuck-state detection is the
+one that needed this, because it is not a range at any instant. It is a value
+that failed to change while something was pressing.
+
+**What it does not do.** It does not click UI buttons by position, and it does
+not enumerate `Area2D` or `Area3D` triggers to walk to them. Both are targeting
+decisions, and `ui_hit_test`, `nav_query_path` and `spatial_query_frustum`
+already answer them for an agent that wants to make them. Adding that targeting
+here would put a planner inside the tool, which is the "honest executor" line
+[Gogo Design](GOGO_DESIGN.md) draws in its A2A section.
 
 ### PROPOSED: `scene_close` reads real dirty state on Godot 4.7+
 

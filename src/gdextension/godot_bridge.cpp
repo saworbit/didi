@@ -1979,6 +1979,47 @@ Result<VariantValue> buildInjectedEvent(const runtime::InjectedInputEvent& spec)
     return wrapped;
 }
 
+// Which of these action names the project's InputMap does not define.
+//
+// An InputEventAction naming an action nobody declared dispatches without
+// complaint and moves nothing, so an exploration run driving one would watch a
+// game it was never touching and report the stillness as a stuck interval. That
+// is the one answer that tool must never give, so the names are checked before
+// the run starts rather than inferred from its result.
+//
+// InputMap.has_action is 2619796661 on Godot 4.5.1, 4.6.2 and 4.7.2, checked by
+// dumping the extension API from each rather than assuming hashes are stable.
+json inputMapMissingActions(const json& params, const std::string& session_kind) {
+    if (session_kind != "game") return errorJson(409, "session_kind_rejected");
+    if (!params.is_object() || !params.contains("actions") || !params["actions"].is_array()) {
+        return errorJson(400, "actions must be an array");
+    }
+    auto input_map = singleton("InputMap");
+    if (input_map.isErr()) {
+        return errorJson(501, "InputMap singleton is unavailable: " + input_map.error().message);
+    }
+    auto bind = requireMethodBind("InputMap", "has_action", 2619796661LL);
+    if (bind.isErr()) {
+        return errorJson(501, "InputMap.has_action is unavailable: " + bind.error().message);
+    }
+
+    json missing = json::array();
+    for (const auto& entry : params["actions"]) {
+        if (!entry.is_string()) return errorJson(400, "each action must be a string");
+        const auto action = entry.get<std::string>();
+        auto name = makeStringName(action);
+        if (name.isErr()) return errorJson(500, "Failed to construct an action name");
+        auto answered = callObject(input_map.value(), "InputMap", "has_action", 2619796661LL,
+                                   {&name.value()});
+        if (answered.isErr()) return errorJson(500, answered.error().message);
+        auto defined = scalarFromVariant<GDExtensionBool>(answered.value(),
+                                                          GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (defined.isErr()) return errorJson(500, defined.error().message);
+        if (defined.value() == 0) missing.push_back(action);
+    }
+    return liveResult({{"missing", std::move(missing)}, {"session_kind", session_kind}});
+}
+
 json injectInput(const json& params, const std::string& session_kind) {
     if (session_kind != "game") return errorJson(409, "session_kind_rejected");
     auto parsed = runtime::parseInputInjectionRequest(params);
@@ -4140,6 +4181,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
     // the editor-only methods below depend on.
     if (method == "runtime.injectInput") {
         return injectInput(params, session_kind);
+    }
+    if (method == "runtime.missingInputActions") {
+        return inputMapMissingActions(params, session_kind);
     }
     if (method == "physics.raycast") return physicsRaycast(params);
     if (method == "physics.raycastBatch") return physicsRaycastBatch(params);

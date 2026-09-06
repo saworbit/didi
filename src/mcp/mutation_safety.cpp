@@ -28,6 +28,10 @@ const std::unordered_set<std::string_view> kMutations = {
     // It can stop the game, which is a state change the caller has to have
     // asked for. Reversible with runtime_set_paused, so a dry run and no token.
     "runtime_watch_invariants",
+    // It presses buttons in a running game and can pause it, which is as much
+    // of a state change as anything else here. Reversible the same way, so a
+    // dry run and no token.
+    "runtime_explore_scene",
     // Reversible through the editor UndoRedo stack, the same as
     // scene_set_property, so it gets a dry run and no confirmation token.
     "shader_set_uniform",
