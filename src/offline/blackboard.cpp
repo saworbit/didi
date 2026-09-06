@@ -9,6 +9,8 @@
 #include <cctype>
 #include <chrono>
 #include <fstream>
+#include <functional>
+#include <random>
 #include <sstream>
 #include <thread>
 #include <unordered_set>
@@ -17,8 +19,33 @@ namespace didi::offline {
 namespace {
 
 constexpr int kBoardFormatVersion = 1;
-constexpr int kLockAttempts = 50;
-constexpr int kLockRetryMs = 20;
+
+// A board is a coordination surface between agents, so several of them wanting
+// it at once is the ordinary case rather than the exceptional one. The wait is
+// a deadline and not a count of attempts: what a caller cares about is how long
+// it is willing to wait, and an attempt that itself costs 20 ms on a loaded
+// disk quietly halved a budget expressed in attempts. Eight agents each holding
+// the lock across a read, a modify, a write and the lock file's own fsync is
+// enough to pass one second on a busy machine, which is what failed a CI run
+// under sanitizers with the claim reported as an error rather than a refusal.
+//
+// Nothing is waiting on a lock no live process holds. Both implementations tie
+// the lock to an open file description, so the operating system releases it
+// when the holder exits however it exits, and a longer wait cannot turn a dead
+// holder into a hang.
+constexpr auto kLockWait = std::chrono::milliseconds(5000);
+constexpr int kLockRetryMinMs = 4;
+constexpr int kLockRetryMaxMs = 24;
+
+// Waiters that all sleep the same amount wake together and collide again, so
+// the spread is what stops eight threads queueing on one 20 ms boundary for the
+// whole wait.
+int lockRetryDelayMs() {
+    static thread_local std::minstd_rand engine(static_cast<unsigned>(
+        std::hash<std::thread::id>{}(std::this_thread::get_id())));
+    std::uniform_int_distribution<int> spread(kLockRetryMinMs, kLockRetryMaxMs);
+    return spread(engine);
+}
 
 int64_t systemClockMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -273,17 +300,22 @@ Result<json> withBoardLock(const std::string& board, Operation operation) {
     const auto lock_file = directory.value() / (board + ".lock");
 
     std::shared_ptr<runtime::RuntimeSessionLock> lock;
-    for (int attempt = 0; attempt < kLockAttempts; ++attempt) {
+    const auto deadline = std::chrono::steady_clock::now() + kLockWait;
+    for (;;) {
         auto acquired = runtime::RuntimeSessionLock::acquire(lock_file, json::object());
         if (acquired.isOk()) {
             lock = acquired.value();
             break;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(kLockRetryMs));
+        if (std::chrono::steady_clock::now() >= deadline) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(lockRetryDelayMs()));
     }
     if (!lock) {
-        return Error::internal("another process is holding the blackboard lock for board '" +
-                               board + "'");
+        // Not "another process": the holder is as often another thread in this
+        // one, and a message naming the wrong thing sends the next reader
+        // looking in the wrong place.
+        return Error::internal("the blackboard lock for board '" + board + "' stayed held for the "
+                               "whole " + std::to_string(kLockWait.count()) + " ms wait");
     }
     return operation(file);
 }
