@@ -1,7 +1,9 @@
 #include "didi/offline/blackboard.hpp"
+#include "didi/runtime/session_lock.hpp"
 
 #include <atomic>
 #include <chrono>
+#include <mutex>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -240,19 +242,28 @@ void test_blackboard_concurrent_writers_do_not_lose() {
     constexpr int kWriters = 4;
     constexpr int kWritesEach = 6;
     std::atomic<int> failures{0};
+    std::mutex first_error_mutex;
+    std::string first_error;
     std::vector<std::thread> writers;
     for (int writer = 0; writer < kWriters; ++writer) {
-        writers.emplace_back([writer, &failures] {
+        writers.emplace_back([writer, &failures, &first_error_mutex, &first_error] {
             for (int index = 0; index < kWritesEach; ++index) {
                 BlackboardWriteRequest request;
                 request.path = "worker" + std::to_string(writer) + ".item" + std::to_string(index);
                 request.value = writer * 100 + index;
-                if (blackboardWrite(request).isErr()) ++failures;
+                auto written = blackboardWrite(request);
+                if (written.isErr()) {
+                    ++failures;
+                    std::lock_guard<std::mutex> guard(first_error_mutex);
+                    if (first_error.empty()) first_error = written.error().message;
+                }
             }
         });
     }
     for (auto& thread : writers) thread.join();
-    ASSERT_EQ(failures.load(), 0);
+    if (failures.load() != 0) {
+        throw std::runtime_error("a write failed under contention: " + first_error);
+    }
 
     // Read-modify-write without the lock loses whichever write landed first.
     // Every one of them has to be here.
@@ -415,6 +426,48 @@ std::string taskStatus(const std::string& task_id, int64_t* now_ms = nullptr) {
     return "missing";
 }
 
+// A held lock is waited out rather than reported as a failure.
+//
+// The wait used to be fifty attempts twenty milliseconds apart, so a holder
+// that kept the board for much over a second turned every other agent's call
+// into an internal error. That is the shape of the CI failure this came from:
+// eight agents claiming one task under sanitizers, one of them told the claim
+// errored rather than that it lost. Two seconds is past the old budget and
+// well inside the new one, so this fails on the old wait and passes on this one.
+void test_blackboard_waits_out_a_held_lock() {
+    BoardFixture fixture("held-lock");
+    writeValue("architecture.inventory.slots", 12);
+
+    const auto lock_file = std::filesystem::current_path() / ".didi" / "blackboard" / "default.lock";
+    auto held = didi::runtime::RuntimeSessionLock::acquire(lock_file, json::object());
+    ASSERT_TRUE(held.isOk());
+
+    std::atomic<bool> released{false};
+    std::thread holder([&held, &released] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+        released.store(true);
+        held.value().reset();
+    });
+
+    BlackboardWriteRequest request;
+    request.path = "architecture.inventory.stacking";
+    request.value = "by_type";
+    auto result = blackboardWrite(request);
+    holder.join();
+
+    ASSERT_TRUE(released.load());
+    if (result.isErr()) {
+        throw std::runtime_error("the write gave up on a lock that was released: " +
+                                 result.error().message);
+    }
+
+    BlackboardReadRequest read;
+    read.path = "architecture.inventory.stacking";
+    auto stored = blackboardRead(read);
+    ASSERT_TRUE(stored.isOk());
+    ASSERT_EQ(stored.value()["value"].get<std::string>(), std::string("by_type"));
+}
+
 void test_tasks_claim_is_exclusive() {
     BoardFixture fixture("claim");
     const std::string task = createTask("write CharacterBase.gd");
@@ -431,16 +484,25 @@ void test_tasks_claim_is_exclusive() {
     std::atomic<int> winners{0};
     std::atomic<int> refusals{0};
     std::atomic<int> failures{0};
+    // A count on its own leaves the next reader inferring from timestamps what
+    // the message could have said, so the first one is kept.
+    std::mutex first_error_mutex;
+    std::string first_error;
     std::vector<std::thread> agents;
     for (int index = 0; index < kAgents; ++index) {
-        agents.emplace_back([index, &go, &ready, &winners, &refusals, &failures] {
+        agents.emplace_back([index, &go, &ready, &winners, &refusals, &failures,
+                             &first_error_mutex, &first_error] {
             BlackboardTaskClaimRequest request;
             request.agent_id = "agent-" + std::to_string(index);
             request.lease_seconds = 60;
             ++ready;
             while (!go.load(std::memory_order_acquire)) std::this_thread::yield();
             auto claimed = blackboardTaskClaim(request);
-            if (claimed.isErr()) ++failures;
+            if (claimed.isErr()) {
+                ++failures;
+                std::lock_guard<std::mutex> guard(first_error_mutex);
+                if (first_error.empty()) first_error = claimed.error().message;
+            }
             else if (claimed.value()["claimed"].get<bool>()) ++winners;
             else ++refusals;
         });
@@ -452,7 +514,9 @@ void test_tasks_claim_is_exclusive() {
     // One winner, and every other agent told cleanly that it lost. An error is
     // not a refusal: it would mean the claim collided rather than serialised.
     ASSERT_EQ(winners.load(), 1);
-    ASSERT_EQ(failures.load(), 0);
+    if (failures.load() != 0) {
+        throw std::runtime_error("a claim failed rather than being refused: " + first_error);
+    }
     ASSERT_EQ(refusals.load(), kAgents - 1);
 
     ASSERT_EQ(taskStatus(task), std::string("in_progress"));
@@ -740,6 +804,7 @@ struct Register {
         registerTest("Blackboard.BoundsRefuseOversizeInput",
                      test_blackboard_bounds_refuse_oversize_input);
         registerTest("Blackboard.ClearScopes", test_blackboard_clear_scopes);
+        registerTest("Blackboard.WaitsOutAHeldLock", test_blackboard_waits_out_a_held_lock);
         registerTest("BlackboardTasks.ClaimIsExclusive", test_tasks_claim_is_exclusive);
         registerTest("BlackboardTasks.LeaseExpiryReclaims", test_tasks_lease_expiry_reclaims);
         registerTest("BlackboardTasks.DependenciesGateReadiness",
