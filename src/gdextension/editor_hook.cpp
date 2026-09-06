@@ -1061,6 +1061,63 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
                                                               : "not_started"},
                                               {"retryable", false}}}}}});
     }
+
+    // An invariant watch and an exploration run both live across frames, so a
+    // shutdown that drains only the queue leaves their callers waiting on a
+    // promise nothing will ever fulfil. They wait for the transport timeout
+    // instead of being told the engine went away.
+    std::optional<PendingInvariantWatch> active_watch;
+    {
+        std::lock_guard<std::mutex> lock(m_invariantMutex);
+        if (m_pendingInvariantWatch.has_value()) {
+            active_watch = std::move(m_pendingInvariantWatch);
+            m_pendingInvariantWatch.reset();
+        }
+    }
+    if (active_watch.has_value() && active_watch->control &&
+        active_watch->control->tryCancelRunning()) {
+        fulfillCommand(active_watch->response_promise, active_watch->control,
+                       {{"error", {{"code", 503}, {"message", reason},
+                                    {"data", {{"outcome", "unknown_outcome"},
+                                              {"retryable", false}}}}}});
+    }
+
+    std::optional<PendingSceneExploration> active_exploration;
+    {
+        std::lock_guard<std::mutex> lock(m_explorationMutex);
+        if (m_pendingSceneExploration.has_value()) {
+            active_exploration = std::move(m_pendingSceneExploration);
+            m_pendingSceneExploration.reset();
+        }
+    }
+    if (active_exploration.has_value()) {
+        // Whatever the bot was holding comes up. An action left down outlives
+        // the run that pressed it and goes on driving the game, and on a
+        // shutdown path there is nothing else left to release it.
+        if (active_exploration->held_action.has_value()) {
+            const auto& actions = active_exploration->exploration.request().actions;
+            if (*active_exploration->held_action < actions.size()) {
+                const json release = {
+                    {"events", json::array({{{"type", "action"},
+                                             {"action_name",
+                                              actions[*active_exploration->held_action]},
+                                             {"pressed", false}}})}};
+                const auto released = GodotBridge::instance().execute(
+                    "runtime.injectInput", release, sessionKindName(m_sessionKind));
+                if (released.contains("error")) {
+                    DIDI_LOG_WARN("EDITOR_HOOK",
+                                  "Could not release the exploration action on shutdown: ",
+                                  released["error"].value("message", "unknown"));
+                }
+            }
+        }
+        if (active_exploration->control && active_exploration->control->tryCancelRunning()) {
+            fulfillCommand(active_exploration->response_promise, active_exploration->control,
+                           {{"error", {{"code", 503}, {"message", reason},
+                                        {"data", {{"outcome", "unknown_outcome"},
+                                                  {"retryable", false}}}}}});
+        }
+    }
 }
 
 json EditorHook::executeOnMainThread(const std::string& method, const json& params) {
