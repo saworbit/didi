@@ -1,7 +1,7 @@
 # Didi Strategic Roadmap & Technical Build Order 🗺️
 
 > **Core Philosophy**:
-> The 83-tool canonical surface includes completed Phases 1–6 and the feasible Phase 7 delivery: live editor substrate, project wiring, authenticated runtime sessions, autonomous verification, deep-domain workflows, enterprise safety controls, and bounded editor/runtime authoring.
+> The 109-tool canonical surface includes completed Phases 1–6, the feasible Phase 7 delivery, and the names accepted since through [Surface Amendments](SURFACE_AMENDMENTS.md): live editor substrate, project wiring, authenticated runtime sessions, autonomous verification, deep-domain workflows, enterprise safety controls, and bounded editor/runtime authoring.
 
 ---
 

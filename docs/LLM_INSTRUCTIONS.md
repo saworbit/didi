@@ -102,6 +102,7 @@ Use `viewport_capture_frame`.
 - `spatial_query_clearance` asks whether a body fits along a path, which a raycast cannot answer: a line can be clear where a character is too wide. Use it before placing a door, a corridor or a spawn point.
 - `spatial_query_raycast_batch` answers many sightline or clearance questions in one call. Prefer it over a viewport capture for anything numeric, and over repeated `physics_raycast_query` calls for anything more than one ray.
 - `runtime_watch_invariants` is game only. Use it to assert what must stay true while a game runs rather than polling: it samples every frame and pauses on the frame that breaks a condition. Read `outcome` before anything else. `inconclusive` means an invariant never produced a reading, which is not the same as `held`.
+- `runtime_explore_scene` is game only, and it is the one that drives. It holds the project's own InputMap actions on a seeded schedule and samples probes you name every frame, then reports the intervals in which nothing it pressed moved anything. Use it to find out whether a level can be played at all rather than pressing one button per round trip and looking between presses. Name the actions and the probes: it cannot know what counts as movement in your project, and it presses actions rather than setting a position because only the project's own controller knows how its player moves. It reports observations and carries `verdict: "none"`. A stuck interval is a window where nothing moved, which is a cutscene, a menu or a soft lock, and telling those apart is yours.
 - `project_rename_references` renames a symbol in the scene connections and animation tracks that serialize it. Call `project_analyze_impact` first to see every site. It never rewrites GDScript or C#: it reports those with file and line, and they are yours to patch. An empty report is not proof that nothing else names the symbol.
 - `script_reflect_class` consults a limited built-in map; it is not authoritative live ClassDB documentation.
 
@@ -136,7 +137,7 @@ Use `runtime_launch` to start a separate Godot process, optionally headless, for
 
 ### Observe or control an already-running session
 
-Didi v1.5.0 starts detached and exposes 109 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
+Didi v1.6.0 starts detached and exposes 109 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
 
 1. Call `runtime_list_sessions`, preferably with the canonical project path.
 2. Choose the intended `editor` or `game` descriptor and call `runtime_attach_session` if deterministic auto-selection did not choose it.
