@@ -164,12 +164,15 @@ double structuralSimilarity(const RgbaImage& before, const RgbaImage& after) {
 uint64_t perceptualHash(const RgbaImage& image) {
     if (image.width <= 0 || image.height <= 0) return 0;
     constexpr int kSize = 32;
-    constexpr int kLow = 8;
+    constexpr int kLow = 9;
+    constexpr size_t kHashBits = 64;
+    static_assert(kLow * kLow - 1 >= kHashBits,
+                  "the low frequency block must hold 64 AC coefficients");
 
     const auto small = downsampleLuma(lumaPlane(image), image.width, image.height, kSize);
 
-    // DCT-II over the 32x32 plane, but only the low frequency 8x8 corner is
-    // ever read, so the rest is never computed.
+    // DCT-II over the 32x32 plane, but only the low frequency corner is ever
+    // read, so the rest is never computed.
     std::array<double, kLow * kLow> coefficients{};
     for (int u = 0; u < kLow; ++u) {
         for (int v = 0; v < kLow; ++v) {
@@ -191,8 +194,25 @@ uint64_t perceptualHash(const RgbaImage& image) {
     // The DC term carries overall brightness, not structure, so it is excluded
     // from the median and from the hash. A uniform exposure change should not
     // move every bit.
-    std::array<double, kLow * kLow - 1> ac{};
-    for (size_t index = 1; index < coefficients.size(); ++index) ac[index - 1] = coefficients[index];
+    //
+    // Dropping it leaves an odd count in any square block, and an 8x8 block
+    // left 63: the top bit of every hash was clear and the documented distance
+    // of 64 could not be produced. So the block is 9x9 and the hash takes the
+    // 64 lowest frequency AC coefficients out of it, ordered by u+v and then
+    // by u. Diagonal 0 is the DC term, which is why the walk starts at 1.
+    std::array<double, kHashBits> ac{};
+    size_t taken = 0;
+    for (int diagonal = 1; diagonal <= 2 * (kLow - 1) && taken < kHashBits; ++diagonal) {
+        for (int u = 0; u <= diagonal && taken < kHashBits; ++u) {
+            const int v = diagonal - u;
+            if (u >= kLow || v >= kLow) continue;
+            ac[taken++] = coefficients[static_cast<size_t>(u) * kLow + v];
+        }
+    }
+
+    // An even count, so the median falls between the two middle values and
+    // exactly half the coefficients sit above it. The odd count this replaced
+    // had one true middle value and averaged the wrong pair around it.
     auto sorted = ac;
     std::sort(sorted.begin(), sorted.end());
     const double median = (sorted[sorted.size() / 2 - 1] + sorted[sorted.size() / 2]) / 2.0;
