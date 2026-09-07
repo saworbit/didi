@@ -70,6 +70,20 @@ the operator asked for and without the warning that says confirmations are off.
 A launch that prints nothing on stderr and stays running got exactly the
 configuration you wrote.
 
+### Stopping the server
+
+Ctrl+C, or `SIGTERM` where the platform raises it, ends the session and exits
+`0`. Didi hands back any attached runtime session before it goes, so the session
+lock and the IPC route are released by us rather than left for the operating
+system to clear at process exit. Closing the client's end of stdin does the same
+thing, which is the usual way an MCP host stops it.
+
+The signal handler itself only sets a flag, because a handler may not safely
+allocate, log, or make a system call. The work happens on the way out of the
+input loop, which notices the flag within about fifty milliseconds. On Windows
+the C runtime resets the handler before running it, so a second Ctrl+C takes the
+default action and terminates the process immediately.
+
 ---
 
 ## ⚙️ Environment Variables Configuration
