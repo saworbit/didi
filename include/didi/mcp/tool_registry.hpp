@@ -9,6 +9,7 @@
 #include "didi/common/ipc_channel.hpp"
 #include "didi/runtime/session_client.hpp"
 #include "didi/mcp/mutation_safety.hpp"
+#include "didi/runtime/managed_recovery.hpp"
 
 namespace didi {
 namespace mcp {
@@ -49,6 +50,7 @@ public:
     std::shared_ptr<runtime::IRuntimeSessionClient> getRuntimeSessionClient() const;
 
     void registerAllDefaultTools();
+    void setManagedRecovery(std::shared_ptr<runtime::ManagedRecovery> recovery) { m_recovery = std::move(recovery); }
 
 private:
     ToolRegistry() = default;
@@ -57,6 +59,7 @@ private:
     std::shared_ptr<ipc::IIpcClient> m_ipcClient;
     std::shared_ptr<runtime::IRuntimeSessionClient> m_runtimeSessionClient;
     MutationSafety m_mutationSafety;
+    std::shared_ptr<runtime::ManagedRecovery> m_recovery;
 };
 
 } // namespace mcp

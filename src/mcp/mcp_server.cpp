@@ -737,14 +737,14 @@ void McpServer::runStdio() {
     _setmode(_fileno(stdout), _O_BINARY);
 #endif
 
-    m_readerParked.store(false);
+    m_readerParked->store(true);
     m_running.store(true);
     DIDI_LOG_INFO("MCP_SERVER", "Starting Didi MCP server over stdio...");
 
     DIDI_LOG_INFO("MCP_SERVER", "Runtime session router ready; use runtime_list_sessions to discover local Godot sessions");
 
     auto channel = std::make_shared<StdinChannel>();
-    std::thread reader([channel]() {
+    std::thread reader([channel, parked = m_readerParked]() {
         std::string line;
         while (channel->wanted.load() && std::getline(std::cin, line)) {
             {
@@ -757,6 +757,10 @@ void McpServer::runStdio() {
             channel->ready.notify_one();
             line.clear();
         }
+        // getline has returned for the last time. Publishing completion before
+        // touching only the shared channel lets an embedding caller safely
+        // restore or destroy its stdin buffer even after this thread detached.
+        parked->store(false);
         {
             std::lock_guard<std::mutex> guard(channel->mutex);
             channel->closed = true;
@@ -845,7 +849,6 @@ void McpServer::runStdio() {
     if (finished) {
         reader.join();
     } else {
-        m_readerParked.store(true);
         reader.detach();
     }
 

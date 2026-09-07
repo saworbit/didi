@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 109 canonical tool names plus 10 legacy names (119 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 113 canonical tool names plus 10 legacy names (123 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `106/109`
+**Canonical implementation:** `110/113`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 106/109 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 110/113 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -1042,3 +1042,14 @@ Requires finite viewport-space `point.x` and `point.y`. Optional `root_path` def
 Every implemented mutating tool schema includes `dry_run: boolean`. A true dry-run stops at the registry boundary and returns `dry_run: true` plus `mutation_preview`; no tool handler, subprocess, filesystem writer, or Godot main-thread command runs. The preview reports the exact tool/arguments, canonical project, execution mode, optional session ID, route generation, binding hash, and a conservative planned-change record.
 
 `editor_reload_project`, `script_patch_method`/`patch_script_symbols`, `project_rename_references`, `project_apply_changes`, and `overwrite: true` calls to `resource_create`, `script_create`, `viewport_create_test_lab`/`create_visual_test_lab`, `project_export`, and `gridmap_export_mesh_library` require confirmation. Call the exact tool with identical arguments plus `dry_run: true`, then repeat it without `dry_run` and with the returned `confirmation_token`. Tokens are cryptographically random, expire after 120 seconds, are consumed on the first attempt, and reject tool, argument, project, execution-mode, session, route-generation, expiry, and replay mismatches.
+
+## Managed editor recovery
+
+These host tools require managed startup; they return a disabled error in ordinary attach mode. See [Managed Recovery](MANAGED_RECOVERY.md).
+
+| Tool | Arguments | Behavior |
+| --- | --- | --- |
+| `runtime_recovery_status` | None | Read checkpoint list, owned PID and uncertain outcome without restarting. |
+| `runtime_checkpoint` | Optional `accept_current_files` boolean | Snapshot saved files; explicit acceptance requires the uncertain editor to be stopped. |
+| `runtime_recover_editor` | None | Restart/reattach an abnormally exited owned editor once; no replay or reconciliation. |
+| `runtime_restore_checkpoint` | Required `checkpoint_id` string | Verify snapshot, stop owned editor, preserve prior project, restore files and relaunch. Destructive confirmation required. |

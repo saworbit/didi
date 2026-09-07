@@ -189,6 +189,16 @@ jobs:
           fi
           "$DIDI_PYTHON" tools/validate_documentation.py --tool-manifest build/tool_manifest.json
 
+      - name: Verify Managed Recovery Startup Contract
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            export DIDI_TEST_BINARY="$PWD/build/Release/didi.exe"
+          else
+            export DIDI_TEST_BINARY="$PWD/build/didi"
+          fi
+          "$DIDI_PYTHON" -m unittest tests.test_managed_recovery -v
+
       - name: Verify declared output schemas describe real results
         shell: bash
         run: |
@@ -549,6 +559,18 @@ jobs:
           if (-not $godot) { throw "Godot executable not found under godot-bin" }
           ./tests/run_godot_integration.ps1 -GodotExecutable $godot.FullName
 
+      - name: Verify Managed Editor Crash Recovery
+        shell: pwsh
+        run: |
+          $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v${{ matrix.godot-version }}-stable_win64*.exe" |
+                   Where-Object { $_.Name -notlike "*console*" } | Select-Object -First 1
+          if (-not $godot) { throw "Godot executable not found under godot-bin" }
+          $env:DIDI_TEST_BINARY = (Resolve-Path build/Release/didi.exe).Path
+          $env:DIDI_RECOVERY_GODOT = $godot.FullName
+          $env:DIDI_RECOVERY_ARTIFACT_DIR = Join-Path $PWD 'build/recovery-artifacts'
+          $env:PYTHONPATH = Join-Path $PWD 'tests'
+          python -m unittest tests.test_managed_recovery_live tests.test_managed_recovery_adversarial -v
+
       - name: Upload Engine Logs On Failure
         if: failure()
         uses: actions/upload-artifact@v7
@@ -559,6 +581,7 @@ jobs:
             build/godot_*.out
             build/godot_*.err
             build/godot_*.dmp
+            build/recovery-artifacts/
           if-no-files-found: ignore
 
   # The option landed with #38; this is the job that uses it. ASan and UBSan see

@@ -5,6 +5,8 @@
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
+#include <cstdlib>
 #include <deque>
 #include <future>
 #include <iostream>
@@ -346,9 +348,10 @@ public:
 
     // Returns once a reader is actually blocked waiting for more input, which
     // is what proves the loop consumed what it was given and is now idle.
-    void waitUntilRead() {
+    bool waitUntilRead() {
         std::unique_lock<std::mutex> guard(m_mutex);
-        m_parked.wait(guard, [this] { return m_waiting; });
+        return m_parked.wait_for(guard, std::chrono::seconds(5),
+                                [this] { return m_waiting && m_queue.empty(); });
     }
 
 protected:
@@ -384,20 +387,23 @@ static void test_mcp_stdio_loop_leaves_on_a_signal_safe_stop_request() {
     // context, and the loop it was trying to end stayed parked in stdin. Ctrl+C
     // left the process alive and holding the runtime session until the client
     // closed the pipe.
-    // Never destroyed, and held by a static so a leak checker still sees it as
-    // reachable. The reader thread this test creates is detached by design and
-    // cannot be joined, so whatever it is reading from has to outlive it. That
-    // is the same reason main leaves through _Exit instead of returning: a read
-    // nobody can cancel must not have its stream torn down underneath it. A
-    // stack buffer here aborted on macOS, where libc++ throws out of a wait on
-    // a destroyed condition variable, and passed on Windows by luck.
-    static BlockingInput* const input = new BlockingInput();
+    BlockingInput input;
     std::ostringstream output;
-    auto* old_input = std::cin.rdbuf(input);
+    auto* old_input = std::cin.rdbuf(&input);
     auto* old_output = std::cout.rdbuf(output.rdbuf());
+    struct RestoreStreams {
+        std::streambuf* input;
+        std::streambuf* output;
+        ~RestoreStreams() {
+            std::cin.rdbuf(input);
+            std::cout.rdbuf(output);
+        }
+    } restore_streams{old_input, old_output};
 
     auto sessions = std::make_shared<DetachCountingSessionClient>();
     bool left = false;
+    bool reader_waited = false;
+    bool reader_was_parked = false;
     {
         didi::mcp::McpServer server;
         server.setIpcClient(sessions);
@@ -405,34 +411,55 @@ static void test_mcp_stdio_loop_leaves_on_a_signal_safe_stop_request() {
         std::promise<void> done;
         auto finished = done.get_future();
         std::thread loop([&server, &done] {
-            server.runStdio();
-            done.set_value();
+            try {
+                server.runStdio();
+                done.set_value();
+            } catch (...) {
+                done.set_exception(std::current_exception());
+            }
         });
+        struct JoinReaders {
+            didi::mcp::McpServer& server;
+            BlockingInput& input;
+            std::thread& loop;
+            ~JoinReaders() {
+                server.requestStop();
+                input.release();
+                loop.join();
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+                while (server.stdinReaderStillParked() && std::chrono::steady_clock::now() < deadline)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                // Continuing the suite would race std::cin and destroy a live
+                // streambuf. Fail the process explicitly if cleanup regresses.
+                if (server.stdinReaderStillParked()) {
+                    std::fputs("Stdin reader did not finish after test input was released\n", stderr);
+                    std::abort();
+                }
+            }
+        } join_readers{server, input, loop};
 
-        // Serve one request, then wait until the reader is blocked again. The
-        // loop is now live and idle, which is the state a signal arrives in.
-        input->push("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n");
-        input->waitUntilRead();
+        // Exercise a genuinely idle input read. Sending a ping first would
+        // race its dispatch against requestStop and test unrelated ordering.
+        reader_waited = input.waitUntilRead();
 
         server.requestStop();
         left = finished.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
-
-        // Let the reader out either way, so a failure reports rather than hangs.
-        input->release();
-        loop.join();
+        reader_was_parked = server.stdinReaderStillParked();
+        if (left) finished.get();
+        // JoinReaders releases input and awaits the detached reader too. Joining
+        // just the dispatcher does not make restoring std::cin safe.
     }
-    std::cin.rdbuf(old_input);
-    std::cout.rdbuf(old_output);
 
+    didi::mcp::ToolRegistry::instance().setIpcClient(nullptr);
+    didi::mcp::ToolRegistry::instance().setRuntimeSessionClient(nullptr);
+    ASSERT_TRUE(reader_waited);
     ASSERT_TRUE(left);
-    ASSERT_TRUE(output.str().find("\"id\":1") != std::string::npos);
+    ASSERT_TRUE(reader_was_parked);
 
     // Teardown ran on the normal path, once, not from the handler.
     ASSERT_EQ(sessions->detaches, 1);
     ASSERT_TRUE(!sessions->activeSession().has_value());
 
-    didi::mcp::ToolRegistry::instance().setIpcClient(nullptr);
-    didi::mcp::ToolRegistry::instance().setRuntimeSessionClient(nullptr);
 }
 
 static void test_mcp_handles_jsonrpc_batches() {

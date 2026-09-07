@@ -218,7 +218,7 @@ The CI MCP smoke must start Didi with an explicit fixture project. It verifies t
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `106/109`
+**Canonical implementation:** `110/113`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
@@ -227,7 +227,7 @@ Phase 7 is `PARTIAL_DELIVERY`. The gate completed on 2026-08-29 against Godot 4.
 
 Feasibility is design evidence; a production trial is production behavior. All 15 feasible Phase 7 names are delivered, including the three TileMapLayer/GridMap tools. The 3 API-blocked names remain registered but unimplemented.
 
-Governance authorized partial delivery, and all 15 feasible tools are now shipped, and the surface stands at 106/109 canonical implementations. Further work on `physics_simulate_step`, `nav_bake_mesh`, or `runtime_get_call_stack` requires new feasibility evidence on Godot 4.5.1 and 4.7.2 or an explicit contract amendment; do not weaken their contracts implicitly. Use [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) for reproducible evidence and [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md) for the approved executable plan.
+Governance authorized partial delivery, and all 15 feasible tools are now shipped, and the surface stands at 110/113 canonical implementations. Further work on `physics_simulate_step`, `nav_bake_mesh`, or `runtime_get_call_stack` requires new feasibility evidence on Godot 4.5.1 and 4.7.2 or an explicit contract amendment; do not weaken their contracts implicitly. Use [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) for reproducible evidence and [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md) for the approved executable plan.
 
 ## Phase 5 and Phase 6 implementation map
 

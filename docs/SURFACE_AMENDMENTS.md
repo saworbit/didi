@@ -593,3 +593,17 @@ scheduled for removal is marked deprecated, documents its migration path, and
 remains registered for at least twelve months before it may be removed. The ten
 v1.0 legacy names in `kLegacyToolNames` have no deprecation date set; setting one
 requires an amendment.
+
+## 2026-09-07: Managed editor recovery
+
+**Status:** ACCEPTED (implementation and verification on the recovery feature branch).
+**Reviewer:** User authorized autonomous end-to-end delivery of the proposed recovery design; independent yellow-team design, red-team safety, and purple-team executable reviews accompany the branch.
+
+| Name | Failing workflow | Execution modes | Safety class | Proving test |
+| --- | --- | --- | --- | --- |
+| `runtime_recovery_status` | After Godot dies, identify which edits and checkpoint survived without provoking another launch. | host `offline_fallback`, managed editor ownership | read | `test_saved_edit_crash_reconnect_restore_and_restart_limit` |
+| `runtime_checkpoint` | Establish or explicitly accept a known saved-file recovery point before risky work. | host `offline_fallback`, managed editor ownership | create/set; dry-run, not idempotent (creates an ID) | `test_inflight_death_latches_mutations_without_replaying_and_restore_reconciles` |
+| `runtime_recover_editor` | Live discovery is unavailable after a crash; restart the owned editor without guessing or replaying the failed operation. | host `offline_fallback`, managed editor ownership | create/set; dry-run; bounded restart | `test_saved_edit_crash_reconnect_restore_and_restart_limit` |
+| `runtime_restore_checkpoint` | Discard an uncertain working state while retaining it for inspection, then resume from verified saved files. | host `offline_fallback`, managed editor ownership | remove/overwrite; dry-run and confirmation | `test_restore_dry_run_and_corrupt_checkpoint_preserve_running_editor_and_files` |
+
+Coverage is saved project files, with checked saves for supported active-scene edits. It does not claim full unsaved editor state or host-process crash resume. Surface rises from 109 canonical / 106 implemented to 113 canonical / 110 implemented; three API-blocked reservations remain.

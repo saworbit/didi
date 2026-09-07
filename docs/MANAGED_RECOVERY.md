@@ -1,0 +1,40 @@
+# Managed editor recovery
+
+Managed mode gives autonomous MCP work its own editor and project copy. It is opt-in at Didi startup; ordinary attachment keeps its existing behavior.
+
+```powershell
+didi --project "D:\MyGame" --managed-editor "C:\Godot\Godot_v4.5.1-stable_win64.exe" --recovery-workspace "D:\MyGame-recovery-01"
+```
+
+Enable the matching Didi addon in the source project first. Both new options are required together; the workspace must be outside the source project and its parent directory must exist. The Godot executable must be an absolute file path, and the workspace directory must not already exist. Didi copies saved project content into `<workspace>/project` and launches a headless editor there. MCP file tools target that copy. Your source project is unchanged; review and copy intended changes back yourself. Project code can access external files: this workspace is not an OS sandbox.
+
+## Checkpoints and coverage
+
+Managed mutations automatically snapshot saved files before dispatch and after successful completion. Supported scene edits also call Godot's checked `save_scene` for the active scene before the post-edit snapshot. Each response contains a compact `recovery` receipt: operation outcome, checkpoint ID, coverage and whether reconciliation is required. Use `runtime_recovery_status` for the full snapshot list and paths.
+
+Startup waits for Godot filesystem scanning to finish and for a stable saved-file checkpoint before admitting edits. Source inventory and content hashes are checked again before publishing each snapshot; a detected concurrent writer causes refusal, not a partial success. This is not an atomic filesystem transaction: coordinate external writers.
+
+A checkpoint protects saved project files. It does not protect unsaved script buffers, unsaved external resources, other unsaved scenes, editor undo history, game state, or `user://`/external side effects. Audio bus and shader-uniform edits are specifically reported as memory-only changes. `runtime_checkpoint` snapshots files already on disk; it is not a command to save every editor buffer. Never treat a successful scene save as proof every resource was saved.
+
+Five completed checkpoints are retained. Each holds at most 256 MiB and 10,000 files. `.git`, `.godot`, `.didi`, and `.worktrees` are excluded. Links, reparse points, hardlinks and special files are refused. A failed snapshot blocks the next mutation; a post-edit failure reports that the operation may already have applied. Incomplete staging directories are never recovery points. Full manifests include SHA-256 content checks and remain on disk; tool responses return compact summaries.
+
+## Recovery workflow
+
+- `runtime_recovery_status`: inspect owned PID, checkpoint inventory, pending operation and recovery instructions. No restart occurs.
+- `runtime_recover_editor`: use the single automatic restart budget after an abnormal exit. The exact newly spawned editor must authenticate before attachment. This never repeats an interrupted operation or clears its uncertainty.
+- `runtime_checkpoint`: create an explicit saved-file checkpoint. If an outcome is unresolved, `accept_current_files: true` is allowed only once the uncertain editor is proven stopped. While that original editor is alive, use restore to discard in-memory uncertainty. After it has terminated and a new editor has reloaded saved files, explicit acceptance can reconcile those inspected files.
+- `runtime_restore_checkpoint` with `checkpoint_id`: validate and stage a snapshot, stop the owned editor, preserve the old project as `<workspace>/preserved-...`, install the staged copy and launch a new editor. This is destructive and uses the existing dry-run/confirmation flow. `--yolo` can disable confirmation for an intentionally unattended host.
+
+Recovery also runs before the next ordinary authorized tool request, without a background IPC thread. If that request is a mutation and recovery changes the session, the mutation is not started: inspect the recovered state and submit a fresh request. Dry runs, confirmation previews and status calls do not relaunch. Normal editor closure and a living/hung/unverifiable process do not trigger automatic restart. After one restart, another abnormal exit stops automation until explicit restore or a new managed invocation.
+
+A transport failure may mean an edit completed but its response was lost. Didi preserves that result and blocks further mutations until reconciled. It never replays the edit. Managed mode refuses manual attach/detach to prevent crossing into a human editor. Closing the MCP host stops its owned child; it never stops an editor attached by ordinary mode.
+
+## Artifacts and limits
+
+`recovery.json`, `checkpoints/`, and per-launch `editor-N.log` live outside the mutable project. Crash reports stay in the project `.didi/crash`; restoring preserves them with the old project. Retained workspaces and logs are not automatically deleted or capped: inspect and remove them when no longer needed. A restored workspace can reimport assets because `.godot` is excluded.
+
+This feature recovers a Godot editor crash while the MCP host survives. It does not automatically resume an existing container after an MCP/OS crash or claim power-loss durability. The journal and completed checkpoints remain available for manual inspection and salvage. Filesystem checks defend against malformed snapshots and ordinary links, not a malicious process racing path replacement under the same account.
+
+## Verification
+
+`tests/test_managed_recovery_live.py` and `tests/test_managed_recovery_adversarial.py` launch real Godot through MCP stdio, kill only their owned child, and check persistence, one restart, no mutation replay, restoration, source preservation, dry runs and corrupt-snapshot refusal. Set `DIDI_TEST_BINARY` to the built host and `DIDI_RECOVERY_GODOT` to an absolute Godot executable; then run `python -m unittest discover -s tests -p "test_managed_recovery*.py"`.

@@ -105,6 +105,9 @@ set(CORE_SOURCES
     src/mcp/resource_registry.cpp
     src/mcp/prompt_registry.cpp
     src/runtime/session_client.cpp
+    src/runtime/checkpoint_store.cpp
+    src/runtime/managed_process.cpp
+    src/runtime/managed_recovery.cpp
     src/runtime/session_lock.cpp
     src/runtime/profiler_collector.cpp
     src/runtime/invariant_watch.cpp
@@ -292,6 +295,8 @@ set(TEST_SOURCES
     tests/test_jsonrpc.cpp
     tests/test_ipc.cpp
     tests/test_runtime_sessions.cpp
+    tests/test_checkpoints.cpp
+    tests/test_managed_process.cpp
     tests/test_runtime_routing.cpp
     tests/test_crash_capture.cpp
     tests/test_runtime_logs.cpp
