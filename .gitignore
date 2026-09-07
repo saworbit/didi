@@ -46,9 +46,10 @@ demo/addons/didi/bin/*
 
 # Godot Engine Import and Cache
 .godot/
-# Import metadata Godot regenerates on scan. Nothing here is tracked, and the
-# addon's SVG sources are rasterised by the console rather than loaded as
-# imported textures, so an .import beside one describes an import nobody uses.
+# Import metadata Godot regenerates on scan, so none of it is tracked. Where a
+# fixture does load an SVG as an imported texture, the scene has to wait for
+# that scan rather than rely on the metadata being committed: see the smoke
+# plugin in tests/godot_smoke.
 *.import
 *.translation
 *.tmp

@@ -363,6 +363,15 @@ try {
     }
     Assert-True $sceneReady "Godot editor did not activate res://main.tscn through the authenticated bridge."
 
+    # main.tscn loads res://reimport_probe.svg as a Texture2D, and the smoke
+    # plugin used to open the scene before the first import had produced it.
+    # That was a blocking dialog in a windowed editor and, here, three load
+    # failures and six broken TileSet atlas errors that nothing asserted on, so
+    # they sat in every run being read as noise.
+    $editorStartupLog = ((Get-Content $stdoutPath, $stderrPath -ErrorAction SilentlyContinue) -join "`n")
+    Assert-True ($editorStartupLog -notmatch "Failed loading resource: res://reimport_probe\.svg") `
+        "The edited scene was opened before its imported texture existed; main.tscn has an unresolved dependency."
+
     # Regression guard for the themed-Control crash found in field trial 01.
     # classdb_construct_object2 is ClassDB::instantiate_without_postinitialization,
     # so a Control that resolves theme items during post-initialization is handed
