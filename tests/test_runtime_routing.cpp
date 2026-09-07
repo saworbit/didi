@@ -542,6 +542,59 @@ void test_engine_liveness_has_three_answers_and_not_two() {
     }
 }
 
+#if defined(_WIN32)
+// A process that exited with 259 is a corpse, not a running process.
+// GetExitCodeProcess cannot tell those two apart, because 259 is also
+// STILL_ACTIVE, and GetProcessTimes keeps answering for a corpse. So the
+// identity query has to ask the wait handle instead of the exit code.
+//
+// The child handle stays open through the query on purpose. An exited pid stays
+// openable while any handle to it is held, and that is exactly the window where
+// a session descriptor for a dead engine gets read as live and its dead pipe
+// gets dialled until it times out.
+void test_exit_code_259_is_not_a_live_process() {
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION info{};
+    std::wstring command = L"cmd.exe /d /c exit 259";
+    if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+                        nullptr, nullptr, &startup, &info)) {
+        throw std::runtime_error("Failed to start the exit 259 child process");
+    }
+    CloseHandle(info.hThread);
+
+    // Read the identity while the child is running, so the start time this test
+    // later expects to be refused is one the query really does produce.
+    const auto live = didi::runtime::queryProcessIdentity(info.dwProcessId);
+    if (live.isErr()) {
+        TerminateProcess(info.hProcess, 1);
+        CloseHandle(info.hProcess);
+        throw std::runtime_error("The child process had no identity while it was running");
+    }
+    const int64_t started_at_ms = live.value().started_at_ms;
+
+    if (WaitForSingleObject(info.hProcess, 30000) != WAIT_OBJECT_0) {
+        TerminateProcess(info.hProcess, 1);
+        CloseHandle(info.hProcess);
+        throw std::runtime_error("The exit 259 child process did not finish");
+    }
+    DWORD exit_code = 0;
+    const bool read_exit_code = GetExitCodeProcess(info.hProcess, &exit_code) != 0;
+
+    const auto dead = didi::runtime::queryProcessIdentity(info.dwProcessId);
+    const auto report = didi::runtime::describeProcessInstance(info.dwProcessId, started_at_ms);
+    CloseHandle(info.hProcess);
+
+    // The premise of the test: the child really did exit with the value that
+    // reads as still running.
+    ASSERT_TRUE(read_exit_code);
+    ASSERT_EQ(exit_code, static_cast<DWORD>(259));
+
+    ASSERT_TRUE(dead.isErr());
+    ASSERT_TRUE(report.state == didi::runtime::ProcessInstanceState::proven_stale);
+}
+#endif
+
 class SessionDirectoryFixture {
 public:
     SessionDirectoryFixture() {
@@ -1711,6 +1764,10 @@ struct RegisterRuntimeRoutingTests {
     RegisterRuntimeRoutingTests() {
         registerTest("RuntimeRouting.EngineLivenessTriState",
                      test_engine_liveness_has_three_answers_and_not_two);
+#if defined(_WIN32)
+        registerTest("RuntimeRouting.WindowsExit259IsNotAlive",
+                     test_exit_code_259_is_not_a_live_process);
+#endif
         registerTest("RuntimeRouting.LiveEnvelopeAndFiniteDeadline",
                      test_live_runtime_tools_return_session_envelopes_and_finite_deadlines);
         registerTest("RuntimeRouting.ErrorsAndUnknownOutcomeQuarantine",

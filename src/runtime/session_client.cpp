@@ -82,11 +82,15 @@ Result<ProcessIdentity> queryProcessIdentity(uint64_t pid) {
     if (pid > std::numeric_limits<DWORD>::max()) {
         return Error::notFound("Process identity is unavailable");
     }
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE,
+                                 static_cast<DWORD>(pid));
     if (!process) return Error::notFound("Process identity is unavailable");
-    DWORD exit_code = 0;
     FILETIME created{}, exited{}, kernel{}, user{};
-    const bool running = GetExitCodeProcess(process, &exit_code) && exit_code == STILL_ACTIVE;
+    // The wait handle is the only honest liveness test. GetExitCodeProcess
+    // hands back 259 both for a process that is still running and for one that
+    // exited with 259, and GetProcessTimes keeps answering for a corpse, so
+    // reading the exit code reports a dead engine as alive.
+    const bool running = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
     const bool has_times = GetProcessTimes(process, &created, &exited, &kernel, &user) != 0;
     CloseHandle(process);
     if (!running || !has_times) return Error::notFound("Process identity is unavailable");
