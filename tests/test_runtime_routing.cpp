@@ -42,7 +42,8 @@ std::optional<json> rejectDisallowedSessionMethod(
 
 namespace didi::mcp {
 CallToolResult handleRuntimeReadLogs(const json&, std::shared_ptr<ipc::IIpcClient>);
-CallToolResult handleRuntimeGetSession(const json&, std::shared_ptr<runtime::IRuntimeSessionClient>);
+CallToolResult handleRuntimeGetSession(const json&, std::shared_ptr<runtime::IRuntimeSessionClient>,
+                                       std::vector<std::string> available_without_engine = {});
 CallToolResult handleRuntimeSetPaused(const json&, std::shared_ptr<ipc::IIpcClient>);
 CallToolResult handleRuntimeStep(const json&, std::shared_ptr<ipc::IIpcClient>);
 CallToolResult handleRuntimeStop(const json&, std::shared_ptr<ipc::IIpcClient>);
@@ -670,6 +671,88 @@ void test_engine_crash_report_is_read_and_attributed() {
 
     std::error_code cleanup;
     std::filesystem::remove_all(project, cleanup);
+}
+
+// A transport failure already carried the facts. What it did not carry was
+// what to do about them, and the move an agent makes without that is to call
+// the same tool again, which fails the same way.
+void test_engine_incident_says_what_happened_and_what_to_do() {
+    using didi::runtime::EngineCrashReport;
+    using didi::runtime::EngineIncidentKind;
+    using didi::runtime::ProcessInstanceState;
+    using didi::runtime::classifyEngineIncident;
+    using didi::runtime::engineIncidentKindName;
+
+    EngineCrashReport engine_fault;
+    engine_fault.found = true;
+    engine_fault.exception = "0xc000001d  ILLEGAL_INSTRUCTION";
+    engine_fault.in_extension = false;
+    engine_fault.path = "C:/p/.didi/crash/godot_crash_1.log";
+
+    EngineCrashReport our_fault = engine_fault;
+    our_fault.in_extension = true;
+
+    const EngineCrashReport nothing;
+
+    struct Case {
+        const char* what;
+        ProcessInstanceState state;
+        EngineCrashReport crash;
+        bool transport_failed;
+        EngineIncidentKind expected;
+    };
+    const Case cases[] = {
+        {"gone with an engine side report", ProcessInstanceState::proven_stale, engine_fault, true,
+         EngineIncidentKind::crashed},
+        {"gone with a report naming us", ProcessInstanceState::proven_stale, our_fault, true,
+         EngineIncidentKind::crashed},
+        {"gone with no report at all", ProcessInstanceState::proven_stale, nothing, true,
+         EngineIncidentKind::crashed},
+        {"cannot be verified", ProcessInstanceState::unverifiable, nothing, true,
+         EngineIncidentKind::unreachable},
+        {"alive and did not answer", ProcessInstanceState::alive, nothing, true,
+         EngineIncidentKind::hung},
+        // An alive engine and no transport failure is not an incident. Saying
+        // otherwise would put a recovery sentence on every validation error.
+        {"alive and nothing went wrong", ProcessInstanceState::alive, nothing, false,
+         EngineIncidentKind::none},
+    };
+
+    for (const auto& one : cases) {
+        const auto incident = classifyEngineIncident(one.state, one.crash, one.transport_failed);
+        if (incident.kind != one.expected) {
+            throw std::runtime_error(std::string("Wrong incident for: ") + one.what);
+        }
+        if (one.expected == EngineIncidentKind::none) {
+            ASSERT_TRUE(incident.cause.empty());
+            ASSERT_TRUE(incident.recovery.empty());
+            continue;
+        }
+        // A kind with no sentence is a label, and a label does not tell anyone
+        // what to do next.
+        ASSERT_FALSE(incident.cause.empty());
+        ASSERT_FALSE(incident.recovery.empty());
+        // Every recovery has to name the call that says what still works.
+        ASSERT_TRUE(incident.recovery.find("runtime_get_session") != std::string::npos);
+    }
+
+    // A fault with one of our frames on it is ours to answer for, and the
+    // sentence has to say so rather than sending the reader upstream.
+    const auto ours = classifyEngineIncident(ProcessInstanceState::proven_stale, our_fault, true);
+    ASSERT_TRUE(ours.recovery.find("extension") != std::string::npos);
+    const auto theirs = classifyEngineIncident(ProcessInstanceState::proven_stale, engine_fault, true);
+    ASSERT_TRUE(theirs.recovery.find("restart") != std::string::npos);
+    ASSERT_TRUE(theirs.recovery.find(engine_fault.path) != std::string::npos);
+
+    // A hung engine is where an agent is most tempted to repeat itself, and
+    // repeating a mutation whose outcome is unknown is the one thing the
+    // dispatch layer already refuses to do.
+    const auto hung = classifyEngineIncident(ProcessInstanceState::alive, nothing, true);
+    ASSERT_TRUE(hung.recovery.find("Do not repeat") != std::string::npos);
+
+    ASSERT_EQ(std::string(engineIncidentKindName(EngineIncidentKind::crashed)),
+              std::string("engine_crashed"));
+    ASSERT_EQ(std::string(engineIncidentKindName(EngineIncidentKind::none)), std::string("none"));
 }
 
 class SessionDirectoryFixture {
@@ -1843,6 +1926,8 @@ struct RegisterRuntimeRoutingTests {
                      test_engine_liveness_has_three_answers_and_not_two);
         registerTest("RuntimeRouting.EngineCrashReportAttribution",
                      test_engine_crash_report_is_read_and_attributed);
+        registerTest("RuntimeRouting.EngineIncidentGuidance",
+                     test_engine_incident_says_what_happened_and_what_to_do);
 #if defined(_WIN32)
         registerTest("RuntimeRouting.WindowsExit259IsNotAlive",
                      test_exit_code_259_is_not_a_live_process);

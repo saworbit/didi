@@ -106,11 +106,15 @@ CallToolResult sessionError(const Error& error,
                             const std::shared_ptr<runtime::IRuntimeSessionClient>& sessions) {
     const auto active = sessions ? sessions->activeSession()
                                  : std::optional<runtime::SessionDescriptor>{};
-    json data = error.data.is_object() ? error.data : json::object();
-    if (!error.data.is_null() && !error.data.is_object()) data["details"] = error.data;
+    // Same reading of the same facts the live routes get. A session error that
+    // said less than a tool error would send a caller looking in two places.
+    Error annotated = error;
+    runtime::annotateEngineState(annotated, active);
+    json data = annotated.data.is_object() ? annotated.data : json::object();
+    if (!annotated.data.is_null() && !annotated.data.is_object()) data["details"] = annotated.data;
     json envelope = {{"execution_mode", "local_session_management"},
                      {"session", active.has_value() ? active->toJson() : json(nullptr)},
-                     {"error", {{"code", error.code}, {"message", error.message},
+                     {"error", {{"code", annotated.code}, {"message", annotated.message},
                                 {"data", std::move(data)}}}};
     auto result = CallToolResult::successJson(envelope);
     result.isError = true;
@@ -238,10 +242,22 @@ CallToolResult handleRuntimeDetachSession(const json&, std::shared_ptr<runtime::
     return result.isOk() ? localSessionSuccess(result.value()) : sessionError(result.error(), sessions);
 }
 
-CallToolResult handleRuntimeGetSession(const json&, std::shared_ptr<runtime::IRuntimeSessionClient> sessions) {
+CallToolResult handleRuntimeGetSession(const json&,
+                                      std::shared_ptr<runtime::IRuntimeSessionClient> sessions,
+                                      std::vector<std::string> available_without_engine) {
     if (!sessions) return sessionError(Error::notConnected("Runtime session management is unavailable"), sessions);
     auto result = sessions->refreshSession();
-    return result.isOk() ? localSessionSuccess(result.value()) : sessionError(result.error(), sessions);
+    if (result.isErr()) {
+        auto error = result.error();
+        // The one tool a caller reaches for when the engine has gone is this
+        // one, so it has to answer even when the handshake cannot. Saying what
+        // still works is the whole point of being asked.
+        if (!error.data.is_object()) error.data = json::object();
+        error.data["available_without_engine"] = available_without_engine;
+        return sessionError(error, sessions);
+    }
+    auto payload = localSessionSuccess(result.value());
+    return payload;
 }
 
 CallToolResult handleRuntimeReadLogs(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

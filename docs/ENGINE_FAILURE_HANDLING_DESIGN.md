@@ -107,15 +107,24 @@ working with no engine. It gains:
   keeping everything whose capability includes `offline_fallback`. Derived, never
   hand-listed.
 
-### 4. Auto re-attach, and nothing more
+### 4. Auto re-attach: already built, and stricter than this asked for
 
-When the incident is `session_lost` and a descriptor for the same project names a
-process whose identity matches the one that was attached, Didi re-attaches and
-says so in the response. The call that failed is still reported as failed. It is
-never replayed.
+Corrected while implementing. `RuntimeSessionClient::tryAutoAttach` already does
+this: it discovers live sessions, and attaches when exactly one matches the
+project, or when exactly one of several is an editor.
 
-Every other kind stays explicit. Hangs stay explicit because the IPC layer
-already imposes a finite deadline, so waiting longer is the caller's judgement.
+It is also stricter than the design above, in a way worth keeping. Both
+`disconnect` and `quarantineIfCurrent` set `m_autoAttachEnabled = false`, so
+after a route is quarantined, which is what a transport failure and an engine
+crash both do, auto attach does not fire at all. Recovery after a crash is
+explicit, by design, and this design does not change that.
+
+The only thing added is that it now says so. It was silent, and it is the one
+recovery that happens without anyone asking, which makes it the worst one to
+leave invisible.
+
+Hangs stay explicit because the IPC layer already imposes a finite deadline, so
+waiting longer is the caller's judgement.
 
 ### 5. One line for the human
 
@@ -135,9 +144,8 @@ the status in section 3 is what that surface would render.
 - `available_tools` is derived, not listed: assert it is non-empty and contains
   no tool whose capability is `live` only. A hand-written list would satisfy a
   fixed assertion and then drift; a derived one cannot.
-- Auto re-attach: a matching live engine re-attaches; a different process
-  identity does not, and reports `crashed` or `unreachable` instead.
-- The log line is emitted once for one incident and names the report path.
+- The log line is emitted once for one incident and names the report path. Auto
+  re-attach needs no new test: the behaviour predates this design and its tests.
 - Existing guarantees hold unchanged: `MutationIsNeverRepeated` and the
   `unknown_outcome` quarantine tests must still pass.
 
