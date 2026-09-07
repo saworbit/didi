@@ -7,6 +7,8 @@
 #include "didi/tools/resolved_tool_binding.hpp"
 #include <algorithm>
 #include <cctype>
+#include <condition_variable>
+#include <deque>
 #include <filesystem>
 #include <chrono>
 #include <thread>
@@ -25,6 +27,38 @@ namespace mcp {
 // filesystem stats. The sleep is sliced so shutdown does not wait it out.
 static constexpr int kBoardPollSliceMs = 50;
 static constexpr int kBoardPollSlices = 10;
+
+// How long the stdio loop waits for a line before looking at the stop flag
+// again. This is what turns Ctrl+C into an exit: a flag is all a signal
+// handler is allowed to set, so something has to come back and read it.
+static constexpr int kStopPollMs = 50;
+
+// How long shutdown waits for the reader once nothing wants its lines any
+// more. Input that has already ended finishes here and gets joined. Input that
+// is still open does not, and is abandoned rather than hung on.
+static constexpr int kReaderDrainMs = 1000;
+
+namespace {
+
+// Lines arrive on their own thread so that a signal can end the session. A
+// blocking console read cannot be cancelled portably. On POSIX libstdc++
+// retries a read the signal interrupted, and on Windows the handler does not
+// interrupt the read at all: the CRT documents that Win32 generates a new
+// thread to handle the interrupt, so the read is still parked on the thread
+// that owns it. Reading somewhere else lets the loop that owns shutdown watch
+// a flag instead of a descriptor.
+//
+// The channel is shared and outlives the server, so a reader still parked in
+// stdin when the session ends holds nothing that can go away underneath it.
+struct StdinChannel {
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::deque<std::string> lines;
+    bool closed{false};
+    std::atomic<bool> wanted{true};
+};
+
+} // namespace
 
 static bool liveAllowedFor(const std::string& identifier, bool resource,
                            const std::string& session_kind) {
@@ -123,8 +157,19 @@ std::shared_ptr<ipc::IIpcClient> McpServer::getIpcClient() const {
     return m_ipcClient;
 }
 
+// Full teardown: joins the board watcher, detaches the runtime session over
+// IPC, and logs. None of that is safe from a signal handler, so a handler
+// calls requestStop instead and this runs on the normal path afterwards.
 void McpServer::stop() {
     releaseRuntimeSession();
+}
+
+// The whole of what a signal handler is allowed to do. Two lock free stores,
+// no allocation, no lock, no system call, no logging. The stdio loop reads
+// m_stopRequested on its next pass and leaves, and shutdown happens there.
+void McpServer::requestStop() {
+    m_stopRequested.store(true, std::memory_order_relaxed);
+    m_running.store(false, std::memory_order_relaxed);
 }
 
 // The only place anything reaches stdout. The board watcher runs on its own
@@ -684,13 +729,46 @@ void McpServer::runStdio() {
     _setmode(_fileno(stdout), _O_BINARY);
 #endif
 
+    m_readerParked.store(false);
     m_running.store(true);
     DIDI_LOG_INFO("MCP_SERVER", "Starting Didi MCP server over stdio...");
 
     DIDI_LOG_INFO("MCP_SERVER", "Runtime session router ready; use runtime_list_sessions to discover local Godot sessions");
 
-    std::string line;
-    while (m_running.load() && std::getline(std::cin, line)) {
+    auto channel = std::make_shared<StdinChannel>();
+    std::thread reader([channel]() {
+        std::string line;
+        while (channel->wanted.load() && std::getline(std::cin, line)) {
+            {
+                std::lock_guard<std::mutex> guard(channel->mutex);
+                channel->lines.push_back(std::move(line));
+            }
+            channel->ready.notify_one();
+            line.clear();
+        }
+        {
+            std::lock_guard<std::mutex> guard(channel->mutex);
+            channel->closed = true;
+        }
+        channel->ready.notify_one();
+    });
+
+    while (m_running.load() && !m_stopRequested.load()) {
+        std::string line;
+        {
+            std::unique_lock<std::mutex> guard(channel->mutex);
+            channel->ready.wait_for(guard, std::chrono::milliseconds(kStopPollMs),
+                                    [&channel] { return !channel->lines.empty() || channel->closed; });
+            if (channel->lines.empty()) {
+                // Either input ended, or the wait timed out and the loop
+                // condition gets another look at the stop flag.
+                if (channel->closed) break;
+                continue;
+            }
+            line = std::move(channel->lines.front());
+            channel->lines.pop_front();
+        }
+
         std::string trimmed = strings::trim(line);
         if (trimmed.empty()) continue;
 
@@ -734,6 +812,28 @@ void McpServer::runStdio() {
         if (auto response = dispatchPayload(payload); response.has_value()) {
             sendResponse(*response);
         }
+    }
+
+    // Nothing wants lines any more. A reader whose input has already ended is
+    // finished and gets joined. One still inside a read is given a bounded
+    // chance to notice and is then abandoned, because waiting on it means
+    // waiting for a client that is not going to send anything. A signal skips
+    // even that wait: it is the case where the read is certainly still parked.
+    channel->wanted.store(false);
+    bool finished = false;
+    {
+        std::unique_lock<std::mutex> guard(channel->mutex);
+        if (!channel->closed && !m_stopRequested.load()) {
+            channel->ready.wait_for(guard, std::chrono::milliseconds(kReaderDrainMs),
+                                    [&channel] { return channel->closed; });
+        }
+        finished = channel->closed;
+    }
+    if (finished) {
+        reader.join();
+    } else {
+        m_readerParked.store(true);
+        reader.detach();
     }
 
     DIDI_LOG_INFO("MCP_SERVER", "Didi MCP stdio loop terminated");

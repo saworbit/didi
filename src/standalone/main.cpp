@@ -6,15 +6,29 @@
 #include <csignal>
 
 #include <atomic>
+#include <cstdlib>
 
 static didi::mcp::McpServer* g_server = nullptr;
 static std::atomic<bool> g_stopRequested{false};
 
+// The flag has to be lock free, or setting it is not safe from a handler
+// either. Every platform we build for gives us that; fail the build rather
+// than the shutdown on one that does not.
+static_assert(std::atomic<bool>::is_always_lock_free,
+              "The stop flag is written from a signal handler and must be lock free");
+
+// A handler runs either between two instructions on this thread or, on
+// Windows, on a thread the operating system made for the interrupt. Either
+// way the only safe thing it can do is set a flag. The CRT is explicit that a
+// handler must not touch the heap, stdio, or anything that makes a system
+// call, and this one used to call stop(), which joins the board watcher
+// thread, sends IPC frames to detach the runtime session, and logs through a
+// mutex. All of that now runs on the normal path when runStdio returns.
 void signalHandler(int sig) {
     (void)sig;
     g_stopRequested.store(true);
     if (g_server) {
-        g_server->stop();
+        g_server->requestStop();
     }
 }
 
@@ -183,5 +197,14 @@ int main(int argc, char* argv[]) {
     server.runStdio();
 
     DIDI_LOG_INFO("MAIN", "Didi MCP server exited cleanly.");
+
+    // The session ended while a read of stdin was still outstanding, so the
+    // reader thread is parked inside std::cin. Returning from main would run
+    // static destruction and take std::cin away underneath it. The runtime
+    // session is already handed back, the session lock is released, and every
+    // write flushed as it was made, so there is nothing left for exit to do.
+    if (server.stdinReaderStillParked()) {
+        std::_Exit(0);
+    }
     return 0;
 }
