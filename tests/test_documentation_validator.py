@@ -89,11 +89,15 @@ Current documented release: **1.4.0**.
 
 Didi exposes 113 canonical tools plus 10 legacy names (123 total).
 
+## Protocol Surface (113 Canonical Tools)
+
 Startup requires --project or DIDI_PROJECT_ROOT. Mutations expose dry_run and protected writes use confirmation_token.
 
 Phase 7 status is PARTIAL_DELIVERY after the 2026-08-29 Godot 4.5.1 and Godot 4.7.2 feasibility gate. The implementation remains 110/113 canonical tools, with all 3 Phase 7 names registered but unimplemented. The gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts.
 
 [Phase 7 feasibility evidence](docs/PHASE_7_API_FEASIBILITY.md) | [Phase 7 approved executable plan](docs/PHASE_7_IMPLEMENTATION_PLAN.md)
+
+[Managed Recovery](docs/MANAGED_RECOVERY.md)
 
 [Guide](docs/GUIDE.md#details-1) | [Security](SECURITY.md) | [Overview](#didi)
 """,
@@ -129,7 +133,7 @@ Current release: 1.4.0.
         self.write("CONTRIBUTING.md", "# Contributing\n")
 
         generic_docs = {
-            "ADMIN_GUIDE.md": "# Admin Guide\n",
+            "ADMIN_GUIDE.md": "# Admin Guide\n\n[Managed Recovery](MANAGED_RECOVERY.md)\n",
             "API_SPECIFICATION.md": "# API Specification\n\n423 Locked. Mutations expose dry_run and confirmation_token. Live IPC includes ui.hitTest.\n",
             "ARCHITECTURE.md": "# Architecture\n",
             "DEVELOPER_GUIDE.md": "# Developer Guide\n\nPhase 7 is PARTIAL_DELIVERY at 110/113 implemented; 15/18 names are implementation-feasible and 3/18 are API-blocked.\n",
@@ -141,6 +145,15 @@ Current release: 1.4.0.
         }
         for name, text in generic_docs.items():
             self.write(f"docs/{name}", text)
+
+        self.write(
+            "docs/README.md",
+            "# Documentation\n\n[Managed Recovery](MANAGED_RECOVERY.md)\n",
+        )
+        self.write(
+            "docs/MANAGED_RECOVERY.md",
+            "# Managed Recovery\n\nRecovery guidance for managed editor sessions.\n",
+        )
 
         self.write(
             "docs/CAPABILITIES.md",
@@ -172,6 +185,15 @@ Session lock conflicts return 423. Mutations expose dry_run and protected writes
 
 - `emitter_node` (`string`, required).
 - `signal_name` (`string`, required).
+
+## Managed editor recovery
+
+| Tool | Arguments |
+| --- | --- |
+| `runtime_recovery_status` | None |
+| `runtime_checkpoint` | None |
+| `runtime_recover_editor` | None |
+| `runtime_restore_checkpoint` | `checkpoint_id` |
 """,
         )
         self.write("docs/ROADMAP.md", self.make_future_phase_roadmap())
@@ -408,6 +430,413 @@ Second section.
 
     def test_valid_repository_has_no_errors(self):
         self.assertEqual(VALIDATOR.validate_repository(self.make_valid_repository()), [])
+
+    def test_rejects_stale_current_surface_heading(self):
+        # Break caught: the reader-facing current surface heading can drift even
+        # while prose elsewhere still carries the manifest count.
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        self.write(
+            "README.md",
+            readme.replace(
+                "## Protocol Surface (113 Canonical Tools)",
+                "## Protocol Surface (107 Canonical Tools)",
+            ),
+        )
+
+        for manifest in (None, self.write_manifest()):
+            with self.subTest(manifest=manifest is not None):
+                errors = VALIDATOR.validate_repository(root, manifest)
+                self.assertTrue(
+                    any(
+                        "README.md" in error
+                        and "current protocol-surface heading" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
+
+    def test_current_surface_heading_requires_exactly_one_current_readme_heading(self):
+        # Break caught: an omitted or duplicated reader-facing heading makes
+        # the current surface ambiguous even if its count is otherwise right.
+        valid_readme = (self.make_valid_repository() / "README.md").read_text(
+            encoding="utf-8"
+        )
+        cases = {
+            "missing": valid_readme.replace(
+                "## Protocol Surface (113 Canonical Tools)",
+                "## Current Surface",
+            ),
+            "duplicate": valid_readme + "\n## Protocol Surface (113 Canonical Tools)\n",
+        }
+        for scenario, readme in cases.items():
+            with self.subTest(scenario=scenario):
+                errors = VALIDATOR.validate_current_surface_heading(
+                    {"README.md": readme}, 113
+                )
+                self.assertTrue(
+                    any("exactly one current protocol-surface heading" in error for error in errors),
+                    errors,
+                )
+
+    def test_rejects_multiline_current_surface_heading(self):
+        # Break caught: newline whitespace must not join prose into a valid H2.
+        errors = VALIDATOR.validate_current_surface_heading(
+            {"README.md": "## Protocol\nSurface (113 Canonical Tools)\n"}, 113
+        )
+
+        self.assertTrue(
+            any("exactly one current protocol-surface heading" in error for error in errors),
+            errors,
+        )
+
+    def test_preserves_current_surface_heading_after_backtick_inline_sample(self):
+        # Break caught: backticks in the info string make this an inline sample,
+        # not an unclosed fence that hides the real heading through EOF.
+        errors = VALIDATOR.validate_current_surface_heading(
+            {"README.md": "```inline sample```\n\n## Protocol Surface (113 Canonical Tools)\n"},
+            113,
+        )
+
+        self.assertEqual([], errors)
+
+    def test_ignores_fenced_current_surface_heading(self):
+        # Break caught: Markdown examples must not satisfy a current-document
+        # contract just because they contain a literal H2.
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        self.write(
+            "README.md",
+            readme.replace(
+                "## Protocol Surface (113 Canonical Tools)",
+                "```markdown\n## Protocol Surface (113 Canonical Tools)\n```",
+            ),
+        )
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(
+            any("README.md" in error and "current protocol-surface heading" in error for error in errors),
+            errors,
+        )
+
+    def test_ignores_unclosed_or_longer_fenced_current_surface_headings(self):
+        # Break caught: a malformed or longer closing fence must still keep a
+        # sample heading out of the reader-facing current-document contract.
+        fence_endings = {
+            "unclosed": "",
+            "longer closing fence": "\n````",
+        }
+        for scenario, fence_ending in fence_endings.items():
+            with self.subTest(scenario=scenario):
+                root = self.make_valid_repository()
+                readme = (root / "README.md").read_text(encoding="utf-8")
+                self.write(
+                    "README.md",
+                    readme.replace(
+                        "## Protocol Surface (113 Canonical Tools)",
+                        "```markdown\n## Protocol Surface (113 Canonical Tools)"
+                        + fence_ending,
+                    ),
+                )
+
+                errors = VALIDATOR.validate_repository(root)
+
+                self.assertTrue(
+                    any(
+                        "README.md" in error
+                        and "current protocol-surface heading" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
+
+    def test_requires_managed_recovery_navigation_targets(self):
+        # Break caught: recovery guidance can remain in the tree yet become
+        # undiscoverable from the root, documentation index, or admin guide.
+        navigation_targets = (
+            ("README.md", "docs/MANAGED_RECOVERY.md"),
+            ("docs/README.md", "MANAGED_RECOVERY.md"),
+            ("docs/ADMIN_GUIDE.md", "MANAGED_RECOVERY.md"),
+        )
+        for relative_path, target in navigation_targets:
+            with self.subTest(relative_path=relative_path):
+                root = self.make_valid_repository()
+                text = (root / relative_path).read_text(encoding="utf-8")
+                self.write(relative_path, text.replace(target, "MISSING_RECOVERY.md"))
+
+                errors = VALIDATOR.validate_repository(root)
+
+                self.assertTrue(
+                    any(relative_path in error and target in error for error in errors),
+                    errors,
+                )
+
+    def test_requires_a_text_link_to_managed_recovery(self):
+        # Break caught: an image preview is not navigable recovery guidance.
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        self.write(
+            "README.md",
+            readme.replace(
+                "[Managed Recovery](docs/MANAGED_RECOVERY.md)",
+                "![Managed Recovery](docs/MANAGED_RECOVERY.md)",
+            ),
+        )
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(
+            any(
+                "README.md" in error
+                and "must link docs/MANAGED_RECOVERY.md" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_inline_code_link_cannot_satisfy_managed_recovery_navigation(self):
+        # Break caught: a literal Markdown example is not a navigable link.
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        self.write(
+            "README.md",
+            readme.replace(
+                "[Managed Recovery](docs/MANAGED_RECOVERY.md)",
+                "`[Managed Recovery](docs/MANAGED_RECOVERY.md)`",
+            ),
+        )
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(
+            any("README.md: must link docs/MANAGED_RECOVERY.md" in error for error in errors),
+            errors,
+        )
+
+    def test_rejects_multiline_managed_recovery_heading(self):
+        # Break caught: tools below a wrapped prose label must not count as the
+        # required managed recovery H2 section.
+        root = self.make_valid_repository()
+        reference = (root / "docs/TOOL_REFERENCE.md").read_text(encoding="utf-8")
+        errors = VALIDATOR.validate_managed_recovery_contract(
+            {"docs/TOOL_REFERENCE.md": reference.replace(
+                "## Managed editor recovery", "## Managed\neditor recovery"
+            )}
+        )
+
+        self.assertIn(
+            "docs/TOOL_REFERENCE.md: missing Managed editor recovery section", errors
+        )
+
+    def test_requires_managed_recovery_document(self):
+        # Break caught: navigation can look intact while the recovery guide was
+        # deleted from the repository.
+        root = self.make_valid_repository()
+        (root / "docs" / "MANAGED_RECOVERY.md").unlink()
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(
+            any("docs/MANAGED_RECOVERY.md" in error for error in errors), errors
+        )
+
+    def test_canonical_managed_recovery_qualifies_windows_fallback(self):
+        # Windows normally reaps the editor through a job object, but the runtime
+        # deliberately launches an uncontained child when job setup fails. Keep
+        # the reviewed limitation as visible canonical prose without teaching the
+        # validator to infer semantics from arbitrary Markdown.
+        text = (REPOSITORY_ROOT / "docs" / "MANAGED_RECOVERY.md").read_text(
+            encoding="utf-8"
+        )
+        paragraphs = [
+            " ".join(paragraph.split())
+            for paragraph in text.replace("\r\n", "\n").split("\n\n")
+        ]
+        expected = (
+            "The owned editor is stopped when Didi exits. On Windows the child is "
+            "normally created inside a job object marked kill on close, so the kernel "
+            "ends it when the last handle to that job goes with the process. If "
+            "job-object creation or assignment fails, Didi logs the fallback and starts "
+            "the editor without that containment; an abnormal host exit can then leave "
+            "the managed editor running, so stop Didi normally or end the editor yourself."
+        )
+
+        self.assertIn(expected, paragraphs)
+
+    def test_literal_backticks_in_separate_paragraphs_do_not_hide_recovery_link(self):
+        root = self.make_valid_repository()
+        path = root / "README.md"
+        text = path.read_text(encoding="utf-8")
+        path.write_text(
+            text.replace(
+                "[Managed Recovery](docs/MANAGED_RECOVERY.md)",
+                "A literal ` character appears here.\n\n"
+                "[Managed Recovery](docs/MANAGED_RECOVERY.md)\n\n"
+                "Another literal ` character appears here.",
+            ),
+            encoding="utf-8",
+        )
+
+        errors = VALIDATOR.validate_repository(root, self.write_manifest())
+
+        self.assertFalse(
+            [error for error in errors if "must link docs/MANAGED_RECOVERY.md" in error],
+            errors,
+        )
+
+    def test_requires_managed_recovery_tool_reference_names(self):
+        # Break caught: readers lose the exact recovery operation or checkpoint
+        # argument from the only current Tool Reference section.
+        required_names = (
+            "runtime_recovery_status",
+            "runtime_checkpoint",
+            "runtime_recover_editor",
+            "runtime_restore_checkpoint",
+            "checkpoint_id",
+        )
+        for name in required_names:
+            with self.subTest(name=name):
+                root = self.make_valid_repository()
+                path = root / "docs" / "TOOL_REFERENCE.md"
+                self.write(path.relative_to(root).as_posix(), path.read_text(encoding="utf-8").replace(name, f"missing_{name}"))
+
+                errors = VALIDATOR.validate_repository(root)
+
+                self.assertTrue(any(name in error for error in errors), errors)
+
+    def test_rejects_duplicate_managed_recovery_names_or_sections(self):
+        # Break caught: duplicate recovery entries make a caller choose between
+        # conflicting operations instead of documenting one current contract.
+        for scenario, addition in {
+            "name": "\n`runtime_checkpoint` is repeated.\n",
+            "section": "\n## Managed editor recovery\n\n`runtime_checkpoint`\n",
+        }.items():
+            with self.subTest(scenario=scenario):
+                root = self.make_valid_repository()
+                path = root / "docs" / "TOOL_REFERENCE.md"
+                self.write(
+                    path.relative_to(root).as_posix(),
+                    path.read_text(encoding="utf-8") + addition,
+                )
+
+                errors = VALIDATOR.validate_repository(root)
+
+                self.assertTrue(
+                    any("Managed editor recovery section" in error for error in errors),
+                    errors,
+                )
+
+    def test_ignores_fenced_recovery_headings_and_section_terminators(self):
+        # Break caught: example H2s must neither supply the section nor end the
+        # real section before its required recovery names.
+        root = self.make_valid_repository()
+        path = root / "docs" / "TOOL_REFERENCE.md"
+        text = path.read_text(encoding="utf-8")
+        text = text.replace(
+            "## Managed editor recovery\n",
+            "## Managed editor recovery\n\n```markdown\n## Example recovery heading\n```\n",
+        )
+        self.write(path.relative_to(root).as_posix(), text)
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertFalse(
+            any("Managed editor recovery section must name" in error for error in errors),
+            errors,
+        )
+
+        text = text.replace("## Managed editor recovery", "### Managed editor recovery", 1)
+        text += """
+
+```markdown
+## Managed editor recovery
+`runtime_recovery_status`
+`runtime_checkpoint`
+`runtime_recover_editor`
+`runtime_restore_checkpoint`
+`checkpoint_id`
+```
+"""
+        self.write(path.relative_to(root).as_posix(), text)
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(
+            any("missing Managed editor recovery section" in error for error in errors),
+            errors,
+        )
+
+    def test_ignores_unclosed_or_longer_fenced_recovery_sections(self):
+        # Break caught: malformed examples cannot create a recovery section,
+        # and a longer closing run cannot terminate that example early.
+        fence_endings = {
+            "unclosed": "",
+            "longer closing fence": "\n````",
+        }
+        names = "\n".join(
+            (
+                "`runtime_recovery_status`",
+                "`runtime_checkpoint`",
+                "`runtime_recover_editor`",
+                "`runtime_restore_checkpoint`",
+                "`checkpoint_id`",
+            )
+        )
+        for scenario, fence_ending in fence_endings.items():
+            with self.subTest(scenario=scenario):
+                root = self.make_valid_repository()
+                path = root / "docs" / "TOOL_REFERENCE.md"
+                text = path.read_text(encoding="utf-8")
+                text = text.replace("## Managed editor recovery", "### Managed editor recovery", 1)
+                text += (
+                    "\n```markdown\n## Managed editor recovery\n"
+                    + names
+                    + fence_ending
+                )
+                self.write(path.relative_to(root).as_posix(), text)
+
+                errors = VALIDATOR.validate_repository(root)
+
+                self.assertTrue(
+                    any("missing Managed editor recovery section" in error for error in errors),
+                    errors,
+                )
+
+    def test_ignores_a_longer_fenced_recovery_section_terminator(self):
+        # Break caught: a closing run longer than its opener still closes an
+        # example, so its H2 cannot hide the real section's remaining names.
+        root = self.make_valid_repository()
+        path = root / "docs" / "TOOL_REFERENCE.md"
+        text = path.read_text(encoding="utf-8")
+        text = text.replace(
+            "## Managed editor recovery\n",
+            "## Managed editor recovery\n\n```markdown\n## Example recovery heading\n````\n",
+        )
+        self.write(path.relative_to(root).as_posix(), text)
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertFalse(
+            any("Managed editor recovery section must name" in error for error in errors),
+            errors,
+        )
+
+    def test_ignores_historical_surface_heading(self):
+        # A historical record may truthfully describe an earlier surface; only
+        # the designated current README heading is a release contract.
+        root = self.make_valid_repository()
+        self.write(
+            "CHANGELOG.md",
+            (root / "CHANGELOG.md").read_text(encoding="utf-8")
+            + "\n## Historical\n\n## Protocol Surface (107 Canonical Tools)\n",
+        )
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertFalse(
+            any("current protocol-surface heading" in error for error in errors), errors
+        )
 
     # --- tool manifest: documentation is validated against the built binary ---
 

@@ -74,10 +74,21 @@ The native runner's reported total is authoritative as the suite evolves. Covera
 - JSON-RPC/MCP lifecycle, registration counts, capability metadata, output redaction, and structured errors.
 - IPC framing, bounded transport waits, editor-hook state transitions, and single-response ownership.
 - Descriptor validation, PID/start identity, opened-handle TOCTOU defenses, host publication, retirement, and cleanup races.
+- Native checkpoint-store tests cover snapshot bounds, manifests, corruption, unsafe paths/links, and restore staging; managed-process tests cover owned-child identity, launch, exit, and termination behavior.
 - Transactional attach, deterministic auto-selection, fresh identity handshakes, route supersession, kind-aware availability, deadlines, and quarantine.
 - Runtime log cursor/gap/filter behavior, UTF-8 and payload bounds, runtime-tree bounds, and expression-sandbox policy.
 - Tool/resource live and offline provenance, viewport/image encoding, GDScript diagnostics/patching/reflection, and resource indexing.
 - Blackboard path rejection, atomic patching, expiry, bounds, and the cross-process file lock; task claim exclusivity under concurrent claimers, lease expiry and reclaim, dependency readiness, cycle refusal, and lease ownership on update and complete.
+
+The opt-in Python recovery suites launch real Godot through MCP stdio and cover owned-child crashes, saved-file persistence, the single restart, no replay, restore, source preservation, previews, and corrupt snapshots. Set `DIDI_TEST_BINARY` to the built host and `DIDI_RECOVERY_GODOT` to an absolute Godot executable:
+
+```powershell
+$env:DIDI_TEST_BINARY = "D:/didi/build/Release/didi.exe"
+$env:DIDI_RECOVERY_GODOT = "C:/Godot/Godot_v4.5.1-stable_win64.exe"
+python -m unittest discover -s tests -p "test_managed_recovery*.py"
+```
+
+See [Managed Recovery verification](MANAGED_RECOVERY.md#verification) for the live and adversarial suite scope. These are opt-in engine tests; a skipped test is not live recovery evidence.
 
 The Windows live integration harness copies the tracked fixture into `build/` and starts real Godot processes. It preserves the Phase 1/2 sequence, adds Phase 3 concurrent editor/game routing, and now exercises Phase 4 bounded search, SVG reimport, reversible isolation, capture IDs, mutation diffs, exact undo restoration, and cleanup. The earlier coverage still checks scripts, groups, autoloads, nested settings, InputEvent forms, persistence rollback, scene lifecycle, resource ownership, unsafe paths, and honest errors:
 
@@ -172,8 +183,11 @@ Route the method from `EditorHook::executeOnMainThread` into a bounded implement
 - Add a real Godot integration case for live behavior and UndoRedo where relevant.
 - Update [Current Capability Matrix](CAPABILITIES.md) and [Tool Reference](TOOL_REFERENCE.md).
 
-## Phase 3 implementation map
+## Phase 3 and managed recovery implementation map
 
+- `src/runtime/checkpoint_store.cpp`: bounded saved-file inventory, manifest/hash validation, checkpoint publication, retention, and restore staging.
+- `src/runtime/managed_process.cpp`: owned-child launch, process identity, exit observation, logs, and termination.
+- `src/runtime/managed_recovery.cpp`: copied-project lifecycle, readiness, pre/post checkpoints, reconciliation latch, one automatic restart, and preserved-project restore.
 - `src/runtime/session_client.cpp`: descriptor discovery, opened-handle validation, cross-platform PID/process-start identity, 3-second transactional handshake, token insertion, and local route state.
 - `src/gdextension/session_host.cpp`: bind-before-publish editor/game endpoint lifecycle, private descriptor generation, authentication stripping, and safe no-replace descriptor retirement.
 - `src/gdextension/runtime_log.cpp`: bounded 2,000-record ring, UTF-8-safe 16 KiB messages, 64 KiB details, cursor gaps, filtering, and logger sink mirroring.
@@ -248,6 +262,6 @@ python -m unittest tests.test_documentation_validator -v
 python tools/validate_documentation.py
 ```
 
-The validator derives the release from `CMakeLists.txt` and checks the MCP server header, standalone version output, addon manifest, README, capability matrix, changelog, and security policy for alignment. It also locks the documented 109 canonical/10 legacy/119 total surface, the 106 implemented/3 unimplemented split, Phase 7's `PARTIAL_DELIVERY` status, 15/18 versus 3/18 feasibility result, exact three-tool blocker set, authoritative-record links, stale current-state prose, and all relative Markdown targets and anchors.
+The validator derives the release from `CMakeLists.txt` and checks the MCP server header, standalone version output, addon manifest, README, capability matrix, changelog, and security policy for alignment. It also locks the documented 113 canonical/10 legacy/123 total surface, the 110 implemented/3 unimplemented split, Phase 7's `PARTIAL_DELIVERY` status, 15/18 versus 3/18 feasibility result, exact three-tool blocker set, authoritative-record links, stale current-state prose, and all relative Markdown targets and anchors.
 
 When the release changes, update these files in one change: `CMakeLists.txt`, `include/didi/mcp/mcp_protocol.hpp`, `src/standalone/main.cpp`, `addons/didi/plugin.cfg`, `README.md`, `CHANGELOG.md`, `docs/CAPABILITIES.md`, and `SECURITY.md`. When the tool surface or capability modes change, also update runtime discovery tests, `docs/TOOL_REFERENCE.md`, `docs/ROADMAP.md`, `docs/LLM_INSTRUCTIONS.md`, and the relevant quickstart/integration examples. Historical specs and plans record their original decisions and should not be rewritten as current release documentation.

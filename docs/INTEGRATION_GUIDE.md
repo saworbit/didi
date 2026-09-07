@@ -121,6 +121,29 @@ Add to your `mcp_config.json`:
 
 ---
 
+### Optional managed editor startup
+
+Use these startup arguments when the host should own a headless editor and edit a saved-project copy:
+
+```json
+{
+  "mcpServers": {
+    "didi": {
+      "command": "D:/didi/build/Release/didi.exe",
+      "args": [
+        "--project", "D:/my_game",
+        "--managed-editor", "C:/Godot/Godot_v4.5.1-stable_win64.exe",
+        "--recovery-workspace", "D:/my_game-recovery-01"
+      ]
+    }
+  }
+}
+```
+
+Both recovery flags are required together. Enable the matching addon in the source project first, use an absolute Godot executable file, and choose a new workspace outside the source with an existing parent. Tool work targets `<workspace>/project`. These are host startup arguments, not tool arguments; managed mode refuses manual attach/detach and only owns the child it launched.
+
+Every invocation needs a fresh workspace. A static client configuration that automatically restarts Didi with the retained same path will fail startup. Use a wrapper that rotates workspace names, or deliberately archive/remove the prior container after inspection before reusing its path. Retained containers are for inspection and salvage, not automatic host resume. See [Managed Recovery](MANAGED_RECOVERY.md) for the restart budget, reconciliation, coverage, and project-code boundary.
+
 ## 3. Environment Variables & Customization
 
 | Variable | Default | Description |
@@ -182,7 +205,7 @@ coordination tools are for.
 
 ## 5. Phase 3 client integration sequence
 
-`tools/list` returns 109 canonical tools and 10 legacy registrations, 119 in total. Integrators should treat the four session-management tools as local operations even though their discovery metadata uses the existing `offline_fallback` capability label:
+`tools/list` returns 113 canonical tools and 10 legacy registrations, 123 in total. In ordinary attachment mode, integrators should treat the four session-management tools as local operations even though their discovery metadata uses the existing `offline_fallback` capability label:
 
 1. Start Didi with `--project <canonical-project-root>` (or `DIDI_PROJECT_ROOT`). Phase 6 rejects startup if the explicit directory is missing or does not contain `project.godot`.
 2. Didi may auto-attach on first availability when there is one live project match, or one matching editor among games. Multiple editors or multiple games without an editor stay detached.
@@ -195,7 +218,7 @@ For logs, begin with `{ "cursor": 0, "limit": 100 }` and persist `next_cursor`. 
 
 For games, pause before step, allow only one in-flight `runtime_step`, and do not equate `runtime_stop` success with confirmed process exit. Editor sessions support tree/log/evaluation observation but reject game-only step/stop behavior.
 
-Only one MCP client can hold a runtime session lock. Detach or stop the first client before attaching another. For mutating tools, use `dry_run: true` to obtain a change plan; guarded reload/script-patch/overwrite calls must then repeat the exact arguments with the returned single-use `confirmation_token`.
+Only one MCP client can hold a runtime session lock. Detach or stop the first client before attaching another. For mutating tools, use `dry_run: true` to obtain a change plan; the [always-confirmed and overwrite-confirmed tools](TOOL_REFERENCE.md#13-phase-6-mutation-safety) must then repeat the exact arguments with the returned single-use `confirmation_token`.
 
 For evaluation, send only expressions supported by the [exact receiver allowlist](TOOL_REFERENCE.md#eval_gdscript--live). The submitted source is intentionally absent from successful responses and operational logs. Context and returned Nodes must remain inside the active editor/game subtree. The timeout is cooperative, not preemptive.
 

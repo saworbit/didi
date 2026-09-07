@@ -147,7 +147,7 @@ Once connected, ask your AI assistant any of the following:
 
 Signal wiring, viewport camera/debug controls, TileMap/GridMap editing, physics/navigation queries, game input injection, and profiler telemetry are implemented live. Only `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack` remain registered but unimplemented; an MCP client should not call any name when `implemented` is false.
 
-Every implemented mutation supports `dry_run`. Editor reload, script patching, and overwrite-enabled offline writers require the exact preview's `confirmation_token`; it expires after 120 seconds and is single-use. Repeat the original arguments unchanged, remove `dry_run`, and add the token only when the preview matches your intent.
+Every implemented mutation supports `dry_run`. The [always-confirmed and overwrite-confirmed tools](TOOL_REFERENCE.md#13-phase-6-mutation-safety) require the exact preview's `confirmation_token`; it expires after 120 seconds and is single-use. Repeat the original arguments unchanged, remove `dry_run`, and add the token only when the preview matches your intent.
 
 ## 🔗 Step 6: Attach to a running editor or game
 
@@ -176,3 +176,13 @@ A safe evaluation example is:
 `eval_gdscript` is a strict read-only expression subset, not arbitrary GDScript. It rejects traversal, dynamic/indexed access, callbacks, mutation, statements, and unsafe APIs; timeout checks are cooperative rather than preemptive. See [Tool Reference](TOOL_REFERENCE.md#eval_gdscript--live) before generating expressions.
 
 The structured runtime ring does not capture arbitrary Godot/external `print()` output. Continue using `runtime_launch` when you need bounded child stdout/stderr returned after process exit.
+
+## ♻️ Optional Step 7: Start a managed editor
+
+For autonomous work with saved-file checkpoints and one automatic editor restart, start a new Didi host with both recovery flags paired:
+
+```powershell
+D:/didi/build/Release/didi.exe --project "D:/my_game" --managed-editor "C:/Godot/Godot_v4.5.1-stable_win64.exe" --recovery-workspace "D:/my_game-recovery-01"
+```
+
+The matching addon must already be enabled in the source project. The Godot executable must be an absolute file path. The workspace must be a new directory outside the source project, with an existing parent; every host invocation needs a fresh workspace name. Work targets `<workspace>/project`, the saved-project copy. Managed mode owns only its child headless editor and refuses manual attach/detach. An ordinary authorized read can trigger recovery and execute project startup code; this is not an OS sandbox. See [Managed Recovery](MANAGED_RECOVERY.md) for checkpoint coverage, reconciliation, and cleanup, and the [MCP client example](INTEGRATION_GUIDE.md#optional-managed-editor-startup) for client startup arguments.

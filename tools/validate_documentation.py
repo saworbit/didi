@@ -20,6 +20,8 @@ REQUIRED_DOCUMENTS = (
     "CONTRIBUTING.md",
     "SECURITY.md",
     "docs/ADMIN_GUIDE.md",
+    "docs/README.md",
+    "docs/MANAGED_RECOVERY.md",
     "docs/API_SPECIFICATION.md",
     "docs/ARCHITECTURE.md",
     "docs/CAPABILITIES.md",
@@ -388,6 +390,15 @@ FACT_PATTERNS = {
 
 LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 HEADING_PATTERN = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
+CURRENT_SURFACE_HEADING_PATTERN = re.compile(
+    r"^[ \t]{0,3}##(?!#)[ \t]+[^\n]*?\bProtocol[ \t]+Surface[ \t]*\([ \t]*"
+    r"(?P<canonical>\d+)[ \t]+Canonical[ \t]+Tools[ \t]*\)[^\n]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+MANAGED_RECOVERY_HEADING_PATTERN = re.compile(
+    r"^[ \t]{0,3}##(?!#)[ \t]+Managed[ \t]+editor[ \t]+recovery[ \t]*#*[ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 ROADMAP_PHASE_HEADING_PATTERN = re.compile(
     r"^##\s+.*?\bPhase\s+(?P<number>\d+):(?P<title>[^\n]*)$",
     re.MULTILINE,
@@ -399,9 +410,6 @@ ROADMAP_SEQUENCE_STATUS_PATTERN = re.compile(
 DESIGN_PHASE_HEADING_PATTERN = re.compile(
     r"^## Phase (?P<number>\d+):[^\n]*$",
     re.MULTILINE,
-)
-FENCED_CODE_PATTERN = re.compile(
-    r"^\s{0,3}(`{3,}|~{3,}).*?^\s{0,3}\1\s*$", re.MULTILINE | re.DOTALL
 )
 INLINE_CODE_PATTERN = re.compile(r"(?<!`)`[^`\n]*`(?!`)")
 PHASE7_MATRIX_ROW_PATTERN = re.compile(
@@ -688,14 +696,44 @@ def extract_project_version(cmake_text: str) -> str:
     return match.group(1)
 
 
+def strip_fenced_code_blocks(text: str) -> str:
+    """Remove fenced Markdown blocks, including an unclosed block through EOF."""
+    visible_lines: list[str] = []
+    fence_marker: str | None = None
+    fence_length = 0
+
+    for line in text.splitlines(keepends=True):
+        content = line.rstrip("\r\n")
+        indent = len(content) - len(content.lstrip(" "))
+        candidate = content[indent:]
+        if fence_marker is None:
+            if indent <= 3 and candidate[:1] in {"`", "~"}:
+                marker = candidate[0]
+                length = len(candidate) - len(candidate.lstrip(marker))
+                if length >= 3 and (marker != "`" or "`" not in candidate[length:]):
+                    fence_marker = marker
+                    fence_length = length
+                    continue
+            visible_lines.append(line)
+            continue
+
+        if indent <= 3 and candidate[:1] == fence_marker:
+            length = len(candidate) - len(candidate.lstrip(fence_marker))
+            if length >= fence_length and not candidate[length:].strip(" \t"):
+                fence_marker = None
+                fence_length = 0
+
+    return "".join(visible_lines)
+
+
 def _without_code(text: str) -> str:
-    return INLINE_CODE_PATTERN.sub("", FENCED_CODE_PATTERN.sub("", text))
+    return INLINE_CODE_PATTERN.sub("", strip_fenced_code_blocks(text))
 
 
 def markdown_anchors(text: str) -> set[str]:
     anchors: set[str] = set()
     seen: dict[str, int] = {}
-    clean_text = FENCED_CODE_PATTERN.sub("", text)
+    clean_text = strip_fenced_code_blocks(text)
     for line in clean_text.splitlines():
         match = HEADING_PATTERN.match(line)
         if not match:
@@ -775,6 +813,104 @@ def _read_required(root: Path, relative_path: str, errors: list[str]) -> str | N
     except (OSError, UnicodeError) as error:
         errors.append(f"{relative_path}: cannot read UTF-8 text: {error}")
         return None
+
+
+def validate_current_surface_heading(
+    texts: dict[str, str], canonical_count: int
+) -> list[str]:
+    """Keep the reader-facing README surface heading aligned with the tool count."""
+    text = texts.get("README.md")
+    if text is None:
+        return []
+    text = strip_fenced_code_blocks(text)
+    headings = list(CURRENT_SURFACE_HEADING_PATTERN.finditer(text))
+    if not headings:
+        return [
+            "README.md: must contain exactly one current protocol-surface heading "
+            f"for {canonical_count} Canonical Tools"
+        ]
+    if len(headings) != 1:
+        return [
+            "README.md: must contain exactly one current protocol-surface heading "
+            f"(found {len(headings)})"
+        ]
+
+    documented_count = int(headings[0].group("canonical"))
+    if documented_count != canonical_count:
+        return [
+            "README.md: current protocol-surface heading must report "
+            f"{canonical_count} Canonical Tools (found {documented_count})"
+        ]
+    return []
+
+
+def _has_literal_markdown_target(text: str, target: str) -> bool:
+    for match in LINK_PATTERN.finditer(_without_code(text)):
+        if match.group(0).startswith("!"):
+            continue
+        if match.group(1).strip().split(maxsplit=1)[0].strip("<>") == target:
+            return True
+    return False
+
+
+def validate_managed_recovery_contract(texts: dict[str, str]) -> list[str]:
+    """Require discoverable, complete recovery guidance for managed editor sessions."""
+    errors: list[str] = []
+    navigation_targets = {
+        "README.md": "docs/MANAGED_RECOVERY.md",
+        "docs/README.md": "MANAGED_RECOVERY.md",
+        "docs/ADMIN_GUIDE.md": "MANAGED_RECOVERY.md",
+    }
+    for relative_path, target in navigation_targets.items():
+        text = texts.get(relative_path)
+        if text is not None and not _has_literal_markdown_target(text, target):
+            errors.append(
+                f"{relative_path}: must link {target} for managed editor recovery"
+            )
+
+    tool_reference = texts.get("docs/TOOL_REFERENCE.md")
+    if tool_reference is None:
+        return errors
+    current_reference = strip_fenced_code_blocks(tool_reference)
+    headings = list(MANAGED_RECOVERY_HEADING_PATTERN.finditer(current_reference))
+    if not headings:
+        return errors + [
+            "docs/TOOL_REFERENCE.md: missing Managed editor recovery section"
+        ]
+    if len(headings) != 1:
+        return errors + [
+            "docs/TOOL_REFERENCE.md: must contain exactly one Managed editor recovery section"
+        ]
+
+    section_start = headings[0].end()
+    following_heading = re.search(
+        r"^\s{0,3}##(?!#)\s+", current_reference[section_start:], flags=re.MULTILINE
+    )
+    section_end = (
+        section_start + following_heading.start()
+        if following_heading is not None
+        else len(current_reference)
+    )
+    section = current_reference[section_start:section_end]
+    for tool_name in (
+        "runtime_recovery_status",
+        "runtime_checkpoint",
+        "runtime_recover_editor",
+        "runtime_restore_checkpoint",
+    ):
+        occurrences = len(re.findall(rf"\b{re.escape(tool_name)}\b", section))
+        if occurrences != 1:
+            errors.append(
+                "docs/TOOL_REFERENCE.md: Managed editor recovery section must name "
+                f"`{tool_name}` exactly once (found {occurrences})"
+            )
+    checkpoint_occurrences = len(re.findall(r"\bcheckpoint_id\b", section))
+    if checkpoint_occurrences == 0:
+        errors.append(
+            "docs/TOOL_REFERENCE.md: Managed editor recovery section must name "
+            "`checkpoint_id` at least once"
+        )
+    return errors
 
 
 def _normalized_phase_status(title: str) -> str | None:
@@ -948,7 +1084,7 @@ def _current_changelog_section(text: str) -> str:
 
 
 def _without_phase7_excluded_contexts(text: str) -> str:
-    clean = FENCED_CODE_PATTERN.sub("", text)
+    clean = strip_fenced_code_blocks(text)
     lines: list[str] = []
     excluded_level: int | None = None
     for line in clean.splitlines():
@@ -1655,6 +1791,8 @@ def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[s
                     "has no binary to read, checks the same numbers as the build jobs."
                 )
             errors.extend(validate_tool_surface_counts(texts, manifest_counts))
+    errors.extend(validate_current_surface_heading(texts, expected_counts[0]))
+    errors.extend(validate_managed_recovery_contract(texts))
     errors.extend(validate_canonical_implementation_counts(texts, expected_counts))
     errors.extend(validate_phase7_reconciliation(texts, expected_counts))
     errors.extend(validate_addon_copies_match(root))

@@ -1,7 +1,9 @@
 # Engine Failure Handling Design
 
-Status: design, approved to plan
+Status: implemented; superseded in part by opt-in managed recovery
 Date: 2026-09-07
+
+This record preserves the original ordinary-attachment design and reasoning. Later [Managed Recovery](MANAGED_RECOVERY.md) owns a separate headless editor in a project copy and provides one bounded automatic restart. Its ownership and reconciliation contract supersedes this record's restart exclusion only for managed mode.
 
 ## The problem
 
@@ -43,9 +45,9 @@ In: engine crashed, engine unreachable, engine hung, session lost.
 
 Out, and deliberately:
 
-**Restarting the editor.** Didi cannot. `runtime_launch` starts a short-lived
+**Restarting the editor in ordinary attachment.** Didi cannot restart the user's attached editor. `runtime_launch` starts a short-lived
 headless process for a scene test. The editor is the user's own application,
-attached to over IPC. Recovery from a crash goes through a human.
+attached to over IPC. Recovery from a crash in this topology goes through a human.
 
 **Retrying the failed call.** The codebase already decided this. Auto-retry
 would contradict `MutationIsNeverRepeated` and the `unknown_outcome` quarantine.

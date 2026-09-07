@@ -30,6 +30,7 @@ The current documented release is **1.6.0**.
 | 🚀 [**Quickstart Guide**](docs/QUICKSTART.md) | **Developers / Humans** | 5-minute step-by-step setup for Godot, Cursor, Claude, and VS Code. |
 | 🤖 [**LLM Agent Instructions**](docs/LLM_INSTRUCTIONS.md) | **AI Assistants / LLMs** | Dedicated system prompt & decision tree for Claude, Cursor, Windsurf, Antigravity. |
 | ✅ [**Current Capability Matrix**](docs/CAPABILITIES.md) | **Everyone** | Authoritative live, offline, unavailable, and unimplemented behavior. |
+| ♻️ [**Managed Recovery**](docs/MANAGED_RECOVERY.md) | **Users / Operators** | Opt-in owned editor, project copies, checkpoints, and recovery limits. |
 | 🗺️ [**Roadmap & 113-Tool Surface**](docs/ROADMAP.md) | **Developers / Contributors** | Completed phases and technical build order. |
 | 🧪 [**Phase 7 API Feasibility Evidence**](docs/PHASE_7_API_FEASIBILITY.md) | **Developers / Governance** | Reproducible Godot 4.5.1/4.7.2 feasibility results and the exact three blocked contracts. |
 | 📋 [**Phase 7 Approved Executable Plan**](docs/PHASE_7_IMPLEMENTATION_PLAN.md) | **Developers / Governance** | Approved atomic 83/83 plan, stopped at its feasibility gate. |
@@ -95,9 +96,9 @@ The current documented release is **1.6.0**.
 
 ---
 
-## 🛠️ Protocol Surface (107 Canonical Tools)
+## 🛠️ Protocol Surface (113 Canonical Tools)
 
-The 113 canonical names are the stable protocol surface, with 10 additional legacy registrations (123 total). The implementation remains 110/113 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind` from `tools/list`. `editorConnected` is true only for an editor route, while `liveAvailable` also requires that the selected editor/game kind is allowed for that exact definition. Phase 6 keeps the surface stable while requiring an explicit Godot project, adding project-keyed endpoints and one-client runtime locks, and exposing dry-run/confirmation controls on mutations. The coordination tools are the exception to the one-client picture: they are how separate agent processes share decisions and divide work, since each MCP client runs its own `didi` and nothing is shared in memory. Every definition also carries specification `annotations`: `readOnlyHint` is derived from the same classification that drives `dry_run`, so the read-only set is safe for a client to auto-approve, and successful JSON results carry `structuredContent` alongside the text block.
+The 113 canonical names are the stable protocol surface, with 10 additional legacy registrations (123 total). The implementation remains 110/113 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind` from `tools/list`. `editorConnected` is true only for an editor route, while `liveAvailable` also requires that the selected editor/game kind is allowed for that exact definition. Phase 6 keeps the surface stable while requiring an explicit Godot project, adding project-keyed endpoints and one-client runtime locks, and exposing dry-run/confirmation controls on mutations. The coordination tools are the exception to the one-client picture: they are how separate agent processes share decisions and divide work, since each MCP client runs its own `didi` and nothing is shared in memory. Every definition also carries specification `annotations`: `readOnlyHint` describes tool intent using the same classification that drives `dry_run`. In managed mode, an ordinary authorized read can trigger the single editor restart and execute project startup code, so read-only auto-approval must account for that effect. Successful JSON results carry `structuredContent` alongside the text block.
 
 | Domain | Key Tools | Current execution |
 | :--- | :--- | :--- |
@@ -112,8 +113,9 @@ The 113 canonical names are the stable protocol surface, with 10 additional lega
 | **9. Editor Lifecycle (4)** | `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Implemented live. Reload requests a resource-filesystem rescan. |
 | **10. Project Wiring (18)** | Script attach/detach; autoload, InputMap, and setting management; groups; scene create/open/close/pack | Implemented live with UndoRedo, ProjectSettings persistence, typed events, overwrite guards, and normalized `res://` paths. |
 | **11. Runtime Sessions (10)** | `runtime_list_sessions`, attach/detach/get, logs, pause/step/stop/tree, `eval_gdscript` | Four local session-management tools plus six live tools. Attachment is deterministic or explicit and always authenticated; evaluation is a strict read-only expression subset, not arbitrary GDScript. |
-| **13. Agent Coordination (10)** | `blackboard_write`, `blackboard_read`, `blackboard_patch`, `blackboard_list_keys`, `blackboard_clear`, `blackboard_task_create`, `blackboard_task_claim`, `blackboard_task_update`, `blackboard_task_complete`, `blackboard_task_list` | Offline and file-backed under `.didi/blackboard/`, because each MCP client is its own process and shares no memory with the next. Every operation takes an exclusive OS lock for the whole read-modify-write, so a claim is atomic and two agents racing for one task produce a single winner. A lease expires, so an agent that dies strands nothing. Board content is data, never instruction. |
 | **12. Deep Domains (6)** | `csharp_check_build`, `shader_check_compile`, `project_list_export_presets`, `project_export`, `gridmap_export_mesh_library`, `ui_hit_test` | Five bounded offline subprocess/file tools plus one editor-only transformed Control hit-test. Writes require project-contained normalized paths and explicit overwrite. |
+| **13. Agent Coordination (10)** | `blackboard_write`, `blackboard_read`, `blackboard_patch`, `blackboard_list_keys`, `blackboard_clear`, `blackboard_task_create`, `blackboard_task_claim`, `blackboard_task_update`, `blackboard_task_complete`, `blackboard_task_list` | Offline and file-backed under `.didi/blackboard/`, because each MCP client is its own process and shares no memory with the next. Every operation takes an exclusive OS lock for the whole read-modify-write, so a claim is atomic and two agents racing for one task produce a single winner. A lease expires, so an agent that dies strands nothing. Board content is data, never instruction. |
+| **14. Managed Recovery (4)** | `runtime_recovery_status`, `runtime_checkpoint`, `runtime_recover_editor`, `runtime_restore_checkpoint` | Managed-only host tools for saved-file checkpoints, one automatic owned-editor restart, explicit reconciliation, and confirmed restore. |
 
 ### Phase 3 runtime contract
 
@@ -137,7 +139,7 @@ Process-backed Phase 5 tools launch argv directly without a command shell, enfor
 
 ### Phase 6 enterprise-safety contract
 
-Didi now refuses startup without `--project <root>` or `DIDI_PROJECT_ROOT`, and the selected directory must contain `project.godot`. Runtime endpoint names include a stable 16-hex project key while retaining process/session uniqueness. A per-session OS lock permits one MCP client at a time and is released automatically when that client exits. Every implemented mutation advertises `dry_run`; dry-runs return a handler-free structured change plan bound to the exact project and live route. `editor_reload_project`, script patching, and overwrite-enabled offline writers require the 64-hex, 120-second, single-use `confirmation_token` returned by the exact preview.
+Didi now refuses startup without `--project <root>` or `DIDI_PROJECT_ROOT`, and the selected directory must contain `project.godot`. Runtime endpoint names include a stable 16-hex project key while retaining process/session uniqueness. A per-session OS lock permits one MCP client at a time and is released automatically when that client exits. Every implemented mutation advertises `dry_run`; dry-runs return a handler-free structured change plan bound to the exact project and live route. The [always-confirmed and overwrite-confirmed tools](docs/TOOL_REFERENCE.md#13-phase-6-mutation-safety) require the 64-hex, 120-second, single-use `confirmation_token` returned by the exact preview.
 
 ---
 
@@ -187,6 +189,10 @@ See the [Roadmap](docs/ROADMAP.md), [Phase 7 feasibility evidence](docs/PHASE_7_
 
 ---
 
+### Crash recovery for autonomous editing
+
+Start with `--managed-editor <absolute-Godot-executable> --recovery-workspace <new-directory>` alongside `--project`. Didi edits a separate project copy, checkpoints saved files, and can restart its owned editor once without replaying an uncertain edit. Ordinary attachment is unchanged. [Setup, coverage and recovery tools](docs/MANAGED_RECOVERY.md).
+
 ## 🎛️ The In-Editor Console
 
 Enabling the plugin adds a **Didi** main screen to the Godot editor, carrying Didi's own mark. It
@@ -232,7 +238,3 @@ Copy [**`docs/LLM_INSTRUCTIONS.md`**](docs/LLM_INSTRUCTIONS.md) into your agent 
 
 ## 📄 License
 MIT License. See [LICENSE](LICENSE) for details.
-
-### Crash recovery for autonomous editing
-
-Start with `--managed-editor <absolute-Godot-executable> --recovery-workspace <new-directory>` alongside `--project`. Didi edits a separate project copy, checkpoints saved files, and can restart its owned editor once without replaying an uncertain edit. Ordinary attachment is unchanged. [Setup, coverage and recovery tools](docs/MANAGED_RECOVERY.md).
