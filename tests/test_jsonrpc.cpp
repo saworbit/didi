@@ -384,9 +384,16 @@ static void test_mcp_stdio_loop_leaves_on_a_signal_safe_stop_request() {
     // context, and the loop it was trying to end stayed parked in stdin. Ctrl+C
     // left the process alive and holding the runtime session until the client
     // closed the pipe.
-    BlockingInput input;
+    // Never destroyed, and held by a static so a leak checker still sees it as
+    // reachable. The reader thread this test creates is detached by design and
+    // cannot be joined, so whatever it is reading from has to outlive it. That
+    // is the same reason main leaves through _Exit instead of returning: a read
+    // nobody can cancel must not have its stream torn down underneath it. A
+    // stack buffer here aborted on macOS, where libc++ throws out of a wait on
+    // a destroyed condition variable, and passed on Windows by luck.
+    static BlockingInput* const input = new BlockingInput();
     std::ostringstream output;
-    auto* old_input = std::cin.rdbuf(&input);
+    auto* old_input = std::cin.rdbuf(input);
     auto* old_output = std::cout.rdbuf(output.rdbuf());
 
     auto sessions = std::make_shared<DetachCountingSessionClient>();
@@ -404,14 +411,14 @@ static void test_mcp_stdio_loop_leaves_on_a_signal_safe_stop_request() {
 
         // Serve one request, then wait until the reader is blocked again. The
         // loop is now live and idle, which is the state a signal arrives in.
-        input.push("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n");
-        input.waitUntilRead();
+        input->push("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n");
+        input->waitUntilRead();
 
         server.requestStop();
         left = finished.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
 
         // Let the reader out either way, so a failure reports rather than hangs.
-        input.release();
+        input->release();
         loop.join();
     }
     std::cin.rdbuf(old_input);
