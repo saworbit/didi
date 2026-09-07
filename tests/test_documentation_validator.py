@@ -641,6 +641,50 @@ Second section.
             any("docs/MANAGED_RECOVERY.md" in error for error in errors), errors
         )
 
+    def test_canonical_managed_recovery_qualifies_windows_fallback(self):
+        # Windows normally reaps the editor through a job object, but the runtime
+        # deliberately launches an uncontained child when job setup fails. Keep
+        # the reviewed limitation as visible canonical prose without teaching the
+        # validator to infer semantics from arbitrary Markdown.
+        text = (REPOSITORY_ROOT / "docs" / "MANAGED_RECOVERY.md").read_text(
+            encoding="utf-8"
+        )
+        paragraphs = [
+            " ".join(paragraph.split())
+            for paragraph in text.replace("\r\n", "\n").split("\n\n")
+        ]
+        expected = (
+            "The owned editor is stopped when Didi exits. On Windows the child is "
+            "normally created inside a job object marked kill on close, so the kernel "
+            "ends it when the last handle to that job goes with the process. If "
+            "job-object creation or assignment fails, Didi logs the fallback and starts "
+            "the editor without that containment; an abnormal host exit can then leave "
+            "the managed editor running, so stop Didi normally or end the editor yourself."
+        )
+
+        self.assertIn(expected, paragraphs)
+
+    def test_literal_backticks_in_separate_paragraphs_do_not_hide_recovery_link(self):
+        root = self.make_valid_repository()
+        path = root / "README.md"
+        text = path.read_text(encoding="utf-8")
+        path.write_text(
+            text.replace(
+                "[Managed Recovery](docs/MANAGED_RECOVERY.md)",
+                "A literal ` character appears here.\n\n"
+                "[Managed Recovery](docs/MANAGED_RECOVERY.md)\n\n"
+                "Another literal ` character appears here.",
+            ),
+            encoding="utf-8",
+        )
+
+        errors = VALIDATOR.validate_repository(root, self.write_manifest())
+
+        self.assertFalse(
+            [error for error in errors if "must link docs/MANAGED_RECOVERY.md" in error],
+            errors,
+        )
+
     def test_requires_managed_recovery_tool_reference_names(self):
         # Break caught: readers lose the exact recovery operation or checkpoint
         # argument from the only current Tool Reference section.
