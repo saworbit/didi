@@ -12,6 +12,55 @@ Historical entries describe the surface advertised by those releases. For the ex
 ## [Unreleased]
 
 Added opt-in managed editor recovery: isolated project copies, saved-file checkpoints, one owned-editor restart, explicit reconciliation and preserved-workspace restoration. Four recovery tools expose state and actions without replaying uncertain edits. Ordinary attachment and runtime_launch remain unchanged. See [Managed Recovery](docs/MANAGED_RECOVERY.md) for coverage and limitations.
+### Fixed
+
+- Ctrl+C stops the server. The `SIGINT` and `SIGTERM` handler called `stop()`,
+  which joins the blackboard watcher thread, detaches the runtime session over
+  IPC, and logs through a mutex. None of that is safe from a signal handler,
+  which the C runtime is explicit about: no heap, no stdio, nothing that makes a
+  system call. The flag the handler also set was read by nobody, and the stdio
+  loop stayed blocked inside `std::getline`, so a single Ctrl+C left the process
+  running and still holding the session. It took closing the client, or another
+  line on stdin, to get out.
+
+  The handler now stores two atomics and returns, and that is all it does.
+  Lines come off a reader thread, so the loop can wait on a flag rather than on
+  a descriptor and leave when one is set. A blocking read cannot be cancelled
+  portably: libstdc++ retries a read a signal interrupted, and on Windows the
+  handler runs on a thread the operating system made for the interrupt, so the
+  read is never interrupted at all. Teardown runs where it always belonged, on
+  the normal path when the loop returns.
+
+  Reading on a thread took away the backpressure the pipe used to provide, so
+  the pending queue is capped and the reader waits once it is full. Three
+  thousand pipelined requests come back in order and the process still exits 0.
+
+- The perceptual hash uses all 64 bits it reports. `perceptualHash` dropped the
+  DC term out of an 8x8 DCT block and wrote the 63 that were left to bits 0
+  through 62. Bit 63 was clear for every possible input, so the Hamming distance
+  of 64 that the header, `docs/TOOL_REFERENCE.md` and the `max_hamming_distance`
+  schema all offer could not be produced by the function producing the hashes. A
+  caller tuning a visual regression threshold was tuning against a range the
+  implementation could not reach. The median was also the average of the pair
+  either side of the middle of an odd count, which is not the median.
+
+  The block is 9x9 now and the hash takes the 64 lowest frequency AC
+  coefficients out of it, ordered by `u+v` and then by `u`. The DC term stays
+  out, so a uniform exposure change still moves no bits. The count is even, so
+  the median formula is the right one and exactly half the coefficients sit
+  above it, which is what makes 64 reachable between two real hashes. Documenting
+  63 instead would not have worked: a correct odd median split puts 31 bits in
+  every hash, so the most two of them can differ by is 62, and the contract would
+  have been wrong again by one. Hashes are computed per diff and never stored, so
+  nothing on disk went stale.
+
+- `DIDI_BUILD_TESTS=OFF` builds no tests. `didi_extension_signal_tests` sat
+  outside the guard, so a production configure recompiled every GDExtension
+  source a second time with test seams to produce a library nothing ships. It
+  had come out from under that guard once before, so there is now a configure
+  time check that refuses when either test-only target exists with the option
+  off, rather than a comment asking the next person not to do it again. A clean
+  test-off build produces exactly the server binary and the extension.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`

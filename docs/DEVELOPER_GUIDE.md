@@ -19,16 +19,27 @@ cmake -B build -S .
 # Compile Release binaries
 cmake --build build --config Release
 
-# Run automated tests
-./build/Release/didi_tests.exe
+# Run both registered suites
+ctest --test-dir build -C Release --output-on-failure
 ```
 
 ### Linux / macOS
 ```bash
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
-./build/didi_tests
+ctest --test-dir build --output-on-failure
 ```
+
+### Build options
+
+| Option | Default | Effect |
+| :--- | :--- | :--- |
+| `DIDI_BUILD_TESTS` | `ON` | Builds the native suite, the Phase 7 signal bridge fixture and its probe, and registers both CTest entries. `OFF` produces only `didi` and `didi_extension`, and the configure fails if a test-only target is defined anyway. |
+| `DIDI_ENABLE_SANITIZERS` | `OFF` | ASan and UBSan on GCC and Clang. MSVC has no supported combination here, so the configure refuses rather than building without the runtime. CI runs this on Ubuntu. |
+
+`ctest` runs the native suite and the Python suite, the latter discovered rather
+than listed, so the two cannot drift. Running `didi_tests` by path still works
+and is what the `--list` and `--filter` flags below are for.
 
 ---
 
@@ -173,7 +184,7 @@ The standalone router starts detached, then may auto-attach on first availabilit
 
 ## Phase 4 tests and release gate
 
-The v1.4.0 release gate runs the complete native suite; the runner's reported total remains authoritative as cases evolve. Focused suites cover the existing session/routing/evaluation contracts plus search containment and lexical filtering, two-idle-frame reimport progress, exact diff arithmetic, cache eviction, public response completeness, and restoration guards. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and verifies the complete live workflow on Godot 4.5.1 and 4.7.2. Editor teardown first requests a normal window close, then uses PID-and-start-time-verified termination if a hidden Windows editor keeps an invisible native prompt alive; this fallback is limited to the disposable test process and cannot target a reused PID. Because forced exit cannot run the extension destructor, the harness removes a leftover descriptor only after its regular-file shape, session ID, PID, and process-start identity all match that editor instance.
+The release gate runs the complete native suite; the runner's reported total remains authoritative as cases evolve. Focused suites cover the existing session/routing/evaluation contracts plus search containment and lexical filtering, two-idle-frame reimport progress, exact diff arithmetic, cache eviction, public response completeness, and restoration guards. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and verifies the complete live workflow on Godot 4.5.1 and 4.7.2. Editor teardown first requests a normal window close, then uses PID-and-start-time-verified termination if a hidden Windows editor keeps an invisible native prompt alive; this fallback is limited to the disposable test process and cannot target a reused PID. Because forced exit cannot run the extension destructor, the harness removes a leftover descriptor only after its regular-file shape, session ID, PID, and process-start identity all match that editor instance.
 
 Run from a clean worktree:
 
