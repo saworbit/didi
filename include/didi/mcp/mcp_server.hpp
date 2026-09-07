@@ -28,6 +28,20 @@ public:
     void runStdio();
     void stop();
 
+    // Signal safe. A handler may call this and nothing else on the server: it
+    // stores two flags and returns. Every part of shutdown that touches a
+    // mutex, the heap, a thread join or the IPC route happens on the normal
+    // path when runStdio leaves its loop. Sticky, so a signal that arrives
+    // before the loop starts still ends the session.
+    void requestStop();
+
+    // True when the loop ended while stdin still had a read outstanding: a
+    // signal, or a frame the server refused to keep reading after. The reader
+    // is detached and still inside that read, so whoever owns the process
+    // should leave without running static destruction, which would take
+    // std::cin away underneath it.
+    bool stdinReaderStillParked() const { return m_readerParked.load(); }
+
     JsonRpcResponse handleRequest(const JsonRpcRequest& req);
 
     void setIpcClient(std::shared_ptr<ipc::IIpcClient> ipc_client);
@@ -56,6 +70,8 @@ private:
     void watchBoards();
 
     std::atomic<bool> m_running{false};
+    std::atomic<bool> m_stopRequested{false};
+    std::atomic<bool> m_readerParked{false};
     bool m_initialized{false};
     bool m_skipConfirmations{false};
     std::shared_ptr<ipc::IIpcClient> m_ipcClient;

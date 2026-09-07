@@ -3,10 +3,17 @@
 #include "didi/runtime/session_client.hpp"
 #include "didi/common/logger.hpp"
 #include <cassert>
+#include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <future>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <memory>
 #include <optional>
+#include <streambuf>
+#include <thread>
 #include <vector>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
@@ -306,6 +313,116 @@ static void test_mcp_releases_its_runtime_session_on_stdio_eof() {
     }
     // The destructor runs stop() again; nothing is attached, so it stays at one.
     ASSERT_EQ(sessions->detaches, 1);
+
+    didi::mcp::ToolRegistry::instance().setIpcClient(nullptr);
+    didi::mcp::ToolRegistry::instance().setRuntimeSessionClient(nullptr);
+}
+
+namespace {
+
+// A stdin that hands over the lines it is given and then waits, the way a real
+// client's pipe does between requests. std::istringstream cannot stand in for
+// this: it reports end of input the moment it runs dry, which is the one thing
+// a live session never does, and a loop that only leaves on end of input looks
+// correct against it.
+class BlockingInput final : public std::streambuf {
+public:
+    void push(const std::string& text) {
+        {
+            std::lock_guard<std::mutex> guard(m_mutex);
+            m_queue.push_back(text);
+        }
+        m_ready.notify_all();
+    }
+
+    // Report end of input, so a reader parked here can leave.
+    void release() {
+        {
+            std::lock_guard<std::mutex> guard(m_mutex);
+            m_released = true;
+        }
+        m_ready.notify_all();
+    }
+
+    // Returns once a reader is actually blocked waiting for more input, which
+    // is what proves the loop consumed what it was given and is now idle.
+    void waitUntilRead() {
+        std::unique_lock<std::mutex> guard(m_mutex);
+        m_parked.wait(guard, [this] { return m_waiting; });
+    }
+
+protected:
+    int_type underflow() override {
+        std::unique_lock<std::mutex> guard(m_mutex);
+        if (m_queue.empty() && !m_released) {
+            m_waiting = true;
+            m_parked.notify_all();
+            m_ready.wait(guard, [this] { return !m_queue.empty() || m_released; });
+            m_waiting = false;
+        }
+        if (m_queue.empty()) return traits_type::eof();
+        m_chunk = std::move(m_queue.front());
+        m_queue.pop_front();
+        setg(m_chunk.data(), m_chunk.data(), m_chunk.data() + m_chunk.size());
+        return traits_type::to_int_type(*gptr());
+    }
+
+private:
+    std::mutex m_mutex;
+    std::condition_variable m_ready;
+    std::condition_variable m_parked;
+    std::deque<std::string> m_queue;
+    std::string m_chunk;
+    bool m_released{false};
+    bool m_waiting{false};
+};
+
+} // namespace
+
+static void test_mcp_stdio_loop_leaves_on_a_signal_safe_stop_request() {
+    // Break caught: the signal handler did the teardown itself, from signal
+    // context, and the loop it was trying to end stayed parked in stdin. Ctrl+C
+    // left the process alive and holding the runtime session until the client
+    // closed the pipe.
+    BlockingInput input;
+    std::ostringstream output;
+    auto* old_input = std::cin.rdbuf(&input);
+    auto* old_output = std::cout.rdbuf(output.rdbuf());
+
+    auto sessions = std::make_shared<DetachCountingSessionClient>();
+    bool left = false;
+    {
+        didi::mcp::McpServer server;
+        server.setIpcClient(sessions);
+
+        std::promise<void> done;
+        auto finished = done.get_future();
+        std::thread loop([&server, &done] {
+            server.runStdio();
+            done.set_value();
+        });
+
+        // Serve one request, then wait until the reader is blocked again. The
+        // loop is now live and idle, which is the state a signal arrives in.
+        input.push("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n");
+        input.waitUntilRead();
+
+        server.requestStop();
+        left = finished.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+
+        // Let the reader out either way, so a failure reports rather than hangs.
+        input.release();
+        loop.join();
+    }
+    std::cin.rdbuf(old_input);
+    std::cout.rdbuf(old_output);
+
+    ASSERT_TRUE(left);
+    ASSERT_TRUE(output.str().find("\"id\":1") != std::string::npos);
+
+    // Teardown ran on the normal path, once, not from the handler.
+    ASSERT_EQ(sessions->detaches, 1);
+    ASSERT_TRUE(!sessions->activeSession().has_value());
 
     didi::mcp::ToolRegistry::instance().setIpcClient(nullptr);
     didi::mcp::ToolRegistry::instance().setRuntimeSessionClient(nullptr);
@@ -708,6 +825,8 @@ struct RegisterJsonRpcTests {
         registerTest("McpServer.JsonRpcBatchRequests", test_mcp_handles_jsonrpc_batches);
         registerTest("McpServer.ReleasesRuntimeSessionOnEof",
                      test_mcp_releases_its_runtime_session_on_stdio_eof);
+        registerTest("McpServer.StdioLoopLeavesOnStopRequest",
+                     test_mcp_stdio_loop_leaves_on_a_signal_safe_stop_request);
         registerTest("McpServer.ApplicationErrorRange",
                      test_mcp_maps_resource_and_prompt_failures_to_server_error_range);
         registerTest("McpServer.OutputLoggingRedactsBodies",
