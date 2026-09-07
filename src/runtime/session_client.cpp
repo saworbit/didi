@@ -664,6 +664,60 @@ ProcessInstanceState processInstanceState(uint64_t pid, int64_t started_at_ms) {
     return describeProcessInstance(pid, started_at_ms).state;
 }
 
+namespace {
+
+std::string valueAfter(const std::string& text, const std::string& key) {
+    const auto at = text.find(key);
+    if (at == std::string::npos) return {};
+    const auto start = at + key.size();
+    const auto end = text.find_first_of("\r\n", start);
+    auto value = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
+    while (!value.empty() && (value.back() == ' ' || value.back() == '\t')) value.pop_back();
+    return value;
+}
+
+} // namespace
+
+EngineCrashReport findEngineCrashReport(const std::string& project_path, uint64_t pid) {
+    EngineCrashReport report;
+    if (pid == 0) return report;
+    const std::string name = "godot_crash_" + std::to_string(pid) + ".log";
+
+    std::vector<std::filesystem::path> candidates;
+    if (const char* configured = std::getenv("DIDI_CRASH_CAPTURE_DIR");
+        configured && *configured) {
+        candidates.push_back(paths::projectPathFromUtf8(configured) / name);
+    }
+    if (!project_path.empty()) {
+        candidates.push_back(paths::projectPathFromUtf8(project_path) / ".didi" / "crash" / name);
+    }
+
+    std::error_code error;
+    for (const auto& candidate : candidates) {
+        if (!std::filesystem::is_regular_file(candidate, error)) continue;
+        std::ifstream file(candidate, std::ios::binary);
+        if (!file) continue;
+        std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        if (text.find("DIDI CRASH CAPTURE") == std::string::npos) continue;
+
+        report.found = true;
+        report.path = paths::nativePathToUtf8(candidate);
+        report.exception = valueAfter(text, "exception: ");
+        report.on_main_thread = valueAfter(text, "on main thread: ") == "yes";
+        // Only the stack section counts. The module list below it names every
+        // loaded binary, ours included, so searching the whole report would
+        // call every crash ours.
+        const auto stack = text.find("\nstack:");
+        const auto modules = text.find("\nloaded modules:");
+        if (stack != std::string::npos && modules != std::string::npos && modules > stack) {
+            report.in_extension =
+                text.substr(stack, modules - stack).find("didi_extension") != std::string::npos;
+        }
+        return report;
+    }
+    return report;
+}
+
 void annotateEngineState(Error& error, const std::optional<SessionDescriptor>& session) {
     if (!session.has_value() || session->pid == 0) return;
     if (!error.data.is_object()) error.data = json::object();
@@ -677,6 +731,16 @@ void annotateEngineState(Error& error, const std::optional<SessionDescriptor>& s
             error.data["engine_os_error"] = static_cast<uint64_t>(report.os_error);
         }
     }
+    // An engine that is not alive may have left an account of why. Without it a
+    // caller sees only that the connection went, which is the same thing it
+    // would see for a network fault or a clean shutdown.
+    if (report.state == ProcessInstanceState::alive) return;
+    const auto crash = findEngineCrashReport(session->project_path, session->pid);
+    if (!crash.found) return;
+    error.data["engine_crash"] = {{"report", crash.path},
+                                  {"exception", crash.exception},
+                                  {"on_main_thread", crash.on_main_thread},
+                                  {"in_extension", crash.in_extension}};
 }
 
 const char* processInstanceStateName(ProcessInstanceState state) {

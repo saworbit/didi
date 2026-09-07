@@ -11,9 +11,13 @@ namespace godot {
 // already loaded in the process that dies, so this is the one place a stack
 // can still be taken.
 //
-// Does nothing unless DIDI_CRASH_CAPTURE_DIR names a directory that exists.
-// Returns true when a handler was installed.
-bool armCrashCapture();
+// DIDI_CRASH_CAPTURE_DIR wins when it names a directory that exists, which is
+// how the harness points reports at its build tree. Otherwise the reports go
+// to fallback_directory, which is created if needed. Passing neither leaves the
+// handler uninstalled.
+//
+// Returns true when a handler was installed, and is a no-op once one is.
+bool armCrashCapture(const std::string& fallback_directory = {});
 
 // Puts the handler back on top if something else has taken the top level
 // filter since. Godot installs its own after the extension loads, which

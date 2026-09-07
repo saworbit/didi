@@ -59,6 +59,24 @@ const char* processInstanceStateName(ProcessInstanceState state);
 
 struct SessionDescriptor;
 
+// What the engine left behind when it died. The capture writes this from
+// inside the engine process, so it is the only account of a fault that kills
+// the editor before it can report anything itself.
+struct EngineCrashReport {
+    bool found{false};
+    // Whether a frame of ours is on the faulting stack. False means the engine
+    // faulted in its own code, which is a different conversation from a fault
+    // in a tool call.
+    bool in_extension{false};
+    bool on_main_thread{false};
+    std::string exception;
+    std::string path;
+};
+
+// Looks where the engine would have written one: DIDI_CRASH_CAPTURE_DIR when
+// it is set, otherwise the project's .didi/crash.
+EngineCrashReport findEngineCrashReport(const std::string& project_path, uint64_t pid);
+
 // Records whether the engine behind a session is still there, on a transport
 // failure that is about to be reported.
 //

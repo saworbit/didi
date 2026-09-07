@@ -98,6 +98,17 @@ static void initialize_didi_module(void *userdata, GDExtensionInitializationLeve
             DIDI_LOG_WARN("GDEXTENSION", "Unable to resolve res:// for runtime session; using canonical process path: ",
                           resolved_project.error().message);
         }
+        // The library entry point armed this only if the environment named a
+        // directory. Now that the project is known it gets one regardless, so
+        // an ordinary session that dies leaves a stack behind rather than a
+        // bare exit code. .didi is already ignored, so nothing lands in a
+        // user's repository.
+        if (!project_path.empty() &&
+            armCrashCapture(paths::nativePathToUtf8(
+                paths::projectPathFromUtf8(project_path) / ".didi" / "crash"))) {
+            DIDI_LOG_INFO("GDEXTENSION", "Fatal exception capture armed; a crash writes ",
+                          crashReportPath());
+        }
         DIDI_LOG_INFO("GDEXTENSION", "Initializing Didi GDExtension runtime session for Godot ", kind);
         // Subscribe to engine output before the IPC session starts, so anything
         // the engine reports while connecting is already being captured.

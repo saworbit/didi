@@ -6,6 +6,8 @@
 #include <dbghelp.h>
 #include <psapi.h>
 
+#include "didi/common/project_path.hpp"
+
 #include <atomic>
 #include <cstdlib>
 #include <filesystem>
@@ -394,13 +396,24 @@ LONG WINAPI onUnhandledException(EXCEPTION_POINTERS* pointers) {
 
 } // namespace
 
-bool armCrashCapture() {
+bool armCrashCapture(const std::string& fallback_directory) {
     if (g_armed) return true;
-    const char* directory = std::getenv("DIDI_CRASH_CAPTURE_DIR");
-    if (!directory || !*directory) return false;
     std::error_code error;
-    const std::filesystem::path root(directory);
-    if (!std::filesystem::is_directory(root, error)) return false;
+    std::filesystem::path root;
+    const char* configured = std::getenv("DIDI_CRASH_CAPTURE_DIR");
+    if (configured && *configured && std::filesystem::is_directory(configured, error)) {
+        root = paths::projectPathFromUtf8(configured);
+    } else if (!fallback_directory.empty()) {
+        // Created rather than required, because the point of the fallback is
+        // that an ordinary editor session leaves a report without anyone
+        // having set anything up first.
+        const auto candidate = paths::projectPathFromUtf8(fallback_directory);
+        std::filesystem::create_directories(candidate, error);
+        if (error || !std::filesystem::is_directory(candidate, error)) return false;
+        root = candidate;
+    } else {
+        return false;
+    }
 
     const auto base = root / ("godot_crash_" + std::to_string(GetCurrentProcessId()));
     const auto report = std::filesystem::path(base).replace_extension(".log");
@@ -458,7 +471,7 @@ std::string crashReportPath() { return g_report_path; }
 namespace didi {
 namespace godot {
 
-bool armCrashCapture() { return false; }
+bool armCrashCapture(const std::string&) { return false; }
 void reassertCrashCapture() {}
 bool disarmCrashCapture() { return false; }
 std::string crashReportPath() { return {}; }
