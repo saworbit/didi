@@ -427,6 +427,16 @@ bool armCrashCapture() {
     return true;
 }
 
+void reassertCrashCapture() {
+    if (!g_armed) return;
+    // There is no way to read the current filter without setting one, so the
+    // swap is the read. If something else had taken the top level it becomes
+    // the filter this one chains to, which keeps the engine's own handler in
+    // the chain rather than displacing it.
+    LPTOP_LEVEL_EXCEPTION_FILTER previous = SetUnhandledExceptionFilter(onUnhandledException);
+    if (previous != onUnhandledException) g_previous_filter = previous;
+}
+
 bool disarmCrashCapture() {
     if (!g_armed) return false;
     SetUnhandledExceptionFilter(g_previous_filter);
@@ -449,6 +459,7 @@ namespace didi {
 namespace godot {
 
 bool armCrashCapture() { return false; }
+void reassertCrashCapture() {}
 bool disarmCrashCapture() { return false; }
 std::string crashReportPath() { return {}; }
 

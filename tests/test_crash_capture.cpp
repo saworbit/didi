@@ -24,6 +24,7 @@ namespace {
 #if defined(_WIN32)
 
 constexpr const char* kSelfTestVariable = "DIDI_CRASH_CAPTURE_SELF_TEST";
+constexpr const char* kSelfTestStealVariable = "DIDI_CRASH_CAPTURE_SELF_TEST_STEAL";
 
 LONG WINAPI terminateQuietly(EXCEPTION_POINTERS*) {
     // Stands in for the filter the engine already had. Returning this ends the
@@ -43,6 +44,13 @@ struct CrashCaptureSelfTest {
         _putenv_s("DIDI_CRASH_CAPTURE_DIR", directory);
         SetUnhandledExceptionFilter(terminateQuietly);
         if (!didi::godot::armCrashCapture()) ExitProcess(2);
+        const char* steal = std::getenv(kSelfTestStealVariable);
+        if (steal && *steal) {
+            // What the engine does: installs its own top level filter after the
+            // extension has loaded, which silently replaces ours.
+            SetUnhandledExceptionFilter(terminateQuietly);
+            didi::godot::reassertCrashCapture();
+        }
         // The fault the issue reports, raised for real rather than described.
         __ud2();
         ExitProcess(3);
@@ -135,12 +143,13 @@ void test_crash_report_names_the_fault_the_thread_and_the_stack() {
 // fired on exceptions the engine raises and handles normally, and hung the
 // editor's shutdown. So the thing worth testing is the whole path: a real
 // illegal instruction, in a real process, reaching a real filter.
-void test_a_real_illegal_instruction_leaves_a_report() {
-    const auto directory = makeScratchDirectory("child");
+void runFaultingChild(const char* label, bool steal) {
+    const auto directory = makeScratchDirectory(label);
     const std::wstring executable = thisExecutablePath();
     ASSERT_FALSE(executable.empty());
 
     SetEnvironmentVariableA(kSelfTestVariable, directory.string().c_str());
+    if (steal) SetEnvironmentVariableA(kSelfTestStealVariable, "1");
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     PROCESS_INFORMATION child{};
@@ -148,6 +157,7 @@ void test_a_real_illegal_instruction_leaves_a_report() {
     const BOOL started = CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE,
                                         CREATE_NO_WINDOW, nullptr, nullptr, &startup, &child);
     SetEnvironmentVariableA(kSelfTestVariable, nullptr);
+    SetEnvironmentVariableA(kSelfTestStealVariable, nullptr);
     if (!started) {
         std::error_code cleanup;
         std::filesystem::remove_all(directory, cleanup);
@@ -183,6 +193,15 @@ void test_a_real_illegal_instruction_leaves_a_report() {
     ASSERT_TRUE(exit_code == static_cast<DWORD>(EXCEPTION_ILLEGAL_INSTRUCTION));
 }
 
+void test_a_real_illegal_instruction_leaves_a_report() { runFaultingChild("child", false); }
+
+// The engine installs its own top level filter after the extension has loaded.
+// That replaced this one in the field, so a real crash was reported by the
+// engine's handler, which on an official build has no symbols and printed
+// thirty lines of "no debug info", and this handler never ran. Reasserting is
+// what puts it back, and this is the case that proves it.
+void test_a_stolen_filter_is_taken_back() { runFaultingChild("stolen", true); }
+
 #endif
 
 } // namespace
@@ -194,6 +213,8 @@ struct RegisterCrashCaptureTests {
                      test_crash_report_names_the_fault_the_thread_and_the_stack);
         registerTest("CrashCapture.RealFaultIsCaptured",
                      test_a_real_illegal_instruction_leaves_a_report);
+        registerTest("CrashCapture.StolenFilterIsTakenBack",
+                     test_a_stolen_filter_is_taken_back);
 #endif
     }
 };
