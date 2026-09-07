@@ -4215,6 +4215,12 @@ json GodotBridge::execute(const std::string& method, const json& params,
     if (editor_result.isErr()) return errorJson(editor_result.error().code, editor_result.error().message);
     auto editor = editor_result.value();
 
+    if (method == "editor.getRecoveryState") {
+        auto scanning = isEditorFilesystemScanning();
+        if (scanning.isErr()) return errorJson(scanning.error().code, scanning.error().message);
+        return liveResult({{"filesystem_scanning", scanning.value()}});
+    }
+
     if (method == "tilemap.getUsedRect") {
         if (session_kind != "editor") return errorJson(409, "session_kind_rejected");
         if (!hasOnlyKeys(params, {"tilemap_path"}) || !params.contains("tilemap_path") ||

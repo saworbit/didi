@@ -23,7 +23,7 @@ const std::unordered_set<std::string_view> kMutations = {
     "anim_play_track", "anim_state_set", "tilemap_set_cells", "tilemap_set_region",
     "gridmap_set_cells", "resource_create", "instantiate_asset", "mutate_scene_tree",
     "asset_reimport", "project_rename_references", "project_apply_changes",
-    "runtime_launch", "execute_test_session", "runtime_set_paused",
+    "runtime_launch", "execute_test_session", "runtime_set_paused", "runtime_checkpoint", "runtime_restore_checkpoint", "runtime_recover_editor",
     "runtime_step", "runtime_stop", "runtime_inject_input", "input_map_set_action",
     // It can stop the game, which is a state change the caller has to have
     // asked for. Reversible with runtime_set_paused, so a dry run and no token.
@@ -55,6 +55,7 @@ const std::unordered_set<std::string_view> kMutations = {
 };
 
 const std::unordered_set<std::string_view> kAlwaysConfirmed = {
+    "runtime_restore_checkpoint",
     "editor_reload_project", "script_patch_method", "patch_script_symbols", "signal_emit",
     // Always, not on a flag: it rewrites several files at once, there is no
     // editor undo stack behind a file on disk, and the preview is the only
@@ -81,6 +82,7 @@ const std::unordered_set<std::string_view> kOverwriteConfirmed = {
 // the project, not by Didi. A client that uses openWorldHint to decide what
 // needs a person's eyes has to be told that.
 const std::unordered_set<std::string_view> kRunsProjectCode = {
+    "runtime_restore_checkpoint", "runtime_recover_editor",
     "csharp_check_build", "shader_check_compile", "project_export",
     "gridmap_export_mesh_library", "runtime_launch", "script_check_syntax"
 };

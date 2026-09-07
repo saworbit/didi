@@ -33,7 +33,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-Didi v1.6.0 registers 109 canonical tool names. 106 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 106 canonical tools are implemented. Ten legacy names are registered separately, for exactly 119 `tools/list` entries.
+Didi v1.6.0 registers 113 canonical tool names. 110 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 110 canonical tools are implemented. Ten legacy names are registered separately, for exactly 123 `tools/list` entries.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
@@ -63,7 +63,7 @@ Didi v1.6.0 registers 109 canonical tool names. 106 are implemented in at least 
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `106/109`
+**Canonical implementation:** `110/113`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
@@ -163,3 +163,7 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 - `spatial_query_raycast_batch` casts up to 64 rays in one dispatch against one space state. Each entry uses the `physics_raycast_query` contract unchanged. One batch is one dimension, and a ray that cannot be answered fails the batch rather than leaving a gap.
 - `runtime_watch_invariants` samples once per engine frame for a bounded window and stops the game on the first violation. Its outcome is `violated`, `held`, or `inconclusive`; an invariant that never produced a reading makes the run inconclusive rather than held. It sees error-level engine output, not a debugger, and carries no call stack.
 - The structured ring is not process stdout/stderr. `runtime_launch` remains the bounded offline child-process path for captured stdout/stderr after exit. Input injection is game-only, profiler telemetry is a bounded live sample, and call-stack inspection remains unimplemented.
+
+## Managed editor recovery
+
+Four host tools require opt-in `--managed-editor` plus `--recovery-workspace`: `runtime_recovery_status`, `runtime_checkpoint`, `runtime_recover_editor`, and `runtime_restore_checkpoint`. They use `offline_fallback` because the supervising host survives editor loss. Ordinary mode returns a disabled error; it never takes ownership of an attached human editor. Saved-file checkpoints are bounded to five completed copies, 256 MiB and 10,000 files each. Only abnormal owned-child exits qualify for the single automatic restart. Memory-only edits and host-process resume are outside coverage. See [Managed Recovery](MANAGED_RECOVERY.md) for persistence, reconciliation and artifact limits.

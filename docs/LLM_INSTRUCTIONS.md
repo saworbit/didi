@@ -25,7 +25,7 @@ The four possible `currentMode` values are:
 - `unavailable`: the tool is implemented only live, but no editor is connected.
 - `unimplemented`: the name is reserved and calls will be rejected.
 
-When live tools report `unavailable`, the cause is in the editor and the fix is not yours to make. Say so plainly and point the person at Godot's **Didi** main screen tab: its dashboard distinguishes an extension that is not loaded from one that is loaded without a published session, names the file, path or pid behind each, and lists any session published for a different project. Do not retry the call on a schedule, and never describe an `offline_fallback` result as observed editor state because the live route was closed.
+In managed mode, inspect `runtime_recovery_status` and use `runtime_recover_editor` for an abnormal editor exit; never replay an uncertain mutation. In ordinary attach mode, when live tools report `unavailable`, inspect the editor connection. Say so plainly and point the person at Godot's **Didi** main screen tab: its dashboard distinguishes an extension that is not loaded from one that is loaded without a published session, names the file, path or pid behind each, and lists any session published for a different project. Do not retry the call on a schedule, and never describe an `offline_fallback` result as observed editor state because the live route was closed.
 
 ## Supported workflows
 
@@ -137,7 +137,7 @@ Use `runtime_launch` to start a separate Godot process, optionally headless, for
 
 ### Observe or control an already-running session
 
-Didi v1.6.0 starts detached and exposes 109 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
+Ordinary Didi starts detached and exposes 113 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
 
 1. Call `runtime_list_sessions`, preferably with the canonical project path.
 2. Choose the intended `editor` or `game` descriptor and call `runtime_attach_session` if deterministic auto-selection did not choose it.
@@ -154,12 +154,12 @@ Treat `eval_gdscript` as a small read-only expression language. Prefer literals,
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `106/109`
+**Canonical implementation:** `110/113`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 106/109 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 110/113 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
 All 15 feasible Phase 7 names are delivered and callable, including `tilemap_set_cells`, `tilemap_get_used_rect`, and `gridmap_set_cells` in editor sessions. Do not call or advertise the remaining 3 as available; feasibility is not implementation. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
@@ -184,3 +184,7 @@ For a supported live change:
 6. Redo if desired, then save only when requested or clearly required by the workflow.
 
 Always preserve result provenance in summaries: distinguish live editor state, parsed files, a separate test process, and synthesized images.
+
+## Managed recovery
+
+With `--managed-editor` and `--recovery-workspace`, work targets an isolated saved-project copy. Automatic checkpoints cover saved files and supported active-scene saves; unsaved scripts/external resources, audio state, undo and game state are excluded. Read the compact `recovery` receipt after mutations. When `requires_reconciliation` is true, inspect `runtime_recovery_status`; restore a checkpoint or explicitly accept saved files only after the uncertain editor is stopped. Do not retry the failed edit. `runtime_checkpoint` snapshots existing disk files and does not save all editor buffers. `runtime_restore_checkpoint` preserves the prior workspace and requires destructive confirmation. Status and dry runs do not restart. Recovery has one automatic restart budget; `runtime_recover_editor` makes that action explicit when live discovery is unavailable. See [Managed Recovery](MANAGED_RECOVERY.md).

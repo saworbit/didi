@@ -1,7 +1,7 @@
 # Didi Strategic Roadmap & Technical Build Order 🗺️
 
 > **Core Philosophy**:
-> The 109-tool canonical surface includes completed Phases 1–6, the feasible Phase 7 delivery, and the names accepted since through [Surface Amendments](SURFACE_AMENDMENTS.md): live editor substrate, project wiring, authenticated runtime sessions, autonomous verification, deep-domain workflows, enterprise safety controls, and bounded editor/runtime authoring.
+> The 113-tool canonical surface includes completed Phases 1–6, the feasible Phase 7 delivery, and the names accepted since through [Surface Amendments](SURFACE_AMENDMENTS.md): live editor substrate, project wiring, authenticated runtime sessions, autonomous verification, deep-domain workflows, enterprise safety controls, and bounded editor/runtime authoring.
 
 ---
 
@@ -136,12 +136,12 @@ The native red-team contract covers invalid roots, project-key isolation, lock e
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `106/109`
+**Canonical implementation:** `110/113`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-**Objective:** The implementation remains 106/109 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. All 15 feasible names are delivered. The original objective was atomic 83/83 without adding public tool names.
+**Objective:** The implementation remains 110/113 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. All 15 feasible names are delivered. The original objective was atomic 83/83 without adding public tool names.
 
 **Feasibility result:** The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (15/18) are implementation-feasible: `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `runtime_inject_input`, and `runtime_read_profiler`.
 
@@ -191,7 +191,7 @@ baseline is carrying an unauthorized second decision.
 
 This decision authorized Task 2. At decision time the implementation was 61/79;
 the delivery slices have since landed and the current status block above is
-authoritative at 106/109. Phase 7 remains `PARTIAL_DELIVERY` because the three
+authoritative at 110/113. Phase 7 remains `PARTIAL_DELIVERY` because the three
 API-blocked contracts stay honestly unimplemented.
 
 **Delivery slices:**

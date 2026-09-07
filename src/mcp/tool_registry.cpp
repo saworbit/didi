@@ -84,7 +84,8 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "blackboard_task_complete", "blackboard_task_list",
         "scene_get_selection",
         "execute_test_session", "runtime_list_sessions", "runtime_attach_session",
-        "runtime_detach_session", "runtime_get_session"
+        "runtime_detach_session", "runtime_get_session",
+        "runtime_checkpoint", "runtime_recovery_status", "runtime_restore_checkpoint", "runtime_recover_editor"
         , "project_search_text", "project_search_symbols",
         "csharp_check_build", "shader_check_compile", "project_list_export_presets",
         "project_export", "gridmap_export_mesh_library"
@@ -243,11 +244,12 @@ public:
     class Binding {
     public:
         Binding(LeaseDispatchClient* owner, std::optional<runtime::RuntimeRouteLease> lease,
-                bool repeatable)
+                bool repeatable, int* requests)
             : m_owner(owner) {
             BoundState state;
             state.lease = std::move(lease);
             state.repeatable = repeatable;
+            state.requests = requests;
             m_owner->m_bound[thisThreadKey(m_owner)].push_back(std::move(state));
         }
         Binding(const Binding&) = delete;
@@ -270,8 +272,8 @@ public:
 
     // No default for repeatable: a new call site has to say whether making
     // this call twice is the same as making it once.
-    Binding bind(std::optional<runtime::RuntimeRouteLease> lease, bool repeatable) {
-        return Binding(this, std::move(lease), repeatable);
+    Binding bind(std::optional<runtime::RuntimeRouteLease> lease, bool repeatable, int* requests = nullptr) {
+        return Binding(this, std::move(lease), repeatable, requests);
     }
 
     std::optional<Error> lastError() const {
@@ -310,6 +312,7 @@ public:
     Result<json> sendRequest(const std::string& method, const json& params,
                              int timeout_ms) override {
         auto* state = current();
+        if (state && state->requests) ++*state->requests;
         // One repeat per tool call, however many requests that call makes. The
         // repeat has to happen before the quarantine below, because
         // quarantining retires the route and leaves nothing to ask on.
@@ -334,7 +337,11 @@ public:
     }
 
     std::optional<runtime::RuntimeRouteLease> routeLease() {
-        const auto* state = current();
+        auto* state = current();
+        // Phase 7 handlers dispatch directly through a handed-out lease rather
+        // than sendRequest above. Once handed out, local non-dispatch cannot be
+        // proven by this wrapper; conservatively count the possible request.
+        if (state && state->requests) ++*state->requests;
         return state ? state->lease
                      : runtime::acquireRuntimeRouteLease(m_source);
     }
@@ -344,6 +351,7 @@ public:
 
 private:
     struct BoundState {
+        int* requests{nullptr};
         std::optional<runtime::RuntimeRouteLease> lease;
         std::optional<Error> last_error;
         // Whether repeating a request in this call is the same as making it
@@ -718,6 +726,11 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
     if (!tool->capability.implemented) {
         return CallToolResult::error("Tool '" + name + "' is unimplemented: " + tool->capability.reason);
     }
+    const bool recovery_tool = name == "runtime_checkpoint" || name == "runtime_recovery_status" || name == "runtime_restore_checkpoint" || name == "runtime_recover_editor";
+    if (m_recovery) {
+        if (name == "runtime_attach_session" || name == "runtime_detach_session")
+            return m_recovery->annotate(CallToolResult::error("Managed mode owns its editor route; use a separate ordinary Didi session to attach elsewhere."));
+    }
     const bool supports_live =
         std::find(tool->capability.modes.begin(), tool->capability.modes.end(), "live") !=
         tool->capability.modes.end();
@@ -778,12 +791,45 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
         return response;
     }
     auto authorized_arguments = std::move(safety.arguments);
+    if (m_recovery && !recovery_tool) {
+        // Authorization and dry-run evaluation precede supervision. Recovery tools
+        // inspect/accept/restore explicitly; status must never launch an editor.
+        const auto prior_session = m_runtimeSessionClient->activeSession();
+        const auto ready = m_recovery->ensureEditor();
+        if (ready.isErr() && (MutationSafety::isMutation(binding) || supports_live || m_recovery->status().value("state", "") == "restore_failed"))
+            return m_recovery->annotate(CallToolResult::error(ready.error().message));
+        const auto current_session = m_runtimeSessionClient->activeSession();
+        if (ready.isOk() && MutationSafety::isMutation(binding) &&
+            (!prior_session || !current_session || prior_session->session_id != current_session->session_id))
+            return m_recovery->annotate(CallToolResult::error("Editor recovered. This mutation was not started. Inspect the scene and submit a fresh request; any confirmation must be renewed."));
+        if (ready.isOk() && supports_live) lease = runtime::acquireRuntimeRouteLease(m_sourceIpcClient);
+    }
+    const bool protected_mutation = m_recovery && !recovery_tool && MutationSafety::isMutation(binding);
+    if (protected_mutation) {
+        auto prepared = m_recovery->beforeMutation(std::string(binding.canonical_name), authorized_arguments);
+        if (prepared.isErr()) return m_recovery->annotate(CallToolResult::error(prepared.error().message));
+    }
+    int dispatched_requests = 0;
+    auto finish = [&](CallToolResult result) {
+        if (!protected_mutation) return result;
+        bool not_started = supports_live && !supports_offline && dispatched_requests == 0;
+        if (result.isError && dispatched_requests == 1) {
+            for (const auto& item : result.content) if (item.type == "text") {
+                try {
+                    const auto payload = json::parse(item.text);
+                    const auto data = payload.value("error", json::object()).value("data", json::object());
+                    not_started = data.is_object() && data.value("outcome", "") == "not_started";
+                } catch (const json::exception&) {}
+            }
+        }
+        return m_recovery->afterMutation(std::string(binding.canonical_name), authorized_arguments, std::move(result), not_started);
+    };
     try {
         const auto dispatcher = std::dynamic_pointer_cast<LeaseDispatchClient>(m_ipcClient);
         std::optional<LeaseDispatchClient::Binding> route_binding;
         if (dispatcher) {
             route_binding.emplace(
-                dispatcher->bind(lease, liveCallIsRepeatable(binding, authorized_arguments)));
+                dispatcher->bind(lease, liveCallIsRepeatable(binding, authorized_arguments), &dispatched_requests));
         }
         auto result = tool->boundHandler
                           ? tool->boundHandler(binding, authorized_arguments)
@@ -794,12 +840,15 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
                     // An offline-only tool, or a live tool with no route, has no
                     // lease. A dispatcher error recorded by an earlier call must
                     // not be reported against a session that was never selected.
-                    return structuredLiveToolError(
+                    auto failure = structuredLiveToolError(
                         *error, lease.has_value() ? lease->descriptor
                                                   : std::optional<runtime::SessionDescriptor>{});
+                    if (protected_mutation) return finish(std::move(failure));
+                    return m_recovery ? m_recovery->annotate(std::move(failure)) : std::move(failure);
                 }
             }
-            return result;
+            if (protected_mutation) return finish(std::move(result));
+            return m_recovery ? m_recovery->annotate(std::move(result)) : std::move(result);
         }
 
         const bool live = supports_live && lease.has_value();
@@ -839,10 +888,11 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
                 }
             }
         }
-        return result;
+        return protected_mutation ? finish(std::move(result)) : std::move(result);
     } catch (const std::exception& e) {
         DIDI_LOG_ERROR("TOOL_EXEC", "Exception calling tool '", name, "': ", e.what());
-        return CallToolResult::error("Internal error executing tool: " + std::string(e.what()));
+        auto result = CallToolResult::error("Internal error executing tool: " + std::string(e.what()));
+        return protected_mutation ? finish(std::move(result)) : std::move(result);
     }
 }
 
@@ -938,6 +988,38 @@ void ToolRegistry::registerAllDefaultTools() {
     // ==========================================
     // Phase 3: Runtime Session Management and Evaluation
     // ==========================================
+    for (const auto* name : {"runtime_recovery_status", "runtime_checkpoint", "runtime_restore_checkpoint", "runtime_recover_editor"}) {
+        ToolDefinition t;
+        t.name = name;
+        t.description = t.name == "runtime_recovery_status"
+            ? "Reports owned editor recovery state, saved-file checkpoint coverage and unresolved operations. Managed mode only."
+            : t.name == "runtime_checkpoint"
+            ? "Snapshots current saved project files in managed mode. Does not save unsaved editor buffers. Accept uncertain saved files explicitly after inspecting them."
+            : t.name == "runtime_recover_editor"
+            ? "Reconnects a dead Didi-owned editor using the single restart budget. Never replays an edit or clears an uncertain outcome. Does not restart a living or normally closed editor."
+            : "Restores a saved-file checkpoint in managed mode, preserves the current workspace, and starts a new owned editor. Does not replay mutations.";
+        t.inputSchema = {{"type", "object"}, {"additionalProperties", false}, {"properties", json::object()}};
+        if (t.name == "runtime_checkpoint") t.inputSchema["properties"]["accept_current_files"] = {{"type", "boolean"}, {"default", false}};
+        if (t.name == "runtime_restore_checkpoint") {
+            t.inputSchema["properties"]["checkpoint_id"] = {{"type", "string"}};
+            t.inputSchema["required"] = json::array({"checkpoint_id"});
+        }
+        t.handler = [this, operation = t.name](const json& args) {
+            if (!m_recovery) return CallToolResult::error("Managed recovery is disabled. Start Didi with --managed-editor and --recovery-workspace to use an isolated project copy.");
+            if (operation == "runtime_recovery_status") return CallToolResult::successJson(m_recovery->status());
+            if (operation == "runtime_recover_editor") {
+                auto recovered = m_recovery->ensureEditor();
+                if (recovered.isErr()) return m_recovery->annotate(CallToolResult::error(recovered.error().message));
+                return CallToolResult::successJson(m_recovery->status());
+            }
+            Result<json> response = operation == "runtime_checkpoint"
+                ? m_recovery->checkpoint(args.value("accept_current_files", false))
+                : m_recovery->restore(args.value("checkpoint_id", ""));
+            if (response.isErr()) return m_recovery->annotate(CallToolResult::error(response.error().message));
+            return CallToolResult::successJson(response.value());
+        };
+        registerTool(std::move(t));
+    }
     {
         ToolDefinition t;
         t.name = "runtime_list_sessions";

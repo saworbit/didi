@@ -11,16 +11,16 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
-Nothing yet. The surface below is what 1.6.0 shipped and is current.
+Added opt-in managed editor recovery: isolated project copies, saved-file checkpoints, one owned-editor restart, explicit reconciliation and preserved-workspace restoration. Four recovery tools expose state and actions without replaying uncertain edits. Ordinary attachment and runtime_launch remain unchanged. See [Managed Recovery](docs/MANAGED_RECOVERY.md) for coverage and limitations.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `106/109`
+**Canonical implementation:** `110/113`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 109 canonical tools plus 10 legacy registrations (119 total). 106 canonical tools are implemented and 3 remain unimplemented.
+Discovery now exposes 113 canonical tools plus 10 legacy registrations (123 total). 110 canonical tools are implemented and 3 remain unimplemented.
 
 ---
 

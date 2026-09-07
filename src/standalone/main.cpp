@@ -72,6 +72,7 @@ int main(int argc, char* argv[]) {
     // chosen by the person starting the process. Nothing reachable from a tool
     // call may set this.
     bool skip_confirmations = false;
+    std::string managed_editor, recovery_workspace;
     if (const char* env_yolo = std::getenv("DIDI_YOLO")) {
         const std::string value = env_yolo;
         skip_confirmations = value == "1" || value == "true" || value == "TRUE";
@@ -105,6 +106,8 @@ int main(int argc, char* argv[]) {
                       << kPipeNameHelpLine << "\n"
                       << kLogLevelHelpLine << "\n"
                       << "  --dump-tool-manifest  Print the registered tool surface as JSON and exit\n"
+                      << "  --managed-editor <exe>  Own a headless Godot editor with saved-file recovery\n"
+                      << "  --recovery-workspace <new-dir>  Copy the project here; required with --managed-editor\n"
                       << "  --yolo                Skip confirmation on destructive tools (or DIDI_YOLO=1)\n"
                       << "                        For unattended runs. Mutations execute without review,\n"
                       << "                        and each affected result records confirmation: skipped.\n"
@@ -113,6 +116,10 @@ int main(int argc, char* argv[]) {
                       << "  Communicates over standard I/O (JSON-RPC 2.0) with AI coding assistants.\n"
                       << "  Connects to Godot 4.5+ editor via native named pipes.\n";
             return 0;
+        } else if (arg == "--managed-editor") {
+            if (!takeValue(argc, argv, i, arg, kHelpHint, managed_editor)) return 2;
+        } else if (arg == "--recovery-workspace") {
+            if (!takeValue(argc, argv, i, arg, kHelpHint, recovery_workspace)) return 2;
         } else if (arg == "--project" || arg == "-p") {
             if (!takeValue(argc, argv, i, arg, kProjectHelpLine, project_root)) return 2;
         } else if (arg == "--pipe-name") {
@@ -152,10 +159,27 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    const auto resolved_project = didi::paths::resolveExplicitProjectRoot(project_root);
+    if (managed_editor.empty() != recovery_workspace.empty()) {
+        refuse("--managed-editor and --recovery-workspace must be supplied together", kHelpHint);
+        return 2;
+    }
+    auto resolved_project = didi::paths::resolveExplicitProjectRoot(project_root);
     if (resolved_project.isErr()) {
         std::cerr << "Didi startup refused: " << resolved_project.error().message << std::endl;
         return 2;
+    }
+    std::filesystem::path recovery_container;
+    if (!managed_editor.empty()) {
+        std::error_code ec;
+        const auto executable = didi::paths::projectPathFromUtf8(managed_editor);
+        if (!executable.is_absolute() || !std::filesystem::is_regular_file(executable, ec) || ec) {
+            refuse("--managed-editor requires an absolute executable file", kHelpHint);
+            return 2;
+        }
+        recovery_container = std::filesystem::absolute(didi::paths::projectPathFromUtf8(recovery_workspace));
+        const auto initialized = didi::runtime::CheckpointStore::initialize(resolved_project.value(), recovery_container);
+        if (initialized.isErr()) { refuse(initialized.error().message, kHelpHint); return 2; }
+        resolved_project = recovery_container / "project";
     }
     try {
         std::filesystem::current_path(resolved_project.value());
@@ -170,6 +194,15 @@ int main(int argc, char* argv[]) {
                   " for Godot 4.5+...");
 
     didi::mcp::McpServer server;
+    std::shared_ptr<didi::runtime::ManagedRecovery> recovery;
+    if (!managed_editor.empty()) {
+        recovery = std::make_shared<didi::runtime::ManagedRecovery>(recovery_container, managed_editor,
+            didi::mcp::ToolRegistry::instance().getRuntimeSessionClient());
+        const auto started = recovery->start();
+        if (started.isErr()) { refuse(started.error().message, nullptr); return 2; }
+        didi::mcp::ToolRegistry::instance().setManagedRecovery(recovery);
+        DIDI_LOG_INFO("MAIN", "Managed recovery workspace: ", didi::paths::projectPathToUtf8(resolved_project.value()));
+    }
     server.setConfirmationsSkipped(skip_confirmations);
     if (skip_confirmations) {
         // Loud, once, at startup. Someone reading a log after a bad afternoon
@@ -181,6 +214,8 @@ int main(int argc, char* argv[]) {
     g_server = &server;
 
     server.runStdio();
+    didi::mcp::ToolRegistry::instance().setManagedRecovery(nullptr);
+    recovery.reset();
 
     DIDI_LOG_INFO("MAIN", "Didi MCP server exited cleanly.");
     return 0;
