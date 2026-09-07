@@ -81,18 +81,22 @@ $env:DIDI_CRASH_CAPTURE_DIR = $buildRoot
 # The test is deliberately structural rather than a pinned address, because the
 # offsets differ between engine versions. A Didi frame anywhere on the faulting
 # stack means the fault is ours and the run must fail.
+# The classifier lives beside its cases so both stay honest. Running them here
+# costs a second and fails on the classifier rather than on whatever it would
+# otherwise mislabel twenty minutes later.
+. (Join-Path $PSScriptRoot "engine_crash_classifier.ps1")
+# The cases throw on a wrong answer, and that propagates out of here, so there
+# is nothing to check afterwards. $LASTEXITCODE would be the wrong instrument:
+# a PowerShell script does not set it, so it still holds whatever a native
+# command left behind.
+& (Join-Path $PSScriptRoot "test_engine_crash_classifier.ps1")
+
 function Test-EngineWorkerCrash($EngineProcess) {
     if ($null -eq $EngineProcess) { return $false }
     if (-not $EngineProcess.HasExited) { return $false }
     $path = Join-Path $buildRoot ("godot_crash_" + $EngineProcess.Id + ".log")
     if (-not (Test-Path -LiteralPath $path)) { return $false }
-    $report = Get-Content -LiteralPath $path -Raw
-    if ($report -notmatch 'exception: 0xc000001d') { return $false }
-    if ($report -notmatch 'on main thread: no') { return $false }
-    $stack = [regex]::Match($report, '(?ms)^stack:
-?$(.*?)^loaded modules:')
-    if (-not $stack.Success) { return $false }
-    return ($stack.Groups[1].Value -notmatch 'didi_extension')
+    return Test-EngineWorkerCrashReport (Get-Content -LiteralPath $path -Raw)
 }
 
 # Reads what the crashed engine left, so a failure says where it died rather
