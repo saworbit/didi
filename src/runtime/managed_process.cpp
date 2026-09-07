@@ -1,4 +1,5 @@
 #include "didi/runtime/managed_process.hpp"
+#include "didi/common/logger.hpp"
 #include <cerrno>
 #include <limits>
 #if defined(_WIN32)
@@ -11,6 +12,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #if defined(__linux__)
+#include <sys/prctl.h>
 #include <sys/syscall.h>
 #elif defined(__APPLE__)
 #include <crt_externs.h>
@@ -87,6 +89,9 @@ struct ManagedProcess::Impl {
     std::optional<int> exit;
 #if defined(_WIN32)
     Handle process;
+    // Held open for as long as we own the child. Closing it is what kills the
+    // child when nothing of ours gets to run, so it outlives start() on purpose.
+    Handle job;
 #else
     pid_t owned_pid = 0;
     bool uncertain = false;
@@ -162,38 +167,90 @@ Result<void> ManagedProcess::start(const std::string& executable,
     if (input.value == INVALID_HANDLE_VALUE)
         return Error::internal("Cannot open managed process input");
 
-    SIZE_T size = 0;
-    InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
-    std::vector<unsigned char> storage(size);
-    auto attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage.data());
-    if (!InitializeProcThreadAttributeList(attributes, 1, 0, &size))
-        return Error::internal("Cannot initialize managed process handle isolation");
-    struct AttributeGuard {
-        LPPROC_THREAD_ATTRIBUTE_LIST value;
-        ~AttributeGuard() { DeleteProcThreadAttributeList(value); }
-    } attribute_guard{attributes};
-    HANDLE inherited[] = {input.value, log.value};
-    if (!UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited,
-                                   sizeof(inherited), nullptr, nullptr))
-        return Error::internal("Cannot isolate managed process handles");
-    STARTUPINFOEXW startup{};
-    startup.StartupInfo.cb = sizeof(startup);
-    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-    startup.StartupInfo.wShowWindow = SW_HIDE;
-    startup.StartupInfo.hStdInput = input.value;
-    startup.StartupInfo.hStdOutput = log.value;
-    startup.StartupInfo.hStdError = log.value;
-    startup.lpAttributeList = attributes;
+    // The child must not outlive us. stop() covers every exit that runs our
+    // code, and a job with KILL_ON_JOB_CLOSE covers the ones that do not: the
+    // kernel kills everything in the job when the last handle to it closes, and
+    // process death closes ours however it happens. The job is attached at
+    // creation rather than after it, so there is no window in which the child
+    // is running outside it.
+    Handle job{CreateJobObjectW(nullptr, nullptr)};
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    const bool wanted_job = job.value != nullptr &&
+                            SetInformationJobObject(job.value, JobObjectExtendedLimitInformation,
+                                                    &limits, sizeof(limits)) != 0;
+    HANDLE job_list[] = {job.value};
+
     PROCESS_INFORMATION process{};
-    if (!CreateProcessW(executable_wide.value().c_str(), command.data(), nullptr, nullptr, TRUE,
-                        CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT, nullptr, cwd.c_str(),
-                        &startup.StartupInfo, &process))
+    DWORD create_error = 0;
+    auto launch = [&](bool use_job) {
+        SIZE_T size = 0;
+        const DWORD count = use_job ? 2 : 1;
+        InitializeProcThreadAttributeList(nullptr, count, 0, &size);
+        std::vector<unsigned char> storage(size);
+        auto attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage.data());
+        if (!InitializeProcThreadAttributeList(attributes, count, 0, &size)) {
+            create_error = GetLastError();
+            return false;
+        }
+        struct AttributeGuard {
+            LPPROC_THREAD_ATTRIBUTE_LIST value;
+            ~AttributeGuard() { DeleteProcThreadAttributeList(value); }
+        } attribute_guard{attributes};
+        HANDLE inherited[] = {input.value, log.value};
+        if (!UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited,
+                                       sizeof(inherited), nullptr, nullptr) ||
+            (use_job && !UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST,
+                                                   job_list, sizeof(job_list), nullptr, nullptr))) {
+            create_error = GetLastError();
+            return false;
+        }
+        STARTUPINFOEXW startup{};
+        startup.StartupInfo.cb = sizeof(startup);
+        startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+        startup.StartupInfo.wShowWindow = SW_HIDE;
+        startup.StartupInfo.hStdInput = input.value;
+        startup.StartupInfo.hStdOutput = log.value;
+        startup.StartupInfo.hStdError = log.value;
+        startup.lpAttributeList = attributes;
+        if (CreateProcessW(executable_wide.value().c_str(), command.data(), nullptr, nullptr, TRUE,
+                           CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT, nullptr, cwd.c_str(),
+                           &startup.StartupInfo, &process))
+            return true;
+        create_error = GetLastError();
+        return false;
+    };
+
+    // A job the environment will not let us nest is a reason to lose the second
+    // line, not a reason to refuse to start. But a launch can fail for reasons
+    // that have nothing to do with the job, and blaming the job for a bad
+    // executable would be a lie in the log, so the retry is what decides: it
+    // only counts as a job problem if dropping the job is what made it work.
+    bool with_job = wanted_job && launch(true);
+    bool started = with_job;
+    const DWORD job_error = create_error;
+    if (!started) {
+        started = launch(false);
+        if (started)
+            DIDI_LOG_WARN("MANAGED_PROCESS",
+                          "Starting the managed child without a job object",
+                          wanted_job ? " (Windows error " + std::to_string(job_error) + ")"
+                                     : " (this host could not create one)",
+                          ". It is still stopped on an ordinary exit, but an abnormal host exit "
+                          "will leave it running.");
+    }
+    if (!started)
         return Error::internal("Cannot start managed process (Windows error " +
-                               std::to_string(GetLastError()) + ")");
+                               std::to_string(create_error) + ")");
     CloseHandle(process.hThread);
     if (impl_->process.value != INVALID_HANDLE_VALUE)
         CloseHandle(impl_->process.value);
     impl_->process.value = process.hProcess;
+    if (impl_->job.value != INVALID_HANDLE_VALUE && impl_->job.value != nullptr)
+        CloseHandle(impl_->job.value);
+    impl_->job.value = with_job ? job.value : INVALID_HANDLE_VALUE;
+    if (with_job)
+        job.value = INVALID_HANDLE_VALUE;
     impl_->pid = process.dwProcessId;
 #else
     // Allocate everything before spawning; the fork child uses only safe calls.
@@ -263,13 +320,32 @@ Result<void> ManagedProcess::start(const std::string& executable,
         return Error::internal("Cannot determine safe descriptor closing limit");
     const int descriptor_limit =
         static_cast<int>(std::min<rlim_t>(limit.rlim_max, std::numeric_limits<int>::max()));
+    const pid_t parent_pid = getpid();
     const pid_t child = fork();
     if (child < 0)
         return Error::internal("Cannot fork managed process");
     if (child == 0) {
         int failure = 0;
-        if (chdir(directory.c_str()) != 0 || dup2(input.value, STDIN_FILENO) < 0 ||
-            dup2(log.value, STDOUT_FILENO) < 0 || dup2(log.value, STDERR_FILENO) < 0)
+#if defined(__linux__)
+        // The other half of what the job object does on Windows. stop() covers
+        // every exit that runs our code; this covers the ones that do not.
+        // It survives execve, so it is set once, here, before the exec.
+        //
+        // Two things the kernel will not do for us. The signal is not sent at
+        // all if the parent had already gone when this ran, so the parent is
+        // checked again immediately afterwards. And it follows the forking
+        // THREAD, not the process, so a caller that starts a managed child from
+        // a thread it later retires would lose the child with it. start() is
+        // reached from the thread that owns the stdio loop, which lives as long
+        // as the host does.
+        if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0)
+            failure = errno;
+        else if (getppid() != parent_pid)
+            failure = ESRCH;
+#endif
+        if (!failure &&
+            (chdir(directory.c_str()) != 0 || dup2(input.value, STDIN_FILENO) < 0 ||
+             dup2(log.value, STDOUT_FILENO) < 0 || dup2(log.value, STDERR_FILENO) < 0))
             failure = errno;
         // Preserve only the exec error descriptor and standard streams.
         bool closed = false;
