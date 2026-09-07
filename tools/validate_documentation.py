@@ -20,6 +20,8 @@ REQUIRED_DOCUMENTS = (
     "CONTRIBUTING.md",
     "SECURITY.md",
     "docs/ADMIN_GUIDE.md",
+    "docs/README.md",
+    "docs/MANAGED_RECOVERY.md",
     "docs/API_SPECIFICATION.md",
     "docs/ARCHITECTURE.md",
     "docs/CAPABILITIES.md",
@@ -388,6 +390,15 @@ FACT_PATTERNS = {
 
 LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 HEADING_PATTERN = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
+CURRENT_SURFACE_HEADING_PATTERN = re.compile(
+    r"^\s{0,3}##(?!#)\s+[^\n]*?\bProtocol\s+Surface\s*\(\s*"
+    r"(?P<canonical>\d+)\s+Canonical\s+Tools\s*\)[^\n]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+MANAGED_RECOVERY_HEADING_PATTERN = re.compile(
+    r"^\s{0,3}##(?!#)\s+Managed\s+editor\s+recovery\s*#*\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 ROADMAP_PHASE_HEADING_PATTERN = re.compile(
     r"^##\s+.*?\bPhase\s+(?P<number>\d+):(?P<title>[^\n]*)$",
     re.MULTILINE,
@@ -775,6 +786,95 @@ def _read_required(root: Path, relative_path: str, errors: list[str]) -> str | N
     except (OSError, UnicodeError) as error:
         errors.append(f"{relative_path}: cannot read UTF-8 text: {error}")
         return None
+
+
+def validate_current_surface_heading(text: str, canonical_count: int) -> list[str]:
+    """Keep the reader-facing README surface heading aligned with the tool count."""
+    headings = list(CURRENT_SURFACE_HEADING_PATTERN.finditer(text))
+    if not headings:
+        return [
+            "README.md: must contain exactly one current protocol-surface heading "
+            f"for {canonical_count} Canonical Tools"
+        ]
+    if len(headings) != 1:
+        return [
+            "README.md: must contain exactly one current protocol-surface heading "
+            f"(found {len(headings)})"
+        ]
+
+    documented_count = int(headings[0].group("canonical"))
+    if documented_count != canonical_count:
+        return [
+            "README.md: current protocol-surface heading must report "
+            f"{canonical_count} Canonical Tools (found {documented_count})"
+        ]
+    return []
+
+
+def _has_literal_markdown_target(text: str, target: str) -> bool:
+    return any(
+        raw_target.strip().split(maxsplit=1)[0].strip("<>") == target
+        for raw_target in LINK_PATTERN.findall(_without_code(text))
+    )
+
+
+def validate_managed_recovery_contract(texts: dict[str, str]) -> list[str]:
+    """Require discoverable, complete recovery guidance for managed editor sessions."""
+    errors: list[str] = []
+    navigation_targets = {
+        "README.md": "docs/MANAGED_RECOVERY.md",
+        "docs/README.md": "MANAGED_RECOVERY.md",
+        "docs/ADMIN_GUIDE.md": "MANAGED_RECOVERY.md",
+    }
+    for relative_path, target in navigation_targets.items():
+        text = texts.get(relative_path)
+        if text is not None and not _has_literal_markdown_target(text, target):
+            errors.append(
+                f"{relative_path}: must link {target} for managed editor recovery"
+            )
+
+    tool_reference = texts.get("docs/TOOL_REFERENCE.md")
+    if tool_reference is None:
+        return errors
+    headings = list(MANAGED_RECOVERY_HEADING_PATTERN.finditer(tool_reference))
+    if not headings:
+        return errors + [
+            "docs/TOOL_REFERENCE.md: missing Managed editor recovery section"
+        ]
+    if len(headings) != 1:
+        return errors + [
+            "docs/TOOL_REFERENCE.md: must contain exactly one Managed editor recovery section"
+        ]
+
+    section_start = headings[0].end()
+    following_heading = re.search(
+        r"^\s{0,3}##(?!#)\s+", tool_reference[section_start:], flags=re.MULTILINE
+    )
+    section_end = (
+        section_start + following_heading.start()
+        if following_heading is not None
+        else len(tool_reference)
+    )
+    section = tool_reference[section_start:section_end]
+    for tool_name in (
+        "runtime_recovery_status",
+        "runtime_checkpoint",
+        "runtime_recover_editor",
+        "runtime_restore_checkpoint",
+    ):
+        occurrences = len(re.findall(rf"\b{re.escape(tool_name)}\b", section))
+        if occurrences != 1:
+            errors.append(
+                "docs/TOOL_REFERENCE.md: Managed editor recovery section must name "
+                f"`{tool_name}` exactly once (found {occurrences})"
+            )
+    checkpoint_occurrences = len(re.findall(r"\bcheckpoint_id\b", section))
+    if checkpoint_occurrences == 0:
+        errors.append(
+            "docs/TOOL_REFERENCE.md: Managed editor recovery section must name "
+            "`checkpoint_id` at least once"
+        )
+    return errors
 
 
 def _normalized_phase_status(title: str) -> str | None:
@@ -1655,6 +1755,10 @@ def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[s
                     "has no binary to read, checks the same numbers as the build jobs."
                 )
             errors.extend(validate_tool_surface_counts(texts, manifest_counts))
+    readme_text = texts.get("README.md")
+    if readme_text is not None:
+        errors.extend(validate_current_surface_heading(readme_text, expected_counts[0]))
+    errors.extend(validate_managed_recovery_contract(texts))
     errors.extend(validate_canonical_implementation_counts(texts, expected_counts))
     errors.extend(validate_phase7_reconciliation(texts, expected_counts))
     errors.extend(validate_addon_copies_match(root))

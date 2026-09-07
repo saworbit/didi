@@ -89,11 +89,15 @@ Current documented release: **1.4.0**.
 
 Didi exposes 113 canonical tools plus 10 legacy names (123 total).
 
+## Protocol Surface (113 Canonical Tools)
+
 Startup requires --project or DIDI_PROJECT_ROOT. Mutations expose dry_run and protected writes use confirmation_token.
 
 Phase 7 status is PARTIAL_DELIVERY after the 2026-08-29 Godot 4.5.1 and Godot 4.7.2 feasibility gate. The implementation remains 110/113 canonical tools, with all 3 Phase 7 names registered but unimplemented. The gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts.
 
 [Phase 7 feasibility evidence](docs/PHASE_7_API_FEASIBILITY.md) | [Phase 7 approved executable plan](docs/PHASE_7_IMPLEMENTATION_PLAN.md)
+
+[Managed Recovery](docs/MANAGED_RECOVERY.md)
 
 [Guide](docs/GUIDE.md#details-1) | [Security](SECURITY.md) | [Overview](#didi)
 """,
@@ -129,7 +133,7 @@ Current release: 1.4.0.
         self.write("CONTRIBUTING.md", "# Contributing\n")
 
         generic_docs = {
-            "ADMIN_GUIDE.md": "# Admin Guide\n",
+            "ADMIN_GUIDE.md": "# Admin Guide\n\n[Managed Recovery](MANAGED_RECOVERY.md)\n",
             "API_SPECIFICATION.md": "# API Specification\n\n423 Locked. Mutations expose dry_run and confirmation_token. Live IPC includes ui.hitTest.\n",
             "ARCHITECTURE.md": "# Architecture\n",
             "DEVELOPER_GUIDE.md": "# Developer Guide\n\nPhase 7 is PARTIAL_DELIVERY at 110/113 implemented; 15/18 names are implementation-feasible and 3/18 are API-blocked.\n",
@@ -141,6 +145,15 @@ Current release: 1.4.0.
         }
         for name, text in generic_docs.items():
             self.write(f"docs/{name}", text)
+
+        self.write(
+            "docs/README.md",
+            "# Documentation\n\n[Managed Recovery](MANAGED_RECOVERY.md)\n",
+        )
+        self.write(
+            "docs/MANAGED_RECOVERY.md",
+            "# Managed Recovery\n\nRecovery guidance for managed editor sessions.\n",
+        )
 
         self.write(
             "docs/CAPABILITIES.md",
@@ -172,6 +185,15 @@ Session lock conflicts return 423. Mutations expose dry_run and protected writes
 
 - `emitter_node` (`string`, required).
 - `signal_name` (`string`, required).
+
+## Managed editor recovery
+
+| Tool | Arguments |
+| --- | --- |
+| `runtime_recovery_status` | None |
+| `runtime_checkpoint` | None |
+| `runtime_recover_editor` | None |
+| `runtime_restore_checkpoint` | `checkpoint_id` |
 """,
         )
         self.write("docs/ROADMAP.md", self.make_future_phase_roadmap())
@@ -408,6 +430,100 @@ Second section.
 
     def test_valid_repository_has_no_errors(self):
         self.assertEqual(VALIDATOR.validate_repository(self.make_valid_repository()), [])
+
+    def test_rejects_stale_current_surface_heading(self):
+        # Break caught: the reader-facing current surface heading can drift even
+        # while prose elsewhere still carries the manifest count.
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        self.write(
+            "README.md",
+            readme.replace(
+                "## Protocol Surface (113 Canonical Tools)",
+                "## Protocol Surface (107 Canonical Tools)",
+            ),
+        )
+
+        for manifest in (None, self.write_manifest()):
+            with self.subTest(manifest=manifest is not None):
+                errors = VALIDATOR.validate_repository(root, manifest)
+                self.assertTrue(
+                    any(
+                        "README.md" in error
+                        and "current protocol-surface heading" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
+
+    def test_requires_managed_recovery_navigation_targets(self):
+        # Break caught: recovery guidance can remain in the tree yet become
+        # undiscoverable from the root, documentation index, or admin guide.
+        navigation_targets = (
+            ("README.md", "docs/MANAGED_RECOVERY.md"),
+            ("docs/README.md", "MANAGED_RECOVERY.md"),
+            ("docs/ADMIN_GUIDE.md", "MANAGED_RECOVERY.md"),
+        )
+        for relative_path, target in navigation_targets:
+            with self.subTest(relative_path=relative_path):
+                root = self.make_valid_repository()
+                text = (root / relative_path).read_text(encoding="utf-8")
+                self.write(relative_path, text.replace(target, "MISSING_RECOVERY.md"))
+
+                errors = VALIDATOR.validate_repository(root)
+
+                self.assertTrue(
+                    any(relative_path in error and target in error for error in errors),
+                    errors,
+                )
+
+    def test_requires_managed_recovery_document(self):
+        # Break caught: navigation can look intact while the recovery guide was
+        # deleted from the repository.
+        root = self.make_valid_repository()
+        (root / "docs" / "MANAGED_RECOVERY.md").unlink()
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(
+            any("docs/MANAGED_RECOVERY.md" in error for error in errors), errors
+        )
+
+    def test_requires_managed_recovery_tool_reference_names(self):
+        # Break caught: readers lose the exact recovery operation or checkpoint
+        # argument from the only current Tool Reference section.
+        required_names = (
+            "runtime_recovery_status",
+            "runtime_checkpoint",
+            "runtime_recover_editor",
+            "runtime_restore_checkpoint",
+            "checkpoint_id",
+        )
+        for name in required_names:
+            with self.subTest(name=name):
+                root = self.make_valid_repository()
+                path = root / "docs" / "TOOL_REFERENCE.md"
+                self.write(path.relative_to(root).as_posix(), path.read_text(encoding="utf-8").replace(name, f"missing_{name}"))
+
+                errors = VALIDATOR.validate_repository(root)
+
+                self.assertTrue(any(name in error for error in errors), errors)
+
+    def test_ignores_historical_surface_heading(self):
+        # A historical record may truthfully describe an earlier surface; only
+        # the designated current README heading is a release contract.
+        root = self.make_valid_repository()
+        self.write(
+            "CHANGELOG.md",
+            (root / "CHANGELOG.md").read_text(encoding="utf-8")
+            + "\n## Historical\n\n## Protocol Surface (107 Canonical Tools)\n",
+        )
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertFalse(
+            any("current protocol-surface heading" in error for error in errors), errors
+        )
 
     # --- tool manifest: documentation is validated against the built binary ---
 
