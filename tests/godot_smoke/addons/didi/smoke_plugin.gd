@@ -11,6 +11,7 @@ extends EditorPlugin
 const IMPORT_PROBE_SOURCE := "res://reimport_probe.svg"
 const IMPORT_PROBE_METADATA := "res://reimport_probe.svg.import"
 const IMPORT_TIMEOUT_MS := 60000
+const SETTLE_AFTER_SCAN_MS := 4000
 
 
 func _enter_tree() -> void:
@@ -19,6 +20,7 @@ func _enter_tree() -> void:
 
 func _open_smoke_scene() -> void:
 	await _await_imports()
+	await _settle_after_scan()
 	get_editor_interface().open_scene_from_path("res://main.tscn")
 	print("[DidiSmoke] scene opened")
 
@@ -39,3 +41,19 @@ func _await_imports() -> void:
 	# reports at all.
 	push_warning("[DidiSmoke] %s was not imported within %d ms; opening anyway" % [
 		IMPORT_PROBE_SOURCE, IMPORT_TIMEOUT_MS])
+
+
+# Waiting for the scan is necessary but it lands us on a worse moment. The
+# editor defers regenerate_script_doc_cache() while the filesystem is scanning
+# and starts it on sources_changed, so the instant the scan settles is the
+# instant the documentation threads start. Opening a scene right then puts the
+# main thread into EditorHelp while those threads are joining each other, which
+# is the collision in #285.
+#
+# There is no signal for "documentation finished", so this is a settle rather
+# than a wait on the real thing. It costs a few seconds per run and moves the
+# scene open off the moment the collision happens.
+func _settle_after_scan() -> void:
+	var deadline := Time.get_ticks_msec() + SETTLE_AFTER_SCAN_MS
+	while Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
