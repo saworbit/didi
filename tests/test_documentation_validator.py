@@ -499,6 +499,37 @@ Second section.
             errors,
         )
 
+    def test_ignores_unclosed_or_longer_fenced_current_surface_headings(self):
+        # Break caught: a malformed or longer closing fence must still keep a
+        # sample heading out of the reader-facing current-document contract.
+        fence_endings = {
+            "unclosed": "",
+            "longer closing fence": "\n````",
+        }
+        for scenario, fence_ending in fence_endings.items():
+            with self.subTest(scenario=scenario):
+                root = self.make_valid_repository()
+                readme = (root / "README.md").read_text(encoding="utf-8")
+                self.write(
+                    "README.md",
+                    readme.replace(
+                        "## Protocol Surface (113 Canonical Tools)",
+                        "```markdown\n## Protocol Surface (113 Canonical Tools)"
+                        + fence_ending,
+                    ),
+                )
+
+                errors = VALIDATOR.validate_repository(root)
+
+                self.assertTrue(
+                    any(
+                        "README.md" in error
+                        and "current protocol-surface heading" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
+
     def test_requires_managed_recovery_navigation_targets(self):
         # Break caught: recovery guidance can remain in the tree yet become
         # undiscoverable from the root, documentation index, or admin guide.
@@ -634,6 +665,61 @@ Second section.
 
         self.assertTrue(
             any("missing Managed editor recovery section" in error for error in errors),
+            errors,
+        )
+
+    def test_ignores_unclosed_or_longer_fenced_recovery_sections(self):
+        # Break caught: malformed examples cannot create a recovery section,
+        # and a longer closing run cannot terminate that example early.
+        fence_endings = {
+            "unclosed": "",
+            "longer closing fence": "\n````",
+        }
+        names = "\n".join(
+            (
+                "`runtime_recovery_status`",
+                "`runtime_checkpoint`",
+                "`runtime_recover_editor`",
+                "`runtime_restore_checkpoint`",
+                "`checkpoint_id`",
+            )
+        )
+        for scenario, fence_ending in fence_endings.items():
+            with self.subTest(scenario=scenario):
+                root = self.make_valid_repository()
+                path = root / "docs" / "TOOL_REFERENCE.md"
+                text = path.read_text(encoding="utf-8")
+                text = text.replace("## Managed editor recovery", "### Managed editor recovery", 1)
+                text += (
+                    "\n```markdown\n## Managed editor recovery\n"
+                    + names
+                    + fence_ending
+                )
+                self.write(path.relative_to(root).as_posix(), text)
+
+                errors = VALIDATOR.validate_repository(root)
+
+                self.assertTrue(
+                    any("missing Managed editor recovery section" in error for error in errors),
+                    errors,
+                )
+
+    def test_ignores_a_longer_fenced_recovery_section_terminator(self):
+        # Break caught: a closing run longer than its opener still closes an
+        # example, so its H2 cannot hide the real section's remaining names.
+        root = self.make_valid_repository()
+        path = root / "docs" / "TOOL_REFERENCE.md"
+        text = path.read_text(encoding="utf-8")
+        text = text.replace(
+            "## Managed editor recovery\n",
+            "## Managed editor recovery\n\n```markdown\n## Example recovery heading\n````\n",
+        )
+        self.write(path.relative_to(root).as_posix(), text)
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertFalse(
+            any("Managed editor recovery section must name" in error for error in errors),
             errors,
         )
 

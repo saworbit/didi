@@ -411,9 +411,6 @@ DESIGN_PHASE_HEADING_PATTERN = re.compile(
     r"^## Phase (?P<number>\d+):[^\n]*$",
     re.MULTILINE,
 )
-FENCED_CODE_PATTERN = re.compile(
-    r"^\s{0,3}(`{3,}|~{3,}).*?^\s{0,3}\1\s*$", re.MULTILINE | re.DOTALL
-)
 INLINE_CODE_PATTERN = re.compile(r"(?<!`)`[^`\n]*`(?!`)")
 PHASE7_MATRIX_ROW_PATTERN = re.compile(
     r"^\|\s*`(?P<tool>[a-z0-9_]+)`\s*\|"
@@ -699,14 +696,44 @@ def extract_project_version(cmake_text: str) -> str:
     return match.group(1)
 
 
+def strip_fenced_code_blocks(text: str) -> str:
+    """Remove fenced Markdown blocks, including an unclosed block through EOF."""
+    visible_lines: list[str] = []
+    fence_marker: str | None = None
+    fence_length = 0
+
+    for line in text.splitlines(keepends=True):
+        content = line.rstrip("\r\n")
+        indent = len(content) - len(content.lstrip(" "))
+        candidate = content[indent:]
+        if fence_marker is None:
+            if indent <= 3 and candidate[:1] in {"`", "~"}:
+                marker = candidate[0]
+                length = len(candidate) - len(candidate.lstrip(marker))
+                if length >= 3:
+                    fence_marker = marker
+                    fence_length = length
+                    continue
+            visible_lines.append(line)
+            continue
+
+        if indent <= 3 and candidate[:1] == fence_marker:
+            length = len(candidate) - len(candidate.lstrip(fence_marker))
+            if length >= fence_length and not candidate[length:].strip(" \t"):
+                fence_marker = None
+                fence_length = 0
+
+    return "".join(visible_lines)
+
+
 def _without_code(text: str) -> str:
-    return INLINE_CODE_PATTERN.sub("", FENCED_CODE_PATTERN.sub("", text))
+    return INLINE_CODE_PATTERN.sub("", strip_fenced_code_blocks(text))
 
 
 def markdown_anchors(text: str) -> set[str]:
     anchors: set[str] = set()
     seen: dict[str, int] = {}
-    clean_text = FENCED_CODE_PATTERN.sub("", text)
+    clean_text = strip_fenced_code_blocks(text)
     for line in clean_text.splitlines():
         match = HEADING_PATTERN.match(line)
         if not match:
@@ -795,7 +822,7 @@ def validate_current_surface_heading(
     text = texts.get("README.md")
     if text is None:
         return []
-    text = FENCED_CODE_PATTERN.sub("", text)
+    text = strip_fenced_code_blocks(text)
     headings = list(CURRENT_SURFACE_HEADING_PATTERN.finditer(text))
     if not headings:
         return [
@@ -818,7 +845,7 @@ def validate_current_surface_heading(
 
 
 def _has_literal_markdown_target(text: str, target: str) -> bool:
-    for match in LINK_PATTERN.finditer(FENCED_CODE_PATTERN.sub("", text)):
+    for match in LINK_PATTERN.finditer(strip_fenced_code_blocks(text)):
         if match.group(0).startswith("!"):
             continue
         if match.group(1).strip().split(maxsplit=1)[0].strip("<>") == target:
@@ -844,7 +871,7 @@ def validate_managed_recovery_contract(texts: dict[str, str]) -> list[str]:
     tool_reference = texts.get("docs/TOOL_REFERENCE.md")
     if tool_reference is None:
         return errors
-    current_reference = FENCED_CODE_PATTERN.sub("", tool_reference)
+    current_reference = strip_fenced_code_blocks(tool_reference)
     headings = list(MANAGED_RECOVERY_HEADING_PATTERN.finditer(current_reference))
     if not headings:
         return errors + [
@@ -1057,7 +1084,7 @@ def _current_changelog_section(text: str) -> str:
 
 
 def _without_phase7_excluded_contexts(text: str) -> str:
-    clean = FENCED_CODE_PATTERN.sub("", text)
+    clean = strip_fenced_code_blocks(text)
     lines: list[str] = []
     excluded_level: int | None = None
     for line in clean.splitlines():
