@@ -1832,7 +1832,13 @@ try {
     )
     $dotnetAvailable = $null -ne (Get-Command dotnet -ErrorAction SilentlyContinue)
     if ($dotnetAvailable) {
-        $phase5Requests += Tool-Request 510 "csharp_check_build" @{ project_file = "res://Phase5.csproj"; configuration = "Debug"; timeout_seconds = 120 }
+        # A cold dotnet build on a loaded runner does not reliably finish in two
+        # minutes, and the retry above makes that more likely rather than less:
+        # a first attempt that dies in the themed Control block never reaches
+        # here, so the retry's build is the cold one, started five minutes into
+        # a job. This bounds a hang, so it is generous on purpose. 300 is the
+        # tool's own maximum.
+        $phase5Requests += Tool-Request 510 "csharp_check_build" @{ project_file = "res://Phase5.csproj"; configuration = "Debug"; timeout_seconds = 300 }
     }
     # Speculative verification needs the project to sit in a git work tree,
     # which the copied fixture is not until this makes it one. The nested repo
