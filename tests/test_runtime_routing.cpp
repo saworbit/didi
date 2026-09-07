@@ -2,6 +2,7 @@
 #include "didi/mcp/mcp_server.hpp"
 #include "didi/mcp/resource_registry.hpp"
 #include "didi/mcp/tool_registry.hpp"
+#include "didi/common/project_path.hpp"
 #include "didi/runtime/session_client.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
 
@@ -594,6 +595,82 @@ void test_exit_code_259_is_not_a_live_process() {
     ASSERT_TRUE(report.state == didi::runtime::ProcessInstanceState::proven_stale);
 }
 #endif
+
+// An engine that dies takes its own explanation with it. The report the
+// capture leaves is the only account of why, and a caller that sees a bare
+// transport failure cannot tell a crashed editor from a network fault or a
+// clean shutdown. Reading it wrong is worse than not reading it: the module
+// list names didi_extension on every crash, so only the stack section can say
+// whether a frame of ours is involved.
+void test_engine_crash_report_is_read_and_attributed() {
+    const auto project = std::filesystem::temp_directory_path() /
+                         ("didi-crash-lookup-" + std::to_string(currentPid()) + "-" +
+                          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const auto directory = project / ".didi" / "crash";
+    std::filesystem::create_directories(directory);
+
+    const std::string engine_fault =
+        "DIDI CRASH CAPTURE\r\n"
+        "exception: 0xc000001d  ILLEGAL_INSTRUCTION\r\n"
+        "thread: 5496  main thread: 5892  on main thread: no\r\n"
+        "stack:\r\n"
+        "  #00 0x1  Godot.exe+0x1\r\n"
+        "  #01 0x2  Godot.exe+0x2\r\n"
+        "loaded modules:\r\n"
+        "  0x3  size 0x4  C:/p/addons/didi/bin/didi_extension.dll\r\n"
+        "END DIDI CRASH CAPTURE\r\n";
+
+    const uint64_t engine_pid = 4242;
+    {
+        std::ofstream out(directory / ("godot_crash_" + std::to_string(engine_pid) + ".log"),
+                          std::ios::binary);
+        out << engine_fault;
+    }
+
+    const auto project_utf8 = didi::paths::nativePathToUtf8(project);
+    const auto found = didi::runtime::findEngineCrashReport(project_utf8, engine_pid);
+    ASSERT_TRUE(found.found);
+    ASSERT_EQ(found.exception, std::string("0xc000001d  ILLEGAL_INSTRUCTION"));
+    ASSERT_FALSE(found.on_main_thread);
+    // The only didi_extension mention is in the module list, which every crash
+    // has. Counting it would blame us for every engine fault.
+    ASSERT_FALSE(found.in_extension);
+    ASSERT_FALSE(found.path.empty());
+
+    // The same report with a frame of ours on the stack is ours.
+    const uint64_t ours_pid = 4243;
+    std::string ours = engine_fault;
+    ours.replace(ours.find("  #01 0x2  Godot.exe+0x2"), std::string("  #01 0x2  Godot.exe+0x2").size(),
+                 "  #01 0x2  didi_extension.dll+0x2");
+    {
+        std::ofstream out(directory / ("godot_crash_" + std::to_string(ours_pid) + ".log"),
+                          std::ios::binary);
+        out << ours;
+    }
+    const auto mine = didi::runtime::findEngineCrashReport(project_utf8, ours_pid);
+    ASSERT_TRUE(mine.found);
+    ASSERT_TRUE(mine.in_extension);
+
+    // A pid that never crashed has nothing to say.
+    ASSERT_FALSE(didi::runtime::findEngineCrashReport(project_utf8, 4244).found);
+    ASSERT_FALSE(didi::runtime::findEngineCrashReport(project_utf8, 0).found);
+
+    // And the annotation only rides along on an engine that is not alive.
+    didi::runtime::SessionDescriptor descriptor;
+    descriptor.pid = engine_pid;
+    descriptor.started_at_ms = 1;
+    descriptor.project_path = project_utf8;
+    didi::Error dead(503, "Transport closed");
+    didi::runtime::annotateEngineState(dead, descriptor);
+    ASSERT_TRUE(dead.data.is_object());
+    ASSERT_TRUE(dead.data.contains("engine_crash"));
+    ASSERT_EQ(dead.data["engine_crash"]["exception"].get<std::string>(),
+              std::string("0xc000001d  ILLEGAL_INSTRUCTION"));
+    ASSERT_FALSE(dead.data["engine_crash"]["in_extension"].get<bool>());
+
+    std::error_code cleanup;
+    std::filesystem::remove_all(project, cleanup);
+}
 
 class SessionDirectoryFixture {
 public:
@@ -1764,6 +1841,8 @@ struct RegisterRuntimeRoutingTests {
     RegisterRuntimeRoutingTests() {
         registerTest("RuntimeRouting.EngineLivenessTriState",
                      test_engine_liveness_has_three_answers_and_not_two);
+        registerTest("RuntimeRouting.EngineCrashReportAttribution",
+                     test_engine_crash_report_is_read_and_attributed);
 #if defined(_WIN32)
         registerTest("RuntimeRouting.WindowsExit259IsNotAlive",
                      test_exit_code_259_is_not_a_live_process);
