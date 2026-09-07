@@ -7,7 +7,13 @@ param(
     # .godot cache. On a developer machine that is a few seconds; on a cold
     # shared CI runner it is not, and 30 seconds went red on a job that was
     # otherwise fine. This bounds a hang, so it is generous on purpose.
-    [int]$StartupTimeoutSeconds = 120
+    [int]$StartupTimeoutSeconds = 120,
+    # Bounds the retry below. Once was not enough: 4.7.2 hit the engine crash on
+    # two consecutive attempts of the same job, so a single retry still went
+    # red for something nothing under test causes. Three bounds the run at
+    # roughly eighteen minutes and still fails if the crash is persistent.
+    [int]$Attempt = 1,
+    [int]$MaxAttempts = 3
 )
 
 $ErrorActionPreference = "Stop"
@@ -65,6 +71,30 @@ Remove-Item -Path (Join-Path $buildRoot "godot_crash_*.dmp") -Force -ErrorAction
 $previousCrashCaptureDir = $env:DIDI_CRASH_CAPTURE_DIR
 $env:DIDI_CRASH_CAPTURE_DIR = $buildRoot
 
+# The engine's own script documentation thread can trap inside
+# Thread::wait_to_finish and take the editor down with an illegal instruction.
+# #285 has the symbolized stack: every frame is in the engine binary or a
+# system DLL, it is on an engine worker thread, and the main thread, which is
+# the only one this harness drives, is not involved. Nothing under test causes
+# that and nothing under test can fix it.
+#
+# The test is deliberately structural rather than a pinned address, because the
+# offsets differ between engine versions. A Didi frame anywhere on the faulting
+# stack means the fault is ours and the run must fail.
+function Test-EngineWorkerCrash($EngineProcess) {
+    if ($null -eq $EngineProcess) { return $false }
+    if (-not $EngineProcess.HasExited) { return $false }
+    $path = Join-Path $buildRoot ("godot_crash_" + $EngineProcess.Id + ".log")
+    if (-not (Test-Path -LiteralPath $path)) { return $false }
+    $report = Get-Content -LiteralPath $path -Raw
+    if ($report -notmatch 'exception: 0xc000001d') { return $false }
+    if ($report -notmatch 'on main thread: no') { return $false }
+    $stack = [regex]::Match($report, '(?ms)^stack:
+?$(.*?)^loaded modules:')
+    if (-not $stack.Success) { return $false }
+    return ($stack.Groups[1].Value -notmatch 'didi_extension')
+}
+
 # Reads what the crashed engine left, so a failure says where it died rather
 # than only that it did.
 function Get-EngineCrashReport($EngineProcess) {
@@ -93,6 +123,7 @@ $gameSessionId = ""
 $shutdownGameSessionId = ""
 $integrationSucceeded = $false
 $editorForcedTeardown = $false
+$retryForEngineCrash = $false
 $primaryFailureMessage = ""
 $rawPhase5Responses = @()
 
@@ -1801,7 +1832,13 @@ try {
     )
     $dotnetAvailable = $null -ne (Get-Command dotnet -ErrorAction SilentlyContinue)
     if ($dotnetAvailable) {
-        $phase5Requests += Tool-Request 510 "csharp_check_build" @{ project_file = "res://Phase5.csproj"; configuration = "Debug"; timeout_seconds = 120 }
+        # A cold dotnet build on a loaded runner does not reliably finish in two
+        # minutes, and the retry above makes that more likely rather than less:
+        # a first attempt that dies in the themed Control block never reaches
+        # here, so the retry's build is the cold one, started five minutes into
+        # a job. This bounds a hang, so it is generous on purpose. 300 is the
+        # tool's own maximum.
+        $phase5Requests += Tool-Request 510 "csharp_check_build" @{ project_file = "res://Phase5.csproj"; configuration = "Debug"; timeout_seconds = 300 }
     }
     # Speculative verification needs the project to sit in a git work tree,
     # which the copied fixture is not until this makes it one. The nested repo
@@ -2679,7 +2716,14 @@ try {
 }
 catch {
     $primaryFailureMessage = $_.Exception.Message
-    throw
+    if ($Attempt -lt $MaxAttempts -and (Test-EngineWorkerCrash $godot)) {
+        # Swallowed here so the cleanup below still runs. The retry happens
+        # after it, with nothing of this attempt left holding a file.
+        $retryForEngineCrash = $true
+    }
+    else {
+        throw
+    }
 }
 finally {
     Stop-RuntimeProcess $game $gameEnginePid $gameEngineStartedAtMs
@@ -2755,4 +2799,27 @@ finally {
     if ($integrationSucceeded -and $descriptorEntries.Count -ne 0) {
         throw "Runtime descriptor directory was not empty after exact-PID cleanup: $($descriptorEntries.Name -join ', ')"
     }
+}
+
+# Retried out here rather than inside the catch, so this attempt's cleanup has
+# finished and nothing of it is still holding the fixture or a descriptor.
+if ($retryForEngineCrash) {
+    # Tolerating this quietly would mean losing every trace of how often it
+    # still happens, and it is an open engine bug. The retry clears
+    # godot_crash_*.log on its way in, so the report moves to a name it will
+    # not take with it, and one CI still uploads.
+    $crashReportPath = Join-Path $buildRoot ("godot_crash_" + $godot.Id + ".log")
+    $keptReportPath = Join-Path $buildRoot ("godot_engine_worker_crash_attempt" + $Attempt + "_" + $godot.Id + ".log")
+    if (Test-Path -LiteralPath $crashReportPath) {
+        Move-Item -LiteralPath $crashReportPath -Destination $keptReportPath -Force
+    }
+    Write-Warning ("The engine died on one of its own worker threads, not on anything this harness drives. " +
+                   "See #285: an illegal instruction with no Didi frame on the faulting stack. " +
+                   "Retrying: attempt $($Attempt + 1) of $MaxAttempts. Report kept at $keptReportPath. " +
+                   "The failure it died with was: " + $primaryFailureMessage)
+    $retryArguments = @{}
+    foreach ($entry in $PSBoundParameters.GetEnumerator()) { $retryArguments[$entry.Key] = $entry.Value }
+    $retryArguments["Attempt"] = $Attempt + 1
+    & $PSCommandPath @retryArguments
+    exit $LASTEXITCODE
 }
