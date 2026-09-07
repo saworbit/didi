@@ -168,6 +168,7 @@ target_link_libraries(didi PRIVATE didi_core)
 # 2. GDExtension Shared Library (didi_extension.dll)
 set(GDEXT_SOURCES
     src/gdextension/gdextension_entry.cpp
+    src/gdextension/crash_capture.cpp
     src/gdextension/editor_hook.cpp
     src/gdextension/godot_bridge.cpp
     src/gdextension/runtime_bridge.cpp
@@ -278,6 +279,7 @@ set(TEST_SOURCES
     tests/test_ipc.cpp
     tests/test_runtime_sessions.cpp
     tests/test_runtime_routing.cpp
+    tests/test_crash_capture.cpp
     tests/test_runtime_logs.cpp
     tests/test_speculative_verify.cpp
     tests/test_ghost_preview.cpp
