@@ -33,6 +33,13 @@ static constexpr int kBoardPollSlices = 10;
 // handler is allowed to set, so something has to come back and read it.
 static constexpr int kStopPollMs = 50;
 
+// How many lines may sit unread before the reader stops taking them. Reading
+// on its own thread removed the backpressure the pipe used to give us for
+// free, and a client that writes faster than the server works through it
+// would otherwise grow this queue without a bound. Deep enough that a client
+// pipelining a batch never waits on it.
+static constexpr size_t kMaxPendingLines = 256;
+
 // How long shutdown waits for the reader once nothing wants its lines any
 // more. Input that has already ended finishes here and gets joined. Input that
 // is still open does not, and is abandoned rather than hung on.
@@ -53,6 +60,7 @@ namespace {
 struct StdinChannel {
     std::mutex mutex;
     std::condition_variable ready;
+    std::condition_variable drained;
     std::deque<std::string> lines;
     bool closed{false};
     std::atomic<bool> wanted{true};
@@ -740,7 +748,10 @@ void McpServer::runStdio() {
         std::string line;
         while (channel->wanted.load() && std::getline(std::cin, line)) {
             {
-                std::lock_guard<std::mutex> guard(channel->mutex);
+                std::unique_lock<std::mutex> guard(channel->mutex);
+                channel->drained.wait(guard, [&channel] {
+                    return channel->lines.size() < kMaxPendingLines || !channel->wanted.load();
+                });
                 channel->lines.push_back(std::move(line));
             }
             channel->ready.notify_one();
@@ -768,6 +779,7 @@ void McpServer::runStdio() {
             line = std::move(channel->lines.front());
             channel->lines.pop_front();
         }
+        channel->drained.notify_one();
 
         std::string trimmed = strings::trim(line);
         if (trimmed.empty()) continue;
@@ -820,6 +832,7 @@ void McpServer::runStdio() {
     // waiting for a client that is not going to send anything. A signal skips
     // even that wait: it is the case where the read is certainly still parked.
     channel->wanted.store(false);
+    channel->drained.notify_all();
     bool finished = false;
     {
         std::unique_lock<std::mutex> guard(channel->mutex);
