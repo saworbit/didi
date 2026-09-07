@@ -77,6 +77,30 @@ struct EngineCrashReport {
 // it is set, otherwise the project's .didi/crash.
 EngineCrashReport findEngineCrashReport(const std::string& project_path, uint64_t pid);
 
+// What happened to the engine, and what a caller can do about it.
+//
+// A transport failure already carries facts. This is the reading of them: one
+// classification site, so the routes that report a failure cannot disagree
+// about what kind of failure it was.
+enum class EngineIncidentKind { none, crashed, unreachable, hung, session_lost };
+
+struct EngineIncident {
+    EngineIncidentKind kind{EngineIncidentKind::none};
+    std::string cause;
+    // One imperative sentence. The agent on the other end has to be able to act
+    // on it without reading anything else.
+    std::string recovery;
+    bool recoverable_without_human{false};
+};
+
+const char* engineIncidentKindName(EngineIncidentKind kind);
+
+// Pure, so the table of cases can be tested without a live engine. Takes
+// whether the failure was a transport failure, because an engine that is alive
+// and did not answer is a different incident from one that is merely alive.
+EngineIncident classifyEngineIncident(ProcessInstanceState state, const EngineCrashReport& crash,
+                                      bool transport_failed);
+
 // Records whether the engine behind a session is still there, on a transport
 // failure that is about to be reported.
 //

@@ -718,6 +718,100 @@ EngineCrashReport findEngineCrashReport(const std::string& project_path, uint64_
     return report;
 }
 
+const char* engineIncidentKindName(EngineIncidentKind kind) {
+    switch (kind) {
+        case EngineIncidentKind::crashed: return "engine_crashed";
+        case EngineIncidentKind::unreachable: return "engine_unreachable";
+        case EngineIncidentKind::hung: return "engine_hung";
+        case EngineIncidentKind::session_lost: return "session_lost";
+        case EngineIncidentKind::none: break;
+    }
+    return "none";
+}
+
+namespace {
+
+// Every recovery sentence ends by naming the one call that says what still
+// works, because the useful next move is almost never to try the same tool
+// again.
+const char* kWhatStillWorks =
+    " Call runtime_get_session for the tools that still work without an engine.";
+
+} // namespace
+
+EngineIncident classifyEngineIncident(ProcessInstanceState state, const EngineCrashReport& crash,
+                                      bool transport_failed) {
+    EngineIncident incident;
+    switch (state) {
+        case ProcessInstanceState::proven_stale:
+            incident.kind = EngineIncidentKind::crashed;
+            if (crash.found && crash.in_extension) {
+                // Worth separating loudly. A frame of ours on the faulting
+                // stack means the engine died doing something we asked, and
+                // that is ours to fix rather than to report upstream.
+                incident.cause = "The engine died with a Didi frame on the faulting stack: " +
+                                 crash.exception;
+                incident.recovery = "This is a fault in the extension, not the engine. Keep " +
+                                    crash.path + " and report it." + kWhatStillWorks;
+            } else if (crash.found) {
+                incident.cause = "The engine died in its own code: " + crash.exception;
+                incident.recovery = "Ask the user to restart the Godot editor, then call "
+                                    "runtime_attach_session. The report is at " + crash.path + "." +
+                                    kWhatStillWorks;
+            } else {
+                incident.cause = "The engine process is gone and left no crash report.";
+                incident.recovery = "Ask the user to restart the Godot editor, then call "
+                                    "runtime_attach_session." + std::string(kWhatStillWorks);
+            }
+            return incident;
+        case ProcessInstanceState::unverifiable:
+            incident.kind = EngineIncidentKind::unreachable;
+            incident.cause = "The engine process cannot be verified.";
+            incident.recovery = "Call runtime_list_sessions to see what is live. If nothing is, "
+                                "ask the user to restart the Godot editor." +
+                                std::string(kWhatStillWorks);
+            return incident;
+        case ProcessInstanceState::alive:
+            if (!transport_failed) return incident;
+            incident.kind = EngineIncidentKind::hung;
+            incident.cause = "The engine is running but did not answer within the deadline.";
+            // Deliberately not "retry". A mutation whose outcome is unknown must
+            // not be repeated, which is the rule the dispatch layer already
+            // enforces, and this is the one place an agent is most tempted.
+            incident.recovery = "Do not repeat a mutation whose outcome is unknown. Call "
+                                "runtime_get_session to check the engine, and retry reads only." +
+                                std::string(kWhatStillWorks);
+            return incident;
+    }
+    return incident;
+}
+
+namespace {
+
+// One line per dead engine, not one per failed call. A tool loop can produce
+// dozens of failures from a single crash, and a log that repeats itself is a
+// log nobody reads.
+std::mutex g_reported_crash_mutex;
+std::set<uint64_t> g_reported_crash_pids;
+
+void reportCrashOnce(uint64_t pid, const EngineIncident& incident, const EngineCrashReport& crash) {
+    if (incident.kind != EngineIncidentKind::crashed) return;
+    {
+        std::lock_guard<std::mutex> lock(g_reported_crash_mutex);
+        if (!g_reported_crash_pids.insert(pid).second) return;
+    }
+    // The only thing that reaches a person without the agent choosing to pass
+    // it on. Everything else here is addressed to the agent.
+    if (crash.found) {
+        DIDI_LOG_ERROR("RUNTIME", "The Godot engine (pid ", pid, ") died: ", incident.cause,
+                       " Report: ", crash.path);
+    } else {
+        DIDI_LOG_ERROR("RUNTIME", "The Godot engine (pid ", pid, ") died: ", incident.cause);
+    }
+}
+
+} // namespace
+
 void annotateEngineState(Error& error, const std::optional<SessionDescriptor>& session) {
     if (!session.has_value() || session->pid == 0) return;
     if (!error.data.is_object()) error.data = json::object();
@@ -734,13 +828,26 @@ void annotateEngineState(Error& error, const std::optional<SessionDescriptor>& s
     // An engine that is not alive may have left an account of why. Without it a
     // caller sees only that the connection went, which is the same thing it
     // would see for a network fault or a clean shutdown.
-    if (report.state == ProcessInstanceState::alive) return;
-    const auto crash = findEngineCrashReport(session->project_path, session->pid);
-    if (!crash.found) return;
-    error.data["engine_crash"] = {{"report", crash.path},
-                                  {"exception", crash.exception},
-                                  {"on_main_thread", crash.on_main_thread},
-                                  {"in_extension", crash.in_extension}};
+    const bool transport_failed = error.data.contains("outcome");
+    const auto crash = report.state == ProcessInstanceState::alive
+                           ? EngineCrashReport{}
+                           : findEngineCrashReport(session->project_path, session->pid);
+    if (crash.found) {
+        error.data["engine_crash"] = {{"report", crash.path},
+                                      {"exception", crash.exception},
+                                      {"on_main_thread", crash.on_main_thread},
+                                      {"in_extension", crash.in_extension}};
+    }
+
+    // The facts above say what happened. Without this the caller still has to
+    // work out what to do about it, and the thing it does by default is call
+    // the same tool again.
+    const auto incident = classifyEngineIncident(report.state, crash, transport_failed);
+    if (incident.kind == EngineIncidentKind::none) return;
+    error.data["incident"] = engineIncidentKindName(incident.kind);
+    error.data["cause"] = incident.cause;
+    error.data["recovery"] = incident.recovery;
+    reportCrashOnce(session->pid, incident, crash);
 }
 
 const char* processInstanceStateName(ProcessInstanceState state) {
@@ -1190,6 +1297,12 @@ private:
             }
             if (selected.has_value()) {
                 attached = attachDescriptor(*selected, generation).isOk();
+                if (attached) {
+                    DIDI_LOG_INFO("RUNTIME", "Re-attached to runtime session ",
+                                  selected->session_id, " (pid ", selected->pid,
+                                  ") without being asked; no session was attached and exactly one "
+                                  "live one matched this project.");
+                }
             }
         } catch (const std::exception&) {
             attached = false;

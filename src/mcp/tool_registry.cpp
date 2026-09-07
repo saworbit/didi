@@ -200,7 +200,8 @@ CallToolResult handleRuntimeExploreScene(const ResolvedToolBinding& binding, con
 CallToolResult handleRuntimeListSessions(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
 CallToolResult handleRuntimeAttachSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
 CallToolResult handleRuntimeDetachSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
-CallToolResult handleRuntimeGetSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions);
+CallToolResult handleRuntimeGetSession(const json& args, std::shared_ptr<runtime::IRuntimeSessionClient> sessions,
+                                       std::vector<std::string> available_without_engine = {});
 CallToolResult handleRuntimeReadLogs(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleRuntimeReadOutput(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleRuntimeSetPaused(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -972,7 +973,20 @@ void ToolRegistry::registerAllDefaultTools() {
         t.name = "runtime_get_session";
         t.description = "Performs a fresh authenticated handshake and returns token-free authoritative session identity metadata.";
         t.inputSchema = {{"type", "object"}};
-        t.handler = [this](const json& args) { return handleRuntimeGetSession(args, m_runtimeSessionClient); };
+        // Derived from the registry, never listed. A written list would satisfy
+        // a fixed test and then drift; this one cannot be wrong unless
+        // capabilityForTool is, which the docs validator already covers.
+        t.handler = [this](const json& args) {
+            std::vector<std::string> offline;
+            for (const auto& tool : listTools()) {
+                if (!tool.capability.implemented) continue;
+                const auto& modes = tool.capability.modes;
+                if (std::find(modes.begin(), modes.end(), "offline_fallback") == modes.end()) continue;
+                offline.push_back(tool.name);
+            }
+            std::sort(offline.begin(), offline.end());
+            return handleRuntimeGetSession(args, m_runtimeSessionClient, std::move(offline));
+        };
         registerTool(std::move(t));
     }
     const auto register_live_runtime = [this](const char* name, const char* description, json schema,

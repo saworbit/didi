@@ -2718,8 +2718,44 @@ static void test_rename_refuses_what_it_cannot_do_safely() {
     registry.setIpcClient(nullptr);
 }
 
+// The list of what still works when there is no engine is derived from the
+// registry rather than written down. A written list satisfies a fixed
+// assertion and then drifts as tools are added; this asserts the property
+// instead, so it cannot be right today and wrong next month.
+void test_offline_capability_is_derived_not_listed() {
+    const auto tools = didi::mcp::ToolRegistry::instance().listTools();
+    ASSERT_TRUE(!tools.empty());
+
+    std::vector<std::string> offline;
+    for (const auto& tool : tools) {
+        if (!tool.capability.implemented) continue;
+        const auto& modes = tool.capability.modes;
+        if (std::find(modes.begin(), modes.end(), "offline_fallback") != modes.end()) {
+            offline.push_back(tool.name);
+        }
+    }
+
+    // If this is ever empty, an engine loss leaves an agent with nothing to do,
+    // and the recovery sentences that point at this are lying.
+    ASSERT_TRUE(!offline.empty());
+
+    // And nothing in it may be live only, or we would be telling a caller to
+    // use a tool that needs the engine that just died.
+    for (const auto& name : offline) {
+        const auto found = std::find_if(tools.begin(), tools.end(),
+                                        [&](const auto& tool) { return tool.name == name; });
+        ASSERT_TRUE(found != tools.end());
+        const auto& modes = found->capability.modes;
+        ASSERT_TRUE(std::find(modes.begin(), modes.end(), "offline_fallback") != modes.end());
+        const bool live_only = modes.size() == 1 && modes.front() == "live";
+        ASSERT_TRUE(!live_only);
+    }
+}
+
 struct RegisterToolTests {
     RegisterToolTests() {
+        registerTest("Tools.OfflineCapabilityIsDerived",
+                     test_offline_capability_is_derived_not_listed);
         registerTest("Tools.PropertyTypeMismatchNamesTheValue",
                      test_property_type_mismatch_names_the_value_the_caller_sent);
         registerTest("Tools.PropertyTypeMismatchNamesEveryScalarType",
