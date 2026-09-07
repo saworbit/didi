@@ -183,16 +183,30 @@ set(GDEXT_SOURCES
 add_library(didi_extension SHARED ${GDEXT_SOURCES})
 target_link_libraries(didi_extension PRIVATE didi_core)
 
-# Test-only build of the real extension. It shares every production source but enables
-# deterministic failure seams used by the Godot 4.7.2 raw-bridge fixture.
-add_library(didi_extension_signal_tests SHARED ${GDEXT_SOURCES})
-target_link_libraries(didi_extension_signal_tests PRIVATE didi_core)
-target_compile_definitions(didi_extension_signal_tests PRIVATE DIDI_PHASE7_SIGNAL_TEST_SEAMS=1)
-set_target_properties(didi_extension_signal_tests PROPERTIES OUTPUT_NAME didi_extension_signal_tests)
-
 if(DIDI_BUILD_TESTS)
+    # Test-only build of the real extension. It shares every production source but enables
+    # deterministic failure seams used by the Godot 4.7.2 raw-bridge fixture. Nothing ships
+    # it, so a production configure has no reason to compile all of GDEXT_SOURCES a second
+    # time to produce it.
+    add_library(didi_extension_signal_tests SHARED ${GDEXT_SOURCES})
+    target_link_libraries(didi_extension_signal_tests PRIVATE didi_core)
+    target_compile_definitions(didi_extension_signal_tests PRIVATE DIDI_PHASE7_SIGNAL_TEST_SEAMS=1)
+    set_target_properties(didi_extension_signal_tests PROPERTIES OUTPUT_NAME didi_extension_signal_tests)
+
     add_executable(phase7_signal_bridge_probe tests/phase7_signal_bridge_probe.cpp)
     target_link_libraries(phase7_signal_bridge_probe PRIVATE didi_core)
+endif()
+
+# It went out from under that guard once already. Say so at configure time rather than
+# letting a production build quietly compile a test library again.
+if(NOT DIDI_BUILD_TESTS)
+    foreach(test_only_target didi_extension_signal_tests phase7_signal_bridge_probe)
+        if(TARGET ${test_only_target})
+            message(FATAL_ERROR
+                "${test_only_target} is a test-only target and must not exist when "
+                "DIDI_BUILD_TESTS is OFF. Move it inside the DIDI_BUILD_TESTS block.")
+        endif()
+    endforeach()
 endif()
 
 # The addon is exactly these tracked files plus the library built here. Naming
