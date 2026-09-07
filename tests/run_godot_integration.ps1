@@ -8,9 +8,12 @@ param(
     # shared CI runner it is not, and 30 seconds went red on a job that was
     # otherwise fine. This bounds a hang, so it is generous on purpose.
     [int]$StartupTimeoutSeconds = 120,
-    # Bounds the retry below. A second attempt that dies the same way is a
-    # real failure, whatever killed it.
-    [int]$Attempt = 1
+    # Bounds the retry below. Once was not enough: 4.7.2 hit the engine crash on
+    # two consecutive attempts of the same job, so a single retry still went
+    # red for something nothing under test causes. Three bounds the run at
+    # roughly eighteen minutes and still fails if the crash is persistent.
+    [int]$Attempt = 1,
+    [int]$MaxAttempts = 3
 )
 
 $ErrorActionPreference = "Stop"
@@ -2707,7 +2710,7 @@ try {
 }
 catch {
     $primaryFailureMessage = $_.Exception.Message
-    if ($Attempt -lt 2 -and (Test-EngineWorkerCrash $godot)) {
+    if ($Attempt -lt $MaxAttempts -and (Test-EngineWorkerCrash $godot)) {
         # Swallowed here so the cleanup below still runs. The retry happens
         # after it, with nothing of this attempt left holding a file.
         $retryForEngineCrash = $true
@@ -2800,13 +2803,13 @@ if ($retryForEngineCrash) {
     # godot_crash_*.log on its way in, so the report moves to a name it will
     # not take with it, and one CI still uploads.
     $crashReportPath = Join-Path $buildRoot ("godot_crash_" + $godot.Id + ".log")
-    $keptReportPath = Join-Path $buildRoot ("godot_engine_worker_crash_" + $godot.Id + ".log")
+    $keptReportPath = Join-Path $buildRoot ("godot_engine_worker_crash_attempt" + $Attempt + "_" + $godot.Id + ".log")
     if (Test-Path -LiteralPath $crashReportPath) {
         Move-Item -LiteralPath $crashReportPath -Destination $keptReportPath -Force
     }
     Write-Warning ("The engine died on one of its own worker threads, not on anything this harness drives. " +
                    "See #285: an illegal instruction with no Didi frame on the faulting stack. " +
-                   "Retrying the run once. Report kept at $keptReportPath. " +
+                   "Retrying: attempt $($Attempt + 1) of $MaxAttempts. Report kept at $keptReportPath. " +
                    "The failure it died with was: " + $primaryFailureMessage)
     $retryArguments = @{}
     foreach ($entry in $PSBoundParameters.GetEnumerator()) { $retryArguments[$entry.Key] = $entry.Value }
