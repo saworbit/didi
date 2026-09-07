@@ -21,7 +21,9 @@ namespace {
 namespace fs = std::filesystem;
 using didi::runtime::CheckpointStore;
 struct Fixture {
-    fs::path root = fs::temp_directory_path() /
+    // Darwin's temporary directory can use /var -> /private/var. Resolve the
+    // existing temp root so normal fixtures satisfy production's no-link policy.
+    fs::path root = fs::canonical(fs::temp_directory_path()) /
                     ("didi-checkpoint-test-" +
                      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     Fixture() { fs::create_directories(root / "source"); }
