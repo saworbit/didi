@@ -33,6 +33,8 @@ A transport failure may mean an edit completed but its response was lost. Didi p
 
 `recovery.json`, `checkpoints/`, and per-launch `editor-N.log` live outside the mutable project. Crash reports stay in the project `.didi/crash`; restoring preserves them with the old project. Retained workspaces and logs are not automatically deleted or capped: inspect and remove them when no longer needed. A restored workspace can reimport assets because `.godot` is excluded.
 
+The owned editor is stopped when Didi exits, and the operating system stops it when Didi does not get that far. On Windows the child is created inside a job object marked kill on close, so the kernel ends it when the last handle to that job goes with the process. On Linux the child asks for `SIGKILL` when its parent dies. Either way a host that is killed rather than stopped does not leave a headless editor behind. macOS has neither mechanism and its spawn path cannot run code in the child, so on that platform an abnormally killed host does leave the editor running; stop Didi normally there, or end the editor yourself.
+
 This feature recovers a Godot editor crash while the MCP host survives. It does not automatically resume an existing container after an MCP/OS crash or claim power-loss durability. The journal and completed checkpoints remain available for manual inspection and salvage. Filesystem checks defend against malformed snapshots and ordinary links, not a malicious process racing path replacement under the same account.
 
 ## Verification

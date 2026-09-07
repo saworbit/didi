@@ -14,6 +14,23 @@ Historical entries describe the surface advertised by those releases. For the ex
 Added opt-in managed editor recovery: isolated project copies, saved-file checkpoints, one owned-editor restart, explicit reconciliation and preserved-workspace restoration. Four recovery tools expose state and actions without replaying uncertain edits. Ordinary attachment and runtime_launch remain unchanged. See [Managed Recovery](docs/MANAGED_RECOVERY.md) for coverage and limitations.
 ### Fixed
 
+- The managed editor does not outlive the host that owns it. It was reaped only
+  by a destructor, so it survived every exit that does not run one: a `SIGKILL`,
+  a supervisor or container stopping the host, a second Ctrl+C taking the C
+  runtime default on Windows, or the host crashing. What was left was a headless
+  Godot holding a workspace open, with nothing running that knew about it, in a
+  mode built for unattended runs where nobody is watching a process list.
+
+  Windows now creates the child inside a job object marked kill on close and
+  attaches it at creation, so there is no window where the child runs outside
+  the job, and the kernel ends it when the last handle to that job goes with the
+  process. Linux sets `PR_SET_PDEATHSIG` in the child before the exec, and
+  checks the parent again immediately afterwards because the kernel sends
+  nothing if the parent had already gone. A host that cannot create or nest a
+  job still starts its editor, and says in the log that the second line is
+  missing rather than leaving somebody to find out from an orphan. macOS has
+  neither mechanism and is recorded as the gap it is.
+
 - Ctrl+C stops the server. The `SIGINT` and `SIGTERM` handler called `stop()`,
   which joins the blackboard watcher thread, detaches the runtime session over
   IPC, and logs through a mutex. None of that is safe from a signal handler,

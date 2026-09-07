@@ -9,12 +9,14 @@
 #include <windows.h>
 #elif defined(__APPLE__)
 #include <crt_externs.h>
+#include <csignal>
 #include <fcntl.h>
 #include <mach-o/dyld.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #else
+#include <csignal>
 #include <fcntl.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
@@ -57,12 +59,33 @@ struct ChildFixture {
             return;
         if (args[2] == "hold")
             std::this_thread::sleep_for(std::chrono::seconds(30));
+        // Long enough that outliving the reap deadline is the only way this
+        // ends. A grandchild that merely finished its own sleep would make the
+        // reaping test pass without anything having reaped it.
+        if (args[2] == "hold_long")
+            std::this_thread::sleep_for(std::chrono::seconds(120));
 #if !defined(_WIN32)
         if (args[2] == "check_descriptor" && args.size() == 4) {
             const int descriptor = std::stoi(args[3]);
             std::_Exit(fcntl(descriptor, F_GETFD) == -1 && errno == EBADF ? 37 : 38);
         }
 #endif
+        // Stands in for a host that dies without running any of its own code.
+        // It starts a managed child, publishes that child's pid, and then never
+        // returns, so no destructor and no stop() can be what reaps it.
+        if (args[2] == "orphan" && args.size() == 6) {
+            static ManagedProcess grandchild;
+            if (grandchild.start(args[0], {"--didi-managed-child", "hold_long"}, args[3], args[4])
+                    .isOk()) {
+                const fs::path published(args[5]);
+                const fs::path partial(published.string() + ".partial");
+                std::ofstream(partial) << grandchild.pid();
+                std::error_code ec;
+                fs::rename(partial, published, ec);
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(60));
+            std::_Exit(38);
+        }
         if (args[2] == "report") {
             std::cout << didi::json(
                              {{"arguments", std::vector<std::string>(args.begin() + 3, args.end())},
@@ -105,6 +128,48 @@ struct Temp {
         fs::remove_all(path, ec);
     }
 };
+
+// Alive means running. A killed child on Linux is briefly a zombie, which is
+// still a pid but is not a process doing anything, so it does not count.
+bool processAlive(uint64_t pid) {
+#if defined(_WIN32)
+    HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE,
+                                static_cast<DWORD>(pid));
+    if (!handle)
+        return false;
+    const bool alive = WaitForSingleObject(handle, 0) == WAIT_TIMEOUT;
+    CloseHandle(handle);
+    return alive;
+#else
+    if (kill(static_cast<pid_t>(pid), 0) != 0)
+        return false;
+#if defined(__linux__)
+    std::ifstream input("/proc/" + std::to_string(pid) + "/stat");
+    std::string line;
+    if (std::getline(input, line)) {
+        // The command field is parenthesised and may itself contain spaces and
+        // brackets, so the state is read relative to the last close bracket.
+        const auto command_end = line.rfind(')');
+        if (command_end != std::string::npos && command_end + 2 < line.size())
+            return line[command_end + 2] != 'Z';
+    }
+#endif
+    return true;
+#endif
+}
+
+// Kills without giving the target any chance to clean up, which is the point:
+// a supervisor, a SIGKILL, or a second Ctrl+C taking the default action.
+void hardKill(uint64_t pid) {
+#if defined(_WIN32)
+    HANDLE handle = OpenProcess(PROCESS_TERMINATE, FALSE, static_cast<DWORD>(pid));
+    CHECK_PROCESS(handle != nullptr);
+    CHECK_PROCESS(TerminateProcess(handle, 1) != 0);
+    CloseHandle(handle);
+#else
+    CHECK_PROCESS(kill(static_cast<pid_t>(pid), SIGKILL) == 0);
+#endif
+}
 
 void waitForExit(ManagedProcess& process) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
@@ -276,12 +341,76 @@ void launchClosesDescriptorsAboveSoftLimit() {
 }
 #endif
 
+void reapsOwnedChildWhenTheHostDiesAbnormally() {
+    // Break caught: the child was reaped only by a destructor, so a host killed
+    // rather than stopped left a headless editor running with nothing left that
+    // knew about it.
+#if defined(__APPLE__)
+    // Darwin has no equivalent of a job object or PR_SET_PDEATHSIG, and the
+    // spawn extension this platform needs rules out running code in the child.
+    // The gap is recorded in docs/MANAGED_RECOVERY.md rather than pretended away.
+    return;
+#else
+    Temp temp;
+    const auto self = selfPath().string();
+    const auto published = temp.path / "grandchild.pid";
+
+    ManagedProcess host;
+    CHECK_PROCESS(host
+                      .start(self,
+                             {"--didi-managed-child", "orphan", temp.path.string(),
+                              (temp.path / "grandchild.log").string(), published.string()},
+                             temp.path, temp.path / "host.log")
+                      .isOk());
+
+    uint64_t grandchild = 0;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (!grandchild && std::chrono::steady_clock::now() < deadline) {
+        std::ifstream(published) >> grandchild;
+        if (!grandchild)
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    CHECK_PROCESS(grandchild != 0);
+    CHECK_PROCESS(processAlive(grandchild));
+
+    // If nothing reaps it, do not leave it sleeping for two minutes.
+    struct Cleanup {
+        uint64_t pid;
+        ~Cleanup() {
+            if (processAlive(pid)) {
+#if defined(_WIN32)
+                if (HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, static_cast<DWORD>(pid))) {
+                    TerminateProcess(h, 1);
+                    CloseHandle(h);
+                }
+#else
+                kill(static_cast<pid_t>(pid), SIGKILL);
+#endif
+            }
+        }
+    } cleanup{grandchild};
+
+    // The host object stays alive here, so our own job handle stays open.
+    // Anything that reaps the grandchild now is the host's own arrangement.
+    hardKill(host.pid());
+
+    // Well inside the grandchild's own lifetime, so surviving this window means
+    // it was not reaped rather than that it had not got round to exiting.
+    deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    while (processAlive(grandchild) && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    CHECK_PROCESS(!processAlive(grandchild));
+#endif
+}
+
 struct RegisterManagedProcess {
     RegisterManagedProcess() {
         registerTest("ManagedProcess.ReportsArgumentsAndExit", reportsArgumentsAndExit);
         registerTest("ManagedProcess.StopsOnlyOwnedChild", stopsOnlyOwnedChild);
         registerTest("ManagedProcess.RejectsInvalidLaunchInput", rejectsInvalidLaunchInput);
         registerTest("ManagedProcess.DestructorReapsOwnedChild", destructorReapsOwnedChild);
+        registerTest("ManagedProcess.ReapsOwnedChildWhenHostDiesAbnormally",
+                     reapsOwnedChildWhenTheHostDiesAbnormally);
         registerTest("ManagedProcess.FailedNativeLaunchLeavesObjectReusable",
                      failedNativeLaunchLeavesObjectReusable);
 #if !defined(_WIN32)
