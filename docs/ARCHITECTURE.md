@@ -62,6 +62,26 @@ itself is down, which is why it exists; see
 
 ---
 
+### Third topology: opt-in managed recovery
+
+Alongside ordinary live attachment and offline execution, managed startup adds an owned-editor topology. Ordinary attachment remains unchanged:
+
+```text
+Source project (matching addon already enabled)
+  -> new disjoint recovery container/
+       project/                 -> owned headless editor -> exact-child authenticated IPC
+       checkpoints/             saved-file snapshots
+       recovery.json            operation/reconciliation journal
+       editor-N.log             per-launch diagnostics
+       preserved-.../           prior project retained during restore
+```
+
+The host copies saved content into the new container and routes project work to that copy. The journal, checkpoints, and logs live outside the mutable copy. Attachment requires the exact owned child's identity, then readiness polling through `editor.getRecoveryState`, including `filesystem_scanning`. Discovery, attachment, four quiet polls, and a stable checkpoint share one 30-second startup/reattach deadline.
+
+Managed mutations receive pre-dispatch and post-success saved-file snapshots; supported scene edits save the active scene before the post snapshot. Unknown outcomes or failed post-edit protection latch `requires_reconciliation`, blocking further mutations until explicit restore or acceptance of inspected saved files after the uncertain original editor stops. No uncertain edit is replayed.
+
+Before ordinary authorized dispatch, the supervisor can restart an abnormally exited child once. Reads can therefore execute project startup code; status via `runtime_recovery_status`, dry runs, and confirmation previews do not relaunch. A recovery that changes the route defers a pending mutation without starting it. Confirmed restore preserves the prior project and launches an editor, but does not replenish the automatic restart budget. New host invocations require new workspaces; retained containers are salvage artifacts, not resumable host state. This is process ownership and saved-file recovery, not an OS sandbox. See [Managed Recovery](MANAGED_RECOVERY.md).
+
 ## 3. Threading & Concurrency Model
 
 Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-safe** for concurrent mutations. Didi solves this with a multi-layered queue dispatcher:

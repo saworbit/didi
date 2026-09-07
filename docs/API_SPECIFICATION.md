@@ -198,7 +198,19 @@ Tool execution failures use MCP `result.isError: true` with explanatory text. JS
 
 Every implemented mutating tool schema includes `dry_run: boolean`. With `dry_run: true`, dispatch stops at the registry boundary and returns `dry_run: true` plus `mutation_preview`; no mutation handler or external process executes. The preview is bound to the tool, sanitized arguments, canonical project, execution mode, optional session ID, and route generation.
 
-`editor_reload_project`, `script_patch_method` and its legacy alias, plus overwrite-enabled `resource_create`, visual-test-lab creation, `project_export`, and `gridmap_export_mesh_library` require the preview's `confirmation_token`. The token is 64 lowercase hexadecimal characters, expires after 120 seconds, is consumed on its first validation attempt, and fails on any argument/context mismatch or replay. A request must not combine `dry_run: true` with `confirmation_token`.
+`runtime_restore_checkpoint`, `editor_reload_project`, `script_patch_method`/`patch_script_symbols`, `signal_emit`, `project_rename_references`, `project_apply_changes`, and `blackboard_clear` always require confirmation. `resource_create`, `script_create`, `viewport_create_test_lab`/`create_visual_test_lab`, `project_export`, and `gridmap_export_mesh_library` require confirmation when `overwrite: true`. The preview's `confirmation_token` is 64 lowercase hexadecimal characters, expires after 120 seconds, is consumed on its first validation attempt, and fails on any argument/context mismatch or replay. A request must not combine `dry_run: true` with `confirmation_token`. The startup-only YOLO override is described above.
+
+### Managed recovery extension
+
+Opt-in `--managed-editor` and `--recovery-workspace` startup enables four standalone host tools: `runtime_recovery_status`, `runtime_checkpoint`, `runtime_recover_editor`, and `runtime_restore_checkpoint`. They advertise `offline_fallback` and return a disabled error in ordinary attachment mode. The host owns only its child editor, uses a new project copy, and refuses manual attach/detach. See [Managed Recovery](MANAGED_RECOVERY.md) for startup validation and saved-file coverage.
+
+Ordinary result `recovery` receipts contain `state`, `requires_reconciliation`, `operation`, `checkpoint_id`, `coverage`, and `unprotected_changes`. Full `runtime_recovery_status` fields are `enabled`, `state`, `editor_running`, `checkpoints`, `pid`, `session_id`, `workspace`, `journal`, `automatic_restart_used`, `requires_reconciliation`, `last_operation`, `last_checkpoint`, `coverage`, `unprotected_changes`, `excludes`, and `next_action`.
+
+Before an ordinary authorized request dispatches, `ensureEditor()` may consume the single automatic restart after an abnormal owned-child exit. This includes ordinary reads and can execute project startup code. If recovery changes the route for a pending mutation, that mutation does not start; inspect the recovered state before submitting a fresh request. `runtime_recovery_status`, dry runs, and confirmation previews do not relaunch. Dry runs execute no recovery mutation, checkpoint, or restore.
+
+An uncertain edit is never replayed. `not_started` means dispatch did not begin; a live/transport `unknown_outcome` means the edit may have applied, summarized as `failed_or_unknown` in the recovery operation. Applied edits whose protection fails report `applied_persistence_failed`, `applied_checkpoint_failed`, or `applied_journal_failed`; successful protection records `completed_saved_files_checkpointed`. `requires_reconciliation` blocks further mutations until explicit reconciliation: restore a checkpoint, or inspect and accept saved files using `runtime_checkpoint` with `accept_current_files: true` only after the uncertain original editor is proven stopped. A running replacement editor alone does not clear this latch. See the [Tool Reference](TOOL_REFERENCE.md#managed-editor-recovery) for lifecycle states and reconciliation outcomes.
+
+`runtime_restore_checkpoint` requires a listed `checkpoint_id` and the exact dry-run preview's confirmation token. It verifies/stages the checkpoint, stops only the owned editor, preserves the prior project, installs the copy, and launches an editor. Restore does not reset the automatic restart budget; only a new managed host invocation does, and it must use a fresh workspace.
 
 ---
 
@@ -222,7 +234,7 @@ Request IDs are correlated exactly. A missing or mismatched response ID closes t
 
 - `session.handshake`
 
-- `editor.getState`
+- `editor.getState`, `editor.getRecoveryState`
 - `scene.getHierarchy`, `scene.instantiateNode`, `scene.removeNode`, `scene.reparentNode`, `scene.setProperty`, `scene.getProperty`, `scene.duplicateNode`
 - `script.attachToNode`, `script.detachFromNode`
 - `project.listAutoloads`, `project.setAutoload`, `project.removeAutoload`
@@ -236,6 +248,8 @@ Request IDs are correlated exactly. A missing or mismatched response ID closes t
 - `ui.hitTest`
 - `runtime.getLogs`, `runtime.getTree`, `runtime.setPaused`, `runtime.step`, `runtime.stop`
 - `runtime.evalGdscript`
+
+`editor.getRecoveryState` is an internal main-thread readiness observation, not a public MCP tool. Its `filesystem_scanning` field reports ongoing editor filesystem scanning/import activity. Managed startup and reattachment share a 30-second deadline across discovery, exact-child attachment, four quiet readiness polls, and a stable saved-file checkpoint; connection alone is insufficient readiness.
 
 Each `tools/list` definition carries specification `annotations` with `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint`. They are derived from the server's mutation classification and are never set by hand. Successful `tools/call` results whose payload is JSON carry `structuredContent` with that payload, emitted alongside the existing text content item rather than replacing it, so clients that read only `content` are unaffected.
 

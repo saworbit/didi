@@ -43,7 +43,7 @@ Phase 4 live capture IDs and raw RGBA buffers exist only inside the selected ext
 
 ### 4. Phase 6 Mutation Capabilities
 
-Every implemented mutation exposes `dry_run`. A dry-run stops before tool handlers, subprocesses, filesystem writers, or Godot main-thread commands and returns a structured preview. Editor reload, script patching, and overwrite-enabled offline writers additionally require the preview's 64-hex `confirmation_token`. Tokens expire after 120 seconds, are single-use, and are bound to the exact tool, arguments, canonical project, execution mode, session, and route generation. Treat them as short-lived secrets: never persist them in CI artifacts or logs, and never retry an `unknown_outcome` mutation automatically.
+Every implemented mutation exposes `dry_run`. A dry-run stops before tool handlers, subprocesses, filesystem writers, or Godot main-thread commands and returns a structured preview. The [always-confirmed and overwrite-confirmed tools](TOOL_REFERENCE.md#13-phase-6-mutation-safety) additionally require the preview's 64-hex `confirmation_token`. Tokens expire after 120 seconds, are single-use, and are bound to the exact tool, arguments, canonical project, execution mode, session, and route generation. Treat them as short-lived secrets: never persist them in CI artifacts or logs, and never retry an `unknown_outcome` mutation automatically.
 
 ---
 
@@ -54,6 +54,8 @@ Every implemented mutation exposes `dry_run`. A dry-run stops before tool handle
 | `-v`, `--version` | none | Print the version and exit `0` |
 | `-h`, `--help` | none | Print the option list and exit `0` |
 | `-p`, `--project <dir>` | Directory path | Godot project root, required unless `DIDI_PROJECT_ROOT` is set |
+| `--managed-editor <file>` | Absolute executable file path | Opt in to an owned headless Godot editor; requires `--recovery-workspace` |
+| `--recovery-workspace <dir>` | New disjoint directory | Recovery container with an existing parent; requires `--managed-editor` |
 | `--pipe-name <name>` | Pipe / socket name | Legacy direct IPC override, same effect as `DIDI_PIPE_NAME` |
 | `--log-level <level>` | `DEBUG`, `INFO`, `WARN`, `ERROR`, `NONE` | Stderr logging verbosity |
 | `--dump-tool-manifest` | none | Print the registered tool surface as JSON and exit `0`, no project or IPC needed |
@@ -69,6 +71,14 @@ the operator asked for and without the warning that says confirmations are off.
 
 A launch that prints nothing on stderr and stays running got exactly the
 configuration you wrote.
+
+### Managed recovery operations
+
+The two recovery flags must be paired. Startup validates an absolute Godot executable file and a new workspace directory disjoint from the source project, with an existing parent. Enable the source addon first. Each invocation requires a fresh workspace; retained containers are salvage-only and cannot be reused as a new `--recovery-workspace`. See [Managed Recovery](MANAGED_RECOVERY.md) and the [client startup example](INTEGRATION_GUIDE.md#optional-managed-editor-startup).
+
+Startup and reattachment share a 30-second readiness deadline across discovery, exact-child attachment, four quiet polls of `editor.getRecoveryState`, and a stable checkpoint. `filesystem_scanning` must settle; a first import can exhaust this boundary. Inspect `<workspace>/editor-N.log` for missing addons, import failures, or project startup errors before retrying with a fresh workspace.
+
+Five completed checkpoints are retained, each capped at 256 MiB and 10,000 files, with traversal capped at 30,000 paths. The recovery journal (`recovery.json`), per-launch logs, preserved project copies, and accumulated workspace containers have no overall automatic size/retention cap. Inspect and clean up these project-sensitive artifacts deliberately; completed checkpoint retention is not a cap on total disk use. Ordinary authorized reads can consume the single automatic restart and execute project code. Restore launches an editor but does not replenish that budget.
 
 ### Stopping the server
 
@@ -167,6 +177,10 @@ The live `godot://runtime/logs`/`runtime_read_logs` ring retains 2,000 structure
 
 | Symptom | Probable Cause | Recommended Action |
 | :--- | :--- | :--- |
+| Managed startup refuses a reused workspace | A previous host left the container in place, often after client auto-restart. | Inspect/archive the prior artifacts, then use a fresh path; configure a wrapper to rotate names. Existing containers cannot resume automatically. |
+| Managed startup/reattach exceeds readiness deadline | Discovery, attachment, imports, or stable checkpointing did not complete within the shared 30 seconds. | Read the current `editor-N.log`, verify the enabled source addon and import health, then start with a fresh workspace if the host exited. |
+| `requires_reconciliation: true` | An edit has an uncertain outcome or its post-edit checkpoint failed. | Inspect `runtime_recovery_status` and files. Restore a confirmed checkpoint, or explicitly accept current saved files only after the uncertain original editor is proven stopped. Never replay the uncertain edit. |
+| Automatic restart budget exhausted | The one automatic owned-editor restart was consumed. | Inspect status and logs; use an explicit confirmed restore or start a new managed invocation with a fresh workspace. Restore does not reset the automatic budget. |
 | `Cannot connect to Godot Didi GDExtension IPC pipe` | Godot Editor is not open, or Didi plugin is disabled. | 1. Open the project in Godot Editor.<br>2. Open the **Didi** main screen tab; the Dashboard names which of these is wrong, and Diagnostics names the file, path or pid it looked at.<br>3. Verify **Project Settings $\rightarrow$ Plugins $\rightarrow$ Didi** is checked.<br>4. Verify `didi_extension.dll` exists in `addons/didi/bin/`. |
 | The editor is open and the plugin enabled, but live tools still report `unavailable` | The extension loaded and its endpoint did not, or the session belongs to a different project than the one the client was started with. | Open the **Didi** tab. A live bridge with no session is amber and names the Output tag carrying the reason. The Other sessions card counts what else is published on the machine, and its **List them** button shows each one with the project it belongs to. The Connect page shows the `--project` value this editor would need. |
 | `Didi startup refused: unknown option ...` (exit `2`) | A misspelled option, a missing value, or a value that is really the next option. | Read the second stderr line, which is the help line for that option, and fix the client's `args` array. Run `didi --help` for the full list. |

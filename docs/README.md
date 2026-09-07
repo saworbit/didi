@@ -22,6 +22,7 @@ record is kept for the reasoning, not because it describes today's behaviour.
 | --- | --- |
 | [Current Capability Matrix](CAPABILITIES.md) | The authoritative list of what is live, offline, unavailable and unimplemented. |
 | [Tool Reference](TOOL_REFERENCE.md) | Behaviour, arguments and limits for every canonical tool and legacy name. |
+| [Managed Recovery](MANAGED_RECOVERY.md) | Opt-in owned-editor startup, saved-file checkpoints, reconciliation, and recovery limits. |
 | [Resources and Prompts](RESOURCES_AND_PROMPTS.md) | The `godot://` resources and the prompt templates. |
 
 ## How it works
@@ -58,6 +59,7 @@ any of it as current behaviour.
 | [Field Trial Implementation Plan](FIELD_TRIAL_IMPLEMENTATION_PLAN.md) | The executable plan for that trial. The seed, briefing and scoring script live in `tools/field-trial/`. |
 | [Field Trial Results](FIELD_TRIAL_RESULTS.md) | One section per run, numbers kept so two runs can be compared. |
 | [Gogo Design](GOGO_DESIGN.md) | Design only. The parallel Godot bench farm. Nothing of it is implemented. |
+| [Engine Failure Handling Design](ENGINE_FAILURE_HANDLING_DESIGN.md) | Implemented; superseded in part by managed recovery's opt-in owned-editor restart. Historical reasoning for ordinary attachment remains. |
 | [Human Interaction Design](HUMAN_INTERACTION_DESIGN.md) | Partly implemented. Records what the editor console became and where it went past what this document recommended. |
 | [Realignment Program Plan](REALIGNMENT_IMPLEMENTATION_PLAN.md) | Partly implemented. Its checkboxes were never maintained, so read them as the original proposal rather than as progress. |
 | [Lab Orchestrator Design](LAB_ORCHESTRATOR_DESIGN.md) | Superseded. A redirect to [Gogo Design](GOGO_DESIGN.md). |

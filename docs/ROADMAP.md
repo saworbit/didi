@@ -325,11 +325,11 @@ These are missing capabilities that an AI agent actually requires to complete fu
 
 ---
 
-## 📋 The 79-Tool Canonical Surface
+## 📋 The Original 79-Tool Canonical Baseline
 
-This is the current registered canonical surface, not a claim that every row executes today. See [Current Capability Matrix](CAPABILITIES.md) for per-tool status.
+This table records the original 79-tool canonical baseline, not the current registered surface or execution status. See [Current Capability Matrix](CAPABILITIES.md) for today's surface and per-tool status, and [Surface Amendments](SURFACE_AMENDMENTS.md) for subsequent accepted additions.
 
-| Domain | Key Tools | Current status |
+| Domain | Key Tools | Baseline status |
 | :--- | :--- | :--- |
 | **1. Scene & Nodes (7)** | `scene_get_hierarchy`, `scene_instantiate_node`, `scene_remove_node`, `scene_reparent_node`, `scene_set_property`, `scene_get_property`, `scene_duplicate_node` | Implemented live; hierarchy also has offline parsing. Phase 1 scalar/built-in-node limits apply. |
 | **2. Signals & Events (4)** | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` | Implemented live in editor sessions. |
