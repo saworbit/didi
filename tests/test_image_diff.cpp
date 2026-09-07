@@ -205,6 +205,25 @@ void test_perceptual_hash_ignores_uniform_brightness() {
     ASSERT_EQ(didi::image::hammingDistance(0b1011ull, 0b1110ull), 2);
 }
 
+void test_perceptual_hash_uses_every_bit_it_claims() {
+    // Break caught: the hash came from 63 AC coefficients written to bits 0 to
+    // 62, so the top bit was clear for every possible input and the distance of
+    // 64 that the header, the docs and the tool schema all offer could not be
+    // produced by the function that produces the hashes.
+    uint64_t combined = 0;
+    for (int shift = 0; shift < 24; ++shift) {
+        for (int noise = 0; noise < 3; ++noise) {
+            const uint64_t hash = didi::image::perceptualHash(patternImage(64, 64, shift, noise));
+            combined |= hash;
+            // An even coefficient count splits exactly in half at the median,
+            // so every hash carries 32 bits and two of them can differ in all
+            // 64. An odd count cannot, whatever the tolerance says.
+            ASSERT_EQ(didi::image::hammingDistance(hash, 0), 32);
+        }
+    }
+    ASSERT_TRUE((combined & (uint64_t{1} << 63)) != 0);
+}
+
 void test_restoration_guard_runs_once_on_early_exit() {
     // Break caught: an encoding/capture error bypasses temporary editor-state restoration.
     int restorations = 0;
@@ -352,6 +371,8 @@ struct RegisterImageDiffTests {
                      test_structural_similarity_falls_as_structure_diverges);
         registerTest("ImageDiff.PerceptualHashIgnoresBrightness",
                      test_perceptual_hash_ignores_uniform_brightness);
+        registerTest("ImageDiff.PerceptualHashUsesEveryBit",
+                     test_perceptual_hash_uses_every_bit_it_claims);
         registerTest("ImageDiff.SubThresholdNoiseIsUnambiguous",
                      test_sub_threshold_noise_is_reported_without_contradiction);
         registerTest("CaptureCache.BorrowsAndMovesFrames",

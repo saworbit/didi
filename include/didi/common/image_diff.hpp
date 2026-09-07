@@ -76,7 +76,9 @@ struct ImageDiffResult {
 double structuralSimilarity(const RgbaImage& before, const RgbaImage& after);
 
 // 64 bit DCT perceptual hash. Two images that look alike hash alike, whatever
-// their pixel-level noise.
+// their pixel-level noise. Every bit carries a coefficient, so the whole 0 to
+// 64 Hamming range the callers are offered can actually be produced. The DC
+// term is not one of them: overall brightness is not structure.
 uint64_t perceptualHash(const RgbaImage& image);
 
 int hammingDistance(uint64_t left, uint64_t right);
