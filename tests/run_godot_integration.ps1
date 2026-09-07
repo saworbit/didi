@@ -55,6 +55,27 @@ New-Item -ItemType Directory -Path $sessionDirectory | Out-Null
 $env:DIDI_SESSION_DIR = $sessionDirectory
 
 Remove-Item -LiteralPath $stdoutPath, $stderrPath, $gameStdoutPath, $gameStderrPath, $editorEngineLogPath, $gameEngineLogPath, $shutdownGameStdoutPath, $shutdownGameStderrPath, $shutdownGameEngineLogPath -Force -ErrorAction SilentlyContinue
+# The reports are named after the engine pid, so they accumulate rather than
+# overwrite. A stale one read as this run's would be worse than none.
+Remove-Item -Path (Join-Path $buildRoot "godot_crash_*.log") -Force -ErrorAction SilentlyContinue
+Remove-Item -Path (Join-Path $buildRoot "godot_crash_*.dmp") -Force -ErrorAction SilentlyContinue
+# #285 kills the editor with a bare exit code and no engine side trace. The
+# extension is already loaded in the process that dies, so it takes the stack
+# the engine does not.
+$previousCrashCaptureDir = $env:DIDI_CRASH_CAPTURE_DIR
+$env:DIDI_CRASH_CAPTURE_DIR = $buildRoot
+
+# Reads what the crashed engine left, so a failure says where it died rather
+# than only that it did.
+function Get-EngineCrashReport($EngineProcess) {
+    if ($null -eq $EngineProcess) { return "" }
+    $path = Join-Path $buildRoot ("godot_crash_" + $EngineProcess.Id + ".log")
+    if (-not (Test-Path -LiteralPath $path)) {
+        return " No crash report at $path, so the fault was not one the capture handles or the extension never armed."
+    }
+    $text = (Get-Content -LiteralPath $path -Raw)
+    return "`nCrash report ($path):`n$text"
+}
 $godot = $null
 $game = $null
 $shutdownGame = $null
@@ -382,7 +403,7 @@ try {
         while ([DateTime]::UtcNow -lt $exitDeadline -and -not $godot.HasExited) {
             Start-Sleep -Milliseconds 100
         }
-        Assert-True (-not $godot.HasExited) "Godot editor died during the themed Control block and left exit code 0x$('{0:X8}' -f $godot.ExitCode). The tool errors in this block are the transport reporting that, not faults in the requests."
+        Assert-True (-not $godot.HasExited) "Godot editor died during the themed Control block and left exit code 0x$('{0:X8}' -f $godot.ExitCode). The tool errors in this block are the transport reporting that, not faults in the requests.$(Get-EngineCrashReport $godot)"
     }
     Tool-Payload $postInitById[922] | Out-Null
     Tool-Payload $postInitById[923] | Out-Null
@@ -396,7 +417,7 @@ try {
     Tool-Payload $postInitById[928] | Out-Null
     Tool-Payload $postInitById[929] | Out-Null
     Tool-Payload $postInitById[930] | Out-Null
-    Assert-True (-not $godot.HasExited) "Godot editor died constructing a themed Control; NOTIFICATION_POSTINITIALIZE is not reaching newly constructed objects. Exit code 0x$('{0:X8}' -f $godot.ExitCode)."
+    Assert-True (-not $godot.HasExited) "Godot editor died constructing a themed Control; NOTIFICATION_POSTINITIALIZE is not reaching newly constructed objects. Exit code 0x$('{0:X8}' -f $godot.ExitCode).$(Get-EngineCrashReport $godot)"
 
     $game = Start-Process -FilePath $GodotExecutable `
         -ArgumentList @("--headless", "--path", $fixtureRoot, "--log-file", $gameEngineLogPath, "res://runtime_main.tscn") `
@@ -2715,6 +2736,12 @@ finally {
     }
     else {
         $env:GODOT_BIN = $previousGodotBin
+    }
+    if ($null -eq $previousCrashCaptureDir) {
+        Remove-Item Env:DIDI_CRASH_CAPTURE_DIR -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:DIDI_CRASH_CAPTURE_DIR = $previousCrashCaptureDir
     }
     if ($integrationSucceeded -and $descriptorEntries.Count -ne 0) {
         throw "Runtime descriptor directory was not empty after exact-PID cleanup: $($descriptorEntries.Name -join ', ')"

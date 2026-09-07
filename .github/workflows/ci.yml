@@ -558,6 +558,7 @@ jobs:
             build/godot_*.log
             build/godot_*.out
             build/godot_*.err
+            build/godot_*.dmp
           if-no-files-found: ignore
 
   # The option landed with #38; this is the job that uses it. ASan and UBSan see

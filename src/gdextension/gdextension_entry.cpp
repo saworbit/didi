@@ -1,6 +1,7 @@
 #include "didi/gdextension/gdextension_interface.h"
 #include "didi/gdextension/gdextension_api.hpp"
 #include "didi/gdextension/gdextension_ipc.hpp"
+#include "didi/gdextension/crash_capture.hpp"
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/editor_hook.hpp"
 #include "didi/gdextension/engine_output_logger.hpp"
@@ -145,6 +146,13 @@ GDE_EXPORT GDExtensionBool didi_library_init(GDExtensionInterfaceGetProcAddress 
         return 1;
     }
     didi::godot::GodotApi::instance().init(p_get_proc_address, p_library, r_initialization);
+
+    // After the API is bound, because nothing here may run before the engine
+    // has handed the extension its interface.
+    if (didi::godot::armCrashCapture()) {
+        DIDI_LOG_INFO("GDEXTENSION", "Fatal exception capture armed; a crash writes ",
+                      didi::godot::crashReportPath());
+    }
 
     GDExtensionMainLoopCallbacks main_loop_callbacks{};
     main_loop_callbacks.frame_func = didi::godot::didi_main_loop_frame;
