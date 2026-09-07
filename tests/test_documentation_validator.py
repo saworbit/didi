@@ -479,6 +479,27 @@ Second section.
                     errors,
                 )
 
+    def test_rejects_multiline_current_surface_heading(self):
+        # Break caught: newline whitespace must not join prose into a valid H2.
+        errors = VALIDATOR.validate_current_surface_heading(
+            {"README.md": "## Protocol\nSurface (113 Canonical Tools)\n"}, 113
+        )
+
+        self.assertTrue(
+            any("exactly one current protocol-surface heading" in error for error in errors),
+            errors,
+        )
+
+    def test_preserves_current_surface_heading_after_backtick_inline_sample(self):
+        # Break caught: backticks in the info string make this an inline sample,
+        # not an unclosed fence that hides the real heading through EOF.
+        errors = VALIDATOR.validate_current_surface_heading(
+            {"README.md": "```inline sample```\n\n## Protocol Surface (113 Canonical Tools)\n"},
+            113,
+        )
+
+        self.assertEqual([], errors)
+
     def test_ignores_fenced_current_surface_heading(self):
         # Break caught: Markdown examples must not satisfy a current-document
         # contract just because they contain a literal H2.
@@ -572,6 +593,40 @@ Second section.
                 for error in errors
             ),
             errors,
+        )
+
+    def test_inline_code_link_cannot_satisfy_managed_recovery_navigation(self):
+        # Break caught: a literal Markdown example is not a navigable link.
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        self.write(
+            "README.md",
+            readme.replace(
+                "[Managed Recovery](docs/MANAGED_RECOVERY.md)",
+                "`[Managed Recovery](docs/MANAGED_RECOVERY.md)`",
+            ),
+        )
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(
+            any("README.md: must link docs/MANAGED_RECOVERY.md" in error for error in errors),
+            errors,
+        )
+
+    def test_rejects_multiline_managed_recovery_heading(self):
+        # Break caught: tools below a wrapped prose label must not count as the
+        # required managed recovery H2 section.
+        root = self.make_valid_repository()
+        reference = (root / "docs/TOOL_REFERENCE.md").read_text(encoding="utf-8")
+        errors = VALIDATOR.validate_managed_recovery_contract(
+            {"docs/TOOL_REFERENCE.md": reference.replace(
+                "## Managed editor recovery", "## Managed\neditor recovery"
+            )}
+        )
+
+        self.assertIn(
+            "docs/TOOL_REFERENCE.md: missing Managed editor recovery section", errors
         )
 
     def test_requires_managed_recovery_document(self):

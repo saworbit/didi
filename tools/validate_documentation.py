@@ -391,12 +391,12 @@ FACT_PATTERNS = {
 LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 HEADING_PATTERN = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
 CURRENT_SURFACE_HEADING_PATTERN = re.compile(
-    r"^\s{0,3}##(?!#)\s+[^\n]*?\bProtocol\s+Surface\s*\(\s*"
-    r"(?P<canonical>\d+)\s+Canonical\s+Tools\s*\)[^\n]*$",
+    r"^[ \t]{0,3}##(?!#)[ \t]+[^\n]*?\bProtocol[ \t]+Surface[ \t]*\([ \t]*"
+    r"(?P<canonical>\d+)[ \t]+Canonical[ \t]+Tools[ \t]*\)[^\n]*$",
     re.IGNORECASE | re.MULTILINE,
 )
 MANAGED_RECOVERY_HEADING_PATTERN = re.compile(
-    r"^\s{0,3}##(?!#)\s+Managed\s+editor\s+recovery\s*#*\s*$",
+    r"^[ \t]{0,3}##(?!#)[ \t]+Managed[ \t]+editor[ \t]+recovery[ \t]*#*[ \t]*$",
     re.IGNORECASE | re.MULTILINE,
 )
 ROADMAP_PHASE_HEADING_PATTERN = re.compile(
@@ -710,7 +710,7 @@ def strip_fenced_code_blocks(text: str) -> str:
             if indent <= 3 and candidate[:1] in {"`", "~"}:
                 marker = candidate[0]
                 length = len(candidate) - len(candidate.lstrip(marker))
-                if length >= 3:
+                if length >= 3 and (marker != "`" or "`" not in candidate[length:]):
                     fence_marker = marker
                     fence_length = length
                     continue
@@ -845,7 +845,7 @@ def validate_current_surface_heading(
 
 
 def _has_literal_markdown_target(text: str, target: str) -> bool:
-    for match in LINK_PATTERN.finditer(strip_fenced_code_blocks(text)):
+    for match in LINK_PATTERN.finditer(_without_code(text)):
         if match.group(0).startswith("!"):
             continue
         if match.group(1).strip().split(maxsplit=1)[0].strip("<>") == target:

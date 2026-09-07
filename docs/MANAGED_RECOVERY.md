@@ -10,7 +10,7 @@ Enable the matching Didi addon in the source project first. Both new options are
 
 ## Checkpoints and coverage
 
-Managed mutations automatically snapshot saved files before dispatch and after successful completion. Supported scene edits also call Godot's checked `save_scene` for the active scene before the post-edit snapshot. Each response contains a compact `recovery` receipt: operation outcome, checkpoint ID, coverage and whether reconciliation is required. Use `runtime_recovery_status` for the full snapshot list and paths.
+Managed mutations automatically snapshot saved files before dispatch and after successful completion. Supported scene edits also call Godot's checked `save_scene` for the active scene before the post-edit snapshot. Protected mutation results and selected managed-recovery error responses carry a compact `recovery` receipt: operation outcome, checkpoint ID, coverage and whether reconciliation is required. Successful ordinary reads do not carry this receipt. Query `runtime_recovery_status` for authoritative recovery state, especially after a successful read that may have triggered a restart, and for the full snapshot list and paths.
 
 Startup and reattachment share a 30-second deadline for discovery, exact-child attachment, four quiet readiness polls, and a stable saved-file checkpoint before admitting edits. The internal `editor.getRecoveryState` method reports `filesystem_scanning`; importing or scanning is not readiness. Source inventory and content hashes are checked again before publishing each snapshot; a detected concurrent writer causes refusal, not a partial success. This is not an atomic filesystem transaction: coordinate external writers. Diagnose readiness failures in the current `editor-N.log`.
 
