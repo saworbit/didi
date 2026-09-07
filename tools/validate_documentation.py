@@ -788,8 +788,14 @@ def _read_required(root: Path, relative_path: str, errors: list[str]) -> str | N
         return None
 
 
-def validate_current_surface_heading(text: str, canonical_count: int) -> list[str]:
+def validate_current_surface_heading(
+    texts: dict[str, str], canonical_count: int
+) -> list[str]:
     """Keep the reader-facing README surface heading aligned with the tool count."""
+    text = texts.get("README.md")
+    if text is None:
+        return []
+    text = FENCED_CODE_PATTERN.sub("", text)
     headings = list(CURRENT_SURFACE_HEADING_PATTERN.finditer(text))
     if not headings:
         return [
@@ -812,10 +818,12 @@ def validate_current_surface_heading(text: str, canonical_count: int) -> list[st
 
 
 def _has_literal_markdown_target(text: str, target: str) -> bool:
-    return any(
-        raw_target.strip().split(maxsplit=1)[0].strip("<>") == target
-        for raw_target in LINK_PATTERN.findall(_without_code(text))
-    )
+    for match in LINK_PATTERN.finditer(FENCED_CODE_PATTERN.sub("", text)):
+        if match.group(0).startswith("!"):
+            continue
+        if match.group(1).strip().split(maxsplit=1)[0].strip("<>") == target:
+            return True
+    return False
 
 
 def validate_managed_recovery_contract(texts: dict[str, str]) -> list[str]:
@@ -836,7 +844,8 @@ def validate_managed_recovery_contract(texts: dict[str, str]) -> list[str]:
     tool_reference = texts.get("docs/TOOL_REFERENCE.md")
     if tool_reference is None:
         return errors
-    headings = list(MANAGED_RECOVERY_HEADING_PATTERN.finditer(tool_reference))
+    current_reference = FENCED_CODE_PATTERN.sub("", tool_reference)
+    headings = list(MANAGED_RECOVERY_HEADING_PATTERN.finditer(current_reference))
     if not headings:
         return errors + [
             "docs/TOOL_REFERENCE.md: missing Managed editor recovery section"
@@ -848,14 +857,14 @@ def validate_managed_recovery_contract(texts: dict[str, str]) -> list[str]:
 
     section_start = headings[0].end()
     following_heading = re.search(
-        r"^\s{0,3}##(?!#)\s+", tool_reference[section_start:], flags=re.MULTILINE
+        r"^\s{0,3}##(?!#)\s+", current_reference[section_start:], flags=re.MULTILINE
     )
     section_end = (
         section_start + following_heading.start()
         if following_heading is not None
-        else len(tool_reference)
+        else len(current_reference)
     )
-    section = tool_reference[section_start:section_end]
+    section = current_reference[section_start:section_end]
     for tool_name in (
         "runtime_recovery_status",
         "runtime_checkpoint",
@@ -1755,9 +1764,7 @@ def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[s
                     "has no binary to read, checks the same numbers as the build jobs."
                 )
             errors.extend(validate_tool_surface_counts(texts, manifest_counts))
-    readme_text = texts.get("README.md")
-    if readme_text is not None:
-        errors.extend(validate_current_surface_heading(readme_text, expected_counts[0]))
+    errors.extend(validate_current_surface_heading(texts, expected_counts[0]))
     errors.extend(validate_managed_recovery_contract(texts))
     errors.extend(validate_canonical_implementation_counts(texts, expected_counts))
     errors.extend(validate_phase7_reconciliation(texts, expected_counts))
