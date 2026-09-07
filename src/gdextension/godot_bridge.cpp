@@ -584,15 +584,32 @@ GDExtensionObjectPtr constructObject(GDExtensionConstStringNamePtr class_name) {
     auto object = api.classdb_construct_object(class_name);
     if (!object) return nullptr;
 
-    // A missing bind leaves the object exactly as it was before this function
-    // existed, which is survivable, rather than failing a construction that
-    // would otherwise have worked.
+    // A missing bind fails the construction rather than handing the caller the
+    // object anyway.
+    //
+    // This used to return the object, on the reasoning that it left things
+    // exactly as they were before this function existed. That reasoning is
+    // wrong here: what it was before is the half-built object the paragraph
+    // above describes, and the case that found this took the editor down with
+    // it. A construction that cannot finish is a construction that failed, and
+    // every caller already reports that. Handing back something documented to
+    // segfault the editor is not the survivable option.
+    //
+    // The hash is 4023243586 on Godot 4.5.1, 4.6.2 and 4.7.2, checked by
+    // dumping the extension API from each, so this is a guard against a future
+    // engine rather than a live condition.
     NativeName object_class("Object");
     NativeName notification("notification");
-    if (!object_class.valid() || !notification.valid()) return object;
+    if (!object_class.valid() || !notification.valid()) {
+        api.object_destroy(object);
+        return nullptr;
+    }
     auto bind = api.classdb_get_method_bind(object_class.ptr(), notification.ptr(),
                                             kObjectNotificationHash);
-    if (!bind) return object;
+    if (!bind) {
+        api.object_destroy(object);
+        return nullptr;
+    }
 
     int64_t what = kNotificationPostInitialize;
     GDExtensionBool reversed = 0;
