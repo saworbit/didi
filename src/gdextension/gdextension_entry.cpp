@@ -79,6 +79,7 @@ std::string fallbackCanonicalProjectPath() {
 } // namespace
 
 static void didi_main_loop_frame() {
+    reassertCrashCapture();
     EditorHook::instance().processQueue();
 }
 

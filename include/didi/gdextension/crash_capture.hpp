@@ -15,6 +15,12 @@ namespace godot {
 // Returns true when a handler was installed.
 bool armCrashCapture();
 
+// Puts the handler back on top if something else has taken the top level
+// filter since. Godot installs its own after the extension loads, which
+// silently replaced ours and left a crash reported by the engine's handler
+// with no symbols instead of by this one. Cheap enough to call every frame.
+void reassertCrashCapture();
+
 // Removes the handler installed by armCrashCapture. Returns true when one was
 // removed.
 bool disarmCrashCapture();
