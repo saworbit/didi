@@ -35,12 +35,12 @@ public:
     // before the loop starts still ends the session.
     void requestStop();
 
-    // True when the loop ended while stdin still had a read outstanding: a
+    // True while stdin still has a read outstanding after the loop ends: a
     // signal, or a frame the server refused to keep reading after. The reader
     // is detached and still inside that read, so whoever owns the process
     // should leave without running static destruction, which would take
     // std::cin away underneath it.
-    bool stdinReaderStillParked() const { return m_readerParked.load(); }
+    bool stdinReaderStillParked() const { return m_readerParked->load(); }
 
     JsonRpcResponse handleRequest(const JsonRpcRequest& req);
 
@@ -71,7 +71,8 @@ private:
 
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_stopRequested{false};
-    std::atomic<bool> m_readerParked{false};
+    // Shared because the reader can finish after the server is destroyed.
+    std::shared_ptr<std::atomic<bool>> m_readerParked{std::make_shared<std::atomic<bool>>(false)};
     bool m_initialized{false};
     bool m_skipConfirmations{false};
     std::shared_ptr<ipc::IIpcClient> m_ipcClient;

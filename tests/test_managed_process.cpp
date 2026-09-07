@@ -9,10 +9,14 @@
 #include <windows.h>
 #elif defined(__APPLE__)
 #include <crt_externs.h>
+#include <fcntl.h>
 #include <mach-o/dyld.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #else
+#include <fcntl.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -53,6 +57,12 @@ struct ChildFixture {
             return;
         if (args[2] == "hold")
             std::this_thread::sleep_for(std::chrono::seconds(30));
+#if !defined(_WIN32)
+        if (args[2] == "check_descriptor" && args.size() == 4) {
+            const int descriptor = std::stoi(args[3]);
+            std::_Exit(fcntl(descriptor, F_GETFD) == -1 && errno == EBADF ? 37 : 38);
+        }
+#endif
         if (args[2] == "report") {
             std::cout << didi::json(
                              {{"arguments", std::vector<std::string>(args.begin() + 3, args.end())},
@@ -236,6 +246,36 @@ void failedNativeLaunchLeavesObjectReusable() {
     CHECK_PROCESS(child.exitCode() == 37);
 }
 
+#if !defined(_WIN32)
+void launchClosesDescriptorsAboveSoftLimit() {
+    Temp temp;
+    struct LimitGuard {
+        struct rlimit previous {};
+        ~LimitGuard() { setrlimit(RLIMIT_NOFILE, &previous); }
+    } limit;
+    CHECK_PROCESS(getrlimit(RLIMIT_NOFILE, &limit.previous) == 0);
+    struct DescriptorGuard {
+        int value = -1;
+        ~DescriptorGuard() { if (value >= 0) close(value); }
+    } low{open("/dev/null", O_RDONLY)};
+    CHECK_PROCESS(low.value >= 0);
+    DescriptorGuard high{fcntl(low.value, F_DUPFD, 128)};
+    CHECK_PROCESS(high.value >= 128);
+    auto reduced = limit.previous;
+    reduced.rlim_cur = 64;
+    CHECK_PROCESS(setrlimit(RLIMIT_NOFILE, &reduced) == 0);
+    ManagedProcess child;
+    auto started = child.start(selfPath().string(),
+                              {"--didi-managed-child", "check_descriptor", std::to_string(high.value)},
+                              temp.path, temp.path / "isolated.log");
+    if (started.isErr())
+        throw std::runtime_error(started.error().message);
+    waitForExit(child);
+    CHECK_PROCESS(child.exitCode() == 37);
+    CHECK_PROCESS(fcntl(high.value, F_GETFD) >= 0);
+}
+#endif
+
 struct RegisterManagedProcess {
     RegisterManagedProcess() {
         registerTest("ManagedProcess.ReportsArgumentsAndExit", reportsArgumentsAndExit);
@@ -244,6 +284,10 @@ struct RegisterManagedProcess {
         registerTest("ManagedProcess.DestructorReapsOwnedChild", destructorReapsOwnedChild);
         registerTest("ManagedProcess.FailedNativeLaunchLeavesObjectReusable",
                      failedNativeLaunchLeavesObjectReusable);
+#if !defined(_WIN32)
+        registerTest("ManagedProcess.LaunchClosesDescriptorsAboveSoftLimit",
+                     launchClosesDescriptorsAboveSoftLimit);
+#endif
     }
 } register_managed_process;
 } // namespace

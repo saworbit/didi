@@ -12,6 +12,9 @@
 #include <unistd.h>
 #if defined(__linux__)
 #include <sys/syscall.h>
+#elif defined(__APPLE__)
+#include <crt_externs.h>
+#include <spawn.h>
 #endif
 #endif
 
@@ -193,7 +196,7 @@ Result<void> ManagedProcess::start(const std::string& executable,
     impl_->process.value = process.hProcess;
     impl_->pid = process.dwProcessId;
 #else
-    // Allocate everything before fork: the child uses only async-signal-safe calls.
+    // Allocate everything before spawning; the fork child uses only safe calls.
     std::vector<char*> argv;
     argv.reserve(arguments.size() + 2);
     argv.push_back(const_cast<char*>(executable.c_str()));
@@ -212,6 +215,40 @@ Result<void> ManagedProcess::start(const std::string& executable,
     Descriptor input{aboveStandardStreams(open("/dev/null", O_RDONLY | O_CLOEXEC))};
     if (input.value < 0)
         return Error::internal("Cannot open managed process input");
+#if defined(__APPLE__)
+    // Darwin normally has an infinite hard RLIMIT_NOFILE. Its spawn extension
+    // closes unlisted descriptors atomically, including descriptors above a
+    // subsequently lowered soft limit, without guessing a close-loop bound.
+    posix_spawn_file_actions_t actions;
+    int spawn_error = posix_spawn_file_actions_init(&actions);
+    if (spawn_error != 0)
+        return Error::internal("Cannot initialize managed spawn file actions");
+    struct ActionsGuard {
+        posix_spawn_file_actions_t* value;
+        ~ActionsGuard() { posix_spawn_file_actions_destroy(value); }
+    } actions_guard{&actions};
+    posix_spawnattr_t attributes;
+    spawn_error = posix_spawnattr_init(&attributes);
+    if (spawn_error != 0)
+        return Error::internal("Cannot initialize managed spawn attributes");
+    struct SpawnAttributesGuard {
+        posix_spawnattr_t* value;
+        ~SpawnAttributesGuard() { posix_spawnattr_destroy(value); }
+    } attributes_guard{&attributes};
+    if ((spawn_error = posix_spawnattr_setflags(&attributes, POSIX_SPAWN_CLOEXEC_DEFAULT)) != 0 ||
+        (spawn_error = posix_spawn_file_actions_adddup2(&actions, input.value, STDIN_FILENO)) != 0 ||
+        (spawn_error = posix_spawn_file_actions_adddup2(&actions, log.value, STDOUT_FILENO)) != 0 ||
+        (spawn_error = posix_spawn_file_actions_adddup2(&actions, log.value, STDERR_FILENO)) != 0 ||
+        (spawn_error = posix_spawn_file_actions_addchdir_np(&actions, directory.c_str())) != 0)
+        return Error::internal("Cannot configure managed spawn (errno " +
+                               std::to_string(spawn_error) + ")");
+    pid_t child = 0;
+    spawn_error = posix_spawn(&child, executable.c_str(), &actions, &attributes,
+                             argv.data(), *_NSGetEnviron());
+    if (spawn_error != 0)
+        return Error::internal("Cannot execute managed process (errno " +
+                               std::to_string(spawn_error) + ")");
+#else
     int pipe_fds[2];
     if (pipe(pipe_fds) != 0)
         return Error::internal("Cannot create managed exec status pipe");
@@ -271,6 +308,7 @@ Result<void> ManagedProcess::start(const std::string& executable,
         return Error::internal("Cannot execute managed process (errno " + std::to_string(failure) +
                                ")");
     }
+#endif
     impl_->owned_pid = child;
     impl_->pid = static_cast<uint64_t>(child);
     impl_->uncertain = false;
