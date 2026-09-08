@@ -10,6 +10,13 @@ json publicSessionEnvelope(const runtime::SessionDescriptor& session) {
     return {{"execution_mode", "live"}, {"session", session.toJson()}};
 }
 
+// The same envelope for a failure, without the endpoint. An error says which
+// session it happened on; it is not a place to publish the pipe to reach that
+// session, and an error string is the payload most likely to be quoted onward.
+json failureSessionEnvelope(const runtime::SessionDescriptor& session) {
+    return {{"execution_mode", "live"}, {"session", session.toProvenanceJson()}};
+}
+
 json decorateRuntimeResponse(json response, const runtime::SessionDescriptor& session) {
     const auto envelope = publicSessionEnvelope(session);
     if (!response.is_object()) response = {{"result", std::move(response)}};
@@ -20,8 +27,9 @@ json decorateRuntimeResponse(json response, const runtime::SessionDescriptor& se
         }
         json data = error.value("data", json::object());
         if (!data.is_object()) data = {{"details", std::move(data)}};
-        data["execution_mode"] = envelope["execution_mode"];
-        data["session"] = envelope["session"];
+        const auto failure = failureSessionEnvelope(session);
+        data["execution_mode"] = failure["execution_mode"];
+        data["session"] = failure["session"];
         error["data"] = std::move(data);
         return response;
     }

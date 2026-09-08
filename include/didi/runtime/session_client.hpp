@@ -128,6 +128,15 @@ struct SessionDescriptor {
     std::string protocol_version;
 
     json toJson(bool include_token = false) const;
+    // Which session something happened on, without the address to reach it.
+    //
+    // A failure has to say which route it failed on, and session_id, kind,
+    // pid and project_path all say that. The endpoint says something else:
+    // it is the named pipe or socket to connect to. Session discovery
+    // legitimately hands that out, because picking a session is what
+    // runtime_list_sessions is for. An error does not, because the caller
+    // is already attached to the session it is being told about.
+    json toProvenanceJson() const;
     static Result<SessionDescriptor> fromJson(const json& value);
 };
 

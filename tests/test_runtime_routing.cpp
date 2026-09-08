@@ -309,6 +309,7 @@ public:
     didi::Result<didi::json> sendRequest(const std::string& method, const didi::json&, int) override {
         ++requests;
         last_method = method;
+        if (error.has_value()) return *error;
         return didi::json{{"status", "ok"}};
     }
     didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
@@ -328,6 +329,7 @@ public:
         return true;
     }
 
+    std::optional<didi::Error> error;
     int requests{0};
     int disconnects{0};
     int quarantines{0};
@@ -827,6 +829,127 @@ void assertSessionEnvelope(const didi::json& value, const std::string& kind) {
     ASSERT_EQ(value["session"]["session_id"], "0123456789abcdef0123456789abcdef");
     ASSERT_EQ(value["session"]["kind"], kind);
     ASSERT_FALSE(value["session"].contains("token"));
+}
+
+// A failure names the session it happened on. It does not publish the pipe.
+//
+// The endpoint is not a credential -- the descriptor directory is access
+// controlled and the token is separate -- so this is least disclosure rather
+// than a vulnerability. It matters because an error string is the payload most
+// likely to be quoted onward into a model's context, and because the Control
+// Room already keeps the endpoint out of what it renders for the same reason.
+// A success is a client's own record of the route it used and keeps it.
+void test_live_errors_report_the_session_without_its_endpoint() {
+    const auto contains_endpoint = [](const didi::json& value) {
+        const auto text = value.dump();
+        return text.find("endpoint") != std::string::npos ||
+               text.find("\\\\.\\pipe") != std::string::npos;
+    };
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    // 1. An engine that answers with an error. This is the path the standalone
+    //    takes through structuredLiveToolError.
+    auto editor = std::make_shared<RoutedFake>("editor");
+    editor->error = didi::Error(404, "Scene node not found: NoSuchNode",
+                                didi::json{{"node", "NoSuchNode"}});
+    registry.setIpcClient(editor);
+    const auto failed = registry.callTool("scene_get_hierarchy", didi::json::object());
+    ASSERT_TRUE(failed.isError);
+    const auto failed_value = payload(failed);
+    ASSERT_FALSE(contains_endpoint(failed_value));
+
+    // The session is still identified, and the failure still explains itself.
+    ASSERT_EQ(failed_value["session"]["session_id"], "0123456789abcdef0123456789abcdef");
+    ASSERT_EQ(failed_value["session"]["kind"], "editor");
+    ASSERT_EQ(failed_value["session"]["pid"], 77);
+    ASSERT_FALSE(failed_value["session"].contains("token"));
+    ASSERT_EQ(failed_value["error"]["code"], 404);
+    ASSERT_EQ(failed_value["error"]["message"], "Scene node not found: NoSuchNode");
+    // Useful data from the engine survives; only provenance was trimmed.
+    ASSERT_EQ(failed_value["error"]["data"]["node"], "NoSuchNode");
+
+    // Said once. The engine names the route on its way out and the envelope
+    // names it again, so a bridged error used to carry the same session twice.
+    ASSERT_FALSE(failed_value["error"]["data"].contains("session"));
+    ASSERT_FALSE(failed_value["error"]["data"].contains("execution_mode"));
+    ASSERT_TRUE(failed_value.contains("session"));
+    ASSERT_EQ(failed_value["execution_mode"], "live");
+
+    // 2. The wrong-kind rejection, which builds its own envelope rather than
+    //    going through structuredLiveToolError.
+    auto game = std::make_shared<RoutedFake>("game");
+    registry.setIpcClient(game);
+    const auto rejected = registry.callTool("scene_get_hierarchy", didi::json::object());
+    ASSERT_TRUE(rejected.isError);
+    const auto rejected_value = payload(rejected);
+    ASSERT_EQ(rejected_value["error"]["code"], 409);
+    ASSERT_FALSE(contains_endpoint(rejected_value));
+    ASSERT_EQ(rejected_value["session"]["kind"], "game");
+
+    // 3. A success keeps it. This is documented provenance and the point of the
+    //    split; a change that quietly dropped it here would be a regression.
+    auto healthy = std::make_shared<RoutedFake>("editor");
+    registry.setIpcClient(healthy);
+    const auto succeeded = registry.callTool("runtime_get_tree", didi::json::object());
+    ASSERT_FALSE(succeeded.isError);
+    const auto succeeded_value = payload(succeeded);
+    ASSERT_TRUE(succeeded_value["session"].contains("endpoint"));
+    ASSERT_FALSE(succeeded_value["session"].contains("token"));
+
+    registry.setIpcClient(nullptr);
+}
+
+// A failure with no route still reads as a failure.
+//
+// The deduplication above is conditional on the envelope actually having a
+// session to prefer, so that stripping the inner copy can never be the thing
+// that removes the last attribution. No reachable path populates the engine's
+// copy without a route -- no lease means the engine was never called, so there
+// is nothing for it to have said -- but the shape has to stay coherent when
+// there is no session at all, which is the case this pins.
+void test_a_failure_with_no_route_is_still_coherent() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    auto route = std::make_shared<DescriptorlessSessionFake>();
+    registry.setIpcClient(route);
+    const auto failed = registry.callTool("runtime_get_tree", didi::json::object());
+    ASSERT_TRUE(failed.isError);
+    const auto value = payload(failed);
+
+    ASSERT_TRUE(value["session"].is_null());
+    ASSERT_EQ(value["execution_mode"], "live");
+    ASSERT_EQ(value["error"]["code"], 503);
+    ASSERT_TRUE(value["error"]["data"].is_object());
+    // It still says what went wrong, which is the whole job of an error that
+    // cannot say where.
+    ASSERT_TRUE(value["error"]["message"].get<std::string>().find("route") != std::string::npos);
+
+    registry.setIpcClient(nullptr);
+}
+
+// The descriptor helper itself, so the rule holds for any future caller rather
+// than only for the three sites that use it today.
+void test_provenance_json_drops_only_the_endpoint() {
+    const auto descriptor = descriptorFor("editor");
+    const auto full = descriptor.toJson();
+    const auto provenance = descriptor.toProvenanceJson();
+
+    ASSERT_TRUE(full.contains("endpoint"));
+    ASSERT_FALSE(provenance.contains("endpoint"));
+    ASSERT_FALSE(provenance.contains("token"));
+    ASSERT_FALSE(descriptor.toJson(true).at("token").get<std::string>().empty());
+
+    // Everything else is carried, so a field added to the descriptor later
+    // reaches provenance too and only deliberate omissions have to be named.
+    for (const auto& entry : full.items()) {
+        if (entry.key() == "endpoint") continue;
+        ASSERT_TRUE(provenance.contains(entry.key()));
+        ASSERT_EQ(provenance.at(entry.key()), entry.value());
+    }
+    ASSERT_EQ(provenance.size(), full.size() - 1);
 }
 
 void test_live_runtime_tools_return_session_envelopes_and_finite_deadlines() {
@@ -1934,6 +2057,12 @@ struct RegisterRuntimeRoutingTests {
 #endif
         registerTest("RuntimeRouting.LiveEnvelopeAndFiniteDeadline",
                      test_live_runtime_tools_return_session_envelopes_and_finite_deadlines);
+        registerTest("RuntimeRouting.LiveErrorsReportTheSessionWithoutItsEndpoint",
+                     test_live_errors_report_the_session_without_its_endpoint);
+        registerTest("RuntimeRouting.FailureWithNoRouteIsStillCoherent",
+                     test_a_failure_with_no_route_is_still_coherent);
+        registerTest("RuntimeRouting.ProvenanceJsonDropsOnlyTheEndpoint",
+                     test_provenance_json_drops_only_the_endpoint);
         registerTest("RuntimeRouting.ErrorsAndUnknownOutcomeQuarantine",
                      test_live_runtime_errors_preserve_code_data_and_quarantine_unknown_outcomes);
         registerTest("RuntimeRouting.ValidationErrorsHaveProvenance",
