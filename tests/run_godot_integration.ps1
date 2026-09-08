@@ -10,8 +10,8 @@ param(
     [int]$StartupTimeoutSeconds = 120,
     # Bounds the retry below. Once was not enough: 4.7.2 hit the engine crash on
     # two consecutive attempts of the same job, so a single retry still went
-    # red for something nothing under test causes. Three bounds the run at
-    # roughly eighteen minutes and still fails if the crash is persistent.
+    # red for the known failure path. Three bounds the run at roughly eighteen
+    # minutes and still fails if the crash is persistent.
     [int]$Attempt = 1,
     [int]$MaxAttempts = 3
 )
@@ -154,23 +154,17 @@ $env:DIDI_CRASH_CAPTURE_DIR = $buildRoot
 
 # The engine's own script documentation thread can trap inside
 # Thread::wait_to_finish and take the editor down with an illegal instruction.
-# #285 has the symbolized stack: every frame is in the engine binary or a
-# system DLL, it is on an engine worker thread, and the main thread, which is
-# the only one this harness drives, is not involved. Nothing under test causes
-# that and nothing under test can fix it.
-#
-# The test is deliberately structural rather than a pinned address, because the
-# offsets differ between engine versions. A Didi frame anywhere on the faulting
-# stack means the fault is ours and the run must fail.
-# The classifier lives beside its cases so both stay honest. Running them here
-# costs a second and fails on the classifier rather than on whatever it would
-# otherwise mislabel twenty minutes later.
+# #285 records the four engine frame offsets for the official 4.7.2 binary.
+# Match that observed path before retrying; an engine-only worker stack could
+# also be an unrelated fatal check or corruption triggered by a Didi command.
 . (Join-Path $PSScriptRoot "engine_crash_classifier.ps1")
+. (Join-Path $PSScriptRoot "engine_crash_artifacts.ps1")
 # The cases throw on a wrong answer, and that propagates out of here, so there
 # is nothing to check afterwards. $LASTEXITCODE would be the wrong instrument:
 # a PowerShell script does not set it, so it still holds whatever a native
 # command left behind.
 & (Join-Path $PSScriptRoot "test_engine_crash_classifier.ps1")
+& (Join-Path $PSScriptRoot "test_engine_crash_artifacts.ps1")
 
 function Test-EngineWorkerCrash($EngineProcess) {
     if ($null -eq $EngineProcess) { return $false }
@@ -2934,17 +2928,14 @@ finally {
 # finished and nothing of it is still holding the fixture or a descriptor.
 if ($retryForEngineCrash) {
     # Tolerating this quietly would mean losing every trace of how often it
-    # still happens, and it is an open engine bug. The retry clears
-    # godot_crash_*.log on its way in, so the report moves to a name it will
-    # not take with it, and one CI still uploads.
-    $crashReportPath = Join-Path $buildRoot ("godot_crash_" + $godot.Id + ".log")
-    $keptReportPath = Join-Path $buildRoot ("godot_engine_worker_crash_attempt" + $Attempt + "_" + $godot.Id + ".log")
-    if (Test-Path -LiteralPath $crashReportPath) {
-        Move-Item -LiteralPath $crashReportPath -Destination $keptReportPath -Force
-    }
-    Write-Warning ("The engine died on one of its own worker threads, not on anything this harness drives. " +
-                   "See #285: an illegal instruction with no Didi frame on the faulting stack. " +
-                   "Retrying: attempt $($Attempt + 1) of $MaxAttempts. Report kept at $keptReportPath. " +
+    # still happens. The next attempt clears godot_crash_*.log AND *.dmp.
+    # Preserve both under names still included by CI's godot_* artifact globs.
+    $savedCrash = Save-EngineCrashArtifacts -BuildRoot $buildRoot -EnginePid $godot.Id -Attempt $Attempt
+    $dumpMessage = if ($savedCrash.DumpPath) { "Minidump kept at $($savedCrash.DumpPath). " }
+                   else { "No minidump was available to preserve. " }
+    Write-Warning ("The crash matches the captured Godot 4.7.2 documentation-worker stack in #285. " +
+                   "Retrying: attempt $($Attempt + 1) of $MaxAttempts. Report kept at $($savedCrash.ReportPath). " +
+                   $dumpMessage +
                    "The failure it died with was: " + $primaryFailureMessage)
     $retryArguments = @{}
     foreach ($entry in $PSBoundParameters.GetEnumerator()) { $retryArguments[$entry.Key] = $entry.Value }
