@@ -1,4 +1,5 @@
 #include "didi/mcp/tool_registry.hpp"
+#include "didi/mcp/control_room.hpp"
 #include "didi/mcp/project_tools.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
@@ -86,6 +87,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "execute_test_session", "runtime_list_sessions", "runtime_attach_session",
         "runtime_detach_session", "runtime_get_session",
         "runtime_checkpoint", "runtime_recovery_status", "runtime_restore_checkpoint", "runtime_recover_editor"
+        , "didi_control_room"
         , "project_search_text", "project_search_symbols",
         "csharp_check_build", "shader_check_compile", "project_list_export_presets",
         "project_export", "gridmap_export_mesh_library"
@@ -1017,6 +1019,31 @@ void ToolRegistry::registerAllDefaultTools() {
                 : m_recovery->restore(args.value("checkpoint_id", ""));
             if (response.isErr()) return m_recovery->annotate(CallToolResult::error(response.error().message));
             return CallToolResult::successJson(response.value());
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "didi_control_room";
+        t.description =
+            "Reports Didi's own state: bridge and session status with the pid or session behind "
+            "it, the current execution mode of every registered tool, the safety posture, and a "
+            "tail of this server's log. Read-only. Hosts that support the MCP Apps extension "
+            "render it as an interactive dashboard; every other client gets the same payload as "
+            "text.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"log_limit", {{"type", "integer"}, {"minimum", 0}, {"maximum", 500},
+                           {"default", 120},
+                           {"description", "How many of the newest log records to return. The default is a glance; ask for more only when a person is going to read them."}}}
+        }}};
+        t.handler = [this](const json& args) {
+            // The source client, not the lease-dispatch wrapper: the wrapper is a
+            // route lease provider but not a session client, and route
+            // classification reads that difference as an unreachable route. The
+            // protocol layer passes the source client, so this must too, or the
+            // dashboard reports modes tools/list does not.
+            return handleControlRoom(args, m_sourceIpcClient, m_runtimeSessionClient,
+                                     m_skipConfirmations, m_recovery != nullptr);
         };
         registerTool(std::move(t));
     }

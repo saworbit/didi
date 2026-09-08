@@ -65,6 +65,22 @@ add_custom_command(
     VERBATIM
 )
 
+# The Control Room page is a build input, not a runtime file. A dashboard that
+# was missing at runtime would be discovered at the worst possible moment, so a
+# missing page fails the build instead. See docs/CONTROL_ROOM_DESIGN.md.
+set(CONTROL_ROOM_PAGE "${CMAKE_CURRENT_SOURCE_DIR}/resources/control_room.html")
+set(CONTROL_ROOM_GENERATED_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/didi/mcp/control_room_app.hpp")
+set(CONTROL_ROOM_GENERATED_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/generated/didi/mcp/control_room_app.cpp")
+add_custom_command(
+    OUTPUT "${CONTROL_ROOM_GENERATED_HEADER}" "${CONTROL_ROOM_GENERATED_SOURCE}"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_ui_app.py"
+            --page "${CONTROL_ROOM_PAGE}"
+            --header "${CONTROL_ROOM_GENERATED_HEADER}"
+            --source "${CONTROL_ROOM_GENERATED_SOURCE}"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_ui_app.py" "${CONTROL_ROOM_PAGE}"
+    VERBATIM
+)
+
 # Offline class reflection answers from Godot's own API surface rather than a
 # hand written snapshot. resources/didi_class_reference.json is the trimmed form
 # of a `godot --dump-extension-api` dump, committed because the dump itself is a
@@ -152,6 +168,10 @@ set(CORE_SOURCES
     src/tools/tilemap_grid_tools.cpp
     src/tools/editor_tools.cpp
     src/tools/deep_domain_tools.cpp
+    src/mcp/tool_availability.cpp
+    src/mcp/control_room.cpp
+    src/tools/control_room_tools.cpp
+    ${CONTROL_ROOM_GENERATED_SOURCE}
 )
 
 find_package(Threads REQUIRED)
@@ -319,6 +339,7 @@ set(TEST_SOURCES
     tests/test_phase5.cpp
     tests/test_phase6.cpp
     tests/test_tool_manifest.cpp
+    tests/test_control_room.cpp
     tests/test_phase7_contract.cpp
     tests/test_phase7a_signals.cpp
     tests/test_phase7_signal_followup.cpp

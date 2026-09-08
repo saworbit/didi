@@ -33,7 +33,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-The current source / Unreleased surface registers 113 canonical tool names. 110 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 110 canonical tools are implemented. Ten legacy names are registered separately, for exactly 123 `tools/list` entries. The latest documented release is 1.6.0; its historical surface is recorded in the changelog.
+The current source / Unreleased surface registers 114 canonical tool names. 111 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 111 canonical tools are implemented. Ten legacy names are registered separately, for exactly 124 `tools/list` entries. The latest documented release is 1.6.0; its historical surface is recorded in the changelog.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
@@ -58,13 +58,33 @@ The current source / Unreleased surface registers 113 canonical tool names. 110 
 | `live` | `runtime_read_profiler` | Editor or game. Samples `Performance` monitors from the frame callback over a bounded window; one collector per session. |
 | `live` | `ui_hit_test` | Editor-only. Traverses bounded live Control state at a viewport-space point without synthesizing or injecting input. |
 | `offline_fallback` | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method`, `script_create`, `viewport_create_test_lab`, `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map`, `project_audit_assets`, `project_analyze_impact`, `project_verify_changes`, `project_apply_changes`, `project_rename_references`, `blackboard_write`, `blackboard_read`, `blackboard_patch`, `blackboard_list_keys`, `blackboard_clear`, `blackboard_task_create`, `blackboard_task_claim`, `blackboard_task_update`, `blackboard_task_complete`, `blackboard_task_list`, `project_search_text`, `project_search_symbols`, `runtime_launch`, `csharp_check_build`, `shader_check_compile`, `project_list_export_presets`, `project_export`, `gridmap_export_mesh_library` | Operates on bounded project files or launches a separate Godot/dotnet process. Results are not live editor state. |
+| `offline_fallback` (local status) | `didi_control_room` | Reports this server's own bridge, surface, safety and log state. Reads no Godot and writes nothing. Its tool rows come from the same availability function as `tools/list`, so the two cannot disagree. |
 | `unimplemented` | `physics_simulate_step`, `nav_bake_mesh`, `runtime_get_call_stack` | Registered schema only. Calls are rejected before legacy handlers execute. |
+
+## MCP Apps
+
+Didi declares the `io.modelcontextprotocol/ui` extension in `server/discover`
+and `initialize`. The declaration is unconditional; the *surface* is not.
+Extensions are bilateral, so the `ui://didi/control-room` resource and the
+`_meta.ui` link on `didi_control_room` are advertised only to a client that
+declared the extension too -- in `initialize` capabilities for `2024-11-05`, or
+in per-request `_meta` for `2026-07-28`. An unaware host is not handed a page it
+would read as text.
+
+`--ui-app <auto|always|off>` overrides that. `always` advertises regardless, for
+a host whose declaration Didi does not recognise. `off` withdraws the resource
+and the link, and also refuses a `resources/read` of the page by URI, leaving
+`didi_control_room` a plain read-only tool.
+
+The page is self-contained -- no external script, style, font or image -- so no
+`csp` domains are declared and the host's default `default-src 'none'` policy
+applies unweakened.
 
 ## Phase 7 feasibility status
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `110/113`
+**Canonical implementation:** `111/114`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->

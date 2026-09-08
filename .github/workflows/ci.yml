@@ -18,9 +18,13 @@ on:
       - 'CMakeLists.txt'
       - 'requirements-dev.txt'
       - 'tools/generate_phase7_schemas.py'
+      - 'tools/generate_ui_app.py'
+      - 'resources/control_room.html'
       - 'schemas/phase7/**'
       - 'tests/test_phase7_schema_contract.py'
       - 'tests/test_phase7_plan_ownership.py'
+      - 'tests/test_control_room_app.py'
+      - 'tests/test_control_room_protocol.py'
       - 'tests/phase7_contract_probe/**'
       - '.github/workflows/ci.yml'
   pull_request:
@@ -40,9 +44,13 @@ on:
       - 'CMakeLists.txt'
       - 'requirements-dev.txt'
       - 'tools/generate_phase7_schemas.py'
+      - 'tools/generate_ui_app.py'
+      - 'resources/control_room.html'
       - 'schemas/phase7/**'
       - 'tests/test_phase7_schema_contract.py'
       - 'tests/test_phase7_plan_ownership.py'
+      - 'tests/test_control_room_app.py'
+      - 'tests/test_control_room_protocol.py'
       - 'tests/phase7_contract_probe/**'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
@@ -223,6 +231,20 @@ jobs:
           # confirmations off. An agent able to authorise its own bypass would
           # make the confirmation system decorative.
           "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_yolo_mode -v
+
+      - name: Verify the Control Room page and its MCP Apps contract
+        shell: bash
+        run: |
+          # The page half is static: no path from data to markup, no external
+          # origin, and the embedding round-trips byte for byte. The protocol
+          # half drives the binary, because the bilateral extension gate is a
+          # property of what a given client is actually served.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            export DIDI_TEST_BINARY="$PWD/build/Release/didi.exe"
+          else
+            export DIDI_TEST_BINARY="$PWD/build/didi"
+          fi
+          "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_control_room_app tests.test_control_room_protocol -v
 
       - name: Verify the command line refuses unknown and malformed options
         shell: bash

@@ -54,8 +54,8 @@ and verification, and it fails visibly wherever the surface has a hole.
 
 Six amendments are implemented: `runtime_read_output`, `audio_list_buses` and
 `audio_configure_bus`, all recorded below with tri-engine feasibility evidence,
-plus `project_audit_assets`, `project_analyze_impact` and
-`runtime_explore_scene`. One is withdrawn: raising the engine floor to
+plus `project_audit_assets`, `project_analyze_impact`,
+`runtime_explore_scene` and `didi_control_room`. One is withdrawn: raising the engine floor to
 Godot 4.7, refused in favour of runtime capability detection so that 4.5 and 4.6
 users keep support. The remaining candidates come from the
 August 2026 competitive review and are proposed, not accepted, in
@@ -567,6 +567,52 @@ decisions, and `ui_hit_test`, `nav_query_path` and `spatial_query_frustum`
 already answer them for an agent that wants to make them. Adding that targeting
 here would put a planner inside the tool, which is the "honest executor" line
 [Gogo Design](GOGO_DESIGN.md) draws in its A2A section.
+
+### ACCEPTED (IMPLEMENTED): `didi_control_room`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `didi_control_room` |
+| **Failing workflow** | *"Make the player double-jump and prove it works."* -- when it does not work, and the reason is Didi rather than the game. The agent calls `scene_set_property` and gets `currentMode: "unavailable"`. That single value has at least four causes: the addon is not loaded, no descriptor was published, a descriptor exists but no route is selected, or a route is selected and cannot produce an authenticated lease. The agent can distinguish some of them by calling `runtime_list_sessions`, then `runtime_get_session`, then reading `_meta.didi` off a second `tools/list` and comparing -- three round trips to answer *is the bridge up*. The person watching has it worse: Didi's own diagnostics go to standard error, which the client that launched the server over stdio discards, so the one record that says what happened is unreadable by anybody. No tool exposes it. |
+| **Execution modes** | `offline_fallback`, reported as `local_status`. It reads this process: the tool registry, the route lease, the published descriptors, a stat for a board file, and its own log ring. It talks to no engine, so there is no live mode and no session kind to allow. |
+| **Safety class** | `read`. No `dry_run`, no confirmation token, `readOnlyHint: true` and `destructiveHint: false`. `openWorldHint` is false: nothing it does can start a process or run project code. The read-only claim is load bearing and shaped the tool -- see below. |
+| **Proving test** | Native: `ControlRoom.*` in `tests/test_control_room.cpp` covers the field allowlist rejecting the session token, every light state including the amber ones, the payload bounds, the UTF-8 clipping boundary, and the log ring under eight concurrent writers with a reader racing them. Python: `tests/test_control_room_app.py` holds the page's static invariants and the byte-exact embedding; `tests/test_control_room_protocol.py` drives the built binary for the bilateral extension gate, all three `--ui-app` modes, the resource contract, and the assertion that every mode the dashboard reports equals the mode `tools/list` reports for that tool. |
+| **Reviewer** | Unassigned. It is a read, and the review question is what it can disclose rather than what it can change. The response is built from an explicit field allowlist, never from `SessionDescriptor::toJson`, so a field added to a descriptor later cannot reach a client by accident; the token and the endpoint are both outside it, and a test fails the build if either name appears in the payload or in the page. |
+
+**Why a name at all.** A host preloads an MCP App from a *tool's*
+`_meta.ui.resourceUri`, so an entry point is required. Attaching it to an
+existing tool would make that tool's contract dishonest, and a resource alone
+cannot be an entry point.
+
+**Why not `ui_*` or a `status_*` family.** `ui_` already means Godot `Control`
+nodes in this surface (`ui_hit_test`), and a second meaning for the same prefix
+would be a trap. A `status_*` family would be a family with one member. The
+subject here is Didi itself rather than any Godot domain, and the name says so.
+
+**What being read-only cost, and why it was worth paying.** The obvious Work
+panel is task counts. Every board-reading entry point in `offline::blackboard`
+-- `blackboardTaskList` and `blackboardReadResource` alike -- sweeps expired
+state and reclaims lapsed leases before answering, then saves the board. That is
+a write, and a tool asserting `readOnlyHint: true` cannot perform one. So the
+light reports whether a board file exists, from a stat, and says where the
+counts are. A dashboard that quietly reclaimed another agent's lease because
+somebody glanced at it would be a worse bug than a missing number.
+
+**Why it cannot disagree with discovery.** The mode shown per tool comes from
+`currentModeFor`, which is the function `tools/list` calls. Extracting it into
+`didi/mcp/tool_availability.hpp` was part of this work for exactly that reason:
+a dashboard that reported a mode discovery would not is worse than no dashboard,
+and a copied implementation would eventually do it. A protocol test asserts the
+two agree registration by registration, and it caught a real disagreement during
+implementation -- the tool registry's lease-dispatch wrapper is a route lease
+provider but not a session client, which route classification read as an
+unreachable route.
+
+**What it does not do.** It calls no tool on its own behalf. Every action the
+page offers -- rescan, attach, detach, refresh -- is an existing tool name
+issued to the *host*, which forwards it under its own consent policy. Adding a
+button did not add an authority, and the page speaks no part of the IPC
+protocol.
 
 ### PROPOSED: `scene_close` reads real dirty state on Godot 4.7+
 

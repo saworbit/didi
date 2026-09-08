@@ -1,4 +1,5 @@
 #include "didi/mcp/resource_registry.hpp"
+#include "didi/mcp/control_room_app.hpp"
 #include "didi/offline/blackboard.hpp"
 #include "didi/offline/resource_indexer.hpp"
 #include "didi/runtime/session_client.hpp"
@@ -84,7 +85,9 @@ ResourceRegistry& ResourceRegistry::instance() {
 }
 
 void ResourceRegistry::registerResource(ResourceDefinition res) {
-    if (res.uri == "godot://editor/state" || res.uri == "godot://runtime/logs") {
+    if (res.uri == kControlRoomResourceUri) {
+        // Already classified by its registration, and not a Godot resource.
+    } else if (res.uri == "godot://editor/state" || res.uri == "godot://runtime/logs") {
         res.capability = {{"live", "offline_fallback"}, true, {}};
     } else if (res.uri == "godot://project/tree") {
         res.capability = {{"offline_fallback"}, true, {}};
@@ -166,6 +169,28 @@ void ResourceRegistry::setIpcClient(std::shared_ptr<ipc::IIpcClient> ipc_client)
 }
 
 void ResourceRegistry::registerAllDefaultResources() {
+    // The Control Room page. Served to hosts that negotiated MCP Apps; the
+    // protocol layer withholds it from clients that did not, so an unaware host
+    // never renders a page of markup into a model's context.
+    //
+    // No csp block is declared because the page loads nothing: the host's
+    // default policy (default-src 'none') is the strongest one available and it
+    // is sufficient. See docs/CONTROL_ROOM_DESIGN.md, requirement A5.
+    {
+        ResourceDefinition app;
+        app.uri = kControlRoomResourceUri;
+        app.name = "Didi Control Room";
+        app.description =
+            "Interactive dashboard for MCP Apps hosts: bridge and session lights with the pid or "
+            "session behind each, the live execution mode of every tool, the safety posture, and "
+            "this server's own log. Rendered by the host, not read as text.";
+        app.mimeType = kUiAppMimeType;
+        app.uiMeta = {{"prefersBorder", true}};
+        app.capability = {{"offline_fallback"}, true, {}};
+        app.readHandler = []() -> Result<std::string> { return controlRoomHtml(); };
+        registerResource(std::move(app));
+    }
+
     // The default board, so a client sees these in resources/list. Any other
     // board resolves dynamically, because boards are created on demand.
     for (const char* kind : {"state", "tasks"}) {

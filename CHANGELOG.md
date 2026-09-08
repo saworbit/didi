@@ -13,6 +13,37 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Added
 
+- Added the Control Room: an interactive dashboard Didi serves to the host over
+  the existing stdio connection, rendered in the conversation by clients that
+  support MCP Apps. Red/amber/green lights for the bridge, project, safety
+  posture and coordination board, each carrying the pid, path or session behind
+  it; every registration with the execution mode it is in right now; and a tail
+  of Didi's own log, which until now went only to a standard error stream that a
+  client launching the server over stdio discards.
+
+  One read-only canonical tool, `didi_control_room`, and one resource,
+  `ui://didi/control-room`. The tool works with no host UI support at all and
+  returns the same payload as text, so nothing depends on the extension.
+
+  The extension is bilateral, so the UI surface is advertised only to a client
+  that declared `io.modelcontextprotocol/ui` -- an unaware host is not handed a
+  page of markup to read into a model's context. `--ui-app auto|always|off`
+  overrides that, and `off` withdraws the resource rather than merely hiding it
+  from the listing.
+
+  The page loads nothing from anywhere, so no content security policy domain is
+  declared and the host's default `default-src 'none'` applies unweakened. It
+  builds every value with `textContent`, because the strings it renders -- paths,
+  node names, log lines -- originate in files a project can contain, and a
+  project is not a trust boundary. It ignores any message whose sender is not the
+  host. The session token is outside the allowlist the payload is built from, and
+  the build fails if that field name appears in either the payload or the page.
+
+  This completes the recommended order in
+  [Human Interaction Design](docs/HUMAN_INTERACTION_DESIGN.md), whose third step
+  was deliberately left conditional on host support being broad enough to be
+  worth it. See [Control Room Design](docs/CONTROL_ROOM_DESIGN.md).
+
 - Added opt-in managed editor recovery: isolated project copies, saved-file checkpoints, one owned-editor restart, explicit reconciliation and preserved-workspace restoration. Four recovery tools expose state and actions without replaying uncertain edits. Ordinary attachment and runtime_launch remain unchanged. See [Managed Recovery](docs/MANAGED_RECOVERY.md) for coverage and limitations.
 
 ### Fixed
@@ -84,12 +115,13 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `110/113`
+**Canonical implementation:** `111/114`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 113 canonical tools plus 10 legacy registrations (123 total). 110 canonical tools are implemented and 3 remain unimplemented.
+Discovery now exposes 114 canonical tools plus 10 legacy registrations (124 total). 111 canonical tools are implemented and 3 remain unimplemented.
+The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
 ---
 

@@ -1,6 +1,6 @@
 # Control Room Design
 
-**Status:** design approved, implementation in progress. One canonical tool name is added through a [Surface Amendment](SURFACE_AMENDMENTS.md). No new transport, no new mutation, no second MCP client.
+**Status:** Implemented. One canonical tool name is added through a [Surface Amendment](SURFACE_AMENDMENTS.md). No new transport, no new mutation, no second MCP client.
 
 **Supersedes nothing.** This is step 3 of the recommended order in [Human Interaction Design](HUMAN_INTERACTION_DESIGN.md#recommended-order-and-where-it-stands), which was written conditionally and has been waiting on its condition.
 
@@ -92,12 +92,14 @@ Assembled from sources that already exist. Nothing here is a new measurement.
 | **Project** | Launch arguments, `project.godot` | Green: canonical root resolved and still present. Amber: resolved at startup but no longer readable. |
 | **Surface** | `ToolRegistry::buildManifest()` plus per-tool `currentMode` | Per row, not per panel. |
 | **Safety** | `MutationSafety`, `m_skipConfirmations`, managed-recovery state | Green: confirmations enforced. Amber: managed mode's automatic restart is armed. Red: confirmations skipped. |
-| **Work** | `offline::Blackboard` task counts, when a board exists | Informational. |
+| **Work** | A plain stat for a blackboard file | Informational: present, or not. |
 | **Log** | A bounded in-memory ring on `Logger::setSink` | Informational. |
 
 **Amber means unknown, and says why.** A light never goes green on an absence of evidence. Liveness Godot cannot answer for a process it did not start is reported as unverified rather than guessed, exactly as the editor console does.
 
 **The log ring is new and is worth naming.** Didi's own diagnostics go to the process's standard error, which a client launching the server over stdio typically discards. Nothing in the tool surface can read them. A bounded ring behind the existing `Logger::setSink` seam makes them visible for the first time, capped by record count and total bytes, capturing `Info` and above by default. It is not a Godot log: `runtime_read_logs` and `runtime_read_output` remain the engine's, and the page says so rather than blurring them.
+
+**The Work light counts nothing, on purpose.** Every board-reading entry point in `offline::blackboard` sweeps expired state and reclaims lapsed leases before answering, and then saves the board. That is a write. A tool declaring `readOnlyHint: true` cannot perform it, so the light reports only whether a board file exists, from a stat. Counts remain one `blackboard_task_list` call away, under that tool's own classification.
 
 **Actions are existing tools.** Refresh calls `didi_control_room`. The session controls call `runtime_list_sessions`, `runtime_attach_session` and `runtime_detach_session`. Every one goes out through the host and comes back in through the ordinary path, including consent.
 
