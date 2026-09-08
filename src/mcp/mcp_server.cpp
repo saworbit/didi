@@ -766,7 +766,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                             "changes without a tool call from this client"));
         }
         if (subscribing) {
-            auto exists = ResourceRegistry::instance().readResource(uri);
+            auto exists = ResourceRegistry::instance().readResource(uri, scope);
             if (exists.isErr()) return makeApplicationError(req.id, exists.error());
         }
 
@@ -803,7 +803,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                                 "--ui-app off"));
             }
         }
-        auto read_res = ResourceRegistry::instance().readResource(uri);
+        auto read_res = ResourceRegistry::instance().readResource(uri, scope);
         if (read_res.isErr()) {
             return makeApplicationError(req.id, read_res.error());
         }

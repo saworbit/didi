@@ -13,6 +13,50 @@ namespace mcp {
 
 namespace {
 
+// The scope of the read running on this thread.
+//
+// A resource read handler is nullary by contract, and every registration in
+// this file closes over the registry rather than taking arguments, so the
+// request that asked cannot be handed to one. This is how a handler learns
+// which runtime session it is allowed to use. Thread local because the board
+// watcher reads blackboard resources on its own thread while the stdio loop is
+// serving a request on this one.
+thread_local RequestScope t_readScope = RequestScope::legacy();
+
+// Installs the scope for one read and takes it out again however the read
+// leaves, including through an exception from a handler.
+struct ScopedReadScope {
+    explicit ScopedReadScope(const RequestScope& scope) : previous(t_readScope) {
+        t_readScope = scope;
+    }
+    ~ScopedReadScope() { t_readScope = previous; }
+    ScopedReadScope(const ScopedReadScope&) = delete;
+    ScopedReadScope& operator=(const ScopedReadScope&) = delete;
+    RequestScope previous;
+};
+
+// The route a resource read may use, which is not always the one the process
+// holds. A modern request is served on the session it named and on no other,
+// so a read that named nothing falls through to the offline branch the handler
+// already has rather than answering from an editor it never selected.
+std::optional<runtime::RuntimeRouteLease> scopedRouteLease(
+    const std::shared_ptr<ipc::IIpcClient>& client) {
+    const auto& scope = t_readScope;
+    if (!scope.mayInheritActiveRoute() && !scope.selectsRuntimeSession()) return std::nullopt;
+    auto lease = runtime::acquireRuntimeRouteLease(client);
+    if (!scope.selectsRuntimeSession()) return lease;
+    if (lease.has_value() && lease->descriptor.has_value() &&
+        lease->descriptor->session_id == *scope.runtime_session_id) {
+        return lease;
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
+
+namespace {
+
 std::optional<runtime::SessionDescriptor> selectedSession(
     const std::shared_ptr<ipc::IIpcClient>& ipc_client) {
     const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc_client);
@@ -27,6 +71,13 @@ std::optional<runtime::SessionDescriptor> selectedSession(
 
 bool managedRouteMustFailClosed(const std::shared_ptr<ipc::IIpcClient>& ipc_client) {
     if (!std::dynamic_pointer_cast<runtime::IRuntimeRouteLeaseProvider>(ipc_client)) {
+        return false;
+    }
+    // A request that declined to name a session has not met a broken route, it
+    // asked for no route. Failing closed here would report a healthy session as
+    // unavailable because some other request could have used it, which is the
+    // opposite of what this rule is for.
+    if (!t_readScope.mayInheritActiveRoute() && !scopedRouteLease(ipc_client).has_value()) {
         return false;
     }
     const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc_client);
@@ -147,12 +198,14 @@ bool isBlackboardUri(const std::string& uri) {
 
 } // namespace
 
-Result<std::string> ResourceRegistry::readResource(const std::string& uri) {
+Result<std::string> ResourceRegistry::readResource(const std::string& uri,
+                                                  const RequestScope& scope) {
     auto res = getResource(uri);
     if (!res && isBlackboardUri(uri)) return readBlackboardUri(uri);
     if (!res) {
         return Error::notFound("Resource not found: " + uri);
     }
+    const ScopedReadScope read_scope(scope);
     auto result = res->readHandler();
     if (result.isErr()) return result;
 
@@ -161,7 +214,10 @@ Result<std::string> ResourceRegistry::readResource(const std::string& uri) {
         if (payload.is_object() && !payload.contains("execution_mode")) {
             const bool supports_live = std::find(res->capability.modes.begin(), res->capability.modes.end(), "live") !=
                                        res->capability.modes.end();
-            const bool live = supports_live && m_ipcClient && m_ipcClient->isConnected();
+            // Whether it went live, not whether a route exists: a modern read
+            // that named no session is offline even on a connected process.
+            const bool live = supports_live && m_ipcClient && m_ipcClient->isConnected() &&
+                              scopedRouteLease(m_ipcClient).has_value();
             payload["execution_mode"] = live ? "live" : "offline_fallback";
             return payload.dump();
         }
@@ -241,7 +297,7 @@ void ResourceRegistry::registerAllDefaultResources() {
     editor_state.description = "Connection state and active edited-scene root when live, or an explicit offline status.";
     editor_state.mimeType = "application/json";
     editor_state.readHandler = [this]() -> Result<std::string> {
-        const auto lease = runtime::acquireRuntimeRouteLease(m_ipcClient);
+        const auto lease = scopedRouteLease(m_ipcClient);
         if (lease.has_value()) {
             const auto session = lease->descriptor;
             if (session.has_value() && session->kind != "editor") {
@@ -292,7 +348,7 @@ void ResourceRegistry::registerAllDefaultResources() {
     runtime_logs.description = "Incremental, sequence-cursored Didi runtime log records when connected, or one explicit standalone-status record offline; not a full Godot debugger stream.";
     runtime_logs.mimeType = "application/json";
     runtime_logs.readHandler = [this]() -> Result<std::string> {
-        const auto lease = runtime::acquireRuntimeRouteLease(m_ipcClient);
+        const auto lease = scopedRouteLease(m_ipcClient);
         if (lease.has_value()) {
             const auto session = lease->descriptor;
             // Same as editor state: reading logs changes nothing, so one

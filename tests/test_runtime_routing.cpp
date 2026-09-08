@@ -2326,6 +2326,49 @@ void test_modern_call_without_a_handle_still_answers_offline() {
     ASSERT_TRUE(result.content[0].text.find("runtime_session_id") == std::string::npos);
 }
 
+
+// Resource reads are dispatch too. godot://editor/state returns live editor
+// state, so a modern read that named no session used to be answered from
+// whatever editor another task had attached.
+void test_modern_resource_read_does_not_inherit_the_attached_route() {
+    ScopedRegistryRoute route;
+    auto& fake = route.session;
+    auto& resources = didi::mcp::ResourceRegistry::instance();
+    resources.registerAllDefaultResources();
+    resources.setIpcClient(fake);
+    ASSERT_TRUE(fake->attachSession(kSessionA).isOk());
+
+    const auto inherited = resources.readResource("godot://editor/state",
+                                                  modernNamingNothing());
+    ASSERT_TRUE(inherited.isOk());
+    const auto offline = didi::json::parse(inherited.value());
+    ASSERT_EQ(offline["execution_mode"], "offline_fallback");
+    ASSERT_TRUE(fake->served.empty());
+
+    // Naming the attached session is served from it.
+    const auto named = resources.readResource("godot://editor/state",
+                                              modernNaming(kSessionA));
+    ASSERT_TRUE(named.isOk());
+    ASSERT_EQ(fake->served.size(), static_cast<size_t>(1));
+
+    // Naming the other one is not, and does not move the route.
+    fake->served.clear();
+    const auto other = resources.readResource("godot://editor/state",
+                                              modernNaming(kSessionB));
+    ASSERT_TRUE(other.isOk());
+    ASSERT_EQ(didi::json::parse(other.value())["execution_mode"], "offline_fallback");
+    ASSERT_TRUE(fake->served.empty());
+    ASSERT_EQ(fake->held->session_id, std::string(kSessionA));
+
+    // A legacy read still inherits, which is the era's own lifecycle.
+    const auto legacy = resources.readResource("godot://editor/state");
+    ASSERT_TRUE(legacy.isOk());
+    ASSERT_EQ(fake->served.size(), static_cast<size_t>(1));
+
+    resources.setIpcClient(nullptr);
+    resources.registerAllDefaultResources();
+}
+
 struct RegisterRuntimeRoutingTests {
     RegisterRuntimeRoutingTests() {
         registerTest("RuntimeRouting.EngineLivenessTriState",
@@ -2430,6 +2473,8 @@ struct RegisterRuntimeRoutingTests {
                      test_modern_call_refuses_a_session_from_another_project);
         registerTest("RuntimeRouting.ModernCallWithoutHandleAnswersOffline",
                      test_modern_call_without_a_handle_still_answers_offline);
+        registerTest("RuntimeRouting.ModernResourceReadDoesNotInheritRoute",
+                     test_modern_resource_read_does_not_inherit_the_attached_route);
     }
 } g_registerRuntimeRoutingTests;
 

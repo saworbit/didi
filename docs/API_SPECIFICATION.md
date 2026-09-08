@@ -105,6 +105,11 @@ refused with `409` carrying both ids, rather than moving a route another task
 selected. Availability follows the same rule, so `tools/list` will not report a
 tool live because an unrelated request attached an editor.
 
+`resources/read` is scoped the same way. `godot://editor/state` and
+`godot://runtime/logs` read from the attached editor, so a modern read that
+named no session, or named a different one, gets the offline payload rather
+than another task's editor.
+
 The server holds one route at a time. A modern request may select a session
 when the server is routed nowhere, because that takes it from nobody. Two tasks
 that need two different sessions at once need two Didi processes; the `409` says
