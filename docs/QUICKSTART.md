@@ -149,6 +149,24 @@ Signal wiring, viewport camera/debug controls, TileMap/GridMap editing, physics/
 
 Every implemented mutation supports `dry_run`. The [always-confirmed and overwrite-confirmed tools](TOOL_REFERENCE.md#13-phase-6-mutation-safety) require the exact preview's `confirmation_token`; it expires after 120 seconds and is single-use. Repeat the original arguments unchanged, remove `dry_run`, and add the token only when the preview matches your intent.
 
+## 🎛️ Step 5a: See what Didi thinks is going on
+
+Ask your assistant to open the Didi Control Room, or call `didi_control_room`.
+
+In a client that supports [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview)
+— Claude, Claude Desktop, VS Code GitHub Copilot and others — this renders as an
+interactive dashboard inside the conversation: red/amber/green lights for the
+bridge, project, safety posture and coordination board, each naming the path, pid
+or session behind it; every tool with the execution mode it is in right now; and
+a tail of Didi's own log. In any other client the same information comes back as
+text, so nothing depends on the extension being there.
+
+This is the fastest way to answer "why is that tool unavailable". A light is
+amber whenever the honest answer is *unknown*, and it says why.
+
+The dashboard is offered only to clients that negotiate the extension. Start Didi
+with `--ui-app always` to offer it regardless, or `--ui-app off` to withdraw it.
+
 ## 🔗 Step 6: Attach to a running editor or game
 
 Phase 3 routing starts detached. On first availability, Didi selects only an unambiguous canonical-project match: a sole editor/game, or a unique editor among games. Multiple editors or game-only multiplicity stay detached. With the addon enabled in one or more editor/game processes:

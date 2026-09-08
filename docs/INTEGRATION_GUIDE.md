@@ -144,6 +144,28 @@ Both recovery flags are required together. Enable the matching addon in the sour
 
 Every invocation needs a fresh workspace. A static client configuration that automatically restarts Didi with the retained same path will fail startup. Use a wrapper that rotates workspace names, or deliberately archive/remove the prior container after inspection before reusing its path. Retained containers are for inspection and salvage, not automatic host resume. See [Managed Recovery](MANAGED_RECOVERY.md) for the restart budget, reconciliation, coverage, and project-code boundary.
 
+### Optional: the Control Room dashboard
+
+Didi declares the `io.modelcontextprotocol/ui` extension (MCP Apps, revision
+`2026-01-26`) in `server/discover` and `initialize`. Extensions are bilateral, so
+the `ui://didi/control-room` resource and the `_meta.ui` link on
+`didi_control_room` are advertised only to a client that declared the extension
+too — in `initialize` capabilities for `2024-11-05`, or in per-request `_meta` for
+`2026-07-28`. A client that did not declare it is not offered a page it cannot
+render, and `didi_control_room` still returns the same payload as text.
+
+`--ui-app <mode>` overrides that:
+
+| Mode | Behaviour |
+| :--- | :--- |
+| `auto` (default) | Advertise to clients that declared the extension |
+| `always` | Advertise regardless, for a host whose declaration Didi does not recognise |
+| `off` | Withdraw the resource and the link, and refuse a `resources/read` of the page |
+
+The page is self-contained — no external script, style, font or image — so Didi
+declares no content-security-policy domains and the host's default `default-src
+'none'` applies unweakened.
+
 ## 3. Environment Variables & Customization
 
 | Variable | Default | Description |
