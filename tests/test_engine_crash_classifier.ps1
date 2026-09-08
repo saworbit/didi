@@ -16,9 +16,12 @@ $engineCrash = @(
     "stack:",
     "  #00 0x00007ff60b3144b6  Godot_v4.7.2-stable_win64.exe+0x066744b6",
     "  #01 0x00007ff606446266  Godot_v4.7.2-stable_win64.exe+0x017a6266",
-    "  #02 0x00007ffb6d6bf0ad  msvcrt.dll+0x0003f0ad",
-    "  #03 0x00007ffb6dc4e8d7  KERNEL32.DLL+0x0002e8d7",
-    "  #04 0x00007ffb6e4ec53c  ntdll.dll+0x0008c53c",
+    "  #02 0x00007ff6085c8abd  Godot_v4.7.2-stable_win64.exe+0x03928abd",
+    "  #03 0x00007ff609994b1a  Godot_v4.7.2-stable_win64.exe+0x04cf4b1a",
+    "  #04 0x00007ffb6d6bf0ad  msvcrt.dll+0x0003f0ad",
+    "  #05 0x00007ffb6d6bf17c  msvcrt.dll+0x0003f17c",
+    "  #06 0x00007ffb6dc4e8d7  KERNEL32.DLL+0x0002e8d7",
+    "  #07 0x00007ffb6e4ec53c  ntdll.dll+0x0008c53c",
     "loaded modules:",
     "  0x00007ff604ca0000  size 0x0ae59000  D:\a\didi\godot-bin\Godot_v4.7.2-stable_win64.exe",
     "  0x00007ffb00000000  size 0x00001000  C:\p\addons\didi\bin\didi_extension.dll",
@@ -36,7 +39,34 @@ $engineFrame = "  #01 0x00007ff606446266  Godot_v4.7.2-stable_win64.exe+0x017a62
 
 $cases = [ordered]@{
     # The one failure this is allowed to retry.
-    "engine faulting in its own code" = @{ report = $engineCrash; expect = $true }
+    "captured 4.7.2 documentation worker" = @{ report = $engineCrash; expect = $true }
+
+    "another trap in the same engine" =
+        @{ report = (New-Report '066744b6' '066744b8'); expect = $false }
+
+    "same shared trap reached from another caller" =
+        @{ report = (New-Report '017a6266' '017a6268'); expect = $false }
+
+    "different worker entry" =
+        @{ report = (New-Report '03928abd' '03928abf'); expect = $false }
+
+    "unknown engine version with coincident offsets" =
+        @{ report = (New-Report '4.7.2' '4.5.1'); expect = $false }
+
+    "different engine image size" =
+        @{ report = (New-Report '0ae59000' '0ae5a000'); expect = $false }
+
+    "incomplete crash report" =
+        @{ report = (New-Report 'END DIDI CRASH CAPTURE' ''); expect = $false }
+
+    "multiple reports cannot be combined into a fingerprint" =
+        @{ report = ($engineCrash + "`r`n" + $engineCrash); expect = $false }
+
+    "missing worker frames" =
+        @{ report = ($engineCrash -replace '(?m)^  #0[23].*\r?\n', ''); expect = $false }
+
+    "ASLR changes absolute addresses but not the fingerprint" =
+        @{ report = ($engineCrash -replace '0x00007ff6', '0x00006ff6'); expect = $true }
 
     # A frame of ours means the fault is ours to answer for.
     "a Didi frame on the stack" =
