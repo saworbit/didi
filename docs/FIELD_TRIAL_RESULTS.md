@@ -105,6 +105,84 @@ The cheapest correct form is for a mutation to **return the observed post-state 
 
 ---
 
+## Trial 03, 2026-09-08
+
+**Seed:** commit `3b58517`, Didi 1.6.0, Godot 4.7.2 stable, Windows. Identical briefing and identical bare seed to trials 01 and 02.
+
+**Outcome:** all six required features delivered again. Both endings reached live and captured from the running game. Logs clean: zero engine errors across the 832-frame play run, and an empty `errors` array from the headless launch.
+
+### Coverage against trials 01 and 02
+
+| Metric | Trial 01 | Trial 02 | Trial 03 |
+| :--- | ---: | ---: | ---: |
+| Distinct implemented tools called | 36 | 37 | 36 |
+| Coverage | 39.6% | 40.7% | 32.1% |
+| Total invocations | 156 | 313 | 174 |
+| Ledger entries | 18 | 23 | 19 |
+| Entries verdicted `failed` | 6 | 9 | 9 |
+| Issues filed | 9 | 6 | 7 |
+
+The coverage drop is not a regression signal. The implemented surface grew from 91 to 112 between trial 01 and trial 03, so the denominator moved; and a large share of this run went on diagnosing a single setup fault rather than ranging across the surface.
+
+### The dominant wall from trial 02 is gone
+
+Trial 02 named the **Phase 1 scalar property contract** as its biggest cost: `position`, `shape`, `tile_set`, `color`, `polygon` and `libraries` all had to be patched into `.tscn` text by hand, and almost every fallback traced to it.
+
+That contract is gone. `scene_set_property` and the `properties` argument of `scene_instantiate_node` now accept Vector2, Vector2i, Vector3, Vector3i, Color and `res://` resource paths, and the writer produces correct `ext_resource` wiring. Placing a node, sizing a `ColorRect`, and filling a `CollisionShape2D.shape` slot are ordinary single calls in this run. Issue #210 is genuinely fixed, and features 1, 4 and 5 were completed without leaving the tool surface at all.
+
+`didi_control_room` is the other clear improvement. The first call of the run reported the bridge as down and named the cause and the remedy, which is the question trials 01 and 02 both had to work out for themselves.
+
+### The most expensive finding was not a tool defect
+
+This run spent about an hour concluding that a shipped capability did not exist.
+
+`README.md:174` says to copy the repository's `addons/didi` into your project, four lines after telling you to build into `build/`. `docs/QUICKSTART.md:21-31` says the opposite, correctly, and explains why: the addon is assembled at `build/addons/didi`, and "The `addons/didi` folder in the repository is the manifest that goes into that assembly, not a build output." That directory's extension is gitignored and, since #38, is written by no build step, so it holds whatever was last left there by hand.
+
+Following the README installed an extension six days older than the server under test, predating the #210 fix. Every Vector2 write then failed with `Property type 5 is outside the Phase 1 scalar property contract`, which reads exactly like a documented limitation rather than a stale binary. `didi_control_room` reported the bridge light green throughout and reported `Server: didi 1.6.0`, which is the standalone server's version; nothing anywhere reports the version of the extension actually serving the calls.
+
+This is the finding to carry into Loop B. A trial can be pointed at the right server binary, dump a fresh manifest from it, and still be scored against a different bridge. `seed_trial.py` records `didi_executable` and its manifest; it does not record, or check, the GDExtension that serves the live half of every call. Filed as #325 (the README line) and #326 (the missing version handshake).
+
+### False success remains the highest-severity class
+
+Trial 02 named mutations that report success without succeeding as the most serious defect class the trials have produced. This run found two more, both of a new kind: the response is not merely optimistic, it is *attributed to work that did not happen*.
+
+`resource_create` (#327) accepts structured property values, reports `created_offline`, and writes a `.tres` that Godot misreads. It emits properties in alphabetical order, so `tracks/0/interp` is applied before `tracks/0/type` has created the track; and it writes JSON where Godot needs literals, so `tracks/0/keys` never becomes a Dictionary of `PackedFloat32Array` and `tracks/0/path` never becomes a `NodePath`. The resulting Animation loads, reports one track, and has discarded every field on it, with four `Index (uint32_t)track = 0 is out of bounds` errors going to a console nobody reads. The same limitation makes a `TileSet` unreachable, because there is no representation for a `SubResource` block or a collision polygon.
+
+`viewport_capture_frame` (#330) is the second. #209 fixed the case where `editor_2d` returned a 2x2 image as a successful capture, and `editor_2d` now fails correctly with a message that names the remedy. The `2d` and `canvas_item` aliases for the same viewport did not get the fix: with a 2D scene open and the editor on the 3D main screen, both return a full-size PNG of the **3D** viewport, described as a capture of `'2d'`.
+
+The cheapest correct form proposed after trial 02 still applies, and extends: a mutation should return the observed post-state, and a read should not describe a result as something it is not.
+
+### A tool that cannot observe what it exists to observe
+
+`runtime_explore_scene` (#329) drives a game by holding the project's own input actions and sampling `probes` every frame. Its schema documents the probe expression as "A sandbox expression evaluating to a number or a boolean, such as `position.x`."
+
+`position.x` is the first form the sandbox refuses. So is every other read of project state: `self.position.x` and a bare `visible` and `get_position().x` all fail, the last two because `context_node` is never bound as the evaluation instance. Only source-local numeric literals evaluate, and a literal never changes, so the tool cannot detect motion in any project.
+
+It reports this as a clean run. A twelve-second window held all five actions across 721 frames and returned `engine_errors: 0`, `stuck_intervals: []` and `verdict: "none"`, with every probe at `readings: 0`. Nothing in that response distinguishes "explored and found nothing wrong" from "measured nothing at all".
+
+### Composition moved out of the scene file
+
+`scene_pack_branch` produced a correct `res://enemy.tscn`, and then nothing could place one. `scene_instantiate_node` carries a `scene_path` argument and returns `501 PackedScene instantiation is outside the Phase 1 built-in-node bridge`; `instantiate_asset`, whose stated contract is exactly this, is reserved and rejects every call.
+
+The fallback was to preload the scene in `arena.gd` and instance three copies in `_ready()`. The game is correct and the enemies do come from a packed scene, but `main.tscn` no longer contains them, so the scene file stops describing the scene. That is the difference between authoring a project and generating one, and it is why #328 is filed as the highest-leverage missing capability of this run.
+
+### Issues filed
+
+Seven, #325 through #331, all labelled `field-trial`: one `documentation`, two `enhancement`, four `bug`. Fourteen gaps were catalogued; seven were promoted and seven were recorded without filing, which is the behaviour the protocol asks for.
+
+### The instructions that still do not land
+
+Trial 02 recorded that the read-back instruction in `LLM_INSTRUCTIONS.md` did not survive contact with the task. This run read back after writes throughout, so that one landed, but two others did not:
+
+- **The blackboard.** The briefing asks the tester to record architectural decisions and node paths on it. Trials 01, 02 and 03 have now all failed to do so. At three for three, the honest reading is that the instruction does not survive the task, not that three testers were careless.
+- **`editor_undo` and `editor_redo`.** Trial 02 recorded these as never called despite UndoRedo safety being the headline differentiator. They did not occur to this tester either, at any point, even though every mutation response carries `undo_redo_registered: true`.
+
+### Caveat on comparability
+
+This tester read the briefing and the three field-trial design documents before starting, because the session running the trial also owned the harness. It had read no tool reference, no capability document and no installation instructions before its first call, which is why it walked into the README trap at full speed. Treat the friction counts as comparable and the discovery ordering as warmer than trial 01.
+
+---
+
 ## When to use Didi, and when not
 
 Drawn from what the run actually did rather than from the tool list. This belongs in agent-facing guidance.
