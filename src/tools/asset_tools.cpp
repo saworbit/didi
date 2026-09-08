@@ -8,6 +8,7 @@
 #include "didi/offline/audio_bus_layout.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/atomic_write.hpp"
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <fstream>
@@ -432,7 +433,7 @@ CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::I
     // The scan is a file scan in every case and says so on every call. The
     // execution mode below describes whether an engine contributed to the
     // findings, which is the question a caller weighing them is actually
-    // asking; uid_verification carries the detail.
+    // asking; reference_verification carries the detail.
     report["scan_source"] = "project_files";
     report["execution_mode"] = "offline_fallback";
 
@@ -443,69 +444,97 @@ CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::I
     // findings are corrected rather than annotated, because leaving a finding
     // in place with a footnote saying it is wrong is how a tool trains people
     // to skim past it.
-    constexpr size_t kMaxUidVerifications = 256; // the bridge's own batch cap
+    constexpr size_t kMaxVerifications = 256; // the bridge's own batch cap
     std::vector<std::string> candidates;
-    std::set<std::string> distinct_unresolved;
-    if (report.contains("broken_references") && report["broken_references"].is_array()) {
+    std::set<std::string> distinct_findings;
+    // UID findings first, then path findings. A fixed order matters because the
+    // budget can cut the list, and a caller comparing two runs of an unchanged
+    // project should get the same answer both times.
+    for (const char* kind : {"unresolved_uid", "missing_file"}) {
+        if (!report.contains("broken_references") || !report["broken_references"].is_array()) break;
         for (const auto& entry : report["broken_references"]) {
-            if (entry.value("kind", std::string{}) != "unresolved_uid") continue;
+            if (entry.value("kind", std::string{}) != kind) continue;
             const auto target = entry.value("target", std::string{});
-            if (target.empty() || !distinct_unresolved.insert(target).second) continue;
-            if (candidates.size() < kMaxUidVerifications) candidates.push_back(target);
+            if (target.empty() || !distinct_findings.insert(target).second) continue;
+            if (candidates.size() < kMaxVerifications) candidates.push_back(target);
         }
     }
 
     json verification{{"mode", candidates.empty() ? "not_needed" : "unavailable"},
                       {"checked", 0},
-                      {"truncated", distinct_unresolved.size() > candidates.size()}};
+                      {"truncated", distinct_findings.size() > candidates.size()}};
 
     if (!candidates.empty() && ipc && ipc->isConnected()) {
         auto response = ipc->sendRequest("project.resolveUids", json{{"queries", candidates}},
                                          ipc::kWaitForDefinitiveResponse);
         if (response.isOk() && response.value().is_object() &&
             response.value().contains("entries") && response.value()["entries"].is_array()) {
-            std::map<std::string, std::string> engine_paths;
-            std::set<std::string> engine_unknown;
+            // A uid finding is disproved by the engine resolving it. A path
+            // finding is disproved by the engine being able to load it, which
+            // is a different question: a path can load with no UID registered,
+            // and a UID can be registered for a file that is gone.
+            std::map<std::string, std::string> resolved_uids;
+            std::map<std::string, bool> loadable_paths;
             for (const auto& entry : response.value()["entries"]) {
                 const auto query = entry.value("query", std::string{});
                 if (query.empty()) continue;
-                if (entry.value("found", false)) {
-                    engine_paths[query] = entry.value("path", std::string{});
-                } else {
-                    engine_unknown.insert(query);
+                if (query.rfind("uid://", 0) == 0) {
+                    if (entry.value("found", false) && entry.value("exists", true)) {
+                        resolved_uids[query] = entry.value("path", std::string{});
+                    }
+                } else if (entry.contains("exists") && entry["exists"].is_boolean()) {
+                    loadable_paths[query] = entry["exists"].get<bool>();
                 }
             }
 
             json kept = json::array();
             json engine_only = json::array();
             for (auto entry : report["broken_references"]) {
-                if (entry.value("kind", std::string{}) == "unresolved_uid") {
-                    const auto target = entry.value("target", std::string{});
-                    const auto resolved = engine_paths.find(target);
-                    if (resolved != engine_paths.end()) {
+                const auto kind = entry.value("kind", std::string{});
+                const auto target = entry.value("target", std::string{});
+                if (kind == "unresolved_uid") {
+                    const auto resolved = resolved_uids.find(target);
+                    if (resolved != resolved_uids.end()) {
                         engine_only.push_back({{"source", entry.value("source", std::string{})},
                                                {"target", target},
+                                               {"kind", kind},
                                                {"engine_path", resolved->second}});
                         continue;
                     }
-                    if (engine_unknown.count(target) != 0) entry["confirmed_by_engine"] = true;
+                    if (std::find(candidates.begin(), candidates.end(), target) != candidates.end()) {
+                        entry["confirmed_by_engine"] = true;
+                    }
+                } else if (kind == "missing_file") {
+                    const auto loadable = loadable_paths.find(target);
+                    if (loadable != loadable_paths.end()) {
+                        if (loadable->second) {
+                            engine_only.push_back({{"source", entry.value("source", std::string{})},
+                                                   {"target", target},
+                                                   {"kind", kind},
+                                                   {"engine_path", target}});
+                            continue;
+                        }
+                        entry["confirmed_by_engine"] = true;
+                    }
                 }
                 kept.push_back(std::move(entry));
             }
             report["broken_references"] = std::move(kept);
             report["engine_only_references"] = engine_only;
 
-            // A file the engine proved is referenced cannot also be unreferenced.
+            // A file the engine proved is referenced cannot also be
+            // unreferenced. Only uid findings can reach this: a path the scan
+            // never indexed is not in the orphan set either.
             size_t orphans_cleared = 0;
-            if (!engine_paths.empty() && report.contains("orphans") && report["orphans"].is_array()) {
-                std::set<std::string> resolved_paths;
-                for (const auto& [uid, resolved_path] : engine_paths) {
-                    if (!resolved_path.empty()) resolved_paths.insert(resolved_path);
+            if (!resolved_uids.empty() && report.contains("orphans") && report["orphans"].is_array()) {
+                std::set<std::string> referenced;
+                for (const auto& [uid, resolved_path] : resolved_uids) {
+                    if (!resolved_path.empty()) referenced.insert(resolved_path);
                 }
                 json kept_orphans = json::array();
                 uint64_t reclaimed = 0;
                 for (const auto& orphan : report["orphans"]) {
-                    if (resolved_paths.count(orphan.value("path", std::string{})) != 0) {
+                    if (referenced.count(orphan.value("path", std::string{})) != 0) {
                         reclaimed += orphan.value("file_size", static_cast<uint64_t>(0));
                         ++orphans_cleared;
                         continue;
@@ -519,23 +548,28 @@ CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::I
                 }
             }
 
+            size_t confirmed = 0;
+            for (const auto& entry : report["broken_references"]) {
+                if (entry.value("confirmed_by_engine", false)) ++confirmed;
+            }
+
             report["execution_mode"] = "live";
             verification["mode"] = "live";
             verification["checked"] = candidates.size();
-            verification["resolved_by_engine"] = engine_paths.size();
-            verification["confirmed_broken"] = engine_unknown.size();
+            verification["cleared"] = engine_only.size();
+            verification["confirmed"] = confirmed;
             verification["orphans_cleared"] = orphans_cleared;
 
             if (!engine_only.empty() && report.contains("limitations") &&
                 report["limitations"].is_array()) {
                 report["limitations"].push_back(
-                    "A uid under engine_only_references resolves in this editor but no project "
-                    "file records it. The editor's table is not in the repository, so a fresh "
-                    "checkout or another machine would report it broken.");
+                    "A reference under engine_only_references resolves in this editor but no "
+                    "scanned project file accounts for it. The editor's table is not in the "
+                    "repository, so a fresh checkout or another machine may report it broken.");
             }
         }
     }
-    report["uid_verification"] = std::move(verification);
+    report["reference_verification"] = std::move(verification);
     return CallToolResult::successJson(std::move(report));
 }
 

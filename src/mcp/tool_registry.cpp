@@ -21,7 +21,22 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "viewport_capture_frame", "capture_viewport", "viewport_capture_passes",
         // The layout file answers the routing question without an engine; only
         // the effect chain and a runtime change need one.
-        "audio_list_buses"
+        "audio_list_buses",
+        // Both have a complete offline path and use an editor to do better, so
+        // both modes are declared. Declaring live is what makes the route
+        // available at all -- the registry acquires a lease only for a tool
+        // that declares it -- and declaring offline_fallback is what stops the
+        // standalone process refusing the call when no session is attached.
+        //
+        // project_get_uid_map: resolution is live because ResourceUID is the
+        // table the engine resolves against and a .uid sidecar can be stale or
+        // not written yet. The map itself is a file scan in both modes;
+        // ResourceUID exposes no enumeration through GDExtension.
+        "project_get_uid_map",
+        // project_audit_assets: the scan is a file scan in both modes, and an
+        // attached editor verifies its unresolved uid and missing path findings
+        // and clears the ones it disproves, so the findings differ by mode.
+        "project_audit_assets"
     };
     static const std::unordered_set<std::string> live = {
         "scene_instantiate_node", "scene_remove_node", "scene_reparent_node",
@@ -48,17 +63,6 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // Reads a ShaderMaterial off a node in the edited scene, so it needs the
         // editor's scene and has no offline reading to fall back to.
         , "shader_list_uniforms", "shader_set_uniform", "shader_get_visual_graph"
-        // The scan is always a file scan, but an attached editor verifies its
-        // unresolved uid findings against ResourceUID and clears the ones it
-        // disproves, so the findings differ by mode. Declaring live is also what
-        // makes the route available: the registry acquires a lease only for a
-        // tool that declares it.
-        , "project_audit_assets"
-        // Resolution is live when an editor is connected, because ResourceUID is
-        // the table the engine actually resolves against and a .uid sidecar can
-        // be stale or not written yet. The map itself stays a file scan in both
-        // modes: ResourceUID exposes no enumeration through GDExtension.
-        , "project_get_uid_map"
         // Live only on purpose. Writing the layout file would change what the
         // project loads next time and not what anyone is listening to now.
         , "audio_configure_bus"
