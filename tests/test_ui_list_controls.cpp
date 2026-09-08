@@ -6,7 +6,9 @@
 // registered contract.
 
 #include "didi/mcp/tool_registry.hpp"
+#include "didi/mcp/tool_availability.hpp"
 #include "didi/common/ipc_channel.hpp"
+#include "didi/runtime/session_kind_policy.hpp"
 
 #include <functional>
 #include <stdexcept>
@@ -85,6 +87,28 @@ void test_registered_contract() {
     ASSERT_EQ(properties["root_path"]["maxLength"], 1024);
 }
 
+// Three gates decide whether a game session may call this, and they have to
+// agree: the tool policy the standalone checks, the method policy, and the
+// editor hook's admission list. Only the hook was updated first, so the tool
+// was documented as editor-or-game and refused in a game with a 409 -- found by
+// running the fixture as a game rather than as an editor.
+void test_a_game_session_is_allowed_by_every_gate() {
+    using didi::runtime::LiveSessionKindPolicy;
+    ASSERT_TRUE(didi::runtime::livePolicyForTool("ui_list_controls") ==
+                LiveSessionKindPolicy::editor_or_game);
+    ASSERT_TRUE(didi::runtime::livePolicyForMethod("ui.listControls") ==
+                LiveSessionKindPolicy::editor_or_game);
+
+    // The function tools/list and the Control Room both answer from.
+    ASSERT_TRUE(didi::mcp::liveAllowedFor("ui_list_controls", false, "game"));
+    ASSERT_TRUE(didi::mcp::liveAllowedFor("ui_list_controls", false, "editor"));
+
+    // And the neighbouring tool stays editor-only: it needs an editor viewport,
+    // and widening this one must not widen that one.
+    ASSERT_FALSE(didi::mcp::liveAllowedFor("ui_hit_test", false, "game"));
+    ASSERT_TRUE(didi::mcp::liveAllowedFor("ui_hit_test", false, "editor"));
+}
+
 void test_forwards_the_exact_request() {
     auto client = std::make_shared<RecordingControlClient>();
     auto& registry = freshRegistry(client);
@@ -154,6 +178,8 @@ void test_a_malformed_engine_answer_is_an_error() {
 struct Register {
     Register() {
         registerTest("UiListControls.RegisteredContract", test_registered_contract);
+        registerTest("UiListControls.GameSessionAllowedByEveryGate",
+                     test_a_game_session_is_allowed_by_every_gate);
         registerTest("UiListControls.ForwardsTheExactRequest", test_forwards_the_exact_request);
         registerTest("UiListControls.BadArgumentsNeverReachTheEngine",
                      test_bad_arguments_never_reach_the_engine);
