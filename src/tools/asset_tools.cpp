@@ -9,6 +9,7 @@
 #include "didi/common/project_path.hpp"
 #include "didi/common/atomic_write.hpp"
 #include <cctype>
+#include <cstdint>
 #include <fstream>
 #include <initializer_list>
 #include <map>
@@ -396,7 +397,6 @@ CallToolResult handleProjectAnalyzeImpact(const json& args, std::shared_ptr<ipc:
 }
 
 CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    (void)ipc;
     if (!args.is_object()) {
         return CallToolResult::error("Invalid audit request: arguments must be an object");
     }
@@ -429,7 +429,113 @@ CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::I
     }
 
     auto report = offline::auditProject(".", options);
+    // The scan is a file scan in every case and says so on every call. The
+    // execution mode below describes whether an engine contributed to the
+    // findings, which is the question a caller weighing them is actually
+    // asking; uid_verification carries the detail.
+    report["scan_source"] = "project_files";
     report["execution_mode"] = "offline_fallback";
+
+    // A uid no project file records is reported as a broken reference, because
+    // offline that is the only reading available. With an editor attached the
+    // engine's own table can say whether it is true, and a reference the engine
+    // resolves is not broken -- nor is the file it points at an orphan. Both
+    // findings are corrected rather than annotated, because leaving a finding
+    // in place with a footnote saying it is wrong is how a tool trains people
+    // to skim past it.
+    constexpr size_t kMaxUidVerifications = 256; // the bridge's own batch cap
+    std::vector<std::string> candidates;
+    std::set<std::string> distinct_unresolved;
+    if (report.contains("broken_references") && report["broken_references"].is_array()) {
+        for (const auto& entry : report["broken_references"]) {
+            if (entry.value("kind", std::string{}) != "unresolved_uid") continue;
+            const auto target = entry.value("target", std::string{});
+            if (target.empty() || !distinct_unresolved.insert(target).second) continue;
+            if (candidates.size() < kMaxUidVerifications) candidates.push_back(target);
+        }
+    }
+
+    json verification{{"mode", candidates.empty() ? "not_needed" : "unavailable"},
+                      {"checked", 0},
+                      {"truncated", distinct_unresolved.size() > candidates.size()}};
+
+    if (!candidates.empty() && ipc && ipc->isConnected()) {
+        auto response = ipc->sendRequest("project.resolveUids", json{{"queries", candidates}},
+                                         ipc::kWaitForDefinitiveResponse);
+        if (response.isOk() && response.value().is_object() &&
+            response.value().contains("entries") && response.value()["entries"].is_array()) {
+            std::map<std::string, std::string> engine_paths;
+            std::set<std::string> engine_unknown;
+            for (const auto& entry : response.value()["entries"]) {
+                const auto query = entry.value("query", std::string{});
+                if (query.empty()) continue;
+                if (entry.value("found", false)) {
+                    engine_paths[query] = entry.value("path", std::string{});
+                } else {
+                    engine_unknown.insert(query);
+                }
+            }
+
+            json kept = json::array();
+            json engine_only = json::array();
+            for (auto entry : report["broken_references"]) {
+                if (entry.value("kind", std::string{}) == "unresolved_uid") {
+                    const auto target = entry.value("target", std::string{});
+                    const auto resolved = engine_paths.find(target);
+                    if (resolved != engine_paths.end()) {
+                        engine_only.push_back({{"source", entry.value("source", std::string{})},
+                                               {"target", target},
+                                               {"engine_path", resolved->second}});
+                        continue;
+                    }
+                    if (engine_unknown.count(target) != 0) entry["confirmed_by_engine"] = true;
+                }
+                kept.push_back(std::move(entry));
+            }
+            report["broken_references"] = std::move(kept);
+            report["engine_only_references"] = engine_only;
+
+            // A file the engine proved is referenced cannot also be unreferenced.
+            size_t orphans_cleared = 0;
+            if (!engine_paths.empty() && report.contains("orphans") && report["orphans"].is_array()) {
+                std::set<std::string> resolved_paths;
+                for (const auto& [uid, resolved_path] : engine_paths) {
+                    if (!resolved_path.empty()) resolved_paths.insert(resolved_path);
+                }
+                json kept_orphans = json::array();
+                uint64_t reclaimed = 0;
+                for (const auto& orphan : report["orphans"]) {
+                    if (resolved_paths.count(orphan.value("path", std::string{})) != 0) {
+                        reclaimed += orphan.value("file_size", static_cast<uint64_t>(0));
+                        ++orphans_cleared;
+                        continue;
+                    }
+                    kept_orphans.push_back(orphan);
+                }
+                if (orphans_cleared > 0) {
+                    report["orphans"] = std::move(kept_orphans);
+                    const auto counted = report.value("orphan_bytes", static_cast<uint64_t>(0));
+                    report["orphan_bytes"] = counted > reclaimed ? counted - reclaimed : 0;
+                }
+            }
+
+            report["execution_mode"] = "live";
+            verification["mode"] = "live";
+            verification["checked"] = candidates.size();
+            verification["resolved_by_engine"] = engine_paths.size();
+            verification["confirmed_broken"] = engine_unknown.size();
+            verification["orphans_cleared"] = orphans_cleared;
+
+            if (!engine_only.empty() && report.contains("limitations") &&
+                report["limitations"].is_array()) {
+                report["limitations"].push_back(
+                    "A uid under engine_only_references resolves in this editor but no project "
+                    "file records it. The editor's table is not in the repository, so a fresh "
+                    "checkout or another machine would report it broken.");
+            }
+        }
+    }
+    report["uid_verification"] = std::move(verification);
     return CallToolResult::successJson(std::move(report));
 }
 
