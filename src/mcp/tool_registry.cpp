@@ -7,6 +7,8 @@
 #include "didi/tools/resolved_tool_binding.hpp"
 #include "didi/mcp/phase7_schemas.hpp"
 #include <algorithm>
+#include <cctype>
+#include <filesystem>
 #include <unordered_set>
 #include <utility>
 
@@ -418,6 +420,67 @@ std::shared_ptr<ipc::IIpcClient> makeLeaseDispatchClient(
     return std::make_shared<LeaseDispatchClient>(source);
 }
 
+// Whether a session's project is provably not the one this server is serving.
+//
+// Deliberately one-sided. Both paths go through the same normalisation so two
+// spellings of one directory agree, and anything that cannot be resolved, or
+// that is simply absent, answers false. A refusal here blocks real work, so it
+// is made only when the two trees are known to differ; the cost of missing a
+// case is that an already narrow door stays open, and the cost of a false
+// positive is a working session the caller cannot use.
+bool isProvablyDifferentProject(const std::string& session_project_path) {
+    if (session_project_path.empty()) return false;
+    std::error_code error;
+    const auto here = std::filesystem::weakly_canonical(
+        std::filesystem::current_path(error), error);
+    if (error) return false;
+    std::error_code session_error;
+    const auto theirs = std::filesystem::weakly_canonical(
+        paths::projectPathFromUtf8(session_project_path), session_error);
+    if (session_error) return false;
+    auto ours_text = paths::nativePathToUtf8(here.lexically_normal());
+    auto theirs_text = paths::nativePathToUtf8(theirs.lexically_normal());
+#if defined(_WIN32)
+    // Windows paths differing only in case name the same directory, and a
+    // descriptor is written by a different process than the one reading it.
+    const auto fold = [](std::string& text) {
+        std::transform(text.begin(), text.end(), text.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    };
+    fold(ours_text);
+    fold(theirs_text);
+#endif
+    return ours_text != theirs_text;
+}
+
+// A modern request that named no session asked a live tool to run on whatever
+// the process happened to be pointed at. Say what to do rather than refuse.
+Error unnamedRuntimeSessionError(const std::string& tool_name) {
+    Error error(400,
+                "This tool runs against a Godot session, and a request declaring protocol "
+                "2026-07-28 has to name the one it means. Discover sessions with "
+                "runtime_list_sessions, then set _meta.didi.runtime_session_id on the call.");
+    error.data = {{"tool", tool_name},
+                  {"missing", std::string("_meta.") + kDidiMetaKey + "." + kRuntimeSessionMetaKey}};
+    return error;
+}
+
+// The request named one session and this process is on another. Refusing keeps
+// whoever attached that route in charge of it.
+Error runtimeSessionMismatchError(const std::string& tool_name, const std::string& wanted,
+                                  const std::optional<runtime::SessionDescriptor>& held) {
+    Error error(409, held.has_value()
+                         ? "This server is routed to a different runtime session than the one "
+                           "this request named. Name the attached session, or run a separate "
+                           "Didi process for the other one."
+                         : "The runtime session this request named is not available.");
+    error.data = {{"tool", tool_name},
+                  {"requested_session_id", wanted},
+                  {"attached_session_id",
+                   held.has_value() ? json(held->session_id) : json(nullptr)}};
+    return error;
+}
+
 CallToolResult structuredLiveToolError(const Error& error,
                                        const std::optional<runtime::SessionDescriptor>& session) {
     json data = error.data.is_object() ? error.data : json::object();
@@ -736,7 +799,63 @@ ToolManifest ToolRegistry::buildManifest() const {
     return manifest;
 }
 
-CallToolResult ToolRegistry::callTool(const std::string& name, const json& arguments) {
+std::optional<CallToolResult> ToolRegistry::selectNamedRuntimeRoute(
+    const std::string& tool_name, const RequestScope& scope,
+    std::optional<runtime::RuntimeRouteLease>& lease) {
+    const std::string& wanted = *scope.runtime_session_id;
+    const auto held = lease.has_value() ? lease->descriptor
+                                        : std::optional<runtime::SessionDescriptor>{};
+
+    if (!held.has_value() || held->session_id != wanted) {
+        if (held.has_value()) {
+            // Routed somewhere else. Moving it would serve this request
+            // correctly and take the route out from under whoever set it.
+            return structuredLiveToolError(
+                runtimeSessionMismatchError(tool_name, wanted, held), std::nullopt);
+        }
+        // Managed mode owns its editor and refuses attach through the tool
+        // surface, so a request there names what managed holds or it does not
+        // run. Without a session client there is nothing to attach with.
+        if (m_recovery || !m_runtimeSessionClient) {
+            return structuredLiveToolError(
+                runtimeSessionMismatchError(tool_name, wanted, held), std::nullopt);
+        }
+        auto attached = m_runtimeSessionClient->attachSession(wanted);
+        if (attached.isErr()) {
+            return structuredLiveToolError(attached.error(), std::nullopt);
+        }
+        lease = runtime::acquireRuntimeRouteLease(m_sourceIpcClient);
+        // Attaching and leasing are two steps. Confirm what came back is what
+        // was asked for rather than assume the gap was quiet.
+        if (!lease.has_value() || !lease->descriptor.has_value() ||
+            lease->descriptor->session_id != wanted) {
+            const auto now = lease.has_value() ? lease->descriptor
+                                               : std::optional<runtime::SessionDescriptor>{};
+            lease.reset();
+            return structuredLiveToolError(
+                runtimeSessionMismatchError(tool_name, wanted, now), std::nullopt);
+        }
+    }
+
+    // A handle names a session and a session belongs to a project. Attaching by
+    // id searches every session on the machine, so without this a request could
+    // name an editor open on somebody else's tree and be answered from it.
+    const auto& routed = *lease->descriptor;
+    if (isProvablyDifferentProject(routed.project_path)) {
+        Error error(409,
+                    "The runtime session this request named belongs to a different project "
+                    "than this server is serving.");
+        error.data = {{"tool", tool_name},
+                      {"requested_session_id", wanted},
+                      {"session_project_path", routed.project_path}};
+        lease.reset();
+        return structuredLiveToolError(error, std::nullopt);
+    }
+    return std::nullopt;
+}
+
+CallToolResult ToolRegistry::callTool(const std::string& name, const json& arguments,
+                                      const RequestScope& scope) {
     const auto binding = resolveAliasBinding(name, arguments);
     const auto* tool = getTool(name);
     if (!tool) {
@@ -763,7 +882,28 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
     if (supports_live) {
         const bool managed_route =
             std::dynamic_pointer_cast<runtime::IRuntimeRouteLeaseProvider>(m_sourceIpcClient) != nullptr;
-        lease = runtime::acquireRuntimeRouteLease(m_sourceIpcClient);
+
+        // Which session this request is entitled to. A legacy request inherits
+        // the attached route, which is the lifecycle it was written against. A
+        // modern request gets the session it named and nothing else: inheriting
+        // here is what let one task drive an editor a different task attached,
+        // on a process the specification says is not a conversation boundary.
+        if (scope.mayInheritActiveRoute() || scope.selectsRuntimeSession()) {
+            lease = runtime::acquireRuntimeRouteLease(m_sourceIpcClient);
+        }
+        if (scope.selectsRuntimeSession()) {
+            auto selection = selectNamedRuntimeRoute(name, scope, lease);
+            if (selection.has_value()) return *selection;
+        } else if (!scope.mayInheritActiveRoute()) {
+            // A modern request that named no session gets no live route. When
+            // the tool can answer offline it does, and the payload says
+            // offline_fallback, so nothing is served live by accident.
+            if (!supports_offline) {
+                return structuredLiveToolError(
+                    unnamedRuntimeSessionError(name), std::nullopt);
+            }
+        }
+
         const auto selected = lease.has_value()
                                   ? lease->descriptor
                                   : std::optional<runtime::SessionDescriptor>{};
