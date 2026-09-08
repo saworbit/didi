@@ -48,6 +48,12 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // Reads a ShaderMaterial off a node in the edited scene, so it needs the
         // editor's scene and has no offline reading to fall back to.
         , "shader_list_uniforms", "shader_set_uniform", "shader_get_visual_graph"
+        // The scan is always a file scan, but an attached editor verifies its
+        // unresolved uid findings against ResourceUID and clears the ones it
+        // disproves, so the findings differ by mode. Declaring live is also what
+        // makes the route available: the registry acquires a lease only for a
+        // tool that declares it.
+        , "project_audit_assets"
         // Resolution is live when an editor is connected, because ResourceUID is
         // the table the engine actually resolves against and a .uid sidecar can
         // be stale or not written yet. The map itself stays a file scan in both
@@ -87,7 +93,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "script_get_symbols", "script_patch_method", "patch_script_symbols", "script_create",
         "viewport_create_test_lab", "create_visual_test_lab", "resource_create",
         "resource_inspect", "project_list_resources", "query_project_resources",
-        "project_audit_assets", "project_analyze_impact",
+        "project_analyze_impact",
         "project_verify_changes", "project_apply_changes",
         "project_rename_references", "runtime_launch",
         "blackboard_write", "blackboard_read", "blackboard_patch",
@@ -2263,7 +2269,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "project_audit_assets";
-        t.description = "Audits the project for unreferenced assets, references that resolve to nothing, declared signals nothing uses, and unhealthy Godot import metadata. Reports evidence, not verdicts.";
+        t.description = "Audits the project for unreferenced assets, references that resolve to nothing, declared signals nothing uses, and unhealthy Godot import metadata. Reports evidence, not verdicts. A file scan in every case; a connected editor additionally verifies unresolved uid:// findings against ResourceUID and clears the ones it disproves.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {

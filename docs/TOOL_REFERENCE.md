@@ -552,7 +552,7 @@ Every file is staged before any is replaced, so the change cannot stop half appl
 
 Refused: a `new_name` a connection or track already uses, because that merges two symbols with no way back; a target and `new_name` that are the same; and any run against a truncated project scan, because renaming the files that were read and leaving the rest is the breakage this exists to prevent. Always requires a confirmation token. Run `project_analyze_impact` on the same target first to see every site; the mutation preview shows the arguments, not the file list. Save or close open scenes first, since an editor holding unsaved changes will write over the files.
 
-### `project_audit_assets` — Offline
+### `project_audit_assets` — Live or offline
 
 Reads the project and reports four things nothing in a single file can show: assets that nothing references, references that resolve to no file, signals that nothing emits or connects, and unhealthy existing Godot `.import` metadata.
 
@@ -571,6 +571,15 @@ References are followed in every form Godot writes and people type: `[ext_resour
 A signal counts as alive if any file emits it, connects to it, checks `is_connected`, or wires it through `[connection signal="..."]` in a scene.
 
 Import health inspects only existing regular, non-symlink `*.import` files. It reads at most 256 KiB and 1,024 declared output paths from each, and scans at most 20,000 metadata files without following directory or file symlinks. Declared `source_file`, `dest_files`, and `[remap] path` values must be canonical project-contained `res://` paths; generated outputs under `res://.godot/imported/` are allowed, but an escape or symlink is not. `invalid_import_metadata` also covers `valid=false`, malformed targeted assignments, an oversized file/path list, or a `source_file` that disagrees with the sidecar name. Other findings are `missing_import_source`, `missing_import_output`, and `source_newer_than_output`, with `metadata`, `source`, and `target` provenance. `scanned_import_metadata` counts inspected sidecars, `import_issue_count` counts all findings before the shared `max_findings` response cap, and `import_scan_truncated` reports the metadata-file cap.
+
+**Live UID verification.** An `unresolved_uid` finding means no scanned project file records that UID, which offline is the only reading available. With an editor attached the audit checks those findings against `ResourceUID` through `project.resolveUids` and corrects what it disproves, because a finding left in place with a footnote saying it is wrong teaches callers to skim past findings.
+
+- A UID the engine resolves is removed from `broken_references` and reported under `engine_only_references` with `source`, `target`, and `engine_path`. The file it points at is removed from `orphans` and its size subtracted from `orphan_bytes`, because a file the engine proved is referenced cannot also be unreferenced. A `limitations` line is added: the editor's table is not in the repository, so a fresh checkout would report it broken.
+- A UID the engine does not know keeps its finding and gains `confirmed_by_engine: true`.
+
+`uid_verification` reports what happened on every call: `mode` is `live`, `unavailable` (unresolved UIDs exist but no editor answered), or `not_needed` (there were none); `checked` is how many were sent; `truncated` is true when more than 256 distinct unresolved UIDs existed; and a live pass adds `resolved_by_engine`, `confirmed_broken`, and `orphans_cleared`.
+
+`execution_mode` is `live` when that verification pass ran and `offline_fallback` when it did not, because it describes whether an engine contributed to the findings. What was scanned does not change with it: `scan_source` is `project_files` on every call, and the orphan, dead-signal and import-health passes are always file reads.
 
 The results are evidence, not verdicts. A path a script builds at runtime cannot be followed, so an asset in use can still be listed as an orphan, and a connection made through a variable name cannot be seen. `source_newer_than_output` compares filesystem timestamps; it does not reproduce Godot's checksum, importer-version, or settings-validity checks. The response repeats these limits in a `limitations` array so a caller reading only the payload still gets them. `orphan_bytes` and `import_issue_count` count findings beyond the response cap.
 

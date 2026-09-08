@@ -1569,6 +1569,9 @@ try {
             "uid://!!",
             "res://does_not_exist.tscn") }),
         (Tool-Request 119 "project_get_uid_map" @{}),
+        # The fixture carries one deliberately unregistered uid, so the audit
+        # always has something for the live pass to check against the editor.
+        (Tool-Request 120 "project_audit_assets" @{ max_findings = 50 }),
         (Tool-Request 113 "runtime_read_logs" @{ cursor = 0; limit = 500; minimum_level = "debug" })
     )
 
@@ -2657,6 +2660,18 @@ try {
     Assert-True ($uidPlain.uid_map_source -eq "project_files") "The scanned UID map misreported its source."
     Assert-True (-not $uidPlain.PSObject.Properties.Match("resolved").Count) "The UID map returned resolutions nobody asked for."
     Assert-True ($uidPlain.uid_map.$smokePluginUid -eq "res://addons/didi/smoke_plugin.gd") "The scanned UID map lost the addon sidecar entry."
+
+    $audit = Tool-Payload $byId[120]
+    Assert-True ($audit.execution_mode -eq "live") "The audit did not report that an engine contributed to its findings."
+    Assert-True ($audit.scan_source -eq "project_files") "The audit misreported what it scanned."
+    Assert-True ($audit.uid_verification.mode -eq "live") "The audit did not verify its uid findings against the attached editor."
+    Assert-True ($audit.uid_verification.checked -ge 1) "The audit verified no uid despite an unresolved one in the fixture."
+    Assert-True ($audit.uid_verification.confirmed_broken -ge 1) "The engine did not confirm the deliberately unregistered fixture uid."
+    $auditProbe = @($audit.broken_references | Where-Object { $_.target -eq "uid://bogusbogusbogus" })
+    Assert-True ($auditProbe.Count -eq 1) "The unregistered fixture uid was not reported as a broken reference."
+    Assert-True ($auditProbe[0].confirmed_by_engine -eq $true) "A uid the engine disproved was not marked as engine confirmed."
+    $auditCleared = @($audit.engine_only_references | Where-Object { $_.target -eq "uid://bogusbogusbogus" })
+    Assert-True ($auditCleared.Count -eq 0) "A uid the engine does not know was cleared as engine resolvable."
 
     $firstLogPage = Tool-Payload $byId[113]
     Assert-True ($firstLogPage.execution_mode -eq "live") "First runtime log read was not live."

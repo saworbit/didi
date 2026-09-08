@@ -71,6 +71,30 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Changed
 
+- `project_audit_assets` checks its unresolved UID findings against the running
+  editor instead of leaving them as guesses. An `unresolved_uid` finding means
+  no scanned project file records that UID, which offline is the only reading
+  available; with an editor attached, `ResourceUID` can say whether it is true.
+
+  A UID the engine resolves is not broken, so it leaves `broken_references` and
+  is reported under `engine_only_references` with the path the engine gave. The
+  file it points at leaves `orphans` too, and its bytes come off `orphan_bytes`:
+  a file the engine proved is referenced cannot also be unreferenced, and a
+  report that said both would be arguing with itself. A UID the engine does not
+  know keeps its finding and gains `confirmed_by_engine`.
+
+  Corrected rather than annotated, because a finding left standing with a
+  footnote saying it is wrong is how a tool teaches people to skim past
+  findings. The trade is disclosed rather than silent: `engine_only_references`
+  adds a `limitations` line saying the editor's table is not in the repository,
+  so a fresh checkout would report those references broken.
+
+  `uid_verification` reports on every call whether the pass ran -- `live`,
+  `unavailable`, or `not_needed` -- how many UIDs were sent, and whether more
+  than the 256-query bound existed. `execution_mode` follows it, because it
+  describes whether an engine contributed to the findings. What was scanned
+  does not change with it: `scan_source` is `project_files` on every call.
+
 - `project_get_uid_map` takes a `resolve` list and answers it from the engine.
   Pass up to 256 `uid://` or `res://` values; with an editor attached they are
   resolved by the `ResourceUID` singleton, which is the table the engine itself
