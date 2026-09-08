@@ -38,7 +38,10 @@ ToolDefinition makeTool(const std::string& name, bool implemented, bool read_onl
     return tool;
 }
 
-runtime::SessionDescriptor makeDescriptor(const std::string& id, const std::string& kind) {
+// Deliberately carries a token. The model must never emit one even when the
+// input it is built from has one, which is what makes the A1 test adversarial
+// rather than merely descriptive.
+ControlRoomSession makeSession(const std::string& id, const std::string& kind) {
     runtime::SessionDescriptor descriptor;
     descriptor.session_id = id;
     descriptor.kind = kind;
@@ -49,7 +52,10 @@ runtime::SessionDescriptor makeDescriptor(const std::string& id, const std::stri
     descriptor.started_at_ms = 1700000000000;
     // The thing that must never come out the other side.
     descriptor.token = "SUPERSECRETSESSIONTOKEN0123456789";
-    return descriptor;
+    ControlRoomSession session;
+    session.descriptor = descriptor;
+    session.alive = true;
+    return session;
 }
 
 std::string lightState(const json& model, const std::string& label) {
@@ -78,7 +84,7 @@ std::string lightReason(const json& model, const std::string& label) {
 // -----------------------------------------------------------------------
 void test_no_session_token_reaches_the_model() {
     ControlRoomInputs in;
-    in.sessions = {makeDescriptor("aaaabbbbccccddddeeeeffff00001111", "editor")};
+    in.sessions = {makeSession("aaaabbbbccccddddeeeeffff00001111", "editor")};
     in.selected_session_id = "aaaabbbbccccddddeeeeffff00001111";
     in.connected = true;
     in.session_kind = "editor";
@@ -108,12 +114,105 @@ void test_no_session_token_reaches_the_model() {
 }
 
 // -----------------------------------------------------------------------
+// Sessions are read from the payload a client actually gets.
+//
+// Found live rather than in a test: the dashboard reported no sessions while an
+// editor was plainly attached. The first implementation parsed each entry with
+// SessionDescriptor::fromJson, which requires the session token -- and
+// runtime_list_sessions strips it, exactly as it should. Every entry failed to
+// parse and was silently dropped.
+// -----------------------------------------------------------------------
+void test_listed_sessions_parse_without_a_token() {
+    // The shape runtime_list_sessions really returns. No token: that is the point.
+    const json payload = {
+        {"execution_mode", "local_session_management"},
+        {"diagnostics", json::array()},
+        {"sessions", json::array({
+            {{"session_id", "efce6dcccfca62699ee60536e3fc709d"},
+             {"kind", "editor"},
+             {"pid", 36404},
+             {"project_path", "D:/projects/game"},
+             {"protocol_version", "1.3"},
+             {"schema_version", 1},
+             {"started_at_ms", 1788828033158},
+             {"alive", true},
+             {"stale", false},
+             {"endpoint", "\\\\.\\pipe\\godot_didi_abc"}},
+            {{"session_id", "00000000000000000000000000000002"},
+             {"kind", "game"},
+             {"pid", 2},
+             {"project_path", "D:/projects/game"},
+             {"protocol_version", "1.3"},
+             {"started_at_ms", 2},
+             {"alive", false},
+             {"stale", true}},
+        })}
+    };
+
+    const auto parsed = parseListedSessions(payload);
+    ASSERT_EQ(parsed.size(), 2u);
+    ASSERT_EQ(parsed[0].descriptor.session_id, "efce6dcccfca62699ee60536e3fc709d");
+    ASSERT_EQ(parsed[0].descriptor.kind, "editor");
+    ASSERT_EQ(parsed[0].descriptor.pid, 36404u);
+    ASSERT_TRUE(parsed[0].alive.has_value() && *parsed[0].alive);
+    ASSERT_FALSE(parsed[0].stale);
+    ASSERT_TRUE(parsed[1].alive.has_value() && !*parsed[1].alive);
+    ASSERT_TRUE(parsed[1].stale);
+
+    // The endpoint is read by nobody, so it cannot be forwarded by accident.
+    ASSERT_TRUE(parsed[0].descriptor.endpoint.empty());
+
+    // And it survives the whole way to the model.
+    ControlRoomInputs in;
+    in.sessions = parsed;
+    in.selected_session_id = "efce6dcccfca62699ee60536e3fc709d";
+    const auto model = buildControlRoomModel(in, {});
+    ASSERT_EQ(model["sessions"].size(), 2u);
+    ASSERT_TRUE(model["sessions"][0]["selected"].get<bool>());
+    ASSERT_TRUE(model["sessions"][0]["alive"].get<bool>());
+    ASSERT_TRUE(model["sessions"][1]["stale"].get<bool>());
+    ASSERT_TRUE(model.dump().find("pipe") == std::string::npos);
+}
+
+void test_unknown_liveness_is_omitted_not_guessed() {
+    const json payload = {{"sessions", json::array({
+        {{"session_id", "aaaa"}, {"kind", "editor"}, {"pid", 7}},
+    })}};
+    const auto parsed = parseListedSessions(payload);
+    ASSERT_EQ(parsed.size(), 1u);
+    ASSERT_FALSE(parsed[0].alive.has_value());
+
+    ControlRoomInputs in;
+    in.sessions = parsed;
+    const auto model = buildControlRoomModel(in, {});
+    // Absent, rather than false. Rendering unknown as dead is a lie.
+    ASSERT_FALSE(model["sessions"][0].contains("alive"));
+}
+
+void test_malformed_session_entries_are_skipped_not_fatal() {
+    const json payload = {{"sessions", json::array({
+        json("not an object"),
+        json::object(),                                   // no session_id
+        {{"session_id", ""}},                             // empty session_id
+        {{"session_id", "good"}, {"kind", "editor"}},
+    })}};
+    const auto parsed = parseListedSessions(payload);
+    ASSERT_EQ(parsed.size(), 1u);
+    ASSERT_EQ(parsed[0].descriptor.session_id, "good");
+
+    // A payload with no sessions key at all, and a non-object payload.
+    ASSERT_EQ(parseListedSessions(json::object()).size(), 0u);
+    ASSERT_EQ(parseListedSessions(json("nonsense")).size(), 0u);
+    ASSERT_EQ(parseListedSessions(json{{"sessions", "not an array"}}).size(), 0u);
+}
+
+// -----------------------------------------------------------------------
 // A3. The payload is bounded.
 // -----------------------------------------------------------------------
 void test_the_payload_is_bounded() {
     ControlRoomInputs in;
     for (std::size_t i = 0; i < kControlRoomMaxSessions + 25; ++i) {
-        in.sessions.push_back(makeDescriptor("session" + std::to_string(i), "game"));
+        in.sessions.push_back(makeSession("session" + std::to_string(i), "game"));
     }
     for (std::size_t i = 0; i < kControlRoomMaxLogRecords + 300; ++i) {
         in.log.push_back({"t", "INFO", "TAG", "message " + std::to_string(i)});
@@ -225,7 +324,7 @@ void test_bridge_light_states() {
     {
         ControlRoomInputs in;
         in.descriptors_present = true;
-        in.sessions = {makeDescriptor("s1", "editor")};
+        in.sessions = {makeSession("s1", "editor")};
         const auto model = buildControlRoomModel(in, {});
         ASSERT_EQ(lightState(model, "Bridge"), "warn");
         ASSERT_TRUE(!lightReason(model, "Bridge").empty());
@@ -507,6 +606,12 @@ struct Register {
     Register() {
         registerTest("ControlRoom.NoSessionTokenReachesTheModel",
                      test_no_session_token_reaches_the_model);
+        registerTest("ControlRoom.ListedSessionsParseWithoutAToken",
+                     test_listed_sessions_parse_without_a_token);
+        registerTest("ControlRoom.UnknownLivenessIsOmitted",
+                     test_unknown_liveness_is_omitted_not_guessed);
+        registerTest("ControlRoom.MalformedSessionEntriesSkipped",
+                     test_malformed_session_entries_are_skipped_not_fatal);
         registerTest("ControlRoom.PayloadIsBounded", test_the_payload_is_bounded);
         registerTest("ControlRoom.LogBudgetDefaultsLow",
                      test_log_budget_defaults_low_and_discloses_truncation);

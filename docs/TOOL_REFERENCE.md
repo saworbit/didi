@@ -1058,7 +1058,9 @@ each; `tools`, every registration with the execution mode it is in *right now*,
 computed by the same function `tools/list` uses so the two cannot disagree;
 `surface`, the canonical/implemented/reserved/legacy counts plus how many are
 live at this moment; `sessions`, the published descriptors with `session_id`,
-`kind`, `pid`, `project_path` and which is selected; `facts`, a flat label/value
+`kind`, `pid`, `project_path`, `protocol_version`, `started_at_ms`, `stale` and
+which is selected, plus `alive` when the scanner established it and no `alive`
+key at all when it could not, because rendering an unknown as dead is a lie; `facts`, a flat label/value
 table; and `log`, a tail of this process's own diagnostics.
 
 A light is amber whenever the honest answer is *unknown*, and carries the reason.

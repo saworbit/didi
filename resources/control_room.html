@@ -257,6 +257,8 @@ td.name { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }
 .chip.unavailable   { color: var(--warn); background: var(--warn-bg); }
 .chip.unimplemented { color: var(--bad);  background: var(--bad-bg); }
 .chip.mutates       { color: var(--warn); background: var(--warn-bg); }
+.chip.stale         { color: var(--bad);  background: var(--bad-bg); }
+.chip.gone          { color: var(--warn); background: var(--warn-bg); }
 
 /* ---- log ------------------------------------------------------------- */
 
@@ -799,11 +801,17 @@ td.name { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }
          str(session.project_path, "")].filter(Boolean).join("  ·  ")));
       row.appendChild(main);
 
+      // Liveness the scanner established. Absent means it could not be, and an
+      // unknown is left unmarked rather than drawn as dead.
+      if (session.stale) row.appendChild(el("span", "chip stale", "stale"));
+      else if (session.alive === false) row.appendChild(el("span", "chip gone", "not running"));
+
       if (session.selected) {
         row.appendChild(el("span", "chip live", "selected"));
       } else {
         var attach = el("button", null, "Attach");
         attach.type = "button";
+        if (session.stale || session.alive === false) attach.disabled = true;
         attach.addEventListener("click", function () {
           callTool("runtime_attach_session", { session_id: str(session.session_id) })
             .then(function (result) { if (result) refresh(); });

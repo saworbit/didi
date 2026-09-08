@@ -86,6 +86,21 @@ private:
 LogRing& controlRoomLogRing();
 void installControlRoomLogRing();
 
+// One published session, as the dashboard shows it.
+//
+// The descriptor is carried whole so the model builder's allowlist stays the
+// single place that decides what leaves this process, and liveness rides
+// alongside because it is not a descriptor field: it is what the session
+// scanner learned about the process behind one.
+struct ControlRoomSession {
+    runtime::SessionDescriptor descriptor;
+    // Whether the process behind the descriptor is running. Unknown is a real
+    // answer and is reported as one rather than guessed either way.
+    std::optional<bool> alive;
+    // The scanner judged the descriptor no longer trustworthy.
+    bool stale{false};
+};
+
 struct ControlRoomInputs {
     std::string server_name;
     std::string server_version;
@@ -103,7 +118,7 @@ struct ControlRoomInputs {
     // separates "no editor running" from "editor running, not attached".
     bool descriptors_present{false};
 
-    std::vector<runtime::SessionDescriptor> sessions;
+    std::vector<ControlRoomSession> sessions;
     std::optional<std::string> selected_session_id;
 
     bool skip_confirmations{false};
@@ -135,6 +150,14 @@ json buildControlRoomModel(const ControlRoomInputs& inputs,
 
 // ISO-8601 UTC, to the second.
 std::string controlRoomTimestamp();
+
+// Reads the public payload runtime_list_sessions returns.
+//
+// Exposed because the obvious implementation is wrong in a way no unit test of
+// the model would notice: SessionDescriptor::fromJson requires the session
+// token, which this payload deliberately never carries, so parsing through it
+// silently drops every session.
+std::vector<ControlRoomSession> parseListedSessions(const json& payload);
 
 // Gathers the inputs above from live process state and returns the model.
 // Read-only: it stats, it reads the tool registry, and it asks the router

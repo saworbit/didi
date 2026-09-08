@@ -253,26 +253,33 @@ json buildControlRoomModel(const ControlRoomInputs& in,
     // field added to SessionDescriptor later cannot reach a client by accident.
     // The token is not in this list and must never be.
     json sessions = json::array();
-    for (const auto& descriptor : in.sessions) {
+    for (const auto& session : in.sessions) {
         if (sessions.size() >= kControlRoomMaxSessions) break;
+        const auto& descriptor = session.descriptor;
         const bool selected = in.selected_session_id.has_value() &&
                               *in.selected_session_id == descriptor.session_id;
-        sessions.push_back({{"session_id", descriptor.session_id},
-                            {"kind", descriptor.kind},
-                            {"pid", descriptor.pid},
-                            {"project_path", clip(descriptor.project_path,
-                                                  kControlRoomMaxFactChars)},
-                            {"protocol_version", descriptor.protocol_version},
-                            {"started_at_ms", descriptor.started_at_ms},
-                            {"selected", selected}});
+        json row = {{"session_id", descriptor.session_id},
+                    {"kind", descriptor.kind},
+                    {"pid", descriptor.pid},
+                    {"project_path", clip(descriptor.project_path, kControlRoomMaxFactChars)},
+                    {"protocol_version", descriptor.protocol_version},
+                    {"started_at_ms", descriptor.started_at_ms},
+                    {"stale", session.stale},
+                    {"selected", selected}};
+        // Absent rather than false when it was not established. A dashboard that
+        // renders unknown as dead is worse than one that says it does not know.
+        if (session.alive.has_value()) row["alive"] = *session.alive;
+        sessions.push_back(std::move(row));
     }
     model["sessions"] = std::move(sessions);
     if (in.selected_session_id.has_value()) {
         model["selected_session"] = *in.selected_session_id;
     }
     model["session_note"] =
-        "Liveness is only checked when a client attaches. A listed session is a "
-        "descriptor Godot published, not a promise that the process is still running.";
+        "A listed session is a descriptor Godot published. `alive` is what the "
+        "scanner found for the process behind it and is omitted when that could "
+        "not be established; a stale descriptor is one the scanner no longer "
+        "trusts. Neither is a promise that the next call will reach the engine.";
 
     // Facts, for the overview table.
     json facts = json::array();

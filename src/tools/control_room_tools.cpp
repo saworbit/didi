@@ -11,26 +11,51 @@
 namespace didi {
 namespace mcp {
 
-namespace {
-
-// The session list a client would get from runtime_list_sessions, reduced to
-// descriptors. Failure is not an error here: a dashboard that refuses to draw
-// because one panel could not be filled is worse than a dashboard that says so.
-std::vector<runtime::SessionDescriptor> gatherSessions(
-    const std::shared_ptr<runtime::IRuntimeSessionClient>& sessions) {
-    std::vector<runtime::SessionDescriptor> found;
-    if (!sessions) return found;
-    auto listed = sessions->listSessions(std::nullopt);
-    if (listed.isErr()) return found;
-    const json& payload = listed.value();
+// The session list a client would get from runtime_list_sessions.
+//
+// Read field by field rather than through SessionDescriptor::fromJson. That
+// parser is for the descriptor on disk, which carries the session token;
+// listSessions deliberately strips it, so every entry failed to parse and the
+// dashboard reported no sessions while one was plainly attached. Reading the
+// public fields directly is also the honest shape here: this list is built from
+// what a client is already allowed to see.
+//
+// Failure is not an error: a dashboard that refuses to draw because one panel
+// could not be filled is worse than one that draws the rest.
+std::vector<ControlRoomSession> parseListedSessions(const json& payload) {
+    std::vector<ControlRoomSession> found;
+    if (!payload.is_object()) return found;
     const auto entries = payload.find("sessions");
     if (entries == payload.end() || !entries->is_array()) return found;
+
     for (const auto& entry : *entries) {
-        auto descriptor = runtime::SessionDescriptor::fromJson(entry);
-        if (descriptor.isOk()) found.push_back(descriptor.value());
         if (found.size() >= kControlRoomMaxSessions) break;
+        if (!entry.is_object()) continue;
+        ControlRoomSession session;
+        session.descriptor.session_id = entry.value("session_id", std::string());
+        if (session.descriptor.session_id.empty()) continue;
+        session.descriptor.kind = entry.value("kind", std::string());
+        session.descriptor.pid = entry.value("pid", static_cast<uint64_t>(0));
+        session.descriptor.project_path = entry.value("project_path", std::string());
+        session.descriptor.protocol_version = entry.value("protocol_version", std::string());
+        session.descriptor.started_at_ms = entry.value("started_at_ms", static_cast<int64_t>(0));
+        session.stale = entry.value("stale", false);
+        const auto alive = entry.find("alive");
+        if (alive != entry.end() && alive->is_boolean()) session.alive = alive->get<bool>();
+        found.push_back(std::move(session));
     }
     return found;
+}
+
+
+namespace {
+
+std::vector<ControlRoomSession> gatherSessions(
+    const std::shared_ptr<runtime::IRuntimeSessionClient>& sessions) {
+    if (!sessions) return {};
+    auto listed = sessions->listSessions(std::nullopt);
+    if (listed.isErr()) return {};
+    return parseListedSessions(listed.value());
 }
 
 }  // namespace
