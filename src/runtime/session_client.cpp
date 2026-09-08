@@ -1392,6 +1392,14 @@ DescriptorRetirementOutcome retireOwnedSessionDescriptor(
     return DescriptorRetirementOutcome::retained_collision_or_race;
 }
 
+json SessionDescriptor::toProvenanceJson() const {
+    // Derived from toJson so a field added to the descriptor is carried here
+    // too, and only the ones deliberately withheld have to be named.
+    json value = toJson(false);
+    value.erase("endpoint");
+    return value;
+}
+
 json SessionDescriptor::toJson(bool include_token) const {
     json value = {
         {"schema_version", schema_version}, {"session_id", session_id}, {"pid", pid},
