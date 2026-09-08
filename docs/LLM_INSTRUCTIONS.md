@@ -25,7 +25,7 @@ The four possible `currentMode` values are:
 - `unavailable`: the tool is implemented only live, but no editor is connected.
 - `unimplemented`: the name is reserved and calls will be rejected.
 
-In managed mode, inspect `runtime_recovery_status` and use `runtime_recover_editor` for an abnormal editor exit; never replay an uncertain mutation. In ordinary attach mode, when live tools report `unavailable`, inspect the editor connection. Say so plainly and point the person at Godot's **Didi** main screen tab: its dashboard distinguishes an extension that is not loaded from one that is loaded without a published session, names the file, path or pid behind each, and lists any session published for a different project. Do not retry the call on a schedule, and never describe an `offline_fallback` result as observed editor state because the live route was closed.
+In managed mode, inspect `runtime_recovery_status` and use `runtime_recover_editor` for an abnormal editor exit; never replay an uncertain mutation. In ordinary attach mode, when live tools report `unavailable`, call `didi_control_room` first: it reports the bridge state with the pid or session behind it, the current execution mode of every tool, and a tail of this server's own log, which no other tool can read. Then inspect the editor connection. Say so plainly and point the person at Godot's **Didi** main screen tab: its dashboard distinguishes an extension that is not loaded from one that is loaded without a published session, names the file, path or pid behind each, and lists any session published for a different project. Do not retry the call on a schedule, and never describe an `offline_fallback` result as observed editor state because the live route was closed.
 
 ## Supported workflows
 
@@ -87,6 +87,28 @@ Use `viewport_capture_frame`.
 - A viewport that is not on screen has no size, and the capture is refused rather than returned as a few pixels. For an editor viewport that means the main screen you asked for is not the selected one; switch to it in the editor and call again.
 - Do not assume requested resolution, camera-node selection, or debug flags were applied. Named-node isolation is supported only on a live editor and success must include `state_restored: true`.
 - Keep each live `capture_id` only for the selected extension process. Use `viewport_diff_capture` before eviction/restart; require exact dimensions and inspect `threshold`, `changed_pixels`, `bounding_box`, and `identical`.
+
+### Find a Control to act on
+
+Use `ui_list_controls` when you know what a control is called or says but not
+where it is. Editor or game.
+
+- Each entry carries `node_path`, `class`, `global_rect`, `visible`,
+  `mouse_filter`, and `text` where the Control has a `text` property.
+- `visible_only` defaults to true and skips hidden Controls *and everything
+  beneath them*, because a hidden Control hides its subtree. Pass false when
+  debugging a menu that is not appearing.
+- Narrow with `class_filter` rather than listing everything and filtering
+  yourself; a class name the engine does not know matches nothing rather than
+  failing.
+- `global_rect` is the same rectangle `ui_hit_test` reports, so the two compose:
+  list the control, take the centre of its rectangle, and hit-test that point to
+  confirm it is really on top before acting on it.
+- It reports the resolved rectangle, not the anchors, offsets or theme overrides
+  behind it, and it injects no input. Use `runtime_inject_input` in a game to
+  actually press something.
+- Reading a `.tscn` is not a substitute: the file holds anchors and offsets, not
+  the rectangle Godot resolves them to.
 
 ### Work with scripts
 

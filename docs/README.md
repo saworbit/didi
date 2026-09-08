@@ -61,7 +61,7 @@ any of it as current behaviour.
 | [Field Trial Results](FIELD_TRIAL_RESULTS.md) | One section per run, numbers kept so two runs can be compared. |
 | [Gogo Design](GOGO_DESIGN.md) | Design only. The parallel Godot bench farm. Nothing of it is implemented. |
 | [Engine Failure Handling Design](ENGINE_FAILURE_HANDLING_DESIGN.md) | Implemented; superseded in part by managed recovery's opt-in owned-editor restart. Historical reasoning for ordinary attachment remains. |
-| [Human Interaction Design](HUMAN_INTERACTION_DESIGN.md) | Partly implemented. Records what the editor console became and where it went past what this document recommended. |
+| [Human Interaction Design](HUMAN_INTERACTION_DESIGN.md) | Implemented. Records what the editor console became, where it went past what this document recommended, and why the MCP Apps step waited for its condition. |
 | [Realignment Program Plan](REALIGNMENT_IMPLEMENTATION_PLAN.md) | Partly implemented. Its checkboxes were never maintained, so read them as the original proposal rather than as progress. |
 | [Lab Orchestrator Design](LAB_ORCHESTRATOR_DESIGN.md) | Superseded. A redirect to [Gogo Design](GOGO_DESIGN.md). |
 

@@ -200,7 +200,7 @@ Requirements:
 
 - Explicit 2D canvas, 3D world, editor viewport, and running-game capture targets.
 - Reversible debug overlays and visualization modifiers.
-- Control layout, anchor, offset, minimum-size, container, and theme inspection.
+- Control layout, anchor, offset, minimum-size, container, and theme inspection. Partly delivered: `ui_list_controls` reports the resolved viewport rectangle, class, visibility, mouse filter and text of live Controls in an editor or a running game. The authoring inputs behind that rectangle -- anchors, offsets, minimum sizes, container behaviour and theme overrides -- remain unreported.
 - Animation keyframe creation, update, interpolation, deletion, and duration editing.
 - Multi-frame and richer visual baselines with deterministic comparison metadata.
 - Additional guided character, signal, UI, animation, and visual-verification prompt workflows.
@@ -230,8 +230,17 @@ a human sequencing them.
 file-backed with an exclusive OS lock, because each MCP client is its own process.
 
 **Explicit exclusions:** reactive resource subscriptions, live editor state
-reflected onto board namespaces, and any human-facing dashboard. None of these is
-implied by what shipped.
+reflected onto board namespaces, and any human-facing dashboard. None of these was
+implied by what shipped here.
+
+Two have since been delivered elsewhere, which is worth recording so this list is
+not read as a description of what is still missing. Reactive subscriptions arrived
+as `blackboard://` resources with `resources/subscribe`, which is the narrow case
+where something changes without a call from the subscribing client. The
+human-facing dashboard arrived as the [Control Room](CONTROL_ROOM_DESIGN.md), an
+MCP App rather than anything board-specific: it renders Didi's own state, and a
+board is one light on it. Live editor state on board namespaces remains open and
+is still excluded.
 
 **Security classification:** shared state inside the project boundary. A board is
 not a trust boundary between agents, and a lease is cooperation rather than
@@ -240,8 +249,8 @@ authentication. See [SECURITY.md](../SECURITY.md).
 **Mutation classification:** writes and task moves are create/set with a dry run;
 `blackboard_clear` is remove/overwrite and always confirmed.
 
-**Status:** delivered for the blackboard and the task engine. The exclusions above
-remain open.
+**Status:** delivered for the blackboard and the task engine. Of the exclusions
+above, two were delivered by later work and one remains open; see the note there.
 
 ---
 
@@ -285,10 +294,18 @@ remain open.
 **Scope:**
 
 - Resource templates for nodes, scripts, scenes, assets, and bounded project queries.
-- Resource subscriptions and change notifications.
-- `logging/setLevel` plus structured Godot diagnostic notifications.
+- Resource subscriptions and change notifications. Delivered for `blackboard://`
+  resources, which are the ones that change without a call from the subscribing
+  client. `godot://` resources remain unsubscribable and the reason is recorded in
+  [ROADMAP.md](ROADMAP.md).
+- `logging/setLevel` plus structured Godot diagnostic notifications. `logging/setLevel`
+  was removed from MCP; the Control Room's log page is how this server's own
+  diagnostics became readable instead.
 - Additional reusable prompt workflows with capability-aware branching.
-- Explicit protocol-version negotiation and compatibility tests.
+- Explicit protocol-version negotiation and compatibility tests. Delivered: the
+  server is dual-era over `2026-07-28` and `2024-11-05`, negotiates the
+  `io.modelcontextprotocol/ui` extension bilaterally, and both are covered by tests
+  that drive the built binary.
 - Bounded notification queues, coalescing, backpressure, and dropped-event disclosure.
 
 **Explicit exclusions:**

@@ -118,6 +118,18 @@ COUNT_FACTS = {
         ("legacy", r"\b{n} legacy", "legacy names"),
         ("total", r"\b{n} registrations", "total registrations"),
     ),
+    # The sentence describing what this validator locks is itself a count
+    # claim, and it drifted through two surface changes without anything
+    # noticing, because this document was not in this map. A checker that
+    # publishes numbers it does not check is the one place drift is least
+    # excusable.
+    "docs/DEVELOPER_GUIDE.md": (
+        ("canonical", r"\b{n} canonical/", "canonical tools"),
+        ("legacy", r"/{n} legacy/", "legacy names"),
+        ("total", r"/{n} total", "total registrations"),
+        ("implemented", r"\b{n} implemented/", "implemented tools"),
+        ("unimplemented", r"/{n} unimplemented", "unimplemented tools"),
+    ),
     "CHANGELOG.md": (
         ("canonical", r"\b{n} canonical", "canonical tools"),
         ("legacy", r"\b{n} legacy", "legacy names"),

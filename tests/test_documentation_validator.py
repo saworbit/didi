@@ -136,7 +136,12 @@ Current release: 1.4.0.
             "ADMIN_GUIDE.md": "# Admin Guide\n\n[Managed Recovery](MANAGED_RECOVERY.md)\n",
             "API_SPECIFICATION.md": "# API Specification\n\n423 Locked. Mutations expose dry_run and confirmation_token. Live IPC includes ui.hitTest.\n",
             "ARCHITECTURE.md": "# Architecture\n",
-            "DEVELOPER_GUIDE.md": "# Developer Guide\n\nPhase 7 is PARTIAL_DELIVERY at 112/115 implemented; 15/18 names are implementation-feasible and 3/18 are API-blocked.\n",
+            "DEVELOPER_GUIDE.md": (
+                "# Developer Guide\n\nPhase 7 is PARTIAL_DELIVERY at 112/115 implemented; "
+                "15/18 names are implementation-feasible and 3/18 are API-blocked.\n\n"
+                "The validator locks the documented 115 canonical/10 legacy/125 total "
+                "surface and the 112 implemented/3 unimplemented split.\n"
+            ),
             "INTEGRATION_GUIDE.md": "# Integration Guide\n",
             "LLM_INSTRUCTIONS.md": "# LLM Instructions\n\nStart with --project or DIDI_PROJECT_ROOT. Preview with dry_run and use confirmation_token when returned. Phase 7 is PARTIAL_DELIVERY at 112/115 implemented; all 3 names remain unimplemented and API-blocked.\n",
             "QUICKSTART.md": "# Quickstart\n\nStart with --project. Preview mutations with dry_run and use confirmation_token when required.\n",

@@ -40,7 +40,7 @@ The three states named in [Human Interaction Design](HUMAN_INTERACTION_DESIGN.md
 
 Read-only. `readOnlyHint: true`, `destructiveHint: false`, `openWorldHint: false`. No confirmation, no dry-run, because it mutates nothing.
 
-It is named for the product rather than a Godot domain because that is what it reports on: Didi's own state, not the engine's. It is deliberately not `ui_*`, which in this surface means Godot `Control` nodes (`ui_hit_test`), and deliberately not a new `status_*` family, because one name does not need a family.
+It is named for the product rather than a Godot domain because that is what it reports on: Didi's own state, not the engine's. It is deliberately not `ui_*`, which in this surface means Godot `Control` nodes (`ui_hit_test`, `ui_list_controls`), and deliberately not a new `status_*` family, because one name does not need a family.
 
 The tool returns the dashboard model as `structuredContent`, and carries the UI link in its definition:
 
