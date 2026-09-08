@@ -55,7 +55,9 @@ and verification, and it fails visibly wherever the surface has a hole.
 Six amendments are implemented: `runtime_read_output`, `audio_list_buses` and
 `audio_configure_bus`, all recorded below with tri-engine feasibility evidence,
 plus `project_audit_assets`, `project_analyze_impact`,
-`runtime_explore_scene`, `didi_control_room` and `ui_list_controls`. One is withdrawn: raising the engine floor to
+`runtime_explore_scene`, `didi_control_room` and `ui_list_controls`. One
+amendment adds no name and changes an existing contract: `scene_close` reads
+real dirty state where the engine can report it. One is withdrawn: raising the engine floor to
 Godot 4.7, refused in favour of runtime capability detection so that 4.5 and 4.6
 users keep support. The remaining candidates come from the
 August 2026 competitive review and are proposed, not accepted, in
@@ -650,7 +652,7 @@ second implementation of it to keep in step. It does not read theme overrides,
 anchors or offsets: those are authoring inputs, and this reports the resolved
 result.
 
-### PROPOSED: `scene_close` reads real dirty state on Godot 4.7+
+### ACCEPTED (IMPLEMENTED): `scene_close` reads real dirty state on Godot 4.7+
 
 | Field | Value |
 | :--- | :--- |
@@ -658,15 +660,35 @@ result.
 | **Failing workflow** | An agent that opens a scene, inspects it, and closes it must pass `discard_unsaved: true` even when nothing was modified. That flag is the project's marker for destructive intent, so every close teaches the agent to assert destructive intent it does not have. |
 | **Execution modes** | `live`, editor sessions only. |
 | **Safety class** | `remove/overwrite` — unchanged. The guard relaxes only when the engine positively reports the scene as clean. |
-| **Proving test** | A Godot integration case per supported version: on 4.5.1 and 4.6.2 the default call must still refuse; on 4.7.2 it must succeed for a clean scene and still refuse for a dirty one. |
-| **Reviewer** | Unassigned. Requires security review: this narrows a data-loss guard. |
+| **Proving test** | `tests/run_godot_integration.ps1` requests 114-117 and 91. The harness reads the engine version from the binary and branches: below 4.7 the default close must be refused and the refusal must name `get_unsaved_scenes`; from 4.7 it must close a clean scene and report `dirty_state: "clean"`, `dirty_state_readable: true` and `discarded_unsaved: false`. On every version the scene is then reopened, modified, and a default close must be refused, and the explicit `discard_unsaved: true` close must still work. |
+| **Reviewer** | Maintainer, 2026-09-08. The security question is below. |
 
 Evidence gathered 2026-08-30 by dumping `extension_api.json` from each installed
-engine. `EditorInterface` exposes only the write-side `mark_scene_as_unsaved` on
-Godot 4.5.1 and 4.6.2; the read-side `get_unsaved_scenes()` first appears in 4.7.
-Didi supports 4.5+, so this cannot be adopted unconditionally — it must be gated
-on a runtime capability check, with the conservative refusal retained wherever the
-call is absent.
+engine, re-verified 2026-09-08 against 4.5.1, 4.6.2 and 4.7.2.
+`EditorInterface` exposes only the write-side `mark_scene_as_unsaved` on
+Godot 4.5.1 and 4.6.2; the read-side `get_unsaved_scenes()` first appears in 4.7
+with hash `1139954409`. Didi supports 4.5+, so this is not adopted
+unconditionally: it is gated on `classdb_get_method_bind` for that exact
+signature, and the conservative refusal is retained wherever the bind is absent.
+
+**Why narrowing this guard is safe.** The guard exists to stop Didi discarding
+work the engine never told it about. It is replaced by the engine's own answer,
+not by an inference: the default close proceeds only when `get_unsaved_scenes()`
+returns a list that does not contain the active scene's path. Three cases keep
+the old refusal, and they are the three where the engine's answer is absent or
+cannot be matched to this scene:
+
+- the bind is missing, which is Godot 4.5 and 4.6;
+- the active scene has never been saved, so `get_scene_file_path` is empty and
+  no entry in the unsaved list can be attributed to it;
+- the engine names the scene as unsaved.
+
+`discard_unsaved: true` is unchanged and still skips the check entirely, so the
+explicit destructive path behaves exactly as before on every version. The result
+now carries `dirty_state_readable` and `dirty_state`, so a client can tell a
+checked close from an unchecked one instead of inferring it from the engine
+version, and a future engine that drops the bind degrades to the refusal rather
+than to a silent discard.
 
 ## Deprecating a name
 

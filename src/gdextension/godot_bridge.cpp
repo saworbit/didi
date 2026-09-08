@@ -7140,8 +7140,55 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (path_value.isErr()) return errorJson(path_value.error().code, path_value.error().message);
             auto path = stringFromVariant(path_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
             if (path.isErr()) return errorJson(path.error().code, path.error().message);
-            if (!params.value("discard_unsaved", false)) {
-                return errorJson(409, "Godot 4.5 cannot expose active-scene dirty state; pass discard_unsaved: true to close explicitly");
+            const bool discard_unsaved = params.value("discard_unsaved", false);
+            // Godot 4.5 and 4.6 expose only the write side of dirty state
+            // (mark_scene_as_unsaved). The read side, get_unsaved_scenes,
+            // arrives in 4.7, so this is a runtime bind probe rather than a
+            // version-string comparison: the guard stays wherever it is absent.
+            const bool dirty_state_readable =
+                requireMethodBind("EditorInterface", "get_unsaved_scenes", 1139954409LL).isOk();
+            bool verified_clean = false;
+            if (!discard_unsaved) {
+                if (!dirty_state_readable) {
+                    return errorJson(409, "This Godot build cannot report active-scene dirty state; "
+                                          "EditorInterface.get_unsaved_scenes arrives in Godot 4.7. "
+                                          "Pass discard_unsaved: true to close explicitly");
+                }
+                if (path.value().empty()) {
+                    return errorJson(409, "The active scene has never been saved, so the engine cannot "
+                                          "report it as clean; save it with editor_save_scene or pass "
+                                          "discard_unsaved: true to close explicitly");
+                }
+                auto unsaved = callObject(editor, "EditorInterface", "get_unsaved_scenes", 1139954409LL);
+                if (unsaved.isErr()) return errorJson(unsaved.error().code, unsaved.error().message);
+                auto unsaved_size = callVariant(unsaved.value(), "size");
+                if (unsaved_size.isErr()) return errorJson(500, unsaved_size.error().message);
+                auto unsaved_count = scalarFromVariant<int64_t>(unsaved_size.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                if (unsaved_count.isErr()) return errorJson(500, unsaved_count.error().message);
+                // The list holds one entry per open scene, so this bound is far
+                // above anything an editor produces. Refusing past it matters
+                // because a partial scan cannot prove the active scene absent.
+                constexpr int64_t kMaxUnsavedScenesScanned = 1024;
+                if (unsaved_count.value() > kMaxUnsavedScenesScanned) {
+                    return errorJson(409, "The editor reports more unsaved scenes than Didi will scan (" +
+                                          std::to_string(unsaved_count.value()) + "), so this scene cannot be "
+                                          "proven clean; pass discard_unsaved: true to close explicitly");
+                }
+                for (int64_t index = 0; index < unsaved_count.value(); ++index) {
+                    auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+                    if (index_value.isErr()) return errorJson(500, index_value.error().message);
+                    auto entry = callVariant(unsaved.value(), "get", {&index_value.value()});
+                    if (entry.isErr()) return errorJson(500, entry.error().message);
+                    auto entry_path = stringFromVariant(
+                        entry.value(), GodotApi::instance().variant_get_type(entry.value().ptr()));
+                    if (entry_path.isErr()) return errorJson(500, entry_path.error().message);
+                    if (entry_path.value() == path.value()) {
+                        return errorJson(409, "The active scene has unsaved changes: " + path.value() +
+                                              "; save it with editor_save_scene or pass "
+                                              "discard_unsaved: true to discard them");
+                    }
+                }
+                verified_clean = true;
             }
             auto closed = callObject(editor, "EditorInterface", "close_scene", 166280745LL);
             if (closed.isErr()) return errorJson(closed.error().code, closed.error().message);
@@ -7149,7 +7196,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (code.isErr()) return errorJson(code.error().code, code.error().message);
             if (code.value() != 0) return errorJson(500, "Godot close_scene failed with Error " + std::to_string(code.value()));
             return liveResult({{"status", "success"}, {"closed", true}, {"scene_path", path.value()},
-                               {"discarded_unsaved", true}});
+                               {"discarded_unsaved", discard_unsaved},
+                               {"dirty_state_readable", dirty_state_readable},
+                               {"dirty_state", verified_clean ? "clean" : "unchecked"}});
         }
 
         const std::string scene_path = params.value("scene_path", "");

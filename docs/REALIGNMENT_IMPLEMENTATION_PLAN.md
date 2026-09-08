@@ -169,6 +169,11 @@ is a version-gated behavior change to a data-loss guard, so it is filed as a
 proposed [Surface Amendment](SURFACE_AMENDMENTS.md) with a per-version proving
 test, not slipped in here.
 
+That amendment was accepted and implemented on 2026-09-08. `scene_close` probes
+for the `get_unsaved_scenes` bind at runtime and closes without the flag only
+when the engine positively omits the active scene from its unsaved list; the
+refusal is retained wherever the engine cannot answer.
+
 ---
 
 ## Relationship to the Phase 7 feasibility gate

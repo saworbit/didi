@@ -823,7 +823,7 @@ Group mutations use UndoRedo.
 
 - `scene_create`: requires normalized `scene_path` ending in `.tscn`; accepts `root_type` (`Node2D`, `Node3D`, or `Control`), `root_name`, and `overwrite`. It saves and verifies the active scene.
 - `scene_open`: validates and opens an existing `PackedScene`, then verifies its active resource path.
-- `scene_close`: refuses unless `discard_unsaved: true` on Godot 4.5 because that API version cannot expose dirty-state status safely.
+- `scene_close`: closes the active scene. It probes for the `EditorInterface.get_unsaved_scenes` bind, which exists from Godot 4.7. Where it exists and the engine omits the active scene from the unsaved list, a call with no arguments closes and returns `dirty_state: "clean"`. Where the bind is missing (Godot 4.5 and 4.6), where the active scene has never been saved and so has no path for the engine to name, or where the engine reports the scene as unsaved, the call is refused with `409` unless `discard_unsaved: true` is passed. Results carry `dirty_state_readable` (whether this engine can answer), `dirty_state` (`clean` or `unchecked`), and `discarded_unsaved` (the flag as passed).
 - `scene_pack_branch`: requires `target_node` and `scene_path`; duplicates the branch, normalizes descendant ownership, packs it, and protects existing targets unless `overwrite: true`.
 
 Scene paths reject absolute filesystem paths, backslashes, and parent-relative segments.
