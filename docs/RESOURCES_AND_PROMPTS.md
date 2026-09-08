@@ -83,6 +83,23 @@ diff it on every tick.
 - Resource reads are snapshots, not subscriptions. Use the `runtime_read_logs` tool for explicit `cursor`, `limit` (`1..500`), and minimum-level polling; advance to every returned `next_cursor` even when filtering.
 - The ring records structured Didi lifecycle/command/control/evaluation events. It does **not** intercept arbitrary Godot/external-process `print()` output. Poll `runtime_read_output` for the separate bounded engine-output ring of an attached session; `runtime_launch` remains the bounded stdout/stderr capture path for a Didi-owned child process.
 
+## `ui://didi/control-room`
+
+`mimeType: text/html;profile=mcp-app`. The Control Room page, served to hosts
+that negotiated the `io.modelcontextprotocol/ui` extension and rendered by them
+in a sandboxed iframe. It is listed only to such a client; see
+[Current Capability Matrix](CAPABILITIES.md#mcp-apps) for the gate and the
+`--ui-app` override.
+
+The read result carries `_meta.ui.prefersBorder`. It carries no `csp` block,
+because the page loads nothing from anywhere: declaring domains it does not use
+would weaken the host's default policy for no gain.
+
+The page holds no data of its own. It renders whatever the host pushes from a
+`didi_control_room` result, and asks for more by calling tools back through the
+host, which applies its own consent policy. It is not subscribable: like every
+`godot://` resource, it changes only when this server is rebuilt.
+
 ## `godot_debug_visual_anomaly`
 
 Arguments:

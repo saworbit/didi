@@ -1,6 +1,9 @@
 #pragma once
 
-#include "didi/common/json.hpp"
+// types.hpp, not json.hpp: the alias these helpers are written against is
+// didi::json, so including the vendored header alone leaves this file unable to
+// compile when it is the first include in a translation unit.
+#include "didi/common/types.hpp"
 
 #include <cstdint>
 #include <limits>

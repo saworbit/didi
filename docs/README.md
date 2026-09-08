@@ -54,6 +54,7 @@ any of it as current behaviour.
 
 | Page | Status |
 | --- | --- |
+| [Control Room Design](CONTROL_ROOM_DESIGN.md) | Implemented. The MCP Apps dashboard the host renders in the conversation, and why it waited for its condition. |
 | [Autonomous Pipeline Design](AUTONOMOUS_PIPELINE_DESIGN.md) | Design approved. The loop that finds defects, fixes them and proves the fixes. |
 | [Field Trial Design](FIELD_TRIAL_DESIGN.md) | Design approved. Method and apparatus for handing Didi to an agent that has never seen it. |
 | [Field Trial Implementation Plan](FIELD_TRIAL_IMPLEMENTATION_PLAN.md) | The executable plan for that trial. The seed, briefing and scoring script live in `tools/field-trial/`. |
