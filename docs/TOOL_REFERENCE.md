@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 114 canonical tool names plus 10 legacy names (124 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 115 canonical tool names plus 10 legacy names (125 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `111/114`
+**Canonical implementation:** `112/115`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 111/114 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 112/115 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -1032,6 +1032,42 @@ Requires an existing `preset` and a normalized project-contained `output_path`. 
 ### `gridmap_export_mesh_library` — Offline
 
 Requires an existing `.tscn` `source_scene` and a normalized `.meshlib` `output_path`. Direct source-root children become deterministic item IDs in scene order. Each item uses itself or its first recursive `MeshInstance3D`; `generate_collisions` defaults to true and creates a trimesh shape when possible. A first recursive `NavigationRegion3D` contributes navigation data. `timeout_seconds` is `1..300` (default `60`), existing output requires `overwrite: true`, and success reloads the saved `MeshLibrary` to verify its item count.
+
+### `ui_list_controls` — Live (editor or game)
+
+Lists the Control nodes under a root, with where each one is and what it says.
+This is the tool that makes a control addressable: `ui_hit_test` answers what
+sits under a point, which is only useful once you already have a point.
+
+- `root_path` (`string`, optional, at most 1024 bytes): where to start. Defaults
+  to the edited scene root in an editor and `/root` in a game.
+- `max_results` (`integer`, optional, default `64`, range `1..256`).
+- `visible_only` (`boolean`, optional, default `true`): skip Controls that are
+  not visible in the tree, and everything beneath them, because a hidden Control
+  hides its children.
+- `include_text` (`boolean`, optional, default `true`).
+- `class_filter` (`array` of 1 to 16 class names, optional): keep only Controls
+  that are one of these classes, inheritance included. A name the engine does
+  not know matches nothing rather than failing, which is what a filter on a typo
+  means.
+
+Each entry carries `node_path`, `class`, `global_rect`, `visible`, `depth`,
+`mouse_filter` with its `mouse_filter_value`, and `text` where the Control has a
+`text` property. Text is read as a property rather than through a `get_text`
+bind per widget class, so a `Button`, a `Label`, a `LineEdit` and anything else
+carrying one are all covered by the same path; it is capped at 256 bytes with
+`text_truncated` when clipped. The response also carries `returned_count`,
+`match_count_total`, `traversed_nodes`, `truncated`, `traversal_limit_hit`, and
+the `visible_only` that was applied.
+
+`global_rect` is `Control.get_global_rect`, which is the same viewport-space
+rectangle `ui_hit_test` reports for a hit, so listing a control and then
+hit-testing the centre of its rectangle returns that same control. Traversal is
+capped at 10,000 nodes and ordered by scene tree order. No input is created or
+injected, and nothing is mutated.
+
+Live only, and deliberately: a `.tscn` holds anchors and offsets, not the
+rectangle they resolve to, so an offline answer would be a fabricated one.
 
 ### `ui_hit_test` — Live
 

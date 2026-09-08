@@ -55,7 +55,7 @@ and verification, and it fails visibly wherever the surface has a hole.
 Six amendments are implemented: `runtime_read_output`, `audio_list_buses` and
 `audio_configure_bus`, all recorded below with tri-engine feasibility evidence,
 plus `project_audit_assets`, `project_analyze_impact`,
-`runtime_explore_scene` and `didi_control_room`. One is withdrawn: raising the engine floor to
+`runtime_explore_scene`, `didi_control_room` and `ui_list_controls`. One is withdrawn: raising the engine floor to
 Godot 4.7, refused in favour of runtime capability detection so that 4.5 and 4.6
 users keep support. The remaining candidates come from the
 August 2026 competitive review and are proposed, not accepted, in
@@ -613,6 +613,42 @@ page offers -- rescan, attach, detach, refresh -- is an existing tool name
 issued to the *host*, which forwards it under its own consent policy. Adding a
 button did not add an authority, and the page speaks no part of the IPC
 protocol.
+
+### ACCEPTED (IMPLEMENTED): `ui_list_controls`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `ui_list_controls` |
+| **Failing workflow** | *"Make the player double-jump and prove it works"* -- once the proof involves a menu. The agent writes a UI, launches the game, and has to press Start. It knows the button is called `StartButton` and that it says "Start Game". Nothing in the surface turns either of those into a place on screen. `runtime_get_tree` gives the running tree with no rectangles and no text. `ui_hit_test` gives rectangles but is editor-only and needs a point, which is the very thing being looked for. `scene_get_hierarchy` can filter the *edited* scene by class, which is neither the running tree nor a position. So the agent is left choosing between reading a `.tscn`'s anchors and doing Godot's layout arithmetic itself, or guessing coordinates and calling `runtime_inject_input` until something happens. |
+| **Execution modes** | `live`, editor or game. Editor because an agent authoring a UI wants the same answer, game because that is where the failing workflow is. No offline mode: a `.tscn` records anchors, offsets and container membership, not the rectangle Godot resolves them to, and computing one outside the engine would be reimplementing the layout system and reporting the result as fact. |
+| **Safety class** | `read`. `readOnlyHint: true`, `destructiveHint: false`, `openWorldHint: false`. No `dry_run`, no confirmation. It reads geometry; it creates no event and touches no property. |
+| **Proving test** | Native: `UiListControls.*` in `tests/test_ui_list_controls.cpp` covers the registered contract, the exact forwarded request, twelve rejected argument shapes that must never reach the engine, a disconnected route being refused rather than answered, and a malformed engine reply being an error rather than an empty list. Live: `tests/run_godot_integration.ps1` drives a real editor over a fixture scene and requires the rectangle, class, visibility, mouse filter and text of each Control, the hidden-subtree rule, the class filter, and agreement with `ui_hit_test` on the same node. |
+| **Reviewer** | Unassigned. It is a read, and the disclosure is UI geometry and label text from the project the caller already selected. Every binding it uses was already bound and shipped: `Object::is_class`, `Object::get_class`, `Object::get`, `Node::get_children`, `Node::get_path`, `CanvasItem::is_visible_in_tree`, `Control::get_global_rect` and `Control::get_mouse_filter_with_override`. All eight carry identical hashes on Godot 4.5.1, 4.6.2 and 4.7.2, so no engine-floor change and no new compatibility risk. |
+
+**Why it agrees with `ui_hit_test` by construction.** The rectangle is
+`Control.get_global_rect`, which is the rectangle `ui_hit_test` already reports
+for a hit. That is what makes the pair composable: list the controls, take the
+centre of the one you want, hit-test it, and the same node comes back. Verified
+on all three engines rather than assumed.
+
+**Why text is read as a property.** `text` lives on `Button`, `Label`,
+`LineEdit`, `RichTextLabel` and others, each a different class with its own
+`get_text` bind. Reading the property through `Object::get` covers all of them
+with one call, and covers a custom Control exporting a `text` property too. A
+Control without one yields a nil Variant and simply has no `text` key, rather
+than an empty string that would read as a blank label.
+
+**Why hidden Controls take their children with them.** A hidden Control hides
+its subtree, so with `visible_only` on, descending into one would list controls
+that cannot be seen or pressed. `visible_only: false` reports the lot, with
+`visible` on each, for an agent debugging why a menu is not showing.
+
+**What it does not do.** It does not click anything, order by draw order, or
+resolve overlap. Overlap is `ui_hit_test`'s question and it answers it with
+canvas layer, z-index and draw order; duplicating that ordering here would be a
+second implementation of it to keep in step. It does not read theme overrides,
+anchors or offsets: those are authoring inputs, and this reports the resolved
+result.
 
 ### PROPOSED: `scene_close` reads real dirty state on Godot 4.7+
 

@@ -3570,6 +3570,242 @@ Result<GDExtensionObjectPtr> resolveAnimationPlayer(const std::string& path, con
     return node.value();
 }
 
+// Enumerates the Control nodes under a root, with where each one is on screen
+// and what it says.
+//
+// ui_hit_test answers "what is under this point", which is only useful once you
+// already have a point. An agent that has just written a menu has no point: it
+// knows a button is called Start and needs to know where Start is. In a running
+// game nothing answered that at all -- runtime_get_tree carries structure with
+// no rectangles and no text -- so the only way to press a button was to guess
+// coordinates.
+//
+// Editor or game. The rectangle is Control.get_global_rect, which is the
+// viewport-space rectangle ui_hit_test already reports for a hit, so the two
+// tools agree about where a Control is.
+json uiListControls(const json& params, const std::string& session_kind) {
+    if (!hasOnlyKeys(params, {"root_path", "max_results", "visible_only", "include_text",
+                              "class_filter"})) {
+        return errorJson(400, "invalid_ui_list_controls_request");
+    }
+    if (params.contains("root_path") &&
+        (!params["root_path"].is_string() || params["root_path"].get<std::string>().size() > 1024)) {
+        return errorJson(400, "root_path must be a string of at most 1024 bytes");
+    }
+    if (params.contains("visible_only") && !params["visible_only"].is_boolean()) {
+        return errorJson(400, "visible_only must be a boolean");
+    }
+    if (params.contains("include_text") && !params["include_text"].is_boolean()) {
+        return errorJson(400, "include_text must be a boolean");
+    }
+    if (params.contains("max_results") && !params["max_results"].is_number_integer()) {
+        return errorJson(400, "max_results must be an integer");
+    }
+    const int64_t max_results = params.value("max_results", static_cast<int64_t>(64));
+    if (max_results < 1 || max_results > 256) {
+        return errorJson(400, "max_results must be from 1 to 256");
+    }
+
+    std::vector<std::string> class_filter;
+    if (params.contains("class_filter")) {
+        if (!params["class_filter"].is_array() || params["class_filter"].empty() ||
+            params["class_filter"].size() > 16) {
+            return errorJson(400, "class_filter must be an array of 1 to 16 class names");
+        }
+        for (const auto& entry : params["class_filter"]) {
+            if (!entry.is_string() || entry.get<std::string>().empty() ||
+                entry.get<std::string>().size() > 64) {
+                return errorJson(400, "class_filter entries must be 1 to 64 byte class names");
+            }
+            class_filter.push_back(entry.get<std::string>());
+        }
+    }
+
+    for (const auto& bind : {std::make_tuple("Object", "is_class", 3927539163LL),
+                             std::make_tuple("Object", "get_class", 201670096LL),
+                             std::make_tuple("Node", "get_children", 873284517LL),
+                             std::make_tuple("CanvasItem", "is_visible_in_tree", 36873697LL),
+                             std::make_tuple("Control", "get_global_rect", 1639390495LL),
+                             std::make_tuple("Control", "get_mouse_filter_with_override",
+                                             1572545674LL)}) {
+        auto required = requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind));
+        if (required.isErr()) return errorJson(501, required.error().message);
+    }
+
+    const bool editor = session_kind == "editor";
+    Result<GDExtensionObjectPtr> root = Error::internal("unresolved");
+    if (editor) {
+        auto interface_result = editorInterface();
+        if (interface_result.isErr()) {
+            return errorJson(interface_result.error().code, interface_result.error().message);
+        }
+        root = editedSceneRoot(interface_result.value());
+    } else {
+        auto tree = liveSceneTree();
+        if (tree.isErr()) return errorJson(tree.error().code, tree.error().message);
+        root = liveSceneTreeRoot(tree.value());
+    }
+    if (root.isErr()) return errorJson(root.error().code, root.error().message);
+
+    GDExtensionObjectPtr traversal_root = root.value();
+    const std::string requested_root = params.value("root_path", std::string());
+    if (!requested_root.empty()) {
+        auto resolved = resolveNode(root.value(), requested_root);
+        if (resolved.isErr()) return errorJson(resolved.error().code, resolved.error().message);
+        if (!resolved.value()) return errorJson(404, "No node at " + requested_root);
+        traversal_root = resolved.value();
+    }
+
+    const bool visible_only = params.value("visible_only", true);
+    const bool include_text = params.value("include_text", true);
+
+    auto text_name = makeStringName("text");
+    if (text_name.isErr()) return errorJson(500, "Failed to construct the text property name");
+
+    json controls = json::array();
+    uint64_t traversed = 0;
+    uint64_t matched = 0;
+    bool traversal_limit_hit = false;
+
+    std::function<Result<void>(GDExtensionObjectPtr, int)> visit =
+        [&](GDExtensionObjectPtr node, int depth) -> Result<void> {
+            if (traversed >= 10000) {
+                traversal_limit_hit = true;
+                return Result<void>::ok();
+            }
+            ++traversed;
+
+            auto is_control = objectIsClass(node, "Control");
+            if (is_control.isErr()) return is_control.error();
+
+            bool visible = true;
+            if (is_control.value()) {
+                auto visible_value = callObject(node, "CanvasItem", "is_visible_in_tree", 36873697LL);
+                if (visible_value.isErr()) return visible_value.error();
+                auto visible_flag = scalarFromVariant<GDExtensionBool>(
+                    visible_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                if (visible_flag.isErr()) return visible_flag.error();
+                visible = visible_flag.value() != 0;
+            }
+
+            if (is_control.value() && (!visible_only || visible)) {
+                auto class_name = nodeString(node, "get_class", 201670096LL);
+                if (class_name.isErr()) return class_name.error();
+                const std::string bounded_class = boundUtf8(class_name.value(), 256).value;
+
+                bool keep = class_filter.empty();
+                for (const auto& wanted : class_filter) {
+                    if (keep) break;
+                    auto matches = objectIsClass(node, wanted.c_str());
+                    // An unknown class name is not an error: it simply matches
+                    // nothing, which is what a caller filtering on a typo means
+                    // to the engine.
+                    if (matches.isOk() && matches.value()) keep = true;
+                }
+
+                if (keep) {
+                    ++matched;
+                    if (static_cast<int64_t>(controls.size()) < max_results) {
+                        auto path = editor ? logicalPathFromEditedRoot(root.value(), node)
+                                           : nodeString(node, "get_path", 4075236667LL);
+                        if (path.isErr()) return path.error();
+                        auto rect_value = callObject(node, "Control", "get_global_rect",
+                                                     1639390495LL);
+                        if (rect_value.isErr()) return rect_value.error();
+                        auto rect_json = rect2ToJson(rect_value.value());
+                        if (rect_json.isErr()) return rect_json.error();
+                        auto mouse_value = callObject(node, "Control",
+                                                      "get_mouse_filter_with_override",
+                                                      1572545674LL);
+                        if (mouse_value.isErr()) return mouse_value.error();
+                        auto mouse_filter = scalarFromVariant<int64_t>(
+                            mouse_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                        if (mouse_filter.isErr()) return mouse_filter.error();
+                        const char* filter_name = mouse_filter.value() == 0   ? "stop"
+                                                  : mouse_filter.value() == 1 ? "pass"
+                                                                              : "ignore";
+
+                        json entry = {{"node_path", boundUtf8(path.value(), 1024).value},
+                                      {"class", bounded_class},
+                                      {"global_rect", rect_json.value()},
+                                      {"visible", visible},
+                                      {"depth", depth},
+                                      {"mouse_filter", filter_name},
+                                      {"mouse_filter_value", mouse_filter.value()}};
+
+                        // Text lives on a different class for every widget that
+                        // has it, so it is read as a property rather than through
+                        // one get_text bind per class. A Control without the
+                        // property yields a nil Variant and simply has no text.
+                        if (include_text) {
+                            auto text_value = callObject(node, "Object", "get", 2760726917LL,
+                                                         {&text_name.value()});
+                            if (text_value.isOk() &&
+                                GodotApi::instance().variant_get_type(text_value.value().ptr()) ==
+                                    GDEXTENSION_VARIANT_TYPE_STRING) {
+                                auto text = stringFromVariant(text_value.value(),
+                                                              GDEXTENSION_VARIANT_TYPE_STRING);
+                                if (text.isOk()) {
+                                    const auto bounded = boundUtf8(text.value(), 256);
+                                    entry["text"] = bounded.value;
+                                    if (bounded.truncated) entry["text_truncated"] = true;
+                                }
+                            }
+                        }
+                        controls.push_back(std::move(entry));
+                    }
+                }
+            }
+
+            // A hidden Control hides its children, so there is nothing under it
+            // worth reporting when only visible Controls were asked for.
+            if (is_control.value() && visible_only && !visible) return Result<void>::ok();
+
+            auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
+                                               static_cast<GDExtensionBool>(0));
+            if (include_internal.isErr()) return include_internal.error();
+            auto children = callObject(node, "Node", "get_children", 873284517LL,
+                                       {&include_internal.value()});
+            if (children.isErr()) return children.error();
+            auto size_value = callVariant(children.value(), "size");
+            if (size_value.isErr()) return size_value.error();
+            auto size = scalarFromVariant<int64_t>(size_value.value(),
+                                                   GDEXTENSION_VARIANT_TYPE_INT);
+            if (size.isErr()) return size.error();
+            for (int64_t index_value = 0; index_value < size.value(); ++index_value) {
+                if (traversal_limit_hit) break;
+                auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index_value);
+                if (index.isErr()) return index.error();
+                auto child_value = callVariant(children.value(), "get", {&index.value()});
+                if (child_value.isErr()) return child_value.error();
+                auto child = objectFromVariant(child_value.value());
+                if (child.isErr() || !child.value()) {
+                    return Error::internal("Godot returned an invalid UI child");
+                }
+                auto nested = visit(child.value(), depth + 1);
+                if (nested.isErr()) return nested.error();
+            }
+            return Result<void>::ok();
+        };
+
+    auto visited = visit(traversal_root, 0);
+    if (visited.isErr()) return errorJson(visited.error().code, visited.error().message);
+
+    return liveResult({
+        {"root_path", requested_root.empty() ? std::string(editor ? "<edited scene root>" : "/root")
+                                             : requested_root},
+        {"controls", controls},
+        {"returned_count", controls.size()},
+        {"match_count_total", matched},
+        {"traversed_nodes", traversed},
+        {"truncated", matched > controls.size() || traversal_limit_hit},
+        {"traversal_limit_hit", traversal_limit_hit},
+        {"visible_only", visible_only},
+        {"ordering", "scene_tree_order"},
+        {"input_injected", false}
+    });
+}
+
 json animListTracks(const json& params, const std::string& session_kind) {
     auto parsed = runtime::parseAnimListRequest(params);
     if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
@@ -4209,6 +4445,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
     if (method == "preview.renderGhost") return ghostPreviewRender(params);
     if (method == "preview.clearGhosts") return ghostPreviewClear(params);
     if (method == "nav.queryPath") return navQueryPath(params);
+    if (method == "ui.listControls") return uiListControls(params, session_kind);
     if (method == "anim.listTracks") return animListTracks(params, session_kind);
     if (method == "anim.playTrack") return animPlayTrack(params, session_kind);
     auto editor_result = editorInterface();

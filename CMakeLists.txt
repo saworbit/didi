@@ -340,6 +340,7 @@ set(TEST_SOURCES
     tests/test_phase6.cpp
     tests/test_tool_manifest.cpp
     tests/test_control_room.cpp
+    tests/test_ui_list_controls.cpp
     tests/test_phase7_contract.cpp
     tests/test_phase7a_signals.cpp
     tests/test_phase7_signal_followup.cpp

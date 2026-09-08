@@ -13,6 +13,29 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Added
 
+- Added `ui_list_controls`: the Control nodes under a root, with the
+  viewport-space rectangle each one occupies, its class, visibility, mouse
+  filter, and its text where it has any. Editor or game.
+
+  This is what makes a control addressable. `ui_hit_test` answers what sits
+  under a point, which is only useful once you already have a point, and it is
+  editor-only; `runtime_get_tree` gives the running tree with no rectangles and
+  no text. An agent that had just written a menu and needed to press Start was
+  left doing Godot's layout arithmetic on a `.tscn` itself, or guessing
+  coordinates.
+
+  The rectangle is `Control.get_global_rect`, the same one `ui_hit_test` reports
+  for a hit, so listing a control and hit-testing the centre of its rectangle
+  returns that control. Text is read as a property rather than through a
+  `get_text` bind per widget class, so `Button`, `Label`, `LineEdit` and a custom
+  Control exporting `text` are all covered by one path.
+
+  Read-only, bounded to 10,000 traversed nodes and 256 results, and it injects
+  nothing. Live only: a `.tscn` holds anchors and offsets, not the rectangle they
+  resolve to. Verified against real editors on Godot 4.5.1, 4.6.2 and 4.7.2;
+  every binding it uses was already shipped and carries an identical hash on all
+  three.
+
 - Added the Control Room: an interactive dashboard Didi serves to the host over
   the existing stdio connection, rendered in the conversation by clients that
   support MCP Apps. Red/amber/green lights for the bridge, project, safety
@@ -115,12 +138,12 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `111/114`
+**Canonical implementation:** `112/115`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 114 canonical tools plus 10 legacy registrations (124 total). 111 canonical tools are implemented and 3 remain unimplemented.
+Discovery now exposes 115 canonical tools plus 10 legacy registrations (125 total). 112 canonical tools are implemented and 3 remain unimplemented.
 The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
 ---
