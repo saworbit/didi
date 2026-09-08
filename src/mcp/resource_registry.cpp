@@ -50,6 +50,12 @@ Error liveResourceError(const Error& error,
                         const std::string& context) {
     json engine_data = error.data.is_object() ? error.data : json::object();
     if (!error.data.is_null() && !error.data.is_object()) engine_data["details"] = error.data;
+    // Same deduplication as the tool path: the envelope states the route, so the
+    // engine's own copy of it is redundant once it is wrapped.
+    if (session.has_value()) {
+        engine_data.erase("session");
+        engine_data.erase("execution_mode");
+    }
     return Error(error.code, context + error.message,
                  {{"execution_mode", "live"},
                   // Provenance, not an address. Same reasoning as the tool path.

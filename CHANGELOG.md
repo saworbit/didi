@@ -31,6 +31,15 @@ Historical entries describe the surface advertised by those releases. For the ex
   client's own record of the route it used, and `runtime_list_sessions` still
   reports it because choosing a session is what that tool is for.
 
+  A failure also names its session once now rather than twice. The extension
+  states the route on its way out and the standalone states it again when it
+  wraps the error, so a bridged failure carried the same session at the top
+  level and again in `error.data`. The top-level copy is the one a success also
+  uses, so it is the one kept; `error.data` retains everything else the engine
+  said about the failure, including `outcome`, `route_quarantine`, `transport`
+  and `engine`. The internal IPC error is unchanged, because at that layer the
+  extension's copy is the only attribution there is.
+
 - The managed editor does not outlive the host that owns it. It was reaped only
   by a destructor, so it survived every exit that does not run one: a `SIGKILL`,
   a supervisor or container stopping the host, a second Ctrl+C taking the C

@@ -415,6 +415,20 @@ CallToolResult structuredLiveToolError(const Error& error,
                                        const std::optional<runtime::SessionDescriptor>& session) {
     json data = error.data.is_object() ? error.data : json::object();
     if (!error.data.is_null() && !error.data.is_object()) data["details"] = error.data;
+    // The engine states the route it failed on, and so does the envelope below,
+    // so an error that crossed the bridge used to name the same session twice.
+    // The outer copy is the one that matches a successful result's shape, so the
+    // inner one goes.
+    //
+    // Guarded on there being an outer copy so that deduplication can never be
+    // the thing that removes the last attribution. No reachable path populates
+    // the engine's copy without a route today -- no lease means the engine was
+    // never called -- so this is about the rule staying true rather than about
+    // a case that fires.
+    if (session.has_value()) {
+        data.erase("session");
+        data.erase("execution_mode");
+    }
     auto result = CallToolResult::successJson({
         {"execution_mode", "live"},
         // Provenance, not an address. See SessionDescriptor::toProvenanceJson.

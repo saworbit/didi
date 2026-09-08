@@ -309,6 +309,7 @@ public:
     didi::Result<didi::json> sendRequest(const std::string& method, const didi::json&, int) override {
         ++requests;
         last_method = method;
+        if (error.has_value()) return *error;
         return didi::json{{"status", "ok"}};
     }
     didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
@@ -328,6 +329,7 @@ public:
         return true;
     }
 
+    std::optional<didi::Error> error;
     int requests{0};
     int disconnects{0};
     int quarantines{0};
@@ -868,6 +870,13 @@ void test_live_errors_report_the_session_without_its_endpoint() {
     // Useful data from the engine survives; only provenance was trimmed.
     ASSERT_EQ(failed_value["error"]["data"]["node"], "NoSuchNode");
 
+    // Said once. The engine names the route on its way out and the envelope
+    // names it again, so a bridged error used to carry the same session twice.
+    ASSERT_FALSE(failed_value["error"]["data"].contains("session"));
+    ASSERT_FALSE(failed_value["error"]["data"].contains("execution_mode"));
+    ASSERT_TRUE(failed_value.contains("session"));
+    ASSERT_EQ(failed_value["execution_mode"], "live");
+
     // 2. The wrong-kind rejection, which builds its own envelope rather than
     //    going through structuredLiveToolError.
     auto game = std::make_shared<RoutedFake>("game");
@@ -888,6 +897,35 @@ void test_live_errors_report_the_session_without_its_endpoint() {
     const auto succeeded_value = payload(succeeded);
     ASSERT_TRUE(succeeded_value["session"].contains("endpoint"));
     ASSERT_FALSE(succeeded_value["session"].contains("token"));
+
+    registry.setIpcClient(nullptr);
+}
+
+// A failure with no route still reads as a failure.
+//
+// The deduplication above is conditional on the envelope actually having a
+// session to prefer, so that stripping the inner copy can never be the thing
+// that removes the last attribution. No reachable path populates the engine's
+// copy without a route -- no lease means the engine was never called, so there
+// is nothing for it to have said -- but the shape has to stay coherent when
+// there is no session at all, which is the case this pins.
+void test_a_failure_with_no_route_is_still_coherent() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    auto route = std::make_shared<DescriptorlessSessionFake>();
+    registry.setIpcClient(route);
+    const auto failed = registry.callTool("runtime_get_tree", didi::json::object());
+    ASSERT_TRUE(failed.isError);
+    const auto value = payload(failed);
+
+    ASSERT_TRUE(value["session"].is_null());
+    ASSERT_EQ(value["execution_mode"], "live");
+    ASSERT_EQ(value["error"]["code"], 503);
+    ASSERT_TRUE(value["error"]["data"].is_object());
+    // It still says what went wrong, which is the whole job of an error that
+    // cannot say where.
+    ASSERT_TRUE(value["error"]["message"].get<std::string>().find("route") != std::string::npos);
 
     registry.setIpcClient(nullptr);
 }
@@ -2021,6 +2059,8 @@ struct RegisterRuntimeRoutingTests {
                      test_live_runtime_tools_return_session_envelopes_and_finite_deadlines);
         registerTest("RuntimeRouting.LiveErrorsReportTheSessionWithoutItsEndpoint",
                      test_live_errors_report_the_session_without_its_endpoint);
+        registerTest("RuntimeRouting.FailureWithNoRouteIsStillCoherent",
+                     test_a_failure_with_no_route_is_still_coherent);
         registerTest("RuntimeRouting.ProvenanceJsonDropsOnlyTheEndpoint",
                      test_provenance_json_drops_only_the_endpoint);
         registerTest("RuntimeRouting.ErrorsAndUnknownOutcomeQuarantine",
