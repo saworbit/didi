@@ -310,6 +310,7 @@ These are missing capabilities that an AI agent actually requires to complete fu
 ## 🚫 What NOT to Add Yet
 
 - ❌ **Do NOT add success stubs.** A registered name that cannot execute must report `implemented: false` and reject calls. This rule is absolute.
+- ⚠️ **Do NOT add a name a shipped tool already answers.** Checked 2026-09-08: `godot_api_reference` is answered by `script_reflect_class`, which reads the pinned `extension_api.json` for every registered class, and an `until` parameter on `runtime_step` is answered by `runtime_watch_invariants`, which samples every frame in-engine and pauses on the frame a condition turns. Both were live proposals in [Realignment Implementation Plan](REALIGNMENT_IMPLEMENTATION_PLAN.md) until the work that covers them shipped.
 - ⚠️ **Do NOT add speculative domain families** (e.g. `multiplayer_*`, `particle_*`, `xr_*`) as substitutes for the three reserved blockers: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. A single name that an agent workflow provably needs is added through a [Surface Amendment](SURFACE_AMENDMENTS.md), not blocked by this rule.
 - ❌ **Do NOT create a second plugin architecture or network transport** — local named pipes and UNIX domain sockets are optimal.
 - ❌ **Do NOT build a custom GDScript language server** — extend the existing symbol extractor and headless Godot compiler check only where evidence requires it.
