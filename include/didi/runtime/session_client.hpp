@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "didi/common/ipc_channel.hpp"
 
@@ -152,7 +153,25 @@ struct RuntimeRouteLease {
 class IRuntimeRouteLeaseProvider {
 public:
     virtual ~IRuntimeRouteLeaseProvider() = default;
+    // The process selection: whichever session `runtime_attach_session` last
+    // pointed at. This is the legacy lifecycle and stays exactly that.
     virtual std::optional<RuntimeRouteLease> acquireRouteLease() = 0;
+
+    // A lease on one named session, whether or not it is the process
+    // selection. This is what lets two tasks interleave requests against two
+    // editors on one stdio process without either seeing the other's.
+    //
+    // The default is the single-route behaviour every implementation had
+    // before there could be more than one: the selected route, and only when
+    // it happens to be the session that was asked for.
+    virtual std::optional<RuntimeRouteLease> acquireRouteLeaseFor(const std::string& session_id) {
+        auto lease = acquireRouteLease();
+        if (lease.has_value() && lease->descriptor.has_value() &&
+            lease->descriptor->session_id == session_id) {
+            return lease;
+        }
+        return std::nullopt;
+    }
     virtual bool quarantineRoute(const RuntimeRouteLease& lease) = 0;
 };
 
@@ -196,8 +215,35 @@ DescriptorRetirementOutcome retireOwnedSessionDescriptor(
 class IRuntimeSessionClient : public ipc::IIpcClient, public IRuntimeRouteLeaseProvider {
 public:
     virtual Result<json> listSessions(const std::optional<std::string>& project_path) = 0;
+    // Selects a session for the process. Sticky, and what the legacy
+    // `runtime_attach_session` tool has always done.
     virtual Result<json> attachSession(const std::string& session_id) = 0;
     virtual Result<json> detachSession() = 0;
+
+    // Holds a route to one session without changing the process selection.
+    //
+    // A modern request names the session it means, and opening that route must
+    // not move the selection out from under a legacy client on the same
+    // process. The default routes it through attach, which is the best a
+    // single-route implementation can do and is what they all did before.
+    virtual Result<json> openSessionRoute(const std::string& session_id) {
+        return attachSession(session_id);
+    }
+    // Releases one named route. Releasing the selected one also clears the
+    // selection, so this is a superset of detach rather than a second way to
+    // do it.
+    virtual Result<json> closeSessionRoute(const std::string&) {
+        return detachSession();
+    }
+    // Every session this process is currently holding a route to, selected or
+    // not. Shutdown reads this: a route that is not released takes its
+    // ownership lock with it, and every other Didi process is refused that
+    // session until this one exits.
+    virtual std::vector<SessionDescriptor> heldSessions() const {
+        const auto selected = activeSession();
+        if (!selected.has_value()) return {};
+        return {*selected};
+    }
     virtual Result<json> refreshSession() {
         return Error::notConnected("Fresh runtime session state is unavailable");
     }
@@ -208,6 +254,12 @@ public:
 
 std::optional<RuntimeRouteLease> acquireRuntimeRouteLease(
     const std::shared_ptr<ipc::IIpcClient>& router);
+
+// A lease on one named session. Unlike the selection-based form above this
+// does not require the process selection to be connected, because the whole
+// point is to reach a session that is not the selected one.
+std::optional<RuntimeRouteLease> acquireRuntimeRouteLeaseFor(
+    const std::shared_ptr<ipc::IIpcClient>& router, const std::string& session_id);
 bool quarantineRuntimeRoute(const std::shared_ptr<ipc::IIpcClient>& router,
                             const RuntimeRouteLease& lease);
 

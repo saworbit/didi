@@ -5,6 +5,7 @@
 #include "didi/common/logger.hpp"
 
 #include <algorithm>
+#include <unordered_map>
 #include <array>
 #include <cerrno>
 #include <cctype>
@@ -1033,6 +1034,14 @@ std::vector<DiscoveredSession> discoverSessions(json& diagnostics,
     return sessions;
 }
 
+// How many sessions one process will hold routes to at once.
+//
+// Each route keeps a connection and an ownership lock, and a lock held here is
+// a session refused to every other Didi process. Two or three is the realistic
+// number; this is far above that and exists so the count cannot grow without
+// one, not as a working limit anyone should meet.
+constexpr size_t kMaxHeldRoutes = 8;
+
 class RuntimeSessionClient final : public IRuntimeSessionClient {
 public:
     RuntimeSessionClient(std::string project_root, ipc::IpcClientFactory factory,
@@ -1047,26 +1056,32 @@ public:
     bool connect(const std::string&, int) override { return isConnected(); }
 
     void disconnect() override {
-        std::shared_ptr<ipc::IIpcClient> previous;
-        std::shared_ptr<RuntimeSessionLock> previous_lock;
+        // Every route, not only the selected one. Each one holds an ownership
+        // lock, and a lock this process keeps after it has stopped using the
+        // session refuses that session to every other Didi process until this
+        // one exits.
+        std::vector<Route> released;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            previous = std::move(m_activeClient);
-            previous_lock = std::move(m_activeLock);
-            m_activeDescriptor.reset();
+            released.reserve(m_routes.size());
+            for (auto& entry : m_routes) released.push_back(std::move(entry.second));
+            m_routes.clear();
+            m_selectedSessionId.clear();
             m_autoAttachEnabled = false;
-            ++m_routeGeneration;
+            ++m_releaseEpoch;
         }
-        if (previous) previous->disconnect();
+        for (auto& route : released) {
+            if (route.client) route.client->disconnect();
+        }
     }
 
     bool isConnected() const override {
-        std::shared_ptr<ipc::IIpcClient> active;
+        std::shared_ptr<ipc::IIpcClient> selected;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            active = m_activeClient;
+            if (const Route* route = findRouteLocked(m_selectedSessionId)) selected = route->client;
         }
-        if (active) return active->isConnected();
+        if (selected) return selected->isConnected();
         return const_cast<RuntimeSessionClient*>(this)->tryAutoAttach();
     }
 
@@ -1094,39 +1109,52 @@ public:
         return json{{"sessions", listed}, {"diagnostics", diagnostics}};
     }
 
+    // Selects a session for the process, which is what the legacy lifecycle
+    // means by attaching. Opening the route is the same work either way; only
+    // whether the selection moves differs.
     Result<json> attachSession(const std::string& session_id) override {
-        uint64_t generation = 0;
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            m_autoAttachEnabled = false;
-            ++m_routeGeneration;
-            generation = m_routeGeneration;
-        }
-        json diagnostics = json::array();
-        const auto sessions = discoverSessions(diagnostics, m_descriptorOpenedHook);
-        auto found = std::find_if(sessions.begin(), sessions.end(), [&](const DiscoveredSession& item) {
-            return item.descriptor.session_id == session_id;
-        });
-        if (found == sessions.end()) return Error::notFound("Runtime session not found: " + session_id);
-        if (!found->alive) return Error::notConnected("Runtime session is stale: " + session_id);
-        return attachDescriptor(found->descriptor, generation);
+        return openRoute(session_id, true);
+    }
+
+    // Holds a route without moving the selection, so a request that named its
+    // own session cannot take the process out from under a legacy client.
+    Result<json> openSessionRoute(const std::string& session_id) override {
+        return openRoute(session_id, false);
     }
 
     Result<json> detachSession() override {
-        std::shared_ptr<ipc::IIpcClient> previous;
-        std::shared_ptr<RuntimeSessionLock> previous_lock;
-        std::optional<SessionDescriptor> descriptor;
+        std::optional<Route> released;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_autoAttachEnabled = false;
-            ++m_routeGeneration;
-            if (!m_activeDescriptor.has_value()) return Error::notConnected("No runtime session is attached");
-            previous = std::move(m_activeClient);
-            previous_lock = std::move(m_activeLock);
-            descriptor = std::move(m_activeDescriptor);
+            if (m_selectedSessionId.empty() || !findRouteLocked(m_selectedSessionId)) {
+                return Error::notConnected("No runtime session is attached");
+            }
+            released = takeRouteLocked(m_selectedSessionId);
         }
-        if (previous) previous->disconnect();
-        return json{{"session", descriptor->toJson()}};
+        if (released->client) released->client->disconnect();
+        return json{{"session", released->descriptor.toJson()}};
+    }
+
+    Result<json> closeSessionRoute(const std::string& session_id) override {
+        std::optional<Route> released;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            released = takeRouteLocked(session_id);
+        }
+        if (!released.has_value()) {
+            return Error::notFound("No runtime route is open for session: " + session_id);
+        }
+        if (released->client) released->client->disconnect();
+        return json{{"session", released->descriptor.toJson()}};
+    }
+
+    std::vector<SessionDescriptor> heldSessions() const override {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        std::vector<SessionDescriptor> held;
+        held.reserve(m_routes.size());
+        for (const auto& entry : m_routes) held.push_back(entry.second.descriptor);
+        return held;
     }
 
     Result<json> refreshSession() override {
@@ -1135,8 +1163,10 @@ public:
         std::optional<SessionDescriptor> descriptor;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            active = m_activeClient;
-            descriptor = m_activeDescriptor;
+            if (const Route* route = findRouteLocked(m_selectedSessionId)) {
+                active = route->client;
+                descriptor = route->descriptor;
+            }
         }
         if (!active || !descriptor.has_value() || !active->isConnected()) {
             if (active) quarantineIfCurrent(active);
@@ -1149,8 +1179,9 @@ public:
         }
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            if (m_activeClient != active || !m_activeDescriptor.has_value() ||
-                m_activeDescriptor->session_id != descriptor->session_id) {
+            const Route* route = findRouteLocked(m_selectedSessionId);
+            if (!route || route->client != active ||
+                route->descriptor.session_id != descriptor->session_id) {
                 return Error(409, "Fresh runtime session handshake was superseded by a route change");
             }
         }
@@ -1160,54 +1191,79 @@ public:
 
     std::optional<SessionDescriptor> activeSession() const override {
         std::lock_guard<std::mutex> lock(m_mutex);
-        return m_activeDescriptor;
+        if (const Route* route = findRouteLocked(m_selectedSessionId)) return route->descriptor;
+        return std::nullopt;
     }
 
     std::optional<RuntimeRouteLease> acquireRouteLease() override {
         (void)isConnected();
-        RuntimeRouteLease lease;
+        std::string selected;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            if (!m_activeClient || !m_activeDescriptor.has_value()) return std::nullopt;
-            lease = RuntimeRouteLease{m_activeClient, m_activeDescriptor, m_routeGeneration};
+            selected = m_selectedSessionId;
         }
-        if (!lease.client->isConnected()) return std::nullopt;
-        return lease;
+        if (selected.empty()) return std::nullopt;
+        return leaseFor(selected);
+    }
+
+    // Deliberately does not go through isConnected. That would auto-attach the
+    // one session matching this project, which is a guess, and a request that
+    // named a session is not guessing.
+    std::optional<RuntimeRouteLease> acquireRouteLeaseFor(const std::string& session_id) override {
+        if (session_id.empty()) return std::nullopt;
+        return leaseFor(session_id);
     }
 
     bool quarantineRoute(const RuntimeRouteLease& lease) override {
-        std::shared_ptr<ipc::IIpcClient> quarantined;
-        std::shared_ptr<RuntimeSessionLock> quarantined_lock;
+        if (!lease.descriptor.has_value()) return false;
+        std::optional<Route> quarantined;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            if (m_routeGeneration != lease.generation || m_activeClient != lease.client ||
-                !m_activeDescriptor.has_value() || !lease.descriptor.has_value() ||
-                m_activeDescriptor->session_id != lease.descriptor->session_id) {
+            const Route* route = findRouteLocked(lease.descriptor->session_id);
+            // Generations are handed out once and never reused, so this both
+            // finds the route and proves the lease is for this instance of it
+            // rather than one that was already retired and reopened.
+            if (!route || route->generation != lease.generation || route->client != lease.client) {
                 return false;
             }
-            quarantined = std::move(m_activeClient);
-            quarantined_lock = std::move(m_activeLock);
-            m_activeDescriptor.reset();
+            quarantined = takeRouteLocked(lease.descriptor->session_id);
             m_autoAttachEnabled = false;
-            ++m_routeGeneration;
         }
-        if (quarantined) quarantined->disconnect();
+        if (quarantined->client) quarantined->client->disconnect();
         return true;
     }
 
 private:
-    Result<json> attachDescriptor(const SessionDescriptor& descriptor,
-                                  std::optional<uint64_t> expected_generation = std::nullopt) {
+    // One held route: the connection, the ownership lock that keeps other Didi
+    // processes off this session, and the descriptor naming it. The map owns
+    // the only reference to each, so removing the entry is what releases both.
+    struct Route {
+        std::shared_ptr<ipc::IIpcClient> client;
+        std::shared_ptr<RuntimeSessionLock> lock;
+        SessionDescriptor descriptor;
+        uint64_t generation{0};
+    };
+
+    Result<json> attachDescriptor(const SessionDescriptor& descriptor, bool make_selected) {
         if (!m_factory) return Error::internal("Runtime IPC client factory is not configured");
         if (m_clientId.empty()) return Error::internal("Unable to establish MCP client identity");
         std::shared_ptr<RuntimeSessionLock> session_lock;
-        bool reusing_owned_lock = false;
+        // What this attach is racing against. Connecting and handshaking happen
+        // outside the mutex, so the world can move underneath: a caller can
+        // disconnect everything, or detach this very session, while the
+        // handshake is still in flight. Committing anyway would resurrect a
+        // route somebody deliberately released, and take its ownership lock
+        // back with it.
+        uint64_t release_epoch = 0;
+        uint64_t teardowns = 0;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            if (m_activeDescriptor.has_value() && m_activeLock &&
-                m_activeDescriptor->session_id == descriptor.session_id) {
-                session_lock = m_activeLock;
-                reusing_owned_lock = true;
+            release_epoch = m_releaseEpoch;
+            teardowns = teardownsLocked(descriptor.session_id);
+            // A route to this session that we already own carries the lock we
+            // would otherwise queue for behind ourselves.
+            if (const Route* route = findRouteLocked(descriptor.session_id)) {
+                session_lock = route->lock;
             }
         }
         if (!session_lock) {
@@ -1231,44 +1287,153 @@ private:
         }
 
         std::shared_ptr<ipc::IIpcClient> previous;
-        std::shared_ptr<RuntimeSessionLock> previous_lock;
-        bool accepted = true;
+        bool kept_existing = false;
+        bool superseded = false;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            if (expected_generation.has_value() &&
-                m_routeGeneration != *expected_generation) {
-                accepted = false;
-            } else if (reusing_owned_lock &&
-                       (!m_activeDescriptor.has_value() || m_activeLock != session_lock ||
-                        m_activeDescriptor->session_id != descriptor.session_id)) {
-                accepted = false;
+            if (m_releaseEpoch != release_epoch ||
+                teardownsLocked(descriptor.session_id) != teardowns) {
+                superseded = true;
             } else {
-                previous = std::move(m_activeClient);
-                if (!reusing_owned_lock) {
-                    previous_lock = std::move(m_activeLock);
-                    m_activeLock = session_lock;
+                Route* existing = findRouteLocked(descriptor.session_id);
+                if (existing && existing->client && existing->client->isConnected()) {
+                    // Another caller opened this same route while we were
+                    // connecting. Theirs is live and leased, so ours is the
+                    // one that goes; churning the lock would gain nothing.
+                    previous = std::move(candidate);
+                    kept_existing = true;
+                } else {
+                    if (existing && existing->client) previous = std::move(existing->client);
+                    Route route;
+                    route.client = std::move(candidate);
+                    // Held as a shared_ptr, so reusing the lock we already
+                    // owned keeps it held rather than dropping and retaking it.
+                    route.lock = std::move(session_lock);
+                    route.descriptor = descriptor;
+                    route.generation = m_nextGeneration++;
+                    m_routes[descriptor.session_id] = std::move(route);
                 }
-                m_activeClient = std::move(candidate);
-                m_activeDescriptor = descriptor;
-                ++m_routeGeneration;
+                if (make_selected) m_selectedSessionId = descriptor.session_id;
             }
         }
-        if (!accepted) {
+        if (superseded) {
             candidate->disconnect();
             return Error(409, "Runtime attach was superseded by a later route change");
         }
         if (previous) previous->disconnect();
-        return json{{"session", descriptor.toJson()}, {"handshake", handshake.value()}};
+        return json{{"session", descriptor.toJson()},
+                    {"handshake", handshake.value()},
+                    {"reused", kept_existing}};
+    }
+
+    // Opens a route to one session, or reuses the one already held for it.
+    Result<json> openRoute(const std::string& session_id, bool make_selected) {
+        if (session_id.empty()) return Error::invalidArgument("session_id is required");
+        if (make_selected) {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            // Naming a session is a decision, so stop guessing at one.
+            m_autoAttachEnabled = false;
+        } else if (auto held = leaseFor(session_id)) {
+            // A request naming a session this process is already routed to uses
+            // that route as it stands. Attach does not take this path: it
+            // re-authenticates every time, which is how a session whose process
+            // changed underneath it is caught, and callers read the handshake
+            // it returns.
+            return json{{"session", held->descriptor->toJson()}, {"reused", true}};
+        }
+        // A route whose engine has gone still holds a lock. Drop those before
+        // deciding there is no room, so an editor that closed hours ago cannot
+        // be what refuses a session now.
+        releaseDeadRoutes();
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_routes.find(session_id) == m_routes.end() &&
+                m_routes.size() >= kMaxHeldRoutes) {
+                return Error(429,
+                             "This server is already holding the most runtime sessions it will "
+                             "hold at once. Close one with runtime_detach_session before opening "
+                             "another.");
+            }
+        }
+        json diagnostics = json::array();
+        const auto sessions = discoverSessions(diagnostics, m_descriptorOpenedHook);
+        auto found = std::find_if(sessions.begin(), sessions.end(),
+                                  [&](const DiscoveredSession& item) {
+                                      return item.descriptor.session_id == session_id;
+                                  });
+        if (found == sessions.end()) return Error::notFound("Runtime session not found: " + session_id);
+        if (!found->alive) return Error::notConnected("Runtime session is stale: " + session_id);
+        return attachDescriptor(found->descriptor, make_selected);
+    }
+
+    void releaseDeadRoutes() {
+        std::vector<Route> released;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            for (auto it = m_routes.begin(); it != m_routes.end();) {
+                if (it->second.client && it->second.client->isConnected()) {
+                    ++it;
+                    continue;
+                }
+                if (m_selectedSessionId == it->first) m_selectedSessionId.clear();
+                released.push_back(std::move(it->second));
+                it = m_routes.erase(it);
+            }
+        }
+        for (auto& route : released) {
+            if (route.client) route.client->disconnect();
+        }
+    }
+
+    std::optional<RuntimeRouteLease> leaseFor(const std::string& session_id) {
+        RuntimeRouteLease lease;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            const Route* route = findRouteLocked(session_id);
+            if (!route || !route->client) return std::nullopt;
+            lease = RuntimeRouteLease{route->client, route->descriptor, route->generation};
+        }
+        if (!lease.client->isConnected()) return std::nullopt;
+        return lease;
+    }
+
+    // Both require m_mutex.
+    Route* findRouteLocked(const std::string& session_id) {
+        auto it = m_routes.find(session_id);
+        return it == m_routes.end() ? nullptr : &it->second;
+    }
+    const Route* findRouteLocked(const std::string& session_id) const {
+        auto it = m_routes.find(session_id);
+        return it == m_routes.end() ? nullptr : &it->second;
+    }
+
+    // Deliberate teardown of one route: detach, close, quarantine. Reaping a
+    // route whose engine has gone is not one of these and does not count, so a
+    // dead route being cleaned up cannot abort an attach that is in the middle
+    // of replacing it.
+    std::optional<Route> takeRouteLocked(const std::string& session_id) {
+        auto it = m_routes.find(session_id);
+        if (it == m_routes.end()) return std::nullopt;
+        Route route = std::move(it->second);
+        m_routes.erase(it);
+        if (m_selectedSessionId == session_id) m_selectedSessionId.clear();
+        ++m_teardowns[session_id];
+        return route;
+    }
+
+    uint64_t teardownsLocked(const std::string& session_id) const {
+        auto it = m_teardowns.find(session_id);
+        return it == m_teardowns.end() ? 0 : it->second;
     }
 
     bool tryAutoAttach() {
-        uint64_t generation = 0;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            if (m_activeClient) return m_activeClient->isConnected();
+            if (const Route* route = findRouteLocked(m_selectedSessionId)) {
+                return route->client && route->client->isConnected();
+            }
             if (!m_autoAttachEnabled || m_autoAttachInProgress) return false;
             m_autoAttachInProgress = true;
-            generation = m_routeGeneration;
         }
 
         bool attached = false;
@@ -1296,7 +1461,7 @@ private:
                 }
             }
             if (selected.has_value()) {
-                attached = attachDescriptor(*selected, generation).isOk();
+                attached = attachDescriptor(*selected, true).isOk();
                 if (attached) {
                     DIDI_LOG_INFO("RUNTIME", "Re-attached to runtime session ",
                                   selected->session_id, " (pid ", selected->pid,
@@ -1315,24 +1480,29 @@ private:
         return attached;
     }
 
+    // The session lock goes with the route, exactly as it does in
+    // quarantineRoute, detachSession and disconnect. Retiring the route but
+    // keeping the lock left this process holding a session it no longer has,
+    // so the next attach got 423 from a lock we ourselves still owned, and so
+    // did any other MCP client, until the process exited. Taking the route out
+    // of the map is what releases both, because the map owns the only
+    // reference to each.
     void quarantineIfCurrent(const std::shared_ptr<ipc::IIpcClient>& client) {
-        std::shared_ptr<ipc::IIpcClient> quarantined;
-        // The session lock has to go with the route, exactly as it does in
-        // quarantineRoute, detachSession and disconnect. Retiring the route but
-        // keeping the lock left this process holding a session it no longer has,
-        // so the next attach got 423 from a lock we ourselves still owned, and
-        // so did any other MCP client, until the process exited.
-        std::shared_ptr<RuntimeSessionLock> quarantined_lock;
+        std::optional<Route> quarantined;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            if (m_activeClient != client) return;
-            quarantined = std::move(m_activeClient);
-            quarantined_lock = std::move(m_activeLock);
-            m_activeDescriptor.reset();
+            std::string owner;
+            for (const auto& entry : m_routes) {
+                if (entry.second.client == client) {
+                    owner = entry.first;
+                    break;
+                }
+            }
+            if (owner.empty()) return;
+            quarantined = takeRouteLocked(owner);
             m_autoAttachEnabled = false;
-            ++m_routeGeneration;
         }
-        if (quarantined) quarantined->disconnect();
+        if (quarantined->client) quarantined->client->disconnect();
     }
 
     std::string m_projectRoot;
@@ -1340,12 +1510,22 @@ private:
     ipc::IpcClientFactory m_factory;
     DescriptorOpenedHook m_descriptorOpenedHook;
     mutable std::mutex m_mutex;
-    std::shared_ptr<ipc::IIpcClient> m_activeClient;
-    std::shared_ptr<RuntimeSessionLock> m_activeLock;
-    std::optional<SessionDescriptor> m_activeDescriptor;
+    // Every session this process is holding a route to, by session id.
+    std::unordered_map<std::string, Route> m_routes;
+    // The process selection, empty when there is none. Legacy attach sets it;
+    // a request that names its own session does not.
+    std::string m_selectedSessionId;
     bool m_autoAttachEnabled{true};
     bool m_autoAttachInProgress{false};
-    uint64_t m_routeGeneration{0};
+    // Bumped by disconnect, which releases everything. An attach that began
+    // before it must not commit after it.
+    uint64_t m_releaseEpoch{0};
+    // Deliberate teardowns per session, for the same reason at one route's
+    // granularity, so detaching one session leaves an attach to another alone.
+    std::unordered_map<std::string, uint64_t> m_teardowns;
+    // Handed out once per installed route and never reused, so a lease can be
+    // matched to the exact instance of the route it was taken from.
+    uint64_t m_nextGeneration{1};
 };
 
 } // namespace
@@ -1482,6 +1662,25 @@ std::optional<RuntimeRouteLease> acquireRuntimeRouteLease(
         return lease;
     }
     return RuntimeRouteLease{router, std::nullopt, 0};
+}
+
+std::optional<RuntimeRouteLease> acquireRuntimeRouteLeaseFor(
+    const std::shared_ptr<ipc::IIpcClient>& router, const std::string& session_id) {
+    if (!router || session_id.empty()) return std::nullopt;
+    // No isConnected gate here, unlike the selection-based form. That asks
+    // whether the selected route is up, and the whole point of naming a
+    // session is to reach one that is not the selection.
+    const auto provider = std::dynamic_pointer_cast<IRuntimeRouteLeaseProvider>(router);
+    if (!provider) return std::nullopt;
+    auto lease = provider->acquireRouteLeaseFor(session_id);
+    if (!lease.has_value() || !lease->client || !lease->descriptor.has_value()) {
+        return std::nullopt;
+    }
+    if (lease->descriptor->session_id != session_id) return std::nullopt;
+    if (SessionDescriptor::fromJson(lease->descriptor->toJson(true)).isErr()) {
+        return std::nullopt;
+    }
+    return lease;
 }
 
 bool reconnectRuntimeRoute(const RuntimeRouteLease& lease, int timeout_ms) {

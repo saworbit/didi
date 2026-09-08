@@ -453,6 +453,14 @@ bool isProvablyDifferentProject(const std::string& session_project_path) {
     return ours_text != theirs_text;
 }
 
+// Which session the process has selected, for reporting only. A request that
+// named its own session is not served from this.
+std::optional<runtime::SessionDescriptor> selectedSessionOf(
+    const std::shared_ptr<ipc::IIpcClient>& client) {
+    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(client);
+    return sessions ? sessions->activeSession() : std::optional<runtime::SessionDescriptor>{};
+}
+
 // A modern request that named no session asked a live tool to run on whatever
 // the process happened to be pointed at. Say what to do rather than refuse.
 Error unnamedRuntimeSessionError(const std::string& tool_name) {
@@ -465,18 +473,14 @@ Error unnamedRuntimeSessionError(const std::string& tool_name) {
     return error;
 }
 
-// The request named one session and this process is on another. Refusing keeps
-// whoever attached that route in charge of it.
+// The named session could not be reached: no such session, not alive, or this
+// process is already holding as many as it will.
 Error runtimeSessionMismatchError(const std::string& tool_name, const std::string& wanted,
                                   const std::optional<runtime::SessionDescriptor>& held) {
-    Error error(409, held.has_value()
-                         ? "This server is routed to a different runtime session than the one "
-                           "this request named. Name the attached session, or run a separate "
-                           "Didi process for the other one."
-                         : "The runtime session this request named is not available.");
+    Error error(409, "The runtime session this request named could not be reached.");
     error.data = {{"tool", tool_name},
                   {"requested_session_id", wanted},
-                  {"attached_session_id",
+                  {"selected_session_id",
                    held.has_value() ? json(held->session_id) : json(nullptr)}};
     return error;
 }
@@ -803,37 +807,32 @@ std::optional<CallToolResult> ToolRegistry::selectNamedRuntimeRoute(
     const std::string& tool_name, const RequestScope& scope,
     std::optional<runtime::RuntimeRouteLease>& lease) {
     const std::string& wanted = *scope.runtime_session_id;
-    const auto held = lease.has_value() ? lease->descriptor
-                                        : std::optional<runtime::SessionDescriptor>{};
 
-    if (!held.has_value() || held->session_id != wanted) {
-        if (held.has_value()) {
-            // Routed somewhere else. Moving it would serve this request
-            // correctly and take the route out from under whoever set it.
-            return structuredLiveToolError(
-                runtimeSessionMismatchError(tool_name, wanted, held), std::nullopt);
-        }
-        // Managed mode owns its editor and refuses attach through the tool
-        // surface, so a request there names what managed holds or it does not
-        // run. Without a session client there is nothing to attach with.
+    // The session this request named, whether or not it is the one the process
+    // has selected. Two tasks naming two editors both get served; neither is
+    // handed the other's, and neither moves the other's selection.
+    lease = runtime::acquireRuntimeRouteLeaseFor(m_sourceIpcClient, wanted);
+    if (!lease.has_value()) {
+        // Managed mode owns its editor and refuses route changes through the
+        // tool surface, so a request there names what managed holds or it does
+        // not run. Without a session client there is nothing to open with.
         if (m_recovery || !m_runtimeSessionClient) {
             return structuredLiveToolError(
-                runtimeSessionMismatchError(tool_name, wanted, held), std::nullopt);
+                runtimeSessionMismatchError(tool_name, wanted, selectedSessionOf(m_sourceIpcClient)),
+                std::nullopt);
         }
-        auto attached = m_runtimeSessionClient->attachSession(wanted);
-        if (attached.isErr()) {
-            return structuredLiveToolError(attached.error(), std::nullopt);
+        // Opening a route does not move the process selection, so a legacy
+        // client attached elsewhere on this process keeps what it attached.
+        auto opened = m_runtimeSessionClient->openSessionRoute(wanted);
+        if (opened.isErr()) {
+            return structuredLiveToolError(opened.error(), std::nullopt);
         }
-        lease = runtime::acquireRuntimeRouteLease(m_sourceIpcClient);
-        // Attaching and leasing are two steps. Confirm what came back is what
-        // was asked for rather than assume the gap was quiet.
-        if (!lease.has_value() || !lease->descriptor.has_value() ||
-            lease->descriptor->session_id != wanted) {
-            const auto now = lease.has_value() ? lease->descriptor
-                                               : std::optional<runtime::SessionDescriptor>{};
-            lease.reset();
+        lease = runtime::acquireRuntimeRouteLeaseFor(m_sourceIpcClient, wanted);
+        // Opening and leasing are two steps. Confirm what came back is what was
+        // asked for rather than assume the gap was quiet.
+        if (!lease.has_value()) {
             return structuredLiveToolError(
-                runtimeSessionMismatchError(tool_name, wanted, now), std::nullopt);
+                runtimeSessionMismatchError(tool_name, wanted, std::nullopt), std::nullopt);
         }
     }
 

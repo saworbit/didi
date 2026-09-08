@@ -70,7 +70,7 @@ Requests require `jsonrpc: "2.0"` and a string `method`. When present, `id` must
 
 ### Bridge error codes
 
-The internal extension and local session envelopes can use `400` (invalid argument), `401` (runtime token rejected), `404` (missing object/property/session), `408` (cooperative expression deadline exceeded), `409` (protocol/mode/state conflict), `413` (bounded payload exceeded), `415` (unsupported expression result), `422` (parse/execution rejection), `423` (runtime session locked by another MCP client), `500` (Godot/bridge failure), `501` (unimplemented), `503` (not connected/ready), or `504` (deadline exceeded). At the extension's 15-second main-thread deadline, a still-pending command is atomically cancelled and returns `outcome: "not_started"` with `route_quarantine: false`; a started but unresolved command returns `outcome: "unknown_outcome"` with `route_quarantine: true`. Public live tools and the runtime-log resource use a finite 17-second outer transport deadline. An explicit quarantine response or transport timeout quarantines that exact route; clients must not blindly retry a mutation whose outcome is unknown. A transport failure on a call that changes nothing is sent once more, on a new connection to the same session, before it is reported: repeating such a call is the same as making it, so asking again is what settles whether the engine ran it. The repeat happens before the quarantine, since quarantining retires the route. It happens once, not in a loop, and never for a mutation or for `editor_render_ghost_preview` with `replace: false`, which accumulates rather than replaces. A result that took two attempts carries `transport.repeats`, and a failure that was asked twice and answered neither time carries `transport.repeated` in `error.data`. A transport failure additionally carries `error.data.transport` with `request_started`, `outcome_unknown` and `timed_out`, plus `reason` and `waited_ms` when the cause was established. `reason` is `peer_closed` when the other end hung up, `deadline` when this side ran out of time, `io_error`, or `stopped`. The two are worth separating: a closed connection and an expired deadline used to share one message and one false `timed_out` flag, so a failure could report a timeout it had not had. `waited_ms` is how long that operation actually waited, which is what distinguishes an operation ended by its own deadline from one ended by something else. A transport failure on a route with a known session also carries `error.data.engine`: `alive`, `gone`, or `unknown`. It answers the question the transport itself cannot, since a peer closing the pipe does not say why it went, and an engine that crashed reads identically to one that is alive and merely stopped answering. `unknown` is a real answer and is kept distinct from `gone`, because a process that could not be queried is not a process that has ended. It also says why: `error.data.engine_reason` is `open_denied` when the process could not be opened for a reason other than there being no such process, with the operating system's own number in `engine_os_error`, or `running_but_unidentified` when something with that pid is running and could not be confirmed as the process the session opened. `unknown` on its own leaves a reader where they started, because an engine that crashed and a query that was refused are different problems. The check compares the recorded start time as well as the pid, so a recycled pid reads as `gone` rather than as the session that used to own it. Public `tools/call` converts these failures into MCP content with `result.isError: true`; clients should use the returned text and structured error data rather than expecting a top-level JSON-RPC code.
+The internal extension and local session envelopes can use `400` (invalid argument), `401` (runtime token rejected), `404` (missing object/property/session), `408` (cooperative expression deadline exceeded), `409` (protocol/mode/state conflict), `413` (bounded payload exceeded), `415` (unsupported expression result), `422` (parse/execution rejection), `423` (runtime session locked by another MCP client), `429` (this server already holds as many runtime sessions as it will), `500` (Godot/bridge failure), `501` (unimplemented), `503` (not connected/ready), or `504` (deadline exceeded). At the extension's 15-second main-thread deadline, a still-pending command is atomically cancelled and returns `outcome: "not_started"` with `route_quarantine: false`; a started but unresolved command returns `outcome: "unknown_outcome"` with `route_quarantine: true`. Public live tools and the runtime-log resource use a finite 17-second outer transport deadline. An explicit quarantine response or transport timeout quarantines that exact route; clients must not blindly retry a mutation whose outcome is unknown. A transport failure on a call that changes nothing is sent once more, on a new connection to the same session, before it is reported: repeating such a call is the same as making it, so asking again is what settles whether the engine ran it. The repeat happens before the quarantine, since quarantining retires the route. It happens once, not in a loop, and never for a mutation or for `editor_render_ghost_preview` with `replace: false`, which accumulates rather than replaces. A result that took two attempts carries `transport.repeats`, and a failure that was asked twice and answered neither time carries `transport.repeated` in `error.data`. A transport failure additionally carries `error.data.transport` with `request_started`, `outcome_unknown` and `timed_out`, plus `reason` and `waited_ms` when the cause was established. `reason` is `peer_closed` when the other end hung up, `deadline` when this side ran out of time, `io_error`, or `stopped`. The two are worth separating: a closed connection and an expired deadline used to share one message and one false `timed_out` flag, so a failure could report a timeout it had not had. `waited_ms` is how long that operation actually waited, which is what distinguishes an operation ended by its own deadline from one ended by something else. A transport failure on a route with a known session also carries `error.data.engine`: `alive`, `gone`, or `unknown`. It answers the question the transport itself cannot, since a peer closing the pipe does not say why it went, and an engine that crashed reads identically to one that is alive and merely stopped answering. `unknown` is a real answer and is kept distinct from `gone`, because a process that could not be queried is not a process that has ended. It also says why: `error.data.engine_reason` is `open_denied` when the process could not be opened for a reason other than there being no such process, with the operating system's own number in `engine_os_error`, or `running_but_unidentified` when something with that pid is running and could not be confirmed as the process the session opened. `unknown` on its own leaves a reader where they started, because an engine that crashed and a query that was refused are different problems. The check compares the recorded start time as well as the pid, so a recycled pid reads as `gone` rather than as the session that used to own it. Public `tools/call` converts these failures into MCP content with `result.isError: true`; clients should use the returned text and structured error data rather than expecting a top-level JSON-RPC code.
 
 ---
 
@@ -100,24 +100,30 @@ it means in `_meta["didi"]["runtime_session_id"]`. Discover the ids with
 A modern request is only ever served on the session it named. Naming nothing
 gets no live route at all: a tool that can answer offline does and says
 `offline_fallback`, and a live-only tool is refused with `400` naming the field
-to set. Naming a session while the server is routed to a different one is
-refused with `409` carrying both ids, rather than moving a route another task
-selected. Availability follows the same rule, so `tools/list` will not report a
-tool live because an unrelated request attached an editor.
+to set. Availability follows the same rule, so `tools/list` will not report a
+tool live because an unrelated request opened a route to an editor.
 
 `resources/read` is scoped the same way. `godot://editor/state` and
-`godot://runtime/logs` read from the attached editor, so a modern read that
-named no session, or named a different one, gets the offline payload rather
-than another task's editor.
+`godot://runtime/logs` read from a live session, so a modern read that named no
+session gets the offline payload rather than another task's editor.
 
-The server holds one route at a time. A modern request may select a session
-when the server is routed nowhere, because that takes it from nobody. Two tasks
-that need two different sessions at once need two Didi processes; the `409` says
-so rather than letting one of them silently drive the other's editor.
+Naming a session the server is not already routed to opens a route to it. That
+route is held alongside any others, so two tasks interleaving requests on one
+stdio process each drive their own editor and neither sees the other's. Opening
+a route does not move the process selection, so a legacy client keeps whatever
+it attached.
 
-Legacy clients are unchanged. `runtime_attach_session` still sets a route for
-the process and later legacy requests still inherit it, which is the lifecycle
-that era was written against.
+One process holds at most eight routes at once. Each one keeps a connection and
+an ownership lock, and a lock held here is a session refused to every other Didi
+process, so the count is bounded rather than left to grow. Routes whose engine
+has gone are dropped before the limit is consulted; if the limit is genuinely
+reached the request is refused with `429` naming what to do. Every held route is
+released on shutdown, not only the selected one.
+
+Legacy clients are unchanged. `runtime_attach_session` still sets the process
+selection and later legacy requests still inherit it, which is the lifecycle
+that era was written against. Detaching releases the selected route and leaves
+any others alone.
 
 `server/discover` reports the supported versions without a handshake, because it
 is the probe a modern stdio client sends first. A version Didi does not serve

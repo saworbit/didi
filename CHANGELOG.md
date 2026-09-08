@@ -69,7 +69,53 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 - Added opt-in managed editor recovery: isolated project copies, saved-file checkpoints, one owned-editor restart, explicit reconciliation and preserved-workspace restoration. Four recovery tools expose state and actions without replaying uncertain edits. Ordinary attachment and runtime_launch remain unchanged. See [Managed Recovery](docs/MANAGED_RECOVERY.md) for coverage and limitations.
 
+### Changed
+
+- One Didi process can drive several Godot sessions at once. Routes are held per
+  session, each with its own connection and ownership lock, so two tasks
+  interleaving requests on one stdio process each drive their own editor and
+  neither sees the other's. Opening a route for a named request does not move
+  the process selection, so a legacy client sharing the process keeps what it
+  attached, and detaching releases only the selected route.
+
+  Eight routes at once is the ceiling. Each holds an ownership lock, and a lock
+  held here is a session refused to every other Didi process, so the count is
+  bounded rather than left to grow; routes whose engine has gone are dropped
+  before the limit is consulted, and a genuine limit returns `429`. Every held
+  route is released on shutdown, not only the selected one.
+
 ### Fixed
+
+- A request no longer inherits a Godot session it never chose. Attaching set one
+  route for the whole process and every later request acquired it, so on a
+  process serving more than one task an agent could read from, or mutate, an
+  editor a different task had attached.
+
+  A request declaring protocol `2026-07-28` now names its session in
+  `_meta.didi.runtime_session_id` and is served on that one only. Naming nothing
+  gets no live route: a tool that can answer offline does and says so, and a
+  live-only tool is refused with `400` naming the field to set. `tools/list`,
+  `resources/list` and `resources/read` follow the same rule, so nothing is
+  reported live, or read, because an unrelated task opened a route. The named
+  session is checked for project identity, and a confirmation token now binds to
+  the session the call will actually run on rather than whichever route happened
+  to be current when the preview ran.
+
+  Legacy clients are unchanged. `runtime_attach_session` still selects a session
+  for the process and later legacy requests still inherit it. See
+  [Naming the runtime session](docs/INTEGRATION_GUIDE.md#naming-the-runtime-session).
+
+- A modern request is validated before it is dispatched. Advertising
+  `2026-07-28` while checking only the protocol version meant a request missing
+  its client capabilities, or carrying a null or fractional id, was executed and
+  answered rather than refused. All of those now return `-32602` before the
+  method runs, naming the field at fault. `server/discover` stays exempt,
+  because refusing the probe a client uses to learn what a server speaks would
+  make a dual-era server look like a legacy one.
+
+- MCP Apps is negotiated per request again. A legacy client declaring the UI
+  extension turned the Control Room on for every later request on that process,
+  including modern ones that declared nothing and could not render it.
 
 - A live failure no longer publishes the session endpoint. An error from a live
   route carried the full public descriptor, so the named pipe or socket path

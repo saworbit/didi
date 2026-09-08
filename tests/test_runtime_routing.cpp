@@ -13,6 +13,7 @@
 #include <future>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <limits>
 #include <string>
@@ -409,6 +410,9 @@ std::string endpointForSession(const std::string& session_id) {
 struct AutoAttachState {
     std::unordered_map<std::string, didi::runtime::SessionDescriptor> by_endpoint;
     std::unordered_map<std::string, bool> reject_endpoint;
+    // One endpoint's connection reported as gone, so a test can kill a single
+    // route while the others stay up. force_disconnected kills all of them.
+    std::unordered_map<std::string, bool> dead_endpoint;
     std::unordered_map<std::string, std::string> mutate_field;
     int handshakes{0};
     bool force_disconnected{false};
@@ -441,7 +445,11 @@ public:
         connected_ = false;
         ++state_->disconnects[endpoint_];
     }
-    bool isConnected() const override { return connected_ && !state_->force_disconnected; }
+    bool isConnected() const override {
+        if (!connected_ || state_->force_disconnected) return false;
+        const auto dead = state_->dead_endpoint.find(endpoint_);
+        return dead == state_->dead_endpoint.end() || !dead->second;
+    }
     didi::Result<didi::json> sendRequest(const std::string& method, const didi::json& params,
                                          int timeout_ms) override {
         if (!isConnected()) return didi::Error::notConnected();
@@ -2081,11 +2089,11 @@ public:
           two(namedDescriptor(std::move(second_id), "editor", project)) {}
 
     bool connect(const std::string&, int) override { return true; }
-    void disconnect() override { held.reset(); }
-    bool isConnected() const override { return held.has_value(); }
+    void disconnect() override { routes.clear(); selected.clear(); }
+    bool isConnected() const override { return !routes.empty(); }
     didi::Result<didi::json> sendRequest(const std::string& method, const didi::json&,
                                          int) override {
-        served.push_back(held.has_value() ? held->session_id : std::string("<none>"));
+        served.push_back(serving.empty() ? std::string("<none>") : serving);
         last_method = method;
         return didi::json{{"status", "ok"}, {"method", method}};
     }
@@ -2094,29 +2102,69 @@ public:
                           {"diagnostics", didi::json::array()}};
     }
     didi::Result<didi::json> attachSession(const std::string& session_id) override {
-        attaches.push_back(session_id);
-        if (session_id == one.session_id) held = one;
-        else if (session_id == two.session_id) held = two;
-        else return didi::Error::notFound("Runtime session not found: " + session_id);
+        auto opened = openSessionRoute(session_id);
+        if (opened.isOk()) selected = session_id;
+        return opened;
+    }
+    didi::Result<didi::json> openSessionRoute(const std::string& session_id) override {
+        opens.push_back(session_id);
+        const auto* descriptor = descriptorFor_(session_id);
+        if (!descriptor) return didi::Error::notFound("Runtime session not found: " + session_id);
+        routes[session_id] = *descriptor;
         ++generation;
         return didi::json::object();
     }
-    didi::Result<didi::json> detachSession() override {
-        held.reset();
+    didi::Result<didi::json> closeSessionRoute(const std::string& session_id) override {
+        if (!routes.erase(session_id)) {
+            return didi::Error::notFound("No runtime route is open for session: " + session_id);
+        }
+        if (selected == session_id) selected.clear();
         return didi::json::object();
     }
-    std::optional<didi::runtime::SessionDescriptor> activeSession() const override { return held; }
+    didi::Result<didi::json> detachSession() override {
+        if (selected.empty()) return didi::Error::notConnected("No runtime session is attached");
+        return closeSessionRoute(selected);
+    }
+    std::vector<didi::runtime::SessionDescriptor> heldSessions() const override {
+        std::vector<didi::runtime::SessionDescriptor> held;
+        for (const auto& entry : routes) held.push_back(entry.second);
+        return held;
+    }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override {
+        auto it = routes.find(selected);
+        if (it == routes.end()) return std::nullopt;
+        return it->second;
+    }
     std::optional<didi::runtime::RuntimeRouteLease> acquireRouteLease() override {
-        if (!held.has_value()) return std::nullopt;
+        return acquireRouteLeaseFor(selected);
+    }
+    std::optional<didi::runtime::RuntimeRouteLease> acquireRouteLeaseFor(
+        const std::string& session_id) override {
+        auto it = routes.find(session_id);
+        if (it == routes.end()) return std::nullopt;
+        serving = session_id;
         return didi::runtime::RuntimeRouteLease{
-            std::static_pointer_cast<didi::ipc::IIpcClient>(shared_from_this()), held, generation};
+            std::static_pointer_cast<didi::ipc::IIpcClient>(shared_from_this()), it->second,
+            generation};
     }
     bool quarantineRoute(const didi::runtime::RuntimeRouteLease&) override { return false; }
 
+    const didi::runtime::SessionDescriptor* descriptorFor_(const std::string& session_id) const {
+        if (session_id == one.session_id) return &one;
+        if (session_id == two.session_id) return &two;
+        return nullptr;
+    }
+
     didi::runtime::SessionDescriptor one;
     didi::runtime::SessionDescriptor two;
-    std::optional<didi::runtime::SessionDescriptor> held;
-    std::vector<std::string> attaches;
+    // Every route held at once, which is the arrangement under test.
+    std::map<std::string, didi::runtime::SessionDescriptor> routes;
+    // The process selection, separate from what is held.
+    std::string selected;
+    std::vector<std::string> opens;
+    // Which route the most recent lease was taken on, so served records the
+    // session a request actually reached rather than the selection.
+    std::string serving;
     std::vector<std::string> served;
     std::string last_method;
     uint64_t generation{1};
@@ -2185,7 +2233,7 @@ void test_modern_call_without_a_handle_does_not_inherit_the_attached_route() {
     ASSERT_EQ(payload["error"]["data"]["missing"], "_meta.didi.runtime_session_id");
     // Never reached the engine, and the legacy route is untouched.
     ASSERT_TRUE(fake->served.empty());
-    ASSERT_EQ(fake->held->session_id, std::string(kSessionA));
+    ASSERT_EQ(fake->activeSession()->session_id, std::string(kSessionA));
 }
 
 // A legacy request is the lifecycle this was written against and keeps it.
@@ -2207,7 +2255,7 @@ void test_modern_call_naming_the_attached_session_is_served_on_it() {
     auto& fake = route.session;
     auto& registry = didi::mcp::ToolRegistry::instance();
     ASSERT_TRUE(fake->attachSession(kSessionA).isOk());
-    const auto attaches_before = fake->attaches.size();
+    const auto opens_before = fake->opens.size();
 
     const auto result = registry.callTool("scene_instantiate_node", kProbeArguments,
                                           modernNaming(kSessionA));
@@ -2215,74 +2263,73 @@ void test_modern_call_naming_the_attached_session_is_served_on_it() {
     ASSERT_FALSE(result.isError);
     ASSERT_EQ(fake->served.size(), static_cast<size_t>(1));
     ASSERT_EQ(fake->served[0], std::string(kSessionA));
-    // Naming the session already routed changes nothing about the route.
-    ASSERT_EQ(fake->attaches.size(), attaches_before);
+    // Naming a session already routed reuses it rather than opening it again.
+    ASSERT_EQ(fake->opens.size(), opens_before);
 }
 
-// The criterion that stops this fix becoming the same defect pointed the other
-// way: a request must not take the route from whoever set it.
-void test_modern_call_naming_another_session_is_refused_and_moves_nothing() {
+// Naming a session other than the selected one opens a second route rather
+// than moving the first. The legacy client that attached keeps what it
+// attached, and both sessions are held at once.
+void test_modern_call_naming_another_session_opens_its_own_route() {
     ScopedRegistryRoute route;
     auto& fake = route.session;
     auto& registry = didi::mcp::ToolRegistry::instance();
     ASSERT_TRUE(fake->attachSession(kSessionA).isOk());
-    const auto attaches_before = fake->attaches.size();
 
     const auto result = registry.callTool("scene_instantiate_node", kProbeArguments,
                                           modernNaming(kSessionB));
 
-    ASSERT_TRUE(result.isError);
-    const auto payload = didi::json::parse(result.content[0].text);
-    ASSERT_EQ(payload["error"]["code"], 409);
-    ASSERT_EQ(payload["error"]["data"]["requested_session_id"], std::string(kSessionB));
-    ASSERT_EQ(payload["error"]["data"]["attached_session_id"], std::string(kSessionA));
-    ASSERT_TRUE(fake->served.empty());
-    ASSERT_EQ(fake->attaches.size(), attaches_before);
-    ASSERT_EQ(fake->held->session_id, std::string(kSessionA));
+    ASSERT_FALSE(result.isError);
+    ASSERT_EQ(fake->served.size(), static_cast<size_t>(1));
+    ASSERT_EQ(fake->served[0], std::string(kSessionB));
+    // The selection did not move, and both routes are held.
+    ASSERT_EQ(fake->selected, std::string(kSessionA));
+    ASSERT_EQ(fake->activeSession()->session_id, std::string(kSessionA));
+    ASSERT_EQ(fake->heldSessions().size(), static_cast<size_t>(2));
 }
 
-// Interleaving, which is the arrangement the specification says to expect.
-void test_interleaved_modern_calls_cannot_be_served_on_each_others_session() {
+// Interleaving, which is the arrangement the specification says to expect and
+// the reason this exists: two tasks on one stdio process, each driving its own
+// editor, neither seeing the other's.
+void test_interleaved_modern_calls_each_reach_their_own_session() {
     ScopedRegistryRoute route;
     auto& fake = route.session;
     auto& registry = didi::mcp::ToolRegistry::instance();
 
-    // Task A selects a session on a process routed nowhere, taking it from
-    // nobody.
-    const auto first = registry.callTool("scene_instantiate_node", kProbeArguments,
-                                         modernNaming(kSessionA));
-    ASSERT_FALSE(first.isError);
+    // A, B, A, B interleaved, the way two unrelated tasks would arrive.
+    const std::array<const char*, 4> order{kSessionA, kSessionB, kSessionA, kSessionB};
+    for (const auto* session : order) {
+        const auto result = registry.callTool("scene_instantiate_node", kProbeArguments,
+                                              modernNaming(session));
+        ASSERT_FALSE(result.isError);
+    }
 
-    // Task B, interleaved, names the other one. It is refused rather than
-    // silently served, and A's route does not move.
-    const auto second = registry.callTool("scene_instantiate_node", kProbeArguments,
-                                          modernNaming(kSessionB));
-    ASSERT_TRUE(second.isError);
-
-    // A carries on, still on the session it named.
-    const auto third = registry.callTool("scene_instantiate_node", kProbeArguments,
-                                         modernNaming(kSessionA));
-    ASSERT_FALSE(third.isError);
-
-    // Every request that reached the engine reached the session it asked for,
-    // and none reached B.
-    for (const auto& served : fake->served) ASSERT_EQ(served, std::string(kSessionA));
-    ASSERT_EQ(fake->served.size(), static_cast<size_t>(2));
+    // Each request reached the session it named, in the order it was made.
+    ASSERT_EQ(fake->served.size(), static_cast<size_t>(4));
+    for (size_t index = 0; index < order.size(); ++index) {
+        ASSERT_EQ(fake->served[index], std::string(order[index]));
+    }
+    // Both routes are held at once, and neither became the selection, because
+    // naming a session is not attaching to it.
+    ASSERT_EQ(fake->heldSessions().size(), static_cast<size_t>(2));
+    ASSERT_TRUE(fake->selected.empty());
 }
 
 void test_modern_call_selects_a_session_when_the_process_is_routed_nowhere() {
     ScopedRegistryRoute route;
     auto& fake = route.session;
     auto& registry = didi::mcp::ToolRegistry::instance();
-    ASSERT_FALSE(fake->held.has_value());
+    ASSERT_TRUE(fake->heldSessions().empty());
 
     const auto result = registry.callTool("scene_instantiate_node", kProbeArguments,
                                           modernNaming(kSessionB));
 
     ASSERT_FALSE(result.isError);
-    ASSERT_EQ(fake->attaches.size(), static_cast<size_t>(1));
-    ASSERT_EQ(fake->attaches[0], std::string(kSessionB));
+    ASSERT_EQ(fake->opens.size(), static_cast<size_t>(1));
+    ASSERT_EQ(fake->opens[0], std::string(kSessionB));
     ASSERT_EQ(fake->served[0], std::string(kSessionB));
+    // Opening a route for a named request does not make it the selection.
+    ASSERT_TRUE(fake->selected.empty());
 }
 
 // A handle names a session, and attaching by id searches every session on the
@@ -2358,7 +2405,6 @@ void test_modern_resource_read_does_not_inherit_the_attached_route() {
     ASSERT_TRUE(other.isOk());
     ASSERT_EQ(didi::json::parse(other.value())["execution_mode"], "offline_fallback");
     ASSERT_TRUE(fake->served.empty());
-    ASSERT_EQ(fake->held->session_id, std::string(kSessionA));
 
     // A legacy read still inherits, which is the era's own lifecycle.
     const auto legacy = resources.readResource("godot://editor/state");
@@ -2367,6 +2413,213 @@ void test_modern_resource_read_does_not_inherit_the_attached_route() {
 
     resources.setIpcClient(nullptr);
     resources.registerAllDefaultResources();
+}
+
+
+// --- Two sessions on one process, for real -----------------------------------
+//
+// The fake above proves the dispatch rules. These drive the real session
+// client, because holding two routes means holding two connections and two
+// ownership locks, and a lock this process keeps is a session every other Didi
+// process is refused until this one exits.
+
+void test_two_runtime_routes_are_held_and_leased_independently() {
+    SessionDirectoryFixture fixture;
+    const auto first = fixture.add("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "editor");
+    const auto second = fixture.add("b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2", "game");
+    auto client = fixture.client();
+
+    // A legacy client attaches, which selects.
+    ASSERT_TRUE(client->attachSession(first.session_id).isOk());
+    // A request names the other one, which opens a route without selecting.
+    ASSERT_TRUE(client->openSessionRoute(second.session_id).isOk());
+
+    ASSERT_EQ(client->heldSessions().size(), static_cast<size_t>(2));
+    // The selection is still what the legacy client attached.
+    ASSERT_TRUE(client->activeSession().has_value());
+    ASSERT_EQ(client->activeSession()->session_id, first.session_id);
+
+    // Each lease reaches its own session, and neither reaches the other's.
+    const auto lease_first = client->acquireRouteLeaseFor(first.session_id);
+    const auto lease_second = client->acquireRouteLeaseFor(second.session_id);
+    ASSERT_TRUE(lease_first.has_value());
+    ASSERT_TRUE(lease_second.has_value());
+    ASSERT_EQ(lease_first->descriptor->session_id, first.session_id);
+    ASSERT_EQ(lease_second->descriptor->session_id, second.session_id);
+    ASSERT_TRUE(lease_first->client != lease_second->client);
+    // Generations are handed out once, so two live routes never share one.
+    ASSERT_TRUE(lease_first->generation != lease_second->generation);
+
+    // The selection-based lease still answers about the selection alone.
+    const auto selected = client->acquireRouteLease();
+    ASSERT_TRUE(selected.has_value());
+    ASSERT_EQ(selected->descriptor->session_id, first.session_id);
+
+    client->disconnect();
+}
+
+void test_detaching_the_selection_leaves_the_other_route_alone() {
+    SessionDirectoryFixture fixture;
+    const auto first = fixture.add("c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3", "editor");
+    const auto second = fixture.add("d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4", "game");
+    auto client = fixture.client();
+    ASSERT_TRUE(client->attachSession(first.session_id).isOk());
+    ASSERT_TRUE(client->openSessionRoute(second.session_id).isOk());
+
+    ASSERT_TRUE(client->detachSession().isOk());
+
+    // The selection is gone, the route nobody detached is not.
+    ASSERT_FALSE(client->activeSession().has_value());
+    ASSERT_EQ(client->heldSessions().size(), static_cast<size_t>(1));
+    ASSERT_TRUE(client->acquireRouteLeaseFor(first.session_id) == std::nullopt);
+    ASSERT_TRUE(client->acquireRouteLeaseFor(second.session_id).has_value());
+
+    client->disconnect();
+}
+
+// The one that matters most. A route the selection never pointed at still holds
+// a lock, and shutdown reads the selection. Releasing only that would leave the
+// other session locked for every other Didi process until this one exits.
+void test_releasing_every_route_frees_every_ownership_lock() {
+    SessionDirectoryFixture fixture;
+    const auto first = fixture.add("e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5", "editor");
+    const auto second = fixture.add("f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6", "game");
+    auto client = fixture.client();
+    ASSERT_TRUE(client->attachSession(first.session_id).isOk());
+    ASSERT_TRUE(client->openSessionRoute(second.session_id).isOk());
+    ASSERT_EQ(client->heldSessions().size(), static_cast<size_t>(2));
+
+    // Exactly what shutdown does: every held session, not just the selection.
+    for (const auto& held : client->heldSessions()) {
+        ASSERT_TRUE(client->closeSessionRoute(held.session_id).isOk());
+    }
+    ASSERT_TRUE(client->heldSessions().empty());
+
+    // A different client can now take both, which is the only observation that
+    // proves the locks went rather than the routes merely being forgotten.
+    auto successor = fixture.client();
+    ASSERT_TRUE(successor->attachSession(first.session_id).isOk());
+    ASSERT_TRUE(successor->openSessionRoute(second.session_id).isOk());
+    ASSERT_EQ(successor->heldSessions().size(), static_cast<size_t>(2));
+    successor->disconnect();
+}
+
+// disconnect() is the other way everything goes at once.
+//
+// Dropping the routes releases their locks on its own, because the map holds
+// the only reference to each. The connections do not close themselves, so this
+// asserts on those: closing one and abandoning the other is the shape of the
+// mistake, and only the sockets can see it.
+void test_disconnect_releases_every_route_not_only_the_selected_one() {
+    SessionDirectoryFixture fixture;
+    const auto first = fixture.add("07070707070707070707070707070707", "editor");
+    const auto second = fixture.add("18181818181818181818181818181818", "game");
+    auto client = fixture.client();
+    ASSERT_TRUE(client->attachSession(first.session_id).isOk());
+    ASSERT_TRUE(client->openSessionRoute(second.session_id).isOk());
+    ASSERT_EQ(fixture.state->disconnects[first.endpoint], 0);
+    ASSERT_EQ(fixture.state->disconnects[second.endpoint], 0);
+
+    client->disconnect();
+
+    ASSERT_TRUE(client->heldSessions().empty());
+    // Both connections closed, not only the selected one's.
+    ASSERT_EQ(fixture.state->disconnects[first.endpoint], 1);
+    ASSERT_EQ(fixture.state->disconnects[second.endpoint], 1);
+
+    auto successor = fixture.client();
+    ASSERT_TRUE(successor->openSessionRoute(second.session_id).isOk());
+    successor->disconnect();
+}
+
+// Constructing an McpServer points the shared registries at its own client,
+// and this test then points them at a fixture client that goes away with the
+// fixture. Put them back however the test leaves, or the next test in the run
+// is answered by a route that no longer exists.
+struct ScopedSharedRegistries {
+    ~ScopedSharedRegistries() {
+        didi::mcp::ToolRegistry::instance().setRuntimeSessionClient(nullptr);
+        didi::mcp::ToolRegistry::instance().setIpcClient(nullptr);
+        didi::mcp::ToolRegistry::instance().registerAllDefaultTools();
+        didi::mcp::ResourceRegistry::instance().setIpcClient(nullptr);
+        didi::mcp::ResourceRegistry::instance().registerAllDefaultResources();
+    }
+};
+
+// The server's shutdown path, rather than the client's, because that is what
+// actually runs when the stdio loop ends.
+void test_server_shutdown_releases_a_route_the_selection_never_pointed_at() {
+    ScopedSharedRegistries restore_registries;
+    SessionDirectoryFixture fixture;
+    const auto selected = fixture.add("29292929292929292929292929292929", "editor");
+    const auto named = fixture.add("3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a", "game");
+    auto client = fixture.client();
+    ASSERT_TRUE(client->attachSession(selected.session_id).isOk());
+    ASSERT_TRUE(client->openSessionRoute(named.session_id).isOk());
+
+    {
+        didi::mcp::McpServer server;
+        server.setIpcClient(client);
+        server.stop();
+    }
+
+    ASSERT_TRUE(client->heldSessions().empty());
+    auto successor = fixture.client();
+    ASSERT_TRUE(successor->openSessionRoute(named.session_id).isOk());
+    successor->disconnect();
+}
+
+// Attaching a session that is already routed still performs the handshake.
+//
+// The reuse shortcut skipped it, and the live harness caught what the unit
+// tests did not: attach is how a caller revalidates a session, and its answer
+// carries the handshake a caller reads. Reusing the route silently turned a
+// revalidation into a no-op.
+void test_reattaching_the_same_session_still_handshakes() {
+    SessionDirectoryFixture fixture;
+    const auto session = fixture.add("6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d", "editor");
+    auto client = fixture.client();
+
+    const auto first = client->attachSession(session.session_id);
+    ASSERT_TRUE(first.isOk());
+    const auto handshakes_after_first = fixture.state->handshakes;
+    ASSERT_TRUE(first.value().contains("handshake"));
+
+    const auto again = client->attachSession(session.session_id);
+    ASSERT_TRUE(again.isOk());
+    ASSERT_TRUE(again.value().contains("handshake"));
+    ASSERT_TRUE(fixture.state->handshakes > handshakes_after_first);
+
+    // A request naming a session it already holds does not pay for one, because
+    // it is using the route rather than revalidating it.
+    const auto before_open = fixture.state->handshakes;
+    ASSERT_TRUE(client->openSessionRoute(session.session_id).isOk());
+    ASSERT_EQ(fixture.state->handshakes, before_open);
+
+    client->disconnect();
+}
+
+// A route to an engine that has gone still holds a lock, so it is reaped before
+// the cap is consulted. Otherwise an editor closed hours ago is what refuses a
+// session now.
+void test_a_dead_route_does_not_count_against_the_held_route_limit() {
+    SessionDirectoryFixture fixture;
+    const auto first = fixture.add("4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b", "editor");
+    const auto second = fixture.add("5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c", "game");
+    auto client = fixture.client();
+    ASSERT_TRUE(client->openSessionRoute(first.session_id).isOk());
+    ASSERT_EQ(client->heldSessions().size(), static_cast<size_t>(1));
+
+    // The engine behind the first route goes away.
+    fixture.state->dead_endpoint[first.endpoint] = true;
+    ASSERT_TRUE(client->openSessionRoute(second.session_id).isOk());
+
+    // The dead one was reaped rather than kept holding its lock.
+    const auto held = client->heldSessions();
+    ASSERT_EQ(held.size(), static_cast<size_t>(1));
+    ASSERT_EQ(held[0].session_id, second.session_id);
+
+    client->disconnect();
 }
 
 struct RegisterRuntimeRoutingTests {
@@ -2463,10 +2716,10 @@ struct RegisterRuntimeRoutingTests {
                      test_legacy_call_still_inherits_the_attached_route);
         registerTest("RuntimeRouting.ModernCallUsesTheSessionItNamed",
                      test_modern_call_naming_the_attached_session_is_served_on_it);
-        registerTest("RuntimeRouting.ModernCallCannotTakeAnotherRoute",
-                     test_modern_call_naming_another_session_is_refused_and_moves_nothing);
+        registerTest("RuntimeRouting.ModernCallOpensItsOwnRoute",
+                     test_modern_call_naming_another_session_opens_its_own_route);
         registerTest("RuntimeRouting.InterleavedModernCallsStaySeparate",
-                     test_interleaved_modern_calls_cannot_be_served_on_each_others_session);
+                     test_interleaved_modern_calls_each_reach_their_own_session);
         registerTest("RuntimeRouting.ModernCallSelectsAnUnroutedSession",
                      test_modern_call_selects_a_session_when_the_process_is_routed_nowhere);
         registerTest("RuntimeRouting.ModernCallChecksProjectIdentity",
@@ -2475,6 +2728,20 @@ struct RegisterRuntimeRoutingTests {
                      test_modern_call_without_a_handle_still_answers_offline);
         registerTest("RuntimeRouting.ModernResourceReadDoesNotInheritRoute",
                      test_modern_resource_read_does_not_inherit_the_attached_route);
+        registerTest("RuntimeRouting.TwoRoutesHeldIndependently",
+                     test_two_runtime_routes_are_held_and_leased_independently);
+        registerTest("RuntimeRouting.DetachLeavesOtherRoute",
+                     test_detaching_the_selection_leaves_the_other_route_alone);
+        registerTest("RuntimeRouting.ReleasingEveryRouteFreesEveryLock",
+                     test_releasing_every_route_frees_every_ownership_lock);
+        registerTest("RuntimeRouting.DisconnectReleasesEveryRoute",
+                     test_disconnect_releases_every_route_not_only_the_selected_one);
+        registerTest("RuntimeRouting.ShutdownReleasesUnselectedRoute",
+                     test_server_shutdown_releases_a_route_the_selection_never_pointed_at);
+        registerTest("RuntimeRouting.ReattachStillHandshakes",
+                     test_reattaching_the_same_session_still_handshakes);
+        registerTest("RuntimeRouting.DeadRouteDoesNotFillTheLimit",
+                     test_a_dead_route_does_not_count_against_the_held_route_limit);
     }
 } g_registerRuntimeRoutingTests;
 

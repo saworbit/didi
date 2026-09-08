@@ -276,13 +276,10 @@ std::optional<std::string> requestedRuntimeSession(const json& params) {
 std::optional<runtime::RuntimeRouteLease> visibleRouteLease(
     const std::shared_ptr<ipc::IIpcClient>& client, const RequestScope& scope) {
     if (!scope.mayInheritActiveRoute() && !scope.selectsRuntimeSession()) return std::nullopt;
-    auto lease = runtime::acquireRuntimeRouteLease(client);
-    if (!scope.selectsRuntimeSession()) return lease;
-    if (lease.has_value() && lease->descriptor.has_value() &&
-        lease->descriptor->session_id == *scope.runtime_session_id) {
-        return lease;
+    if (scope.selectsRuntimeSession()) {
+        return runtime::acquireRuntimeRouteLeaseFor(client, *scope.runtime_session_id);
     }
-    return std::nullopt;
+    return runtime::acquireRuntimeRouteLease(client);
 }
 
 bool requestDeclaresUiExtension(const json& params) {
@@ -1120,15 +1117,27 @@ void McpServer::releaseRuntimeSession() {
     m_running.store(false);
     stopBoardWatcher();
     if (!m_runtimeSessionClient) return;
-    if (!m_runtimeSessionClient->activeSession().has_value()) return;
 
-    const auto detached = m_runtimeSessionClient->detachSession();
-    if (detached.isErr()) {
-        DIDI_LOG_WARN("MCP_SERVER", "Runtime session detach on shutdown failed: ",
-                      detached.error().message);
-        return;
+    // Every route, not only the selected one. Each holds an ownership lock,
+    // and one kept past shutdown refuses that session to every other Didi
+    // process until this one exits. Requests that named their own session open
+    // routes the selection never points at, so reading only the selection here
+    // would leak exactly those.
+    const auto held = m_runtimeSessionClient->heldSessions();
+    if (held.empty()) return;
+    size_t released = 0;
+    for (const auto& session : held) {
+        const auto closed = m_runtimeSessionClient->closeSessionRoute(session.session_id);
+        if (closed.isErr()) {
+            DIDI_LOG_WARN("MCP_SERVER", "Runtime route release on shutdown failed for ",
+                          session.session_id, ": ", closed.error().message);
+            continue;
+        }
+        ++released;
     }
-    DIDI_LOG_INFO("MCP_SERVER", "Released the attached runtime session on shutdown");
+    if (released > 0) {
+        DIDI_LOG_INFO("MCP_SERVER", "Released ", released, " runtime session route(s) on shutdown");
+    }
 }
 
 } // namespace mcp
