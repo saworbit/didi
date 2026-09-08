@@ -830,7 +830,7 @@ Scene paths reject absolute filesystem paths, backslashes, and parent-relative s
 
 ## 11. Phase 3 runtime sessions
 
-Phase 3 routes live operations to one authenticated Godot editor or game. The four session-management tools advertise `offline_fallback` because they run locally in the MCP process; successful payloads identify `execution_mode: "local_session_management"`. The other six tools advertise `live` and require an attached session. On first availability, Didi auto-attaches only when canonical-project discovery yields one session, or one editor among games. Multiple editors or game-only multiplicity remain detached. Explicit attach/detach or route quarantine disables later auto-selection.
+Phase 3 routes live operations to authenticated Godot editors and games. The four session-management tools advertise `offline_fallback` because they run locally in the MCP process; successful payloads identify `execution_mode: "local_session_management"`. The other six tools advertise `live` and require a session: a legacy client attaches one and later requests inherit it, while a request declaring protocol `2026-07-28` names the session it means in `_meta.didi.runtime_session_id` and is served on that one only. Several sessions can be held at once, so two tasks sharing one process each drive their own editor. On first availability, Didi auto-attaches only when canonical-project discovery yields one session, or one editor among games. Multiple editors or game-only multiplicity remain detached. Explicit attach/detach or route quarantine disables later auto-selection.
 
 ### `runtime_list_sessions` — Local session management
 

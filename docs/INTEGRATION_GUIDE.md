@@ -219,9 +219,13 @@ coordination tools are for.
 - Size `lease_seconds` to the work, and renew through `blackboard_task_update` if
   it runs long. A lapsed lease returns the task to the pool, which is what makes
   a crashed agent harmless and a silent one indistinguishable from it.
-- The runtime session lock is unaffected. One MCP client at a time may drive a
-  given Godot session; coordinating several agents does not change that, and only
-  one of them can hold the editor route.
+- The runtime session lock is unaffected. One Didi process at a time may drive a
+  given Godot session, and coordinating several agents does not change that.
+- Two agents inside one Didi process are a different case. A client speaking
+  protocol `2026-07-28` names the session it means on every request, so two
+  tasks interleaving requests on one process can drive two different editors at
+  once without either seeing the other's. See
+  [Naming the runtime session](#naming-the-runtime-session) below.
 
 ---
 
@@ -236,11 +240,48 @@ coordination tools are for.
 5. Route live operations and verify `session_kind` (`editor` versus `game`) in every response.
 6. Call `runtime_detach_session` before changing projects or choosing another process.
 
+### Naming the runtime session
+
+A client that declares protocol `2026-07-28` on its requests must say which
+Godot session each one means:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "method": "tools/call",
+  "params": {
+    "_meta": {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities": {},
+      "didi": { "runtime_session_id": "<id from runtime_list_sessions>" }
+    },
+    "name": "scene_get_hierarchy",
+    "arguments": { "root_path": "res://main.tscn" }
+  }
+}
+```
+
+That request is served on that session and no other. A request that names none
+gets no live session at all: a tool that can answer offline does and says
+`offline_fallback`, and a live-only tool is refused with `400` naming the field
+to set. The reason is that a stdio process is not a conversation under that
+revision, so a request cannot be handed whatever session some other task
+happened to attach.
+
+Naming a session the process is not already routed to opens a route to it,
+alongside any others, up to eight at once. Opening a route does not move the
+process selection, so a legacy client sharing the process keeps whatever it
+attached with `runtime_attach_session`.
+
+Legacy clients need none of this. They attach once and later requests inherit
+that session, exactly as before.
+
 For logs, begin with `{ "cursor": 0, "limit": 100 }` and persist `next_cursor`. Treat `dropped_before_cursor` as a retention gap; a severity filter never changes cursor advancement. Records contain `sequence`, timestamp, level, source, message, and `details`. They are structured Didi events, not arbitrary Godot/external stdout. Use `runtime_launch` for bounded child stdout/stderr.
 
 For games, pause before step, allow only one in-flight `runtime_step`, and do not equate `runtime_stop` success with confirmed process exit. Editor sessions support tree/log/evaluation observation but reject game-only step/stop behavior.
 
-Only one MCP client can hold a runtime session lock. Detach or stop the first client before attaching another. For mutating tools, use `dry_run: true` to obtain a change plan; the [always-confirmed and overwrite-confirmed tools](TOOL_REFERENCE.md#13-phase-6-mutation-safety) must then repeat the exact arguments with the returned single-use `confirmation_token`.
+Only one Didi process can hold a given session's lock. Detach or stop the first process before attaching the same session from another. Within one process, several sessions can be held at once; see [Naming the runtime session](#naming-the-runtime-session). For mutating tools, use `dry_run: true` to obtain a change plan; the [always-confirmed and overwrite-confirmed tools](TOOL_REFERENCE.md#13-phase-6-mutation-safety) must then repeat the exact arguments with the returned single-use `confirmation_token`.
 
 For evaluation, send only expressions supported by the [exact receiver allowlist](TOOL_REFERENCE.md#eval_gdscript--live). The submitted source is intentionally absent from successful responses and operational logs. Context and returned Nodes must remain inside the active editor/game subtree. The timeout is cooperative, not preemptive.
 

@@ -43,13 +43,12 @@ std::optional<runtime::RuntimeRouteLease> scopedRouteLease(
     const std::shared_ptr<ipc::IIpcClient>& client) {
     const auto& scope = t_readScope;
     if (!scope.mayInheritActiveRoute() && !scope.selectsRuntimeSession()) return std::nullopt;
-    auto lease = runtime::acquireRuntimeRouteLease(client);
-    if (!scope.selectsRuntimeSession()) return lease;
-    if (lease.has_value() && lease->descriptor.has_value() &&
-        lease->descriptor->session_id == *scope.runtime_session_id) {
-        return lease;
+    // A read that named a session is served from that one whether or not it is
+    // the process selection, and never from another.
+    if (scope.selectsRuntimeSession()) {
+        return runtime::acquireRuntimeRouteLeaseFor(client, *scope.runtime_session_id);
     }
-    return std::nullopt;
+    return runtime::acquireRuntimeRouteLease(client);
 }
 
 } // namespace
