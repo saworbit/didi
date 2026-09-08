@@ -220,6 +220,7 @@ constexpr int64_t kStaticTtlMs = 3600000;
 // step with the first.
 constexpr const char* kConfirmationRequestKey = "didi_confirm_mutation";
 constexpr const char* kClientCapabilitiesMetaKey = "io.modelcontextprotocol/clientCapabilities";
+constexpr const char* kClientInfoMetaKey = "io.modelcontextprotocol/clientInfo";
 
 bool clientCanElicitForms(const json& params) {
     if (!params.is_object() || !params.contains("_meta") || !params["_meta"].is_object()) {
@@ -322,6 +323,72 @@ json withConfirmationProvenance(json result, const char* provenance) {
     return result;
 }
 
+// Whether the request marked itself modern. The marker is the presence of the
+// protocol version key, not whether it parsed: a request carrying the key with
+// a non-string value is a malformed modern request, not a legacy one, and
+// reading it as legacy would let it through the gate it failed.
+bool carriesModernEnvelope(const json& params) {
+    return params.is_object() && params.contains("_meta") && params["_meta"].is_object() &&
+           params["_meta"].contains(kProtocolVersionMetaKey);
+}
+
+json missingMetaField(const char* key) {
+    return {{"field", std::string("_meta.") + key}};
+}
+
+// Revision 2026-07-28 makes every request self-contained: protocol version and
+// client capabilities travel in `_meta` on the request itself, and a request
+// missing either is malformed and must be rejected with -32602 before the
+// method runs. Advertising the revision without this check meant a request
+// that a conforming client is entitled to have refused was executed instead,
+// and answered with a response that client may reject.
+//
+// Only requests that marked themselves modern reach here. A legacy request
+// carries no envelope and keeps the handshake it negotiated.
+//
+// `server/discover` is deliberately never validated. It is the probe a modern
+// stdio client sends to learn what a server speaks, and the backward
+// compatibility rules tell that client to read any error which is not a
+// recognised modern error as proof of a legacy server. Refusing a bare
+// discover would make this dual-era server look legacy to exactly the clients
+// the rest of this validation exists to serve.
+std::optional<JsonRpcResponse> rejectMalformedModernEnvelope(const JsonRpcRequest& req) {
+    const json& meta = req.params["_meta"];
+
+    if (!meta[kProtocolVersionMetaKey].is_string()) {
+        return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams,
+                                          "Protocol version must be a string",
+                                          missingMetaField(kProtocolVersionMetaKey));
+    }
+    const auto capabilities = meta.find(kClientCapabilitiesMetaKey);
+    if (capabilities == meta.end()) {
+        return JsonRpcResponse::makeError(
+            req.id, JsonRpcErrorCode::InvalidParams,
+            "Client capabilities are required on every request that declares a protocol version",
+            missingMetaField(kClientCapabilitiesMetaKey));
+    }
+    if (!capabilities->is_object()) {
+        return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams,
+                                          "Client capabilities must be an object",
+                                          missingMetaField(kClientCapabilitiesMetaKey));
+    }
+    const auto client_info = meta.find(kClientInfoMetaKey);
+    if (client_info != meta.end() && !client_info->is_object()) {
+        return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams,
+                                          "Client info must be an object",
+                                          missingMetaField(kClientInfoMetaKey));
+    }
+    // Unlike base JSON-RPC, a modern request id must be a string or an integer
+    // and must not be null. A notification carries no id and gets no response,
+    // so there is nothing to check and nowhere to report it.
+    if (!req.is_notification && !req.id.is_string() && !req.id.is_number_integer()) {
+        return JsonRpcResponse::makeError(
+            req.id, JsonRpcErrorCode::InvalidParams,
+            "Request id must be a string or an integer, and must not be null");
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 std::optional<McpServer::UiAppMode> McpServer::parseUiAppMode(const std::string& value) {
@@ -331,12 +398,19 @@ std::optional<McpServer::UiAppMode> McpServer::parseUiAppMode(const std::string&
     return std::nullopt;
 }
 
-bool McpServer::uiSurfaceVisible(const json& params) const {
+bool McpServer::uiSurfaceVisible(ProtocolEra era, const json& params) const {
     switch (m_uiAppMode) {
         case UiAppMode::Off: return false;
         case UiAppMode::Always: return true;
         case UiAppMode::Auto: break;
     }
+    // MCP Apps is opt-in on both sides, and a modern request declares its own
+    // capabilities. Reading the legacy handshake flag here served one client's
+    // extension choice to another client's request: a host that cannot render
+    // the page was handed UI metadata and an HTML resource, and spent context
+    // on a surface it never negotiated. A modern request is answered from
+    // itself alone.
+    if (era == ProtocolEra::Modern) return requestDeclaresUiExtension(params);
     return m_clientDeclaredUiExtension || requestDeclaresUiExtension(params);
 }
 
@@ -349,10 +423,10 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     // than in a handshake. Reject an unsupported one before doing any work, and
     // name what this server does speak: that list is the client's entire
     // recovery path.
+    const ProtocolEra era =
+        carriesModernEnvelope(req.params) ? ProtocolEra::Modern : ProtocolEra::Legacy;
     std::optional<std::string> requested_version;
-    if (req.params.is_object() && req.params.contains("_meta") &&
-        req.params["_meta"].is_object() &&
-        req.params["_meta"].contains(kProtocolVersionMetaKey) &&
+    if (era == ProtocolEra::Modern &&
         req.params["_meta"][kProtocolVersionMetaKey].is_string()) {
         requested_version = req.params["_meta"][kProtocolVersionMetaKey].get<std::string>();
     }
@@ -400,6 +474,13 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         };
         return JsonRpcResponse::makeSuccess(
             req.id, cacheable(std::move(result), kStaticTtlMs, "public"));
+    }
+
+    // Placed after discover and before every other method, so a malformed
+    // modern request is refused before any registry, resource or tool code
+    // runs. A legacy request never enters here.
+    if (era == ProtocolEra::Modern) {
+        if (auto rejected = rejectMalformedModernEnvelope(req)) return *rejected;
     }
 
     if (req.method == "initialize") {
@@ -455,7 +536,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         const auto session_kind = active.has_value()
                                       ? std::optional<std::string>(active->kind)
                                       : std::optional<std::string>{};
-        const bool ui_visible = uiSurfaceVisible(req.params);
+        const bool ui_visible = uiSurfaceVisible(era, req.params);
         for (const auto& t : tools) {
             json definition = t.toJson();
             addCurrentAvailability(definition, t.capability, connected, session_kind, false,
@@ -609,7 +690,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         const auto session_kind = active.has_value()
                                       ? std::optional<std::string>(active->kind)
                                       : std::optional<std::string>{};
-        const bool ui_visible = uiSurfaceVisible(req.params);
+        const bool ui_visible = uiSurfaceVisible(era, req.params);
         for (const auto& r : resources) {
             // Withheld from a client that did not negotiate MCP Apps: it cannot
             // render the page, and reading it as text would spend a client's
