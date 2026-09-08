@@ -71,6 +71,26 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Changed
 
+- `scene_close` no longer demands `discard_unsaved: true` for a scene the engine
+  says is clean. Godot 4.7 added the read side of editor dirty state,
+  `EditorInterface.get_unsaved_scenes()`; Didi now probes for that bind and, when
+  the engine omits the active scene from its unsaved list, closes on a call with
+  no arguments and reports `dirty_state: "clean"`.
+
+  The flag was the project's marker for destructive intent, and requiring it on
+  every close taught an agent to assert destructive intent it did not have. The
+  guard is not weakened where the engine cannot answer: Godot 4.5 and 4.6 bind
+  only the write-side `mark_scene_as_unsaved`, a scene that has never been saved
+  has no path for the engine to name, and a scene the engine reports as unsaved
+  is refused everywhere. Those three cases still return `409`, and the message
+  says which one it is. `discard_unsaved: true` is unchanged and still skips the
+  check.
+
+  Results carry `dirty_state_readable` and `dirty_state`, so a client reads which
+  case it is in from the response rather than inferring it from a version number,
+  and an engine without the bind degrades to the refusal rather than to a silent
+  discard.
+
 - One Didi process can drive several Godot sessions at once. Routes are held per
   session, each with its own connection and ownership lock, so two tasks
   interleaving requests on one stdio process each drive their own editor and

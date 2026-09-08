@@ -129,6 +129,35 @@ if (-not (Test-Path -LiteralPath $GodotExecutable)) {
     throw "Godot executable not found: $GodotExecutable"
 }
 $env:GODOT_BIN = [IO.Path]::GetFullPath($GodotExecutable)
+
+# Which engine this run is driving, because one assertion below is version
+# dependent. EditorInterface.get_unsaved_scenes is the read side of editor
+# dirty state and first binds in Godot 4.7; 4.5 and 4.6 bind only the write
+# side, so scene_close cannot relax its guard there.
+#
+# CI drives the GUI binary, whose stdout is not attached to the parent console
+# on Windows, so --version comes back empty from it. The embedded Win32 version
+# resource answers for both the GUI and console builds; --version covers a
+# platform that has no such resource. If neither answers, this throws rather
+# than guessing, because a guess here silently picks which branch to assert.
+function Get-GodotEngineVersion {
+    param([string]$ExecutablePath)
+    $raw = $null
+    try { $raw = (Get-Item -LiteralPath $ExecutablePath).VersionInfo.FileVersion } catch { $raw = $null }
+    if (-not $raw) { $raw = (& $ExecutablePath --version 2>$null | Select-Object -First 1) }
+    if (-not $raw) { throw "Could not determine the Godot engine version of $ExecutablePath." }
+    $parsed = [regex]::Match([string]$raw, '(\d+)\.(\d+)')
+    if (-not $parsed.Success) { throw "Unrecognized Godot version string: $raw" }
+    return [pscustomobject]@{
+        Raw   = ([string]$raw).Trim()
+        Major = [int]$parsed.Groups[1].Value
+        Minor = [int]$parsed.Groups[2].Value
+    }
+}
+$engineVersion = Get-GodotEngineVersion -ExecutablePath $env:GODOT_BIN
+$dirtyStateReadable = ($engineVersion.Major -gt 4) -or
+                      ($engineVersion.Major -eq 4 -and $engineVersion.Minor -ge 7)
+Write-Host "Godot engine $($engineVersion.Raw); editor dirty state readable: $dirtyStateReadable"
 if (-not (Test-Path -LiteralPath $didiExecutable)) {
     throw "Didi executable not found: $didiExecutable"
 }
@@ -1487,6 +1516,14 @@ try {
         (Tool-Request 88 "scene_pack_branch" @{ target_node = "/root/SmokeRoot/Container"; scene_path = "res://packed_branch.tscn" }),
         (Tool-Request 89 "scene_open" @{ scene_path = "res://packed_branch.tscn" }),
         (Tool-Request 90 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 2 }),
+        # A freshly packed and opened scene is clean. On Godot 4.7 the engine
+        # says so and the default close is allowed; on 4.5 and 4.6 nothing can
+        # say so and the guard holds. 115 reopens it either way, so the rest of
+        # the block runs identically on every engine.
+        (Tool-Request 114 "scene_close" @{}),
+        (Tool-Request 115 "scene_open" @{ scene_path = "res://packed_branch.tscn" }),
+        (Tool-Request 116 "scene_instantiate_node" @{ node_type = "Node2D"; parent_path = "/root/Container"; name = "DirtyProbe" }),
+        (Tool-Request 117 "scene_close" @{}),
         (Tool-Request 91 "scene_close" @{ discard_unsaved = $true }),
         (Tool-Request 92 "scene_create" @{ scene_path = "res://created_phase2.tscn"; root_type = "Node2D"; root_name = "Created" }),
         (Tool-Request 93 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 1 }),
@@ -2525,7 +2562,21 @@ try {
     $packedHierarchy = Tool-Payload $byId[90]
     Assert-True ($packedHierarchy.scene_tree.name -eq "Container") "Packed branch root was not preserved."
     Assert-True (@($packedHierarchy.scene_tree.children.name) -contains "SpawnedCopy") "Packed branch lost its owned child."
-    Assert-True ((Tool-Payload $byId[91]).closed -eq $true) "Clean packed scene could not be closed."
+    if ($dirtyStateReadable) {
+        $verifiedClean = Tool-Payload $byId[114]
+        Assert-True ($verifiedClean.closed -eq $true) "Godot $($engineVersion.Raw) can report dirty state, but a clean scene still refused a default close."
+        Assert-True ($verifiedClean.dirty_state -eq "clean") "A verified-clean close did not report dirty_state clean."
+        Assert-True ($verifiedClean.dirty_state_readable -eq $true) "A close on an engine with get_unsaved_scenes did not report readable dirty state."
+        Assert-True ($verifiedClean.discarded_unsaved -eq $false) "A verified-clean close claimed it discarded unsaved work."
+    } else {
+        Assert-True $byId[114].result.isError "Godot $($engineVersion.Raw) cannot report dirty state, yet it accepted a default close."
+        Assert-True ($byId[114].result.content[0].text -match "get_unsaved_scenes") "The pre-4.7 close refusal did not name the missing engine capability."
+    }
+    Assert-True ((Tool-Payload $byId[115]).opened -eq $true) "The dirty-state probe could not reopen the packed scene."
+    Assert-True ((Tool-Payload $byId[116]).status -eq "success") "The dirty-state probe could not modify the reopened scene."
+    Assert-True $byId[117].result.isError "A modified scene accepted a default close."
+    Assert-True ((Tool-Payload $byId[91]).closed -eq $true) "Explicit discard could not close the modified scene."
+    Assert-True ((Tool-Payload $byId[91]).discarded_unsaved -eq $true) "An explicit discard did not report itself as one."
     Assert-True ((Tool-Payload $byId[92]).opened -eq $true) "New scene was not created and opened."
     Assert-True ((Tool-Payload $byId[93]).scene_tree.name -eq "Created") "Created scene root was not observable."
     Assert-True $byId[94].result.isError "Scene create overwrote an existing target without overwrite: true."

@@ -2873,9 +2873,10 @@ void ToolRegistry::registerAllDefaultTools() {
         {{"type", "object"}, {"properties", {{"scene_path", {{"type", "string"}}}}}, {"required", {"scene_path"}}},
         [this](const json& args) { return handleSceneOpen(args, m_ipcClient); });
     register_phase_two(
-        "scene_close", "Safely closes the active scene, refusing unsaved changes by default.",
+        "scene_close", "Closes the active scene, refusing when unsaved changes are reported or cannot be ruled out.",
         {{"type", "object"}, {"properties", {
-            {"discard_unsaved", {{"type", "boolean"}, {"default", false}}}
+            {"discard_unsaved", {{"type", "boolean"}, {"default", false},
+                                 {"description", "Close without checking. Required where the engine cannot report dirty state (before Godot 4.7), where the scene has never been saved, or where the engine reports it as unsaved. Results carry dirty_state_readable and dirty_state."}}}
         }}},
         [this](const json& args) { return handleSceneClose(args, m_ipcClient); });
     register_phase_two(
