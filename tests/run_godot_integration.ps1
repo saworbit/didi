@@ -29,10 +29,91 @@ $sourceFixtureRoot = Join-Path $PSScriptRoot "godot_smoke"
 $buildRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot "build"))
 $fixtureRoot = [IO.Path]::GetFullPath((Join-Path $buildRoot "godot_phase2_smoke"))
 $sessionDirectory = [IO.Path]::GetFullPath((Join-Path $fixtureRoot ".didi-sessions"))
-$didiExecutable = Join-Path $repoRoot "build\$Configuration\didi.exe"
-if ($McpExecutable) {
-    $didiExecutable = [IO.Path]::GetFullPath($McpExecutable)
+# Which Didi binary this harness drives.
+#
+# The repository is built into build\ by CI and into build-ninja\ by hand, so a
+# developer machine has both trees and one of them is usually stale. Taking
+# build\ by name meant a local run drove a binary from days ago, which failed on
+# a tool that did not exist yet and reads exactly like a real regression. Telling
+# the two apart cost a long detour. tests/didi_binary.py settled the same
+# question for the Python suite; this follows it.
+#
+# Newest modification time wins, because that is almost always the build just
+# made. Anything named explicitly wins over that, because naming it is a
+# decision rather than a guess.
+function Get-DidiCandidatePaths {
+    param([string]$RepoRoot)
+    $relatives = @(
+        "build\Release\didi.exe",
+        "build\Debug\didi.exe",
+        "build\didi.exe",
+        "build-ninja\didi.exe",
+        "build-ninja\didi"
+    )
+    $paths = @()
+    foreach ($relative in $relatives) { $paths += (Join-Path $RepoRoot $relative) }
+    return $paths
 }
+
+function Get-RepoRelativePath {
+    param([string]$RepoRoot, [string]$Path)
+    $prefix = $RepoRoot
+    if (-not $prefix.EndsWith([IO.Path]::DirectorySeparatorChar)) {
+        $prefix += [IO.Path]::DirectorySeparatorChar
+    }
+    if ($Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        return $Path.Substring($prefix.Length)
+    }
+    return $Path
+}
+
+function Resolve-DidiExecutable {
+    param(
+        [string]$RepoRoot,
+        [string]$Explicit,
+        [string]$Configuration,
+        [bool]$ConfigurationWasNamed
+    )
+
+    # An explicit path is the whole answer. CI does not pass one, so everything
+    # below has to be right on its own.
+    if ($Explicit) { return [IO.Path]::GetFullPath($Explicit) }
+    # The same variable the Python suite honours, so pinning a build once pins
+    # it for both.
+    if ($env:DIDI_TEST_BINARY) { return [IO.Path]::GetFullPath($env:DIDI_TEST_BINARY) }
+    # Asking for a configuration by name is asking for that one.
+    if ($ConfigurationWasNamed) {
+        return [IO.Path]::GetFullPath((Join-Path $RepoRoot "build\$Configuration\didi.exe"))
+    }
+
+    $built = @()
+    foreach ($path in (Get-DidiCandidatePaths -RepoRoot $RepoRoot)) {
+        if (Test-Path -LiteralPath $path -PathType Leaf) { $built += (Get-Item -LiteralPath $path) }
+    }
+    if ($built.Count -eq 0) {
+        # Nothing is built. Return the path a reader most likely expected, so
+        # the not-found error below names something recognisable.
+        return [IO.Path]::GetFullPath((Join-Path $RepoRoot "build\$Configuration\didi.exe"))
+    }
+
+    $built = @($built | Sort-Object LastWriteTimeUtc -Descending)
+    $chosen = $built[0].FullName
+    if ($built.Count -gt 1) {
+        $others = @()
+        foreach ($other in ($built | Select-Object -Skip 1)) {
+            $others += (Get-RepoRelativePath -RepoRoot $RepoRoot -Path $other.FullName)
+        }
+        # Write-Host, not Write-Output: anything a function writes to the
+        # output stream becomes part of what it returns, and this one returns a
+        # path.
+        Write-Host ("Didi binary: {0}, the newest of {1} builds. Older: {2}. Pass -McpExecutable to choose." -f `
+            (Get-RepoRelativePath -RepoRoot $RepoRoot -Path $chosen), $built.Count, ($others -join ", "))
+    }
+    return $chosen
+}
+
+$didiExecutable = Resolve-DidiExecutable -RepoRoot $repoRoot -Explicit $McpExecutable `
+    -Configuration $Configuration -ConfigurationWasNamed $PSBoundParameters.ContainsKey("Configuration")
 $stdoutPath = Join-Path $repoRoot "build\godot_integration.out"
 $stderrPath = Join-Path $repoRoot "build\godot_integration.err"
 $gameStdoutPath = Join-Path $repoRoot "build\godot_game_integration.out"
