@@ -31,3 +31,20 @@ offset_right = 72.0
 offset_bottom = 72.0
 mouse_filter = 2
 color = Color(0.1, 0.8, 0.35, 0.8)
+
+[node name="LabelControl" type="Label" parent="."]
+layout_mode = 0
+offset_left = 96.0
+offset_top = 0.0
+offset_right = 128.0
+offset_bottom = 16.0
+text = "phase5 label"
+
+[node name="HiddenControl" type="Button" parent="."]
+visible = false
+layout_mode = 0
+offset_left = 96.0
+offset_top = 24.0
+offset_right = 128.0
+offset_bottom = 48.0
+text = "hidden button"

@@ -34,6 +34,10 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "runtime_read_logs", "runtime_read_output", "runtime_set_paused", "runtime_step", "runtime_stop",
         "runtime_get_tree", "eval_gdscript"
         , "asset_reimport", "viewport_diff_capture", "ui_hit_test", "scene_get_selection"
+        // Editor or game. Reads Control geometry out of whichever tree is
+        // running; a .tscn holds anchors and offsets, not the rectangle they
+        // resolve to, so there is no offline answer to fall back to.
+        , "ui_list_controls"
         // Phase 7 partial delivery. Admitted after the production-configuration
         // extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and
         // 4.7.2 -- the trial the earlier attempt never ran, having only ever
@@ -193,6 +197,7 @@ CallToolResult handleProjectListExportPresets(const json& args, std::shared_ptr<
 CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleUiHitTest(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleUiListControls(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
 CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleInjectInputEvent(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -2785,6 +2790,30 @@ void ToolRegistry::registerAllDefaultTools() {
             {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 300}, {"default", 60}}}
         }}, {"required", {"source_scene", "output_path"}}};
         t.handler = [this](const json& args) { return handleGridmapExportMeshLibrary(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "ui_list_controls";
+        t.description =
+            "Lists live Control nodes under a root with the viewport-space rectangle each one "
+            "occupies, its class, visibility, mouse filter, and its text where it has any. Editor "
+            "or game, read-only, and no input is injected. This is how a caller finds a control "
+            "to act on; ui_hit_test answers the opposite question, which is what sits under a "
+            "point it already has.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"root_path", {{"type", "string"}, {"maxLength", 1024},
+                           {"description", "Where to start. Defaults to the edited scene root in an editor and /root in a game."}}},
+            {"max_results", {{"type", "integer"}, {"minimum", 1}, {"maximum", 256}, {"default", 64}}},
+            {"visible_only", {{"type", "boolean"}, {"default", true},
+                              {"description", "Skip Controls that are not visible in the tree, and everything beneath them."}}},
+            {"include_text", {{"type", "boolean"}, {"default", true},
+                              {"description", "Read the text property where the Control has one. Capped at 256 bytes."}}},
+            {"class_filter", {{"type", "array"}, {"items", {{"type", "string"}, {"maxLength", 64}}},
+                              {"minItems", 1}, {"maxItems", 16},
+                              {"description", "Keep only Controls that are one of these classes, inheritance included."}}}
+        }}};
+        t.handler = [this](const json& args) { return handleUiListControls(args, m_ipcClient); };
         registerTool(std::move(t));
     }
     {

@@ -980,7 +980,29 @@ This closes the honesty gap the competitive review found: `liveAvailable` change
 
 # Workstream B: Capability Gaps
 
-Needs its own detailed plan. Scope and order, from the competitive analysis:
+Needs its own detailed plan. Scope and order, from the competitive analysis.
+
+> **Read this list against the current surface before building from it.** It was
+> written from the August 2026 competitive review, and work that shipped since has
+> overtaken parts of it. Checked on 2026-09-08:
+>
+> - **B2 is covered.** `runtime_step` gaining `until` was to let an agent run to a
+>   condition. `runtime_watch_invariants` does that and does it better: it samples
+>   every frame inside the engine and pauses the game on the frame the condition
+>   turns, where a stepping loop can only look between steps. "Run until X" is the
+>   invariant "not X", and the violation is the event. A separate `until` would be
+>   a second way to express the same thing.
+> - **B5 is covered.** `godot_api_reference` was to give version-exact class,
+>   method, property and signal lookup from `extension_api.json` and retire the
+>   "small built-in offline class map" caveat. `script_reflect_class` already reads
+>   the pinned dump through `resources/didi_class_reference.json`, covers every
+>   class the engine registers, and reports `api_version` and `source`. The small
+>   map survives only as the fallback when the reference file is not installed.
+> - **B4 is delivered** as `ui_list_controls`.
+>
+> Neither B2 nor B5 should be added as a name. An amendment has to name a workflow
+> that fails without it, and for both the workflow now succeeds. See
+> [Surface Amendments](SURFACE_AMENDMENTS.md).
 
 - **B1 — `runtime_read_output`.** Engine output from an attached session, with the cursor semantics `runtime_read_logs` already has, plus severity and source. Largest functional gap; four of six competitors have it. **Amendment accepted 2026-08-30** with tri-engine feasibility evidence: Godot exposes an extensible `Logger` and `OS.add_logger`, with identical method hashes on 4.5.1, 4.6.2 and 4.7.2, so no engine-floor change is required. See [Surface Amendments](SURFACE_AMENDMENTS.md). Implementation is the next step: a `Logger` implementation in the extension feeding a bounded ring, and the tool that reads it.
 - **B2 — `runtime_step` gains `until`.** Predicate restricted to the existing `eval_gdscript` read-only subset, with `max_frames` and a cooperative timeout. Same capability as satelliteoflove's `godot_game_time`, on a predicate language that cannot mutate the game.

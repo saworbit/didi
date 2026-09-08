@@ -1825,6 +1825,11 @@ try {
         (Tool-Request 507 "scene_open" @{ scene_path = "res://phase5_ui.tscn" }),
         (Tool-Request 508 "ui_hit_test" @{ point = @{ x = 32; y = 32 }; root_path = "/root/Phase5Ui"; max_results = 16 }),
         (Tool-Request 509 "ui_hit_test" @{ point = @{ x = 32; y = 32 }; root_path = "/root/Phase5Ui"; include_mouse_filter_ignore = $true; max_results = 16 }),
+        # ui_list_controls answers the question ui_hit_test cannot: where the
+        # controls are, before a point is known.
+        (Tool-Request 512 "ui_list_controls" @{ root_path = "/root/Phase5Ui"; max_results = 32 }),
+        (Tool-Request 513 "ui_list_controls" @{ root_path = "/root/Phase5Ui"; visible_only = $false; max_results = 32 }),
+        (Tool-Request 514 "ui_list_controls" @{ root_path = "/root/Phase5Ui"; class_filter = @("Label"); max_results = 32 }),
         # The 2D half of the preview, which needs a scene whose root is a
         # CanvasItem. main.tscn is a Node3D, so this is the only place in the
         # run where a canvas exists to draw into.
@@ -2071,6 +2076,45 @@ try {
     Assert-True (-not (@($uiDefault.hits.node_path) -match "/IgnoredControl$")) "UI hit-test included MOUSE_FILTER_IGNORE by default."
     $uiIncludingIgnored = Tool-Payload $phase5ById[509]
     Assert-True ($uiIncludingIgnored.topmost.node_path -match "/IgnoredControl$") "UI hit-test did not honor include_mouse_filter_ignore ordering."
+
+    $uiList = Tool-Payload $phase5ById[512]
+    $uiListAll = Tool-Payload $phase5ById[513]
+    $uiListLabels = Tool-Payload $phase5ById[514]
+
+    $listedPaths = @($uiList.controls.node_path)
+    Assert-True ($listedPaths.Count -ge 4) "ui_list_controls did not list the fixture Controls."
+    Assert-True (@($listedPaths -match "/TopControl$").Count -eq 1) "ui_list_controls omitted TopControl."
+    # MOUSE_FILTER_IGNORE hides a Control from hit-testing, not from existing.
+    Assert-True (@($listedPaths -match "/IgnoredControl$").Count -eq 1) "ui_list_controls dropped a Control that only ignores the mouse."
+
+    $label = $uiList.controls | Where-Object { $_.node_path -match "/LabelControl$" } | Select-Object -First 1
+    Assert-True ($null -ne $label) "ui_list_controls omitted the Label."
+    Assert-True ($label.text -eq "phase5 label") "ui_list_controls did not read the Label text."
+    Assert-True ($label.class -eq "Label") "ui_list_controls reported the wrong class for the Label."
+    Assert-True ($label.visible -eq $true) "ui_list_controls reported a visible Label as hidden."
+    Assert-True ($label.global_rect.size.x -gt 0 -and $label.global_rect.size.y -gt 0) "ui_list_controls returned an empty rectangle."
+
+    # visible_only defaults on, so a hidden Button is absent until it is asked for.
+    Assert-True (-not (@($listedPaths) -match "/HiddenControl$")) "ui_list_controls returned a hidden Control by default."
+    $hidden = $uiListAll.controls | Where-Object { $_.node_path -match "/HiddenControl$" } | Select-Object -First 1
+    Assert-True ($null -ne $hidden) "ui_list_controls did not return a hidden Control with visible_only false."
+    Assert-True ($hidden.visible -eq $false) "ui_list_controls reported a hidden Control as visible."
+    Assert-True ($hidden.text -eq "hidden button") "ui_list_controls did not read a hidden Control's text."
+
+    Assert-True (@($uiListLabels.controls).Count -eq 1) "ui_list_controls class_filter did not narrow to the Label."
+    Assert-True ($uiListLabels.controls[0].class -eq "Label") "ui_list_controls class_filter returned the wrong class."
+
+    # The composability claim: the rectangle this reports is the rectangle
+    # ui_hit_test reports, so a caller can list a control and then hit-test the
+    # centre of it and get the same node back.
+    $listedTop = $uiList.controls | Where-Object { $_.node_path -match "/TopControl$" } | Select-Object -First 1
+    $hitTop = $uiDefault.hits | Where-Object { $_.node_path -match "/TopControl$" } | Select-Object -First 1
+    Assert-True ($null -ne $listedTop -and $null -ne $hitTop) "TopControl was missing from one of the two UI tools."
+    Assert-True ($listedTop.global_rect.position.x -eq $hitTop.global_rect.position.x -and
+                 $listedTop.global_rect.position.y -eq $hitTop.global_rect.position.y -and
+                 $listedTop.global_rect.size.x -eq $hitTop.global_rect.size.x -and
+                 $listedTop.global_rect.size.y -eq $hitTop.global_rect.size.y) "ui_list_controls and ui_hit_test disagree about where TopControl is."
+    Assert-True ($listedTop.node_path -eq $hitTop.node_path) "ui_list_controls and ui_hit_test disagree about TopControl's path."
     if ($dotnetAvailable) {
         $csharpBuild = Tool-Payload $phase5ById[510]
         Assert-True ($csharpBuild.success -eq $true -and $csharpBuild.has_errors -eq $false) "C# diagnostic build did not compile the fixture."
@@ -2716,7 +2760,7 @@ try {
     })
     Assert-True ($unexpectedSourceArtifacts.Count -eq 0) "Integration generated artifacts in the checked-in source fixture."
     $integrationSucceeded = $true
-    Write-Output "Godot integration passed: Phases 1-6 editor/runtime workflows, deep diagnostics, project isolation, export, MeshLibrary, and live UI hit-testing."
+    Write-Output "Godot integration passed: Phases 1-6 editor/runtime workflows, deep diagnostics, project isolation, export, MeshLibrary, live UI hit-testing, and live Control listing."
 }
 catch {
     $primaryFailureMessage = $_.Exception.Message

@@ -33,7 +33,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-The current source / Unreleased surface registers 114 canonical tool names. 111 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 111 canonical tools are implemented. Ten legacy names are registered separately, for exactly 124 `tools/list` entries. The latest documented release is 1.6.0; its historical surface is recorded in the changelog.
+The current source / Unreleased surface registers 115 canonical tool names. 112 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 112 canonical tools are implemented. Ten legacy names are registered separately, for exactly 125 `tools/list` entries. The latest documented release is 1.6.0; its historical surface is recorded in the changelog.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
@@ -57,6 +57,7 @@ The current source / Unreleased surface registers 114 canonical tool names. 111 
 | `live` | `runtime_inject_input` | Game only. Builds every event before dispatching any through `Input.parse_input_event`; the count is calls made, not events accepted. |
 | `live` | `runtime_read_profiler` | Editor or game. Samples `Performance` monitors from the frame callback over a bounded window; one collector per session. |
 | `live` | `ui_hit_test` | Editor-only. Traverses bounded live Control state at a viewport-space point without synthesizing or injecting input. |
+| `live` | `ui_list_controls` | Editor or game. Enumerates Control nodes with the viewport-space rectangle each occupies, its class, visibility, mouse filter and text. Bounded, read-only, and injects nothing. Its rectangles are the ones `ui_hit_test` reports. |
 | `offline_fallback` | `script_check_syntax`, `script_reflect_class`, `script_get_symbols`, `script_patch_method`, `script_create`, `viewport_create_test_lab`, `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map`, `project_audit_assets`, `project_analyze_impact`, `project_verify_changes`, `project_apply_changes`, `project_rename_references`, `blackboard_write`, `blackboard_read`, `blackboard_patch`, `blackboard_list_keys`, `blackboard_clear`, `blackboard_task_create`, `blackboard_task_claim`, `blackboard_task_update`, `blackboard_task_complete`, `blackboard_task_list`, `project_search_text`, `project_search_symbols`, `runtime_launch`, `csharp_check_build`, `shader_check_compile`, `project_list_export_presets`, `project_export`, `gridmap_export_mesh_library` | Operates on bounded project files or launches a separate Godot/dotnet process. Results are not live editor state. |
 | `offline_fallback` (local status) | `didi_control_room` | Reports this server's own bridge, surface, safety and log state. Reads no Godot and writes nothing. Its tool rows come from the same availability function as `tools/list`, so the two cannot disagree. |
 | `unimplemented` | `physics_simulate_step`, `nav_bake_mesh`, `runtime_get_call_stack` | Registered schema only. Calls are rejected before legacy handlers execute. |
@@ -84,7 +85,7 @@ applies unweakened.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `111/114`
+**Canonical implementation:** `112/115`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
