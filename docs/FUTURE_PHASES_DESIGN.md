@@ -168,7 +168,7 @@ Requirements:
 **Scope:**
 
 - Reverse scene/resource usage lookup.
-- Real `.godot/uid_cache.bin` resolution and UID-to-path reconciliation.
+- UID-to-path resolution and reconciliation through the `ResourceUID` singleton, not by parsing `.godot/uid_cache.bin`. The cache is an engine implementation detail with no format guarantee, and it is a cache rather than the truth: it is absent on a fresh clone, written on the editor's schedule, and readable mid-write.
 - Import remap, missing-source, stale-import, and broken-dependency diagnostics.
 - Import-preset inspection and guarded configuration.
 - Generated `extension_api.json` or live ClassDB reflection replacing the limited static map.

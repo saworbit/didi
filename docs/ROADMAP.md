@@ -285,7 +285,7 @@ These are missing capabilities that an AI agent actually requires to complete fu
 
 ### 1. Deeper Search and Indexing
 - **Reverse Usage Lookup**: "Where is this node type used?" and "Which scenes instance this sub-scene?"
-- **UID ↔ Path Synchronization**: Real-time sync with `.godot/uid_cache.bin` to resolve `uid://` references.
+- **UID ↔ Path Synchronization**: delivered as the `resolve` parameter on `project_get_uid_map`. A connected editor answers from the `ResourceUID` singleton, and each result reports whether the project files agree. Not `.godot/uid_cache.bin`: that is an undocumented binary cache, absent on a fresh clone and stale between saves, and parsing it would mean maintaining a format the engine does not support — the same reason Phase 7 option C was rejected. Still open: `ResourceUID` exposes no enumeration through GDExtension, so the map itself remains a file scan.
 - **Import Status Tracking**: Inspect `.import` remaps and detect broken/missing asset imports.
 
 ### 2. Expanded Visual Verification

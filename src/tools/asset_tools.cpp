@@ -11,8 +11,11 @@
 #include <cctype>
 #include <fstream>
 #include <initializer_list>
+#include <map>
 #include <sstream>
 #include <set>
+#include <string>
+#include <vector>
 
 namespace didi {
 namespace mcp {
@@ -430,21 +433,145 @@ CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::I
     return CallToolResult::successJson(std::move(report));
 }
 
+namespace {
+
+// What the project files say about a query, next to what the engine said. The
+// two disagree exactly when a sidecar is stale, missing, or newer than the
+// editor's table, which is the drift a caller is looking for.
+std::string uidIndexAgreement(const json& uid_map,
+                              const std::map<std::string, std::string>& path_to_uid,
+                              const json& engine_entry) {
+    const std::string query = engine_entry.value("query", "");
+    const bool engine_found = engine_entry.value("found", false);
+    std::string index_answer;
+    bool index_has = false;
+    if (query.rfind("uid://", 0) == 0) {
+        if (uid_map.contains(query)) {
+            index_has = true;
+            index_answer = uid_map.at(query).get<std::string>();
+        }
+        return index_has ? (engine_found && index_answer == engine_entry.value("path", "")
+                                ? "agrees" : "differs")
+                         : "absent";
+    }
+    if (query.rfind("res://", 0) == 0) {
+        const auto found = path_to_uid.find(query);
+        if (found != path_to_uid.end()) {
+            index_has = true;
+            index_answer = found->second;
+        }
+        return index_has ? (engine_found && index_answer == engine_entry.value("uid", "")
+                                ? "agrees" : "differs")
+                         : "absent";
+    }
+    return "absent";
+}
+
+} // namespace
+
 CallToolResult handleProjectGetUidMap(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!args.is_object()) {
+        return CallToolResult::error("Invalid uid map request: arguments must be an object");
+    }
+    for (const auto& entry : args.items()) {
+        if (entry.key() != "resolve") {
+            return CallToolResult::error("Invalid uid map request: unknown parameter " + entry.key());
+        }
+    }
+    std::vector<std::string> queries;
+    if (args.contains("resolve")) {
+        const auto& value = args["resolve"];
+        if (!value.is_array() || value.empty() || value.size() > 256) {
+            return CallToolResult::error(
+                "Invalid uid map request: resolve must be an array of 1 to 256 strings");
+        }
+        for (const auto& item : value) {
+            if (!item.is_string() || item.get<std::string>().empty()) {
+                return CallToolResult::error(
+                    "Invalid uid map request: resolve must contain only non-empty strings");
+            }
+            queries.push_back(item.get<std::string>());
+        }
+    }
+
     const auto indexer = offline::ResourceIndexer::sharedIndex(".");
     auto all_res = indexer->query("res://");
 
     json uid_map = json::object();
+    std::map<std::string, std::string> path_to_uid;
     for (const auto& r : all_res) {
         if (!r.uid.empty()) {
             uid_map[r.uid] = r.path;
+            path_to_uid[r.path] = r.uid;
         }
     }
 
-    return CallToolResult::successJson({
+    json payload{
         {"total_uids", uid_map.size()},
-        {"uid_map", uid_map}
-    });
+        {"uid_map", uid_map},
+        // The map is always the file scan. ResourceUID resolves an id or a path
+        // it is given but exposes no way to enumerate its table through
+        // GDExtension, so a live enumeration would be an invented claim.
+        {"uid_map_source", "project_files"}
+    };
+
+    if (queries.empty()) {
+        payload["execution_mode"] = "offline_fallback";
+        payload["is_live_engine"] = false;
+        return CallToolResult::successJson(std::move(payload));
+    }
+
+    if (ipc && ipc->isConnected()) {
+        auto response = ipc->sendRequest("project.resolveUids", json{{"queries", queries}},
+                                         ipc::kWaitForDefinitiveResponse);
+        if (response.isOk() && response.value().is_object() &&
+            response.value().contains("entries") && response.value()["entries"].is_array()) {
+            json resolved = json::array();
+            for (auto entry : response.value()["entries"]) {
+                entry["source"] = "engine";
+                entry["index_state"] = uidIndexAgreement(uid_map, path_to_uid, entry);
+                resolved.push_back(std::move(entry));
+            }
+            payload["execution_mode"] = "live";
+            payload["is_live_engine"] = true;
+            payload["resolved"] = std::move(resolved);
+            return CallToolResult::successJson(std::move(payload));
+        }
+    }
+
+    json resolved = json::array();
+    for (const auto& query : queries) {
+        json entry{{"query", query}, {"found", false}, {"uid", ""}, {"path", ""},
+                   {"source", "index"}};
+        if (query.rfind("uid://", 0) == 0) {
+            if (uid_map.contains(query)) {
+                entry["found"] = true;
+                entry["uid"] = query;
+                entry["path"] = uid_map.at(query);
+            } else {
+                // Not the same claim as "does not exist". An imported asset
+                // whose .import has not been written yet is unknown here and
+                // known to a running editor.
+                entry["reason"] = "not_in_project_files";
+            }
+        } else if (query.rfind("res://", 0) == 0) {
+            const auto found = path_to_uid.find(query);
+            if (found != path_to_uid.end()) {
+                entry["found"] = true;
+                entry["uid"] = found->second;
+                entry["path"] = query;
+            } else {
+                entry["reason"] = "not_in_project_files";
+            }
+        } else {
+            entry["reason"] = "unsupported_query";
+        }
+        resolved.push_back(std::move(entry));
+    }
+    payload["execution_mode"] = "offline_fallback";
+    payload["is_live_engine"] = false;
+    payload["resolved"] = std::move(resolved);
+    return CallToolResult::successJson(std::move(payload));
 }
 
 CallToolResult handleInstantiateAsset(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

@@ -832,6 +832,64 @@ static void test_project_impact_traces_exact_node_paths() {
     }
 }
 
+static void test_uid_map_resolves_offline_and_says_which_source_answered() {
+    ScopedToolProject project("uid-resolve");
+    writeAuditFixture();
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    // No resolve list: the map is a file scan and nothing may imply otherwise.
+    const auto plain = registry.callTool("project_get_uid_map", didi::json::object());
+    ASSERT_TRUE(!plain.isError);
+    const auto plain_report = didi::json::parse(plain.content[0].text);
+    ASSERT_EQ(plain_report["uid_map_source"], "project_files");
+    ASSERT_EQ(plain_report["execution_mode"], "offline_fallback");
+    ASSERT_EQ(plain_report["is_live_engine"], false);
+    ASSERT_TRUE(!plain_report.contains("resolved"));
+    ASSERT_EQ(plain_report["uid_map"]["uid://bybyby"], "res://art/by_uid.png");
+
+    // Both directions, a UID the files do not carry, and a query that is
+    // neither form. No editor is attached, so every answer is the index.
+    const auto resolved = registry.callTool(
+        "project_get_uid_map",
+        didi::json{{"resolve", didi::json::array({"uid://bybyby", "res://art/by_uid.png",
+                                                  "uid://gonegone", "scripts/player.gd"})}});
+    ASSERT_TRUE(!resolved.isError);
+    const auto report = didi::json::parse(resolved.content[0].text);
+    ASSERT_EQ(report["execution_mode"], "offline_fallback");
+    ASSERT_EQ(report["resolved"].size(), 4u);
+
+    ASSERT_EQ(report["resolved"][0]["found"], true);
+    ASSERT_EQ(report["resolved"][0]["path"], "res://art/by_uid.png");
+    ASSERT_EQ(report["resolved"][0]["source"], "index");
+    ASSERT_EQ(report["resolved"][1]["found"], true);
+    ASSERT_EQ(report["resolved"][1]["uid"], "uid://bybyby");
+
+    // A UID the scene names but no file carries. Offline this is "the project
+    // files do not have it", which is not the same claim as "it does not
+    // exist" -- a running editor can still know it.
+    ASSERT_EQ(report["resolved"][2]["found"], false);
+    ASSERT_EQ(report["resolved"][2]["reason"], "not_in_project_files");
+    ASSERT_EQ(report["resolved"][3]["found"], false);
+    ASSERT_EQ(report["resolved"][3]["reason"], "unsupported_query");
+
+    // Bounds and shape are refused before any scan happens.
+    ASSERT_TRUE(registry.callTool("project_get_uid_map",
+                                  didi::json{{"resolve", didi::json::array()}}).isError);
+    ASSERT_TRUE(registry.callTool("project_get_uid_map",
+                                  didi::json{{"resolve", "uid://bybyby"}}).isError);
+    ASSERT_TRUE(registry.callTool("project_get_uid_map",
+                                  didi::json{{"resolve", didi::json::array({""})}}).isError);
+    ASSERT_TRUE(registry.callTool("project_get_uid_map",
+                                  didi::json{{"resolve", didi::json::array({1})}}).isError);
+    ASSERT_TRUE(registry.callTool("project_get_uid_map",
+                                  didi::json{{"unknown", true}}).isError);
+    didi::json oversized = didi::json::array();
+    for (int index = 0; index < 257; ++index) oversized.push_back("uid://bybyby");
+    ASSERT_TRUE(registry.callTool("project_get_uid_map",
+                                  didi::json{{"resolve", oversized}}).isError);
+}
+
 static void test_project_audit_reports_orphans_broken_references_and_dead_signals() {
     ScopedToolProject project("project-audit");
     writeAuditFixture();
@@ -2838,6 +2896,8 @@ struct RegisterToolTests {
                      test_project_impact_traces_a_file_target_and_rejects_a_malformed_one);
         registerTest("Tools.ProjectImpactNodePath",
                      test_project_impact_traces_exact_node_paths);
+        registerTest("Tools.UidMapResolve",
+                     test_uid_map_resolves_offline_and_says_which_source_answered);
         registerTest("Tools.ProjectAuditFindings",
                      test_project_audit_reports_orphans_broken_references_and_dead_signals);
         registerTest("Tools.ProjectAuditOptions",

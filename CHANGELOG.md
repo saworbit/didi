@@ -71,6 +71,30 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Changed
 
+- `project_get_uid_map` takes a `resolve` list and answers it from the engine.
+  Pass up to 256 `uid://` or `res://` values; with an editor attached they are
+  resolved by the `ResourceUID` singleton, which is the table the engine itself
+  resolves against, and each result reports `index_state` — whether the project
+  files agree, contradict it, or hold nothing.
+
+  This closes the roadmap's UID-to-path synchronization item, and it closes it
+  without parsing `.godot/uid_cache.bin`. That file is an undocumented binary
+  cache with no format guarantee: absent on a fresh clone, written on the
+  editor's schedule, and readable mid-write. Building reconciliation on it would
+  mean maintaining a format the engine does not support and re-proving it every
+  release, which is the shape Phase 7 option C was rejected for. `ResourceUID`
+  is public, and its binds carry identical hashes on Godot 4.5.1, 4.6.2 and
+  4.7.2, so there is no version gate.
+
+  What did not change is the map. `ResourceUID` exposes no enumeration through
+  GDExtension, so `uid_map` is a scan of the project files in both modes and
+  every response carries `uid_map_source` saying so. A call without `resolve`
+  reports `offline_fallback` even with an editor connected, because claiming
+  live for a file scan would be a lie. A miss says which kind it is:
+  `unknown_to_engine`, `malformed_uid`, `unsupported_query`, or offline
+  `not_in_project_files` — which is not the same claim as the resource not
+  existing.
+
 - `scene_close` no longer demands `discard_unsaved: true` for a scene the engine
   says is clean. Godot 4.7 added the read side of editor dirty state,
   `EditorInterface.get_unsaved_scenes()`; Didi now probes for that bind and, when

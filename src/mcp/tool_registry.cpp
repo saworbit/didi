@@ -48,6 +48,11 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // Reads a ShaderMaterial off a node in the edited scene, so it needs the
         // editor's scene and has no offline reading to fall back to.
         , "shader_list_uniforms", "shader_set_uniform", "shader_get_visual_graph"
+        // Resolution is live when an editor is connected, because ResourceUID is
+        // the table the engine actually resolves against and a .uid sidecar can
+        // be stale or not written yet. The map itself stays a file scan in both
+        // modes: ResourceUID exposes no enumeration through GDExtension.
+        , "project_get_uid_map"
         // Live only on purpose. Writing the layout file would change what the
         // project loads next time and not what anyone is listening to now.
         , "audio_configure_bus"
@@ -82,7 +87,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "script_get_symbols", "script_patch_method", "patch_script_symbols", "script_create",
         "viewport_create_test_lab", "create_visual_test_lab", "resource_create",
         "resource_inspect", "project_list_resources", "query_project_resources",
-        "project_get_uid_map", "project_audit_assets", "project_analyze_impact",
+        "project_audit_assets", "project_analyze_impact",
         "project_verify_changes", "project_apply_changes",
         "project_rename_references", "runtime_launch",
         "blackboard_write", "blackboard_read", "blackboard_patch",
@@ -2241,8 +2246,17 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "project_get_uid_map";
-        t.description = "Resolves uid:// references to local filesystem paths.";
-        t.inputSchema = {{"type", "object"}};
+        t.description = "Resolves uid:// and res:// references to each other, and returns the UID map scanned from the project files.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"resolve", {{"type", "array"},
+                             {"items", {{"type", "string"}}},
+                             {"minItems", 1}, {"maxItems", 256},
+                             {"description", "uid:// or res:// values to resolve. A connected editor answers them from ResourceUID and each result reports whether the project files agree (index_state). Omit to get the scanned map alone."}}}
+            }},
+            {"additionalProperties", false}
+        };
         t.handler = [this](const json& args) { return handleProjectGetUidMap(args, m_ipcClient); };
         registerTool(std::move(t));
     }
