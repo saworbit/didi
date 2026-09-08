@@ -82,6 +82,15 @@ declares its version in `_meta["io.modelcontextprotocol/protocolVersion"]` on
 every request and is served statelessly. A request carrying a supported version
 is self-contained and needs no prior `initialize`.
 
+A modern request must carry `_meta["io.modelcontextprotocol/clientCapabilities"]`
+as well as the version, and its `id` must be a string or an integer. A request
+that declares a version and leaves out the capabilities, or sends a null or
+fractional `id`, is refused with `-32602` before the method runs. Capabilities
+are read from the request that carries them and never from an earlier one, so
+two clients sharing one process cannot see each other's declarations.
+`server/discover` is exempt: it is how a client finds out what the server
+speaks, so it answers whatever it is sent.
+
 `server/discover` reports the supported versions without a handshake, because it
 is the probe a modern stdio client sends first. A version Didi does not serve
 returns `-32022 Unsupported protocol version` carrying the list to retry with,
