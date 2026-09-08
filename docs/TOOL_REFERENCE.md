@@ -968,6 +968,8 @@ Every tool definition carries specification `annotations`. `readOnlyHint` descri
 
 Tools whose result shape has been observed also publish an `outputSchema`, and CI validates each of those tools' real `structuredContent` against the schema the server published for it, so the promise cannot drift from the implementation. A schema is declared only where the shape is known: a tool that cannot be exercised, and every unimplemented name, publishes none rather than asserting a shape nobody has seen. `required` lists only fields present in every execution mode, and additional properties are permitted, so the extra members a live result carries never invalidate it.
 
+A live result and a live failure both name the session they ran on, and they name it differently. A success carries the full public descriptor, `endpoint` included, because that is a client's own record of the route it used. A failure carries `session_id`, `kind`, `pid`, `project_path`, `protocol_version`, `started_at_ms` and `schema_version`, and omits `endpoint`. The error already identifies the session, the caller is attached to it, and an error string is the payload most likely to be quoted onward into a model's context; the address to connect to a local pipe does not need to travel with it. Neither form has ever carried the token. Session discovery through `runtime_list_sessions` still reports `endpoint`, because choosing a session to attach to is what that tool is for.
+
 Successful JSON results also carry `structuredContent` alongside the existing text block. It holds the same payload after execution-mode and session attribution, so the two halves of a result can never disagree. The text block is unchanged for clients that do not read `structuredContent`.
 
 ## 12. Phase 5 deep domains

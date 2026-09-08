@@ -52,7 +52,8 @@ Error liveResourceError(const Error& error,
     if (!error.data.is_null() && !error.data.is_object()) engine_data["details"] = error.data;
     return Error(error.code, context + error.message,
                  {{"execution_mode", "live"},
-                  {"session", session.has_value() ? session->toJson() : json(nullptr)},
+                  // Provenance, not an address. Same reasoning as the tool path.
+                  {"session", session.has_value() ? session->toProvenanceJson() : json(nullptr)},
                   {"error", {{"code", error.code}, {"message", error.message},
                              {"data", std::move(engine_data)}}}});
 }

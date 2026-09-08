@@ -17,6 +17,20 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Fixed
 
+- A live failure no longer publishes the session endpoint. An error from a live
+  route carried the full public descriptor, so the named pipe or socket path
+  appeared in the tool's error text, in `error.data.session` as the engine
+  attached it, and in resource errors. The endpoint is not a credential -- the
+  descriptor directory is access controlled and the token is separate -- but an
+  error string is the payload most likely to be quoted onward into a model's
+  context, and identifying which session failed is a different act from handing
+  out the address to reach it. Failures now carry `session_id`, `kind`, `pid`,
+  `project_path`, `protocol_version`, `started_at_ms` and `schema_version`.
+
+  Successful results are unchanged and still carry `endpoint`, because that is a
+  client's own record of the route it used, and `runtime_list_sessions` still
+  reports it because choosing a session is what that tool is for.
+
 - The managed editor does not outlive the host that owns it. It was reaped only
   by a destructor, so it survived every exit that does not run one: a `SIGKILL`,
   a supervisor or container stopping the host, a second Ctrl+C taking the C

@@ -417,7 +417,8 @@ CallToolResult structuredLiveToolError(const Error& error,
     if (!error.data.is_null() && !error.data.is_object()) data["details"] = error.data;
     auto result = CallToolResult::successJson({
         {"execution_mode", "live"},
-        {"session", session.has_value() ? session->toJson() : json(nullptr)},
+        // Provenance, not an address. See SessionDescriptor::toProvenanceJson.
+        {"session", session.has_value() ? session->toProvenanceJson() : json(nullptr)},
         {"error", {{"code", error.code}, {"message", error.message}, {"data", std::move(data)}}}
     });
     result.isError = true;
@@ -753,7 +754,7 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
                                    : json::array({"game"});
                 json envelope = {
                     {"execution_mode", "live"},
-                    {"session", selected->toJson()},
+                    {"session", selected->toProvenanceJson()},
                     {"error", {{"code", 409},
                                {"message", "Tool is unavailable for the selected session kind"},
                                {"data", {{"tool", name},

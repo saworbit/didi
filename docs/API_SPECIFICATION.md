@@ -288,6 +288,10 @@ Every routed live request copies public parameters and adds `_didi_session_token
 
 The token must never be placed in MCP requests, responses, logs, diagnostics, or copied documentation examples with a real value.
 
+### Failure provenance
+
+An error returned from a live route carries `session` provenance identifying which route failed: `schema_version`, `session_id`, `pid`, `kind`, `project_path`, `started_at_ms` and `protocol_version`. It omits `endpoint`, which successful results and `runtime_list_sessions` do carry. The distinction is deliberate rather than incidental: identifying a session and publishing the address to connect to it are different acts, and only the first belongs in a failure. This holds for both halves of the envelope, the top-level `session` and the `error.data.session` the engine attaches, and for resource errors as well as tool errors. `token` has never appeared in any public form.
+
 ### Cursor log response
 
 `runtime.getLogs` returns `records`, `oldest_cursor`, `next_cursor`, and `dropped_before_cursor`. Each record has `sequence`, `timestamp_ms`, `level`, `source`, `message`, and `details` (object or null). Filtering does not freeze the cursor: `next_cursor` advances across all inspected records. The 2,000-record ring caps messages at 16 KiB and details at 64 KiB.
