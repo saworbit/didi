@@ -19,6 +19,15 @@
 namespace didi {
 namespace mcp {
 
+// Which protocol revision a single request belongs to. Didi is dual-era: a
+// legacy client negotiates once in `initialize` and the process remembers what
+// it declared, while a modern client carries version and capabilities in
+// `_meta` on every request and is entitled to have nothing inferred from
+// earlier traffic on the same process. Requests of both kinds can be
+// interleaved on one stdio process, so this is a property of the request and
+// never of the server.
+enum class ProtocolEra { Legacy, Modern };
+
 class McpServer {
 public:
     McpServer();
@@ -89,10 +98,12 @@ private:
     bool m_initialized{false};
     bool m_skipConfirmations{false};
     UiAppMode m_uiAppMode{UiAppMode::Auto};
-    // Sticky from a 2024-11-05 handshake. A modern client declares its
-    // capabilities per request instead, and both are honoured.
+    // Sticky from a 2024-11-05 handshake, and read only for legacy requests.
+    // A modern request declares its own capabilities and is answered from
+    // those alone, so one client's extension choice cannot reach another's
+    // request on a process serving both eras.
     bool m_clientDeclaredUiExtension{false};
-    bool uiSurfaceVisible(const json& params) const;
+    bool uiSurfaceVisible(ProtocolEra era, const json& params) const;
     std::shared_ptr<ipc::IIpcClient> m_ipcClient;
     std::shared_ptr<runtime::IRuntimeSessionClient> m_runtimeSessionClient;
 

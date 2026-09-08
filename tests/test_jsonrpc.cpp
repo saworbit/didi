@@ -637,6 +637,21 @@ static void test_mcp_output_logging_never_copies_response_bodies() {
     ASSERT_TRUE(diagnostics.str().find(secret) == std::string::npos);
 }
 
+// Both metadata fields are required on every modern request, so the fixtures
+// build them together. The defect this file used to bake in was a happy path
+// that sent a version and no capabilities, which is a request the server has
+// to refuse: writing it once here means a fixture cannot drift back to it.
+static didi::json modernMeta(const didi::json& version,
+                             didi::json capabilities = didi::json::object()) {
+    return {{"_meta",
+             {{"io.modelcontextprotocol/protocolVersion", version},
+              {"io.modelcontextprotocol/clientCapabilities", std::move(capabilities)}}}};
+}
+
+static didi::json uiCapabilities() {
+    return {{"extensions", {{"io.modelcontextprotocol/ui", didi::json::object()}}}};
+}
+
 // --- Dual-era protocol discovery -------------------------------------------
 //
 // MCP revision 2026-07-28 removed the initialize handshake: a modern client
@@ -655,7 +670,7 @@ static void test_mcp_discover_reports_supported_versions_without_a_handshake() {
     didi::mcp::JsonRpcRequest discover;
     discover.id = 1;
     discover.method = "server/discover";
-    discover.params = {{"_meta", {{"io.modelcontextprotocol/protocolVersion", "2026-07-28"}}}};
+    discover.params = modernMeta("2026-07-28");
     const auto response = server.handleRequest(discover);
 
     ASSERT_TRUE(!response.error.has_value());
@@ -695,7 +710,7 @@ static void test_mcp_every_advertised_revision_is_actually_served() {
         didi::mcp::JsonRpcRequest list;
         list.id = 2;
         list.method = "tools/list";
-        list.params = {{"_meta", {{"io.modelcontextprotocol/protocolVersion", version}}}};
+        list.params = modernMeta(version);
         const auto response = server.handleRequest(list);
         ASSERT_TRUE(!response.error.has_value());
         ASSERT_EQ(response.result["resultType"].get<std::string>(), std::string("complete"));
@@ -709,7 +724,7 @@ static void test_mcp_rejects_an_unsupported_protocol_version_actionably() {
     didi::mcp::JsonRpcRequest list;
     list.id = 2;
     list.method = "tools/list";
-    list.params = {{"_meta", {{"io.modelcontextprotocol/protocolVersion", "1900-01-01"}}}};
+    list.params = modernMeta("1900-01-01");
     const auto response = server.handleRequest(list);
 
     ASSERT_TRUE(response.error.has_value());
@@ -832,10 +847,203 @@ static void test_mcp_modern_request_is_served_without_a_handshake() {
     didi::mcp::JsonRpcRequest list;
     list.id = 9;
     list.method = "tools/list";
-    list.params = {{"_meta", {{"io.modelcontextprotocol/protocolVersion", "2026-07-28"}}}};
+    list.params = modernMeta("2026-07-28");
     const auto response = server.handleRequest(list);
     ASSERT_TRUE(!response.error.has_value());
     ASSERT_EQ(response.result["resultType"].get<std::string>(), std::string("complete"));
+}
+
+// --- The modern request envelope -------------------------------------------
+//
+// Advertising 2026-07-28 is a promise that the whole per-request envelope is
+// checked, not just the version. Both metadata fields are required on every
+// request, and a request missing either is malformed and must be refused with
+// -32602 before the method runs.
+
+static void test_mcp_modern_request_without_capabilities_is_refused() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+
+    didi::mcp::JsonRpcRequest list;
+    list.id = 20;
+    list.method = "tools/list";
+    list.params = {{"_meta", {{"io.modelcontextprotocol/protocolVersion", "2026-07-28"}}}};
+    const auto response = server.handleRequest(list);
+
+    ASSERT_TRUE(response.error.has_value());
+    ASSERT_EQ(static_cast<int>(response.error->code), -32602);
+    // The client has to be told which field it left out, or the only recovery
+    // is guessing at an envelope it thought it had sent.
+    ASSERT_EQ(response.error->data["field"].get<std::string>(),
+              std::string("_meta.io.modelcontextprotocol/clientCapabilities"));
+}
+
+// The load-bearing half. Refusing after the tool ran would still return an
+// error and would still have changed the project.
+static void test_mcp_malformed_modern_request_does_not_execute_the_tool() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+    int call_count = 0;
+    registerCountingResourceCreate(call_count);
+
+    didi::mcp::JsonRpcRequest call;
+    call.id = 21;
+    call.method = "tools/call";
+    call.params = {{"_meta", {{"io.modelcontextprotocol/protocolVersion", "2026-07-28"}}},
+                   {"name", "resource_create"},
+                   {"arguments", didi::json::object()}};
+    const auto response = server.handleRequest(call);
+    server.initializeRegistries();
+
+    ASSERT_TRUE(response.error.has_value());
+    ASSERT_EQ(static_cast<int>(response.error->code), -32602);
+    ASSERT_EQ(call_count, 0);
+}
+
+static void test_mcp_malformed_modern_metadata_types_are_refused() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+
+    const auto refused = [&server](const didi::json& meta) {
+        didi::mcp::JsonRpcRequest list;
+        list.id = 22;
+        list.method = "tools/list";
+        list.params = {{"_meta", meta}};
+        const auto response = server.handleRequest(list);
+        ASSERT_TRUE(response.error.has_value());
+        ASSERT_EQ(static_cast<int>(response.error->code), -32602);
+    };
+
+    // A version that is not a string still marks the request modern. Reading it
+    // as legacy instead would let it past the gate it just failed.
+    refused({{"io.modelcontextprotocol/protocolVersion", 20260728}});
+    refused({{"io.modelcontextprotocol/protocolVersion", "2026-07-28"},
+             {"io.modelcontextprotocol/clientCapabilities", "none"}});
+    refused({{"io.modelcontextprotocol/protocolVersion", "2026-07-28"},
+             {"io.modelcontextprotocol/clientCapabilities", didi::json::object()},
+             {"io.modelcontextprotocol/clientInfo", "didi-test"}});
+}
+
+static void test_mcp_modern_request_ids_must_be_a_string_or_integer() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+
+    const auto respond = [&server](const didi::json& id) {
+        didi::mcp::JsonRpcRequest list;
+        list.id = id;
+        list.method = "tools/list";
+        list.params = modernMeta("2026-07-28");
+        return server.handleRequest(list);
+    };
+
+    for (const didi::json& illegal : {didi::json(nullptr), didi::json(1.5)}) {
+        const auto response = respond(illegal);
+        ASSERT_TRUE(response.error.has_value());
+        ASSERT_EQ(static_cast<int>(response.error->code), -32602);
+    }
+    ASSERT_TRUE(!respond(7).error.has_value());
+    ASSERT_TRUE(!respond("request-7").error.has_value());
+}
+
+// --- MCP Apps is negotiated per request, not per process --------------------
+//
+// Extensions are bilateral and opt-in. On a process serving both eras, a
+// legacy client's declaration used to be OR-ed into every later answer, so a
+// modern host that declared nothing was still handed UI metadata and an HTML
+// resource it cannot render.
+
+static bool controlRoomOffersUi(const didi::mcp::JsonRpcResponse& tools_list) {
+    for (const auto& tool : tools_list.result["tools"]) {
+        if (tool["name"].get<std::string>() != "didi_control_room") continue;
+        return tool.contains("_meta") && tool["_meta"].contains("ui");
+    }
+    return false;
+}
+
+static bool listsControlRoomResource(const didi::mcp::JsonRpcResponse& resources_list) {
+    for (const auto& resource : resources_list.result["resources"]) {
+        if (resource["uri"].get<std::string>() == "ui://didi/control-room") return true;
+    }
+    return false;
+}
+
+static didi::mcp::JsonRpcResponse listWith(didi::mcp::McpServer& server, const char* method,
+                                           const didi::json& params) {
+    didi::mcp::JsonRpcRequest request;
+    request.id = 30;
+    request.method = method;
+    request.params = params;
+    return server.handleRequest(request);
+}
+
+static void test_mcp_legacy_ui_declaration_does_not_reach_a_modern_request() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+
+    didi::mcp::JsonRpcRequest initialize;
+    initialize.id = 1;
+    initialize.method = "initialize";
+    initialize.params = {{"capabilities", uiCapabilities()}};
+    ASSERT_TRUE(!server.handleRequest(initialize).error.has_value());
+
+    // The legacy client keeps what it negotiated.
+    ASSERT_TRUE(controlRoomOffersUi(listWith(server, "tools/list", didi::json::object())));
+    ASSERT_TRUE(listsControlRoomResource(listWith(server, "resources/list", didi::json::object())));
+
+    // A modern request that declared no extensions gets the text and structured
+    // fallback instead, on the same process.
+    const auto modern = modernMeta("2026-07-28");
+    ASSERT_TRUE(!controlRoomOffersUi(listWith(server, "tools/list", modern)));
+    ASSERT_TRUE(!listsControlRoomResource(listWith(server, "resources/list", modern)));
+}
+
+static void test_mcp_modern_ui_visibility_does_not_bleed_in_either_direction() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+
+    // A legacy client declares the extension first, so the process is carrying
+    // the sticky flag while the modern requests below alternate. Without it
+    // there is no state to bleed and the alternation proves nothing.
+    didi::mcp::JsonRpcRequest initialize;
+    initialize.id = 1;
+    initialize.method = "initialize";
+    initialize.params = {{"capabilities", uiCapabilities()}};
+    ASSERT_TRUE(!server.handleRequest(initialize).error.has_value());
+
+    const auto with_ui = modernMeta("2026-07-28", uiCapabilities());
+    const auto without_ui = modernMeta("2026-07-28");
+
+    // Four alternations, so a fix that only clears the flag on the first modern
+    // request is caught as surely as one that never clears it.
+    for (int round = 0; round < 2; ++round) {
+        ASSERT_TRUE(controlRoomOffersUi(listWith(server, "tools/list", with_ui)));
+        ASSERT_TRUE(listsControlRoomResource(listWith(server, "resources/list", with_ui)));
+        ASSERT_TRUE(!controlRoomOffersUi(listWith(server, "tools/list", without_ui)));
+        ASSERT_TRUE(!listsControlRoomResource(listWith(server, "resources/list", without_ui)));
+    }
+
+    // And the legacy client still has what it negotiated, after all of that.
+    ASSERT_TRUE(controlRoomOffersUi(listWith(server, "tools/list", didi::json::object())));
+}
+
+// Withholding the surface must not withhold the answer: a host without MCP
+// Apps still needs the Control Room's content.
+static void test_mcp_control_room_still_answers_without_the_ui_extension() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+
+    didi::mcp::JsonRpcRequest call;
+    call.id = 31;
+    call.method = "tools/call";
+    call.params = modernMeta("2026-07-28");
+    call.params["name"] = "didi_control_room";
+    call.params["arguments"] = didi::json::object();
+    const auto response = server.handleRequest(call);
+
+    ASSERT_TRUE(!response.error.has_value());
+    ASSERT_EQ(response.result["isError"].get<bool>(), false);
+    ASSERT_TRUE(!response.result["content"][0]["text"].get<std::string>().empty());
+    ASSERT_TRUE(response.result.contains("structuredContent"));
 }
 
 struct RegisterJsonRpcTests {
@@ -883,5 +1091,19 @@ struct RegisterJsonRpcTests {
                      test_mcp_discover_now_advertises_the_modern_revision);
         registerTest("McpServer.ModernRequestNeedsNoHandshake",
                      test_mcp_modern_request_is_served_without_a_handshake);
+        registerTest("McpServer.ModernRequestNeedsCapabilities",
+                     test_mcp_modern_request_without_capabilities_is_refused);
+        registerTest("McpServer.MalformedModernRequestRunsNoTool",
+                     test_mcp_malformed_modern_request_does_not_execute_the_tool);
+        registerTest("McpServer.MalformedModernMetadataRefused",
+                     test_mcp_malformed_modern_metadata_types_are_refused);
+        registerTest("McpServer.ModernRequestIdShape",
+                     test_mcp_modern_request_ids_must_be_a_string_or_integer);
+        registerTest("McpServer.LegacyUiDeclarationStaysLegacy",
+                     test_mcp_legacy_ui_declaration_does_not_reach_a_modern_request);
+        registerTest("McpServer.ModernUiVisibilityDoesNotBleed",
+                     test_mcp_modern_ui_visibility_does_not_bleed_in_either_direction);
+        registerTest("McpServer.ControlRoomAnswersWithoutUi",
+                     test_mcp_control_room_still_answers_without_the_ui_extension);
     }
 } g_registerJsonRpcTests;
