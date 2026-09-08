@@ -11,7 +11,6 @@ behaviour of the process at startup and nothing smaller can prove it.
 """
 
 import json
-import os
 import subprocess
 import unittest
 from pathlib import Path
@@ -20,24 +19,15 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_PROJECT = str(REPOSITORY_ROOT / "tests" / "godot_smoke")
 
 
-def _executable() -> str:
-    override = os.environ.get("DIDI_EXECUTABLE")
-    if override:
-        return override
-    # The repository is built into build/ by CI and into build-ninja/ by hand,
-    # so both can exist at once. Take the newest rather than a fixed order, or a
-    # stale binary from the other directory answers for the one just built.
-    candidates = [
-        REPOSITORY_ROOT / name
-        for name in (
-            "build/Release/didi.exe", "build/Debug/didi.exe", "build/didi",
-            "build-ninja/didi.exe", "build-ninja/didi",
-        )
-    ]
-    built = [path for path in candidates if path.is_file()]
-    if not built:
-        raise unittest.SkipTest("didi executable not built")
-    return str(max(built, key=lambda path: path.stat().st_mtime))
+# One resolver for every test that drives the binary. tests/ is imported two
+# ways -- as the top level directory by unittest discover, and as tests.<module>
+# by the explicit invocations in CI -- and only one of these resolves at a time.
+try:
+    import didi_binary as _binary
+except ImportError:
+    from tests import didi_binary as _binary
+
+_executable = _binary.resolve
 
 
 def _run(arguments):

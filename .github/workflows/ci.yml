@@ -254,6 +254,16 @@ jobs:
           # could ask for a mode and quietly start without it.
           "$DIDI_PYTHON" -m unittest tests.test_cli_arguments -v
 
+      - name: Verify the tests drive the build that was just made
+        shell: bash
+        run: |
+          # A machine with both a build/ and a build-ninja/ tree used to run the
+          # end to end tests against whichever the candidate list named first,
+          # which was the older one often enough to cost real debugging time. A
+          # stale binary answers every request perfectly well, just as the wrong
+          # version, so nothing about the failure says what went wrong.
+          "$DIDI_PYTHON" -m unittest tests.test_didi_binary -v
+
       - name: Validate Internal Markdown Links
         shell: bash
         run: |
