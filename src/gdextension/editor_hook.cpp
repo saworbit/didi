@@ -1135,6 +1135,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "script.detachFromNode", "project.listAutoloads", "project.setAutoload",
         "project.removeAutoload", "project.listInputActions", "project.setInputAction",
         "project.removeInputAction", "project.getSetting", "project.setSetting",
+        "project.resolveUids",
         "scene.listGroups", "scene.addToGroup", "scene.removeFromGroup",
         "scene.getGroupMembers", "scene.create", "scene.open", "scene.close",
         "scene.packBranch", "runtime.getTree", "runtime.setPaused", "runtime.stop",

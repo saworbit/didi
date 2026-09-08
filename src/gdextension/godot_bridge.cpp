@@ -6277,6 +6277,94 @@ json GodotBridge::execute(const std::string& method, const json& params,
         });
     }
 
+    if (method == "project.resolveUids") {
+        // ResourceUID is the engine's own UID table. Didi reads it instead of
+        // .godot/uid_cache.bin, which is an undocumented binary cache written on
+        // the editor's schedule: absent on a fresh clone, stale between saves,
+        // and readable mid-write. Every bind below carries the same hash on
+        // Godot 4.5.1, 4.6.2 and 4.7.2, so there is no version gate here.
+        if (!params.contains("queries") || !params["queries"].is_array()) {
+            return errorJson(400, "project.resolveUids requires a queries array");
+        }
+        const auto& queries = params["queries"];
+        if (queries.empty() || queries.size() > 256) {
+            return errorJson(400, "project.resolveUids accepts 1 to 256 queries");
+        }
+        for (const auto& bind : {std::make_tuple("ResourceUID", "text_to_id", 1321353865LL),
+                                 std::make_tuple("ResourceUID", "has_id", 1116898809LL),
+                                 std::make_tuple("ResourceUID", "get_id_path", 844755477LL),
+                                 std::make_tuple("ResourceUID", "path_to_uid", 1703090593LL)}) {
+            auto required = requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind));
+            if (required.isErr()) return errorJson(501, required.error().message);
+        }
+        auto uid_table = singleton("ResourceUID");
+        if (uid_table.isErr()) return errorJson(uid_table.error().code, uid_table.error().message);
+
+        json entries = json::array();
+        for (const auto& value : queries) {
+            if (!value.is_string()) return errorJson(400, "project.resolveUids queries must be strings");
+            const std::string query = value.get<std::string>();
+            json entry{{"query", query}, {"found", false}, {"uid", ""}, {"path", ""}};
+            if (query.rfind("uid://", 0) == 0) {
+                auto text = makeString(query);
+                if (text.isErr()) return errorJson(500, text.error().message);
+                auto id_value = callObject(uid_table.value(), "ResourceUID", "text_to_id", 1321353865LL,
+                                           {&text.value()});
+                if (id_value.isErr()) return errorJson(500, id_value.error().message);
+                auto id = scalarFromVariant<int64_t>(id_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                if (id.isErr()) return errorJson(500, id.error().message);
+                if (id.value() < 0) {
+                    // ResourceUID answers INVALID_ID for text that is not a UID
+                    // at all, which is a different fact from a UID it has never
+                    // been told about.
+                    entry["reason"] = "malformed_uid";
+                } else {
+                    auto id_arg = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, id.value());
+                    if (id_arg.isErr()) return errorJson(500, id_arg.error().message);
+                    auto known = callObject(uid_table.value(), "ResourceUID", "has_id", 1116898809LL,
+                                            {&id_arg.value()});
+                    if (known.isErr()) return errorJson(500, known.error().message);
+                    auto is_known = scalarFromVariant<GDExtensionBool>(known.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                    if (is_known.isErr()) return errorJson(500, is_known.error().message);
+                    if (!is_known.value()) {
+                        entry["reason"] = "unknown_to_engine";
+                    } else {
+                        auto path_value = callObject(uid_table.value(), "ResourceUID", "get_id_path", 844755477LL,
+                                                     {&id_arg.value()});
+                        if (path_value.isErr()) return errorJson(500, path_value.error().message);
+                        auto resolved = stringFromVariant(path_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                        if (resolved.isErr()) return errorJson(500, resolved.error().message);
+                        entry["found"] = true;
+                        entry["uid"] = query;
+                        entry["path"] = resolved.value();
+                    }
+                }
+            } else if (query.rfind("res://", 0) == 0) {
+                auto path_arg = makeString(query);
+                if (path_arg.isErr()) return errorJson(500, path_arg.error().message);
+                auto uid_value = callObject(uid_table.value(), "ResourceUID", "path_to_uid", 1703090593LL,
+                                            {&path_arg.value()});
+                if (uid_value.isErr()) return errorJson(500, uid_value.error().message);
+                auto uid_text = stringFromVariant(uid_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                if (uid_text.isErr()) return errorJson(500, uid_text.error().message);
+                // path_to_uid hands back what it was given when the engine holds
+                // no UID for that path, so the prefix is what separates a hit
+                // from a miss rather than an empty string.
+                if (uid_text.value().rfind("uid://", 0) == 0) {
+                    entry["found"] = true;
+                    entry["uid"] = uid_text.value();
+                    entry["path"] = query;
+                } else {
+                    entry["reason"] = "unknown_to_engine";
+                }
+            } else {
+                entry["reason"] = "unsupported_query";
+            }
+            entries.push_back(std::move(entry));
+        }
+        return liveResult({{"status", "success"}, {"entries", std::move(entries)}});
+    }
+
     if (method == "project.getSetting" || method == "project.setSetting") {
         const std::string setting = params.value("setting", "");
         auto valid_name = method == "project.setSetting"

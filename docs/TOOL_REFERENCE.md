@@ -460,9 +460,17 @@ Scans the project working directory for resources.
 - `include_uid` (`boolean`, default `true`).
 - Legacy alias: `query_project_resources`.
 
-### `project_get_uid_map` — Offline
+### `project_get_uid_map` — Live or offline
 
-Returns UID-to-path mappings discovered in indexed project resources. Embedded UIDs take precedence; modern Godot `.uid` sidecars are read for every resource type as a bounded fallback and accepted only when they match Godot's lowercase-alphanumeric textual UID format.
+Returns UID-to-path mappings discovered in indexed project resources, and optionally resolves specific references. Embedded UIDs take precedence; modern Godot `.uid` sidecars are read for every resource type as a bounded fallback and accepted only when they match Godot's lowercase-alphanumeric textual UID format.
+
+- `resolve` (`array`, optional): 1 to 256 non-empty `uid://` or `res://` strings.
+
+`uid_map` and `total_uids` always come from the project files, and `uid_map_source` says so on every response. `ResourceUID` exposes no enumeration through GDExtension, so a connected editor does not make the map live; a call without `resolve` therefore reports `execution_mode: "offline_fallback"` even with an editor attached.
+
+With `resolve` and a connected editor the answers come from `ResourceUID`, the table the engine itself resolves against, and the response reports `execution_mode: "live"`. Each entry carries `query`, `found`, `uid`, `path`, and `source` (`engine` or `index`). A live entry adds `index_state`: `agrees`, `differs` (a sidecar or `.import` the engine contradicts, which is the drift worth acting on), or `absent`. A miss carries `reason`: `unknown_to_engine` for a well-formed UID or path the engine holds nothing for, `malformed_uid` for text that is not a UID, `unsupported_query` for anything that is neither form, and offline `not_in_project_files` — which is not the same claim as the resource not existing, because a running editor can know a UID whose sidecar has not been written yet.
+
+Editor sessions only; a game session is refused. Didi does not read `.godot/uid_cache.bin`.
 
 ### `project_verify_changes` — Offline
 

@@ -167,6 +167,19 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 
 Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
 Copy-Item -LiteralPath $sourceFixtureRoot -Destination $fixtureRoot -Recurse
+
+# The addon script ships with a .uid sidecar, which makes it the one resource
+# the project files and the running engine are both certain to know. Read it
+# rather than hard-coding it, so a regenerated fixture does not silently turn
+# the UID assertions below into assertions about a UID nothing holds.
+$smokePluginUidPath = Join-Path $fixtureRoot "addons\didi\smoke_plugin.gd.uid"
+if (-not (Test-Path -LiteralPath $smokePluginUidPath)) {
+    throw "Fixture is missing the addon UID sidecar: $smokePluginUidPath"
+}
+$smokePluginUid = (Get-Content -LiteralPath $smokePluginUidPath -Raw).Trim()
+if ($smokePluginUid -notmatch '^uid://[0-9a-z]+$') {
+    throw "Fixture addon UID sidecar is not a UID: '$smokePluginUid'"
+}
 New-Item -ItemType Directory -Path $sessionDirectory | Out-Null
 $env:DIDI_SESSION_DIR = $sessionDirectory
 
@@ -1546,6 +1559,16 @@ try {
         (Tool-Request 110 "scene_remove_from_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two_transient" }),
         (Tool-Request 111 "scene_close" @{ discard_unsaved = $true }),
         (Tool-Request 112 "scene_create" @{ scene_path = "res:////escape.tscn" }),
+        # UID resolution against the engine's own ResourceUID table. The addon
+        # script ships with a .uid sidecar, so the files and the engine both
+        # know it and must agree. The rest are the honest misses.
+        (Tool-Request 118 "project_get_uid_map" @{ resolve = @(
+            $smokePluginUid,
+            "res://addons/didi/smoke_plugin.gd",
+            "uid://bogusbogusbogus",
+            "uid://!!",
+            "res://does_not_exist.tscn") }),
+        (Tool-Request 119 "project_get_uid_map" @{}),
         (Tool-Request 113 "runtime_read_logs" @{ cursor = 0; limit = 500; minimum_level = "debug" })
     )
 
@@ -2601,6 +2624,39 @@ try {
     Assert-True ((Tool-Payload $byId[111]).closed -eq $true) "Smoke scene cleanup failed."
     Assert-True $byId[112].result.isError "Non-normalized res:// scene path was accepted."
     Assert-True ($byId[112].result.content[0].text -match "normalized") "Non-normalized path error was not actionable."
+
+    $uidResolved = Tool-Payload $byId[118]
+    Assert-True ($uidResolved.execution_mode -eq "live") "UID resolution did not run against the live editor."
+    Assert-True ($uidResolved.is_live_engine -eq $true) "Live UID resolution did not identify itself as live."
+    Assert-True ($uidResolved.uid_map_source -eq "project_files") "The UID map claimed a source other than the file scan."
+    Assert-True ($uidResolved.resolved.Count -eq 5) "UID resolution did not answer every query."
+
+    $byUid = $uidResolved.resolved[0]
+    Assert-True ($byUid.found -eq $true) "The engine did not know the addon script UID its own sidecar carries."
+    Assert-True ($byUid.path -eq "res://addons/didi/smoke_plugin.gd") "UID resolved to the wrong path."
+    Assert-True ($byUid.source -eq "engine") "A live UID answer was not attributed to the engine."
+    Assert-True ($byUid.index_state -eq "agrees") "The sidecar and the engine disagreed on a UID both hold."
+
+    $byPath = $uidResolved.resolved[1]
+    Assert-True ($byPath.found -eq $true) "The engine did not resolve a path it has loaded."
+    Assert-True ($byPath.uid -eq $smokePluginUid) "Path resolved to the wrong UID."
+    Assert-True ($byPath.index_state -eq "agrees") "The sidecar and the engine disagreed on a path both hold."
+
+    # A well-formed UID nothing has registered, and text that is not a UID at
+    # all. They are different facts and the result says which.
+    Assert-True ($uidResolved.resolved[2].found -eq $false) "An unregistered UID reported a resolution."
+    Assert-True ($uidResolved.resolved[2].reason -eq "unknown_to_engine") "An unregistered UID was not named as unknown."
+    Assert-True ($uidResolved.resolved[3].found -eq $false) "Malformed UID text reported a resolution."
+    Assert-True ($uidResolved.resolved[3].reason -eq "malformed_uid") "Malformed UID text was not named as malformed."
+    Assert-True ($uidResolved.resolved[4].found -eq $false) "A path with no resource reported a UID."
+
+    # A connected editor does not make the map live: ResourceUID cannot be
+    # enumerated through GDExtension, so the scan is still a scan and says so.
+    $uidPlain = Tool-Payload $byId[119]
+    Assert-True ($uidPlain.execution_mode -eq "offline_fallback") "The scanned UID map claimed to be live."
+    Assert-True ($uidPlain.uid_map_source -eq "project_files") "The scanned UID map misreported its source."
+    Assert-True (-not $uidPlain.PSObject.Properties.Match("resolved").Count) "The UID map returned resolutions nobody asked for."
+    Assert-True ($uidPlain.uid_map.$smokePluginUid -eq "res://addons/didi/smoke_plugin.gd") "The scanned UID map lost the addon sidecar entry."
 
     $firstLogPage = Tool-Payload $byId[113]
     Assert-True ($firstLogPage.execution_mode -eq "live") "First runtime log read was not live."
