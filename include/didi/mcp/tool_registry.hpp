@@ -42,7 +42,11 @@ public:
     const ToolDefinition* getTool(const std::string& name) const;
     std::vector<ToolDefinition> listTools() const;
     ToolManifest buildManifest() const;
-    CallToolResult callTool(const std::string& name, const json& arguments);
+    // The scope says which era asked and which runtime session it named. It
+    // defaults to a legacy request, so a caller that does not care about
+    // request scoping keeps the inherited-route behaviour it had.
+    CallToolResult callTool(const std::string& name, const json& arguments,
+                            const RequestScope& scope = RequestScope::legacy());
 
     void setIpcClient(std::shared_ptr<ipc::IIpcClient> ipc_client);
     std::shared_ptr<ipc::IIpcClient> getIpcClient() const;
@@ -57,6 +61,19 @@ public:
 
 private:
     ToolRegistry() = default;
+
+    // Binds a modern request to the runtime session it named.
+    //
+    // Returns an error result when the request cannot be served on that
+    // session, and otherwise leaves `lease` holding a route to exactly it. It
+    // will attach when nothing is routed at all, because selecting a session
+    // no one is on takes it from nobody. It will not move a route that is
+    // already somewhere else: that would be the defect this exists to fix,
+    // pointed the other way.
+    std::optional<CallToolResult> selectNamedRuntimeRoute(
+        const std::string& tool_name, const RequestScope& scope,
+        std::optional<runtime::RuntimeRouteLease>& lease);
+
     std::unordered_map<std::string, ToolDefinition> m_tools;
     std::shared_ptr<ipc::IIpcClient> m_sourceIpcClient;
     std::shared_ptr<ipc::IIpcClient> m_ipcClient;

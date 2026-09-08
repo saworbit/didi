@@ -249,6 +249,42 @@ bool clientDeclaresUiExtension(const json& capabilities) {
     return extensions->contains(kUiExtensionName);
 }
 
+// The runtime session a request named, if it named one. Absent is a real
+// answer and not a default: a modern request that names nothing is asking for
+// no session at all, which is what stops it inheriting somebody else's.
+std::optional<std::string> requestedRuntimeSession(const json& params) {
+    if (!params.is_object() || !params.contains("_meta") || !params["_meta"].is_object()) {
+        return std::nullopt;
+    }
+    const auto& meta = params["_meta"];
+    const auto didi = meta.find(kDidiMetaKey);
+    if (didi == meta.end() || !didi->is_object()) return std::nullopt;
+    const auto session = didi->find(kRuntimeSessionMetaKey);
+    if (session == didi->end() || !session->is_string()) return std::nullopt;
+    auto value = session->get<std::string>();
+    if (value.empty()) return std::nullopt;
+    return value;
+}
+
+// The route a request is entitled to see when it asks what is available.
+//
+// Availability leaked the same way dispatch did: a modern request was told a
+// live tool was ready because an unrelated task had attached an editor. A
+// request that named no session sees no route, and one that named a session
+// sees it only if that is the session this process is on. Listing never
+// attaches, because asking what is available should not change what is.
+std::optional<runtime::RuntimeRouteLease> visibleRouteLease(
+    const std::shared_ptr<ipc::IIpcClient>& client, const RequestScope& scope) {
+    if (!scope.mayInheritActiveRoute() && !scope.selectsRuntimeSession()) return std::nullopt;
+    auto lease = runtime::acquireRuntimeRouteLease(client);
+    if (!scope.selectsRuntimeSession()) return lease;
+    if (lease.has_value() && lease->descriptor.has_value() &&
+        lease->descriptor->session_id == *scope.runtime_session_id) {
+        return lease;
+    }
+    return std::nullopt;
+}
+
 bool requestDeclaresUiExtension(const json& params) {
     if (!params.is_object() || !params.contains("_meta") || !params["_meta"].is_object()) {
         return false;
@@ -285,10 +321,11 @@ std::string describeMutationTarget(const json& arguments) {
 // confirmed mutation is. Returns an empty token when the preview itself fails,
 // because a call that cannot run has nothing to confirm.
 std::pair<std::string, json> mintConfirmationToken(const std::string& name,
-                                                   const json& arguments) {
+                                                   const json& arguments,
+                                                   const RequestScope& scope) {
     json preview_arguments = arguments;
     preview_arguments["dry_run"] = true;
-    const auto preview = ToolRegistry::instance().callTool(name, preview_arguments);
+    const auto preview = ToolRegistry::instance().callTool(name, preview_arguments, scope);
     const auto preview_json = preview.toJson();
     if (preview.isError || !preview_json.contains("structuredContent")) return {"", json::object()};
     const auto& structured = preview_json["structuredContent"];
@@ -425,6 +462,12 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     // recovery path.
     const ProtocolEra era =
         carriesModernEnvelope(req.params) ? ProtocolEra::Modern : ProtocolEra::Legacy;
+    // Everything below dispatches through this rather than reading process
+    // state, so availability, safety and the tool call all answer about the
+    // same session: the one this request selected.
+    RequestScope scope;
+    scope.era = era;
+    scope.runtime_session_id = requestedRuntimeSession(req.params);
     std::optional<std::string> requested_version;
     if (era == ProtocolEra::Modern &&
         req.params["_meta"][kProtocolVersionMetaKey].is_string()) {
@@ -527,7 +570,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     if (req.method == "tools/list") {
         auto tools = ToolRegistry::instance().listTools();
         json tool_list = json::array();
-        const auto lease = runtime::acquireRuntimeRouteLease(m_ipcClient);
+        const auto lease = visibleRouteLease(m_ipcClient, scope);
         const bool connected = lease.has_value();
         const bool managed_unavailable = managedRouteUnavailable(m_ipcClient, connected);
         const auto active = lease.has_value()
@@ -603,7 +646,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             }
             json approved = arguments;
             approved["confirmation_token"] = state->at("token");
-            auto result = ToolRegistry::instance().callTool(name, approved);
+            auto result = ToolRegistry::instance().callTool(name, approved, scope);
             return JsonRpcResponse::makeSuccess(
                 req.id, withConfirmationProvenance(complete(result.toJson()), "human"));
         }
@@ -620,11 +663,11 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         if (m_skipConfirmations && !already_confirmed && !previewing) {
             const auto binding = resolveAliasBinding(name, arguments);
             if (MutationSafety::requiresConfirmation(binding, arguments)) {
-                const auto [token, unused_preview] = mintConfirmationToken(name, arguments);
+                const auto [token, unused_preview] = mintConfirmationToken(name, arguments, scope);
                 if (!token.empty()) {
                     json approved = arguments;
                     approved["confirmation_token"] = token;
-                    auto result = ToolRegistry::instance().callTool(name, approved);
+                    auto result = ToolRegistry::instance().callTool(name, approved, scope);
                     return JsonRpcResponse::makeSuccess(
                         req.id, withConfirmationProvenance(complete(result.toJson()), "skipped"));
                 }
@@ -638,7 +681,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             if (MutationSafety::requiresConfirmation(binding, arguments)) {
                 // If the preview itself failed there is nothing truthful to show
                 // a person, so fall through and let the ordinary path report why.
-                const auto [token, mutation_preview] = mintConfirmationToken(name, arguments);
+                const auto [token, mutation_preview] = mintConfirmationToken(name, arguments, scope);
                 if (!token.empty()) {
                     json input_request = {
                         {"method", "elicitation/create"},
@@ -669,7 +712,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             }
         }
 
-        auto result = ToolRegistry::instance().callTool(name, arguments);
+        auto result = ToolRegistry::instance().callTool(name, arguments, scope);
         auto encoded = complete(result.toJson());
         if (already_confirmed && !result.isError) {
             encoded = withConfirmationProvenance(std::move(encoded), "agent");
@@ -681,7 +724,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     if (req.method == "resources/list") {
         auto resources = ResourceRegistry::instance().listResources();
         json res_list = json::array();
-        const auto lease = runtime::acquireRuntimeRouteLease(m_ipcClient);
+        const auto lease = visibleRouteLease(m_ipcClient, scope);
         const bool connected = lease.has_value();
         const bool managed_unavailable = managedRouteUnavailable(m_ipcClient, connected);
         const auto active = lease.has_value()

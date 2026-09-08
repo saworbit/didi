@@ -19,14 +19,9 @@
 namespace didi {
 namespace mcp {
 
-// Which protocol revision a single request belongs to. Didi is dual-era: a
-// legacy client negotiates once in `initialize` and the process remembers what
-// it declared, while a modern client carries version and capabilities in
-// `_meta` on every request and is entitled to have nothing inferred from
-// earlier traffic on the same process. Requests of both kinds can be
-// interleaved on one stdio process, so this is a property of the request and
-// never of the server.
-enum class ProtocolEra { Legacy, Modern };
+// ProtocolEra and RequestScope live in mcp_protocol.hpp, reached through
+// tool_registry.hpp above: dispatch needs them too, and this header cannot be
+// the one that defines them without the registry including the server.
 
 class McpServer {
 public:

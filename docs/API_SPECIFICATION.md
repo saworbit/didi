@@ -91,6 +91,29 @@ two clients sharing one process cannot see each other's declarations.
 `server/discover` is exempt: it is how a client finds out what the server
 speaks, so it answers whatever it is sent.
 
+### Naming the runtime session
+
+A Godot session is state that spans requests, so a modern request names the one
+it means in `_meta["didi"]["runtime_session_id"]`. Discover the ids with
+`runtime_list_sessions`.
+
+A modern request is only ever served on the session it named. Naming nothing
+gets no live route at all: a tool that can answer offline does and says
+`offline_fallback`, and a live-only tool is refused with `400` naming the field
+to set. Naming a session while the server is routed to a different one is
+refused with `409` carrying both ids, rather than moving a route another task
+selected. Availability follows the same rule, so `tools/list` will not report a
+tool live because an unrelated request attached an editor.
+
+The server holds one route at a time. A modern request may select a session
+when the server is routed nowhere, because that takes it from nobody. Two tasks
+that need two different sessions at once need two Didi processes; the `409` says
+so rather than letting one of them silently drive the other's editor.
+
+Legacy clients are unchanged. `runtime_attach_session` still sets a route for
+the process and later legacy requests still inherit it, which is the lifecycle
+that era was written against.
+
 `server/discover` reports the supported versions without a handshake, because it
 is the probe a modern stdio client sends first. A version Didi does not serve
 returns `-32022 Unsupported protocol version` carrying the list to retry with,

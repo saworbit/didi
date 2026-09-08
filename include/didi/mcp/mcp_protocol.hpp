@@ -40,6 +40,46 @@ inline const char* kProtocolVersionMetaKey = "io.modelcontextprotocol/protocolVe
 inline const char* kServerInfoMetaKey = "io.modelcontextprotocol/serverInfo";
 inline constexpr int kUnsupportedProtocolVersionCode = -32022;
 
+// Where a modern client names the runtime session it means.
+//
+// The modern revision says a stdio process is not a conversation, and that
+// state spanning requests must be referenced by an explicit identifier the
+// client passes on each request. A Godot session is exactly that kind of
+// state: attaching one set a process-wide route that every later request
+// inherited, so a task could read from or mutate an editor it never selected.
+// Results already carry a `didi` block, so this is the request side of a key
+// that exists.
+inline const char* kDidiMetaKey = "didi";
+inline const char* kRuntimeSessionMetaKey = "runtime_session_id";
+
+// Which protocol revision a single request belongs to. Didi is dual-era: a
+// legacy client negotiates once in `initialize` and the process remembers what
+// it declared, while a modern client carries version and capabilities in
+// `_meta` on every request and is entitled to have nothing inferred from
+// earlier traffic on the same process. Requests of both kinds can be
+// interleaved on one stdio process, so this is a property of the request and
+// never of the server.
+enum class ProtocolEra { Legacy, Modern };
+
+// What one request selected, carried from the protocol boundary down to
+// dispatch so that no layer has to guess.
+struct RequestScope {
+    ProtocolEra era{ProtocolEra::Legacy};
+    // The session this request named, if it named one.
+    std::optional<std::string> runtime_session_id;
+
+    bool selectsRuntimeSession() const { return runtime_session_id.has_value(); }
+
+    // A legacy request inherits whatever route the handshake era attached, the
+    // way it always has. A modern request may only ever be served on the
+    // session it named for itself.
+    bool mayInheritActiveRoute() const { return era == ProtocolEra::Legacy; }
+
+    // The default is a legacy request, so every existing caller and every test
+    // that calls a tool directly keeps the behaviour it had.
+    static RequestScope legacy() { return RequestScope{}; }
+};
+
 inline const char* kModernProtocolVersion = "2026-07-28";
 
 // A revision belongs here only once Didi serves its result shapes. The modern

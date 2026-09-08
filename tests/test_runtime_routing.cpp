@@ -2043,6 +2043,289 @@ void test_authoritative_handshake_compares_every_public_identity_field() {
     }
 }
 
+
+// --- Request-scoped runtime selection ---------------------------------------
+//
+// The modern revision says a stdio process is not a conversation: unrelated
+// tasks may interleave requests on one transport, and state spanning requests
+// must be named on each request. A Godot session is that kind of state.
+// Attaching one used to set a process-wide route every later request
+// inherited, so a task could read from or mutate an editor it never selected.
+
+didi::runtime::SessionDescriptor namedDescriptor(const std::string& session_id,
+                                                 const std::string& kind,
+                                                 const std::string& project_path) {
+    return didi::runtime::SessionDescriptor{
+        1, session_id, std::string(64, 'a'), 77,
+        kind, project_path, descriptorEndpoint(77, session_id),
+        123456789, "1.3"};
+}
+
+// The project this test process is serving, normalised the way the check is.
+std::string thisProjectPath() {
+    std::error_code error;
+    const auto here =
+        std::filesystem::weakly_canonical(std::filesystem::current_path(error), error);
+    return didi::paths::nativePathToUtf8(
+        (error ? std::filesystem::current_path() : here).lexically_normal());
+}
+
+// Two sessions reachable from one process. Records every attach, so a test can
+// prove a refused request left the route where it found it rather than merely
+// failing to use it.
+class TwoSessionFake final : public didi::runtime::IRuntimeSessionClient,
+                             public std::enable_shared_from_this<TwoSessionFake> {
+public:
+    TwoSessionFake(std::string first_id, std::string second_id, const std::string& project)
+        : one(namedDescriptor(std::move(first_id), "editor", project)),
+          two(namedDescriptor(std::move(second_id), "editor", project)) {}
+
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override { held.reset(); }
+    bool isConnected() const override { return held.has_value(); }
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json&,
+                                         int) override {
+        served.push_back(held.has_value() ? held->session_id : std::string("<none>"));
+        last_method = method;
+        return didi::json{{"status", "ok"}, {"method", method}};
+    }
+    didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
+        return didi::json{{"sessions", didi::json::array()},
+                          {"diagnostics", didi::json::array()}};
+    }
+    didi::Result<didi::json> attachSession(const std::string& session_id) override {
+        attaches.push_back(session_id);
+        if (session_id == one.session_id) held = one;
+        else if (session_id == two.session_id) held = two;
+        else return didi::Error::notFound("Runtime session not found: " + session_id);
+        ++generation;
+        return didi::json::object();
+    }
+    didi::Result<didi::json> detachSession() override {
+        held.reset();
+        return didi::json::object();
+    }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override { return held; }
+    std::optional<didi::runtime::RuntimeRouteLease> acquireRouteLease() override {
+        if (!held.has_value()) return std::nullopt;
+        return didi::runtime::RuntimeRouteLease{
+            std::static_pointer_cast<didi::ipc::IIpcClient>(shared_from_this()), held, generation};
+    }
+    bool quarantineRoute(const didi::runtime::RuntimeRouteLease&) override { return false; }
+
+    didi::runtime::SessionDescriptor one;
+    didi::runtime::SessionDescriptor two;
+    std::optional<didi::runtime::SessionDescriptor> held;
+    std::vector<std::string> attaches;
+    std::vector<std::string> served;
+    std::string last_method;
+    uint64_t generation{1};
+};
+
+didi::mcp::RequestScope modernNaming(const std::string& session_id) {
+    didi::mcp::RequestScope scope;
+    scope.era = didi::mcp::ProtocolEra::Modern;
+    scope.runtime_session_id = session_id;
+    return scope;
+}
+
+didi::mcp::RequestScope modernNamingNothing() {
+    didi::mcp::RequestScope scope;
+    scope.era = didi::mcp::ProtocolEra::Modern;
+    return scope;
+}
+
+const char* kSessionA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const char* kSessionB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+const didi::json kProbeArguments = {
+    {"node_type", "Node"}, {"parent_path", "/root"}, {"name", "Probe"}};
+
+// Installs a two-session route for the length of a test and takes it out again
+// however the test leaves.
+//
+// Manual cleanup does not survive a failed assertion. One broken assertion here
+// left the fake installed, and the next offline test in the run was answered by
+// it and failed for a reason that had nothing to do with what it was testing.
+struct ScopedRegistryRoute {
+    explicit ScopedRegistryRoute(const std::string& project)
+        : session(std::make_shared<TwoSessionFake>(kSessionA, kSessionB, project)) {
+        auto& registry = didi::mcp::ToolRegistry::instance();
+        registry.registerAllDefaultTools();
+        registry.setIpcClient(session);
+        registry.setRuntimeSessionClient(session);
+    }
+    ScopedRegistryRoute() : ScopedRegistryRoute(thisProjectPath()) {}
+    ~ScopedRegistryRoute() {
+        auto& registry = didi::mcp::ToolRegistry::instance();
+        registry.setRuntimeSessionClient(nullptr);
+        registry.setIpcClient(nullptr);
+        registry.registerAllDefaultTools();
+    }
+    ScopedRegistryRoute(const ScopedRegistryRoute&) = delete;
+    ScopedRegistryRoute& operator=(const ScopedRegistryRoute&) = delete;
+
+    std::shared_ptr<TwoSessionFake> session;
+};
+
+// The load-bearing one. A legacy client attaches, and a modern request that
+// named no session must not be handed that editor.
+void test_modern_call_without_a_handle_does_not_inherit_the_attached_route() {
+    ScopedRegistryRoute route;
+    auto& fake = route.session;
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    ASSERT_TRUE(fake->attachSession(kSessionA).isOk());
+
+    const auto inherited = registry.callTool("scene_instantiate_node", kProbeArguments,
+                                             modernNamingNothing());
+
+    ASSERT_TRUE(inherited.isError);
+    const auto payload = didi::json::parse(inherited.content[0].text);
+    ASSERT_EQ(payload["error"]["code"], 400);
+    ASSERT_EQ(payload["error"]["data"]["missing"], "_meta.didi.runtime_session_id");
+    // Never reached the engine, and the legacy route is untouched.
+    ASSERT_TRUE(fake->served.empty());
+    ASSERT_EQ(fake->held->session_id, std::string(kSessionA));
+}
+
+// A legacy request is the lifecycle this was written against and keeps it.
+void test_legacy_call_still_inherits_the_attached_route() {
+    ScopedRegistryRoute route;
+    auto& fake = route.session;
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    ASSERT_TRUE(fake->attachSession(kSessionA).isOk());
+
+    const auto result = registry.callTool("scene_instantiate_node", kProbeArguments);
+
+    ASSERT_FALSE(result.isError);
+    ASSERT_EQ(fake->served.size(), static_cast<size_t>(1));
+    ASSERT_EQ(fake->served[0], std::string(kSessionA));
+}
+
+void test_modern_call_naming_the_attached_session_is_served_on_it() {
+    ScopedRegistryRoute route;
+    auto& fake = route.session;
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    ASSERT_TRUE(fake->attachSession(kSessionA).isOk());
+    const auto attaches_before = fake->attaches.size();
+
+    const auto result = registry.callTool("scene_instantiate_node", kProbeArguments,
+                                          modernNaming(kSessionA));
+
+    ASSERT_FALSE(result.isError);
+    ASSERT_EQ(fake->served.size(), static_cast<size_t>(1));
+    ASSERT_EQ(fake->served[0], std::string(kSessionA));
+    // Naming the session already routed changes nothing about the route.
+    ASSERT_EQ(fake->attaches.size(), attaches_before);
+}
+
+// The criterion that stops this fix becoming the same defect pointed the other
+// way: a request must not take the route from whoever set it.
+void test_modern_call_naming_another_session_is_refused_and_moves_nothing() {
+    ScopedRegistryRoute route;
+    auto& fake = route.session;
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    ASSERT_TRUE(fake->attachSession(kSessionA).isOk());
+    const auto attaches_before = fake->attaches.size();
+
+    const auto result = registry.callTool("scene_instantiate_node", kProbeArguments,
+                                          modernNaming(kSessionB));
+
+    ASSERT_TRUE(result.isError);
+    const auto payload = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(payload["error"]["code"], 409);
+    ASSERT_EQ(payload["error"]["data"]["requested_session_id"], std::string(kSessionB));
+    ASSERT_EQ(payload["error"]["data"]["attached_session_id"], std::string(kSessionA));
+    ASSERT_TRUE(fake->served.empty());
+    ASSERT_EQ(fake->attaches.size(), attaches_before);
+    ASSERT_EQ(fake->held->session_id, std::string(kSessionA));
+}
+
+// Interleaving, which is the arrangement the specification says to expect.
+void test_interleaved_modern_calls_cannot_be_served_on_each_others_session() {
+    ScopedRegistryRoute route;
+    auto& fake = route.session;
+    auto& registry = didi::mcp::ToolRegistry::instance();
+
+    // Task A selects a session on a process routed nowhere, taking it from
+    // nobody.
+    const auto first = registry.callTool("scene_instantiate_node", kProbeArguments,
+                                         modernNaming(kSessionA));
+    ASSERT_FALSE(first.isError);
+
+    // Task B, interleaved, names the other one. It is refused rather than
+    // silently served, and A's route does not move.
+    const auto second = registry.callTool("scene_instantiate_node", kProbeArguments,
+                                          modernNaming(kSessionB));
+    ASSERT_TRUE(second.isError);
+
+    // A carries on, still on the session it named.
+    const auto third = registry.callTool("scene_instantiate_node", kProbeArguments,
+                                         modernNaming(kSessionA));
+    ASSERT_FALSE(third.isError);
+
+    // Every request that reached the engine reached the session it asked for,
+    // and none reached B.
+    for (const auto& served : fake->served) ASSERT_EQ(served, std::string(kSessionA));
+    ASSERT_EQ(fake->served.size(), static_cast<size_t>(2));
+}
+
+void test_modern_call_selects_a_session_when_the_process_is_routed_nowhere() {
+    ScopedRegistryRoute route;
+    auto& fake = route.session;
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    ASSERT_FALSE(fake->held.has_value());
+
+    const auto result = registry.callTool("scene_instantiate_node", kProbeArguments,
+                                          modernNaming(kSessionB));
+
+    ASSERT_FALSE(result.isError);
+    ASSERT_EQ(fake->attaches.size(), static_cast<size_t>(1));
+    ASSERT_EQ(fake->attaches[0], std::string(kSessionB));
+    ASSERT_EQ(fake->served[0], std::string(kSessionB));
+}
+
+// A handle names a session, and attaching by id searches every session on the
+// machine, so the project it belongs to has to be checked and not assumed.
+void test_modern_call_refuses_a_session_from_another_project() {
+    ScopedRegistryRoute route(didi::paths::nativePathToUtf8(
+        std::filesystem::temp_directory_path() / "didi_some_other_project"));
+    auto& fake = route.session;
+    auto& registry = didi::mcp::ToolRegistry::instance();
+
+    const auto result = registry.callTool("scene_instantiate_node", kProbeArguments,
+                                          modernNaming(kSessionA));
+
+    ASSERT_TRUE(result.isError);
+    const auto payload = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(payload["error"]["code"], 409);
+    ASSERT_TRUE(payload["error"]["data"].contains("session_project_path"));
+    ASSERT_TRUE(fake->served.empty());
+}
+
+// A tool that can answer without an engine still answers, and says which mode
+// it used, so withholding the route is not the same as withholding the result.
+void test_modern_call_without_a_handle_still_answers_offline() {
+    ScopedRegistryRoute route;
+    auto& fake = route.session;
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    ASSERT_TRUE(fake->attachSession(kSessionA).isOk());
+
+    const auto result = registry.callTool("scene_get_hierarchy",
+                                          {{"root_path", "res://main.tscn"}},
+                                          modernNamingNothing());
+
+    // Whether the offline parse finds a scene depends on the working directory
+    // and is not what this is about. What matters is that the engine was never
+    // reached, and that the tool was allowed to try rather than refused for
+    // naming no session the way a live-only tool is.
+    ASSERT_TRUE(fake->served.empty());
+    // The refusal a live-only tool gives names the metadata field to set. This
+    // tool must not give it: it can answer without an engine, so naming no
+    // session costs the caller the live route and not the result.
+    ASSERT_TRUE(result.content[0].text.find("runtime_session_id") == std::string::npos);
+}
+
 struct RegisterRuntimeRoutingTests {
     RegisterRuntimeRoutingTests() {
         registerTest("RuntimeRouting.EngineLivenessTriState",
@@ -2131,6 +2414,22 @@ struct RegisterRuntimeRoutingTests {
                      test_get_session_quarantines_a_disconnected_selected_route);
         registerTest("RuntimeRouting.HandshakeComparesEveryIdentityField",
                      test_authoritative_handshake_compares_every_public_identity_field);
+        registerTest("RuntimeRouting.ModernCallDoesNotInheritRoute",
+                     test_modern_call_without_a_handle_does_not_inherit_the_attached_route);
+        registerTest("RuntimeRouting.LegacyCallStillInheritsRoute",
+                     test_legacy_call_still_inherits_the_attached_route);
+        registerTest("RuntimeRouting.ModernCallUsesTheSessionItNamed",
+                     test_modern_call_naming_the_attached_session_is_served_on_it);
+        registerTest("RuntimeRouting.ModernCallCannotTakeAnotherRoute",
+                     test_modern_call_naming_another_session_is_refused_and_moves_nothing);
+        registerTest("RuntimeRouting.InterleavedModernCallsStaySeparate",
+                     test_interleaved_modern_calls_cannot_be_served_on_each_others_session);
+        registerTest("RuntimeRouting.ModernCallSelectsAnUnroutedSession",
+                     test_modern_call_selects_a_session_when_the_process_is_routed_nowhere);
+        registerTest("RuntimeRouting.ModernCallChecksProjectIdentity",
+                     test_modern_call_refuses_a_session_from_another_project);
+        registerTest("RuntimeRouting.ModernCallWithoutHandleAnswersOffline",
+                     test_modern_call_without_a_handle_still_answers_offline);
     }
 } g_registerRuntimeRoutingTests;
 
