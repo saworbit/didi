@@ -1329,16 +1329,16 @@ private:
     // Opens a route to one session, or reuses the one already held for it.
     Result<json> openRoute(const std::string& session_id, bool make_selected) {
         if (session_id.empty()) return Error::invalidArgument("session_id is required");
-        {
+        if (make_selected) {
             std::lock_guard<std::mutex> lock(m_mutex);
             // Naming a session is a decision, so stop guessing at one.
-            if (make_selected) m_autoAttachEnabled = false;
-        }
-        if (auto held = leaseFor(session_id)) {
-            if (make_selected) {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                m_selectedSessionId = session_id;
-            }
+            m_autoAttachEnabled = false;
+        } else if (auto held = leaseFor(session_id)) {
+            // A request naming a session this process is already routed to uses
+            // that route as it stands. Attach does not take this path: it
+            // re-authenticates every time, which is how a session whose process
+            // changed underneath it is caught, and callers read the handshake
+            // it returns.
             return json{{"session", held->descriptor->toJson()}, {"reused", true}};
         }
         // A route whose engine has gone still holds a lock. Drop those before

@@ -2569,6 +2569,36 @@ void test_server_shutdown_releases_a_route_the_selection_never_pointed_at() {
     successor->disconnect();
 }
 
+// Attaching a session that is already routed still performs the handshake.
+//
+// The reuse shortcut skipped it, and the live harness caught what the unit
+// tests did not: attach is how a caller revalidates a session, and its answer
+// carries the handshake a caller reads. Reusing the route silently turned a
+// revalidation into a no-op.
+void test_reattaching_the_same_session_still_handshakes() {
+    SessionDirectoryFixture fixture;
+    const auto session = fixture.add("6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d", "editor");
+    auto client = fixture.client();
+
+    const auto first = client->attachSession(session.session_id);
+    ASSERT_TRUE(first.isOk());
+    const auto handshakes_after_first = fixture.state->handshakes;
+    ASSERT_TRUE(first.value().contains("handshake"));
+
+    const auto again = client->attachSession(session.session_id);
+    ASSERT_TRUE(again.isOk());
+    ASSERT_TRUE(again.value().contains("handshake"));
+    ASSERT_TRUE(fixture.state->handshakes > handshakes_after_first);
+
+    // A request naming a session it already holds does not pay for one, because
+    // it is using the route rather than revalidating it.
+    const auto before_open = fixture.state->handshakes;
+    ASSERT_TRUE(client->openSessionRoute(session.session_id).isOk());
+    ASSERT_EQ(fixture.state->handshakes, before_open);
+
+    client->disconnect();
+}
+
 // A route to an engine that has gone still holds a lock, so it is reaped before
 // the cap is consulted. Otherwise an editor closed hours ago is what refuses a
 // session now.
@@ -2708,6 +2738,8 @@ struct RegisterRuntimeRoutingTests {
                      test_disconnect_releases_every_route_not_only_the_selected_one);
         registerTest("RuntimeRouting.ShutdownReleasesUnselectedRoute",
                      test_server_shutdown_releases_a_route_the_selection_never_pointed_at);
+        registerTest("RuntimeRouting.ReattachStillHandshakes",
+                     test_reattaching_the_same_session_still_handshakes);
         registerTest("RuntimeRouting.DeadRouteDoesNotFillTheLimit",
                      test_a_dead_route_does_not_count_against_the_held_route_limit);
     }
