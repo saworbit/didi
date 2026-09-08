@@ -12,7 +12,6 @@ See docs/CONTROL_ROOM_DESIGN.md section 4.3.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import unittest
 from pathlib import Path
@@ -28,20 +27,15 @@ TOOL = "didi_control_room"
 DECLARED = {UI_EXTENSION: {"mimeTypes": [UI_MIME]}}
 
 
-def _executable() -> Path:
-    # CI names the binary it just built. Without this the search below can find
-    # a stale tree from another generator and test yesterday's server.
-    override = os.environ.get("DIDI_TEST_BINARY")
-    if override:
-        return Path(override)
-    for candidate in (
-        "build/Release/didi.exe", "build/Debug/didi.exe", "build/didi",
-        "build-ninja/didi.exe", "build-ninja/didi",
-    ):
-        path = REPOSITORY_ROOT / candidate
-        if path.is_file():
-            return path
-    raise unittest.SkipTest("didi executable not built")
+# One resolver for every test that drives the binary. tests/ is imported two
+# ways -- as the top level directory by unittest discover, and as tests.<module>
+# by the explicit invocations in CI -- and only one of these resolves at a time.
+try:
+    import didi_binary as _binary
+except ImportError:
+    from tests import didi_binary as _binary
+
+_executable = _binary.resolve
 
 
 class _Server:

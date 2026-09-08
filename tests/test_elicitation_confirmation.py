@@ -37,12 +37,15 @@ NO_ELICITATION = {
 }
 
 
-def _executable() -> Path:
-    for candidate in ("build/Release/didi.exe", "build/Debug/didi.exe", "build/didi"):
-        path = REPOSITORY_ROOT / candidate
-        if path.is_file():
-            return path
-    raise unittest.SkipTest("didi executable not built")
+# One resolver for every test that drives the binary. tests/ is imported two
+# ways -- as the top level directory by unittest discover, and as tests.<module>
+# by the explicit invocations in CI -- and only one of these resolves at a time.
+try:
+    import didi_binary as _binary
+except ImportError:
+    from tests import didi_binary as _binary
+
+_executable = _binary.resolve
 
 
 class ElicitationConfirmationTests(unittest.TestCase):
