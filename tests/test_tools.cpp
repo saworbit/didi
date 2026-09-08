@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
 #include "didi/mcp/resource_registry.hpp"
@@ -840,12 +841,14 @@ static void test_project_impact_traces_exact_node_paths() {
     }
 }
 
-// Answers project.resolveUids with a fixed verdict, so the correction the
-// handler applies can be checked without an engine.
-class UidVerdictClient final : public didi::ipc::IIpcClient {
+// Answers project.resolveUids with a fixed verdict per query kind, so the
+// correction the handler applies can be checked without an engine. The two
+// kinds are answered independently on purpose: a path can load with no UID
+// registered, and a UID can be registered for a file that is gone.
+class ReferenceVerdictClient final : public didi::ipc::IIpcClient {
 public:
-    UidVerdictClient(bool resolve, std::string path)
-        : m_resolve(resolve), m_path(std::move(path)) {}
+    ReferenceVerdictClient(bool resolve_uids, std::string uid_path, bool paths_load)
+        : m_resolveUids(resolve_uids), m_uidPath(std::move(uid_path)), m_pathsLoad(paths_load) {}
 
     bool connect(const std::string&, int) override { return true; }
     void disconnect() override {}
@@ -857,10 +860,21 @@ public:
         queries_seen = params.value("queries", didi::json::array());
         didi::json entries = didi::json::array();
         for (const auto& query : queries_seen) {
-            didi::json entry{{"query", query}, {"found", m_resolve},
-                             {"uid", m_resolve ? query : didi::json("")},
-                             {"path", m_resolve ? didi::json(m_path) : didi::json("")}};
-            if (!m_resolve) entry["reason"] = "unknown_to_engine";
+            const auto text = query.get<std::string>();
+            didi::json entry{{"query", query}, {"found", false}, {"uid", ""}, {"path", ""}};
+            if (text.rfind("uid://", 0) == 0) {
+                if (m_resolveUids) {
+                    entry["found"] = true;
+                    entry["uid"] = query;
+                    entry["path"] = m_uidPath;
+                    entry["exists"] = true;
+                } else {
+                    entry["reason"] = "unknown_to_engine";
+                }
+            } else {
+                entry["exists"] = m_pathsLoad;
+                if (!m_pathsLoad) entry["reason"] = "unknown_to_engine";
+            }
             entries.push_back(std::move(entry));
         }
         return didi::json{{"status", "success"}, {"entries", std::move(entries)}};
@@ -870,48 +884,68 @@ public:
     didi::json queries_seen;
 
 private:
-    bool m_resolve;
-    std::string m_path;
+    bool m_resolveUids;
+    std::string m_uidPath;
+    bool m_pathsLoad;
 };
 
-static void test_audit_clears_a_uid_finding_the_engine_disproves_and_keeps_one_it_confirms() {
-    ScopedToolProject project("audit-uid-live");
+static didi::json auditWith(const std::shared_ptr<ReferenceVerdictClient>& client) {
+    const auto result = didi::mcp::handleProjectAuditAssets(didi::json::object(), client);
+    ASSERT_TRUE(!result.isError);
+    return didi::json::parse(result.content[0].text);
+}
+
+static bool auditHasBroken(const didi::json& report, const std::string& target) {
+    for (const auto& entry : report["broken_references"]) {
+        if (entry.value("target", std::string{}) == target) return true;
+    }
+    return false;
+}
+
+static bool auditConfirmed(const didi::json& report, const std::string& target) {
+    for (const auto& entry : report["broken_references"]) {
+        if (entry.value("target", std::string{}) != target) continue;
+        return entry.value("confirmed_by_engine", false);
+    }
+    return false;
+}
+
+static void test_audit_clears_the_findings_the_engine_disproves_and_keeps_the_ones_it_confirms() {
+    ScopedToolProject project("audit-reference-live");
     writeAuditFixture();
 
-    // The engine resolves uid://gonegone to the file the offline pass also
-    // called an orphan. Both findings were wrong and both must go: a file the
-    // engine proved is referenced cannot also be unreferenced.
+    // The fixture holds one of each: uid://gonegone that no file records, and
+    // res://art/deleted.png that no file provides.
     {
-        auto client = std::make_shared<UidVerdictClient>(true, "res://art/orphan.png");
-        const auto result = didi::mcp::handleProjectAuditAssets(didi::json::object(), client);
-        ASSERT_TRUE(!result.isError);
-        const auto report = didi::json::parse(result.content[0].text);
+        auto client = std::make_shared<ReferenceVerdictClient>(true, "res://art/orphan.png", true);
+        const auto report = auditWith(client);
 
         ASSERT_EQ(client->method_seen, "project.resolveUids");
-        ASSERT_EQ(client->queries_seen.size(), 1u);
+        ASSERT_EQ(client->queries_seen.size(), 2u);
+        // UID findings are sent first, deterministically, because the budget
+        // can cut the list.
         ASSERT_EQ(client->queries_seen[0], "uid://gonegone");
+        ASSERT_EQ(client->queries_seen[1], "res://art/deleted.png");
 
-        // An engine contributed to the findings, so the mode says live. The
-        // scan behind them is a file scan either way and says so separately.
         ASSERT_EQ(report["execution_mode"], "live");
         ASSERT_EQ(report["scan_source"], "project_files");
-        ASSERT_EQ(report["uid_verification"]["mode"], "live");
-        ASSERT_EQ(report["uid_verification"]["checked"], 1u);
-        ASSERT_EQ(report["uid_verification"]["resolved_by_engine"], 1u);
-        ASSERT_EQ(report["uid_verification"]["confirmed_broken"], 0u);
-        ASSERT_EQ(report["uid_verification"]["orphans_cleared"], 1u);
+        ASSERT_EQ(report["reference_verification"]["mode"], "live");
+        ASSERT_EQ(report["reference_verification"]["checked"], 2u);
+        ASSERT_EQ(report["reference_verification"]["cleared"], 2u);
+        ASSERT_EQ(report["reference_verification"]["confirmed"], 0u);
+        ASSERT_EQ(report["reference_verification"]["orphans_cleared"], 1u);
 
-        ASSERT_EQ(report["engine_only_references"].size(), 1u);
-        ASSERT_EQ(report["engine_only_references"][0]["target"], "uid://gonegone");
-        ASSERT_EQ(report["engine_only_references"][0]["engine_path"], "res://art/orphan.png");
-        for (const auto& entry : report["broken_references"]) {
-            ASSERT_TRUE(entry.value("target", std::string{}) != "uid://gonegone");
+        ASSERT_EQ(report["broken_references"].size(), 0u);
+        ASSERT_EQ(report["engine_only_references"].size(), 2u);
+        std::set<std::string> cleared_kinds;
+        for (const auto& entry : report["engine_only_references"]) {
+            cleared_kinds.insert(entry.value("kind", std::string{}));
         }
-        // res://art/deleted.png is named by path and really is missing, so the
-        // uid pass must not touch it.
-        ASSERT_EQ(report["broken_references"].size(), 1u);
-        ASSERT_EQ(report["broken_references"][0]["target"], "res://art/deleted.png");
+        ASSERT_TRUE(cleared_kinds.count("unresolved_uid") == 1);
+        ASSERT_TRUE(cleared_kinds.count("missing_file") == 1);
 
+        // The engine proved the uid points at the file the scan called an
+        // orphan, so it is neither broken nor unreferenced.
         ASSERT_EQ(report["orphans"].size(), 0u);
         ASSERT_EQ(report["orphan_bytes"], 0u);
 
@@ -922,32 +956,71 @@ static void test_audit_clears_a_uid_finding_the_engine_disproves_and_keeps_one_i
         ASSERT_TRUE(warned);
     }
 
-    // The engine does not know it either. The finding survives and says the
-    // engine agreed, and nothing else is disturbed.
+    // The engine agrees with both findings. Nothing is cleared and the orphan
+    // stays, because nothing disproved it.
     {
-        auto client = std::make_shared<UidVerdictClient>(false, "");
-        const auto result = didi::mcp::handleProjectAuditAssets(didi::json::object(), client);
-        ASSERT_TRUE(!result.isError);
-        const auto report = didi::json::parse(result.content[0].text);
+        auto client = std::make_shared<ReferenceVerdictClient>(false, "", false);
+        const auto report = auditWith(client);
 
-        ASSERT_EQ(report["uid_verification"]["mode"], "live");
-        ASSERT_EQ(report["uid_verification"]["resolved_by_engine"], 0u);
-        ASSERT_EQ(report["uid_verification"]["confirmed_broken"], 1u);
-        ASSERT_EQ(report["uid_verification"]["orphans_cleared"], 0u);
+        ASSERT_EQ(report["reference_verification"]["cleared"], 0u);
+        ASSERT_EQ(report["reference_verification"]["confirmed"], 2u);
+        ASSERT_EQ(report["reference_verification"]["orphans_cleared"], 0u);
         ASSERT_TRUE(report["engine_only_references"].empty());
+        ASSERT_TRUE(auditConfirmed(report, "uid://gonegone"));
+        ASSERT_TRUE(auditConfirmed(report, "res://art/deleted.png"));
         ASSERT_EQ(report["orphans"].size(), 1u);
         ASSERT_EQ(report["orphans"][0]["path"], "res://art/orphan.png");
+    }
 
-        bool confirmed = false;
-        for (const auto& entry : report["broken_references"]) {
-            if (entry.value("target", std::string{}) != "uid://gonegone") continue;
-            confirmed = entry.value("confirmed_by_engine", false);
-        }
-        ASSERT_TRUE(confirmed);
+    // The two questions are answered independently. A registered uid does not
+    // make a missing path loadable, and a loadable path does not register a
+    // uid, so a verdict on one must not move the other.
+    {
+        auto client = std::make_shared<ReferenceVerdictClient>(true, "res://art/orphan.png", false);
+        const auto report = auditWith(client);
+        ASSERT_EQ(report["reference_verification"]["cleared"], 1u);
+        ASSERT_EQ(report["reference_verification"]["confirmed"], 1u);
+        ASSERT_TRUE(!auditHasBroken(report, "uid://gonegone"));
+        ASSERT_TRUE(auditConfirmed(report, "res://art/deleted.png"));
+    }
+    {
+        auto client = std::make_shared<ReferenceVerdictClient>(false, "", true);
+        const auto report = auditWith(client);
+        ASSERT_EQ(report["reference_verification"]["cleared"], 1u);
+        ASSERT_EQ(report["reference_verification"]["confirmed"], 1u);
+        ASSERT_TRUE(auditConfirmed(report, "uid://gonegone"));
+        ASSERT_TRUE(!auditHasBroken(report, "res://art/deleted.png"));
+        // The orphan survives: nothing proved anything references it.
+        ASSERT_EQ(report["orphans"].size(), 1u);
     }
 }
 
-static void test_audit_discloses_that_no_engine_verified_its_uid_findings() {
+// A tool with a real offline path must advertise offline_fallback, not just
+// live. The standalone process refuses a live-only tool when no runtime route
+// is attached, so forgetting the second mode does not degrade the tool -- it
+// stops it working at all outside an editor. The in-process registry cannot
+// see that: its client holds no route lease, so the refusal never fires here.
+// This checks the advertisement; tests/test_tool_output_schema_contract.py
+// checks the dispatch it controls.
+static void test_tools_with_an_offline_path_advertise_it() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    for (const auto& name : {"scene_get_hierarchy", "viewport_capture_frame",
+                             "audio_list_buses", "project_get_uid_map",
+                             "project_audit_assets"}) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        const auto& modes = tool->capability.modes;
+        const bool live = std::find(modes.begin(), modes.end(), "live") != modes.end();
+        const bool offline =
+            std::find(modes.begin(), modes.end(), "offline_fallback") != modes.end();
+        ASSERT_TRUE(live);
+        ASSERT_TRUE(offline);
+    }
+}
+
+static void test_audit_discloses_that_no_engine_verified_its_findings() {
     ScopedToolProject project("audit-uid-verification");
     writeAuditFixture();
     auto& registry = didi::mcp::ToolRegistry::instance();
@@ -962,13 +1035,13 @@ static void test_audit_discloses_that_no_engine_verified_its_uid_findings() {
     ASSERT_EQ(report["execution_mode"], "offline_fallback");
     ASSERT_EQ(report["scan_source"], "project_files");
 
-    // uid://gonegone is unresolved in the files. With no editor there is
-    // nothing to check it against, and the report must say the check did not
-    // happen rather than leaving the caller to assume it did.
-    ASSERT_TRUE(report.contains("uid_verification"));
-    ASSERT_EQ(report["uid_verification"]["mode"], "unavailable");
-    ASSERT_EQ(report["uid_verification"]["checked"], 0u);
-    ASSERT_EQ(report["uid_verification"]["truncated"], false);
+    // The fixture holds an unresolved uid and a missing path. With no editor
+    // there is nothing to check either against, and the report must say the
+    // check did not happen rather than leaving the caller to assume it did.
+    ASSERT_TRUE(report.contains("reference_verification"));
+    ASSERT_EQ(report["reference_verification"]["mode"], "unavailable");
+    ASSERT_EQ(report["reference_verification"]["checked"], 0u);
+    ASSERT_EQ(report["reference_verification"]["truncated"], false);
     ASSERT_TRUE(!report.contains("engine_only_references"));
 
     // The unverified finding stays exactly as it was, and carries no claim of
@@ -988,7 +1061,7 @@ static void test_audit_discloses_that_no_engine_verified_its_uid_findings() {
         "project_audit_assets", didi::json{{"include_broken_references", false}});
     ASSERT_TRUE(!no_references.isError);
     const auto no_reference_report = didi::json::parse(no_references.content[0].text);
-    ASSERT_EQ(no_reference_report["uid_verification"]["mode"], "not_needed");
+    ASSERT_EQ(no_reference_report["reference_verification"]["mode"], "not_needed");
 }
 
 static void test_uid_map_resolves_offline_and_says_which_source_answered() {
@@ -3055,10 +3128,12 @@ struct RegisterToolTests {
                      test_project_impact_traces_a_file_target_and_rejects_a_malformed_one);
         registerTest("Tools.ProjectImpactNodePath",
                      test_project_impact_traces_exact_node_paths);
-        registerTest("Tools.AuditUidVerificationCorrects",
-                     test_audit_clears_a_uid_finding_the_engine_disproves_and_keeps_one_it_confirms);
-        registerTest("Tools.AuditUidVerificationDisclosure",
-                     test_audit_discloses_that_no_engine_verified_its_uid_findings);
+        registerTest("Tools.OfflinePathsAreAdvertised",
+                     test_tools_with_an_offline_path_advertise_it);
+        registerTest("Tools.AuditReferenceVerificationCorrects",
+                     test_audit_clears_the_findings_the_engine_disproves_and_keeps_the_ones_it_confirms);
+        registerTest("Tools.AuditReferenceVerificationDisclosure",
+                     test_audit_discloses_that_no_engine_verified_its_findings);
         registerTest("Tools.UidMapResolve",
                      test_uid_map_resolves_offline_and_says_which_source_answered);
         registerTest("Tools.ProjectAuditFindings",

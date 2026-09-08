@@ -71,6 +71,42 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Changed
 
+- `project_audit_assets` now verifies both kinds of broken reference against the
+  running editor, not just UID ones. A `missing_file` finding says nothing the
+  scan indexed provides that path; `ResourceLoader.exists` says whether Godot
+  can load it, which is a different question. A remap, a resource type the index
+  does not cover, or an index that hit its own cap all read as absent on disk
+  and load perfectly well, and those were false findings.
+
+  A path the engine can load is cleared into `engine_only_references` with
+  `kind: "missing_file"`; one it cannot keeps its finding and gains
+  `confirmed_by_engine`. The two questions stay independent: a registered UID
+  does not make a missing path loadable, and a loadable path does not register
+  a UID, so a verdict on one never moves the other. UID clearing now also
+  requires the resolved path to load, because a UID can stay registered for a
+  file that is gone.
+
+  `uid_verification` is renamed `reference_verification` and its counters are
+  now `cleared` and `confirmed`, since it covers both kinds. UID findings are
+  sent before path findings so a run truncated at the 256 bound is still
+  deterministic. Neither name has appeared in a release.
+
+### Fixed
+
+- `project_get_uid_map` and `project_audit_assets` work again without a Godot
+  session. Both were moved into the live-only capability set when they gained
+  their editor-backed paths, and the standalone process refuses a live-only
+  tool with `503 No atomic runtime route is available for live dispatch` when
+  nothing is attached. Both have complete offline paths, so both now declare
+  `live` and `offline_fallback`.
+
+  The in-process tests could not see this. They drive a client that holds no
+  route lease, so the refusal never fires there and the wrong advertisement
+  looks like a pass. Two tests close that gap: a native one that requires every
+  tool with an offline path to advertise it, and one in
+  `tests/test_tool_output_schema_contract.py` that drives the real binary with
+  no session and requires an answer rather than a refusal.
+
 - `project_audit_assets` checks its unresolved UID findings against the running
   editor instead of leaving them as guesses. An `unresolved_uid` finding means
   no scanned project file records that UID, which offline is the only reading
@@ -89,9 +125,9 @@ Historical entries describe the surface advertised by those releases. For the ex
   adds a `limitations` line saying the editor's table is not in the repository,
   so a fresh checkout would report those references broken.
 
-  `uid_verification` reports on every call whether the pass ran -- `live`,
-  `unavailable`, or `not_needed` -- how many UIDs were sent, and whether more
-  than the 256-query bound existed. `execution_mode` follows it, because it
+  `reference_verification` reports on every call whether the pass ran --
+  `live`, `unavailable`, or `not_needed` -- how many findings were sent, and
+  whether more than the 256-query bound existed. `execution_mode` follows it, because it
   describes whether an engine contributed to the findings. What was scanned
   does not change with it: `scan_source` is `project_files` on every call.
 

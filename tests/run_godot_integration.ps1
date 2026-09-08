@@ -2664,14 +2664,20 @@ try {
     $audit = Tool-Payload $byId[120]
     Assert-True ($audit.execution_mode -eq "live") "The audit did not report that an engine contributed to its findings."
     Assert-True ($audit.scan_source -eq "project_files") "The audit misreported what it scanned."
-    Assert-True ($audit.uid_verification.mode -eq "live") "The audit did not verify its uid findings against the attached editor."
-    Assert-True ($audit.uid_verification.checked -ge 1) "The audit verified no uid despite an unresolved one in the fixture."
-    Assert-True ($audit.uid_verification.confirmed_broken -ge 1) "The engine did not confirm the deliberately unregistered fixture uid."
+    Assert-True ($audit.reference_verification.mode -eq "live") "The audit did not verify its findings against the attached editor."
+    Assert-True ($audit.reference_verification.checked -ge 2) "The audit did not check both fixture findings."
+    Assert-True ($audit.reference_verification.confirmed -ge 2) "The engine did not confirm the deliberately broken fixture references."
     $auditProbe = @($audit.broken_references | Where-Object { $_.target -eq "uid://bogusbogusbogus" })
     Assert-True ($auditProbe.Count -eq 1) "The unregistered fixture uid was not reported as a broken reference."
-    Assert-True ($auditProbe[0].confirmed_by_engine -eq $true) "A uid the engine disproved was not marked as engine confirmed."
-    $auditCleared = @($audit.engine_only_references | Where-Object { $_.target -eq "uid://bogusbogusbogus" })
-    Assert-True ($auditCleared.Count -eq 0) "A uid the engine does not know was cleared as engine resolvable."
+    Assert-True ($auditProbe[0].confirmed_by_engine -eq $true) "A uid the engine does not know was not marked as engine confirmed."
+    # The other half: a path no file provides. The engine is asked whether it
+    # can load it, which is a different question from whether the scan indexed
+    # it, and here both answers agree.
+    $auditMissing = @($audit.broken_references | Where-Object { $_.target -eq "res://uid_audit_probe_missing.tres" })
+    Assert-True ($auditMissing.Count -eq 1) "The absent fixture path was not reported as a broken reference."
+    Assert-True ($auditMissing[0].kind -eq "missing_file") "The absent fixture path was reported under the wrong kind."
+    Assert-True ($auditMissing[0].confirmed_by_engine -eq $true) "A path the engine cannot load was not marked as engine confirmed."
+    Assert-True (@($audit.engine_only_references).Count -eq 0) "A reference the engine disproved was cleared anyway."
 
     $firstLogPage = Tool-Payload $byId[113]
     Assert-True ($firstLogPage.execution_mode -eq "live") "First runtime log read was not live."

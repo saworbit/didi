@@ -6293,12 +6293,32 @@ json GodotBridge::execute(const std::string& method, const json& params,
         for (const auto& bind : {std::make_tuple("ResourceUID", "text_to_id", 1321353865LL),
                                  std::make_tuple("ResourceUID", "has_id", 1116898809LL),
                                  std::make_tuple("ResourceUID", "get_id_path", 844755477LL),
-                                 std::make_tuple("ResourceUID", "path_to_uid", 1703090593LL)}) {
+                                 std::make_tuple("ResourceUID", "path_to_uid", 1703090593LL),
+                                 std::make_tuple("ResourceLoader", "exists", 4185558881LL)}) {
             auto required = requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind));
             if (required.isErr()) return errorJson(501, required.error().message);
         }
         auto uid_table = singleton("ResourceUID");
         if (uid_table.isErr()) return errorJson(uid_table.error().code, uid_table.error().message);
+        auto resource_loader = singleton("ResourceLoader");
+        if (resource_loader.isErr()) return errorJson(resource_loader.error().code, resource_loader.error().message);
+
+        // Whether Godot can load a path, which is the question a reference asks.
+        // It is not the same question as whether a file scan indexed the path:
+        // a remap, a type the scan does not index, or a scan that hit its own
+        // cap all read as absent on disk and load perfectly well here.
+        auto engineCanLoad = [&](const std::string& res_path) -> Result<bool> {
+            auto path_arg = makeString(res_path);
+            if (path_arg.isErr()) return path_arg.error();
+            auto hint = makeString(std::string{});
+            if (hint.isErr()) return hint.error();
+            auto answer = callObject(resource_loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                                     {&path_arg.value(), &hint.value()});
+            if (answer.isErr()) return answer.error();
+            auto loadable = scalarFromVariant<GDExtensionBool>(answer.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (loadable.isErr()) return loadable.error();
+            return loadable.value() != 0;
+        };
 
         json entries = json::array();
         for (const auto& value : queries) {
@@ -6337,6 +6357,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
                         entry["found"] = true;
                         entry["uid"] = query;
                         entry["path"] = resolved.value();
+                        // A UID the engine still holds can point at a file that
+                        // is gone. Registered is not the same as loadable.
+                        auto loadable = engineCanLoad(resolved.value());
+                        if (loadable.isErr()) return errorJson(500, loadable.error().message);
+                        entry["exists"] = loadable.value();
                     }
                 }
             } else if (query.rfind("res://", 0) == 0) {
@@ -6350,6 +6375,12 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 // path_to_uid hands back what it was given when the engine holds
                 // no UID for that path, so the prefix is what separates a hit
                 // from a miss rather than an empty string.
+                // A path can load without any UID registered for it, so
+                // existence is answered separately from resolution rather than
+                // inferred from it.
+                auto loadable = engineCanLoad(query);
+                if (loadable.isErr()) return errorJson(500, loadable.error().message);
+                entry["exists"] = loadable.value();
                 if (uid_text.value().rfind("uid://", 0) == 0) {
                     entry["found"] = true;
                     entry["uid"] = uid_text.value();

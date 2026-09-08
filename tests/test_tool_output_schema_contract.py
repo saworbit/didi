@@ -136,5 +136,82 @@ class ToolOutputSchemaContractTests(unittest.TestCase):
                 self.assertEqual(json.loads(text), result["structuredContent"])
 
 
+class OfflineDispatchContractTests(unittest.TestCase):
+    """A tool that advertises `offline_fallback` must answer without a session.
+
+    The standalone process refuses a live-only tool with `503 No atomic runtime
+    route is available for live dispatch` when nothing is attached. A tool that
+    has a real offline path but forgets to advertise the mode therefore does
+    not degrade -- it stops working at all outside an editor.
+
+    This has to run through the binary. The in-process registry tests drive a
+    client that holds no route lease, so the refusal never fires there and the
+    mistake looks like a pass.
+    """
+
+    # Tools with a complete offline path, and arguments that exercise it.
+    OFFLINE_CAPABLE = {
+        "scene_get_hierarchy": {},
+        "audio_list_buses": {},
+        "project_get_uid_map": {},
+        "project_audit_assets": {"max_findings": 5},
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        cls.process = subprocess.Popen(
+            [str(_executable()), "--project", str(FIXTURE_PROJECT)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        cls._request("initialize", {"protocolVersion": "2024-11-05"}, 1)
+        cls.tools = {
+            tool["name"]: tool
+            for tool in cls._request("tools/list", {}, 2)["result"]["tools"]
+        }
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.process.kill()
+
+    @classmethod
+    def _request(cls, method, params, identifier):
+        cls.process.stdin.write(
+            json.dumps(
+                {"jsonrpc": "2.0", "id": identifier, "method": method, "params": params}
+            )
+            + "\n"
+        )
+        cls.process.stdin.flush()
+        while True:
+            line = cls.process.stdout.readline()
+            if not line:
+                raise AssertionError("didi closed stdout before answering")
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            payload = json.loads(line)
+            if payload.get("id") == identifier:
+                return payload
+
+    def test_offline_capable_tools_answer_with_no_session_attached(self):
+        for index, (name, arguments) in enumerate(self.OFFLINE_CAPABLE.items()):
+            with self.subTest(tool=name):
+                modes = self.tools[name]["_meta"]["didi"]["executionModes"]
+                self.assertIn("offline_fallback", modes)
+                response = self._request(
+                    "tools/call", {"name": name, "arguments": arguments}, 300 + index
+                )
+                result = response["result"]
+                self.assertFalse(
+                    result.get("isError"),
+                    f"{name} refused an offline call: {result['content'][0]['text']}",
+                )
+                payload = json.loads(result["content"][0]["text"])
+                self.assertEqual(payload["execution_mode"], "offline_fallback")
+
+
 if __name__ == "__main__":
     unittest.main()
