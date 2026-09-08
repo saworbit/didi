@@ -1,7 +1,7 @@
 # Didi Strategic Roadmap & Technical Build Order 🗺️
 
 > **Core Philosophy**:
-> The 113-tool canonical surface includes completed Phases 1–6, the feasible Phase 7 delivery, and the names accepted since through [Surface Amendments](SURFACE_AMENDMENTS.md): live editor substrate, project wiring, authenticated runtime sessions, autonomous verification, deep-domain workflows, enterprise safety controls, and bounded editor/runtime authoring.
+> The 115-tool canonical surface includes completed Phases 1–6, the feasible Phase 7 delivery, and the names accepted since through [Surface Amendments](SURFACE_AMENDMENTS.md): live editor substrate, project wiring, authenticated runtime sessions, autonomous verification, deep-domain workflows, enterprise safety controls, and bounded editor/runtime authoring.
 
 ---
 
@@ -136,12 +136,12 @@ The native red-team contract covers invalid roots, project-key isolation, lock e
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `110/113`
+**Canonical implementation:** `112/115`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-**Objective:** The implementation remains 110/113 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. All 15 feasible names are delivered. The original objective was atomic 83/83 without adding public tool names.
+**Objective:** The implementation remains 112/115 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. All 15 feasible names are delivered. The original objective was atomic 83/83 without adding public tool names.
 
 **Feasibility result:** The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (15/18) are implementation-feasible: `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `runtime_inject_input`, and `runtime_read_profiler`.
 
@@ -191,7 +191,7 @@ baseline is carrying an unauthorized second decision.
 
 This decision authorized Task 2. At decision time the implementation was 61/79;
 the delivery slices have since landed and the current status block above is
-authoritative at 110/113. Phase 7 remains `PARTIAL_DELIVERY` because the three
+authoritative at 112/115. Phase 7 remains `PARTIAL_DELIVERY` because the three
 API-blocked contracts stay honestly unimplemented.
 
 **Delivery slices:**
@@ -235,9 +235,13 @@ allocation on top of it (`blackboard_task_create`, `blackboard_task_claim`,
 Both are file-backed under `.didi/blackboard/` with an OS-backed lock, because
 each MCP client is its own process and shares no memory with the next.
 
-**Not delivered:** reactive resource subscriptions, live editor state reflected
-onto board namespaces, and any human-facing dashboard. Those remain open and are
-tracked as their own work rather than implied by what shipped here.
+**Not delivered:** live editor state reflected onto board namespaces. That
+remains open and is tracked as its own work rather than implied by what shipped
+here. Two of the three original exclusions have since been closed elsewhere:
+reactive subscriptions by `blackboard://` resources plus `resources/subscribe`,
+and the human-facing dashboard by the
+[Control Room](CONTROL_ROOM_DESIGN.md), which is an MCP App rather than anything
+board-specific.
 
 **Exit gate:** a claim is atomic under concurrency, a lapsed lease returns work
 to the pool, and dependency completion releases dependents. All three are
@@ -293,9 +297,11 @@ These are missing capabilities that an AI agent actually requires to complete fu
 
 ### 4. Animation and UI Authoring
 - **Animation Track Keyframing**: Add, remove, and interpolate keyframes and track lengths in `AnimationPlayer`.
-- **Theme & Layout Inspection**: Inspect Control node anchors, margins, minimum sizes, and theme overrides.
+- **Control Enumeration**: delivered as `ui_list_controls` -- live Controls with their resolved viewport rectangles, class, visibility, mouse filter and text, in an editor or a running game.
+- **Theme & Layout Inspection**: Inspect Control node anchors, margins, minimum sizes, and theme overrides. Still open: `ui_list_controls` reports the resolved rectangle, not the authoring inputs behind it.
 
 ### 5. Enhanced MCP Protocol Surface
+- **Interactive Surfaces**: delivered. The `io.modelcontextprotocol/ui` extension is negotiated bilaterally and `ui://didi/control-room` serves an interactive dashboard to hosts that support it. See [Control Room Design](CONTROL_ROOM_DESIGN.md).
 - **Resource Subscriptions**: `resources/subscribe` and `notifications/resources/updated` are delivered for `blackboard://` resources, which are the ones that change without a call from the subscribing client. The `godot://` resources remain unsubscribable: they change only in response to a tool call the client already made, or to editor activity that has no watcher yet.
 - **Resource Templates**: Dynamic URI templates `godot://node/{path}` and `godot://script/{res_path}`.
 - **Additional Structured Workflows**: Extend the existing anomaly-debugging and gameplay-slice prompts with guided *Create Character*, *Wire Signal*, and *Visual Verification Loop* workflows.
@@ -304,6 +310,7 @@ These are missing capabilities that an AI agent actually requires to complete fu
 ## 🚫 What NOT to Add Yet
 
 - ❌ **Do NOT add success stubs.** A registered name that cannot execute must report `implemented: false` and reject calls. This rule is absolute.
+- ⚠️ **Do NOT add a name a shipped tool already answers.** Checked 2026-09-08: `godot_api_reference` is answered by `script_reflect_class`, which reads the pinned `extension_api.json` for every registered class, and an `until` parameter on `runtime_step` is answered by `runtime_watch_invariants`, which samples every frame in-engine and pauses on the frame a condition turns. Both were live proposals in [Realignment Implementation Plan](REALIGNMENT_IMPLEMENTATION_PLAN.md) until the work that covers them shipped.
 - ⚠️ **Do NOT add speculative domain families** (e.g. `multiplayer_*`, `particle_*`, `xr_*`) as substitutes for the three reserved blockers: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. A single name that an agent workflow provably needs is added through a [Surface Amendment](SURFACE_AMENDMENTS.md), not blocked by this rule.
 - ❌ **Do NOT create a second plugin architecture or network transport** — local named pipes and UNIX domain sockets are optimal.
 - ❌ **Do NOT build a custom GDScript language server** — extend the existing symbol extractor and headless Godot compiler check only where evidence requires it.

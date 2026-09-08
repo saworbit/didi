@@ -3,6 +3,7 @@
 #include "didi/common/project_path.hpp"
 #include "didi/common/base64.hpp"
 #include "didi/mcp/mutation_safety.hpp"
+#include "didi/mcp/tool_availability.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
 #include "didi/tools/resolved_tool_binding.hpp"
 #include <algorithm>
@@ -68,28 +69,6 @@ struct StdinChannel {
 
 } // namespace
 
-static bool liveAllowedFor(const std::string& identifier, bool resource,
-                           const std::string& session_kind) {
-    if (resource) {
-        if (identifier == "godot://runtime/logs") return session_kind == "editor" || session_kind == "game";
-        return session_kind == "editor";
-    }
-    return runtime::allowsSessionKind(runtime::livePolicyForTool(identifier), session_kind);
-}
-
-static bool managedRouteUnavailable(const std::shared_ptr<ipc::IIpcClient>& client,
-                                    bool connected) {
-    if (connected ||
-        !std::dynamic_pointer_cast<runtime::IRuntimeRouteLeaseProvider>(client)) {
-        return false;
-    }
-    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(client);
-    if (!sessions) return true;
-    // A real session manager with nothing selected is the normal offline state. Once a route is
-    // selected, failure to produce its authenticated lease is authoritative unavailability.
-    return sessions->activeSession().has_value();
-}
-
 static bool startsWithCaseInsensitive(const std::string& value, const std::string& prefix) {
     return value.size() >= prefix.size() &&
            std::equal(prefix.begin(), prefix.end(), value.begin(),
@@ -107,29 +86,6 @@ static JsonRpcResponse makeApplicationError(const json& id, const Error& error) 
     if (!error.data.is_null()) data["application_data"] = error.data;
     return JsonRpcResponse::makeError(id, JsonRpcErrorCode::ServerErrorStart,
                                       error.message, data);
-}
-
-static void addCurrentAvailability(json& definition, const ExecutionCapability& capability,
-                                   bool connected, const std::optional<std::string>& session_kind,
-                                   bool resource = false, bool managed_unavailable = false) {
-    const auto has_mode = [&](const std::string& mode) {
-        return std::find(capability.modes.begin(), capability.modes.end(), mode) != capability.modes.end();
-    };
-    const auto identifier = definition.value(resource ? "uri" : "name", "");
-    const auto effective_kind = session_kind.value_or(connected ? "editor" : "");
-    const bool live_available = connected && has_mode("live") &&
-                                liveAllowedFor(identifier, resource, effective_kind);
-    std::string current_mode = "unavailable";
-    if (!capability.implemented) current_mode = "unimplemented";
-    else if (live_available) current_mode = "live";
-    // A connected route of the wrong kind is an authoritative live selection, not an invitation
-    // to silently run an offline fallback. This applies equally to tools and resources.
-    else if ((connected || managed_unavailable) && has_mode("live")) current_mode = "unavailable";
-    else if (has_mode("offline_fallback")) current_mode = "offline_fallback";
-    definition["_meta"]["didi"]["currentMode"] = current_mode;
-    definition["_meta"]["didi"]["liveAvailable"] = live_available;
-    definition["_meta"]["didi"]["editorConnected"] = connected && effective_kind == "editor";
-    if (!effective_kind.empty()) definition["_meta"]["didi"]["sessionKind"] = effective_kind;
 }
 
 McpServer::McpServer() {
@@ -159,6 +115,13 @@ void McpServer::setIpcClient(std::shared_ptr<ipc::IIpcClient> ipc_client) {
     m_runtimeSessionClient = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(m_ipcClient);
     ToolRegistry::instance().setIpcClient(m_ipcClient);
     ResourceRegistry::instance().setIpcClient(m_ipcClient);
+}
+
+void McpServer::setConfirmationsSkipped(bool skipped) {
+    m_skipConfirmations = skipped;
+    // The Control Room reports this, and a dashboard that showed the gate as
+    // enforced while it was open would be worse than showing nothing.
+    ToolRegistry::instance().setConfirmationsSkipped(skipped);
 }
 
 std::shared_ptr<ipc::IIpcClient> McpServer::getIpcClient() const {
@@ -276,6 +239,31 @@ bool clientCanElicitForms(const json& params) {
     return elicitation.empty() || elicitation.contains("form");
 }
 
+// Whether the client declared the MCP Apps extension. Extensions are bilateral
+// and opt-in, so this is half of the condition for advertising the UI surface.
+bool clientDeclaresUiExtension(const json& capabilities) {
+    if (!capabilities.is_object()) return false;
+    const auto extensions = capabilities.find("extensions");
+    if (extensions == capabilities.end() || !extensions->is_object()) return false;
+    return extensions->contains(kUiExtensionName);
+}
+
+bool requestDeclaresUiExtension(const json& params) {
+    if (!params.is_object() || !params.contains("_meta") || !params["_meta"].is_object()) {
+        return false;
+    }
+    const auto& meta = params["_meta"];
+    const auto capabilities = meta.find(kClientCapabilitiesMetaKey);
+    if (capabilities == meta.end()) return false;
+    return clientDeclaresUiExtension(*capabilities);
+}
+
+// What this server declares it can do. Static and client-independent, which is
+// what keeps server/discover honestly cacheable as public.
+json uiExtensionDeclaration() {
+    return {{kUiExtensionName, {{"mimeTypes", json::array({kUiAppMimeType})}}}};
+}
+
 // What a person needs to see is which thing is about to change, not the whole
 // argument object. These are the arguments that name a target across Didi's
 // mutating tools.
@@ -336,6 +324,22 @@ json withConfirmationProvenance(json result, const char* provenance) {
 
 } // namespace
 
+std::optional<McpServer::UiAppMode> McpServer::parseUiAppMode(const std::string& value) {
+    if (value == "auto") return UiAppMode::Auto;
+    if (value == "always") return UiAppMode::Always;
+    if (value == "off") return UiAppMode::Off;
+    return std::nullopt;
+}
+
+bool McpServer::uiSurfaceVisible(const json& params) const {
+    switch (m_uiAppMode) {
+        case UiAppMode::Off: return false;
+        case UiAppMode::Always: return true;
+        case UiAppMode::Auto: break;
+    }
+    return m_clientDeclaredUiExtension || requestDeclaresUiExtension(params);
+}
+
 JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     DIDI_LOG_DEBUG("MCP_REQ", "Method: ", req.method);
 
@@ -369,7 +373,10 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             {"capabilities", {
                 {"tools", json::object()},
                 {"resources", json::object()},
-                {"prompts", json::object()}
+                {"prompts", json::object()},
+                // Declared unconditionally. Whether the UI surface is then
+                // advertised depends on the client declaring it too.
+                {"extensions", uiExtensionDeclaration()}
             }},
             {"_meta", {
                 {kServerInfoMetaKey, {{"name", kServerName}, {"version", kServerVersion}}},
@@ -397,12 +404,19 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
 
     if (req.method == "initialize") {
         m_initialized = true;
+        // A 2024-11-05 client declares its capabilities once, here. Remember the
+        // MCP Apps declaration for the rest of the session; a modern client
+        // sends it per request instead and is read there.
+        if (req.params.is_object() && req.params.contains("capabilities")) {
+            m_clientDeclaredUiExtension = clientDeclaresUiExtension(req.params["capabilities"]);
+        }
         json result = {
             {"protocolVersion", kProtocolVersion},
             {"capabilities", {
                 {"tools", {{"listChanged", false}}},
                 {"resources", {{"subscribe", true}, {"listChanged", false}}},
-                {"prompts", {{"listChanged", false}}}
+                {"prompts", {{"listChanged", false}}},
+                {"extensions", uiExtensionDeclaration()}
             }},
             {"serverInfo", {
                 {"name", kServerName},
@@ -441,10 +455,20 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         const auto session_kind = active.has_value()
                                       ? std::optional<std::string>(active->kind)
                                       : std::optional<std::string>{};
+        const bool ui_visible = uiSurfaceVisible(req.params);
         for (const auto& t : tools) {
             json definition = t.toJson();
             addCurrentAvailability(definition, t.capability, connected, session_kind, false,
                                    managed_unavailable);
+            // The host preloads the page from the tool that opens it. Declared
+            // only to a client that negotiated MCP Apps, so a host that cannot
+            // render it is not handed a URI it would have to guess about.
+            if (ui_visible && t.name == kControlRoomToolName) {
+                definition["_meta"]["ui"] = {
+                    {"resourceUri", kControlRoomResourceUri},
+                    {"visibility", json::array({"model", "app"})}
+                };
+            }
             tool_list.push_back(std::move(definition));
         }
         return JsonRpcResponse::makeSuccess(
@@ -585,7 +609,12 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         const auto session_kind = active.has_value()
                                       ? std::optional<std::string>(active->kind)
                                       : std::optional<std::string>{};
+        const bool ui_visible = uiSurfaceVisible(req.params);
         for (const auto& r : resources) {
+            // Withheld from a client that did not negotiate MCP Apps: it cannot
+            // render the page, and reading it as text would spend a client's
+            // context on markup for nobody.
+            if (!ui_visible && r.mimeType == kUiAppMimeType) continue;
             json definition = r.toJson();
             addCurrentAvailability(definition, r.capability, connected, session_kind, true,
                                    managed_unavailable);
@@ -636,19 +665,37 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         if (uri.empty()) {
             return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams, "Resource URI is required");
         }
+        // `--ui-app off` withdraws the surface, and a resource that is not
+        // advertised should not be readable by guessing its URI either. Only
+        // `off` refuses: in `auto`, a host may legitimately read the page with a
+        // request that does not repeat its capabilities, and refusing that would
+        // break rendering for the clients this exists to serve.
+        if (m_uiAppMode == UiAppMode::Off) {
+            const auto* withheld = ResourceRegistry::instance().getResource(uri);
+            if (withheld && withheld->mimeType == kUiAppMimeType) {
+                return makeApplicationError(
+                    req.id, Error::invalidArgument(
+                                "the Control Room is disabled; this server was started with "
+                                "--ui-app off"));
+            }
+        }
         auto read_res = ResourceRegistry::instance().readResource(uri);
         if (read_res.isErr()) {
             return makeApplicationError(req.id, read_res.error());
         }
         auto r_def = ResourceRegistry::instance().getResource(uri);
         std::string mime = r_def ? r_def->mimeType : "text/plain";
-        json contents = json::array({
-            {
-                {"uri", uri},
-                {"mimeType", mime},
-                {"text", read_res.value()}
-            }
-        });
+        json entry = {
+            {"uri", uri},
+            {"mimeType", mime},
+            {"text", read_res.value()}
+        };
+        // A UI resource carries its own metadata on the content, which is where
+        // the host reads the framing preference and any policy from.
+        if (r_def && r_def->uiMeta.is_object() && !r_def->uiMeta.empty()) {
+            entry["_meta"] = {{"ui", r_def->uiMeta}};
+        }
+        json contents = json::array({std::move(entry)});
         // Resource contents are live project and editor state.
         return JsonRpcResponse::makeSuccess(
             req.id, cacheable({{"contents", contents}}, kSessionDependentTtlMs, "private"));

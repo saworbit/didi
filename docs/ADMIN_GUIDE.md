@@ -60,6 +60,7 @@ Every implemented mutation exposes `dry_run`. A dry-run stops before tool handle
 | `--log-level <level>` | `DEBUG`, `INFO`, `WARN`, `ERROR`, `NONE` | Stderr logging verbosity |
 | `--dump-tool-manifest` | none | Print the registered tool surface as JSON and exit `0`, no project or IPC needed |
 | `--yolo` | none | Skip confirmation on destructive tools, same effect as `DIDI_YOLO=1` |
+| `--ui-app <mode>` | `auto`, `always`, `off` | Whether the Control Room dashboard is advertised. `auto` follows the MCP Apps extension's bilateral rule; `off` withdraws it entirely |
 
 Parsing fails closed and it fails first. Before project resolution and before any
 server startup, Didi exits `2` and prints the reason plus the matching help line

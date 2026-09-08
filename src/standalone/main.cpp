@@ -1,4 +1,5 @@
 #include "didi/mcp/mcp_server.hpp"
+#include "didi/mcp/control_room.hpp"
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
@@ -41,6 +42,8 @@ static const char* kPipeNameHelpLine =
     "  --pipe-name <name>    Override Named Pipe / Unix domain socket name (or DIDI_PIPE_NAME)";
 static const char* kLogLevelHelpLine =
     "  --log-level <level>   Set log level (DEBUG, INFO, WARN, ERROR, NONE)";
+static const char* kUiAppHelpLine =
+    "  --ui-app <mode>       MCP Apps dashboard: auto (default), always, or off";
 static const char* kHelpHint = "Run didi --help for the supported options.";
 
 static void refuse(const std::string& message, const char* help_line) {
@@ -86,6 +89,7 @@ int main(int argc, char* argv[]) {
     // chosen by the person starting the process. Nothing reachable from a tool
     // call may set this.
     bool skip_confirmations = false;
+    auto ui_app_mode = didi::mcp::McpServer::UiAppMode::Auto;
     std::string managed_editor, recovery_workspace;
     if (const char* env_yolo = std::getenv("DIDI_YOLO")) {
         const std::string value = env_yolo;
@@ -119,6 +123,7 @@ int main(int argc, char* argv[]) {
                       << kProjectHelpLine << "\n"
                       << kPipeNameHelpLine << "\n"
                       << kLogLevelHelpLine << "\n"
+                      << kUiAppHelpLine << "\n"
                       << "  --dump-tool-manifest  Print the registered tool surface as JSON and exit\n"
                       << "  --managed-editor <exe>  Own a headless Godot editor with saved-file recovery\n"
                       << "  --recovery-workspace <new-dir>  Copy the project here; required with --managed-editor\n"
@@ -144,6 +149,15 @@ int main(int argc, char* argv[]) {
 #else
             setenv("DIDI_PIPE_NAME", pipe_arg.c_str(), 1);
 #endif
+        } else if (arg == "--ui-app") {
+            std::string mode;
+            if (!takeValue(argc, argv, i, arg, kUiAppHelpLine, mode)) return 2;
+            const auto parsed = didi::mcp::McpServer::parseUiAppMode(mode);
+            if (!parsed.has_value()) {
+                refuse("--ui-app expects auto, always, or off, not " + mode, kUiAppHelpLine);
+                return 2;
+            }
+            ui_app_mode = *parsed;
         } else if (arg == "--yolo") {
             skip_confirmations = true;
         } else if (arg == "--log-level") {
@@ -217,6 +231,11 @@ int main(int argc, char* argv[]) {
         didi::mcp::ToolRegistry::instance().setManagedRecovery(recovery);
         DIDI_LOG_INFO("MAIN", "Managed recovery workspace: ", didi::paths::projectPathToUtf8(resolved_project.value()));
     }
+    server.setUiAppMode(ui_app_mode);
+    // The dashboard's log page is the only place this process's own
+    // diagnostics are readable: they otherwise go to standard error, which a
+    // client that launched this server over stdio usually discards.
+    didi::mcp::installControlRoomLogRing();
     server.setConfirmationsSkipped(skip_confirmations);
     if (skip_confirmations) {
         // Loud, once, at startup. Someone reading a log after a bad afternoon

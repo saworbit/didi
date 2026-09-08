@@ -536,6 +536,56 @@ CallToolResult handleUiHitTest(const json& args, std::shared_ptr<ipc::IIpcClient
 }
 
 
+CallToolResult handleUiListControls(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!args.is_object()) return CallToolResult::error("arguments must be an object");
+    if (args.contains("root_path") &&
+        (!args["root_path"].is_string() || args["root_path"].get<std::string>().size() > 1024)) {
+        return CallToolResult::error("root_path must be a string of at most 1024 bytes");
+    }
+    if (args.contains("visible_only") && !args["visible_only"].is_boolean()) {
+        return CallToolResult::error("visible_only must be a boolean");
+    }
+    if (args.contains("include_text") && !args["include_text"].is_boolean()) {
+        return CallToolResult::error("include_text must be a boolean");
+    }
+    if (args.contains("max_results")) {
+        if (!args["max_results"].is_number_integer()) {
+            return CallToolResult::error("max_results must be an integer");
+        }
+        const int limit = args["max_results"].get<int>();
+        if (limit < 1 || limit > 256) {
+            return CallToolResult::error("max_results must be from 1 to 256");
+        }
+    }
+    if (args.contains("class_filter")) {
+        const auto& filter = args["class_filter"];
+        if (!filter.is_array() || filter.empty() || filter.size() > 16) {
+            return CallToolResult::error("class_filter must be an array of 1 to 16 class names");
+        }
+        for (const auto& entry : filter) {
+            if (!entry.is_string() || entry.get<std::string>().empty() ||
+                entry.get<std::string>().size() > 64) {
+                return CallToolResult::error(
+                    "class_filter entries must be 1 to 64 byte class names");
+            }
+        }
+    }
+    if (!ipc || !ipc->isConnected()) {
+        return CallToolResult::error(
+            "Listing live Control nodes requires a connected Godot editor or game.");
+    }
+    auto response = ipc->sendRequest("ui.listControls", args, ipc::kWaitForDefinitiveResponse);
+    if (response.isErr()) {
+        return CallToolResult::error("UI control listing failed: " + response.error().message);
+    }
+    if (!response.value().is_object() || !response.value().contains("controls") ||
+        !response.value()["controls"].is_array()) {
+        return CallToolResult::error("Live UI control listing returned a malformed response");
+    }
+    return CallToolResult::successJson(response.value());
+}
+
+
 CallToolResult handleSceneGetSelection(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object()) return CallToolResult::error("arguments must be an object");
     if (!args.empty()) return CallToolResult::error("scene_get_selection takes no arguments");

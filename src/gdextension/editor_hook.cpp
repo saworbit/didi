@@ -1138,7 +1138,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "scene.listGroups", "scene.addToGroup", "scene.removeFromGroup",
         "scene.getGroupMembers", "scene.create", "scene.open", "scene.close",
         "scene.packBranch", "runtime.getTree", "runtime.setPaused", "runtime.stop",
-        "runtime.evalGdscript", "ui.hitTest", "audio.listBuses", "audio.configureBus",
+        "runtime.evalGdscript", "ui.hitTest", "ui.listControls", "audio.listBuses", "audio.configureBus",
         // Admission is deliberately separate from the failure-injection seams.
         // One macro previously controlled both, so the feature could not be
         // admitted to production without also compiling test seams into a
@@ -1163,7 +1163,10 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
                                    method == "physics.raycastBatch" ||
                                    method == "physics.clearance" ||
                                    method == "vision.frustumQuery" || method == "nav.queryPath" ||
-                                   method == "anim.listTracks" || method == "anim.playTrack";
+                                   method == "anim.listTracks" || method == "anim.playTrack" ||
+                                   // Enumerating Controls is a read, and the
+                                   // running game is where a caller most needs it.
+                                   method == "ui.listControls";
         if (m_sessionKind == runtime::SessionKind::game && !game_admitted) {
             return {{"error", {{"code", 409},
                                 {"message", "Editor-only method is unavailable in a game session: " + method}}}};

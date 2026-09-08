@@ -205,7 +205,7 @@ coordination tools are for.
 
 ## 5. Phase 3 client integration sequence
 
-`tools/list` returns 113 canonical tools and 10 legacy registrations, 123 in total. In ordinary attachment mode, integrators should treat the four session-management tools as local operations even though their discovery metadata uses the existing `offline_fallback` capability label:
+`tools/list` returns 115 canonical tools and 10 legacy registrations, 125 in total. In ordinary attachment mode, integrators should treat the four session-management tools as local operations even though their discovery metadata uses the existing `offline_fallback` capability label:
 
 1. Start Didi with `--project <canonical-project-root>` (or `DIDI_PROJECT_ROOT`). Phase 6 rejects startup if the explicit directory is missing or does not contain `project.godot`.
 2. Didi may auto-attach on first availability when there is one live project match, or one matching editor among games. Multiple editors or multiple games without an editor stay detached.

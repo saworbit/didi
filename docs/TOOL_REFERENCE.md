@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 113 canonical tool names plus 10 legacy names (123 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 115 canonical tool names plus 10 legacy names (125 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `110/113`
+**Canonical implementation:** `112/115`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 110/113 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 112/115 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -1037,6 +1037,42 @@ Requires an existing `preset` and a normalized project-contained `output_path`. 
 
 Requires an existing `.tscn` `source_scene` and a normalized `.meshlib` `output_path`. Direct source-root children become deterministic item IDs in scene order. Each item uses itself or its first recursive `MeshInstance3D`; `generate_collisions` defaults to true and creates a trimesh shape when possible. A first recursive `NavigationRegion3D` contributes navigation data. `timeout_seconds` is `1..300` (default `60`), existing output requires `overwrite: true`, and success reloads the saved `MeshLibrary` to verify its item count.
 
+### `ui_list_controls` — Live (editor or game)
+
+Lists the Control nodes under a root, with where each one is and what it says.
+This is the tool that makes a control addressable: `ui_hit_test` answers what
+sits under a point, which is only useful once you already have a point.
+
+- `root_path` (`string`, optional, at most 1024 bytes): where to start. Defaults
+  to the edited scene root in an editor and `/root` in a game.
+- `max_results` (`integer`, optional, default `64`, range `1..256`).
+- `visible_only` (`boolean`, optional, default `true`): skip Controls that are
+  not visible in the tree, and everything beneath them, because a hidden Control
+  hides its children.
+- `include_text` (`boolean`, optional, default `true`).
+- `class_filter` (`array` of 1 to 16 class names, optional): keep only Controls
+  that are one of these classes, inheritance included. A name the engine does
+  not know matches nothing rather than failing, which is what a filter on a typo
+  means.
+
+Each entry carries `node_path`, `class`, `global_rect`, `visible`, `depth`,
+`mouse_filter` with its `mouse_filter_value`, and `text` where the Control has a
+`text` property. Text is read as a property rather than through a `get_text`
+bind per widget class, so a `Button`, a `Label`, a `LineEdit` and anything else
+carrying one are all covered by the same path; it is capped at 256 bytes with
+`text_truncated` when clipped. The response also carries `returned_count`,
+`match_count_total`, `traversed_nodes`, `truncated`, `traversal_limit_hit`, and
+the `visible_only` that was applied.
+
+`global_rect` is `Control.get_global_rect`, which is the same viewport-space
+rectangle `ui_hit_test` reports for a hit, so listing a control and then
+hit-testing the centre of its rectangle returns that same control. Traversal is
+capped at 10,000 nodes and ordered by scene tree order. No input is created or
+injected, and nothing is mutated.
+
+Live only, and deliberately: a `.tscn` holds anchors and offsets, not the
+rectangle they resolve to, so an offline answer would be a fabricated one.
+
 ### `ui_hit_test` — Live
 
 Requires finite viewport-space `point.x` and `point.y`. Optional `root_path` defaults to `/root`, `include_mouse_filter_ignore` defaults to false, and `max_results` defaults to `32` with range `1..256`. The editor bridge traverses at most 10,000 nodes under the active edited scene, transforms the point into each Control's local space, honors inherited visibility and clipping, and orders hits by canvas layer, effective z-index, then scene draw order. Results include canonical node path, class, effective mouse filter, layer/z/order, local point, and global rectangle. Script-defined `_has_point` overrides are used when callable; otherwise Godot's documented local rectangle default is applied. No input event is created or injected.
@@ -1046,6 +1082,47 @@ Requires finite viewport-space `point.x` and `point.y`. Optional `root_path` def
 Every implemented mutating tool schema includes `dry_run: boolean`. A true dry-run stops at the registry boundary and returns `dry_run: true` plus `mutation_preview`; no tool handler, subprocess, filesystem writer, or Godot main-thread command runs. The preview reports the exact tool/arguments, canonical project, execution mode, optional session ID, route generation, binding hash, and a conservative planned-change record.
 
 Always-confirmed tools are `runtime_restore_checkpoint`, `editor_reload_project`, `script_patch_method`/`patch_script_symbols`, `signal_emit`, `project_rename_references`, `project_apply_changes`, and `blackboard_clear`. Overwrite-confirmed tools are `resource_create`, `script_create`, `viewport_create_test_lab`/`create_visual_test_lab`, `project_export`, and `gridmap_export_mesh_library` when `overwrite: true`. Call the exact tool with identical arguments plus `dry_run: true`, then repeat it without `dry_run` and with the returned `confirmation_token`. Tokens are cryptographically random, expire after 120 seconds, are consumed on the first attempt, and reject tool, argument, project, execution-mode, session, route-generation, expiry, and replay mismatches. The startup-only YOLO option can skip confirmation; runtime annotations and the actual preview remain authoritative.
+
+## 14. Control Room
+
+### `didi_control_room` — Offline (local status)
+
+Reports Didi's own state rather than Godot's. Read-only, and the only tool whose
+subject is the server.
+
+- `log_limit` (`integer`, optional, default `120`, maximum `500`): how many of
+  the newest records from this server's log to return.
+
+The result carries `lights`, four red/amber/green states with the fact behind
+each; `tools`, every registration with the execution mode it is in *right now*,
+computed by the same function `tools/list` uses so the two cannot disagree;
+`surface`, the canonical/implemented/reserved/legacy counts plus how many are
+live at this moment; `sessions`, the published descriptors with `session_id`,
+`kind`, `pid`, `project_path`, `protocol_version`, `started_at_ms`, `stale` and
+which is selected, plus `alive` when the scanner established it and no `alive`
+key at all when it could not, because rendering an unknown as dead is a lie; `facts`, a flat label/value
+table; and `log`, a tail of this process's own diagnostics.
+
+A light is amber whenever the honest answer is *unknown*, and carries the reason.
+A connected route that did not report its kind is amber, not green.
+
+Two things the payload deliberately never contains. The session token is not in
+the allowlist the response is built from, and neither is the endpoint: a rendered
+page naming a pipe is an invitation to connect to it. The Work light reports only
+whether a blackboard file exists, from a stat, because every board-reading entry
+point sweeps expired state and reclaims lapsed leases before answering, and that
+is a write this tool's `readOnlyHint` forbids. Call `blackboard_task_list` for
+counts.
+
+The log is Didi's, not Godot's. It is the only way to read these records at all:
+they otherwise go to the process's standard error, which a client that launched
+the server over stdio usually discards. For engine output use `runtime_read_logs`
+and `runtime_read_output`.
+
+Hosts that negotiate the `io.modelcontextprotocol/ui` extension additionally
+receive a `_meta.ui.resourceUri` pointing at `ui://didi/control-room` and render
+the payload as an interactive dashboard. Every other client gets the same data as
+text. See [Control Room Design](CONTROL_ROOM_DESIGN.md).
 
 ## Managed editor recovery
 

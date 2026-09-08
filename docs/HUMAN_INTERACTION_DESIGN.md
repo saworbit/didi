@@ -1,7 +1,7 @@
 # Human Interaction Design
 
-> **Status:** Partly implemented. Steps 1, 2 and 4 of the recommended order have
-> shipped; step 3 remains conditional and unstarted. Step 4 shipped larger than
+> **Status:** Implemented. All four steps of the recommended order have shipped;
+> step 3 last, once its condition was met. Step 4 shipped larger than
 > this document recommended, and [What was built, and where it exceeded
 > this](#what-was-built-and-where-it-exceeded-this) records the difference rather
 > than editing the recommendation to match. This supersedes the
@@ -189,9 +189,14 @@ window, so a staged migration remains comfortable.
    cannot is not silently downgraded: every mutation records whether it was
    confirmed by a `human`, by an `agent` echoing a token, or `skipped` entirely
    under YOLO mode.
-3. **MCP Apps status and log view.** Still conditional on host support being
-   broad enough to be worth it. Not started, and should not start on a schedule
-   -- start it when a client people actually use can render it.
+3. **MCP Apps status and log view.** *Done.* The condition was met, and by
+   external evidence rather than by anyone's judgement: MCP Apps is stable at
+   revision `2026-01-26` and is rendered by Claude, Claude Desktop, VS Code
+   GitHub Copilot, Microsoft 365 Copilot, Goose, Postman, MCPJam and
+   Archestra.AI. Shipped as the Control Room: one read-only tool, one `ui://`
+   resource, and a bilateral advertisement gate so an unaware host is never
+   handed a page it would read as text. See
+   [Control Room Design](CONTROL_ROOM_DESIGN.md).
 4. **Editor status line.** *Done, and larger than this list described.* Shipped
    as a main screen console: a red/amber/green dashboard over the published
    session descriptors, a switch that opens and closes the bridge, generated
@@ -199,10 +204,16 @@ window, so a staged migration remains comfortable.
    behind every check. See [What was built, and where it exceeded
    this](#what-was-built-and-where-it-exceeded-this).
 
-Steps 3 and 4 were written conditionally on purpose. Step 3's condition -- host
-support for MCP Apps being broad enough to be worth it -- has still not been met,
-and building it anyway would be manufacturing work rather than following the
-reasoning that produced the list.
+Steps 3 and 4 were written conditionally on purpose, and both conditions have
+now been met on evidence rather than on a schedule. Step 4's was a maintainer
+asking for the console directly. Step 3's was host coverage, which arrived when
+MCP Apps went stable and the clients people actually use began rendering it. The
+value of writing them conditionally is visible in what did *not* happen in
+between: neither was built early.
+
+The two surfaces are not redundant. The console's whole justification is the case
+where the MCP connection is broken, and a page served over that connection cannot
+serve it.
 
 ## Explicitly out of scope
 

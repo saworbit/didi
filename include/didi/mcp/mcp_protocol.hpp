@@ -18,6 +18,15 @@ inline const char* kProtocolVersion = "2024-11-05";
 inline const char* kServerName = "didi";
 inline const char* kServerVersion = kProjectVersion;
 
+// MCP Apps (the io.modelcontextprotocol/ui extension, revision 2026-01-26).
+// Extensions are bilateral: this server declares support unconditionally, and
+// advertises the UI surface itself only to a client that declared it too.
+// See docs/CONTROL_ROOM_DESIGN.md.
+inline const char* kUiExtensionName = "io.modelcontextprotocol/ui";
+inline const char* kUiAppMimeType = "text/html;profile=mcp-app";
+inline const char* kControlRoomResourceUri = "ui://didi/control-room";
+inline const char* kControlRoomToolName = "didi_control_room";
+
 // Revision 2026-07-28 removed the initialize handshake: a modern client
 // declares its protocol version in `_meta` on every request, and servers must
 // implement `server/discover`. Didi still serves legacy result shapes, so it
@@ -257,14 +266,20 @@ struct ResourceDefinition {
     std::string mimeType;
     std::function<Result<std::string>()> readHandler;
     ExecutionCapability capability;
+    // The io.modelcontextprotocol/ui block for a UI resource: content security
+    // policy domains, requested permissions, framing preference. Empty for
+    // every ordinary resource, and then no `ui` key is emitted at all.
+    json uiMeta;
 
     json toJson() const {
+        json meta = {{"didi", capability.toJson()}};
+        if (uiMeta.is_object() && !uiMeta.empty()) meta["ui"] = uiMeta;
         return {
             {"uri", uri},
             {"name", name},
             {"description", description},
             {"mimeType", mimeType},
-            {"_meta", {{"didi", capability.toJson()}}}
+            {"_meta", meta}
         };
     }
 };

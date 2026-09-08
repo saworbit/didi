@@ -51,6 +51,9 @@ public:
 
     void registerAllDefaultTools();
     void setManagedRecovery(std::shared_ptr<runtime::ManagedRecovery> recovery) { m_recovery = std::move(recovery); }
+    // Mirrors the server's confirmation policy so didi_control_room can report
+    // it. The gate itself stays in the protocol layer; this is only the view.
+    void setConfirmationsSkipped(bool skipped) { m_skipConfirmations = skipped; }
 
 private:
     ToolRegistry() = default;
@@ -60,6 +63,7 @@ private:
     std::shared_ptr<runtime::IRuntimeSessionClient> m_runtimeSessionClient;
     MutationSafety m_mutationSafety;
     std::shared_ptr<runtime::ManagedRecovery> m_recovery;
+    bool m_skipConfirmations{false};
 };
 
 } // namespace mcp

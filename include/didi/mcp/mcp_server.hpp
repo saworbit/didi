@@ -51,8 +51,21 @@ public:
     // from the launch arguments, by the person starting the process. It is
     // deliberately unreachable from a tool call: an agent that can authorise
     // its own bypass makes the confirmation system decorative.
-    void setConfirmationsSkipped(bool skipped) { m_skipConfirmations = skipped; }
+    void setConfirmationsSkipped(bool skipped);
     bool confirmationsSkipped() const { return m_skipConfirmations; }
+
+    // Whether the MCP Apps surface -- the ui:// resource and the _meta.ui link
+    // on didi_control_room -- is advertised.
+    //
+    // `auto` follows the extension's bilateral rule: advertise to a client that
+    // declared io.modelcontextprotocol/ui, and to no one else, so an unaware
+    // host cannot read a page of markup into a model's context. `always` is for
+    // a host whose declaration this server does not recognise, and `off`
+    // withdraws the surface, leaving didi_control_room a plain read-only tool.
+    enum class UiAppMode { Auto, Always, Off };
+    void setUiAppMode(UiAppMode mode) { m_uiAppMode = mode; }
+    UiAppMode uiAppMode() const { return m_uiAppMode; }
+    static std::optional<UiAppMode> parseUiAppMode(const std::string& value);
 
 private:
     std::optional<JsonRpcResponse> dispatchPayload(const json& payload);
@@ -75,6 +88,11 @@ private:
     std::shared_ptr<std::atomic<bool>> m_readerParked{std::make_shared<std::atomic<bool>>(false)};
     bool m_initialized{false};
     bool m_skipConfirmations{false};
+    UiAppMode m_uiAppMode{UiAppMode::Auto};
+    // Sticky from a 2024-11-05 handshake. A modern client declares its
+    // capabilities per request instead, and both are honoured.
+    bool m_clientDeclaredUiExtension{false};
+    bool uiSurfaceVisible(const json& params) const;
     std::shared_ptr<ipc::IIpcClient> m_ipcClient;
     std::shared_ptr<runtime::IRuntimeSessionClient> m_runtimeSessionClient;
 
