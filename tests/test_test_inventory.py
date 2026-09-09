@@ -162,31 +162,61 @@ class NativeGroupingTests(unittest.TestCase):
         self.assertEqual(inventory.native_suite_prefix("phase7 generated schemas"), "phase7")
 
 
+BADGE_LINE = (
+    "[![Tests](https://img.shields.io/badge/tests-804-2ea043"
+    "?logo=pytest&logoColor=white)](docs/TEST_INVENTORY.md)"
+)
+
+
 class BadgeTests(unittest.TestCase):
-    def test_badge_rewrites_only_the_marked_region(self):
-        text = (
-            "# Title\n"
-            f"{inventory.BADGE_START}old badge{inventory.BADGE_END}\n"
-            "trailing prose\n"
-        )
+    def test_badge_rewrites_only_the_count(self):
+        text = f"# Title\n{BADGE_LINE}\ntrailing prose\n"
         updated = inventory.apply_badge(text, 1234)
-        self.assertIn("badge/tests-1234-", updated)
+        self.assertIn("badge/tests-1234-2ea043", updated)
+        self.assertNotIn("tests-804", updated)
+        # The surrounding markup, including the link target and the query
+        # string, is left exactly as it was.
+        self.assertIn("?logo=pytest&logoColor=white)](docs/TEST_INVENTORY.md)", updated)
         self.assertIn("trailing prose", updated)
-        self.assertNotIn("old badge", updated)
 
     def test_badge_is_idempotent(self):
-        text = f"{inventory.BADGE_START}x{inventory.BADGE_END}"
-        once = inventory.apply_badge(text, 42)
+        once = inventory.apply_badge(BADGE_LINE, 42)
         self.assertEqual(inventory.apply_badge(once, 42), once)
 
-    def test_missing_markers_are_an_error_not_a_silent_skip(self):
+    def test_a_missing_badge_is_an_error_not_a_silent_skip(self):
         with self.assertRaises(inventory.InventoryError):
-            inventory.apply_badge("# README with no markers\n", 7)
+            inventory.apply_badge("# README with no badge\n", 7)
 
-    def test_readme_carries_the_markers(self):
+    def test_two_badges_are_refused_rather_than_guessed_between(self):
+        # One would go stale with nothing to notice.
+        with self.assertRaises(inventory.InventoryError):
+            inventory.apply_badge(f"{BADGE_LINE}\n{BADGE_LINE}\n", 7)
+
+    def test_readme_carries_exactly_one_tests_badge(self):
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn(inventory.BADGE_START, readme)
-        self.assertIn(inventory.BADGE_END, readme)
+        self.assertEqual(len(inventory.BADGE_PATTERN.findall(readme)), 1)
+
+    def test_no_badge_line_starts_with_an_html_comment(self):
+        """The regression that shipped: markers stopped the badge rendering.
+
+        A line beginning with `<!--` opens a raw HTML block in CommonMark, so
+        everything on it is emitted literally instead of parsed as Markdown.
+        The tests badge was wrapped in `<!-- test-count:start -->` markers and
+        GitHub rendered the whole line as visible text, splitting the badge row
+        into two paragraphs around it.
+        """
+
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        offenders = [
+            line
+            for line in readme.splitlines()
+            if line.lstrip().startswith("<!--") and "img.shields.io" in line
+        ]
+        self.assertEqual(
+            offenders,
+            [],
+            "a badge on a line starting with an HTML comment renders as literal text",
+        )
 
 
 class ReferencePlatformTests(unittest.TestCase):
