@@ -26,7 +26,14 @@ jobs:
     # Empty for the runners that build on the host. The Linux leg builds inside
     # a container instead; see the comment on its matrix entry.
     container: ${{ matrix.container }}
-    timeout-minutes: 60
+    # Ninety, measured rather than guessed. The macOS leg took fifty minutes on
+    # the v1.6.0 release and is the slowest by a factor of five; a sixty-minute
+    # cap left ten minutes of headroom and a dry run duly went over it and was
+    # killed. The point of a timeout here is to stop a hung job burning the
+    # six-hour default, not to be a second, tighter deadline nobody measured.
+    # See #345: fifty minutes is itself the defect, and this number should come
+    # down once that is fixed.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
