@@ -74,6 +74,12 @@ jobs:
       # installed here: the pinned 3.28 step below supplies it on every POSIX
       # leg, so containerising changed where the Linux build runs and nothing
       # about which toolchain builds it.
+      #
+      # python-is-python3 is not decoration. The runner image ships a `python`
+      # on PATH; a bare Ubuntu container ships only `python3`. The release gate
+      # runs the whole Python suite through ctest, and one case resolves an
+      # executable named `python` -- it failed here on the first attempt, which
+      # is the sort of thing a release rehearsal exists to find.
       - name: Prepare the build container
         if: matrix.container != ''
         shell: bash
@@ -82,7 +88,8 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
           apt-get install -y --no-install-recommends \
-            build-essential ca-certificates curl git python3 python3-venv python3-pip
+            build-essential ca-certificates curl git \
+            python3 python3-venv python3-pip python-is-python3
           # The container runs as root against a workspace it does not own, so
           # git refuses to touch it without this.
           git config --global --add safe.directory '*'
