@@ -1,0 +1,75 @@
+name: Triage
+
+# Housekeeping that would otherwise be somebody remembering to do it.
+on:
+  pull_request:
+    branches: [ main, master ]
+  schedule:
+    # Once a day is enough for a backlog this size, and it keeps the stale
+    # notifications predictable rather than arriving in a burst after a change.
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  label:
+    name: Label by touched area
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # Deliberately `pull_request` and not `pull_request_target`. The latter
+      # runs with a write token in the context of the base branch, which is the
+      # standard way a fork pull request gets to run privileged code. Labels
+      # are not worth that: a fork pull request simply goes unlabelled, and the
+      # step is allowed to fail rather than turn the check red.
+      - name: Apply path labels
+        uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0
+        continue-on-error: true
+        with:
+          sync-labels: true
+
+  stale:
+    name: Age out untouched issues
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Mark and close stale threads
+        uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
+        with:
+          days-before-stale: 60
+          days-before-close: 21
+          stale-issue-label: stale
+          stale-pr-label: stale
+          # A draft is work in progress by definition, and a field trial can
+          # sit open across several release cycles on purpose.
+          exempt-draft-pr: true
+          exempt-issue-labels: 'pinned,security,roadmap,help wanted,good first issue,field-trial'
+          exempt-pr-labels: 'pinned,security,roadmap,field-trial'
+          stale-issue-message: >
+            No activity here for 60 days. That usually means it was fixed,
+            it stopped mattering, or nobody could reproduce it. Comment if it
+            is still live and this label comes straight off; otherwise it
+            closes in 21 days and can be reopened at any time.
+          stale-pr-message: >
+            No activity here for 60 days. Push a commit or comment to keep it
+            open; otherwise it closes in 21 days and the branch stays where it
+            is, so nothing is lost.
+          close-issue-message: >
+            Closing after 81 days without activity. Reopen or file a fresh
+            issue if it turns out to still be live -- a closed issue is a
+            statement about attention, not about correctness.
+          close-pr-message: >
+            Closing after 81 days without activity. The branch is untouched, so
+            reopen when the work resumes.
+          operations-per-run: 100
+          ascending: true

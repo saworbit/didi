@@ -1,0 +1,106 @@
+name: CodeQL
+
+# Code scanning. This is what fills the repository's Security tab: without it
+# the only automated security signal here was Dependabot, which watches
+# dependencies and says nothing at all about the C++ that ships.
+#
+# Path filters are safe on this workflow because it is deliberately not a
+# required status check -- a skipped run blocks nothing.
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'tools/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'tools/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/**'
+  schedule:
+    # Weekly, so a newly published query still finds an old defect in code
+    # nobody has touched. Off-peak on purpose.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      # Upload results to the code-scanning dashboard.
+      security-events: write
+      # Read the workflow run for the Actions analysis.
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # C++ has no build-free mode: CodeQL observes the real compiler, so
+          # the analysis is only as complete as the build it watches. This
+          # builds every target, tests included.
+          - language: c-cpp
+            build-mode: manual
+            runner: ubuntu-latest
+          # The repository's Python is build tooling and test harnesses, and it
+          # reads paths, runs subprocesses and parses untrusted JSON.
+          - language: python
+            build-mode: none
+            runner: ubuntu-latest
+          # The workflows themselves. zizmor covers the security shapes; this
+          # covers what GitHub's own queries know about Actions.
+          - language: actions
+            build-mode: none
+            runner: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # security-extended adds the lower-severity queries. The C++ here
+          # parses untrusted JSON-RPC off a pipe, so the extra reach is worth
+          # the extra minutes.
+          queries: security-extended
+
+      - name: Install Build Tools
+        if: matrix.build-mode == 'manual'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build build-essential
+
+      - name: Build For Analysis
+        if: matrix.build-mode == 'manual'
+        run: |
+          cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          category: /language:${{ matrix.language }}

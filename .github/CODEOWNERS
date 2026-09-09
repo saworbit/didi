@@ -1,0 +1,30 @@
+# Who gets asked to look at what. GitHub requests review from the owners of
+# every path a pull request touches, which is how a change to the release
+# gate or the security policy stops being something that can land unseen.
+#
+# One maintainer today, so every line resolves to the same person. The file is
+# still worth keeping explicit: it is the list to edit when that changes, and
+# it makes the ownership of the load-bearing paths visible rather than assumed.
+
+# Everything, unless a later rule is more specific.
+*                           @saworbit
+
+# The release gate and everything that runs with a repository token.
+/.github/                   @saworbit
+/.github/workflows/         @saworbit
+
+# The build and packaging contract. The version in CMakeLists.txt is the
+# source every document is validated against.
+/CMakeLists.txt             @saworbit
+/cmake/                     @saworbit
+
+# The protocol surface. Changing a tool name, schema or annotation changes
+# what every connected agent is allowed to do without asking.
+/src/mcp/                   @saworbit
+/include/didi/mcp/          @saworbit
+/schemas/                   @saworbit
+
+# Security posture and the promises made about it.
+/SECURITY.md                @saworbit
+/THIRD_PARTY.md             @saworbit
+/LICENSE                    @saworbit

@@ -6,7 +6,11 @@
 
 # Didi (godot-mcp-native) 🎭
 
-[![Didi Fast & Efficient CI](https://github.com/saworbit/didi/actions/workflows/ci.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/ci.yml)
+[![CI](https://github.com/saworbit/didi/actions/workflows/ci.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/saworbit/didi/actions/workflows/codeql.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/saworbit/didi/badge)](https://scorecard.dev/viewer/?uri=github.com/saworbit/didi)
+<!-- test-count:start -->[![Tests](https://img.shields.io/badge/tests-792-2ea043?logo=pytest&logoColor=white)](docs/TEST_INVENTORY.md)<!-- test-count:end -->
+[![Release](https://img.shields.io/github/v/release/saworbit/didi?logo=github&color=blue)](https://github.com/saworbit/didi/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Godot Engine](https://img.shields.io/badge/Godot-4.5%2B-478cbf?logo=godotengine&logoColor=white)](https://godotengine.org/)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=c%2B%2B&logoColor=white)](https://isocpp.org/)
@@ -41,6 +45,7 @@ The current documented release is **1.6.0**.
 | 🔌 [**Integration Guide**](docs/INTEGRATION_GUIDE.md) | **Developers / Integrators** | Installing the addon into an existing project and wiring each supported assistant to it. |
 | 🛡️ [**Administrator & Operations Guide**](docs/ADMIN_GUIDE.md) | **DevOps / Admins** | Security DACL hardening, CI/CD headless execution, observability, and troubleshooting. |
 | 👩‍💻 [**Developer & Extension Guide**](docs/DEVELOPER_GUIDE.md) | **Contributors** | How to build from source, write tests, and add custom MCP tools. |
+| 🧪 [**Test Inventory**](docs/TEST_INVENTORY.md) | **Contributors / Reviewers** | Generated totals for every suite, derived from the suites themselves rather than written down beside them. |
 | 📡 [**API & Wire Protocol Specification**](docs/API_SPECIFICATION.md) | **Integrators** | JSON-RPC 2.0 transport and binary frame specifications. |
 | 🔐 [**Security Policy**](SECURITY.md) | **Users / Operators** | Supported release line, local attachment boundary, and private reporting guidance. |
 | 📝 [**Changelog**](CHANGELOG.md) | **All** | Version history and notable changes. |

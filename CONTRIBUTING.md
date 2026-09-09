@@ -61,6 +61,55 @@ involves. Add a row there if you vendor anything else.
    ```
    Run these checks for documentation, version, tool-surface, capability, or release changes.
 
+5. **Regenerate the Test Inventory** (only if you added or removed tests):
+   ```bash
+   python tools/test_inventory.py
+   ```
+   It reads the built `didi_tests` registry, parses the Python suites, and
+   rewrites [docs/TEST_INVENTORY.md](docs/TEST_INVENTORY.md) and the tests
+   badge in the README. CI runs `--check` after the build, so a stale
+   inventory is a red run rather than a number nobody notices going wrong.
+
+---
+
+## 🚦 What CI runs, and when
+
+A single job decides what the rest of the run does, so the expensive gates only
+fire when something could have changed their answer:
+
+| Change | Build matrix (3 OS) | Live Godot integration + sanitizers |
+| :--- | :--- | :--- |
+| C++, tests, addon, CMake, tools, fixtures | ✅ | ✅ |
+| Documentation, README, CHANGELOG | ✅ (the docs contract is checked against the built binary) | ❌ |
+| Issue templates, funding, brand assets, editor config | ❌ | ❌ |
+
+**CI Gate** and **Validate Docs** report on every pull request regardless, and
+they are the required checks. Path filters at workflow level are deliberately
+avoided on those two: a workflow skipped by a path filter reports nothing at
+all rather than reporting success, which leaves the pull request permanently
+unmergeable.
+
+Everything else -- CodeQL, OpenSSF Scorecard, dependency review, workflow
+linting, labelling -- runs alongside and does not block a merge.
+
+## 🔒 Workflow changes
+
+Workflows run with a token that can write to this repository, so two rules are
+enforced by `tools/validate_documentation.py` rather than left to review:
+
+- **Pin every action to a commit SHA**, with the release named in a trailing
+  comment: `uses: actions/checkout@3d3c42e5... # v7.0.1`. A tag is a pointer
+  its owner can move at any time. Dependabot updates the SHA and the comment
+  together, so this costs nothing to maintain. Resolve a SHA with
+  `gh api repos/<owner>/<repo>/git/ref/tags/<tag> --jq .object.sha`.
+- **Declare least-privilege `permissions:`** at the top of every workflow, and
+  widen them only on the job that needs it.
+
+`actionlint` and `zizmor` run over the workflows on every pull request and
+catch the rest: injectable `${{ }}` interpolation into a shell, credentials
+left on disk by `checkout`, and the expression and shell mistakes that would
+otherwise only show up as a red run.
+
 ---
 
 ## 📝 Coding Standards

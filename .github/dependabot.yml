@@ -1,18 +1,50 @@
-# The C++ sources vendor no package manager, so the only moving dependency here
-# is the set of actions the workflows pin. Left alone they quietly rot and start
-# warning about deprecated runner images.
+# The C++ sources vendor no package manager, so the moving parts Dependabot can
+# actually see are the actions the workflows pin and the one Python package the
+# contract suites need. Left alone, both quietly rot: actions start warning
+# about deprecated runner images, and a pinned library stops receiving fixes.
 #
-# Python is deliberately not watched: CI asserts an exact jsonschema version on
-# purpose, so an automatic bump would open a pull request that always fails
-# until someone edits the assertion by hand.
+# Actions here are pinned to commit SHAs with a `# vX.Y.Z` comment beside each
+# one, which `tools/validate_documentation.py` enforces. Dependabot understands
+# that form and updates the SHA and the comment together, so pinning does not
+# cost the automation it usually costs.
+#
+# See THIRD_PARTY.md for what Dependabot cannot cover: the vendored
+# single-header libraries in include/, which have no manifest to read.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: monthly
+      interval: weekly
+      day: monday
     open-pull-requests-limit: 5
     commit-message:
       prefix: ci
+    labels:
+      - dependencies
+      - ci
+    # One pull request for the routine bumps instead of six. A grouped update
+    # either passes CI as a set or fails as a set, which is the same review
+    # either way and a great deal less noise.
+    groups:
+      actions:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+
+  # Version updates used to be switched off here because CI asserted an exact
+  # jsonschema version in a second place, so any bump opened a pull request
+  # that could only fail. Both workflows now read the pin out of
+  # requirements-dev.txt, so a bump is a normal reviewable change: it either
+  # passes the schema contract suites or it does not.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps
     labels:
       - dependencies

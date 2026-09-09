@@ -1,0 +1,54 @@
+# Shapes the notes that `generate_release_notes` produces in
+# .github/workflows/release.yml. Without this the notes are one flat list of
+# pull request titles, which is fine for three merges and useless for eighty.
+#
+# Grouping is by label. The area labels come from .github/labeler.yml
+# automatically; `breaking-change` is applied by hand, because deciding that
+# something breaks a consumer is a judgement no path glob can make.
+changelog:
+  exclude:
+    labels:
+      - duplicate
+      - invalid
+      - wontfix
+      - stale
+  categories:
+    - title: ⚠️ Breaking Changes
+      labels:
+        - breaking-change
+
+    - title: 🔐 Security
+      labels:
+        - security
+
+    - title: ✨ Features
+      labels:
+        - enhancement
+
+    - title: 🐛 Fixes
+      labels:
+        - bug
+
+    - title: 🧪 Tests and Contracts
+      labels:
+        - tests
+
+    - title: 📚 Documentation
+      labels:
+        - documentation
+
+    - title: 🏗️ Build, CI and Tooling
+      labels:
+        - ci
+        - build
+        - tooling
+
+    - title: 📦 Dependencies
+      labels:
+        - dependencies
+
+    # Anything that reached a release without a label still gets listed. A
+    # silent omission is worse than an unsorted line.
+    - title: 🔎 Other Changes
+      labels:
+        - '*'
