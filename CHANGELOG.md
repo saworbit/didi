@@ -156,6 +156,29 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Fixed
 
+- `didi::ipc::parseFramedMessage` accepted a frame whose length field was near
+  `UINT32_MAX` and then read gigabytes past the end of the buffer it was given.
+  An eight-byte input segfaulted.
+
+  The bounds check was written `size < 4 + len`. `len` is `uint32_t` and `4` is
+  `int`, so the usual arithmetic conversions evaluate the sum in 32-bit
+  unsigned arithmetic: `0xFFFFFFFC + 4` is `0`, the guard passed for any buffer
+  at all, and the `std::string` built from the payload was constructed with a
+  four-gigabyte length. Both operands are now widened before the addition.
+
+  Nothing in the shipping server called this function -- the live IPC paths
+  read frames through their own bounded implementation, which checks the length
+  against a maximum -- so this was reachable only by a caller of the header. It
+  is fixed rather than deleted because `include/didi/common/protocol.hpp` ships
+  in the addon include tree and this is the obvious function to reach for.
+
+  Found while choosing fuzz targets, which is the argument for the exercise:
+  the only existing test round-tripped a frame the same code had just written,
+  and a decoder is defined by what it does with input it did not write. The new
+  case covers wrapping lengths, truncated payloads, short headers, non-JSON
+  payloads, exact fits, and trailing bytes, and it segfaults against the old
+  decoder rather than merely failing.
+
 - `project_get_uid_map` and `project_audit_assets` work again without a Godot
   session. Both were moved into the live-only capability set when they gained
   their editor-backed paths, and the standalone process refuses a live-only
