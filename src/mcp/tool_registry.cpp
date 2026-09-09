@@ -2731,9 +2731,9 @@ void ToolRegistry::registerAllDefaultTools() {
                         {"properties", {
                             {"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 64}}},
                             {"expression", {{"type", "string"}, {"minLength", 1}, {"maxLength", 512},
-                                            {"description", "A sandbox expression evaluating to a number or a boolean, such as position.x. The same sandbox runtime_watch_invariants uses."}}},
+                                            {"description", "A sandbox expression evaluating to a number or a boolean, such as node.get(\"position\").x. The same sandbox runtime_watch_invariants uses: node is the context node, a property is read with node.get(\"name\"), and a bare position.x is refused because it reads through an object. A probe that never returns a value is listed in unread_probes and sets measured to false."}}},
                             {"context_node", {{"type", "string"}, {"maxLength", 256},
-                                              {"description", "The node the expression is evaluated against."}}}
+                                              {"description", "The node the expression is evaluated against, and what node stands for in the expression."}}}
                         }},
                         {"required", json::array({"expression"})},
                         {"additionalProperties", false}
