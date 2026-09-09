@@ -104,7 +104,11 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "blackboard_list_keys", "blackboard_clear",
         "blackboard_task_create", "blackboard_task_claim", "blackboard_task_update",
         "blackboard_task_complete", "blackboard_task_list",
-        "scene_get_selection",
+        // scene_get_selection is deliberately absent here. It is in the live
+        // set above, a selection exists only in a running editor, and there is
+        // no offline implementation to fall back to. It was in both sets; live
+        // is tested first so the wire answer was already correct, which is what
+        // made the dead entry survive -- it changed nothing until the order did.
         "execute_test_session", "runtime_list_sessions", "runtime_attach_session",
         "runtime_detach_session", "runtime_get_session",
         "runtime_checkpoint", "runtime_recovery_status", "runtime_restore_checkpoint", "runtime_recover_editor"
