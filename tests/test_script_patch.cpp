@@ -85,6 +85,35 @@ static void test_gdscript_diagnostics_deprecation() {
     ASSERT_TRUE(found_yield);
 }
 
+// @onready is the Godot 4 spelling, and it contains the Godot 3 one.
+//
+// Every @onready line came back as a deprecation telling the author to write
+// @onready, which is what they wrote. Nothing broke, and that is why it
+// matters: advice to change correct code into the same correct code teaches a
+// reader to stop looking at diagnostics.
+static void test_gdscript_onready_annotation_is_not_deprecated() {
+    const auto current = didi::offline::GDScriptDiagnostics::analyze(
+        "", "extends CharacterBody2D\n"
+            "\n"
+            "@onready var _flash: ColorRect = $Body\n"
+            "@onready var _timer: Timer = $Timer\n");
+    for (const auto& diagnostic : current) {
+        ASSERT_TRUE(diagnostic.rule != "deprecated_onready");
+    }
+
+    // The Godot 3 form is still deprecated, on its own and indented.
+    const auto legacy = didi::offline::GDScriptDiagnostics::analyze(
+        "", "extends Node\n"
+            "onready var sprite = $Sprite\n"
+            "func _ready():\n"
+            "\tonready var late = $Late\n");
+    int deprecated = 0;
+    for (const auto& diagnostic : legacy) {
+        if (diagnostic.rule == "deprecated_onready") ++deprecated;
+    }
+    ASSERT_TRUE(deprecated == 2);
+}
+
 static void test_gdscript_colon_rule_requires_else_as_a_complete_token() {
     const auto diagnostics = didi::offline::GDScriptDiagnostics::analyze(
         "", "elsewhere = 1\nelse_func()\nelse\nelse\t# comment\n");
@@ -532,6 +561,8 @@ static void test_reflect_class_answers_from_the_shipped_api_reference() {
 struct RegisterScriptPatchTests {
     RegisterScriptPatchTests() {
         registerTest("GDScript.DiagnosticsDeprecation", test_gdscript_diagnostics_deprecation);
+        registerTest("GDScript.OnreadyAnnotationIsNotDeprecated",
+                     test_gdscript_onready_annotation_is_not_deprecated);
         registerTest("GDScript.ElseTokenColonRule", test_gdscript_colon_rule_requires_else_as_a_complete_token);
         registerTest("GDScript.StringAwareBalance", test_gdscript_diagnostics_ignore_brackets_in_strings_and_comments);
         registerTest("GDScript.EscapedTripleDelimiter", test_gdscript_diagnostics_ignore_escaped_triple_delimiters);
