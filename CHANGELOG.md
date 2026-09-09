@@ -202,6 +202,19 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Changed
 
+- A viewport diff converts each image's pixels to luma once instead of twice.
+  `structuralSimilarity` and `perceptualHash` each built their own pair of
+  planes, so one diff held four of them; at the 2048 capture limit a plane is
+  32 MB. Two frames that are the same bytes now skip the block pass and the
+  second transform as well, because SSIM is 1.0 by definition there and the
+  second plane would be a copy of the first. The hash reported for those frames
+  is still the real hash rather than a zero: that would be a different answer,
+  not a cheaper one, and a test now says so. (#354)
+
+- `base64::decode` reserves its output. `encode` always did, while `decode`
+  grew a byte at a time and reallocated its way through payloads that run to
+  megabytes on every captured frame. (#357)
+
 - `project_analyze_impact`, `project_rename_references` and
   `project_analyze_bloat` no longer crawl the whole project from scratch. They
   built their own indexer while every other read tool shared one, so inspecting

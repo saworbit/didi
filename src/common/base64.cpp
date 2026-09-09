@@ -42,6 +42,12 @@ std::vector<uint8_t> decode(std::string_view input) {
     std::vector<uint8_t> out;
     if (input.empty()) return out;
 
+    // encode reserves; decode grew a byte at a time. Four input characters
+    // carry three bytes, and padding or a stray newline only makes this an
+    // overestimate, so one allocation covers every payload. Viewport captures
+    // and encoded resources run to megabytes through here.
+    out.reserve((input.size() * 3) / 4);
+
     // Built once. Rebuilding a 256 entry table on the heap for every call cost
     // an allocation per decode, and decode runs per captured frame and per
     // resource payload.

@@ -101,14 +101,13 @@ std::vector<double> downsampleLuma(const std::vector<double>& luma, int width, i
     return small;
 }
 
-} // namespace
-
-double structuralSimilarity(const RgbaImage& before, const RgbaImage& after) {
-    if (before.width != after.width || before.height != after.height) return 0.0;
-    if (before.width <= 0 || before.height <= 0) return 1.0;
-
-    const auto left = lumaPlane(before);
-    const auto right = lumaPlane(after);
+// Both measures work from a luma plane, and diffRgba needs the planes for the
+// pair of them. Taking the plane rather than the image is what stops one diff
+// converting the same pixels twice per image: at the 2048 capture limit a plane
+// is 32 MB, and there were four of them.
+double structuralSimilarityOfLuma(const std::vector<double>& left,
+                                  const std::vector<double>& right, int width, int height) {
+    if (width <= 0 || height <= 0) return 1.0;
 
     // Identical frames are exactly 1.0, said once rather than arrived at.
     // (2*ml*mr + C1) and (ml^2 + mr^2 + C1) are equal in arithmetic when the
@@ -125,14 +124,14 @@ double structuralSimilarity(const RgbaImage& before, const RgbaImage& after) {
 
     double total = 0.0;
     size_t blocks = 0;
-    for (int by = 0; by < before.height; by += kBlock) {
-        for (int bx = 0; bx < before.width; bx += kBlock) {
+    for (int by = 0; by < height; by += kBlock) {
+        for (int bx = 0; bx < width; bx += kBlock) {
             double sum_l = 0.0, sum_r = 0.0;
             double sum_ll = 0.0, sum_rr = 0.0, sum_lr = 0.0;
             size_t count = 0;
-            for (int y = by; y < std::min(by + kBlock, before.height); ++y) {
-                for (int x = bx; x < std::min(bx + kBlock, before.width); ++x) {
-                    const size_t index = static_cast<size_t>(y) * before.width + x;
+            for (int y = by; y < std::min(by + kBlock, height); ++y) {
+                for (int x = bx; x < std::min(bx + kBlock, width); ++x) {
+                    const size_t index = static_cast<size_t>(y) * width + x;
                     const double l = left[index];
                     const double r = right[index];
                     sum_l += l;
@@ -161,15 +160,15 @@ double structuralSimilarity(const RgbaImage& before, const RgbaImage& after) {
     return std::clamp(total / static_cast<double>(blocks), 0.0, 1.0);
 }
 
-uint64_t perceptualHash(const RgbaImage& image) {
-    if (image.width <= 0 || image.height <= 0) return 0;
+uint64_t perceptualHashOfLuma(const std::vector<double>& luma, int width, int height) {
+    if (width <= 0 || height <= 0) return 0;
     constexpr int kSize = 32;
     constexpr int kLow = 9;
     constexpr size_t kHashBits = 64;
     static_assert(kLow * kLow - 1 >= kHashBits,
                   "the low frequency block must hold 64 AC coefficients");
 
-    const auto small = downsampleLuma(lumaPlane(image), image.width, image.height, kSize);
+    const auto small = downsampleLuma(luma, width, height, kSize);
 
     // DCT-II over the 32x32 plane, but only the low frequency corner is ever
     // read, so the rest is never computed.
@@ -222,6 +221,20 @@ uint64_t perceptualHash(const RgbaImage& image) {
         if (ac[index] > median) hash |= (uint64_t{1} << index);
     }
     return hash;
+}
+
+} // namespace
+
+double structuralSimilarity(const RgbaImage& before, const RgbaImage& after) {
+    if (before.width != after.width || before.height != after.height) return 0.0;
+    if (before.width <= 0 || before.height <= 0) return 1.0;
+    return structuralSimilarityOfLuma(lumaPlane(before), lumaPlane(after), before.width,
+                                      before.height);
+}
+
+uint64_t perceptualHash(const RgbaImage& image) {
+    if (image.width <= 0 || image.height <= 0) return 0;
+    return perceptualHashOfLuma(lumaPlane(image), image.width, image.height);
 }
 
 int hammingDistance(uint64_t left, uint64_t right) {
@@ -285,9 +298,28 @@ Result<ImageDiffResult> diffRgba(const RgbaImage& before,
     }
 
     result.threshold = threshold;
-    result.ssim = structuralSimilarity(before, after);
-    result.perceptual_hash_before = perceptualHash(before);
-    result.perceptual_hash_after = perceptualHash(after);
+    // One luma plane per image. structuralSimilarity and perceptualHash each
+    // built their own pair, so a single diff converted every pixel of both
+    // images twice and held four planes to do it.
+    const auto luma_before = lumaPlane(before);
+    result.perceptual_hash_before = perceptualHashOfLuma(luma_before, before.width, before.height);
+    if (result.max_channel_delta == 0) {
+        // Every channel of every pixel matched, so these are the same bytes.
+        // SSIM is 1.0 and the second plane would be a copy of the first, so
+        // neither the block pass nor the second DCT can say anything new.
+        //
+        // The hash is still the real hash. Skipping it would report zero for
+        // two identical frames, which is a different answer rather than a
+        // cheaper one, and a caller comparing hashes across captures would be
+        // reading a value no image produced.
+        result.ssim = 1.0;
+        result.perceptual_hash_after = result.perceptual_hash_before;
+    } else {
+        const auto luma_after = lumaPlane(after);
+        result.ssim = structuralSimilarityOfLuma(luma_before, luma_after, before.width,
+                                                 before.height);
+        result.perceptual_hash_after = perceptualHashOfLuma(luma_after, after.width, after.height);
+    }
     result.perceptual_distance =
         hammingDistance(result.perceptual_hash_before, result.perceptual_hash_after);
     result.changed_ratio = static_cast<double>(result.changed_pixels) /

@@ -163,6 +163,11 @@ void test_perceptual_metrics_are_exact_for_identical_frames() {
     ASSERT_EQ(diff.value().ssim, 1.0);
     ASSERT_EQ(diff.value().perceptual_distance, 0);
     ASSERT_EQ(diff.value().perceptual_hash_before, diff.value().perceptual_hash_after);
+    // Identical frames take a shortcut, and the shortcut must not reach for a
+    // cheaper answer than the hash. Two zeroes are equal to each other and
+    // sixteen characters wide as well, so equality and width cannot catch it.
+    ASSERT_EQ(diff.value().perceptual_hash_before, didi::image::perceptualHash(frame));
+    ASSERT_TRUE(diff.value().perceptual_hash_before != 0);
 
     const auto payload = diff.value().toJson();
     ASSERT_EQ(payload["ssim"], 1.0);
