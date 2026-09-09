@@ -15,6 +15,17 @@ written down is a dependency nobody checks.
 
 Each file keeps its upstream copyright header. Do not strip it.
 
+They are also excluded from CodeQL analysis, through
+[`.github/codeql/codeql-config.yml`](.github/codeql/codeql-config.yml). Not to
+flatter a number: `stb_image_write.h` alone accounted for five of the ten
+findings in CodeQL's first pass over this repository, all integer-multiplication
+overflows in code this project is told not to modify. Five alerts that can never
+be actioned are how a Security tab stops being read. The risk of a vendored file
+is managed by the process below -- knowing what is here and what updating it
+involves -- not by an alert nobody can close. The fuzz targets in
+[`fuzz/`](fuzz/README.md) cover `json.hpp` where it matters, by driving it
+through this project's own parsers on the untrusted input path.
+
 `extension_api.json` and `gdextension_interface.h` at the repository root are
 not these files. They are local dumps produced from a Godot build, they are
 gitignored, and nothing compiles against them.

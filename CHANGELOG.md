@@ -11,9 +11,56 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
-No changes yet since 1.7.0. The block below states the current surface
-rather than anything this release changed, which is why it lives here and
-not in a version section.
+### Added
+
+- Fuzz targets for the three places Didi reads bytes it did not write: the IPC
+  frame decoder, the JSON-RPC request parser, and base64. libFuzzer, built with
+  ASan and UBSan, running on every code pull request and for longer nightly.
+
+  This started as a way to raise an OpenSSF Scorecard number and stopped being
+  that almost immediately. Reading `parseFramedMessage` closely enough to write
+  a target for it found a buffer over-read -- fixed in #344, before a single
+  fuzzer had been compiled. The only test that function had round-tripped a
+  frame the same code had just written, which is the one input shape guaranteed
+  not to find it.
+
+  Worth stating what was declined. Scorecard detects C++ fuzzing by looking for
+  the string `LLVMFuzzerTestOneInput` in a `.cc` file, so the point was
+  available for the price of committing a file that nothing compiles or runs.
+  That is the failure this repository's own documentation validator already
+  polices for Python tests: a test that does not execute is worse than none,
+  because it looks like coverage. These targets are built against `didi_core`
+  and executed in CI, and the corpus persists between runs so findings compound
+  instead of restarting from empty.
+
+  The eight bytes that used to segfault the frame decoder are a committed seed,
+  re-executed on every fuzz job for as long as the target exists.
+
+### Changed
+
+- CodeQL now runs on every pull request rather than on a path filter. A change
+  that "only touches documentation" is a claim worth checking rather than
+  trusting. The cost is controlled by splitting the analyses: Python and
+  Actions are about a minute each and always run, while the C++ analysis takes
+  closer to twenty and runs only when something can reach the compiler.
+
+- The three vendored files recorded in [THIRD_PARTY.md](THIRD_PARTY.md) are
+  excluded from CodeQL analysis. `stb_image_write.h` alone accounted for five
+  of the ten findings in CodeQL's first pass, all integer-multiplication
+  overflows in code this project is told not to modify. Alerts that can never
+  be actioned are how a Security tab stops being read; the risk of a vendored
+  file is managed by knowing what is in the tree and what updating it involves.
+
+  The remaining five findings were triaged and dismissed with written reasons
+  rather than left open. None was a new defect: three are operator-nominated
+  process launches that advertise `openWorldHint: true`, one is the documented
+  `DIDI_SESSION_DIR` override, and one is a test probe reading its own
+  argument. [SECURITY.md](SECURITY.md) records each disposition.
+
+---
+
+The block below states the current surface rather than anything a release
+changed, which is why it lives here and not in a version section.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`

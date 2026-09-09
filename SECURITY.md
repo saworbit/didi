@@ -39,6 +39,7 @@ for it. Findings land in the repository's
 | [Dependency review](.github/workflows/supply-chain.yml) | A dependency arriving with a known vulnerability or a copyleft licence. | Every pull request |
 | [zizmor and actionlint](.github/workflows/lint.yml) | Workflow security: injectable `${{ }}` interpolation, over-broad tokens, credentials left on disk by `checkout`. | Every pull request |
 | [Sanitizers](.github/workflows/ci.yml) | ASan and UBSan over the whole native suite: real allocation and lifetime paths. | Every pull request that touches code |
+| [Fuzzing](.github/workflows/fuzz.yml) | libFuzzer against the three decoders that read bytes Didi did not write: the IPC frame decoder, the JSON-RPC parser, and base64. Built with ASan and UBSan. | Short run on every code pull request, longer nightly |
 | Secret scanning with push protection | A credential committed by accident, blocked at push time. | Every push |
 | Dependabot | Security and version updates for the GitHub Actions and the pinned Python dependency. | Weekly and monthly |
 
@@ -46,6 +47,25 @@ Every action a workflow runs is pinned to a commit SHA rather than a tag, and
 `tools/validate_documentation.py` fails the build on any workflow that is not.
 See [THIRD_PARTY.md](THIRD_PARTY.md) for the vendored sources no scanner can
 reach.
+
+### What is deliberately not an alert
+
+CodeQL's first pass over this repository raised ten C++ findings. None was a
+new defect, and all ten are accounted for here rather than left open, because a
+Security tab that permanently shows ten alerts is one nobody opens — and the
+next real finding disappears into them.
+
+| Finding | Disposition |
+| --- | --- |
+| Five integer-multiplication overflows, all in `stb_image_write.h` | Excluded from analysis. Vendored upstream code this project copies verbatim and does not modify; see [THIRD_PARTY.md](THIRD_PARTY.md). Callers clamp viewport captures to 4096x4096 with a 128 MB frame limit before reaching it. |
+| Three uncontrolled process operations (`test_runner`, `process_runner`, `gdscript_diagnostics`) | Dismissed as by design. Launching an operator-nominated Godot or dotnet binary is what these tools do, and they advertise `openWorldHint: true` on the wire so a client cannot auto-approve them as closed local calls. |
+| Path injection in `session_client.cpp` | Dismissed as by design. `DIDI_SESSION_DIR` is the documented operator override described above; the descriptor's shape, session ID, PID and process-start identity are all validated before anything acts on it. |
+| Path injection in `phase7_signal_bridge_probe.cpp` | Dismissed as test-only. A probe reading the descriptor path passed as its own argument, not built into the shipped server. |
+
+The common thread in the dismissals is that they sit on the boundary this
+document already draws: an attacker who can set this process's environment
+already controls the process. That is a statement about the boundary, not a
+claim that the code is unreachable.
 
 ---
 

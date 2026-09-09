@@ -114,4 +114,5 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 - The end-to-end MCP conversation in `.github/workflows/ci.yml`, which drives the built binary over stdio and asserts the wire surface against the manifest that same binary emits.
 - `tools/validate_documentation.py`, which checks the documentation contract rather than the code, and reports its own findings.
 - Compiler and sanitizer diagnostics. ASan and UBSan run the native suite again under instrumentation; they add coverage, not cases.
+- The libFuzzer targets in `fuzz/`. They generate their own inputs rather than asserting a fixed set, so counting them as tests would be counting the wrong thing: three targets is not three cases, and the number that matters is the corpus, which grows on its own.
 

@@ -1,0 +1,142 @@
+name: Fuzz
+
+# Didi reads bytes it did not write: JSON-RPC off stdin, length-prefixed frames
+# off a pipe, base64 payloads. Reading one of those decoders closely, while
+# choosing what to point a fuzzer at, found a buffer over-read in it (#344). The
+# only test it had round-tripped a frame the same code had just written, which
+# is the one input shape guaranteed not to find that.
+#
+# Two modes:
+#   - every pull request that touches code: a short run, mostly to prove the
+#     targets still build and the seed corpus still passes. A fuzz target that
+#     stops compiling is worse than none, because the directory still looks
+#     like coverage.
+#   - nightly: a long run against the accumulated corpus, which is where new
+#     findings actually come from.
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'src/**', 'include/**', 'fuzz/**', 'CMakeLists.txt', '.github/workflows/fuzz.yml' ]
+  pull_request:
+    branches: [ main ]
+    paths: [ 'src/**', 'include/**', 'fuzz/**', 'CMakeLists.txt', '.github/workflows/fuzz.yml' ]
+  schedule:
+    - cron: '23 2 * * *'
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds to fuzz each target
+        required: false
+        default: '300'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [ fuzz_framed_message, fuzz_jsonrpc_request, fuzz_base64_decode ]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install Clang and Ninja
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang ninja-build
+
+      - name: Decide how long to run
+        id: budget
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          REQUESTED: ${{ inputs.seconds }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            schedule)          seconds=900 ;;
+            workflow_dispatch) seconds="${REQUESTED:-300}" ;;
+            *)                 seconds=60 ;;
+          esac
+          # A pull request is not where long fuzzing belongs: it runs on every
+          # push and the value is in the nightly run against a corpus that has
+          # been accumulating.
+          echo "seconds=$seconds" >> "$GITHUB_OUTPUT"
+          echo "Fuzzing for ${seconds}s (event: $EVENT)"
+
+      - name: Configure and build the fuzz targets
+        run: |
+          cmake -B build-fuzz -S . -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DDIDI_BUILD_FUZZERS=ON \
+            -DDIDI_BUILD_TESTS=OFF
+          cmake --build build-fuzz --target ${{ matrix.target }} --parallel
+
+      # The corpus is the asset. Starting from empty every run means only ever
+      # finding what is reachable in the first sixty seconds; restoring what
+      # previous runs found is most of what ClusterFuzzLite would have bought,
+      # without the Docker image or the separate filestore.
+      - name: Restore the accumulated corpus
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .fuzz-corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-
+
+      - name: Fuzz
+        id: run
+        shell: bash
+        env:
+          SECONDS_TO_RUN: ${{ steps.budget.outputs.seconds }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -uo pipefail
+          # The committed seeds always take part, including the eight bytes
+          # that used to segfault the frame decoder, so that case is re-run on
+          # every single fuzz job for as long as this target exists.
+          seed_dir="fuzz/corpus/${TARGET#fuzz_}"
+          mkdir -p ".fuzz-corpus/${TARGET}" artifacts
+          cp -n "$seed_dir"/* ".fuzz-corpus/${TARGET}/" 2>/dev/null || true
+          echo "corpus entries: $(find ".fuzz-corpus/${TARGET}" -type f | wc -l)"
+
+          set +e
+          "./build-fuzz/${TARGET}" \
+            ".fuzz-corpus/${TARGET}" \
+            -max_total_time="${SECONDS_TO_RUN}" \
+            -print_final_stats=1 \
+            -artifact_prefix=artifacts/ \
+            2>&1 | tail -40
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          if [ "$status" -ne 0 ]; then
+            echo "::error::${TARGET} found a crash. The reproducer is in the uploaded artifacts."
+            exit 1
+          fi
+
+      # Uploaded on failure only, and it is the whole finding: libFuzzer writes
+      # the exact bytes that reproduce, so a maintainer can run the target
+      # against the file rather than re-deriving it.
+      - name: Upload the reproducer
+        if: failure() && steps.run.outputs.status != '0'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-reproducer-${{ matrix.target }}
+          path: artifacts/
+          if-no-files-found: warn
