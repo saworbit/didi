@@ -57,7 +57,7 @@ next real finding disappears into them.
 
 | Finding | Disposition |
 | --- | --- |
-| Five integer-multiplication overflows, all in `stb_image_write.h` | Excluded from analysis. Vendored upstream code this project copies verbatim and does not modify; see [THIRD_PARTY.md](THIRD_PARTY.md). Callers clamp viewport captures to 4096x4096 with a 128 MB frame limit before reaching it. |
+| Five integer-multiplication overflows, all in `stb_image_write.h` | Dismissed as won't-fix. Vendored upstream code this project copies verbatim and does not modify; see [THIRD_PARTY.md](THIRD_PARTY.md). Callers clamp viewport captures to 4096x4096 with a 128 MB frame limit before reaching it. |
 | Three uncontrolled process operations (`test_runner`, `process_runner`, `gdscript_diagnostics`) | Dismissed as by design. Launching an operator-nominated Godot or dotnet binary is what these tools do, and they advertise `openWorldHint: true` on the wire so a client cannot auto-approve them as closed local calls. |
 | Path injection in `session_client.cpp` | Dismissed as by design. `DIDI_SESSION_DIR` is the documented operator override described above; the descriptor's shape, session ID, PID and process-start identity are all validated before anything acts on it. |
 | Path injection in `phase7_signal_bridge_probe.cpp` | Dismissed as test-only. A probe reading the descriptor path passed as its own argument, not built into the shipped server. |
@@ -66,6 +66,17 @@ The common thread in the dismissals is that they sit on the boundary this
 document already draws: an attacker who can set this process's environment
 already controls the process. That is a statement about the boundary, not a
 claim that the code is unreachable.
+
+All ten are dismissals rather than exclusions, and that is not the original
+plan. A CodeQL configuration file was added first, listing the vendored headers
+under `paths-ignore`. It was loaded, it was inert, and the alerts stayed open:
+`paths` and `paths-ignore` apply to interpreted languages and to compiled
+languages analysed *without* a build. This analysis builds, because CodeQL for
+C++ observes the real compiler, and the only supported way to narrow a built
+analysis is to change what the build compiles -- which is not available for a
+header the code under analysis includes. The configuration file has been
+removed rather than left in the tree describing a control that was not in
+force.
 
 ---
 
