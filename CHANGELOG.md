@@ -13,6 +13,39 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Added
 
+- Signed releases. Every release archive now carries SLSA build provenance,
+  signed through Sigstore by the release workflow, plus a `SHA256SUMS` file and
+  the provenance bundle as `didi-<tag>.intoto.jsonl`.
+
+  Didi ships prebuilt binaries, so "did this archive come from that source" has
+  to be answerable by someone holding only the download. Until now it was not
+  answerable at all. The check that matters names the workflow, not just the
+  repository, because an attacker can sign something of their own but cannot
+  produce a signature attributed to this repository's release workflow:
+
+  ```bash
+  gh attestation verify didi-linux-x64.tar.gz \
+    --repo saworbit/didi \
+    --signer-workflow saworbit/didi/.github/workflows/release.yml
+  ```
+
+  There is no signing key. The certificate is issued to the workflow run's own
+  OIDC identity and expires in minutes, so there is nothing for a maintainer to
+  leak, rotate or lose. The bundle ships as a release asset rather than living
+  only in GitHub's attestation store, so verification works offline for someone
+  who would rather not call the GitHub API -- and because that is the form
+  OpenSSF Scorecard's Signed-Releases check reads.
+
+  `SHA256SUMS` is covered by the same attestation, so it cannot be swapped
+  independently of the archives it describes. [SECURITY.md](SECURITY.md) has
+  the verification commands.
+
+- A rehearsal for the release pipeline. Running the release workflow manually
+  now builds, checksums and signs exactly what a tag would, then leaves the
+  result as a workflow artifact instead of publishing it. The signing path used
+  to be reachable only by tagging a real release, which meant the only way to
+  find out whether it worked was to do the thing that cannot be undone.
+
 - Repository automation and supply-chain hardening. Someone assessing this
   project from the outside can now see what is enforced rather than what is
   claimed.
