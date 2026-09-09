@@ -114,8 +114,26 @@ The run produces five artifacts: the ledger, the coverage report, the captured s
 - No parallel execution. The bench farm in [Gogo Design](GOGO_DESIGN.md) stays design-only and is not a dependency of this trial.
 - No 3D. `gridmap_set_cells`, 3D navigation queries, and the 3D camera and raycast paths are a second round with a separate fresh tester.
 - No changes to Didi during the run. Fixes are decided at review, after the run ends.
-- No CI integration. Round one is run by hand.
+- No CI integration. A trial is stochastic and costs real money, so it cannot gate a pull request; `tools/field-trial/cycle.py` is the cheap deterministic loop that does. Rounds one through three were run by hand; see [Running one unattended](#11-running-one-unattended).
 
 ## 10. What round one produces
 
 A seed, a briefing, and a scoring method, all versioned under `tools/field-trial/`. Re-running the identical seed after fixes and diffing the two ledgers is the improvement loop, and running it by hand once is the first turn of the crank that [Gogo Design](GOGO_DESIGN.md) eventually automates.
+
+## 11. Running one unattended
+
+`tools/field-trial/trial.py` is that crank turned by machine. It seeds, briefs a fresh tester in its own client session, and scores what the tester did without asking the tester:
+
+```
+python tools/field-trial/trial.py --compare <previous>/coverage.json
+```
+
+Five phases, each recorded in `trial.json` and rendered into `TRIAL.md`: **preflight** (the client exists and is signed in, checked before the run costs anything, because the tester reads its own credential store and this machine being signed in says nothing about it), **seed**, **run**, **score**, and **bridge**. `--dry-run` performs the preflight and the seed and launches nothing, which is how the orchestration is exercised without spending.
+
+Three things it does deliberately.
+
+**It scores the bridge, not just the server.** This is the finding trial 03 paid for. A trial is seeded against a server binary and scored against that binary's manifest, while the live half of every call is served by a different file that the tester installs by hand and no artifact recorded. That run spent about an hour concluding a shipped capability did not exist, because the GDExtension answering it was six days older than the server. The seed now records the server's build id, read from `didi --version`, and the SHA-256 of the addon the tester is meant to install alongside the one lying in the repository's own `addons/didi`, which is gitignored, written by no build step, and indistinguishable by eye. After the run, `bridge.py` reads the pairing the server reported on every live session call and returns one of three verdicts. `matched` and `mismatched` are the obvious two. The third is `not_observed`, and it is not a pass: a run in which no call ever reported a pairing does not say which build served it, and its live findings are unaccounted for rather than clean.
+
+**It never trusts the tester's account of itself.** Coverage comes from the transcript, as in section 8, and so does the bridge verdict. The ledger is read by a human afterwards and is not an input to any number here.
+
+**It decides nothing.** No fix is applied, no issue is closed, nothing merges. One stochastic run cannot grade a change, and the value is the diff between two runs of the same seed rather than either run alone. The comparison in `TRIAL.md` therefore carries both denominators: trial 03 read as a regression at 32.1% against trial 01's 39.6% purely because the implemented surface grew from 91 to 112 underneath it, and a table showing the percentage without the surface it is a percentage of invites exactly that reading.

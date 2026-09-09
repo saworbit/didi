@@ -3,6 +3,7 @@
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/common/version.hpp"
 #include <iostream>
 #include <csignal>
 
@@ -99,7 +100,15 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--version" || arg == "-v") {
-            std::cout << "didi (godot-mcp-native) v" << didi::mcp::kServerVersion << std::endl;
+            // The build id as well as the version, because the version cannot
+            // tell two builds apart and the GDExtension is a separate file a
+            // user copies around on its own. A session that has attached
+            // reports both halves and says whether they match; before one is
+            // attached, this is the only way to record which build a run was
+            // handed. Field trial 03 lost an hour to a bridge six days older
+            // than the server, and could not have caught it from a version.
+            std::cout << "didi (godot-mcp-native) v" << didi::mcp::kServerVersion << "\n"
+                      << "build " << didi::kBuildId << std::endl;
             return 0;
         } else if (arg == "--dump-tool-manifest") {
             // Emits the registered tool surface as JSON so documentation can be
