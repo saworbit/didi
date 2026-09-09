@@ -435,13 +435,19 @@ Like every mutating Phase 7 live tool, these setters return `504 unknown_outcome
 
 ### `resource_create` — Offline
 
-Writes a textual `.tres` file under the project root. Supported JSON encodings include strings, booleans, numbers, arrays, and `{x,y}`/`{x,y,z}` objects emitted as Vector2/Vector3. Didi does not instantiate or validate the requested Resource class in Godot.
+Writes a textual `.tres` file under the project root. Strings, booleans, numbers, arrays and objects are rendered as Godot literals: `{x,y}`, `{x,y,z}`, `{x,y,z,w}` and `{r,g,b(,a)}` become Vector2, Vector3, Vector4 and Color, and any other object becomes a Dictionary. Nested values go through the same writer, so an array of `{r,g,b}` objects comes out as an array of `Color(...)`.
+
+Give an object a `"type"` to choose the literal yourself, which is the only way to say what the JSON cannot: `Vector2i`, `Vector3i`, `Vector4i`, `Quaternion` and `Color` take their components, `NodePath` and `StringName` take their text under `"value"`, and the packed arrays take their elements under `"values"`. A capitalised type this writer does not know is refused, and so is a `SubResource`, which has no representation here. Nothing falls through to JSON: a value that cannot be written refuses the call naming the property, because a resource reported as created with a field thrown away costs more than a refusal does.
+
+Order is the caller's to set. Godot applies indexed sub-properties in file order and `tracks/0/type` is what creates track 0, so pass `properties` as an array of `{name, value}` entries when that matters; a JSON object cannot carry an order and its keys are written sorted. The result lists `properties_written` in file order.
+
+Didi does not instantiate or validate the requested Resource class in Godot.
 
 `save_path` must end in `.tres` or `.res`. The body is Godot text-resource markup and nothing else, so any other target is refused rather than written; use `script_create` for a `.gd` file.
 
 - `resource_type` (`string`, default `"StandardMaterial3D"`).
 - `save_path` (`string`, required).
-- `properties` (`object`, optional).
+- `properties` (`object` or `array` of `{name, value}`, optional). The array form is written in the order given.
 - `overwrite` (`boolean`, default `false`); an existing target is preserved unless explicitly set to `true`.
 
 ### `resource_inspect` — Offline

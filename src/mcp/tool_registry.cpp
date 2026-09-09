@@ -2204,13 +2204,35 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "resource_create";
-        t.description = "Writes textual .tres content under the project root from supported scalar, array, and vector-shaped JSON values.";
+        t.description = "Writes textual .tres content under the project root. Every value is rendered as a Godot literal or the call is refused naming the property, so a resource is never reported as written when part of it was thrown away.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
                 {"resource_type", {{"type", "string"}, {"default", "StandardMaterial3D"}}},
                 {"save_path", {{"type", "string"}, {"description", "Target res:// path"}}},
-                {"properties", {{"type", "object"}}},
+                {"properties", {
+                    {"description",
+                     "An object, whose keys are written in sorted order, or an array of "
+                     "{name, value} entries written in the order given. Use the array when order "
+                     "matters: Godot applies indexed sub-properties in file order, so tracks/0/type "
+                     "has to come before the rest of track 0. A value is a string, number, boolean, "
+                     "array, or an object. An object with x/y, x/y/z, x/y/z/w or r/g/b(/a) numbers "
+                     "becomes the matching Vector or Color; any other object is a Dictionary. To "
+                     "choose the type yourself, give the object a \"type\": Vector2i, Vector3i, "
+                     "Vector4i, Quaternion and Color take their components; NodePath and StringName "
+                     "take their text under \"value\"; the packed arrays take their elements under "
+                     "\"values\". A type this cannot write is refused, and so is a SubResource, "
+                     "which has no representation here."},
+                    {"oneOf", json::array({
+                        json{{"type", "object"}},
+                        json{{"type", "array"},
+                             {"items", {{"type", "object"},
+                                        {"properties", {{"name", {{"type", "string"},
+                                                                  {"minLength", 1}}},
+                                                        {"value", json::object()}}},
+                                        {"required", json::array({"name", "value"})}}}}
+                    })}
+                }},
                 {"overwrite", {{"type", "boolean"}, {"default", false}}}
             }},
             {"required", {"save_path"}}
