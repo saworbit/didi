@@ -265,6 +265,22 @@ jobs:
             ./build/didi_tests
           fi
 
+      - name: Run The Suites The Way The Release Runs Them
+        shell: bash
+        run: |
+          # The release workflow gates a tag on `ctest`, and nothing else ran
+          # it. Every step above runs the native binary directly and then names
+          # Python modules one at a time, in separate processes and separate
+          # jobs; ctest runs one process over all of them through unittest
+          # discovery. That is a different composition, and the 1.8.0 release
+          # was the first thing to execute it -- which it did for thirty-four
+          # minutes before it was cancelled.
+          #
+          # A release must not be the first run of a command. This is the same
+          # invocation release.yml uses, so the tag can no longer be the place
+          # it is tried.
+          ctest --test-dir build -C Release --output-on-failure
+
       - name: Verify the published test counts match the suites that ran
         shell: bash
         run: |

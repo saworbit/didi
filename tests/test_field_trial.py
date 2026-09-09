@@ -3,8 +3,10 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -120,6 +122,38 @@ class SeedTests(unittest.TestCase):
         self.extension = self.root / "addons" / "didi" / "bin" / "didi_extension.dll"
         self.extension.parent.mkdir(parents=True)
         self.extension.write_text("extension", encoding="utf-8")
+        self._refuse_to_launch_the_fake_server()
+
+    def _refuse_to_launch_the_fake_server(self):
+        """Fail the fake server's launch here rather than in the kernel.
+
+        The seed asks the server it was handed for its build id and its tool
+        manifest. This fixture's server is six bytes of the word "binary" with
+        an .exe name, so those launches can only ever fail, and OSError is the
+        answer the tests are written against.
+
+        Getting that answer from Windows costs a CreateProcess on a brand new
+        file in the temporary directory, which goes through the antivirus filter
+        driver on the way. That is normally instant. Behind the native suite's
+        thirty thousand freshly written files it is not: the 1.8.0 release sat
+        in this one call for thirty-four minutes with a flat CPU and one line of
+        log, and was cancelled rather than finishing. The seed spawns two of
+        these per call and the fixture calls it in most of its tests.
+
+        Only this fixture's own path is intercepted. _commit still shells out to
+        a real git, because that is the behaviour those tests are checking.
+        """
+        real_run = subprocess.run
+        fake = str(self.didi)
+
+        def run(command, *args, **kwargs):
+            if command and str(command[0]) == fake:
+                raise OSError(8, "not a valid application")
+            return real_run(command, *args, **kwargs)
+
+        patcher = mock.patch.object(SEED.subprocess, "run", run)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def seed(self, target):
         return SEED.seed(

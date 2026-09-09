@@ -31,6 +31,31 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- Seeding a field trial no longer tries to execute a file that is not a
+  program, and no longer waits forever when a probe does not come back. The
+  seed asks the server it was handed for its build id and its tool manifest,
+  and the unit tests hand it a fixture six bytes long with an `.exe` name. On
+  Windows that launch reaches the antivirus filter driver before it fails, and
+  behind the native suite's thirty thousand freshly written files it stopped
+  coming back: a 1.8.0 release attempt sat in that one call for thirty-four
+  minutes with a flat processor and one line of log. The tests now refuse the
+  launch themselves, with the same error the operating system would have
+  returned, and both probes carry a timeout, because a probe documented as
+  never fatal must not be able to take the whole seed with it.
+
+- `ctest` says where it stopped. Both suites carry a timeout below the release
+  job's own, and the Python suite runs unbuffered and verbose, so a run that
+  stalls fails at a known bound and names the test it was in. Thirty-four
+  minutes of the release attempt above produced one line, the one saying the
+  suite had started.
+
+- Every pull request now runs `ctest`, which is what gates a tag. Nothing else
+  ran it: the other steps run the native binary directly and then name Python
+  modules one at a time, in separate processes and separate jobs, while `ctest`
+  runs one process over all of them through unittest discovery. That is a
+  different composition, and cutting 1.8.0 was the first thing to execute it. A
+  release should not be the first run of a command.
+
 - `Tools.OfflineCapabilityIsDerived` sets up the tool registry it reads instead
   of inheriting whatever an earlier test left there. It passed only in a full
   run and failed on its own, which is the opposite of what running a single test
