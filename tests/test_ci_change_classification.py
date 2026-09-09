@@ -85,6 +85,7 @@ class ChangeClassificationTests(unittest.TestCase):
             ".gitattributes",
             "LICENSE",
             "CODE_OF_CONDUCT.md",
+            "AI.md",
         ):
             self.assertClassifies([path], build=False, engine=False)
 
@@ -156,6 +157,7 @@ class ChangeClassificationTests(unittest.TestCase):
             ".gitignore",
             "LICENSE",
             "CODE_OF_CONDUCT.md",
+            "AI.md",
         ):
             self.assertTrue(
                 (REPOSITORY_ROOT / path).is_file(),
