@@ -143,6 +143,29 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Changed
 
+- The Linux release artifact is built *inside* Ubuntu 22.04 rather than *on*
+  it. The `ubuntu-22.04` runner image is being retired -- deprecation from
+  2026-09-17, unsupported from 2027-04-17 -- and GitHub brownouts already kill
+  jobs using the label. One killed a release rehearsal mid-compile, which is
+  how this was found rather than by a failed release.
+
+  The label was chosen for glibc in the first place: a binary built against
+  2.35 starts on Ubuntu 22.04 and Debian 12, and one built on a newer host does
+  not. Moving to `ubuntu-24.04` would have raised the floor to glibc 2.39 and
+  silently dropped every Ubuntu 22.04 LTS and Debian 12 user -- a decision about
+  who can run Didi, not a CI fix. Building in a pinned `ubuntu:22.04` container
+  on a supported runner keeps the floor exactly where it was.
+
+  The image is pinned by digest, because this build feeds the provenance
+  attestation: what built the binary should be a fact rather than whatever the
+  tag pointed at that day.
+
+- Corrected the documented Linux minimum in
+  [Administrator Guide](docs/ADMIN_GUIDE.md) from Ubuntu 20.04+ to Ubuntu
+  22.04+ / glibc 2.35+. It had not been true of a published archive for some
+  time: the build host sets the floor, and it had been 22.04. Nothing about
+  what ships changed here -- only the claim made about it.
+
 - CI decides what to run instead of running everything. A single cheap job
   classifies the changed files, and the two 30-minute Windows Godot integration
   matrices and the sanitizer build now start only when the change can reach

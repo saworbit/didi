@@ -21,29 +21,74 @@ concurrency:
 
 jobs:
   build-release-packages:
-    name: Package Release (${{ matrix.os }})
+    name: Package Release (${{ matrix.artifact_name }})
     runs-on: ${{ matrix.os }}
+    # Empty for the runners that build on the host. The Linux leg builds inside
+    # a container instead; see the comment on its matrix entry.
+    container: ${{ matrix.container }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: windows-latest
+            container: ''
             artifact_name: didi-windows-x64
             archive_ext: zip
-          - os: ubuntu-22.04
+
+          # The Linux artifact is built inside Ubuntu 22.04 rather than on it.
+          #
+          # It used to run on the `ubuntu-22.04` runner image, chosen for glibc:
+          # a binary built against 2.35 starts on Ubuntu 22.04 and Debian 12,
+          # and one built on a newer host does not. That image is being retired
+          # -- deprecation from 2026-09-17, unsupported from 2027-04-17 -- and
+          # GitHub brownouts already kill jobs using the label to force the
+          # issue. One killed a release rehearsal mid-compile.
+          #
+          # Moving the label to ubuntu-24.04 would have raised the floor to
+          # glibc 2.39 and silently dropped every Ubuntu 22.04 LTS and Debian 12
+          # user, which is a decision about who can run Didi rather than a CI
+          # fix. A container keeps the floor exactly where it was and puts the
+          # job on a supported runner. Pinned by digest because this build feeds
+          # the provenance attestation below: what built the binary should be a
+          # fact, not whatever the tag pointed at that day. `apt-get update`
+          # still installs current packages on top.
+          - os: ubuntu-latest
+            container: ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc
             artifact_name: didi-linux-x64
             archive_ext: tar.gz
+
           # arm64 only. macos-14 is an Apple Silicon runner and this builds for
           # its own architecture, so there is no Intel macOS artifact. An Intel
           # or universal build needs a second runner or an explicit
           # CMAKE_OSX_ARCHITECTURES, which is a packaging decision rather than a
           # build fix; the artifact name says arm64 so nobody is misled.
           - os: macos-14
+            container: ''
             artifact_name: didi-macos-arm64
             archive_ext: tar.gz
 
     steps:
+      # First, because checkout wants git and everything after wants a
+      # compiler. The base image has neither. CMake is deliberately not
+      # installed here: the pinned 3.28 step below supplies it on every POSIX
+      # leg, so containerising changed where the Linux build runs and nothing
+      # about which toolchain builds it.
+      - name: Prepare the build container
+        if: matrix.container != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            build-essential ca-certificates curl git python3 python3-venv python3-pip
+          # The container runs as root against a workspace it does not own, so
+          # git refuses to touch it without this.
+          git config --global --add safe.directory '*'
+          echo "Container: $(. /etc/os-release && echo "$PRETTY_NAME")"
+          echo "glibc: $(ldd --version | head -1)"
+
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
