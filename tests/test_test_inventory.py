@@ -12,6 +12,7 @@ import contextlib
 import importlib.util
 import io
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -162,6 +163,15 @@ class NativeGroupingTests(unittest.TestCase):
         self.assertEqual(inventory.native_suite_prefix("phase7 generated schemas"), "phase7")
 
 
+# A Markdown image, which is what every badge in the README is. The first
+# version of this test asked whether "img.shields.io" appeared anywhere in the
+# line, and CodeQL flagged it as an incomplete URL substring check -- correctly,
+# because that is the shape that lets evil-img.shields.io.example.com through
+# when the same idea is used to validate a URL. Nothing untrusted reaches this
+# test, but the concern here was never the host: it is whether the line carries
+# an image at all.
+MARKDOWN_IMAGE = re.compile(r"!\[[^\]]*\]\(")
+
 BADGE_LINE = (
     "[![Tests](https://img.shields.io/badge/tests-804-2ea043"
     "?logo=pytest&logoColor=white)](docs/TEST_INVENTORY.md)"
@@ -210,7 +220,7 @@ class BadgeTests(unittest.TestCase):
         offenders = [
             line
             for line in readme.splitlines()
-            if line.lstrip().startswith("<!--") and "img.shields.io" in line
+            if line.lstrip().startswith("<!--") and MARKDOWN_IMAGE.search(line)
         ]
         self.assertEqual(
             offenders,
