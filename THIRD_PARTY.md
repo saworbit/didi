@@ -15,6 +15,21 @@ written down is a dependency nobody checks.
 
 Each file keeps its upstream copyright header. Do not strip it.
 
+CodeQL findings in these files are dismissed rather than excluded.
+`stb_image_write.h` alone accounted for five of the ten findings in CodeQL's
+first pass over this repository, all integer-multiplication overflows in code
+this project is told not to modify. Five alerts that can never be actioned are
+how a Security tab stops being read.
+
+Dismissal rather than exclusion is forced rather than preferred: `paths-ignore`
+does not apply to a compiled language whose analysis builds the code, so there
+is no configuration that removes them. Each carries a written reason pointing
+here. The risk of a vendored file is managed by the process below -- knowing
+what is in the tree and what updating it involves -- not by an alert nobody can
+close. The fuzz targets in [`fuzz/`](fuzz/README.md) cover `json.hpp` where it
+matters, by driving it through this project's own parsers on the untrusted
+input path.
+
 `extension_api.json` and `gdextension_interface.h` at the repository root are
 not these files. They are local dumps produced from a Godot build, they are
 gitignored, and nothing compiles against them.
@@ -32,14 +47,25 @@ live harness runs against real 4.5.1 and 4.7.2 editors. Both have to stay true.
 
 ## What Dependabot does and does not cover
 
-Dependabot watches the GitHub Actions the workflows pin, monthly, through
-[`.github/dependabot.yml`](.github/dependabot.yml).
+Dependabot watches the GitHub Actions the workflows pin, weekly, and the Python
+pin in `requirements-dev.txt`, monthly, through
+[`.github/dependabot.yml`](.github/dependabot.yml). Both carry a seven-day
+cooldown, so a brand-new release is not adopted on the day it is published --
+long enough for a compromised publish to be caught and yanked. Cooldown does not
+apply to security updates, so a fix for a known vulnerability still arrives at
+once.
+
+Actions are pinned to commit SHAs rather than tags, each with a `# vX.Y.Z`
+comment beside it. `tools/validate_documentation.py` rejects a workflow that
+pins any other way, and Dependabot updates the SHA and its comment together, so
+the pin costs nothing in maintenance.
+
+Python version bumps used to be switched off. `requirements-dev.txt` pins
+`jsonschema` exactly and CI asserts that pin, but the version was also typed
+into both workflows, so any bump opened a pull request that failed until
+somebody edited two more lines. Both workflows now read the version out of
+`requirements-dev.txt`, so a bump either passes the schema contract suites or
+it does not, and that is the whole review.
 
 It does not watch anything in the table above, and it cannot: there is no
 manifest for it to read. Those three files are reviewed by hand or not at all.
-
-Python is watched for security only. `requirements-dev.txt` pins
-`jsonschema==4.25.1` and CI asserts that exact version on purpose, so automatic
-version bumps are switched off: they would open a pull request that always
-fails until someone edits the assertion. Dependabot security alerts still cover
-it, because the dependency graph reads the file either way.

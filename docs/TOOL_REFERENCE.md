@@ -42,13 +42,13 @@ The live walk is separately capped at 100000 nodes and 8 MiB so a large edited s
 
 ### `scene_instantiate_node` — Live
 
-Creates a built-in ClassDB node under the active edited scene and registers add/remove operations with UndoRedo.
+Creates a built-in ClassDB node, or an instance of a packed scene, under the active edited scene and registers add/remove operations with UndoRedo.
 
-- `node_type` (`string`, default `"Node"`).
+- `node_type` (`string`, default `"Node"`). Ignored when `scene_path` is given.
 - `parent_path` (`string`, default `"/root"`).
 - `name` (`string`, optional).
 - `properties` (`object`, optional): Initial property values. Each value is a JSON null, boolean, signed integer, real, string, or a vector/colour object compatible with that property's Godot type, the same contract as `scene_set_property`'s `value`.
-- `scene_path` is present in the schema, but PackedScene instantiation currently returns `501`.
+- `scene_path` (`string`, optional): a `res://` `.tscn` to instance rather than a type to construct. The instance is made with `GEN_EDIT_STATE_INSTANCE`, which is what the editor's own scene drop uses, so the scene file records an instance of that scene and not a copy of its nodes. `properties` still applies, to the instance root. The result reports the instance's own class in `node_type` and echoes `scene_path`. A missing scene is `404`, a resource that is not a PackedScene is `422`, and so is one whose dependencies did not load, because instantiating that returns nothing and puts the reason in a console the caller cannot read.
 
 ### `scene_remove_node` — Live
 
@@ -205,7 +205,7 @@ Diagnostics are computed against the file after it is written, so they include t
 
 ### `viewport_capture_frame` — Live + offline
 
-Live mode copies RGBA8 pixels from the active editor 3D viewport, or from the 2D editor viewport when `camera_identifier` is `editor_2d` or `active_editor_view_2d`, and encodes them as PNG. Attached to a game it captures the root viewport instead; a game has one and `camera_identifier` is refused there. `session_kind` says which process the pixels came from. Offline mode returns an attributed synthetic grid preview.
+Live mode copies RGBA8 pixels from the active editor 3D viewport, or from the 2D editor viewport when `camera_identifier` is `editor_2d`, `active_editor_view_2d`, `2d` or `canvas_item`, and encodes them as PNG. The 3D names are `active_editor_view`, `editor_3d`, `active_editor_view_3d` and `3d`, and an identifier in neither list is refused rather than resolved to 3D. Attached to a game it captures the root viewport instead; a game has one and `camera_identifier` is refused there. `session_kind` says which process the pixels came from. Offline mode returns an attributed synthetic grid preview.
 
 A viewport that is not the one on screen has no size, and Godot returns its 2x2 minimum rather than refusing. A capture below 8 pixels on either edge is refused and says so, because a caller cannot tell a four-pixel image from a scene that happens to be empty. For an editor viewport it means the requested main screen is not the selected one.
 
@@ -435,13 +435,19 @@ Like every mutating Phase 7 live tool, these setters return `504 unknown_outcome
 
 ### `resource_create` — Offline
 
-Writes a textual `.tres` file under the project root. Supported JSON encodings include strings, booleans, numbers, arrays, and `{x,y}`/`{x,y,z}` objects emitted as Vector2/Vector3. Didi does not instantiate or validate the requested Resource class in Godot.
+Writes a textual `.tres` file under the project root. Strings, booleans, numbers, arrays and objects are rendered as Godot literals: `{x,y}`, `{x,y,z}`, `{x,y,z,w}` and `{r,g,b(,a)}` become Vector2, Vector3, Vector4 and Color, and any other object becomes a Dictionary. Nested values go through the same writer, so an array of `{r,g,b}` objects comes out as an array of `Color(...)`.
+
+Give an object a `"type"` to choose the literal yourself, which is the only way to say what the JSON cannot: `Vector2i`, `Vector3i`, `Vector4i`, `Quaternion` and `Color` take their components, `NodePath` and `StringName` take their text under `"value"`, and the packed arrays take their elements under `"values"`. A capitalised type this writer does not know is refused, and so is a `SubResource`, which has no representation here. Nothing falls through to JSON: a value that cannot be written refuses the call naming the property, because a resource reported as created with a field thrown away costs more than a refusal does.
+
+Order is the caller's to set. Godot applies indexed sub-properties in file order and `tracks/0/type` is what creates track 0, so pass `properties` as an array of `{name, value}` entries when that matters; a JSON object cannot carry an order and its keys are written sorted. The result lists `properties_written` in file order.
+
+Didi does not instantiate or validate the requested Resource class in Godot.
 
 `save_path` must end in `.tres` or `.res`. The body is Godot text-resource markup and nothing else, so any other target is refused rather than written; use `script_create` for a `.gd` file.
 
 - `resource_type` (`string`, default `"StandardMaterial3D"`).
 - `save_path` (`string`, required).
-- `properties` (`object`, optional).
+- `properties` (`object` or `array` of `{name, value}`, optional). The array form is written in the order given.
 - `overwrite` (`boolean`, default `false`); an existing target is preserved unless explicitly set to `true`.
 
 ### `resource_inspect` — Offline
@@ -635,7 +641,7 @@ Each entry carries `node_path` relative to the edited scene root, plus `class` a
 
 ### `instantiate_asset` — Unimplemented legacy name
 
-Asset or PackedScene instantiation is not implemented.
+Not implemented. To put a packed scene in the edited scene, pass `scene_path` to `scene_instantiate_node`.
 
 ### `project_search_text` and `project_search_symbols` — Offline
 
@@ -724,7 +730,7 @@ Drives a running game for a bounded window and reports what happened. It holds o
 This is the pairing `runtime_inject_input` and `runtime_watch_invariants` cannot make between them. Injection presses a button and returns; watching samples every frame but presses nothing. A character that walks into a wall and stops responding is only visible to something doing both at frame rate, because from outside you see a position before the press and a position after it, never the second in between where nothing happened.
 
 - `actions` (`array`, required, 1 to 8). InputMap action names. Names must not repeat, and one action is down at a time.
-- `probes` (`array`, required, 1 to 4). Each takes an `expression` against an optional `context_node`, evaluating to a number or a boolean, through the same sandbox `runtime_watch_invariants` uses.
+- `probes` (`array`, required, 1 to 4). Each takes an `expression` against an optional `context_node`, evaluating to a number or a boolean, through the same sandbox `runtime_watch_invariants` uses. `node` is the context node and a property is read with `node.get("name")`; a component of that read is a number, as in `node.get("position").x`. A bare `position.x` reads through an object and is refused.
 - `duration_ms` (`integer`, default `5000`, 250 to 60000).
 - `action_hold_ms` (`integer`, default `250`, 16 to 10000). How long one action is held before the schedule moves on.
 - `stuck_ms` (`integer`, default `3000`, 100 to 60000). How long every probe must stay still for that to be reported. Must not exceed `duration_ms`.
@@ -738,6 +744,8 @@ This is the pairing `runtime_inject_input` and `runtime_watch_invariants` cannot
 **Input actions, not movement.** Nothing outside a project's own controller knows how that project moves its player. Setting a position directly would move the sprite without running any of that, which proves nothing about whether the game can be played. Pressing the project's own actions runs the project's own code. `nav_query_path` and the `spatial_query_*` family are how an agent decides where to go; this is how it gets there.
 
 **A probe that cannot be read is not a probe that stayed still.** An expression that fails every frame produces no value, and no value is not stillness. It is reported with zero readings and its `last_read_error`, and it never contributes a stuck interval. A typo in an expression must not come back as a frozen game.
+
+Because of that, a run in which nothing could be read has no stuck intervals and no engine errors, which on its own reads as a clean exploration. It is not: it is a window in which nothing was sampled. Every probe that never returned a value is named in `unread_probes`, and `measured` is `false` when none of them did.
 
 **It reports, it does not judge.** The response carries `verdict: "none"` in as many words. A cutscene, an open menu and a genuine soft lock are the same thing from here: a window in which nothing moved. Which one it was is the caller's to know. Nothing in the response says whether a level is beatable.
 

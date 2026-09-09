@@ -6,7 +6,11 @@
 
 # Didi (godot-mcp-native) 🎭
 
-[![Didi Fast & Efficient CI](https://github.com/saworbit/didi/actions/workflows/ci.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/ci.yml)
+[![CI](https://github.com/saworbit/didi/actions/workflows/ci.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/saworbit/didi/actions/workflows/codeql.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/saworbit/didi/badge)](https://scorecard.dev/viewer/?uri=github.com/saworbit/didi)
+[![Tests](https://img.shields.io/badge/tests-807-2ea043?logo=pytest&logoColor=white)](docs/TEST_INVENTORY.md)
+[![Release](https://img.shields.io/github/v/release/saworbit/didi?logo=github&color=blue)](https://github.com/saworbit/didi/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Godot Engine](https://img.shields.io/badge/Godot-4.5%2B-478cbf?logo=godotengine&logoColor=white)](https://godotengine.org/)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=c%2B%2B&logoColor=white)](https://isocpp.org/)
@@ -18,7 +22,7 @@
 
 **Didi** (`godot-mcp-native`) is a high-performance, native [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for **Godot 4.5+**, engineered in **C++20** as a standalone executable (`didi.exe` on Windows, `didi` on POSIX) and an in-engine GDExtension library for the target platform.
 
-The current documented release is **1.6.0**.
+The current documented release is **1.7.0**.
 
 ---
 
@@ -41,11 +45,13 @@ The current documented release is **1.6.0**.
 | 🔌 [**Integration Guide**](docs/INTEGRATION_GUIDE.md) | **Developers / Integrators** | Installing the addon into an existing project and wiring each supported assistant to it. |
 | 🛡️ [**Administrator & Operations Guide**](docs/ADMIN_GUIDE.md) | **DevOps / Admins** | Security DACL hardening, CI/CD headless execution, observability, and troubleshooting. |
 | 👩‍💻 [**Developer & Extension Guide**](docs/DEVELOPER_GUIDE.md) | **Contributors** | How to build from source, write tests, and add custom MCP tools. |
+| 🧪 [**Test Inventory**](docs/TEST_INVENTORY.md) | **Contributors / Reviewers** | Generated totals for every suite, derived from the suites themselves rather than written down beside them. |
 | 📡 [**API & Wire Protocol Specification**](docs/API_SPECIFICATION.md) | **Integrators** | JSON-RPC 2.0 transport and binary frame specifications. |
 | 🔐 [**Security Policy**](SECURITY.md) | **Users / Operators** | Supported release line, local attachment boundary, and private reporting guidance. |
 | 📝 [**Changelog**](CHANGELOG.md) | **All** | Version history and notable changes. |
 | 🤝 [**Contributing**](CONTRIBUTING.md) | **Contributors** | Build, test, and review expectations for a change you want merged. |
 | 💚 [**Code of Conduct**](CODE_OF_CONDUCT.md) | **Everyone** | How people here are expected to treat each other, and how to report a problem. |
+| 🤖 [**On the Use of AI**](AI.md) | **Everyone** | Where AI was used to build Didi, what checks it, where it is no help at all, and who is responsible when it is wrong. |
 | 📦 [**Third Party Code**](THIRD_PARTY.md) | **Maintainers / Security** | The vendored sources no package manager resolves, their versions, and what Dependabot does not cover. |
 | 🎨 [**Brand Identity**](docs/brand/BRAND.md) | **Contributors / Maintainers** | The mark, wordmark, lockups, palette, and the assets they generate from. |
 
@@ -171,8 +177,11 @@ See the [Roadmap](docs/ROADMAP.md), [Phase 7 feasibility evidence](docs/PHASE_7_
    cmake --build build --config Release
    ```
 2. **Enable Godot Plugin**:
-   Copy `addons/didi` to your project and check **Enable** in **Project Settings $\rightarrow$ Plugins**.
+   Copy `build/addons/didi` into your project as `addons/didi` and check **Enable** in **Project Settings $\rightarrow$ Plugins**.
    A **Didi** tab appears beside 2D, 3D and Script.
+   The build assembles the addon under `build/`. The `addons/didi` folder in this repository is
+   the manifest that goes into that assembly, not a build output, so its `bin/` holds whatever
+   was last put there by hand.
 3. **Connect AI Assistant**:
    Open the Didi tab, go to **Connect**, and copy the generated configuration — it already
    carries the located binary and this project's path. Or write it by hand into

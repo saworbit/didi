@@ -20,6 +20,32 @@ involves. Add a row there if you vendor anything else.
 
 ---
 
+## 🤖 AI-Assisted Contributions
+
+Yes, you may use an AI assistant on a pull request. So do I, and [AI.md](AI.md) says so at
+the root of the repository rather than in a footnote.
+
+None of the terms below are about disclosure. They are the same ones I hold myself to.
+
+1. **Run it.** Build it, run the suites, and exercise the behavior you changed in a real
+   Godot editor if it touches a live tool. A patch that has only been read is not a patch
+   that has been tested.
+2. **Understand it.** Review will ask you why the change is shaped the way it is, and "that
+   is what it generated" is not an answer to that question.
+3. **No success stubs.** This is where assistants fail most often, so it is where reviewers
+   look first. A registered name that cannot execute reports `implemented: false` and
+   rejects calls; see **Capability Honesty** below.
+4. **Check every API against the pinned engine.** Plausible method names that no Godot
+   version ever had are the second most common failure. Verify against `extension_api.json`
+   for the version in front of you, or `resources/didi_class_reference.json`.
+5. **Your name goes on it.** Where a line came from does not change who chose to submit it.
+
+Please leave tool attribution out of the history: no generated-by footers, co-author
+trailers, or model names in commit messages, pull request bodies, or review comments. They
+add noise to the log and change nothing about who is responsible.
+
+---
+
 ## 🛠️ Engineering Principles
 
 1. **Native Performance First**: Didi avoids heavy runtimes (no Node.js, Python, or WebSockets). All core logic is implemented in modern C++20.
@@ -60,6 +86,62 @@ involves. Add a row there if you vendor anything else.
    python tools/validate_documentation.py
    ```
    Run these checks for documentation, version, tool-surface, capability, or release changes.
+
+5. **Regenerate the Test Inventory** (only if you added or removed tests):
+   ```bash
+   python tools/test_inventory.py
+   ```
+   It reads the built `didi_tests` registry, parses the Python suites, and
+   rewrites [docs/TEST_INVENTORY.md](docs/TEST_INVENTORY.md) and the tests
+   badge in the README. CI runs `--check` after the build, so a stale
+   inventory is a red run rather than a number nobody notices going wrong.
+
+   **Regenerate on Windows.** The native suite is platform-conditional --
+   crash capture is Windows-only, and the IPC cases differ between a named
+   pipe and a Unix socket -- so the page publishes the Windows figures and
+   says so. On Linux or macOS the tool refuses to regenerate rather than
+   overwrite them, and `--check` reports a skip. Use `--json` to inspect the
+   counts on whatever platform you are actually on.
+
+---
+
+## 🚦 What CI runs, and when
+
+A single job decides what the rest of the run does, so the expensive gates only
+fire when something could have changed their answer:
+
+| Change | Build matrix (3 OS) | Live Godot integration + sanitizers |
+| :--- | :--- | :--- |
+| C++, tests, addon, CMake, tools, fixtures | ✅ | ✅ |
+| Documentation, README, CHANGELOG | ✅ (the docs contract is checked against the built binary) | ❌ |
+| Issue templates, funding, brand assets, editor config | ❌ | ❌ |
+
+**CI Gate** and **Validate Docs** report on every pull request regardless, and
+they are the required checks. Path filters at workflow level are deliberately
+avoided on those two: a workflow skipped by a path filter reports nothing at
+all rather than reporting success, which leaves the pull request permanently
+unmergeable.
+
+Everything else -- CodeQL, OpenSSF Scorecard, dependency review, workflow
+linting, labelling -- runs alongside and does not block a merge.
+
+## 🔒 Workflow changes
+
+Workflows run with a token that can write to this repository, so two rules are
+enforced by `tools/validate_documentation.py` rather than left to review:
+
+- **Pin every action to a commit SHA**, with the release named in a trailing
+  comment: `uses: actions/checkout@3d3c42e5... # v7.0.1`. A tag is a pointer
+  its owner can move at any time. Dependabot updates the SHA and the comment
+  together, so this costs nothing to maintain. Resolve a SHA with
+  `gh api repos/<owner>/<repo>/git/ref/tags/<tag> --jq .object.sha`.
+- **Declare least-privilege `permissions:`** at the top of every workflow, and
+  widen them only on the job that needs it.
+
+`actionlint` and `zizmor` run over the workflows on every pull request and
+catch the rest: injectable `${{ }}` interpolation into a shell, credentials
+left on disk by `checkout`, and the expression and shell mistakes that would
+otherwise only show up as a red run.
 
 ---
 

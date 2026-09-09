@@ -1,4 +1,5 @@
 #include "didi/runtime/checkpoint_store.hpp"
+#include <atomic>
 #include <chrono>
 #include <fstream>
 #include <functional>
@@ -191,9 +192,16 @@ void checkConcurrentMutation(bool addFile) {
     CheckpointStore store(f.root / "source", f.root / "snapshots");
     bool changed = false;
     std::exception_ptr writerError;
-    std::jthread writer([&](std::stop_token stop) {
+    // std::thread and an atomic flag rather than std::jthread and
+    // std::stop_token. Both are C++20, but the libc++ shipped with the Xcode on
+    // the macos-14 runner does not have them, and that runner builds the
+    // released macOS artifact. The release job compiles the test suite, so this
+    // one line broke the macOS release build -- invisibly, because the release
+    // workflow only runs on a tag and nothing had tagged since it landed.
+    std::atomic<bool> stopRequested{false};
+    std::thread writer([&]() {
         try {
-            while (!stop.stop_requested()) {
+            while (!stopRequested.load(std::memory_order_relaxed)) {
                 if (fs::exists(f.root / "snapshots")) {
                     for (const auto& dir : fs::directory_iterator(f.root / "snapshots")) {
                         if (!dir.path().filename().string().starts_with(".partial-"))
@@ -216,8 +224,20 @@ void checkConcurrentMutation(bool addFile) {
             writerError = std::current_exception();
         }
     });
+    // std::jthread joined on destruction. Keep that property, so an unexpected
+    // throw from create() cannot leave a joinable thread and terminate the
+    // process instead of failing the test.
+    struct StopAndJoin {
+        std::thread& thread;
+        std::atomic<bool>& stop;
+        ~StopAndJoin() {
+            stop.store(true, std::memory_order_relaxed);
+            if (thread.joinable()) thread.join();
+        }
+    } stopAndJoin{writer, stopRequested};
+
     auto result = store.create("concurrent-write");
-    writer.request_stop();
+    stopRequested.store(true, std::memory_order_relaxed);
     writer.join();
     if (writerError)
         std::rethrow_exception(writerError);

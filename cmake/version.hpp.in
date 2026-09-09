@@ -8,4 +8,13 @@ namespace didi {
 
 inline const char* kProjectVersion = "@PROJECT_VERSION@";
 
+// Which build this binary came out of, not which release it claims to be.
+//
+// The server and the GDExtension are separate files that a user copies around
+// separately, so the two halves of one install can come from different builds
+// while both say 1.6.0. The version alone cannot tell them apart. This can:
+// it carries the commit and the moment the build tree was configured, so two
+// binaries match only when they were configured together.
+inline const char* kBuildId = "@DIDI_BUILD_ID@";
+
 }  // namespace didi

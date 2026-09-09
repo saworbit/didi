@@ -1,0 +1,68 @@
+# Area labels applied from the paths a pull request touches, so the list of
+# open work can be filtered without anyone hand-labelling it. Labels here are
+# descriptive ("what does this change reach"), never a judgement ("is this
+# good") -- a judgement label a bot applies is a judgement nobody made.
+#
+# Consumed by actions/labeler in .github/workflows/triage.yml. `sync-labels` is
+# on there, so a label is removed again when a push stops touching that area.
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docs/**'
+          - '*.md'
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/workflows/**'
+          - '.github/dependabot.yml'
+          - '.github/labeler.yml'
+          - '.github/release.yml'
+
+build:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'CMakeLists.txt'
+          - 'cmake/**'
+          - '.gitattributes'
+          - '.editorconfig'
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'tests/**'
+
+addon:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'addons/**'
+          - 'demo/**'
+          - 'src/gdextension/**'
+
+mcp-protocol:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/mcp/**'
+          - 'include/didi/mcp/**'
+          - 'schemas/**'
+          - 'docs/API_SPECIFICATION.md'
+
+tooling:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'tools/**'
+          - 'resources/**'
+          - 'requirements-dev.txt'
+
+brand:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docs/brand/**'
+
+security:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'SECURITY.md'
+          - '.github/workflows/codeql.yml'
+          - '.github/workflows/supply-chain.yml'

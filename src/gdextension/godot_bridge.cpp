@@ -1682,6 +1682,14 @@ Result<ViewportIsolationState> GodotBridge::beginViewportIsolation(
     if (isolation_background != "original" && isolation_background != "transparent") {
         return Error::invalidArgument("isolation_background must be original or transparent");
     }
+    // Refused here, before anything in the editor is touched, because the
+    // transparent branch below picks a viewport from this name and a rollback
+    // is a worse way to find out the name was not one.
+    if (!selectEditorViewport(camera_identifier).has_value()) {
+        return Error::invalidArgument("camera_identifier must be one of " +
+                                      editorViewportIdentifierList() + "; received \"" +
+                                      camera_identifier + "\"");
+    }
     auto& api = GodotApi::instance();
     if (!api.object_get_instance_id || !api.object_get_instance_from_id) {
         return Error::internal("Godot object identity API is unavailable");
@@ -1802,8 +1810,10 @@ Result<ViewportIsolationState> GodotBridge::beginViewportIsolation(
     }
 
     if (isolation_background == "transparent") {
-        bool capture_2d = camera_identifier == "editor_2d" ||
-                          camera_identifier == "active_editor_view_2d";
+        // Checked at the top of this function, so the name is one of the two
+        // lists by the time the isolation has touched anything.
+        const bool capture_2d =
+            *selectEditorViewport(camera_identifier) == EditorViewport::TwoD;
         Result<VariantValue> viewport = capture_2d
             ? callObject(editor.value(), "EditorInterface", "get_editor_viewport_2d", 3750751911LL)
             : [&]() -> Result<VariantValue> {
@@ -8137,29 +8147,119 @@ json GodotBridge::execute(const std::string& method, const json& params,
     }
 
     if (method == "scene.instantiateNode") {
-        if (!params.value("scene_path", "").empty()) {
-            return errorJson(501, "PackedScene instantiation is outside the Phase 1 built-in-node bridge");
-        }
         auto root = editedSceneRoot(editor);
         if (root.isErr()) return errorJson(root.error().code, root.error().message);
         auto parent = resolveNode(root.value(), params.value("parent_path", "/root"));
         if (parent.isErr()) return errorJson(parent.error().code, parent.error().message);
+        const std::string instance_scene_path = params.value("scene_path", "");
         std::string node_type = params.value("node_type", "Node");
-        NativeName type_name(node_type);
-        auto node = constructObject(type_name.ptr());
-        if (!node) return errorJson(400, "Godot ClassDB could not instantiate node type: " + node_type);
-        auto node_class = makeString("Node");
-        auto is_node_variant = node_class.isOk()
-            ? callObject(node, "Object", "is_class", 3927539163LL, {&node_class.value()})
-            : Result<VariantValue>(node_class.error());
-        auto is_node = is_node_variant.isOk()
-            ? scalarFromVariant<GDExtensionBool>(is_node_variant.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
-            : Result<GDExtensionBool>(is_node_variant.error());
-        if (is_node.isErr() || !is_node.value()) {
-            GodotApi::instance().object_destroy(node);
-            return is_node.isErr()
-                ? errorJson(is_node.error().code, is_node.error().message)
-                : errorJson(400, "Godot ClassDB type does not inherit Node: " + node_type);
+        GDExtensionObjectPtr node = nullptr;
+
+        if (!instance_scene_path.empty()) {
+            // Putting a packed scene in the tree is close to the most common
+            // single operation in Godot editing, and scene_pack_branch produced
+            // scenes nothing in the surface could then consume. The instance is
+            // made the way the editor makes one, so what is saved is an
+            // instance of the scene rather than a copy of its nodes.
+            auto valid_scene = validateResPath(instance_scene_path, ".tscn");
+            if (valid_scene.isErr()) {
+                return errorJson(valid_scene.error().code, valid_scene.error().message);
+            }
+            auto loader = singleton("ResourceLoader");
+            if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
+            auto scene_path_value = makeString(instance_scene_path);
+            auto packed_hint = makeString("PackedScene");
+            auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
+            if (scene_path_value.isErr() || packed_hint.isErr() || cache_mode.isErr()) {
+                return errorJson(500, "Failed to construct scene resource arguments");
+            }
+            auto exists_value = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                                           {&scene_path_value.value(), &packed_hint.value()});
+            if (exists_value.isErr()) {
+                return errorJson(exists_value.error().code, exists_value.error().message);
+            }
+            auto scene_exists = scalarFromVariant<GDExtensionBool>(exists_value.value(),
+                                                                   GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (scene_exists.isErr()) {
+                return errorJson(scene_exists.error().code, scene_exists.error().message);
+            }
+            if (!scene_exists.value()) {
+                return errorJson(404, "PackedScene not found: " + instance_scene_path);
+            }
+            auto resource = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                                       {&scene_path_value.value(), &packed_hint.value(),
+                                        &cache_mode.value()});
+            if (resource.isErr()) return errorJson(resource.error().code, resource.error().message);
+            auto packed = objectFromVariant(resource.value());
+            if (packed.isErr() || !packed.value()) {
+                return errorJson(422, "Resource is not a loadable PackedScene: " + instance_scene_path);
+            }
+            auto packed_class = makeString("PackedScene");
+            auto class_value = packed_class.isOk()
+                ? callObject(packed.value(), "Object", "is_class", 3927539163LL,
+                             {&packed_class.value()})
+                : Result<VariantValue>(packed_class.error());
+            auto is_packed = class_value.isOk()
+                ? scalarFromVariant<GDExtensionBool>(class_value.value(),
+                                                     GDEXTENSION_VARIANT_TYPE_BOOL)
+                : Result<GDExtensionBool>(class_value.error());
+            if (is_packed.isErr() || !is_packed.value()) {
+                return is_packed.isErr()
+                    ? errorJson(is_packed.error().code, is_packed.error().message)
+                    : errorJson(422, "Resource is not a PackedScene: " + instance_scene_path);
+            }
+            // A scene whose root script or dependency is missing answers false
+            // here, and instantiating it anyway returns null and puts the reason
+            // in a console the caller cannot read.
+            auto can_value = callObject(packed.value(), "PackedScene", "can_instantiate",
+                                        36873697LL);
+            if (can_value.isErr()) return errorJson(can_value.error().code, can_value.error().message);
+            auto can_instantiate = scalarFromVariant<GDExtensionBool>(
+                can_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (can_instantiate.isErr()) {
+                return errorJson(can_instantiate.error().code, can_instantiate.error().message);
+            }
+            if (!can_instantiate.value()) {
+                return errorJson(422, "PackedScene cannot be instantiated, so something it depends "
+                                      "on is missing or failed to load: " + instance_scene_path);
+            }
+            // GEN_EDIT_STATE_INSTANCE, which is what the editor's own scene drop
+            // uses. It is the difference between a saved instance of the scene
+            // and a saved copy of the nodes that were in it.
+            auto edit_state = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
+            if (edit_state.isErr()) return errorJson(edit_state.error().code, edit_state.error().message);
+            auto instance = callObject(packed.value(), "PackedScene", "instantiate", 2628778455LL,
+                                       {&edit_state.value()});
+            if (instance.isErr()) return errorJson(instance.error().code, instance.error().message);
+            auto instance_node = objectFromVariant(instance.value());
+            if (instance_node.isErr() || !instance_node.value()) {
+                return errorJson(500, "Godot returned no node for PackedScene: " + instance_scene_path);
+            }
+            node = instance_node.value();
+            // Report what was made, not what the caller happened to type in
+            // node_type, which this branch does not use.
+            auto instance_class = callObject(node, "Object", "get_class", 201670096LL);
+            auto instance_class_name = instance_class.isOk()
+                ? stringFromVariant(instance_class.value(), GDEXTENSION_VARIANT_TYPE_STRING)
+                : Result<std::string>(instance_class.error());
+            if (instance_class_name.isOk()) node_type = instance_class_name.value();
+        } else {
+            NativeName type_name(node_type);
+            node = constructObject(type_name.ptr());
+            if (!node) return errorJson(400, "Godot ClassDB could not instantiate node type: " + node_type);
+            auto node_class = makeString("Node");
+            auto is_node_variant = node_class.isOk()
+                ? callObject(node, "Object", "is_class", 3927539163LL, {&node_class.value()})
+                : Result<VariantValue>(node_class.error());
+            auto is_node = is_node_variant.isOk()
+                ? scalarFromVariant<GDExtensionBool>(is_node_variant.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+                : Result<GDExtensionBool>(is_node_variant.error());
+            if (is_node.isErr() || !is_node.value()) {
+                GodotApi::instance().object_destroy(node);
+                return is_node.isErr()
+                    ? errorJson(is_node.error().code, is_node.error().message)
+                    : errorJson(400, "Godot ClassDB type does not inherit Node: " + node_type);
+            }
         }
         if (!params.value("name", "").empty()) {
             auto name = makeStringName(params.value("name", ""));
@@ -8245,7 +8345,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
             GodotApi::instance().object_destroy(node);
             return errorJson(preflight.error().code, preflight.error().message);
         }
-        auto action = createAction(manager.value(), "Didi: instantiate " + node_type, root.value());
+        auto action = createAction(manager.value(),
+                                   instance_scene_path.empty()
+                                       ? "Didi: instantiate " + node_type
+                                       : "Didi: instantiate " + instance_scene_path,
+                                   root.value());
         if (action.isErr()) { GodotApi::instance().object_destroy(node); return errorJson(action.error().code, action.error().message); }
         auto keep = managerReference(manager.value(), "add_do_reference", node);
         auto add = managerMethod(manager.value(), "add_do_method", parent.value(), "add_child",
@@ -8274,6 +8378,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                          ? actual_path.value()
                                          : logical_parent.value() + "/" + logical_name},
                        {"undo_redo_registered", true}};
+        // Which scene this is an instance of, so the caller can tell an
+        // instance apart from a node of the same class that merely looks like
+        // one in the tree.
+        if (!instance_scene_path.empty()) result["scene_path"] = instance_scene_path;
         if (actual_path.isErr()) result["node_path_verified"] = false;
         return liveResult(result);
     }
@@ -8928,8 +9036,13 @@ Result<MultipassCapture> GodotBridge::captureViewportPasses(const std::vector<st
 Result<ViewportPixels> GodotBridge::captureEditorViewport(const std::string& camera_identifier) {
     auto editor_result = editorInterface();
     if (editor_result.isErr()) return editor_result.error();
-    const bool capture_2d =
-        camera_identifier == "editor_2d" || camera_identifier == "active_editor_view_2d";
+    const auto selected = selectEditorViewport(camera_identifier);
+    if (!selected.has_value()) {
+        return Error::invalidArgument("camera_identifier must be one of " +
+                                      editorViewportIdentifierList() + "; received \"" +
+                                      camera_identifier + "\"");
+    }
+    const bool capture_2d = *selected == EditorViewport::TwoD;
     Result<VariantValue> viewport = capture_2d
         ? callObject(editor_result.value(), "EditorInterface", "get_editor_viewport_2d", 3750751911LL)
         : [&]() -> Result<VariantValue> {
@@ -8954,6 +9067,53 @@ Result<ViewportPixels> GodotBridge::captureGameViewport() {
     auto root = liveSceneTreeRoot(tree.value());
     if (root.isErr()) return root.error();
     return captureViewportObject(root.value(), "root_viewport");
+}
+
+namespace {
+
+// The editor has two main-screen viewports and several spellings for each. Both
+// lists live here and nowhere else. Field trial 03 found the cost of a second
+// copy: `2d` and `canvas_item` were absent from the 2D branch, so with a Node2D
+// scene open and the editor on the 3D main screen they returned a full size
+// picture of the 3D grid, labelled as a capture of '2d'. For a 2D project that
+// reads as an empty scene rather than as the wrong viewport.
+const char* const kEditor2dIdentifiers[] = {"editor_2d", "active_editor_view_2d", "2d",
+                                            "canvas_item"};
+const char* const kEditor3dIdentifiers[] = {"active_editor_view", "editor_3d",
+                                            "active_editor_view_3d", "3d"};
+
+bool namesViewport(const std::string& value, const char* const* names, size_t count) {
+    for (size_t index = 0; index < count; ++index) {
+        if (value == names[index]) return true;
+    }
+    return false;
+}
+
+} // namespace
+
+std::optional<EditorViewport> selectEditorViewport(const std::string& camera_identifier) {
+    if (namesViewport(camera_identifier, kEditor2dIdentifiers,
+                      std::size(kEditor2dIdentifiers))) {
+        return EditorViewport::TwoD;
+    }
+    if (namesViewport(camera_identifier, kEditor3dIdentifiers,
+                      std::size(kEditor3dIdentifiers))) {
+        return EditorViewport::ThreeD;
+    }
+    return std::nullopt;
+}
+
+std::string editorViewportIdentifierList() {
+    std::string list;
+    for (const auto* name : kEditor2dIdentifiers) {
+        if (!list.empty()) list += ", ";
+        list += name;
+    }
+    for (const auto* name : kEditor3dIdentifiers) {
+        list += ", ";
+        list += name;
+    }
+    return list;
 }
 
 Result<std::string> resolveGodotProjectPath() {

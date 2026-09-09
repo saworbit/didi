@@ -8,10 +8,17 @@ This guide covers deployment, security controls, system configuration, monitorin
 
 | Component | Minimum Requirement | Recommended |
 | :--- | :--- | :--- |
-| **Operating System** | Windows 10 (64-bit), Ubuntu 20.04+, macOS 12+ | Windows 11 (64-bit) for the currently verified live matrix |
+| **Operating System** | Windows 10 (64-bit), Ubuntu 22.04+ / glibc 2.35+, macOS 12+ | Windows 11 (64-bit) for the currently verified live matrix |
 | **CPU Architecture** | x86_64 / ARM64 (Apple Silicon) | Multi-core x86_64 / Apple Silicon M-series |
 | **RAM** | 4 GB | 16 GB+ (for large Godot 3D scenes) |
 | **Engine Target** | Godot 4.5+ (Standard / .NET) | Godot 4.5+ or 4.7+ |
+
+The Linux figure describes the **published binary**, which is built inside
+Ubuntu 22.04 and therefore needs glibc 2.35 or newer -- Ubuntu 22.04, Debian 12
+and anything later. This table previously said Ubuntu 20.04+, which had not been
+true of a release archive for some time: the build host sets the floor, and it
+has been 22.04. An older distribution can still build from source, where the
+floor is whatever its own toolchain supports.
 | **Dependencies** | None for the core MCP server | Godot 4.5+ for Godot-backed checks/exports; `dotnet` for C# build diagnostics |
 
 ---

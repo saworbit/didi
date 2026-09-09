@@ -3,6 +3,7 @@
 #include "didi/mcp/mutation_safety.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/version.hpp"
 #include "didi/gdextension/expression_sandbox.hpp"
 #include "didi/offline/test_runner.hpp"
 #include "didi/runtime/session_client.hpp"
@@ -146,8 +147,28 @@ CallToolResult liveValidationError(const std::string& message,
     return liveError(Error::invalidArgument(message), activeSessionFor(ipc));
 }
 
+// Says whether the session in this payload was published by the same build as
+// this server. The two binaries are copied around separately, so a bridge from
+// another build answers every call with the tool contract it was built with
+// while nothing else in the response looks unusual. Absent build_id means the
+// extension predates the field, which is a mismatch and reported as one.
+void noteBridgeBuild(json& payload) {
+    const auto session = payload.find("session");
+    if (session == payload.end() || !session->is_object()) return;
+    const std::string bridge = session->value("build_id", std::string());
+    payload["server_build_id"] = kBuildId;
+    if (bridge == kBuildId) return;
+    payload["bridge_build_matches"] = false;
+    payload["bridge_build_note"] =
+        "The attached GDExtension is from a different build than this server. Tool schemas come "
+        "from the server and the answers come from the bridge, so a call can be refused for a "
+        "reason the schema says is supported. Copy build/addons/didi into the project again and "
+        "restart the editor.";
+}
+
 CallToolResult localSessionSuccess(json payload) {
     payload["execution_mode"] = "local_session_management";
+    noteBridgeBuild(payload);
     return CallToolResult::successJson(payload);
 }
 

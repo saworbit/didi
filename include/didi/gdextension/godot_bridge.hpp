@@ -3,6 +3,7 @@
 #include "didi/common/json.hpp"
 #include "didi/common/types.hpp"
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -105,6 +106,21 @@ private:
 };
 
 Result<std::string> resolveGodotProjectPath();
+
+// Which editor viewport a camera_identifier names.
+//
+// One table, read from every place that has to know. The answer used to be
+// written out twice: #209 taught `editor_2d` to refuse a viewport with no size
+// on screen, and its aliases `2d` and `canvas_item` were not in that branch, so
+// they fell through to the 3D case and returned a picture of the 3D viewport
+// described as the 2D one. An identifier in neither list is nothing, not 3D,
+// because treating an unrecognised name as 3D is the same lie spelled
+// differently.
+enum class EditorViewport { TwoD, ThreeD };
+std::optional<EditorViewport> selectEditorViewport(const std::string& camera_identifier);
+
+// The identifiers above, for the refusal a caller reads.
+std::string editorViewportIdentifierList();
 
 // Whether a JSON value may be written to a property of a given Godot variant
 // type. The type is the numeric GDEXTENSION_VARIANT_TYPE_* code, taken as an

@@ -40,6 +40,36 @@ void test_expression_policy_accepts_only_the_documented_read_only_vocabulary() {
     }
 }
 
+// A probe has to be able to read a number off a property.
+//
+// Field trial 03 ran runtime_explore_scene for twelve seconds and measured
+// nothing. position.x is refused because it reads through an object,
+// node.get("position") is a Vector2 and a probe needs a scalar, so the only
+// expressions that evaluated were literals, and a literal never changes. The
+// read is replaced by a prebound value before the expression is parsed, so
+// taking a component off it reaches no object.
+void test_expression_policy_allows_a_component_of_a_property_read() {
+    for (const auto& source : {
+        "node.get('position').x", "node.get('position').y", "node.get('global_position').x",
+        "node.get('modulate').a", "node.get('position').x > 100",
+        "node.get('position').x + node.get('position').y"
+    }) {
+        ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(source).isOk());
+    }
+
+    // Still forbidden. The exemption is a component of a prebound read and
+    // nothing wider: a bare property, a component of something reached any
+    // other way, a method on the read, and a member that is not a component.
+    for (const auto& source : {
+        "position.x", "node.position.x", "node.get_child_count().x",
+        "node.get('position').length()", "node.get('position').script",
+        "node.get('position').x.y", "node.get_node('..').get('position').x",
+        "tree.get('root').x"
+    }) {
+        ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(source).isErr());
+    }
+}
+
 void test_expression_policy_treats_quoted_identifiers_as_data_and_tracks_escapes() {
     // Break caught: scanning raw source words rejects harmless strings or an escaped quote hides executable suffixes.
     for (const auto& source : {
@@ -140,6 +170,8 @@ struct RegisterExpressionSandboxTests {
                      test_expression_policy_allows_math_on_source_local_vectors_and_colors);
         registerTest("ExpressionSandbox.DocumentedVocabulary",
                      test_expression_policy_accepts_only_the_documented_read_only_vocabulary);
+        registerTest("ExpressionSandbox.PropertyComponentReads",
+                     test_expression_policy_allows_a_component_of_a_property_read);
         registerTest("ExpressionSandbox.StringAndEscapeScanning",
                      test_expression_policy_treats_quoted_identifiers_as_data_and_tracks_escapes);
         registerTest("ExpressionSandbox.MalformedAndObfuscatedSource",

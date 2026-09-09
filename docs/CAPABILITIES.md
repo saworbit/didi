@@ -33,7 +33,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-The current source / Unreleased surface registers 115 canonical tool names. 112 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 112 canonical tools are implemented. Ten legacy names are registered separately, for exactly 125 `tools/list` entries. The latest documented release is 1.6.0; its historical surface is recorded in the changelog.
+The current source / Unreleased surface registers 115 canonical tool names. 112 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 112 canonical tools are implemented. Ten legacy names are registered separately, for exactly 125 `tools/list` entries. The latest documented release is 1.7.0; its historical surface is recorded in the changelog.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
@@ -138,9 +138,9 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 - Live hierarchy output contains names, classes, logical paths, and children. Bulk properties, scripts, and signals are listed in `omitted_fields` rather than fabricated.
 - Property get/set supports JSON null, boolean, signed integer, real, and string values. Unknown properties, incompatible JSON types, and non-scalar Godot Variants are rejected.
 - `scene_get_selection` reports the nodes selected in the editor, which is what a person means by "this node". Live and editor only: a selection exists only in a running editor, so there is no offline fallback. Nodes selected in another scene, or freed between the engine listing them and Didi reading them, are counted rather than named.
-- `scene_instantiate_node` creates built-in ClassDB node types only. `scene_path`/`PackedScene` instantiation is not implemented.
+- `scene_instantiate_node` creates built-in ClassDB node types, and instances a `res://` `.tscn` when `scene_path` is given, through `PackedScene.instantiate` with `GEN_EDIT_STATE_INSTANCE` and the same UndoRedo transaction. `instantiate_asset` remains unimplemented.
 - Scene mutations are registered with the edited scene's `EditorUndoRedoManager`. Removed nodes use undo-side lifetime references, and removal/reparent undo restores the original sibling index.
-- Live viewport capture supports the active 3D editor viewport and the 2D identifiers `editor_2d` or `active_editor_view_2d`. Requested resize, camera-node selection, and debug flags remain unsupported. Named-node isolation preserves the target branch and ancestor chain, temporarily hides unrelated visible `CanvasItem`/`Node3D` branches, optionally enables a reversible transparent background, and fails unless state restoration completes.
+- Live viewport capture supports the active 3D editor viewport, named `active_editor_view`, `editor_3d`, `active_editor_view_3d` or `3d`, and the 2D editor viewport, named `editor_2d`, `active_editor_view_2d`, `2d` or `canvas_item`. Any other identifier is refused. Requested resize, camera-node selection, and debug flags remain unsupported. Named-node isolation preserves the target branch and ancestor chain, temporarily hides unrelated visible `CanvasItem`/`Node3D` branches, optionally enables a reversible transparent background, and fails unless state restoration completes.
 - Offline viewport output is a synthetic grid preview with `execution_mode: "offline_fallback"` and `is_live_frame: false`.
 - Live captures use 32-lowercase-hex IDs in an 8-entry, 64 MiB process-local LRU cache. Each image is limited to 2,048 × 2,048 RGBA8 pixels. IDs expire on eviction or extension restart and are never assigned to offline previews.
 - `viewport_diff_capture` requires an exact cached baseline size and integer threshold `0..255`; it does not resize or color-convert. Its transparent PNG marks changed pixels, while metadata reports per-channel mean error, maximum delta, ratio, count, and bounding box.

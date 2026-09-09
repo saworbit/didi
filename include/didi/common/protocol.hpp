@@ -52,7 +52,13 @@ inline std::optional<json> parseFramedMessage(const uint8_t* data, size_t size, 
                    (static_cast<uint32_t>(data[1]) << 8) |
                    (static_cast<uint32_t>(data[2]) << 16) |
                    (static_cast<uint32_t>(data[3]) << 24);
-    if (size < 4 + len) {
+    // Widened before adding. Written as `4 + len`, the usual arithmetic
+    // conversions evaluate it in 32-bit unsigned arithmetic, so a length field
+    // near UINT32_MAX wraps to a very small number: 0xFFFFFFFC + 4 is 0. The
+    // guard then passes for any buffer at all, and the std::string below is
+    // constructed with a four-gigabyte length from whatever few bytes arrived.
+    // An eight-byte input segfaulted.
+    if (static_cast<uint64_t>(size) < static_cast<uint64_t>(len) + 4u) {
         bytes_consumed = 0;
         return std::nullopt;
     }

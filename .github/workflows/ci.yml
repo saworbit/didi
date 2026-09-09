@@ -1,68 +1,120 @@
 name: Didi Fast & Efficient CI
 
+# Triggered on every push and pull request rather than by a duplicated path
+# list. Path filters at this level skip the whole workflow, which means a
+# required status check never reports and the pull request can never merge.
+# The `changes` job below decides what actually needs to run, so a docs-only
+# change still reports a result instead of leaving an empty check.
 on:
   push:
     branches: [ main, master, dev ]
-    paths:
-      - 'src/**'
-      - 'include/**'
-      - 'tests/**'
-      - 'addons/**'
-      - 'docs/**/*.md'
-      # Brand docs document the mark, not the tool surface, so they cannot
-      # invalidate the tool manifest this workflow checks docs against.
-      # Fast Lint & Docs still validates them on every change.
-      - '!docs/brand/**'
-      - 'README.md'
-      - 'CHANGELOG.md'
-      - 'CMakeLists.txt'
-      - 'requirements-dev.txt'
-      - 'tools/generate_phase7_schemas.py'
-      - 'tools/generate_ui_app.py'
-      - 'resources/control_room.html'
-      - 'schemas/phase7/**'
-      - 'tests/test_phase7_schema_contract.py'
-      - 'tests/test_phase7_plan_ownership.py'
-      - 'tests/test_control_room_app.py'
-      - 'tests/test_control_room_protocol.py'
-      - 'tests/phase7_contract_probe/**'
-      - '.github/workflows/ci.yml'
   pull_request:
     branches: [ main, master ]
-    paths:
-      - 'src/**'
-      - 'include/**'
-      - 'tests/**'
-      - 'addons/**'
-      - 'docs/**/*.md'
-      # Brand docs document the mark, not the tool surface, so they cannot
-      # invalidate the tool manifest this workflow checks docs against.
-      # Fast Lint & Docs still validates them on every change.
-      - '!docs/brand/**'
-      - 'README.md'
-      - 'CHANGELOG.md'
-      - 'CMakeLists.txt'
-      - 'requirements-dev.txt'
-      - 'tools/generate_phase7_schemas.py'
-      - 'tools/generate_ui_app.py'
-      - 'resources/control_room.html'
-      - 'schemas/phase7/**'
-      - 'tests/test_phase7_schema_contract.py'
-      - 'tests/test_phase7_plan_ownership.py'
-      - 'tests/test_control_room_app.py'
-      - 'tests/test_control_room_protocol.py'
-      - 'tests/phase7_contract_probe/**'
-      - '.github/workflows/ci.yml'
   workflow_dispatch:
+
+# Least privilege by default. Any job that needs more asks for it explicitly.
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # One cheap job decides what the expensive ones do. Before this, a change to
+  # a single Markdown file started two 30-minute Windows Godot editor runs and
+  # a sanitizer build that could not possibly observe it.
+  changes:
+    name: Decide what needs to run
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.classify.outputs.build }}
+      engine: ${{ steps.classify.outputs.engine }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify the changed files
+        id: classify
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          # Fail towards running more, never less. If the diff cannot be
+          # computed the answer is "run everything", because a skipped job
+          # that should have run is a defect that reaches main.
+          changed=""
+          case "$EVENT_NAME" in
+            pull_request)
+              changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA" || echo "__ALL__")
+              ;;
+            push)
+              if [ -n "${PUSH_BEFORE:-}" ] && [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ] \
+                 && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+                changed=$(git diff --name-only "$PUSH_BEFORE" "$GITHUB_SHA" || echo "__ALL__")
+              else
+                changed="__ALL__"
+              fi
+              ;;
+            *)
+              changed="__ALL__"
+              ;;
+          esac
+
+          if [ -z "$changed" ] || [ "$changed" = "__ALL__" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "engine=true" >> "$GITHUB_OUTPUT"
+            echo "Running everything (no usable diff for a $EVENT_NAME event)."
+            exit 0
+          fi
+
+          echo "Changed files:"
+          printf '%s\n' "$changed" | awk '{ print "  " $0 }'
+
+          # Anything that cannot reach the compiler, the tool manifest, the
+          # documentation contract, or any test. Everything else builds.
+          #
+          # AI.md is prose about how this repository gets built. It states no
+          # count the manifest owns, so the documentation contract that runs
+          # against the built binary has nothing in it to check; its links are
+          # covered by Validate Docs, which needs no build at all.
+          build_ignored='^(docs/brand/|\.github/ISSUE_TEMPLATE/|\.github/pull_request_template\.md$|\.github/FUNDING\.yml$|\.github/CODEOWNERS$|\.github/labeler\.yml$|\.github/release\.yml$|\.github/workflows/(codeql|supply-chain|triage)\.yml$|\.editorconfig$|\.gitattributes$|\.gitignore$|LICENSE$|CODE_OF_CONDUCT\.md$|AI\.md$)'
+
+          # Only these can change what a running Godot editor or a sanitizer
+          # build observes. Prose cannot, which is the whole point.
+          engine_relevant='^(src/|include/|tests/|addons/|demo/|cmake/|resources/|schemas/|tools/|CMakeLists\.txt$|requirements-dev\.txt$|\.github/workflows/ci\.yml$)'
+
+          build=false
+          engine=false
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            if ! printf '%s\n' "$file" | grep -Eq "$build_ignored"; then
+              build=true
+            fi
+            if printf '%s\n' "$file" | grep -Eq "$engine_relevant"; then
+              engine=true
+            fi
+          done <<< "$changed"
+
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "engine=$engine" >> "$GITHUB_OUTPUT"
+          echo "build=$build engine=$engine"
+
   fast-build-and-test:
     name: ${{ matrix.os }} (${{ matrix.compiler }})
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -76,9 +128,10 @@ jobs:
 
     steps:
       - name: Checkout Repository (Shallow)
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Remove Unused Homebrew Tap (macOS)
         if: runner.os == 'macOS'
@@ -93,7 +146,7 @@ jobs:
       # one, so installing ccache there cached nothing and only cost time.
       - name: Setup Compiler Cache (ccache)
         if: runner.os != 'Windows'
-        uses: hendrikmuhs/ccache-action@v1.2.24
+        uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         with:
           key: ${{ matrix.os }}-${{ matrix.compiler }}
           max-size: 500M
@@ -133,7 +186,25 @@ jobs:
           VENV_PY=".venv-dev/bin/python"
           [ -x "$VENV_PY" ] || VENV_PY=".venv-dev/Scripts/python.exe"
           "$VENV_PY" -m pip install --quiet --disable-pip-version-check -r requirements-dev.txt
-          "$VENV_PY" -c "import jsonschema; assert jsonschema.__version__ == '4.25.1', jsonschema.__version__"
+          # The expected version is read from requirements-dev.txt rather than
+          # written out here as well. While the literal lived in both places, a
+          # dependency bump could only ever open a pull request that failed
+          # until someone edited this line, so Python updates were switched off
+          # entirely. One source, and the bump is reviewable.
+          "$VENV_PY" - << 'EOF'
+          import pathlib
+          import re
+          import sys
+
+          import jsonschema
+
+          pin = re.search(r'^jsonschema==([^\s#]+)', pathlib.Path('requirements-dev.txt').read_text(encoding='utf-8'), re.M)
+          if pin is None:
+              sys.exit('requirements-dev.txt no longer pins an exact jsonschema version')
+          if jsonschema.__version__ != pin.group(1):
+              sys.exit(f'installed jsonschema {jsonschema.__version__}, pinned {pin.group(1)}')
+          print(f'jsonschema {jsonschema.__version__} matches the pin')
+          EOF
           echo "DIDI_SCHEMA_PYTHON=$VENV_PY" >> "$GITHUB_ENV"
 
       - name: Run Phase 7 schema and ownership contracts
@@ -186,6 +257,28 @@ jobs:
           else
             ./build/didi_tests
           fi
+
+      - name: Verify the published test counts match the suites that ran
+        shell: bash
+        run: |
+          # The test total used to be a number typed into a guide, and it was
+          # wrong for long enough that the documentation validator had to grow
+          # a rule forbidding the stale sentence. The counts are now derived
+          # from the binary's own registry and from unittest discovery, and
+          # this step fails when the committed inventory disagrees.
+          #
+          # The published figures are the Windows ones, because the native
+          # suite is platform-conditional: crash capture is Windows-only, and
+          # the IPC cases differ between a named pipe and a Unix socket. The
+          # tool knows that and reports a skip on the POSIX runners rather than
+          # a failure, so the gate is kept in one place rather than split
+          # between here and an `if:` condition.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            export DIDI_TEST_BINARY="$PWD/build/Release/didi_tests.exe"
+          else
+            export DIDI_TEST_BINARY="$PWD/build/didi_tests"
+          fi
+          "$DIDI_PYTHON" tools/test_inventory.py --check
 
       - name: Validate Documentation Against Built Tool Surface
         shell: bash
@@ -553,8 +646,13 @@ jobs:
   # without any job going red: didi_tests cannot reach code that needs a running
   # engine. Windows first because the harness is PowerShell; a POSIX harness is
   # still owed.
+  #
+  # Prose cannot change what a running editor does, so this only runs when the
+  # change reaches code, fixtures, or this workflow.
   godot-integration:
     name: Live Godot Integration (windows, ${{ matrix.godot-version }})
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
     runs-on: windows-latest
     timeout-minutes: 30
     strategy:
@@ -563,11 +661,13 @@ jobs:
         godot-version: [4.5.1, 4.7.2]
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Cache Godot
         id: cache-godot
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: godot-bin
           key: godot-${{ matrix.godot-version }}-stable-win64
@@ -575,10 +675,12 @@ jobs:
       - name: Download Godot ${{ matrix.godot-version }}
         if: steps.cache-godot.outputs.cache-hit != 'true'
         shell: bash
+        env:
+          GODOT_VERSION: ${{ matrix.godot-version }}
         run: |
           set -euo pipefail
           mkdir -p godot-bin
-          url="https://github.com/godotengine/godot/releases/download/${{ matrix.godot-version }}-stable/Godot_v${{ matrix.godot-version }}-stable_win64.exe.zip"
+          url="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_win64.exe.zip"
           curl --fail --location --retry 3 --retry-delay 5 --output godot.zip "$url"
           7z x godot.zip -ogodot-bin
           ls godot-bin
@@ -590,8 +692,10 @@ jobs:
 
       - name: Run Live Godot Integration Harness
         shell: pwsh
+        env:
+          GODOT_VERSION: ${{ matrix.godot-version }}
         run: |
-          $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v${{ matrix.godot-version }}-stable_win64*.exe" |
+          $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v${env:GODOT_VERSION}-stable_win64*.exe" |
                    Where-Object { $_.Name -notlike "*console*" } |
                    Select-Object -First 1
           if (-not $godot) { throw "Godot executable not found under godot-bin" }
@@ -599,8 +703,10 @@ jobs:
 
       - name: Verify Managed Editor Crash Recovery
         shell: pwsh
+        env:
+          GODOT_VERSION: ${{ matrix.godot-version }}
         run: |
-          $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v${{ matrix.godot-version }}-stable_win64*.exe" |
+          $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v${env:GODOT_VERSION}-stable_win64*.exe" |
                    Where-Object { $_.Name -notlike "*console*" } | Select-Object -First 1
           if (-not $godot) { throw "Godot executable not found under godot-bin" }
           $env:DIDI_TEST_BINARY = (Resolve-Path build/Release/didi.exe).Path
@@ -614,7 +720,7 @@ jobs:
       # bug still fires.
       - name: Upload Engine Logs On Failure Or Retried Crash
         if: always() && (failure() || hashFiles('build/godot_engine_worker_crash_attempt*.log') != '')
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: godot-integration-${{ matrix.godot-version }}-logs
           path: |
@@ -630,11 +736,15 @@ jobs:
   # allocation and lifetime paths.
   sanitizers:
     name: Sanitizers (ubuntu, asan+ubsan)
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Build Tools
         run: |
@@ -643,7 +753,9 @@ jobs:
 
       - name: Configure With Sanitizers
         run: |
-          cmake -B build -S . -G Ninja             -DCMAKE_BUILD_TYPE=RelWithDebInfo             -DDIDI_ENABLE_SANITIZERS=ON
+          cmake -B build -S . -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DDIDI_ENABLE_SANITIZERS=ON
 
       - name: Build
         run: cmake --build build --parallel
@@ -653,3 +765,39 @@ jobs:
           ASAN_OPTIONS: detect_leaks=1:abort_on_error=0
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: ./build/didi_tests
+
+  # The single required status check. Skipped jobs report no result at all, so
+  # a branch rule that named the matrix directly would block every docs-only
+  # pull request forever. This job always runs, and fails only when something
+  # that did run came back red.
+  ci-gate:
+    name: CI Gate
+    if: always()
+    needs: [ changes, fast-build-and-test, godot-integration, sanitizers ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report the aggregate result
+        shell: bash
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          python3 - << 'EOF'
+          import json
+          import os
+          import sys
+
+          results = json.loads(os.environ["RESULTS"])
+          width = max(len(name) for name in results)
+          bad = []
+          for name, data in sorted(results.items()):
+              outcome = data.get("result", "unknown")
+              print(f"{name.ljust(width)}  {outcome}")
+              if outcome in ("failure", "cancelled"):
+                  bad.append(name)
+          if bad:
+              print(f"\nRed: {', '.join(bad)}", file=sys.stderr)
+              sys.exit(1)
+          print("\nEvery job that ran was green.")
+          EOF

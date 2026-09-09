@@ -153,7 +153,14 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& fi
             diagnostics.push_back(d);
         }
 
-        if (trimmed.find("onready var") != std::string::npos) {
+        // Godot 4 writes @onready, which contains "onready var". Matching the
+        // substring alone reported every correct annotation as deprecated and
+        // told the author to write the line they had already written, which
+        // teaches a new user to stop reading diagnostics. The @ is the whole
+        // difference, so look at the character in front of it.
+        const auto onready_at = trimmed.find("onready var");
+        if (onready_at != std::string::npos &&
+            !(onready_at > 0 && trimmed[onready_at - 1] == '@')) {
             ScriptDiagnostic d;
             d.line = line_num;
             d.column = static_cast<int>(raw_line.find("onready") + 1);

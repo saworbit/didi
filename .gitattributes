@@ -3,6 +3,7 @@
 
 # Source code files - use LF line endings
 *.cpp text eol=lf
+*.cc text eol=lf
 *.c text eol=lf
 *.hpp text eol=lf
 *.h text eol=lf
@@ -13,6 +14,11 @@
 *.txt text eol=lf
 *.cmake text eol=lf
 CMakeLists.txt text eol=lf
+*.py text eol=lf
+*.ps1 text eol=lf
+.editorconfig text eol=lf
+.gitattributes text eol=lf
+CODEOWNERS text eol=lf
 
 # Godot Engine resource formats - use LF line endings
 *.gd text eol=lf

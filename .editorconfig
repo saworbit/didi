@@ -1,0 +1,58 @@
+# Editor settings that match what is already in the tree, so an editor set up
+# for some other project stops silently reformatting this one. The rules here
+# describe the existing files rather than proposing a new style; .gitattributes
+# already pins the line endings on the Git side, and this pins them on the way
+# in.
+#
+# https://editorconfig.org -- supported natively by most editors, and by a
+# plugin everywhere else.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# C++20 sources and headers. Four spaces, per CONTRIBUTING.md.
+[*.{cpp,hpp,c,h}]
+indent_size = 4
+
+# GDScript. Godot's own convention is tabs, its editor inserts tabs, and every
+# committed .gd file here uses them; spaces would produce a diff on every save
+# from inside the engine.
+[*.{gd,gdshader,shader}]
+indent_style = tab
+
+# Godot resource formats are written by the engine, not by hand.
+[*.{tscn,tres,gdextension,cfg,import}]
+indent_style = tab
+trim_trailing_whitespace = false
+
+[*.py]
+indent_size = 4
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[*.{json,jsonc}]
+indent_size = 2
+
+[*.ps1]
+indent_size = 4
+
+[{CMakeLists.txt,*.cmake}]
+indent_size = 4
+
+# Markdown treats two trailing spaces as a hard line break, so stripping them
+# silently changes rendered output.
+[*.md]
+trim_trailing_whitespace = false
+
+# Generated or vendored. Left exactly as whatever produced them wrote them.
+[{extension_api.json,gdextension_interface.h,resources/didi_class_reference.json}]
+trim_trailing_whitespace = false
+insert_final_newline = false

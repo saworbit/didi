@@ -39,7 +39,7 @@ Offline hierarchy results come from parsing a `.tscn` file and contain `source: 
 
 When live, use focused tools:
 
-- `scene_instantiate_node` for built-in ClassDB node types only.
+- `scene_instantiate_node` for built-in ClassDB node types, and for instancing a packed scene through `scene_path`.
 - `scene_remove_node`, `scene_reparent_node`, and `scene_duplicate_node` for structural changes.
 - `scene_set_property` for existing properties. Its `value` is the property read back after the commit, not the argument you sent. Check `applied`: a successful call with `applied: false` means Godot discarded the write, and the scene is not what you asked for.
 - Send `{"x": .., "y": ..}` or `{"x": .., "y": .., "z": ..}` for a Vector2/Vector3, whole numbers for the integer versions, `{"r": .., "g": .., "b": ..}` with an optional `a` or a `"#rrggbb"` string for a Color, and a `res://` path for a Resource slot. `null` clears a resource slot. An extra or missing member is refused rather than dropped.
@@ -55,7 +55,7 @@ Use logical paths shaped like `/root/<edited-scene-root>/Child`. `/root` by itse
 
 Property values are limited to JSON null, boolean, signed integer, real, and string values compatible with the existing Godot property type. Do not send Vector, Transform, Color, Resource, Object, array, or dictionary values in Phase 1.
 
-Do not use `scene_path` for PackedScene instantiation; it is not implemented. Do not use the legacy `mutate_scene_tree` or `instantiate_asset` names.
+Pass `scene_path` to `scene_instantiate_node` to put an instance of a `.tscn` in the edited scene, which is what `scene_pack_branch` output is for. Do not use the legacy `mutate_scene_tree` or `instantiate_asset` names.
 
 ### Wire scripts, groups, and project configuration
 
@@ -82,7 +82,7 @@ Use `viewport_capture_frame`.
 
 - `is_live_frame: true` means pixels came from a live viewport. `session_kind` says which process they came from.
 - `is_live_frame: false` means a synthesized offline grid preview.
-- Use `camera_identifier: "editor_2d"` or `"active_editor_view_2d"` for the 2D viewport; other values currently select the first 3D editor viewport.
+- Use `camera_identifier: "editor_2d"`, `"active_editor_view_2d"`, `"2d"` or `"canvas_item"` for the 2D viewport, and `"active_editor_view"`, `"editor_3d"`, `"active_editor_view_3d"` or `"3d"` for the first 3D editor viewport. Any other value is refused; it used to return the 3D viewport described as whatever was asked for.
 - Attached to a game, omit `camera_identifier`: a game has one root viewport and the editor selectors are refused there. The result reports `camera_identifier: "root_viewport"`.
 - A viewport that is not on screen has no size, and the capture is refused rather than returned as a few pixels. For an editor viewport that means the main screen you asked for is not the selected one; switch to it in the editor and call again.
 - Do not assume requested resolution, camera-node selection, or debug flags were applied. Named-node isolation is supported only on a live editor and success must include `state_restored: true`.
@@ -124,7 +124,7 @@ where it is. Editor or game.
 - `spatial_query_clearance` asks whether a body fits along a path, which a raycast cannot answer: a line can be clear where a character is too wide. Use it before placing a door, a corridor or a spawn point.
 - `spatial_query_raycast_batch` answers many sightline or clearance questions in one call. Prefer it over a viewport capture for anything numeric, and over repeated `physics_raycast_query` calls for anything more than one ray.
 - `runtime_watch_invariants` is game only. Use it to assert what must stay true while a game runs rather than polling: it samples every frame and pauses on the frame that breaks a condition. Read `outcome` before anything else. `inconclusive` means an invariant never produced a reading, which is not the same as `held`.
-- `runtime_explore_scene` is game only, and it is the one that drives. It holds the project's own InputMap actions on a seeded schedule and samples probes you name every frame, then reports the intervals in which nothing it pressed moved anything. Use it to find out whether a level can be played at all rather than pressing one button per round trip and looking between presses. Name the actions and the probes: it cannot know what counts as movement in your project, and it presses actions rather than setting a position because only the project's own controller knows how its player moves. It reports observations and carries `verdict: "none"`. A stuck interval is a window where nothing moved, which is a cutscene, a menu or a soft lock, and telling those apart is yours.
+- `runtime_explore_scene` is game only, and it is the one that drives. It holds the project's own InputMap actions on a seeded schedule and samples probes you name every frame, then reports the intervals in which nothing it pressed moved anything. Use it to find out whether a level can be played at all rather than pressing one button per round trip and looking between presses. Name the actions and the probes: it cannot know what counts as movement in your project, and it presses actions rather than setting a position because only the project's own controller knows how its player moves. A probe expression reads a property with `node.get("position").x`, not `position.x`. Check `measured` before reading anything else: false means no probe returned a value and the window is unobserved. It reports observations and carries `verdict: "none"`. A stuck interval is a window where nothing moved, which is a cutscene, a menu or a soft lock, and telling those apart is yours.
 - `project_rename_references` renames a symbol in the scene connections and animation tracks that serialize it. Call `project_analyze_impact` first to see every site. It never rewrites GDScript or C#: it reports those with file and line, and they are yours to patch. An empty report is not proof that nothing else names the symbol.
 - `script_reflect_class` consults a limited built-in map; it is not authoritative live ClassDB documentation.
 

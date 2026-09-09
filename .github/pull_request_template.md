@@ -20,4 +20,5 @@
 - [ ] The exact MCP smoke starts with an explicit Godot project, matches the manifest emitted by `didi --dump-tool-manifest` from the same build, preserves the Phase 4/5/6 contracts, and keeps reserved runtime debugger tools marked unimplemented.
 - [ ] Any new tool name has an accepted record in `docs/SURFACE_AMENDMENTS.md`.
 - [ ] Capability metadata, reference docs, roadmap, and changelog are current. Published tool counts are derived from the manifest, never hand-edited.
+- [ ] Tests added or removed: `python tools/test_inventory.py` regenerated `docs/TEST_INVENTORY.md` and the README badge. CI checks this after the build.
 - [ ] I have updated relevant documentation in `docs/` and `README.md`.

@@ -13,6 +13,154 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Added
 
+- Fuzz targets for the three places Didi reads bytes it did not write: the IPC
+  frame decoder, the JSON-RPC request parser, and base64. libFuzzer, built with
+  ASan and UBSan, running on every code pull request and for longer nightly.
+
+  This started as a way to raise an OpenSSF Scorecard number and stopped being
+  that almost immediately. Reading `parseFramedMessage` closely enough to write
+  a target for it found a buffer over-read -- fixed in #344, before a single
+  fuzzer had been compiled. The only test that function had round-tripped a
+  frame the same code had just written, which is the one input shape guaranteed
+  not to find it.
+
+  Worth stating what was declined. Scorecard detects C++ fuzzing by looking for
+  the string `LLVMFuzzerTestOneInput` in a `.cc` file, so the point was
+  available for the price of committing a file that nothing compiles or runs.
+  That is the failure this repository's own documentation validator already
+  polices for Python tests: a test that does not execute is worse than none,
+  because it looks like coverage. These targets are built against `didi_core`
+  and executed in CI, and the corpus persists between runs so findings compound
+  instead of restarting from empty.
+
+  The eight bytes that used to segfault the frame decoder are a committed seed,
+  re-executed on every fuzz job for as long as the target exists.
+
+### Changed
+
+- CodeQL now runs on every pull request rather than on a path filter. A change
+  that "only touches documentation" is a claim worth checking rather than
+  trusting. The cost is controlled by splitting the analyses: Python and
+  Actions are about a minute each and always run, while the C++ analysis takes
+  closer to twenty and runs only when something can reach the compiler.
+
+- All ten of CodeQL's first-pass findings were triaged and dismissed with
+  written reasons rather than left open. Alerts that can never be actioned are
+  how a Security tab stops being read, and the next real finding then arrives
+  looking exactly like the ones already learned to be ignored.
+
+  Five of them are integer-multiplication overflows inside
+  `stb_image_write.h`, vendored code this project is told not to modify. The
+  first attempt excluded the vendored files through a CodeQL configuration
+  file; it was loaded and had no effect. `paths-ignore` applies to interpreted
+  languages and to compiled languages analysed without a build, and this
+  analysis builds, because CodeQL for C++ observes the real compiler. The
+  configuration file was removed rather than left in the tree describing a
+  control that was not in force. None was a new defect: three are operator-nominated
+  process launches that advertise `openWorldHint: true`, one is the documented
+  `DIDI_SESSION_DIR` override, and one is a test probe reading its own
+  argument. [SECURITY.md](SECURITY.md) records each disposition.
+
+---
+
+The block below states the current surface rather than anything a release
+changed, which is why it lives here and not in a version section.
+
+<!-- phase7-current-status:start -->
+**Status:** `PARTIAL_DELIVERY`
+**Canonical implementation:** `112/115`
+**Phase 7 registrations:** `3/18` unimplemented
+**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
+<!-- phase7-current-status:end -->
+
+Discovery now exposes 115 canonical tools plus 10 legacy registrations (125 total). 112 canonical tools are implemented and 3 remain unimplemented.
+The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
+
+---
+
+## [1.7.0] - 2026-09-09
+
+### Added
+
+- Signed releases. Every release archive now carries SLSA build provenance,
+  signed through Sigstore by the release workflow, plus a `SHA256SUMS` file and
+  the provenance bundle as `didi-<tag>.intoto.jsonl`.
+
+  Didi ships prebuilt binaries, so "did this archive come from that source" has
+  to be answerable by someone holding only the download. Until now it was not
+  answerable at all. The check that matters names the workflow, not just the
+  repository, because an attacker can sign something of their own but cannot
+  produce a signature attributed to this repository's release workflow:
+
+  ```bash
+  gh attestation verify didi-linux-x64.tar.gz \
+    --repo saworbit/didi \
+    --signer-workflow saworbit/didi/.github/workflows/release.yml
+  ```
+
+  `--source-ref` is part of the documented check for a reason: the release
+  workflow can also be run manually as a rehearsal, and those runs sign too, so
+  their provenance carries the same repository and the same signer workflow.
+  Only the ref separates a published release from a dry run, so a verification
+  that omits it would accept a rehearsal artifact as something the project
+  published.
+
+  There is no signing key. The certificate is issued to the workflow run's own
+  OIDC identity and expires in minutes, so there is nothing for a maintainer to
+  leak, rotate or lose. The bundle ships as a release asset rather than living
+  only in GitHub's attestation store, so verification works offline for someone
+  who would rather not call the GitHub API -- and because that is the form
+  OpenSSF Scorecard's Signed-Releases check reads.
+
+  `SHA256SUMS` is covered by the same attestation, so it cannot be swapped
+  independently of the archives it describes. [SECURITY.md](SECURITY.md) has
+  the verification commands.
+
+- A rehearsal for the release pipeline. Running the release workflow manually
+  now builds, checksums and signs exactly what a tag would, then leaves the
+  result as a workflow artifact instead of publishing it. The signing path used
+  to be reachable only by tagging a real release, which meant the only way to
+  find out whether it worked was to do the thing that cannot be undone.
+
+- Repository automation and supply-chain hardening. Someone assessing this
+  project from the outside can now see what is enforced rather than what is
+  claimed.
+
+  **Code scanning.** CodeQL runs the `security-extended` query set over the
+  C++, the Python tooling, and the workflows themselves, on every code pull
+  request and weekly. Before this the only automated security signal was
+  Dependabot, which watches dependencies and says nothing about the C++ that
+  parses JSON-RPC off a pipe. OpenSSF Scorecard publishes a supply-chain score
+  behind a README badge, and dependency review blocks a pull request that
+  introduces a known vulnerability or a copyleft licence.
+
+  **Every action pinned to a commit SHA**, with the release named in a trailing
+  comment. A tag is a pointer its owner can move at any time, which is how one
+  compromised action leaked credentials from thousands of repositories at once.
+  `tools/validate_documentation.py` now rejects a workflow that pins any other
+  way, or that pins a SHA without saying which release it is. Every workflow
+  declares least-privilege `permissions:`, and `actionlint` and `zizmor` run
+  over them on every pull request.
+
+  **A generated test inventory.** `tools/test_inventory.py` derives the counts
+  from the suites themselves -- the native registry through `didi_tests
+  --list`, the Python suites through `ast`, the live harness through its
+  assertion sites -- and writes [docs/TEST_INVENTORY.md](docs/TEST_INVENTORY.md)
+  and the README badge. CI runs `--check` after the build, so a stale number is
+  a red run. The count this replaces went wrong often enough that the
+  documentation validator carries a rule forbidding one specific out-of-date
+  sentence about it.
+
+  The page publishes the Windows figures and says so. The native suite is
+  platform-conditional -- crash capture is Windows-only, and the IPC cases
+  differ between a named pipe and a Unix socket -- so a single native total is
+  false on two platforms out of three. The tool refuses to regenerate off the
+  reference platform rather than quietly replacing them.
+
+  **Branch protection on `main`**, a `CODEOWNERS` file, path-based pull request
+  labelling, categorised release notes, stale-thread handling, and an
+  `.editorconfig` that describes the indentation already in the tree.
+
 - Added `ui_list_controls`: the Control nodes under a root, with the
   viewport-space rectangle each one occupies, its class, visibility, mouse
   filter, and its text where it has any. Editor or game.
@@ -71,6 +219,53 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Changed
 
+- The Linux release artifact is built *inside* Ubuntu 22.04 rather than *on*
+  it. The `ubuntu-22.04` runner image is being retired -- deprecation from
+  2026-09-17, unsupported from 2027-04-17 -- and GitHub brownouts already kill
+  jobs using the label. One killed a release rehearsal mid-compile, which is
+  how this was found rather than by a failed release.
+
+  The label was chosen for glibc in the first place: a binary built against
+  2.35 starts on Ubuntu 22.04 and Debian 12, and one built on a newer host does
+  not. Moving to `ubuntu-24.04` would have raised the floor to glibc 2.39 and
+  silently dropped every Ubuntu 22.04 LTS and Debian 12 user -- a decision about
+  who can run Didi, not a CI fix. Building in a pinned `ubuntu:22.04` container
+  on a supported runner keeps the floor exactly where it was.
+
+  The image is pinned by digest, because this build feeds the provenance
+  attestation: what built the binary should be a fact rather than whatever the
+  tag pointed at that day.
+
+- Corrected the documented Linux minimum in
+  [Administrator Guide](docs/ADMIN_GUIDE.md) from Ubuntu 20.04+ to Ubuntu
+  22.04+ / glibc 2.35+. It had not been true of a published archive for some
+  time: the build host sets the floor, and it had been 22.04. Nothing about
+  what ships changed here -- only the claim made about it.
+
+- CI decides what to run instead of running everything. A single cheap job
+  classifies the changed files, and the two 30-minute Windows Godot integration
+  matrices and the sanitizer build now start only when the change can reach
+  code, fixtures, or the workflow itself. A documentation change used to start
+  all four.
+
+  The workflow-level `paths:` filters that used to gate this are gone, and that
+  is the load-bearing part: a workflow skipped by a path filter reports no
+  result at all rather than reporting success, so a required status check named
+  on it leaves the pull request permanently unmergeable. A `CI Gate` job now
+  runs unconditionally and fails only when something that did run came back
+  red, which is what makes required checks usable here at all.
+
+- The pinned `jsonschema` version is read out of `requirements-dev.txt` by the
+  workflows that assert it, rather than typed into all three places. Dependabot
+  version updates for Python were switched off precisely because a bump could
+  only ever open a pull request that failed until someone edited two more
+  lines; they are on now, and a bump either passes the schema contract suites
+  or it does not.
+
+- The release job publishes with `gh` rather than a third-party action. It is
+  the one job holding `contents: write`, and `gh` is already on the runner, so
+  publishing costs no additional trusted code.
+
 - `project_audit_assets` now verifies both kinds of broken reference against the
   running editor, not just UID ones. A `missing_file` finding says nothing the
   scan indexed provides that path; `ResourceLoader.exists` says whether Godot
@@ -92,6 +287,29 @@ Historical entries describe the surface advertised by those releases. For the ex
   deterministic. Neither name has appeared in a release.
 
 ### Fixed
+
+- `didi::ipc::parseFramedMessage` accepted a frame whose length field was near
+  `UINT32_MAX` and then read gigabytes past the end of the buffer it was given.
+  An eight-byte input segfaulted.
+
+  The bounds check was written `size < 4 + len`. `len` is `uint32_t` and `4` is
+  `int`, so the usual arithmetic conversions evaluate the sum in 32-bit
+  unsigned arithmetic: `0xFFFFFFFC + 4` is `0`, the guard passed for any buffer
+  at all, and the `std::string` built from the payload was constructed with a
+  four-gigabyte length. Both operands are now widened before the addition.
+
+  Nothing in the shipping server called this function -- the live IPC paths
+  read frames through their own bounded implementation, which checks the length
+  against a maximum -- so this was reachable only by a caller of the header. It
+  is fixed rather than deleted because `include/didi/common/protocol.hpp` ships
+  in the addon include tree and this is the obvious function to reach for.
+
+  Found while choosing fuzz targets, which is the argument for the exercise:
+  the only existing test round-tripped a frame the same code had just written,
+  and a decoder is defined by what it does with input it did not write. The new
+  case covers wrapping lengths, truncated payloads, short headers, non-JSON
+  payloads, exact fits, and trailing bytes, and it segfaults against the old
+  decoder rather than merely failing.
 
 - `project_get_uid_map` and `project_audit_assets` work again without a Godot
   session. Both were moved into the live-only capability set when they gained
@@ -187,8 +405,6 @@ Historical entries describe the surface advertised by those releases. For the ex
   bounded rather than left to grow; routes whose engine has gone are dropped
   before the limit is consulted, and a genuine limit returns `429`. Every held
   route is released on shutdown, not only the selected one.
-
-### Fixed
 
 - A request no longer inherits a Godot session it never chose. Attaching set one
   route for the whole process and every later request acquired it, so on a
@@ -308,16 +524,6 @@ Historical entries describe the surface advertised by those releases. For the ex
   time check that refuses when either test-only target exists with the option
   off, rather than a comment asking the next person not to do it again. A clean
   test-off build produces exactly the server binary and the extension.
-
-<!-- phase7-current-status:start -->
-**Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `112/115`
-**Phase 7 registrations:** `3/18` unimplemented
-**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
-<!-- phase7-current-status:end -->
-
-Discovery now exposes 115 canonical tools plus 10 legacy registrations (125 total). 112 canonical tools are implemented and 3 remain unimplemented.
-The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
 ---
 

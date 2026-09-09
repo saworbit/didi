@@ -1484,6 +1484,146 @@ static void test_resource_create_serializes_colors_quaternions_and_dictionaries(
     ASSERT_TRUE(tres.find("Vector2(0, 0)") == std::string::npos);
 }
 
+// The order the caller asked for is the order in the file, and nothing falls
+// through to JSON.
+//
+// Field trial 03 wrote an Animation. The properties came out in alphabetical
+// order, so tracks/0/interp was applied before tracks/0/type had created track
+// 0, and the key dictionary was written as the JSON it arrived as rather than
+// as Godot literals. The file loaded, reported one track, and had thrown every
+// field of that track away, with the engine's complaints going to a console
+// nobody was reading. The tool said "created_offline".
+static void test_resource_create_writes_properties_in_order_as_godot_literals() {
+    ScopedToolProject project("resource-tres-order");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const didi::json args = {
+        {"save_path", "res://anim/pulse.tres"},
+        {"resource_type", "Animation"},
+        {"properties", didi::json::array({
+            {{"name", "resource_name"}, {"value", "pulse"}},
+            {{"name", "length"}, {"value", 1.0}},
+            {{"name", "tracks/0/type"}, {"value", "value"}},
+            {{"name", "tracks/0/path"},
+             {"value", {{"type", "NodePath"}, {"value", "Body:color"}}}},
+            {{"name", "tracks/0/interp"}, {"value", 1}},
+            {{"name", "tracks/0/keys"},
+             {"value", {{"times", {{"type", "PackedFloat32Array"},
+                                   {"values", didi::json::array({0.0, 0.5, 1.0})}}},
+                        {"values", didi::json::array({
+                             {{"r", 0.95}, {"g", 0.3}, {"b", 0.35}},
+                             {{"r", 1.0}, {"g", 0.75}, {"b", 0.2}}})}}}}
+        })}
+    };
+    const auto result = registry.callTool("resource_create", args);
+    if (result.isError) {
+        throw std::runtime_error("resource_create failed: " + result.content[0].text);
+    }
+
+    const auto tres = readToolTestFile("anim/pulse.tres");
+    // The track is created before anything is written onto it.
+    const auto type_at = tres.find("tracks/0/type");
+    const auto interp_at = tres.find("tracks/0/interp");
+    const auto keys_at = tres.find("tracks/0/keys");
+    ASSERT_TRUE(type_at != std::string::npos && interp_at != std::string::npos);
+    ASSERT_TRUE(type_at < interp_at && interp_at < keys_at);
+    // And resource_name, which sorts first, is still where the caller put it.
+    ASSERT_TRUE(tres.find("resource_name") < tres.find("length"));
+
+    ASSERT_TRUE(tres.find("tracks/0/path = NodePath(\"Body:color\")") != std::string::npos);
+    ASSERT_TRUE(tres.find("PackedFloat32Array(0.0, 0.5, 1.0)") != std::string::npos);
+    ASSERT_TRUE(tres.find("Color(0.95, 0.3, 0.35, 1)") != std::string::npos);
+    // Nothing reaches the file as JSON.
+    ASSERT_TRUE(tres.find("\"r\":") == std::string::npos);
+    ASSERT_TRUE(tres.find("\"r\": ") == std::string::npos);
+
+    const auto payload = didi::json::parse(result.content[0].text);
+    ASSERT_TRUE(payload["properties_written"][2] == "tracks/0/type");
+}
+
+// A value this writer cannot express refuses the call and names the property.
+static void test_resource_create_refuses_what_it_cannot_write() {
+    ScopedToolProject project("resource-tres-refusal");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    // A SubResource is the TileSetAtlasSource case, and it has no representation.
+    const auto sub_resource = registry.callTool("resource_create", didi::json{
+        {"save_path", "res://tiles/set.tres"},
+        {"resource_type", "TileSet"},
+        {"properties", didi::json::array({
+            {{"name", "sources/0"},
+             {"value", {{"type", "SubResource"}, {"id", "atlas"}}}}})}
+    });
+    ASSERT_TRUE(sub_resource.isError);
+    ASSERT_TRUE(sub_resource.content[0].text.find("sources/0") != std::string::npos);
+    ASSERT_TRUE(sub_resource.content[0].text.find("SubResource") != std::string::npos);
+    ASSERT_TRUE(!std::filesystem::exists("tiles/set.tres"));
+
+    // A misspelled type is refused rather than written as a Dictionary.
+    const auto typo = registry.callTool("resource_create", didi::json{
+        {"save_path", "res://anim/typo.tres"},
+        {"resource_type", "Animation"},
+        {"properties", {{"times", {{"type", "PackedFloat32"},
+                                   {"values", didi::json::array({0.0})}}}}}
+    });
+    ASSERT_TRUE(typo.isError);
+
+    // A whole number is demanded where the caller asked for an integer vector,
+    // which is the TileSet.tile_size case: Vector2(32, 32) for a Vector2i.
+    const auto not_integral = registry.callTool("resource_create", didi::json{
+        {"save_path", "res://tiles/size.tres"},
+        {"resource_type", "TileSet"},
+        {"properties", {{"tile_size", {{"type", "Vector2i"}, {"x", 32.5}, {"y", 32}}}}}
+    });
+    ASSERT_TRUE(not_integral.isError);
+    ASSERT_TRUE(not_integral.content[0].text.find("tile_size") != std::string::npos);
+
+    // The same property named twice would put only one of them in the file.
+    const auto duplicated = registry.callTool("resource_create", didi::json{
+        {"save_path", "res://anim/dup.tres"},
+        {"resource_type", "Animation"},
+        {"properties", didi::json::array({
+            {{"name", "length"}, {"value", 1.0}},
+            {{"name", "length"}, {"value", 2.0}}})}
+    });
+    ASSERT_TRUE(duplicated.isError);
+
+    // A numbered element in the object form is refused rather than sorted into
+    // a file where tracks/0/type lands after the fields that need it. This is
+    // the call the field trial actually made.
+    const auto sorted_track = registry.callTool("resource_create", didi::json{
+        {"save_path", "res://anim/sorted.tres"},
+        {"resource_type", "Animation"},
+        {"properties", {{"length", 1.0},
+                        {"tracks/0/type", "value"},
+                        {"tracks/0/interp", 1}}}
+    });
+    ASSERT_TRUE(sorted_track.isError);
+    ASSERT_TRUE(sorted_track.content[0].text.find("array of") != std::string::npos);
+    ASSERT_TRUE(!std::filesystem::exists("anim/sorted.tres"));
+
+    // A slash without a number still sorts after the property it depends on,
+    // so it is left alone.
+    const auto shader_parameter = registry.callTool("resource_create", didi::json{
+        {"save_path", "res://materials/shaded.tres"},
+        {"resource_type", "ShaderMaterial"},
+        {"properties", {{"shader_parameter/tint", {{"r", 1.0}, {"g", 0.0}, {"b", 0.0}}}}}
+    });
+    ASSERT_TRUE(!shader_parameter.isError);
+
+    // A lowercase "type" is an ordinary dictionary key, not a type name.
+    const auto dictionary = registry.callTool("resource_create", didi::json{
+        {"save_path", "res://meta/notes.tres"},
+        {"resource_type", "Resource"},
+        {"properties", {{"notes", {{"type", "material"}, {"revision", 3}}}}}
+    });
+    ASSERT_TRUE(!dictionary.isError);
+    ASSERT_TRUE(readToolTestFile("meta/notes.tres").find("\"type\": \"material\"") !=
+                std::string::npos);
+}
+
 static void test_offline_hierarchy_reads_main_scene_and_multiline_properties() {
     // Break caught: project.godot was opened relative to the process working
     // directory, and a property whose value spans lines was truncated to its
@@ -2524,6 +2664,39 @@ static void test_property_type_mismatch_names_every_scalar_type_in_words() {
                 "NodePath");
 }
 
+// Every spelling of the 2D viewport resolves to the 2D viewport.
+//
+// #209 taught editor_2d to refuse a viewport with no size on screen. Its two
+// aliases were not in that branch, so with a Node2D scene open and the editor
+// on the 3D main screen they returned the 3D grid described as '2d'. One table
+// now answers for all of them, and a name in neither list is refused rather
+// than resolved to 3D, because that was the same wrong picture with a
+// different label.
+static void test_editor_viewport_identifiers_agree() {
+    using didi::godot::EditorViewport;
+    using didi::godot::selectEditorViewport;
+
+    for (const char* name : {"editor_2d", "active_editor_view_2d", "2d", "canvas_item"}) {
+        const auto selected = selectEditorViewport(name);
+        ASSERT_TRUE(selected.has_value());
+        ASSERT_TRUE(*selected == EditorViewport::TwoD);
+    }
+    for (const char* name : {"active_editor_view", "editor_3d", "active_editor_view_3d", "3d"}) {
+        const auto selected = selectEditorViewport(name);
+        ASSERT_TRUE(selected.has_value());
+        ASSERT_TRUE(*selected == EditorViewport::ThreeD);
+    }
+    // Nothing, not 3D. A name nobody defined used to come back as a full size
+    // picture of the 3D viewport carrying the caller's own label.
+    for (const char* name : {"", "lab_camera_front", "EDITOR_2D", "2 d", "canvasitem"}) {
+        ASSERT_TRUE(!selectEditorViewport(name).has_value());
+    }
+    // The refusal names what it would have taken.
+    const auto list = didi::godot::editorViewportIdentifierList();
+    ASSERT_TRUE(list.find("canvas_item") != std::string::npos);
+    ASSERT_TRUE(list.find("active_editor_view") != std::string::npos);
+}
+
 // The message is the only thing that changes. This pins the accept/reject set
 // so a future edit to the wording cannot quietly start coercing a string into
 // a number, which is the false success #213 to #217 were about.
@@ -3078,6 +3251,10 @@ struct RegisterToolTests {
                      test_visual_lab_rejects_a_target_outside_the_project);
         registerTest("Tools.ResourceCreateSerializesComplexTypes",
                      test_resource_create_serializes_colors_quaternions_and_dictionaries);
+        registerTest("Tools.ResourceCreateWritesInOrder",
+                     test_resource_create_writes_properties_in_order_as_godot_literals);
+        registerTest("Tools.ResourceCreateRefusesWhatItCannotWrite",
+                     test_resource_create_refuses_what_it_cannot_write);
         registerTest("Tools.OfflineHierarchyMainSceneAndMultilineProperties",
                      test_offline_hierarchy_reads_main_scene_and_multiline_properties);
         registerTest("Hierarchy.ClassFilterKeepsMatchingBranches",
@@ -3143,6 +3320,8 @@ struct RegisterToolTests {
         registerTest("Tools.ProjectAuditImportHealth",
                      test_project_audit_exposes_optional_import_health);
         registerTest("Tools.SceneGetSelectionContract", test_scene_get_selection_contract);
+        registerTest("Tools.EditorViewportIdentifiersAgree",
+                     test_editor_viewport_identifiers_agree);
         registerTest("Tools.PropertyAdmissionReadsTheNumber",
                      test_property_admission_reads_the_number_not_its_json_spelling);
         registerTest("Tools.ScriptCreate",

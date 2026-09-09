@@ -6,38 +6,119 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Read-only by default. Only the publishing job asks for `contents: write`, so
+# a compromised build step on any of the three runners cannot push a tag, a
+# commit or a release of its own.
+permissions:
+  contents: read
+
+# A tag is published once. Two runs of the same tag racing each other would
+# upload assets twice, so the second waits rather than being cancelled: a
+# half-published release is worse than a slow one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-release-packages:
-    name: Package Release (${{ matrix.os }})
+    name: Package Release (${{ matrix.artifact_name }})
     runs-on: ${{ matrix.os }}
+    # Empty for the runners that build on the host. The Linux leg builds inside
+    # a container instead; see the comment on its matrix entry.
+    container: ${{ matrix.container }}
+    # Ninety, measured rather than guessed. The macOS leg took fifty minutes on
+    # the v1.6.0 release and is the slowest by a factor of five; a sixty-minute
+    # cap left ten minutes of headroom and a dry run duly went over it and was
+    # killed. The point of a timeout here is to stop a hung job burning the
+    # six-hour default, not to be a second, tighter deadline nobody measured.
+    # See #345: fifty minutes is itself the defect, and this number should come
+    # down once that is fixed.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: windows-latest
+            container: ''
             artifact_name: didi-windows-x64
             archive_ext: zip
-          - os: ubuntu-22.04
+
+          # The Linux artifact is built inside Ubuntu 22.04 rather than on it.
+          #
+          # It used to run on the `ubuntu-22.04` runner image, chosen for glibc:
+          # a binary built against 2.35 starts on Ubuntu 22.04 and Debian 12,
+          # and one built on a newer host does not. That image is being retired
+          # -- deprecation from 2026-09-17, unsupported from 2027-04-17 -- and
+          # GitHub brownouts already kill jobs using the label to force the
+          # issue. One killed a release rehearsal mid-compile.
+          #
+          # Moving the label to ubuntu-24.04 would have raised the floor to
+          # glibc 2.39 and silently dropped every Ubuntu 22.04 LTS and Debian 12
+          # user, which is a decision about who can run Didi rather than a CI
+          # fix. A container keeps the floor exactly where it was and puts the
+          # job on a supported runner. Pinned by digest because this build feeds
+          # the provenance attestation below: what built the binary should be a
+          # fact, not whatever the tag pointed at that day. `apt-get update`
+          # still installs current packages on top.
+          - os: ubuntu-latest
+            container: ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc
             artifact_name: didi-linux-x64
             archive_ext: tar.gz
+
           # arm64 only. macos-14 is an Apple Silicon runner and this builds for
           # its own architecture, so there is no Intel macOS artifact. An Intel
           # or universal build needs a second runner or an explicit
           # CMAKE_OSX_ARCHITECTURES, which is a packaging decision rather than a
           # build fix; the artifact name says arm64 so nobody is misled.
           - os: macos-14
+            container: ''
             artifact_name: didi-macos-arm64
             archive_ext: tar.gz
 
     steps:
+      # First, because checkout wants git and everything after wants a
+      # compiler. The base image has neither. CMake is deliberately not
+      # installed here: the pinned 3.28 step below supplies it on every POSIX
+      # leg, so containerising changed where the Linux build runs and nothing
+      # about which toolchain builds it.
+      #
+      # python-is-python3 is not decoration. The runner image ships a `python`
+      # on PATH; a bare Ubuntu container ships only `python3`. The release gate
+      # runs the whole Python suite through ctest, and one case resolves an
+      # executable named `python` -- it failed here on the first attempt, which
+      # is the sort of thing a release rehearsal exists to find.
+      - name: Prepare the build container
+        if: matrix.container != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            build-essential ca-certificates curl git \
+            ninja-build python3 python3-venv python3-pip python-is-python3
+          # The container runs as root against a workspace it does not own, so
+          # git refuses to touch it without this.
+          git config --global --add safe.directory '*'
+          echo "Container: $(. /etc/os-release && echo "$PRETTY_NAME")"
+          echo "glibc: $(ldd --version | head -1)"
+
       - name: Checkout Repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup CMake
         if: runner.os != 'Windows'
-        uses: jwlawson/actions-setup-cmake@v2
+        uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2.2.0
         with:
           cmake-version: '3.28.x'
+
+      # The Linux container gets ninja from apt above; macOS builds on the host
+      # and has none by default.
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
 
       # ctest runs the Python contract suite as well as the native one, and that
       # suite needs the pinned jsonschema. Without this the release gate fails on
@@ -53,7 +134,22 @@ jobs:
           VENV_PY=".venv-release/bin/python"
           [ -x "$VENV_PY" ] || VENV_PY=".venv-release/Scripts/python.exe"
           "$VENV_PY" -m pip install --quiet --disable-pip-version-check -r requirements-dev.txt
-          "$VENV_PY" -c "import jsonschema; assert jsonschema.__version__ == '4.25.1', jsonschema.__version__"
+          # Read from requirements-dev.txt, not repeated here. See the same
+          # step in ci.yml for why the duplicated literal had to go.
+          "$VENV_PY" - << 'EOF'
+          import pathlib
+          import re
+          import sys
+
+          import jsonschema
+
+          pin = re.search(r'^jsonschema==([^\s#]+)', pathlib.Path('requirements-dev.txt').read_text(encoding='utf-8'), re.M)
+          if pin is None:
+              sys.exit('requirements-dev.txt no longer pins an exact jsonschema version')
+          if jsonschema.__version__ != pin.group(1):
+              sys.exit(f'installed jsonschema {jsonschema.__version__}, pinned {pin.group(1)}')
+          print(f'jsonschema {jsonschema.__version__} matches the pin')
+          EOF
           # This step runs in bash, so $PWD on Windows is a /d/a/... path that
           # CMake cannot execute. cygpath -m gives an absolute Windows path with
           # forward slashes, which is the form CMake wants on every runner.
@@ -64,8 +160,33 @@ jobs:
           fi
           echo "DIDI_RELEASE_PYTHON=$RESOLVED" >> "$GITHUB_ENV"
 
-      - name: Configure CMake
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="${{ env.DIDI_RELEASE_PYTHON }}"
+      # Two steps rather than one with a conditional generator argument,
+      # because macOS runners still ship bash 3.2 and expanding an empty array
+      # under `set -u` there is an error rather than nothing. ci.yml splits the
+      # same way.
+      #
+      # The interpreter path is read out of the environment rather than
+      # interpolated into the command line: a `${{ }}` expansion is textual
+      # substitution into the shell before it runs, which is the shape a
+      # workflow injection takes even when today's value is a path this
+      # workflow computed itself.
+      - name: Configure CMake (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="$DIDI_RELEASE_PYTHON"
+
+      # Ninja, matching ci.yml. This job used the default generator and took
+      # fifty minutes on macOS against ten on Linux and seven on Windows, for
+      # the same code -- close enough to the timeout that a release was one
+      # slow day from failing. Deliberately no ccache: a release should be
+      # built from clean, and the generator was the difference that mattered.
+      - name: Configure CMake (POSIX Ninja)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cmake -B build -S . -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPython3_EXECUTABLE="$DIDI_RELEASE_PYTHON"
 
       - name: Build Release Binaries
         run: cmake --build build --config Release --parallel
@@ -118,28 +239,118 @@ jobs:
           tar -czvf ../${{ matrix.artifact_name }}.tar.gz ${{ matrix.artifact_name }}/
 
       - name: Upload Release Archive
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_name }}.${{ matrix.archive_ext }}
 
+  # Signs and publishes. The job-level tag condition is gone on purpose: on a
+  # manual run everything here happens except the publish, so the signing path
+  # can be exercised without cutting a release. A release pipeline whose only
+  # rehearsal is a real tag is a pipeline nobody rehearses.
   publish-github-release:
     name: Publish GitHub Release
     needs: build-release-packages
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    timeout-minutes: 20
     permissions:
       contents: write
+      # Sigstore issues a short-lived signing certificate against this run's
+      # OIDC identity. No key exists to be stolen, rotated, or left behind by a
+      # maintainer, which is the whole reason to prefer it over a stored one.
+      id-token: write
+      # Records the attestation against the repository, so `gh attestation
+      # verify` works without the bundle in hand.
+      attestations: write
     steps:
       - name: Download All Artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: release-assets
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+      - name: Collect the archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # download-artifact nests each archive under its artifact name.
+          find release-assets -type f \( -name '*.zip' -o -name '*.tar.gz' \) \
+            -exec mv -t dist/ {} +
+          if [ -z "$(ls -A dist)" ]; then
+            echo "No archives were downloaded; refusing to sign or publish nothing." >&2
+            exit 1
+          fi
+          ls -l dist
+
+      - name: Write SHA256SUMS
+        shell: bash
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          # Plain checksums, for the reader who wants to confirm a download
+          # matched without installing anything. The attestation below is the
+          # part that says who built it; this only says the bytes are intact.
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Attest build provenance
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          files: release-assets/**/*
-          generate_release_notes: true
-          draft: false
-          prerelease: false
+          # Every published byte, SHA256SUMS included, so the checksum file
+          # cannot be swapped independently of what it describes.
+          subject-path: dist/*
+
+      - name: Attach the provenance as a release asset
+        shell: bash
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # GitHub keeps the attestation, but only for people willing to call
+          # its API. Shipping the bundle beside the archives lets anyone verify
+          # offline, and it is the form OpenSSF Scorecard reads: the
+          # Signed-Releases check inspects release assets and recognises
+          # `*.intoto.jsonl`, not the attestation store.
+          #
+          # The ref is sanitised because it is only a tag on a tag run. On a
+          # rehearsal it is the branch name, and branch names contain slashes:
+          # `feat/signing` would make this a path into a directory that does
+          # not exist, `cp` would fail, `set -e` would abort, and the rehearsal
+          # would upload nothing at the exact moment it is meant to prove
+          # itself. It did precisely that on the first branch to reach here.
+          safe_ref="${TAG//[^A-Za-z0-9._-]/-}"
+          cp "$BUNDLE" "dist/didi-${safe_ref}.intoto.jsonl"
+          ls -l dist
+
+      - name: Create GitHub Release
+        # `gh` rather than a third-party action. This is the one job that holds
+        # `contents: write`, and gh is already on the runner, so publishing
+        # costs no additional trusted code. Notes are generated by GitHub and
+        # grouped by the categories in .github/release.yml.
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mapfile -t assets < <(find dist -type f | sort)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No release assets were produced; refusing to publish an empty release." >&2
+            exit 1
+          fi
+          printf 'Publishing %s with %d assets:\n' "$TAG" "${#assets[@]}"
+          printf '  %s\n' "${assets[@]}"
+          gh release create "$TAG" --title "$TAG" --generate-notes "${assets[@]}"
+
+      - name: Upload the unpublished assets (manual run)
+        # The rehearsal. A manual run produces and signs exactly what a tag
+        # would, and leaves it as a workflow artifact instead of a release.
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-dry-run
+          path: dist/

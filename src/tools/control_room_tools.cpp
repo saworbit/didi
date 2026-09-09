@@ -1,5 +1,6 @@
 #include "didi/common/json_bounds.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/common/version.hpp"
 #include "didi/mcp/control_room.hpp"
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/mcp/tool_availability.hpp"
@@ -38,6 +39,7 @@ std::vector<ControlRoomSession> parseListedSessions(const json& payload) {
         session.descriptor.pid = entry.value("pid", static_cast<uint64_t>(0));
         session.descriptor.project_path = entry.value("project_path", std::string());
         session.descriptor.protocol_version = entry.value("protocol_version", std::string());
+        session.descriptor.build_id = entry.value("build_id", std::string());
         session.descriptor.started_at_ms = entry.value("started_at_ms", static_cast<int64_t>(0));
         session.stale = entry.value("stale", false);
         const auto alive = entry.find("alive");
@@ -66,6 +68,7 @@ CallToolResult handleControlRoom(const json& args, const std::shared_ptr<ipc::II
     ControlRoomInputs inputs;
     inputs.server_name = kServerName;
     inputs.server_version = kServerVersion;
+    inputs.server_build_id = kBuildId;
     for (const auto& version : supportedProtocolVersions()) {
         if (version.is_string()) inputs.protocol_versions.push_back(version.get<std::string>());
     }
@@ -87,6 +90,9 @@ CallToolResult handleControlRoom(const json& args, const std::shared_ptr<ipc::II
     if (lease.has_value() && lease->descriptor.has_value()) {
         inputs.session_kind = lease->descriptor->kind;
         inputs.selected_session_id = lease->descriptor->session_id;
+        // The route actually being dispatched on, not a listed session, because
+        // that is the extension answering the calls.
+        inputs.bridge_build_id = lease->descriptor->build_id;
     } else if (sessions) {
         const auto active = sessions->activeSession();
         if (active.has_value()) inputs.selected_session_id = active->session_id;

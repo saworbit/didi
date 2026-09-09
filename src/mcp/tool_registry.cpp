@@ -1138,12 +1138,12 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "scene_instantiate_node";
-        t.description = "Creates a built-in ClassDB node in the active edited scene with UndoRedo; PackedScene paths are not implemented.";
+        t.description = "Creates a built-in ClassDB node, or an instance of a packed scene, in the active edited scene with UndoRedo.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
-                {"node_type", {{"type", "string"}, {"default", "Node"}, {"description", "Built-in ClassDB Node type to instantiate"}}},
-                {"scene_path", {{"type", "string"}, {"description", "Optional .tscn path"}}},
+                {"node_type", {{"type", "string"}, {"default", "Node"}, {"description", "Built-in ClassDB Node type to instantiate. Ignored when scene_path is given: the instance is whatever the scene's root is, and the result reports its class."}}},
+                {"scene_path", {{"type", "string"}, {"description", "A res:// .tscn to instance instead of constructing a type, as the editor does when a scene is dropped into the tree. What the scene file records is an instance of that scene, not a copy of its nodes."}}},
                 {"parent_path", {{"type", "string"}, {"default", "/root"}}},
                 {"name", {{"type", "string"}, {"description", "Node name"}}},
                 // These values reach the same validator as scene_set_property's
@@ -2204,13 +2204,35 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "resource_create";
-        t.description = "Writes textual .tres content under the project root from supported scalar, array, and vector-shaped JSON values.";
+        t.description = "Writes textual .tres content under the project root. Every value is rendered as a Godot literal or the call is refused naming the property, so a resource is never reported as written when part of it was thrown away.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
                 {"resource_type", {{"type", "string"}, {"default", "StandardMaterial3D"}}},
                 {"save_path", {{"type", "string"}, {"description", "Target res:// path"}}},
-                {"properties", {{"type", "object"}}},
+                {"properties", {
+                    {"description",
+                     "An object, whose keys are written in sorted order, or an array of "
+                     "{name, value} entries written in the order given. Use the array when order "
+                     "matters: Godot applies indexed sub-properties in file order, so tracks/0/type "
+                     "has to come before the rest of track 0. A value is a string, number, boolean, "
+                     "array, or an object. An object with x/y, x/y/z, x/y/z/w or r/g/b(/a) numbers "
+                     "becomes the matching Vector or Color; any other object is a Dictionary. To "
+                     "choose the type yourself, give the object a \"type\": Vector2i, Vector3i, "
+                     "Vector4i, Quaternion and Color take their components; NodePath and StringName "
+                     "take their text under \"value\"; the packed arrays take their elements under "
+                     "\"values\". A type this cannot write is refused, and so is a SubResource, "
+                     "which has no representation here."},
+                    {"oneOf", json::array({
+                        json{{"type", "object"}},
+                        json{{"type", "array"},
+                             {"items", {{"type", "object"},
+                                        {"properties", {{"name", {{"type", "string"},
+                                                                  {"minLength", 1}}},
+                                                        {"value", json::object()}}},
+                                        {"required", json::array({"name", "value"})}}}}
+                    })}
+                }},
                 {"overwrite", {{"type", "boolean"}, {"default", false}}}
             }},
             {"required", {"save_path"}}
@@ -2731,9 +2753,9 @@ void ToolRegistry::registerAllDefaultTools() {
                         {"properties", {
                             {"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 64}}},
                             {"expression", {{"type", "string"}, {"minLength", 1}, {"maxLength", 512},
-                                            {"description", "A sandbox expression evaluating to a number or a boolean, such as position.x. The same sandbox runtime_watch_invariants uses."}}},
+                                            {"description", "A sandbox expression evaluating to a number or a boolean, such as node.get(\"position\").x. The same sandbox runtime_watch_invariants uses: node is the context node, a property is read with node.get(\"name\"), and a bare position.x is refused because it reads through an object. A probe that never returns a value is listed in unread_probes and sets measured to false."}}},
                             {"context_node", {{"type", "string"}, {"maxLength", 256},
-                                              {"description", "The node the expression is evaluated against."}}}
+                                              {"description", "The node the expression is evaluated against, and what node stands for in the expression."}}}
                         }},
                         {"required", json::array({"expression"})},
                         {"additionalProperties", false}

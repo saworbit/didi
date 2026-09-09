@@ -1,5 +1,6 @@
 #include "didi/gdextension/session_host.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/common/version.hpp"
 
 #include <array>
 #include <chrono>
@@ -257,6 +258,10 @@ Result<void> SessionHost::prepare(const std::string& kind, const std::string& pr
 #endif
     descriptor.started_at_ms = process_identity.value().started_at_ms;
     descriptor.protocol_version = "1.3";
+    // The build this extension came out of. The server compares it against its
+    // own so a bridge from another build is visible instead of silently serving
+    // an older tool contract while everything reports healthy.
+    descriptor.build_id = kBuildId;
     auto directory = sessionDirectory();
     if (directory.isErr()) return directory.error();
     m_descriptorPath = directory.value() / (descriptor.session_id + ".json");

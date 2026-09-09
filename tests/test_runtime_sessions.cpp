@@ -608,6 +608,42 @@ void test_session_descriptor_rejects_wrong_token_length() {
 #endif
 }
 
+// A build identity is optional on the wire and rejected when it is malformed.
+//
+// Optional matters more than it looks: an extension built before the field
+// publishes a descriptor without it, and a parser that required it would turn
+// a stale bridge from something the dashboard can report into a session
+// nothing can reach at all, which is the opposite of the point.
+void test_session_descriptor_carries_optional_build_id() {
+    const auto session_id = std::string("0123456789abcdef0123456789abcdef");
+    auto valid = validDescriptor(session_id, endpointFor(session_id));
+
+    const auto without = didi::runtime::SessionDescriptor::fromJson(valid);
+    ASSERT_TRUE(without.isOk());
+    ASSERT_TRUE(without.value().build_id.empty());
+    ASSERT_TRUE(!without.value().toJson().contains("build_id"));
+
+    auto with = valid;
+    with["build_id"] = "1.6.0+abcdef012345.20260909T101112";
+    const auto parsed = didi::runtime::SessionDescriptor::fromJson(with);
+    ASSERT_TRUE(parsed.isOk());
+    ASSERT_EQ(parsed.value().build_id, std::string("1.6.0+abcdef012345.20260909T101112"));
+    ASSERT_EQ(parsed.value().toJson()["build_id"].get<std::string>(),
+              std::string("1.6.0+abcdef012345.20260909T101112"));
+
+    auto with_newline = valid;
+    with_newline["build_id"] = "1.6.0\nrogue";
+    ASSERT_TRUE(didi::runtime::SessionDescriptor::fromJson(with_newline).isErr());
+
+    auto too_long = valid;
+    too_long["build_id"] = std::string(129, 'a');
+    ASSERT_TRUE(didi::runtime::SessionDescriptor::fromJson(too_long).isErr());
+
+    auto unknown_field = valid;
+    unknown_field["build_ids"] = "1.6.0";
+    ASSERT_TRUE(didi::runtime::SessionDescriptor::fromJson(unknown_field).isErr());
+}
+
 void test_session_attach_keeps_existing_route_when_candidate_handshake_fails() {
     const auto directory = makeSessionDirectory();
     const auto healthy_id = "0123456789abcdef0123456789abcdef";
@@ -1176,6 +1212,8 @@ struct RegisterRuntimeSessionTests {
                      test_reaper_ignores_files_that_are_not_tombstones);
         registerTest("RuntimeSessions.DiscoveryReapsOrphanedTombstones",
                      test_discovery_reaps_orphaned_tombstones_without_listing_them);
+        registerTest("RuntimeSessions.DescriptorCarriesOptionalBuildId",
+                     test_session_descriptor_carries_optional_build_id);
 #if !defined(_WIN32)
         registerTest("RuntimeSessions.RegistryUsesXdgRuntimeDirectory",
                      test_session_registry_prefers_xdg_runtime_directory);

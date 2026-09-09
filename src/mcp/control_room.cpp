@@ -58,6 +58,28 @@ json fact(const char* label, std::string value) {
     return {{"label", label}, {"value", clip(std::move(value), kControlRoomMaxFactChars)}};
 }
 
+// Whether the attached bridge came out of this server's build.
+//
+// Unknown when nothing is attached, or when this server has no build identity
+// of its own to compare against. An empty bridge identity is not unknown: it is
+// a bridge older than the field, which is a mismatch.
+std::optional<bool> bridgeBuildMatches(const ControlRoomInputs& in) {
+    if (!in.connected || !in.bridge_build_id.has_value() || in.server_build_id.empty()) {
+        return std::nullopt;
+    }
+    return *in.bridge_build_id == in.server_build_id;
+}
+
+std::string bridgeBuildReason(const ControlRoomInputs& in) {
+    const std::string bridge = in.bridge_build_id.value_or("");
+    return "The attached GDExtension is from a different build than this server (bridge " +
+           (bridge.empty() ? std::string("older than this field") : bridge) + ", server " +
+           in.server_build_id +
+           "). Tool schemas come from the server and the answers come from the bridge, so a "
+           "call can be refused for a reason the schema says is supported. Copy build/addons/didi "
+           "into the project again and restart the editor.";
+}
+
 // The bridge light. Amber is the honest answer far more often than either of
 // the others, and it always carries the reason it is amber.
 json bridgeLight(const ControlRoomInputs& in) {
@@ -67,6 +89,11 @@ json bridgeLight(const ControlRoomInputs& in) {
             return light("Bridge", "warn", "Connected",
                          in.selected_session_id.value_or(""),
                          "The route is connected but did not report its kind.");
+        }
+        const auto matches = bridgeBuildMatches(in);
+        if (matches.has_value() && !*matches) {
+            return light("Bridge", "warn", "Build mismatch",
+                         in.selected_session_id.value_or(""), bridgeBuildReason(in));
         }
         return light("Bridge", "ok", kind == "editor" ? "Editor attached" : "Game attached",
                      in.selected_session_id.value_or(""), "");
@@ -266,6 +293,10 @@ json buildControlRoomModel(const ControlRoomInputs& in,
                     {"started_at_ms", descriptor.started_at_ms},
                     {"stale", session.stale},
                     {"selected", selected}};
+        // Absent when the extension that published this session is older than
+        // the field, which the bridge light reports as a mismatch rather than
+        // as a match nobody checked.
+        if (!descriptor.build_id.empty()) row["build_id"] = descriptor.build_id;
         // Absent rather than false when it was not established. A dashboard that
         // renders unknown as dead is worse than one that says it does not know.
         if (session.alive.has_value()) row["alive"] = *session.alive;
@@ -284,6 +315,16 @@ json buildControlRoomModel(const ControlRoomInputs& in,
     // Facts, for the overview table.
     json facts = json::array();
     facts.push_back(fact("Server", in.server_name + " " + in.server_version));
+    if (!in.server_build_id.empty()) facts.push_back(fact("Server build", in.server_build_id));
+    if (in.bridge_build_id.has_value()) {
+        const auto matches = bridgeBuildMatches(in);
+        const std::string bridge = in.bridge_build_id->empty()
+                                       ? std::string("older than this field")
+                                       : *in.bridge_build_id;
+        facts.push_back(fact("Bridge build",
+                             matches.has_value() && !*matches ? bridge + " (does not match)"
+                                                              : bridge));
+    }
     if (!in.protocol_versions.empty()) {
         std::ostringstream versions;
         for (std::size_t i = 0; i < in.protocol_versions.size(); ++i) {

@@ -1,7 +1,31 @@
 cmake_minimum_required(VERSION 3.20)
-project(didi VERSION 1.6.0 LANGUAGES C CXX)
+project(didi VERSION 1.7.0 LANGUAGES C CXX)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+# The build identity, which is not the version. Two installs can both be 1.6.0
+# and still be different builds, because the server binary and the GDExtension
+# are copied around separately. The commit says which source, and the configure
+# stamp separates two builds of the same source, so the pair matches only when
+# it was configured together. The commit is best effort: without git it reads
+# nogit, and the stamp alone still separates two configures.
+find_package(Git QUIET)
+set(DIDI_BUILD_COMMIT "nogit")
+if(GIT_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" rev-parse --short=12 HEAD
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE DIDI_BUILD_COMMIT_RAW
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE DIDI_BUILD_COMMIT_STATUS
+    )
+    if(DIDI_BUILD_COMMIT_STATUS EQUAL 0 AND DIDI_BUILD_COMMIT_RAW)
+        set(DIDI_BUILD_COMMIT "${DIDI_BUILD_COMMIT_RAW}")
+    endif()
+endif()
+string(TIMESTAMP DIDI_BUILD_STAMP "%Y%m%dT%H%M%S" UTC)
+set(DIDI_BUILD_ID "${PROJECT_VERSION}+${DIDI_BUILD_COMMIT}.${DIDI_BUILD_STAMP}")
 
 # The version had to be typed into four files and kept in step by a documentation
 # check. Everything in C++ now reads it from here, generated from project()
@@ -392,4 +416,40 @@ if(DIDI_BUILD_TESTS)
                          -s tests -t tests -p "test_*.py"
                  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
     endif()
+endif()
+
+# 4. libFuzzer targets (opt in, Clang only)
+# Off by default: libFuzzer needs Clang, and a release build has no business
+# linking a fuzzing engine. .github/workflows/fuzz.yml turns this on.
+#
+# Built against didi_core rather than against a second copy of the sources, so
+# a target cannot drift away from the code it claims to exercise, and compiled
+# on every pull request. A fuzz target that stops building is worse than no
+# target at all: the directory still looks like coverage.
+option(DIDI_BUILD_FUZZERS "Build libFuzzer targets (requires Clang)" OFF)
+
+if(DIDI_BUILD_FUZZERS)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR
+            "DIDI_BUILD_FUZZERS needs Clang; this is ${CMAKE_CXX_COMPILER_ID}. "
+            "libFuzzer ships with Clang and there is no portable substitute.")
+    endif()
+
+    set(DIDI_FUZZ_TARGETS
+        fuzz_framed_message
+        fuzz_jsonrpc_request
+        fuzz_base64_decode
+    )
+
+    foreach(fuzz_target IN LISTS DIDI_FUZZ_TARGETS)
+        add_executable(${fuzz_target} fuzz/${fuzz_target}.cc)
+        target_link_libraries(${fuzz_target} PRIVATE didi_core)
+        # Address and undefined behaviour together. The defect this work grew
+        # out of was an integer overflow that produced an out of bounds read,
+        # and each sanitizer sees only one half of that.
+        target_compile_options(${fuzz_target} PRIVATE
+            -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer -g)
+        target_link_options(${fuzz_target} PRIVATE
+            -fsanitize=fuzzer,address,undefined)
+    endforeach()
 endif()

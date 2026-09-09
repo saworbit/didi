@@ -811,6 +811,13 @@ try {
             @{ name = "children"; expression = "node.get_child_count()";
                context_node = "/root/RuntimeRoot" }) }),
         (Tool-Request 323 "eval_gdscript" @{ expression = "node.get_child_count()"; context_node = "/root/RuntimeRoot" }),
+        # A probe has to be able to read a number off a property. The read is
+        # prebound as a value before the expression is parsed, so taking a
+        # component off it reaches no object; the bare form still does and is
+        # still refused.
+        (Tool-Request 2370 "eval_gdscript" @{ expression = "node.get('position').x"; context_node = "/root/RuntimeRoot/Spatial/RayTarget2D" }),
+        (Tool-Request 2371 "eval_gdscript" @{ expression = "position.x"; context_node = "/root/RuntimeRoot/Spatial/RayTarget2D" }),
+        (Tool-Request 2372 "eval_gdscript" @{ expression = "node.get('position').script"; context_node = "/root/RuntimeRoot/Spatial/RayTarget2D" }),
         (Tool-Request 324 "eval_gdscript" @{ expression = "[1, 2, 3]"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 325 "eval_gdscript" @{ expression = "{'answer': 42, 'ok': true}"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 326 "eval_gdscript" @{ expression = "Vector2(3, 4)"; context_node = "/root/RuntimeRoot" }),
@@ -960,6 +967,17 @@ try {
     Assert-True (@($blind.stuck_intervals).Count -eq 0) "An expression nobody could read was reported as a soft lock."
     Assert-True ($blind.probes[0].readings -eq 0) "An unreadable probe reported readings it did not take."
     Assert-True ($null -ne $blind.probes[0].last_read_error) "An unreadable probe did not say why it could not be read."
+    Assert-True ($blind.measured -eq $false) "A run in which no probe read anything did not say it measured nothing."
+    Assert-True (@($blind.unread_probes) -contains "unreadable") "A run that measured nothing did not name the probe that never read."
+    Assert-True ($explored.measured -eq $true) "A run whose probe was read reported that it measured nothing."
+
+    # A component of a property read is the only way a probe can sample a
+    # number, and every other way through an object is still refused.
+    $componentRead = Tool-Payload $runtimeById[2370]
+    Assert-True ($componentRead.value -eq 2) "A component of a property read did not evaluate against the running game."
+    Assert-True ($runtimeById[2371].result.isError) "A bare property read reached the engine."
+    Assert-True ($runtimeById[2371].result.content[0].text -match "property reads are forbidden") "A bare property read was refused for the wrong reason."
+    Assert-True ($runtimeById[2372].result.isError) "A non-component member of a property read was accepted."
 
     Assert-True $runtimeById[2364].result.isError "An action the project does not define was accepted, and the run reported driving a game it never touched."
     Assert-True $runtimeById[2365].result.isError "A stuck window longer than the run was accepted, and nothing could ever have reported it."
@@ -1540,6 +1558,26 @@ try {
         (Tool-Request 91 "scene_close" @{ discard_unsaved = $true }),
         (Tool-Request 92 "scene_create" @{ scene_path = "res://created_phase2.tscn"; root_type = "Node2D"; root_name = "Created" }),
         (Tool-Request 93 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 1 }),
+        # Instancing a packed scene is close to the most common single
+        # operation in Godot editing, and scene_pack_branch used to produce
+        # scenes nothing in the surface could consume. The instance goes into
+        # a different scene from the one it was packed out of, so what is
+        # saved has to be a reference to the file rather than a copy of its
+        # nodes.
+        # Its own scene, because created_phase2.tscn is overwritten later in
+        # this block and the saved markup has to survive to be read.
+        (Tool-Request 2379 "scene_create" @{ scene_path = "res://instance_host.tscn"; root_type = "Node3D"; root_name = "Host" }),
+        (Tool-Request 2380 "scene_instantiate_node" @{ scene_path = "res://packed_branch.tscn";
+            parent_path = "/root"; name = "PackedInstance";
+            properties = @{ position = @{ x = 4; y = 8; z = 2 } } }),
+        (Tool-Request 2381 "scene_get_property" @{ target_node = "/root/Host/PackedInstance"; property_name = "position" }),
+        (Tool-Request 2382 "editor_save_scene" @{}),
+        (Tool-Request 2383 "scene_instantiate_node" @{ scene_path = "res://no_such_scene.tscn"; parent_path = "/root" }),
+        (Tool-Request 2384 "scene_instantiate_node" @{ scene_path = "res://smoke_plugin.gd"; parent_path = "/root" }),
+        (Tool-Request 2385 "editor_undo" @{}),
+        (Tool-Request 2386 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 2 }),
+        (Tool-Request 2387 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 2388 "scene_open" @{ scene_path = "res://created_phase2.tscn" }),
         (Tool-Request 94 "scene_create" @{ scene_path = "res://created_phase2.tscn"; root_type = "Control"; root_name = "Blocked" }),
         (Tool-Request 95 "scene_open" @{ scene_path = "res://packed_branch.tscn" }),
         (Tool-Request 96 "scene_close" @{ discard_unsaved = $true }),
@@ -1867,7 +1905,13 @@ try {
         # The 2D viewport control has no size while another main screen is
         # selected. Godot hands back its 2x2 minimum rather than refusing, and
         # capturing that used to be reported as a normal successful live frame.
-        (Tool-Request 2257 "viewport_capture_frame" @{ camera_identifier = "editor_2d" })
+        (Tool-Request 2257 "viewport_capture_frame" @{ camera_identifier = "editor_2d" }),
+        # The other two spellings of the same viewport. They used to miss the
+        # 2D branch entirely and hand back the 3D viewport under the caller's
+        # own label, which for a 2D project reads as an empty scene.
+        (Tool-Request 2258 "viewport_capture_frame" @{ camera_identifier = "2d" }),
+        (Tool-Request 2259 "viewport_capture_frame" @{ camera_identifier = "canvas_item" }),
+        (Tool-Request 2261 "viewport_capture_frame" @{ camera_identifier = "not_a_viewport" })
     )
     $rawPhase4Responses = $phase4Requests | & $didiExecutable --project $fixtureRoot
     $phase4Responses = @($rawPhase4Responses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
@@ -1877,13 +1921,24 @@ try {
     # Either a real frame or a refusal that says why. A four-pixel image
     # described as a live capture is neither, and a caller cannot tell it from a
     # scene that happens to be empty.
-    $collapsed = $phase4ById[2257]
-    if ($collapsed.result.isError) {
-        Assert-True ($collapsed.result.content[0].text -match "no size on screen") "A degenerate viewport capture was refused without saying why."
-    } else {
-        $collapsedFrame = Tool-Payload $collapsed
-        Assert-True ($collapsedFrame.resolution.width -ge 8 -and $collapsedFrame.resolution.height -ge 8) "viewport_capture_frame reported a degenerate frame as a successful live capture."
+    foreach ($twoDId in @(2257, 2258, 2259)) {
+        $collapsed = $phase4ById[$twoDId]
+        if ($collapsed.result.isError) {
+            Assert-True ($collapsed.result.content[0].text -match "no size on screen") "A degenerate viewport capture was refused without saying why."
+        } else {
+            $collapsedFrame = Tool-Payload $collapsed
+            Assert-True ($collapsedFrame.resolution.width -ge 8 -and $collapsedFrame.resolution.height -ge 8) "viewport_capture_frame reported a degenerate frame as a successful live capture."
+        }
     }
+    # All three name the same viewport, so they answer the same way. One of them
+    # succeeding while another refuses is the defect: it means only some of the
+    # spellings reach the 2D branch.
+    $twoDOutcomes = @(2257, 2258, 2259) | ForEach-Object { [bool]$phase4ById[$_].result.isError }
+    Assert-True ((($twoDOutcomes | Sort-Object -Unique) | Measure-Object).Count -eq 1) "The 2D viewport aliases did not agree; one resolved to a different viewport."
+    # A name that is neither viewport is refused rather than resolved to 3D.
+    $unknownCamera = $phase4ById[2261]
+    Assert-True ($unknownCamera.result.isError -eq $true) "An unknown camera_identifier was captured instead of refused."
+    Assert-True ($unknownCamera.result.content[0].text -match "camera_identifier must be one of") "An unknown camera_identifier was refused without naming what it accepts."
 
     $isolated = Tool-Payload $phase4ById[412]
     Assert-True ($isolated.isolated -eq $true -and $isolated.state_restored -eq $true) "Isolated capture did not confirm reversible state restoration."
@@ -2605,6 +2660,21 @@ try {
     Assert-True ((Tool-Payload $byId[91]).discarded_unsaved -eq $true) "An explicit discard did not report itself as one."
     Assert-True ((Tool-Payload $byId[92]).opened -eq $true) "New scene was not created and opened."
     Assert-True ((Tool-Payload $byId[93]).scene_tree.name -eq "Created") "Created scene root was not observable."
+    $instanced = Tool-Payload $byId[2380]
+    Assert-True ($instanced.scene_path -eq "res://packed_branch.tscn") "Instancing a packed scene did not report which scene it came from."
+    Assert-True ($instanced.node_path -eq "/root/Host/PackedInstance") "Instancing a packed scene did not report where it landed: $($instanced.node_path)"
+    Assert-True ($instanced.node_type -eq "Node3D") "Instancing a packed scene reported the requested type rather than the class it actually made."
+    $instancePosition = (Tool-Payload $byId[2381]).value
+    Assert-True ($instancePosition.x -eq 4 -and $instancePosition.y -eq 8 -and $instancePosition.z -eq 2) "Initial properties were not applied to the instance root."
+    Assert-True ((Tool-Payload $byId[2382]).status -eq "saved") "The scene holding an instance could not be saved."
+    Assert-True ((Tool-Payload $byId[2379]).opened -eq $true) "The scene meant to hold an instance was not created."
+    $savedScene = Get-Content -LiteralPath (Join-Path $fixtureRoot "instance_host.tscn") -Raw
+    Assert-True ($savedScene -match [regex]::Escape("res://packed_branch.tscn")) "A saved instance did not reference the scene it instances."
+    Assert-True ($savedScene -match "instance=ExtResource") "A packed scene was saved as a copy of its nodes rather than as an instance of it."
+    Assert-True $byId[2383].result.isError "A scene_path that names no file was instanced anyway."
+    Assert-True $byId[2384].result.isError "A scene_path that is not a .tscn was instanced anyway."
+    $afterUndo = Tool-Payload $byId[2386]
+    Assert-True (@($afterUndo.scene_tree.children | Where-Object { $_.name -eq "PackedInstance" }).Count -eq 0) "Undo did not remove an instanced packed scene."
     Assert-True $byId[94].result.isError "Scene create overwrote an existing target without overwrite: true."
     Assert-True ((Tool-Payload $byId[95]).opened -eq $true) "Existing PackedScene could not be reopened."
     Assert-True ((Tool-Payload $byId[96]).closed -eq $true) "Reopened clean scene could not be closed."
@@ -2959,7 +3029,7 @@ try {
 
     $unexpectedSourceArtifacts = @(Get-ChildItem -LiteralPath $sourceFixtureRoot -Force -Recurse | Where-Object {
         $_.Name -like "*.didi-retired-*" -or
-        $_.Name -in @("packed_branch.tscn", "created_phase2.tscn", "transient_probe.tscn")
+        $_.Name -in @("packed_branch.tscn", "created_phase2.tscn", "transient_probe.tscn", "instance_host.tscn")
     })
     Assert-True ($unexpectedSourceArtifacts.Count -eq 0) "Integration generated artifacts in the checked-in source fixture."
     $integrationSucceeded = $true

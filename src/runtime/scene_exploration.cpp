@@ -295,8 +295,15 @@ json SceneExploration::response(bool paused) const {
     }
 
     json probes = json::array();
+    // A probe that never read is not a probe that saw nothing move. Field trial
+    // 03 got frames, engine_errors 0, no stuck intervals and every probe at
+    // readings 0, which skims as a clean exploration and was a run that
+    // measured nothing at all. Naming them at the top level is what separates
+    // the two.
+    json unread = json::array();
     for (size_t index = 0; index < m_request.probes.size(); ++index) {
         const auto& tracked = m_tracked[index];
+        if (tracked.readings == 0) unread.push_back(m_request.probes[index].name);
         json entry = {{"name", m_request.probes[index].name},
                       {"expression", m_request.probes[index].expression},
                       {"readings", tracked.readings},
@@ -328,7 +335,8 @@ json SceneExploration::response(bool paused) const {
     if (m_stoppedOnStuck) stopped_reason = "stuck";
     else if (m_stoppedOnEngineError) stopped_reason = "engine_error";
 
-    return {{"explored_ms", m_elapsedMs},
+    const bool measured = unread.size() < m_request.probes.size();
+    json response = {{"explored_ms", m_elapsedMs},
             {"frames", m_frames},
             {"stopped_reason", stopped_reason},
             // Whether the game was actually stopped, which is not the same as
@@ -340,10 +348,17 @@ json SceneExploration::response(bool paused) const {
             {"probes", std::move(probes)},
             {"stuck_intervals", std::move(intervals)},
             {"stuck_intervals_truncated", m_intervalsTruncated},
+            // Whether anything was actually sampled. False means the whole
+            // window is unobserved: no probe returned a value, so no frame
+            // could be still and no interval could be stuck, and every other
+            // number here is about driving rather than about the game.
+            {"measured", measured},
             // Said plainly, because the whole report is observations and a
             // caller reading "stuck" as "broken" would be reading in a verdict
             // that nothing here is entitled to give.
             {"verdict", "none"}};
+    if (!unread.empty()) response["unread_probes"] = std::move(unread);
+    return response;
 }
 
 } // namespace runtime
