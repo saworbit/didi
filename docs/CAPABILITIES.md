@@ -33,7 +33,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-The current source / Unreleased surface registers 115 canonical tool names. 112 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 112 canonical tools are implemented. Ten legacy names are registered separately, for exactly 125 `tools/list` entries. The latest documented release is 1.6.0; its historical surface is recorded in the changelog.
+The current source / Unreleased surface registers 115 canonical tool names. 112 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 112 canonical tools are implemented. Ten legacy names are registered separately, for exactly 125 `tools/list` entries. The latest documented release is 1.7.0; its historical surface is recorded in the changelog.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
