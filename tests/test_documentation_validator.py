@@ -1183,7 +1183,7 @@ Second section.
     runs-on: ${{ matrix.os }}
     steps:
       - name: Setup CMake
-        uses: jwlawson/actions-setup-cmake@v2
+        uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2.2.0
         with:
           cmake-version: '3.28.x'
 """,
@@ -1201,11 +1201,11 @@ Second section.
         self.write(
             ".github/workflows/ci.yml",
             """steps:
-  - uses: actions/checkout@v4
-  - uses: actions/upload-artifact@v4
-  - uses: actions/download-artifact@v4
-  - uses: softprops/action-gh-release@v2
-  - uses: hendrikmuhs/ccache-action@v1.2
+  - uses: actions/checkout@1111111111111111111111111111111111111111 # v4.2.2
+  - uses: actions/upload-artifact@2222222222222222222222222222222222222222 # v4.6.2
+  - uses: actions/download-artifact@3333333333333333333333333333333333333333 # v4.3.0
+  - uses: softprops/action-gh-release@4444444444444444444444444444444444444444 # v2.3.4
+  - uses: hendrikmuhs/ccache-action@5555555555555555555555555555555555555555 # v1.2.20
 """,
         )
 
@@ -1223,6 +1223,81 @@ Second section.
                 (action, errors),
             )
 
+    def test_rejects_actions_pinned_to_a_mutable_tag(self):
+        # A tag is a pointer the action's owner can move. Pinning to one is a
+        # standing agreement to run whatever they publish next, with a token
+        # that can write to this repository.
+        root = self.make_valid_repository()
+        self.write(
+            ".github/workflows/ci.yml",
+            """jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+""",
+        )
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(
+            any("actions/checkout@v7" in error and "mutable ref" in error for error in errors),
+            errors,
+        )
+
+    def test_rejects_a_sha_pin_with_no_version_comment(self):
+        # An unexplained SHA is unreviewable and unmaintainable: no reader can
+        # tell which release it is, and Dependabot will not offer an update.
+        root = self.make_valid_repository()
+        self.write(
+            ".github/workflows/ci.yml",
+            """jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+""",
+        )
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(
+            any("no" in error and "comment" in error for error in errors),
+            errors,
+        )
+
+    def test_accepts_a_sha_pin_with_a_version_comment(self):
+        root = self.make_valid_repository()
+        self.write(
+            ".github/workflows/ci.yml",
+            """jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+""",
+        )
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertEqual(
+            [error for error in errors if "ci.yml" in error and "pinned" in error],
+            [],
+            errors,
+        )
+
+    def test_the_repository_pins_every_action_it_runs(self):
+        # The rules above are only worth having if this repository passes them.
+        workflows = sorted((REPOSITORY_ROOT / ".github" / "workflows").glob("*.yml"))
+        self.assertTrue(workflows, "no workflows found to check")
+        for workflow in workflows:
+            with self.subTest(workflow=workflow.name):
+                errors = VALIDATOR.validate_workflow_contract(
+                    workflow.name, workflow.read_text(encoding="utf-8")
+                )
+                self.assertEqual(errors, [])
+
     def test_requires_macos_aws_tap_cleanup_before_ccache(self):
         root = self.make_valid_repository()
         workflows = {
@@ -1233,7 +1308,7 @@ Second section.
         os: [macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
 """,
             "cleanup after ccache": """jobs:
   build:
@@ -1242,7 +1317,7 @@ Second section.
         os: [macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
       - name: Remove unused Homebrew tap
         if: runner.os == 'macOS'
         run: |
@@ -1260,7 +1335,7 @@ Second section.
       - name: Remove unused Homebrew tap
         if: runner.os == 'macOS'
         run: brew untap aws/tap
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
 """,
             "cleanup without macOS guard": """jobs:
   build:
@@ -1274,7 +1349,7 @@ Second section.
           if brew tap | grep -qx 'aws/tap'; then
             brew untap aws/tap
           fi
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
 """,
             "cleanup in a different job": """jobs:
   cleanup:
@@ -1289,7 +1364,7 @@ Second section.
   build:
     runs-on: macos-latest
     steps:
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
 """,
             "only first ccache is guarded": """jobs:
   build:
@@ -1301,17 +1376,17 @@ Second section.
           if brew tap | grep -qx 'aws/tap'; then
             brew untap aws/tap
           fi
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
       - name: Separate cache setup
         run: echo separate
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
 """,
             "id-first ccache step": """jobs:
   build:
     runs-on: macos-latest
     steps:
       - id: compiler-cache
-        uses: hendrikmuhs/ccache-action@v1.2.23
+        uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
 """,
             "disconnected presence check": """jobs:
   build:
@@ -1322,26 +1397,26 @@ Second section.
         run: |
           brew tap | grep -qx 'aws/tap' || true
           brew untap aws/tap
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
 """,
             "concrete macOS runner label": """jobs:
   build:
     runs-on: macos-26
     steps:
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
 """,
             "quoted job id": """jobs:
   'build':
     runs-on: macos-latest
     steps:
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
 """,
             "dedented comment before step": """jobs:
   build:
     runs-on: macos-latest
     steps:
 # The runner image carries an unused tap.
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
 """,
             "bare dash step item": """jobs:
   build:
@@ -1349,7 +1424,7 @@ Second section.
     steps:
       -
         id: compiler-cache
-        uses: hendrikmuhs/ccache-action@v1.2.23
+        uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
 """,
             "cleanup text only in env": """jobs:
   build:
@@ -1363,7 +1438,7 @@ Second section.
               brew untap aws/tap
             fi
         run: echo no-cleanup
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
 """,
         }
 
@@ -1392,7 +1467,7 @@ Second section.
           if brew tap | grep -qx 'aws/tap'; then
             brew untap aws/tap
           fi
-      - uses: hendrikmuhs/ccache-action@v1.2.23
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
 """,
             "expression guard and id-first ccache": """jobs:
   build:
@@ -1405,14 +1480,14 @@ Second section.
             brew untap aws/tap
           fi
       - id: compiler-cache
-        uses: hendrikmuhs/ccache-action@v1.2.23
+        uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
 """,
             "Ubuntu step only mentions macOS": """jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Cache compiler; macos-latest uses another job
-        uses: hendrikmuhs/ccache-action@v1.2.23
+        uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
 """,
             "macOS step only echoes action name": """jobs:
   build:

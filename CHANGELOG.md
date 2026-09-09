@@ -13,6 +13,45 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Added
 
+- Repository automation and supply-chain hardening. Someone assessing this
+  project from the outside can now see what is enforced rather than what is
+  claimed.
+
+  **Code scanning.** CodeQL runs the `security-extended` query set over the
+  C++, the Python tooling, and the workflows themselves, on every code pull
+  request and weekly. Before this the only automated security signal was
+  Dependabot, which watches dependencies and says nothing about the C++ that
+  parses JSON-RPC off a pipe. OpenSSF Scorecard publishes a supply-chain score
+  behind a README badge, and dependency review blocks a pull request that
+  introduces a known vulnerability or a copyleft licence.
+
+  **Every action pinned to a commit SHA**, with the release named in a trailing
+  comment. A tag is a pointer its owner can move at any time, which is how one
+  compromised action leaked credentials from thousands of repositories at once.
+  `tools/validate_documentation.py` now rejects a workflow that pins any other
+  way, or that pins a SHA without saying which release it is. Every workflow
+  declares least-privilege `permissions:`, and `actionlint` and `zizmor` run
+  over them on every pull request.
+
+  **A generated test inventory.** `tools/test_inventory.py` derives the counts
+  from the suites themselves -- the native registry through `didi_tests
+  --list`, the Python suites through `ast`, the live harness through its
+  assertion sites -- and writes [docs/TEST_INVENTORY.md](docs/TEST_INVENTORY.md)
+  and the README badge. CI runs `--check` after the build, so a stale number is
+  a red run. The count this replaces went wrong often enough that the
+  documentation validator carries a rule forbidding one specific out-of-date
+  sentence about it.
+
+  The page publishes the Windows figures and says so. The native suite is
+  platform-conditional -- crash capture is Windows-only, and the IPC cases
+  differ between a named pipe and a Unix socket -- so a single native total is
+  false on two platforms out of three. The tool refuses to regenerate off the
+  reference platform rather than quietly replacing them.
+
+  **Branch protection on `main`**, a `CODEOWNERS` file, path-based pull request
+  labelling, categorised release notes, stale-thread handling, and an
+  `.editorconfig` that describes the indentation already in the tree.
+
 - Added `ui_list_controls`: the Control nodes under a root, with the
   viewport-space rectangle each one occupies, its class, visibility, mouse
   filter, and its text where it has any. Editor or game.
@@ -70,6 +109,30 @@ Historical entries describe the surface advertised by those releases. For the ex
 - Added opt-in managed editor recovery: isolated project copies, saved-file checkpoints, one owned-editor restart, explicit reconciliation and preserved-workspace restoration. Four recovery tools expose state and actions without replaying uncertain edits. Ordinary attachment and runtime_launch remain unchanged. See [Managed Recovery](docs/MANAGED_RECOVERY.md) for coverage and limitations.
 
 ### Changed
+
+- CI decides what to run instead of running everything. A single cheap job
+  classifies the changed files, and the two 30-minute Windows Godot integration
+  matrices and the sanitizer build now start only when the change can reach
+  code, fixtures, or the workflow itself. A documentation change used to start
+  all four.
+
+  The workflow-level `paths:` filters that used to gate this are gone, and that
+  is the load-bearing part: a workflow skipped by a path filter reports no
+  result at all rather than reporting success, so a required status check named
+  on it leaves the pull request permanently unmergeable. A `CI Gate` job now
+  runs unconditionally and fails only when something that did run came back
+  red, which is what makes required checks usable here at all.
+
+- The pinned `jsonschema` version is read out of `requirements-dev.txt` by the
+  workflows that assert it, rather than typed into all three places. Dependabot
+  version updates for Python were switched off precisely because a bump could
+  only ever open a pull request that failed until someone edited two more
+  lines; they are on now, and a bump either passes the schema contract suites
+  or it does not.
+
+- The release job publishes with `gh` rather than a third-party action. It is
+  the one job holding `contents: write`, and `gh` is already on the runner, so
+  publishing costs no additional trusted code.
 
 - `project_audit_assets` now verifies both kinds of broken reference against the
   running editor, not just UID ones. A `missing_file` finding says nothing the

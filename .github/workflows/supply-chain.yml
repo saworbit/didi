@@ -1,0 +1,86 @@
+name: Supply Chain
+
+# Two questions about everything this repository trusts:
+#   - Scorecard: how does this project score against the OpenSSF checks for
+#     branch protection, token permissions, pinned dependencies and dangerous
+#     workflow patterns? Results land in the Security tab and behind the badge
+#     in the README, so the answer is public rather than assumed.
+#   - Dependency review: does this pull request introduce a dependency with a
+#     known vulnerability or an incompatible licence? The only package
+#     ecosystem here is GitHub Actions, which is also the one with write access
+#     to the repository.
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  # Scorecard's Branch-Protection check reruns when the rules change.
+  branch_protection_rule:
+  schedule:
+    - cron: '41 5 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scorecard:
+    name: OpenSSF Scorecard
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      # Upload the SARIF to the code-scanning dashboard.
+      security-events: write
+      # Publish to the OpenSSF API so the README badge can resolve.
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard Analysis
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Public repository: publishing is what lets the badge and the
+          # OpenSSF API report a score at all.
+          publish_results: true
+
+      - name: Upload Scorecard Results
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          sarif_file: results.sarif
+
+  dependency-review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Review Dependency Changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+          # This project ships under MIT and vendors only permissive
+          # single-header libraries (see THIRD_PARTY.md). A copyleft dependency
+          # arriving by accident is a licence decision, not a build detail, so
+          # it stops here and gets made deliberately.
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, LGPL-2.1, LGPL-3.0
+          comment-summary-in-pr: on-failure

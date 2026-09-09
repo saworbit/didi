@@ -645,21 +645,85 @@ def _step_uses_ccache_action(step: str) -> bool:
     return bool(re.match(r"^hendrikmuhs/ccache-action@", uses))
 
 
+# `uses: owner/repo[/sub/path]@ref`, where the ref is either a 40-character
+# commit SHA followed by a `# vX.Y.Z` comment, or a bare tag. Both forms are
+# parsed so the Node 20 guard below survived the move to SHA pinning; only the
+# first is accepted by the pinning rule.
+USES_PATTERN = re.compile(
+    r"^\s*(?:-\s+)?uses:\s*"
+    r"(?P<action>[A-Za-z0-9_.\-]+/[A-Za-z0-9_./\-]+)"
+    r"@(?P<ref>[A-Za-z0-9_.\-/]+)"
+    r"(?:\s*#\s*(?P<comment>.*))?$",
+    re.MULTILINE,
+)
+SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+VERSION_COMMENT_PATTERN = re.compile(r"^v(\d+(?:\.\d+){0,2})\b")
+
+
+def _action_root(action: str) -> str:
+    """Return `owner/repo` for a reference that may also name a subdirectory."""
+
+    return "/".join(action.split("/")[:2])
+
+
+def _action_references(text: str) -> list[tuple[str, str, str, str | None]]:
+    """Return `(action, ref, owner/repo, version)` for every `uses:` in *text*.
+
+    `version` is the release the reference claims -- read from the tag, or from
+    the `# vX.Y.Z` comment beside a SHA pin -- or None when it names neither.
+    """
+
+    references: list[tuple[str, str, str, str | None]] = []
+    for match in USES_PATTERN.finditer(text):
+        action = match.group("action")
+        ref = match.group("ref")
+        comment = (match.group("comment") or "").strip()
+        tag_version = VERSION_COMMENT_PATTERN.match(ref)
+        comment_version = VERSION_COMMENT_PATTERN.match(comment)
+        version: str | None = None
+        if tag_version:
+            version = tag_version.group(1)
+        elif comment_version:
+            version = comment_version.group(1)
+        references.append((action, ref, _action_root(action), version))
+    return references
+
+
 def validate_workflow_contract(relative_path: str, text: str) -> list[str]:
     """Validate release-runner assumptions that have caused packaging failures."""
     errors: list[str] = []
-    for match in re.finditer(
-        r"uses:\s*([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@v(\d+(?:\.\d+){0,2})\b", text
-    ):
-        action, version_text = match.groups()
-        minimum = MINIMUM_NODE24_ACTION_VERSIONS.get(action)
+    for action, ref, root, version_text in _action_references(text):
+        # Every third-party action runs with a token against this repository. A
+        # tag is a pointer its owner can move at any time, so pinning to one is
+        # a standing agreement to run whatever they publish next -- which is
+        # how tj-actions/changed-files became a credential leak in thousands of
+        # repositories at once. A SHA cannot move. The comment beside it says
+        # which release it is, and Dependabot updates the pair together.
+        if action.startswith("./"):
+            continue
+        if not SHA_PATTERN.match(ref):
+            errors.append(
+                f"{relative_path}: {action}@{ref} is pinned to a mutable ref. "
+                "Pin the 40-character commit SHA and name the version in a "
+                "trailing comment, so what runs cannot change under the tag."
+            )
+            continue
+        if version_text is None:
+            errors.append(
+                f"{relative_path}: {action}@{ref} is pinned to a SHA with no "
+                "`# vX.Y.Z` comment. Without one nobody can tell which release "
+                "it is, and Dependabot will not offer an update."
+            )
+            continue
+
+        minimum = MINIMUM_NODE24_ACTION_VERSIONS.get(root)
         observed = tuple(int(part) for part in version_text.split("."))
         padded_observed = observed + (0,) * (3 - len(observed))
         padded_minimum = minimum + (0,) * (3 - len(minimum)) if minimum else None
         if padded_minimum is not None and padded_observed < padded_minimum:
             recommendation = ".".join(str(part) for part in minimum)
             errors.append(
-                f"{relative_path}: {action}@v{version_text} still targets deprecated Node 20; "
+                f"{relative_path}: {action} v{version_text} still targets deprecated Node 20; "
                 f"use v{recommendation} or later"
             )
 
@@ -681,7 +745,7 @@ def validate_workflow_contract(relative_path: str, text: str) -> list[str]:
 
     for job in _workflow_job_blocks(text):
         for step in _workflow_steps(job):
-            if "jwlawson/actions-setup-cmake@v2" not in step:
+            if "jwlawson/actions-setup-cmake@" not in step:
                 continue
             if not re.search(r"cmake-version:\s*['\"]?3\.28\.x['\"]?", step):
                 continue

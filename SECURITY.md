@@ -26,10 +26,35 @@ Never include a real session token or descriptor file in an issue, log excerpt, 
 
 ---
 
+## Automated Checks
+
+These run continuously so a defect does not depend on someone thinking to look
+for it. Findings land in the repository's
+[Security tab](https://github.com/saworbit/didi/security).
+
+| Check | What it covers | When it runs |
+| --- | --- | --- |
+| [CodeQL](.github/workflows/codeql.yml) | The C++ that parses JSON-RPC off a pipe, the Python tooling, and the workflows. `security-extended` query set. | Every pull request that touches code, and weekly |
+| [OpenSSF Scorecard](.github/workflows/supply-chain.yml) | Branch protection, token permissions, pinned dependencies, dangerous workflow patterns. Score is public behind the README badge. | Push to `main`, weekly, and when branch rules change |
+| [Dependency review](.github/workflows/supply-chain.yml) | A dependency arriving with a known vulnerability or a copyleft licence. | Every pull request |
+| [zizmor and actionlint](.github/workflows/lint.yml) | Workflow security: injectable `${{ }}` interpolation, over-broad tokens, credentials left on disk by `checkout`. | Every pull request |
+| [Sanitizers](.github/workflows/ci.yml) | ASan and UBSan over the whole native suite: real allocation and lifetime paths. | Every pull request that touches code |
+| Secret scanning with push protection | A credential committed by accident, blocked at push time. | Every push |
+| Dependabot | Security and version updates for the GitHub Actions and the pinned Python dependency. | Weekly and monthly |
+
+Every action a workflow runs is pinned to a commit SHA rather than a tag, and
+`tools/validate_documentation.py` fails the build on any workflow that is not.
+See [THIRD_PARTY.md](THIRD_PARTY.md) for the vendored sources no scanner can
+reach.
+
+---
+
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability in Didi, please do **not** open a public issue.
 
-Instead, report it through GitHub Private Vulnerability Reporting or contact the project maintainers directly. Include the Didi version, operating system, Godot version, session kind (`editor` or `game`), whether the default or an overridden descriptor directory was used, and the smallest safe reproduction. Redact tokens, user-specific paths, project content, and unrelated logs.
+Report it through [GitHub Private Vulnerability Reporting](https://github.com/saworbit/didi/security/advisories/new), which is enabled on this repository, or contact the project maintainers directly. Include the Didi version, operating system, Godot version, session kind (`editor` or `game`), whether the default or an overridden descriptor directory was used, and the smallest safe reproduction. Redact tokens, user-specific paths, project content, and unrelated logs.
+
+You can expect an acknowledgement within 5 working days and an assessment of whether the report is confirmed within 14. A confirmed vulnerability is fixed on the current minor line and disclosed through a GitHub Security Advisory once a fix is available. If a report turns out to fall outside the security boundary described above, that is said plainly with the reasoning, rather than left unanswered.
 
 We appreciate your efforts to responsibly disclose findings and will investigate and patch confirmed issues promptly.

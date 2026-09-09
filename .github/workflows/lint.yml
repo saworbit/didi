@@ -1,41 +1,17 @@
 name: Fast Lint & Docs
 
+# No path filter. This workflow is cheap, it is a required status check, and a
+# workflow skipped by a path filter reports nothing at all rather than
+# reporting success -- which leaves a pull request permanently unmergeable.
 on:
   push:
-    branches: [ main, master ]
-    paths:
-      - 'docs/**'
-      - '*.md'
-      - '.github/workflows/lint.yml'
-      - '.github/workflows/release.yml'
-      - 'tools/validate_documentation.py'
-      - 'tests/test_documentation_validator.py'
-      - 'CMakeLists.txt'
-      - 'include/didi/mcp/mcp_protocol.hpp'
-      - 'src/standalone/main.cpp'
-      - 'src/mcp/tool_registry.cpp'
-      - 'addons/didi/**'
-      - 'demo/addons/didi/**'
-      - 'tests/test_editor_console.py'
-      - '.github/workflows/ci.yml'
+    branches: [ main, master, dev ]
   pull_request:
     branches: [ main, master ]
-    paths:
-      - 'docs/**'
-      - '*.md'
-      - '.github/workflows/lint.yml'
-      - '.github/workflows/release.yml'
-      - 'tools/validate_documentation.py'
-      - 'tests/test_documentation_validator.py'
-      - 'CMakeLists.txt'
-      - 'include/didi/mcp/mcp_protocol.hpp'
-      - 'src/standalone/main.cpp'
-      - 'src/mcp/tool_registry.cpp'
-      - 'addons/didi/**'
-      - 'demo/addons/didi/**'
-      - 'tests/test_editor_console.py'
-      - '.github/workflows/ci.yml'
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -45,15 +21,57 @@ jobs:
   fast-docs-check:
     name: Validate Docs
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout Shallow
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Validate Documentation Contract
         run: |
           python -m unittest tests.test_documentation_validator -v
           python -m unittest tests.test_field_trial -v
           python -m unittest tests.test_editor_console -v
+          python -m unittest tests.test_test_inventory -v
+          python -m unittest tests.test_ci_change_classification -v
           python tools/validate_documentation.py
+
+  # A workflow file is executable code with write access to this repository.
+  # actionlint catches the syntax, expression and shell mistakes that otherwise
+  # only surface as a red run; zizmor catches the security ones -- injectable
+  # ${{ }} interpolation into a shell, over-broad token permissions, credentials
+  # left on disk by checkout.
+  workflow-lint:
+    name: Lint Workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout Shallow
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Run actionlint
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Pinned by version and verified by checksum. Piping an installer
+          # straight from the network into bash is exactly the supply-chain
+          # shape this job exists to complain about.
+          version="1.7.12"
+          sha256="8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+          curl --fail --location --retry 3 --retry-delay 5 \
+            --output actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_amd64.tar.gz"
+          echo "${sha256}  actionlint.tar.gz" | sha256sum --check --strict
+          tar -xzf actionlint.tar.gz actionlint
+          ./actionlint -color
+
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99 # v0.6.3

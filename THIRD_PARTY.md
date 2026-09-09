@@ -32,14 +32,21 @@ live harness runs against real 4.5.1 and 4.7.2 editors. Both have to stay true.
 
 ## What Dependabot does and does not cover
 
-Dependabot watches the GitHub Actions the workflows pin, monthly, through
+Dependabot watches the GitHub Actions the workflows pin, weekly, and the Python
+pin in `requirements-dev.txt`, monthly, through
 [`.github/dependabot.yml`](.github/dependabot.yml).
+
+Actions are pinned to commit SHAs rather than tags, each with a `# vX.Y.Z`
+comment beside it. `tools/validate_documentation.py` rejects a workflow that
+pins any other way, and Dependabot updates the SHA and its comment together, so
+the pin costs nothing in maintenance.
+
+Python version bumps used to be switched off. `requirements-dev.txt` pins
+`jsonschema` exactly and CI asserts that pin, but the version was also typed
+into both workflows, so any bump opened a pull request that failed until
+somebody edited two more lines. Both workflows now read the version out of
+`requirements-dev.txt`, so a bump either passes the schema contract suites or
+it does not, and that is the whole review.
 
 It does not watch anything in the table above, and it cannot: there is no
 manifest for it to read. Those three files are reviewed by hand or not at all.
-
-Python is watched for security only. `requirements-dev.txt` pins
-`jsonschema==4.25.1` and CI asserts that exact version on purpose, so automatic
-version bumps are switched off: they would open a pull request that always
-fails until someone edits the assertion. Dependabot security alerts still cover
-it, because the dependency graph reads the file either way.
