@@ -261,6 +261,13 @@ jobs:
           # a rule forbidding the stale sentence. The counts are now derived
           # from the binary's own registry and from unittest discovery, and
           # this step fails when the committed inventory disagrees.
+          #
+          # The published figures are the Windows ones, because the native
+          # suite is platform-conditional: crash capture is Windows-only, and
+          # the IPC cases differ between a named pipe and a Unix socket. The
+          # tool knows that and reports a skip on the POSIX runners rather than
+          # a failure, so the gate is kept in one place rather than split
+          # between here and an `if:` condition.
           if [ "$RUNNER_OS" = "Windows" ]; then
             export DIDI_TEST_BINARY="$PWD/build/Release/didi_tests.exe"
           else

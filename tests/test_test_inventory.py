@@ -12,6 +12,7 @@ import importlib.util
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -182,6 +183,37 @@ class BadgeTests(unittest.TestCase):
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn(inventory.BADGE_START, readme)
         self.assertIn(inventory.BADGE_END, readme)
+
+
+class ReferencePlatformTests(unittest.TestCase):
+    """The page publishes one platform's native figures and must say so.
+
+    The first version of this tool did not, and the macOS runner rejected the
+    committed Windows count within one CI run: crash capture is Windows-only,
+    and the IPC cases differ because a named pipe and a Unix socket are not the
+    same transport.
+    """
+
+    def test_the_page_names_its_platform(self):
+        page = (REPO_ROOT / "docs" / "TEST_INVENTORY.md").read_text(encoding="utf-8")
+        self.assertIn(f"**These are the {inventory.REFERENCE_PLATFORM} figures.**", page)
+        self.assertIn("platform-conditional", page)
+
+    def test_rendering_always_names_the_platform(self):
+        rendered = inventory.render_inventory(
+            [inventory.Suite(name="Native", unit="tests", total=1, how="a registry.")]
+        )
+        self.assertIn(inventory.REFERENCE_PLATFORM, rendered)
+
+    def test_check_is_a_skip_not_a_failure_off_the_reference_platform(self):
+        with mock.patch.object(inventory.platform, "system", return_value="Linux"):
+            self.assertEqual(inventory.main(["--check"]), 0)
+
+    def test_regeneration_refuses_off_the_reference_platform(self):
+        # The dangerous direction: writing another platform's numbers into a
+        # page that claims Windows figures would be silent and wrong.
+        with mock.patch.object(inventory.platform, "system", return_value="Darwin"):
+            self.assertEqual(inventory.main([]), 2)
 
 
 class RenderingTests(unittest.TestCase):

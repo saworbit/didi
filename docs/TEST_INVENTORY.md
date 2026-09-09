@@ -4,11 +4,13 @@
 
 Every number here is derived from the suites themselves rather than written down beside them. The native total comes from the test binary's own registry, the Python totals from parsing the test modules, and the harness total from counting its assertions. A test added without a line appearing here means the generator is wrong, which is a defect worth knowing about.
 
+**These are the Windows figures.** The native suite is platform-conditional and the difference is not small: crash capture is Windows-only, and the IPC cases differ because a named pipe and a Unix socket are not the same transport, so the POSIX runners register roughly a dozen fewer native tests. Every platform runs the whole Python suite. Windows is the reference here because it is the only platform with the live Godot integration harness, and because it runs the largest native suite, so nothing below is an overstatement of what another platform does.
+
 ## Totals
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **799** |
+| Automated tests | **803** |
 | Live-harness assertions | 783 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
@@ -76,7 +78,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**285 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**289 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
@@ -95,7 +97,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_phase7_plan_ownership.py` | 10 |
 | `test_phase7_schema_contract.py` | 4 |
 | `test_phase7_signal_admission.py` | 3 |
-| `test_test_inventory.py` | 18 |
+| `test_test_inventory.py` | 22 |
 | `test_tool_output_schema_contract.py` | 4 |
 | `test_yolo_mode.py` | 6 |
 

@@ -70,6 +70,13 @@ involves. Add a row there if you vendor anything else.
    badge in the README. CI runs `--check` after the build, so a stale
    inventory is a red run rather than a number nobody notices going wrong.
 
+   **Regenerate on Windows.** The native suite is platform-conditional --
+   crash capture is Windows-only, and the IPC cases differ between a named
+   pipe and a Unix socket -- so the page publishes the Windows figures and
+   says so. On Linux or macOS the tool refuses to regenerate rather than
+   overwrite them, and `--check` reports a skip. Use `--json` to inspect the
+   counts on whatever platform you are actually on.
+
 ---
 
 ## 🚦 What CI runs, and when

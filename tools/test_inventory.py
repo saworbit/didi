@@ -37,6 +37,7 @@ import argparse
 import ast
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -44,6 +45,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# The native suite is platform-conditional, and not by a little: crash capture
+# is Windows-only, and the IPC tests differ because named pipes and Unix
+# sockets are not the same transport. A single committed native total is
+# therefore false on two platforms out of three, and the first version of this
+# tool published one anyway -- Windows numbers, which the macOS runner
+# immediately and correctly rejected.
+#
+# So the page names its platform. Windows is the reference because it is the
+# only platform with the live Godot integration harness, and it runs the
+# largest native suite, so the published figure understates nothing.
+REFERENCE_PLATFORM = "Windows"
 INVENTORY_PATH = REPO_ROOT / "docs" / "TEST_INVENTORY.md"
 README_PATH = REPO_ROOT / "README.md"
 
@@ -383,6 +396,18 @@ def render_inventory(suites: list[Suite]) -> str:
         "which is a defect worth knowing about."
     )
     lines.append("")
+    lines.append(
+        f"**These are the {REFERENCE_PLATFORM} figures.** The native suite is "
+        "platform-conditional and the difference is not small: crash capture "
+        "is Windows-only, and the IPC cases differ because a named pipe and a "
+        "Unix socket are not the same transport, so the POSIX runners register "
+        "roughly a dozen fewer native tests. Every platform runs the whole "
+        "Python suite. Windows is the reference here because it is the only "
+        "platform with the live Godot integration harness, and because it runs "
+        "the largest native suite, so nothing below is an overstatement of "
+        "what another platform does."
+    )
+    lines.append("")
     lines.append("## Totals")
     lines.append("")
     lines.append("| Measure | Count |")
@@ -496,6 +521,30 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "test_inventory: refusing to write an inventory with no native suite; "
             "--no-native is for --json only.",
+            file=sys.stderr,
+        )
+        return 2
+
+    # Everything from here writes or verifies the published page, and the page
+    # states one platform's figures. On any other platform the honest answers
+    # are "nothing to check" and "I will not overwrite this with numbers that
+    # do not describe it".
+    current = platform.system()
+    if current != REFERENCE_PLATFORM:
+        if args.check:
+            print(
+                f"test_inventory: skipped on {current}. The published counts are "
+                f"the {REFERENCE_PLATFORM} figures, and the native suite is "
+                "platform-conditional, so there is nothing here to compare "
+                f"against. The {REFERENCE_PLATFORM} job checks them."
+            )
+            return 0
+        print(
+            f"test_inventory: refusing to regenerate on {current}. The page "
+            f"publishes the {REFERENCE_PLATFORM} figures and this platform "
+            "registers a different set of native tests, so writing here would "
+            f"replace them with numbers the page does not claim. Regenerate on "
+            f"{REFERENCE_PLATFORM}, or use --json to inspect this platform.",
             file=sys.stderr,
         )
         return 2

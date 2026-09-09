@@ -42,6 +42,12 @@ Historical entries describe the surface advertised by those releases. For the ex
   documentation validator carries a rule forbidding one specific out-of-date
   sentence about it.
 
+  The page publishes the Windows figures and says so. The native suite is
+  platform-conditional -- crash capture is Windows-only, and the IPC cases
+  differ between a named pipe and a Unix socket -- so a single native total is
+  false on two platforms out of three. The tool refuses to regenerate off the
+  reference platform rather than quietly replacing them.
+
   **Branch protection on `main`**, a `CODEOWNERS` file, path-based pull request
   labelling, categorised release notes, stale-thread handling, and an
   `.editorconfig` that describes the indentation already in the tree.
