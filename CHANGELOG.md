@@ -49,6 +49,13 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   minutes of the release attempt above produced one line, the one saying the
   suite had started.
 
+- Every pull request now runs `ctest` against the same interpreter the release
+  hands CMake. `release.yml` passes its virtual environment's Python through
+  `-DPython3_EXECUTABLE` and `ci.yml` did not, so ctest's Python suite ran on
+  the runner's own interpreter, which has no `jsonschema` and cannot import two
+  of the modules. That difference is the only reason the release job's ctest
+  could load them while a pull request's could not.
+
 - Every pull request now runs `ctest`, which is what gates a tag. Nothing else
   ran it: the other steps run the native binary directly and then name Python
   modules one at a time, in separate processes and separate jobs, while `ctest`
