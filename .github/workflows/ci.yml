@@ -78,7 +78,7 @@ jobs:
           fi
 
           echo "Changed files:"
-          echo "$changed" | sed 's/^/  /'
+          printf '%s\n' "$changed" | awk '{ print "  " $0 }'
 
           # Anything that cannot reach the compiler, the tool manifest, the
           # documentation contract, or any test. Everything else builds.
