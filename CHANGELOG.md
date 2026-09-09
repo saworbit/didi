@@ -13,6 +13,18 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Fixed
 
+- `editor_reload_project` re-indexes the offline caches it says it re-indexed.
+  With no editor connected it reported `Offline caches re-indexed.` and dropped
+  nothing, so the cached resource index kept answering with what it read before.
+  Callers reach for this tool after changing files outside Didi, which is
+  exactly when that answer is wrong. (#358)
+
+- The shared resource index is keyed on the directory rather than on the
+  spelling of it. Almost every tool asks for `.`, so the cache filed two
+  different projects under one key and could serve each the other's index.
+  Resolving the path first is also what lets two tools that name the same
+  project differently share one crawl, which is the whole point of the cache.
+
 - The native suite no longer leaves its checkpoint fixtures in the temporary
   directory when a run dies inside a test. The destructor that removes them
   cannot run if the process never returns, and the file count boundary test
@@ -189,6 +201,21 @@ Historical entries describe the surface advertised by those releases. For the ex
   attached, this is the only way to record which build a run was handed.
 
 ### Changed
+
+- `project_analyze_impact`, `project_rename_references` and
+  `project_analyze_bloat` no longer crawl the whole project from scratch. They
+  built their own indexer while every other read tool shared one, so inspecting
+  a resource and then asking for its impact walked the tree and parsed every
+  `.uid` file twice. They use the shared index now. `project_rename_references`
+  deliberately does not: it rewrites files, and a resource created outside Didi
+  while the cached list was alive would be missing from it, which is the
+  half-applied rename its truncation check exists to refuse. (#355)
+
+- Node path impact analysis skips a file that cannot mention the target. It used
+  to duplicate the file text to mask comments and strings, then allocate a heap
+  string per line, for every scene and script in the project, and throw the lot
+  away one line later. Most files in a project never name a given node path.
+  (#356)
 
 - CodeQL now runs on every pull request rather than on a path filter. A change
   that "only touches documentation" is a claim worth checking rather than
