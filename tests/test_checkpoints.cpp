@@ -1,4 +1,5 @@
 #include "didi/runtime/checkpoint_store.hpp"
+#include "didi/runtime/session_client.hpp"
 #include <atomic>
 #include <chrono>
 #include <fstream>
@@ -6,6 +7,12 @@
 #include <iostream>
 #include <stdexcept>
 #include <thread>
+#include <vector>
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 void registerTest(const std::string&, std::function<void()>);
 #define TEST(suite, name)                                                                          \
     void test_##suite##_##name();                                                                  \
@@ -21,16 +28,78 @@ void registerTest(const std::string&, std::function<void()>);
 namespace {
 namespace fs = std::filesystem;
 using didi::runtime::CheckpointStore;
+const std::string kFixturePrefix = "didi-checkpoint-test-";
+uint64_t currentProcessId() {
+#if defined(_WIN32)
+    return static_cast<uint64_t>(GetCurrentProcessId());
+#else
+    return static_cast<uint64_t>(getpid());
+#endif
+}
+// A run that dies inside a test never runs the destructor below, so it leaves
+// its whole tree in the temp directory, and the file count test leaves ten
+// thousand files. Nothing used to clear those, so every death made the
+// directory dirtier for the next run.
+//
+// The owning pid is in the fixture name so this can tell a corpse from a suite
+// running right now in another process, and remove only the corpse. A pid that
+// still answers is left alone: keeping a stale directory costs nothing, and
+// deleting a live one out from under a concurrent run would invent a failure.
+// Names from before the pid was added parse as a pid no process can have, so
+// they are collected too.
+void removeAbandonedFixtures() {
+    std::error_code ec;
+    const auto temp = fs::temp_directory_path(ec);
+    if (ec) return;
+    std::vector<fs::path> abandoned;
+    for (fs::directory_iterator it(temp, ec), end; !ec && it != end; it.increment(ec)) {
+        const auto name = it->path().filename().string();
+        if (name.rfind(kFixturePrefix, 0) != 0) continue;
+        const auto tail = name.substr(kFixturePrefix.size());
+        uint64_t owner = 0;
+        try {
+            owner = std::stoull(tail.substr(0, tail.find('-')));
+        } catch (const std::exception&) {
+            continue;
+        }
+        if (owner == 0 || owner == currentProcessId()) continue;
+        if (didi::runtime::queryProcessIdentity(owner).isOk()) continue;
+        abandoned.push_back(it->path());
+    }
+    // Collected first. Removing entries while the directory is being walked is
+    // not something the iterator promises to survive.
+    for (const auto& path : abandoned) {
+        std::error_code remove_error;
+        fs::remove_all(path, remove_error);
+        if (remove_error) {
+            std::cerr << "warning: abandoned checkpoint fixture " << path.string()
+                      << " could not be removed: " << remove_error.message() << std::endl;
+        }
+    }
+}
 struct Fixture {
     // Darwin's temporary directory can use /var -> /private/var. Resolve the
     // existing temp root so normal fixtures satisfy production's no-link policy.
     fs::path root = fs::canonical(fs::temp_directory_path()) /
-                    ("didi-checkpoint-test-" +
+                    (kFixturePrefix + std::to_string(currentProcessId()) + "-" +
                      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    Fixture() { fs::create_directories(root / "source"); }
+    Fixture() {
+        static const bool swept = [] {
+            removeAbandonedFixtures();
+            return true;
+        }();
+        (void)swept;
+        fs::create_directories(root / "source");
+    }
     ~Fixture() {
         std::error_code ec;
         fs::remove_all(root, ec);
+        // A destructor cannot throw, so this says it instead. Dropping the code
+        // is what let a failed removal leave its files behind without a word.
+        if (ec) {
+            std::cerr << "warning: checkpoint fixture " << root.string()
+                      << " was not removed: " << ec.message() << std::endl;
+        }
     }
     void put(const fs::path& name, const std::string& data) {
         fs::create_directories((root / name).parent_path());
@@ -162,6 +231,30 @@ TEST(Checkpoints, PublicSummariesExcludePerFileManifestData) {
     CHECK(listed.value().size() == 1);
     CHECK(!listed.value()[0].contains("entries"));
     CHECK(!listed.value()[0].contains("directories"));
+}
+TEST(Checkpoints, AbandonedFixtureSweepKeepsLiveOwnersAndClearsDeadOnes) {
+    const auto temp = fs::canonical(fs::temp_directory_path());
+    // Above every pid Windows, Linux or macOS can issue, so it names no running
+    // process and cannot start naming one while this test runs.
+    const auto dead = temp / (kFixturePrefix + "4294967296-sweep-probe");
+    const auto live = temp / (kFixturePrefix + std::to_string(currentProcessId()) + "-sweep-probe");
+    const auto unowned = temp / (kFixturePrefix + "not-a-pid");
+    for (const auto& directory : {dead, live, unowned}) {
+        fs::create_directories(directory / "source");
+        std::ofstream(directory / "source/file", std::ios::binary) << "x";
+    }
+    removeAbandonedFixtures();
+    const bool cleared_dead = !fs::exists(dead);
+    const bool kept_live = fs::exists(live / "source/file");
+    const bool kept_unowned = fs::exists(unowned / "source/file");
+    // Read the answers, then clean up, then assert. A test about litter in the
+    // temp directory should not leave any behind when it fails.
+    std::error_code ec;
+    for (const auto& directory : {dead, live, unowned})
+        fs::remove_all(directory, ec);
+    CHECK(cleared_dead);
+    CHECK(kept_live);
+    CHECK(kept_unowned);
 }
 TEST(Checkpoints, FileCountBoundaryRetainsMaximumSizedSnapshots) {
     Fixture f;

@@ -13,6 +13,22 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Fixed
 
+- The native suite no longer leaves its checkpoint fixtures in the temporary
+  directory when a run dies inside a test. The destructor that removes them
+  cannot run if the process never returns, and the file count boundary test
+  creates ten thousand files, so repeated deaths piled up more than a hundred
+  thousand of them. Nothing ever cleared those, and nothing said they were
+  there.
+
+  Each fixture now carries the pid that created it, and a run removes the
+  fixtures whose owner is gone before it creates its own. A pid that still
+  answers is left alone, so a suite running at the same time in another process
+  keeps its files; the safe mistake is to keep a stale directory, not to delete
+  a live one. The destructor now reports a removal it could not complete instead
+  of discarding the error code, which is what made the pile up silent. Two
+  suites run side by side stay green and clear the temporary directory between
+  them. (#363)
+
 - Offline tools no longer hand their child processes the server's standard
   input (#350). Didi speaks JSON-RPC on stdio, so a `dotnet build`, a `git`
   call or a headless Godot helper inherited the same handle the server reads
