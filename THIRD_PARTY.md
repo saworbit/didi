@@ -34,7 +34,11 @@ live harness runs against real 4.5.1 and 4.7.2 editors. Both have to stay true.
 
 Dependabot watches the GitHub Actions the workflows pin, weekly, and the Python
 pin in `requirements-dev.txt`, monthly, through
-[`.github/dependabot.yml`](.github/dependabot.yml).
+[`.github/dependabot.yml`](.github/dependabot.yml). Both carry a seven-day
+cooldown, so a brand-new release is not adopted on the day it is published --
+long enough for a compromised publish to be caught and yanked. Cooldown does not
+apply to security updates, so a fix for a known vulnerability still arrives at
+once.
 
 Actions are pinned to commit SHAs rather than tags, each with a `# vX.Y.Z`
 comment beside it. `tools/validate_documentation.py` rejects a workflow that
