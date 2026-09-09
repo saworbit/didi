@@ -13,6 +13,11 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Fixed
 
+- `Tools.OfflineCapabilityIsDerived` sets up the tool registry it reads instead
+  of inheriting whatever an earlier test left there. It passed only in a full
+  run and failed on its own, which is the opposite of what running a single test
+  is for, and on its own it never reached the property it exists to check.
+
 - `editor_reload_project` re-indexes the offline caches it says it re-indexed.
   With no editor connected it reported `Offline caches re-indexed.` and dropped
   nothing, so the cached resource index kept answering with what it read before.
