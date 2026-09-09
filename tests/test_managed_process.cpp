@@ -89,6 +89,25 @@ struct ChildFixture {
             std::this_thread::sleep_for(std::chrono::seconds(60));
             std::_Exit(38);
         }
+        // Publishes its own pid and then holds. Used as the grandchild in the
+        // orphan test: the wrapper starts this in the background, so the pid
+        // file appears within milliseconds of launch rather than after an
+        // interpreter has finished starting up.
+        if (args[2] == "publish_self_and_hold" && args.size() == 4) {
+            const fs::path published(args[3]);
+            const fs::path partial(published.string() + ".partial");
+            {
+#if defined(_WIN32)
+                std::ofstream(partial) << static_cast<uint64_t>(GetCurrentProcessId());
+#else
+                std::ofstream(partial) << static_cast<uint64_t>(getpid());
+#endif
+            }
+            std::error_code ec;
+            fs::rename(partial, published, ec);
+            std::this_thread::sleep_for(std::chrono::seconds(120));
+            std::_Exit(38);
+        }
         if (args[2] == "report") {
             std::cout << didi::json(
                              {{"arguments", std::vector<std::string>(args.begin() + 3, args.end())},
@@ -461,14 +480,21 @@ static void testSessionTimeoutKillsTheWholeProcessTree() {
     const auto published = temp.path / "grandchild.pid";
     const auto published_text = published.generic_string();
 
+    // The wrapper drives this same test binary rather than an interpreter.
+    // The first version used PowerShell for the grandchild and failed on CI
+    // with "grandchild != 0": the session timeout killed the tree before
+    // PowerShell had finished starting, so the pid file never appeared. That
+    // guard doing its job is the only reason it was not a silent pass.
+    const auto self = selfPath().string();
+
 #if defined(_WIN32)
     const auto wrapper = temp.path / "godot.cmd";
     {
         std::ofstream script(wrapper);
         script << "@echo off\n"
-               << "start \"\" /b powershell -NoProfile -Command \"$PID | Out-File -Encoding ascii '"
-               << published_text << "'; Start-Sleep -Seconds 90\"\n"
-               << "powershell -NoProfile -Command \"Start-Sleep -Seconds 90\"\n";
+               << "start \"\" /b \"" << self << "\" --didi-managed-child "
+               << "publish_self_and_hold \"" << published_text << "\"\n"
+               << "\"" << self << "\" --didi-managed-child hold_long\n";
     }
     _putenv_s("GODOT_BIN", wrapper.string().c_str());
 #else
@@ -476,8 +502,9 @@ static void testSessionTimeoutKillsTheWholeProcessTree() {
     {
         std::ofstream script(wrapper);
         script << "#!/bin/sh\n"
-               << "sh -c 'echo $$ > \"" << published_text << "\"; sleep 90' &\n"
-               << "sleep 90\n";
+               << "\"" << self << "\" --didi-managed-child publish_self_and_hold \""
+               << published_text << "\" &\n"
+               << "\"" << self << "\" --didi-managed-child hold_long\n";
     }
     fs::permissions(wrapper, fs::perms::owner_all | fs::perms::group_read |
                                  fs::perms::group_exec);
@@ -485,7 +512,7 @@ static void testSessionTimeoutKillsTheWholeProcessTree() {
 #endif
 
     // Short, because the whole point is what survives the timeout.
-    const auto result = didi::offline::TestRunner::runSession("res://none.tscn", 3, true, true, {});
+    const auto result = didi::offline::TestRunner::runSession("res://none.tscn", 6, true, true, {});
     CHECK_PROCESS(result.exit_code == 124);
 
     uint64_t grandchild = 0;
