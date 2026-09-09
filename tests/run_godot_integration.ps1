@@ -1558,6 +1558,26 @@ try {
         (Tool-Request 91 "scene_close" @{ discard_unsaved = $true }),
         (Tool-Request 92 "scene_create" @{ scene_path = "res://created_phase2.tscn"; root_type = "Node2D"; root_name = "Created" }),
         (Tool-Request 93 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 1 }),
+        # Instancing a packed scene is close to the most common single
+        # operation in Godot editing, and scene_pack_branch used to produce
+        # scenes nothing in the surface could consume. The instance goes into
+        # a different scene from the one it was packed out of, so what is
+        # saved has to be a reference to the file rather than a copy of its
+        # nodes.
+        # Its own scene, because created_phase2.tscn is overwritten later in
+        # this block and the saved markup has to survive to be read.
+        (Tool-Request 2379 "scene_create" @{ scene_path = "res://instance_host.tscn"; root_type = "Node3D"; root_name = "Host" }),
+        (Tool-Request 2380 "scene_instantiate_node" @{ scene_path = "res://packed_branch.tscn";
+            parent_path = "/root"; name = "PackedInstance";
+            properties = @{ position = @{ x = 4; y = 8; z = 2 } } }),
+        (Tool-Request 2381 "scene_get_property" @{ target_node = "/root/Host/PackedInstance"; property_name = "position" }),
+        (Tool-Request 2382 "editor_save_scene" @{}),
+        (Tool-Request 2383 "scene_instantiate_node" @{ scene_path = "res://no_such_scene.tscn"; parent_path = "/root" }),
+        (Tool-Request 2384 "scene_instantiate_node" @{ scene_path = "res://smoke_plugin.gd"; parent_path = "/root" }),
+        (Tool-Request 2385 "editor_undo" @{}),
+        (Tool-Request 2386 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 2 }),
+        (Tool-Request 2387 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 2388 "scene_open" @{ scene_path = "res://created_phase2.tscn" }),
         (Tool-Request 94 "scene_create" @{ scene_path = "res://created_phase2.tscn"; root_type = "Control"; root_name = "Blocked" }),
         (Tool-Request 95 "scene_open" @{ scene_path = "res://packed_branch.tscn" }),
         (Tool-Request 96 "scene_close" @{ discard_unsaved = $true }),
@@ -2640,6 +2660,21 @@ try {
     Assert-True ((Tool-Payload $byId[91]).discarded_unsaved -eq $true) "An explicit discard did not report itself as one."
     Assert-True ((Tool-Payload $byId[92]).opened -eq $true) "New scene was not created and opened."
     Assert-True ((Tool-Payload $byId[93]).scene_tree.name -eq "Created") "Created scene root was not observable."
+    $instanced = Tool-Payload $byId[2380]
+    Assert-True ($instanced.scene_path -eq "res://packed_branch.tscn") "Instancing a packed scene did not report which scene it came from."
+    Assert-True ($instanced.node_path -eq "/root/Host/PackedInstance") "Instancing a packed scene did not report where it landed: $($instanced.node_path)"
+    Assert-True ($instanced.node_type -eq "Node3D") "Instancing a packed scene reported the requested type rather than the class it actually made."
+    $instancePosition = (Tool-Payload $byId[2381]).value
+    Assert-True ($instancePosition.x -eq 4 -and $instancePosition.y -eq 8 -and $instancePosition.z -eq 2) "Initial properties were not applied to the instance root."
+    Assert-True ((Tool-Payload $byId[2382]).status -eq "saved") "The scene holding an instance could not be saved."
+    Assert-True ((Tool-Payload $byId[2379]).opened -eq $true) "The scene meant to hold an instance was not created."
+    $savedScene = Get-Content -LiteralPath (Join-Path $fixtureRoot "instance_host.tscn") -Raw
+    Assert-True ($savedScene -match [regex]::Escape("res://packed_branch.tscn")) "A saved instance did not reference the scene it instances."
+    Assert-True ($savedScene -match "instance=ExtResource") "A packed scene was saved as a copy of its nodes rather than as an instance of it."
+    Assert-True $byId[2383].result.isError "A scene_path that names no file was instanced anyway."
+    Assert-True $byId[2384].result.isError "A scene_path that is not a .tscn was instanced anyway."
+    $afterUndo = Tool-Payload $byId[2386]
+    Assert-True (@($afterUndo.scene_tree.children | Where-Object { $_.name -eq "PackedInstance" }).Count -eq 0) "Undo did not remove an instanced packed scene."
     Assert-True $byId[94].result.isError "Scene create overwrote an existing target without overwrite: true."
     Assert-True ((Tool-Payload $byId[95]).opened -eq $true) "Existing PackedScene could not be reopened."
     Assert-True ((Tool-Payload $byId[96]).closed -eq $true) "Reopened clean scene could not be closed."
@@ -2994,7 +3029,7 @@ try {
 
     $unexpectedSourceArtifacts = @(Get-ChildItem -LiteralPath $sourceFixtureRoot -Force -Recurse | Where-Object {
         $_.Name -like "*.didi-retired-*" -or
-        $_.Name -in @("packed_branch.tscn", "created_phase2.tscn", "transient_probe.tscn")
+        $_.Name -in @("packed_branch.tscn", "created_phase2.tscn", "transient_probe.tscn", "instance_host.tscn")
     })
     Assert-True ($unexpectedSourceArtifacts.Count -eq 0) "Integration generated artifacts in the checked-in source fixture."
     $integrationSucceeded = $true
