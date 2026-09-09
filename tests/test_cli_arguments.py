@@ -130,6 +130,21 @@ class CommandLineTests(unittest.TestCase):
                        "--log-level", "--dump-tool-manifest", "--yolo"):
             self.assertIn(option, help_text)
 
+    def test_version_prints_the_build_it_came_from_as_well_as_the_release(self):
+        # The version cannot tell two builds apart, and the GDExtension is a
+        # separate file a user copies around on its own. Before a session is
+        # attached this is the only way to record which build a run was handed,
+        # which is what field trial 03 needed and did not have.
+        result = _run(["--version"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        self.assertEqual(len(lines), 2, result.stdout)
+        self.assertTrue(lines[0].startswith("didi (godot-mcp-native) v"), result.stdout)
+        self.assertTrue(lines[1].startswith("build "), result.stdout)
+        # Version, commit and configure stamp, so two binaries match only when
+        # they were configured together.
+        self.assertRegex(lines[1], r"^build \d+\.\d+\.\d+\+\S+\.\d{8}T\d{6}$")
+
     def test_manifest_still_prints_json_without_a_project(self):
         result = _run(["--dump-tool-manifest"])
         self.assertEqual(result.returncode, 0, result.stderr)

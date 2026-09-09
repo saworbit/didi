@@ -72,6 +72,38 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Added
 
+- A field trial can be run unattended. `tools/field-trial/trial.py` seeds the
+  working directory, briefs a fresh tester in its own client session, and scores
+  what that tester did from the transcript rather than from its own account of
+  itself. `--dry-run` exercises everything except the spending.
+
+  The reason to automate it is not the agent's hour, it is the maintainer's.
+  Three trials have now produced defects no suite found, and each cost a morning
+  of seeding by hand and remembering which manifest to score against. The
+  manifest is now dumped from the binary under test rather than copied from
+  wherever one is lying: gating trial 01 scored a binary emitting 94 canonical
+  tools against an on-disk manifest claiming 83, so the uncalled set, which is
+  the interesting half of a coverage report, was wrong about eleven of them.
+
+  It also closes the finding trial 03 paid for. A trial is seeded against a
+  server binary and scored against that binary's manifest, while the live half
+  of every call is answered by a GDExtension the tester installs by hand and no
+  artifact recorded. That run spent about an hour concluding a shipped
+  capability did not exist, because the bridge answering it was six days older
+  than the server. The seed now records the server's build id and the hash of
+  the addon the tester is meant to install, alongside the one lying in the
+  repository's own gitignored `addons/didi`, and `bridge.py` reads back the
+  pairing the server reported on every live session call. Its third verdict is
+  the one worth having: a run where no call ever reported a pairing is
+  `not_observed`, not clean, because nothing in it says which build served it.
+
+- `didi --version` prints the build id under the release version.
+
+  The version cannot tell two builds apart, and the server and the GDExtension
+  are separate files a user copies around separately. A session that has
+  attached reports both halves and says whether they match; before one is
+  attached, this is the only way to record which build a run was handed.
+
 - Fuzz targets for the three places Didi reads bytes it did not write: the IPC
   frame decoder, the JSON-RPC request parser, and base64. libFuzzer, built with
   ASan and UBSan, running on every code pull request and for longer nightly.

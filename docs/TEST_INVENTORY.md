@@ -10,7 +10,7 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **809** |
+| Automated tests | **838** |
 | Live-harness assertions | 789 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
@@ -80,19 +80,19 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**292 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**321 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
 | `test_ci_change_classification.py` | 7 |
-| `test_cli_arguments.py` | 6 |
+| `test_cli_arguments.py` | 7 |
 | `test_control_room_app.py` | 14 |
 | `test_control_room_protocol.py` | 17 |
 | `test_didi_binary.py` | 7 |
 | `test_documentation_validator.py` | 85 |
 | `test_editor_console.py` | 9 |
 | `test_elicitation_confirmation.py` | 6 |
-| `test_field_trial.py` | 81 |
+| `test_field_trial.py` | 109 |
 | `test_managed_recovery.py` | 2 |
 | `test_managed_recovery_adversarial.py` | 3 |
 | `test_managed_recovery_live.py` | 3 |
