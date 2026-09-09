@@ -87,8 +87,10 @@ Three tool names are registered right now and refuse to run: `physics_simulate_s
 4.7.2 builds with the `extension_api.json` hashes recorded, and neither engine exposes a
 public API that satisfies the approved contract. The reasoning, the pinned inputs and the
 result hashes are in
-[`docs/PHASE_7_API_FEASIBILITY.md`](docs/PHASE_7_API_FEASIBILITY.md). The count is 112 of
-115, and the shortfall is printed on the box rather than hidden behind it.
+[`docs/PHASE_7_API_FEASIBILITY.md`](docs/PHASE_7_API_FEASIBILITY.md), and the count they
+come out of is in the [capability matrix](docs/CAPABILITIES.md), which is checked against the
+built binary rather than typed in by hand here. The shortfall is printed on the box rather
+than hidden behind it.
 
 Shipping three plausible-looking successes instead would have taken an afternoon. That
 temptation is the thing this project is built to refuse, in the code and on this page.
