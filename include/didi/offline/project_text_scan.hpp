@@ -26,9 +26,22 @@ struct ProjectTextScan {
     bool truncated{false};
 };
 
+// How the resource list underneath the scan is obtained.
+//
+// shared reuses ResourceIndexer::sharedIndex, which is what every read tool
+// does: a burst of sequential calls collapses to one crawl of the tree, and
+// Didi's own writes drop it. fresh crawls the tree again.
+//
+// A tool that only reports can use the cached list. A tool that rewrites files
+// cannot, because a resource created outside Didi in the cache's lifetime would
+// be missing from the list, and rewriting the references in the files it did
+// see is the half-applied change project_rename_references exists to prevent.
+enum class ScanIndex { shared, fresh };
+
 // Scans root_dir and reads every scene, resource, script and shader in it.
 // Files that cannot be read are skipped rather than failing the scan: a
 // partial answer about a project is worth more than no answer.
-ProjectTextScan scanProjectText(const std::string& root_dir);
+ProjectTextScan scanProjectText(const std::string& root_dir,
+                                ScanIndex index = ScanIndex::shared);
 
 } // namespace didi::offline

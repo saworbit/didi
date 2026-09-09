@@ -1,4 +1,7 @@
 #include "didi/offline/resource_indexer.hpp"
+#include "didi/offline/project_text_scan.hpp"
+#include "didi/mcp/mcp_protocol.hpp"
+#include "didi/common/ipc_channel.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -327,6 +330,60 @@ static void test_imported_assets_take_their_uid_from_import_metadata() {
     ASSERT_TRUE(metadata == nullptr || metadata->uid.empty());
 }
 
+namespace didi::mcp {
+// Declared the way tool_registry.cpp declares it. Calling the handler directly
+// puts the offline branch under test without standing up a registry whose ipc
+// client an earlier test may have set.
+CallToolResult handleEditorReloadProject(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+} // namespace didi::mcp
+
+static void test_offline_reload_project_drops_the_shared_index() {
+    // Break caught: the offline branch answered "Offline caches re-indexed."
+    // and re-indexed nothing. Callers reach for editor_reload_project after
+    // editing files outside Didi, and the cached index carried on answering
+    // with what it read before.
+    IndexFixture fixture;
+    fixture.write("scenes/level.tscn", "[gd_scene format=3]\n");
+
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+    const auto before = didi::offline::ResourceIndexer::sharedIndex(fixture.root());
+    ASSERT_EQ(before->query("res://").size(), 1u);
+
+    fixture.write("scenes/menu.tscn", "[gd_scene format=3]\n");
+
+    const auto result = didi::mcp::handleEditorReloadProject(didi::json::object(), nullptr);
+    ASSERT_TRUE(!result.isError);
+
+    const auto after = didi::offline::ResourceIndexer::sharedIndex(fixture.root());
+    ASSERT_TRUE(after != before);
+    ASSERT_EQ(after->query("res://").size(), 2u);
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+}
+
+static void test_project_text_scan_shares_the_index_and_rename_does_not() {
+    // The read paths reuse the cached list, so inspecting a resource and then
+    // asking for its impact crawls the tree once. project_rename_references
+    // cannot: it rewrites files, and a resource created outside Didi while the
+    // cached list was alive would be missing from it, which is the
+    // half-applied rename the truncation check refuses.
+    IndexFixture fixture;
+    fixture.write("scenes/level.tscn", "[gd_scene format=3]\n");
+
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+    const auto warm = didi::offline::ResourceIndexer::sharedIndex(fixture.root());
+    ASSERT_EQ(warm->query("res://").size(), 1u);
+
+    fixture.write("scenes/menu.tscn", "[gd_scene format=3]\n");
+
+    const auto shared = didi::offline::scanProjectText(fixture.root());
+    ASSERT_EQ(shared.resources.size(), 1u);
+
+    const auto fresh = didi::offline::scanProjectText(fixture.root(),
+                                                      didi::offline::ScanIndex::fresh);
+    ASSERT_EQ(fresh.resources.size(), 2u);
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+}
+
 struct RegisterResourceIndexerTests {
     RegisterResourceIndexerTests() {
         registerTest("ResourceIndexer.ExactLookupAndDirectoryListing",
@@ -346,5 +403,9 @@ struct RegisterResourceIndexerTests {
         registerTest("ResourceIndexer.ExternalUidSidecar", test_uid_sidecars_are_indexed_for_external_resources);
         registerTest("ResourceIndexer.ImportedAssetUid",
                      test_imported_assets_take_their_uid_from_import_metadata);
+        registerTest("ResourceIndexer.OfflineReloadDropsSharedIndex",
+                     test_offline_reload_project_drops_the_shared_index);
+        registerTest("ResourceIndexer.ProjectTextScanIndexSharing",
+                     test_project_text_scan_shares_the_index_and_rename_does_not);
     }
 } g_registerResourceIndexerTests;
