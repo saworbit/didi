@@ -66,6 +66,11 @@ Result<CapturedFrame> captureSelectedFrame(const json& params, const std::string
             "camera_identifier selects an editor viewport and a game session has only its root "
             "viewport; omit it");
     }
+    if (!game_session && !selectEditorViewport(camera).has_value()) {
+        return Error::invalidArgument("camera_identifier must be one of " +
+                                      editorViewportIdentifierList() + "; received \"" + camera +
+                                      "\"");
+    }
     if (background != "original" && background != "transparent") {
         return Error::invalidArgument("isolation_background must be original or transparent");
     }
@@ -219,6 +224,11 @@ json ViewportRenderer::capturePasses(const json& params, const std::string& sess
             return rendererError(Error::invalidArgument("camera_identifier must be a string"));
         }
         const std::string camera = params.value("camera_identifier", "active_editor_view");
+        if (!game_session && !selectEditorViewport(camera).has_value()) {
+            return rendererError(Error::invalidArgument(
+                "camera_identifier must be one of " + editorViewportIdentifierList() +
+                "; received \"" + camera + "\""));
+        }
 
         double depth_far = 0.0;
         if (params.contains("depth_far")) {

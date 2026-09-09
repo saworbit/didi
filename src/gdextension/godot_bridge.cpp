@@ -1682,6 +1682,14 @@ Result<ViewportIsolationState> GodotBridge::beginViewportIsolation(
     if (isolation_background != "original" && isolation_background != "transparent") {
         return Error::invalidArgument("isolation_background must be original or transparent");
     }
+    // Refused here, before anything in the editor is touched, because the
+    // transparent branch below picks a viewport from this name and a rollback
+    // is a worse way to find out the name was not one.
+    if (!selectEditorViewport(camera_identifier).has_value()) {
+        return Error::invalidArgument("camera_identifier must be one of " +
+                                      editorViewportIdentifierList() + "; received \"" +
+                                      camera_identifier + "\"");
+    }
     auto& api = GodotApi::instance();
     if (!api.object_get_instance_id || !api.object_get_instance_from_id) {
         return Error::internal("Godot object identity API is unavailable");
@@ -1802,8 +1810,10 @@ Result<ViewportIsolationState> GodotBridge::beginViewportIsolation(
     }
 
     if (isolation_background == "transparent") {
-        bool capture_2d = camera_identifier == "editor_2d" ||
-                          camera_identifier == "active_editor_view_2d";
+        // Checked at the top of this function, so the name is one of the two
+        // lists by the time the isolation has touched anything.
+        const bool capture_2d =
+            *selectEditorViewport(camera_identifier) == EditorViewport::TwoD;
         Result<VariantValue> viewport = capture_2d
             ? callObject(editor.value(), "EditorInterface", "get_editor_viewport_2d", 3750751911LL)
             : [&]() -> Result<VariantValue> {
@@ -8928,8 +8938,13 @@ Result<MultipassCapture> GodotBridge::captureViewportPasses(const std::vector<st
 Result<ViewportPixels> GodotBridge::captureEditorViewport(const std::string& camera_identifier) {
     auto editor_result = editorInterface();
     if (editor_result.isErr()) return editor_result.error();
-    const bool capture_2d =
-        camera_identifier == "editor_2d" || camera_identifier == "active_editor_view_2d";
+    const auto selected = selectEditorViewport(camera_identifier);
+    if (!selected.has_value()) {
+        return Error::invalidArgument("camera_identifier must be one of " +
+                                      editorViewportIdentifierList() + "; received \"" +
+                                      camera_identifier + "\"");
+    }
+    const bool capture_2d = *selected == EditorViewport::TwoD;
     Result<VariantValue> viewport = capture_2d
         ? callObject(editor_result.value(), "EditorInterface", "get_editor_viewport_2d", 3750751911LL)
         : [&]() -> Result<VariantValue> {
@@ -8954,6 +8969,53 @@ Result<ViewportPixels> GodotBridge::captureGameViewport() {
     auto root = liveSceneTreeRoot(tree.value());
     if (root.isErr()) return root.error();
     return captureViewportObject(root.value(), "root_viewport");
+}
+
+namespace {
+
+// The editor has two main-screen viewports and several spellings for each. Both
+// lists live here and nowhere else. Field trial 03 found the cost of a second
+// copy: `2d` and `canvas_item` were absent from the 2D branch, so with a Node2D
+// scene open and the editor on the 3D main screen they returned a full size
+// picture of the 3D grid, labelled as a capture of '2d'. For a 2D project that
+// reads as an empty scene rather than as the wrong viewport.
+const char* const kEditor2dIdentifiers[] = {"editor_2d", "active_editor_view_2d", "2d",
+                                            "canvas_item"};
+const char* const kEditor3dIdentifiers[] = {"active_editor_view", "editor_3d",
+                                            "active_editor_view_3d", "3d"};
+
+bool namesViewport(const std::string& value, const char* const* names, size_t count) {
+    for (size_t index = 0; index < count; ++index) {
+        if (value == names[index]) return true;
+    }
+    return false;
+}
+
+} // namespace
+
+std::optional<EditorViewport> selectEditorViewport(const std::string& camera_identifier) {
+    if (namesViewport(camera_identifier, kEditor2dIdentifiers,
+                      std::size(kEditor2dIdentifiers))) {
+        return EditorViewport::TwoD;
+    }
+    if (namesViewport(camera_identifier, kEditor3dIdentifiers,
+                      std::size(kEditor3dIdentifiers))) {
+        return EditorViewport::ThreeD;
+    }
+    return std::nullopt;
+}
+
+std::string editorViewportIdentifierList() {
+    std::string list;
+    for (const auto* name : kEditor2dIdentifiers) {
+        if (!list.empty()) list += ", ";
+        list += name;
+    }
+    for (const auto* name : kEditor3dIdentifiers) {
+        list += ", ";
+        list += name;
+    }
+    return list;
 }
 
 Result<std::string> resolveGodotProjectPath() {
