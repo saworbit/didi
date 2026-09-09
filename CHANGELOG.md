@@ -13,6 +13,50 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Fixed
 
+- Offline tools no longer hand their child processes the server's standard
+  input (#350). Didi speaks JSON-RPC on stdio, so a `dotnet build`, a `git`
+  call or a headless Godot helper inherited the same handle the server reads
+  requests from. Two readers on one stream race whether or not the child ever
+  wants input, and a child that does want input waits for bytes that were meant
+  for the server and will never arrive.
+
+  `NUL` on Windows and `/dev/null` on POSIX, which is what
+  `runtime/managed_process.cpp` already did. Reproduced before fixing: with the
+  parent's stdin held open by a pipe, a child that reads to end of input blocks
+  until the timeout; with the fix it returns immediately.
+
+- The test runner binds spawned processes so a timeout cannot orphan them
+  (#351). On Windows it now launches suspended, assigns the process to a job
+  with `KILL_ON_JOB_CLOSE`, and then resumes, so there is no window in which the
+  child runs outside the job. `TerminateProcess` alone only killed what
+  `pi.hProcess` pointed at, and when Godot resolves to a `godot.cmd` wrapper
+  that is the interpreter -- leaving the engine running detached, holding file
+  locks and interfering with the next session. On POSIX the child calls
+  `setpgid` and the timeout signals the process group rather than the single
+  process.
+
+  Covered by a test that reproduces the orphan: `GODOT_BIN` points at a wrapper
+  script that starts a background grandchild publishing its own pid, the
+  session is given three seconds, and the grandchild must be gone afterwards.
+  Against the unfixed runner it fails on `!processAlive(grandchild)` and leaves
+  three live processes behind, which is the defect as a user meets it.
+
+- `resource_create` validates its target through
+  `paths::resolveProjectFileForWrite` instead of its own copy of the rules
+  (#352), and writes through the resolved path rather than the raw relative
+  one. The private copy caught an escaping path but accepted shapes every other
+  writing tool refuses -- an absolute path landing inside the project root, for
+  one -- which is the disagreement `project_path.hpp` says that function exists
+  to prevent. It also called `projectPathFromUtf8` outside its own `try`, so a
+  `save_path` that is not valid UTF-8 threw out of the handler instead of
+  returning an error.
+
+- `scene_get_selection` is no longer listed as an offline capability (#353). A
+  selection exists only in a running editor and there is no offline
+  implementation. The live set is tested first, so the wire answer was already
+  correct, which is exactly why the dead entry survived: it changed nothing
+  until the order changed.
+
 - The workflows that assert the pinned `jsonschema` version no longer read
   `jsonschema.__version__`. That attribute is deprecated as of 4.26.0 and its
   own warning says it will be removed, at which point the check would have
@@ -100,6 +144,33 @@ Historical entries describe the surface advertised by those releases. For the ex
   game. Which side of the step the engine flushes the event on is left unpinned,
   because that is the engine's business and an assertion about it would break
   on a change nobody using Didi would care about.
+
+- A field trial can be run unattended. `tools/field-trial/trial.py` seeds the
+  working directory, briefs a fresh tester in its own client session, and scores
+  what that tester did from the transcript rather than from its own account of
+  itself. `--dry-run` exercises everything except the spending.
+
+  The reason to automate it is not the agent's hour, it is the maintainer's.
+  Three trials have now produced defects no suite found, and each cost a morning
+  of seeding by hand and remembering which manifest to score against.
+
+  It also closes the finding trial 03 paid for. A trial is seeded against a
+  server binary and scored against that binary's manifest, while the live half
+  of every call is answered by a GDExtension the tester installs by hand and no
+  artifact recorded. That run spent about an hour concluding a shipped
+  capability did not exist, because the bridge answering it was six days older
+  than the server. The seed now records the server's build id and the hash of
+  the addon the tester is meant to install, and `bridge.py` reads back the
+  pairing the server reported on every live session call. Its third verdict is
+  the one worth having: a run where no call ever reported a pairing is
+  `not_observed`, not clean, because nothing in it says which build served it.
+
+- `didi --version` prints the build id under the release version.
+
+  The version cannot tell two builds apart, and the server and the GDExtension
+  are separate files a user copies around separately. A session that has
+  attached reports both halves and says whether they match; before one is
+  attached, this is the only way to record which build a run was handed.
 
 ### Changed
 

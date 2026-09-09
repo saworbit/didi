@@ -396,22 +396,27 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
 
     // Offline generator for common .tres resources
     namespace fs = std::filesystem;
-    std::string disk_path = save_path;
-    if (strings::startsWith(disk_path, "res://")) disk_path = disk_path.substr(6);
 
-    fs::path target_p = paths::projectPathFromUtf8(disk_path);
-    fs::path current_root = fs::current_path();
+    // The shared resolver rather than a second copy of the rules. This wrote
+    // its own containment check, which caught an escaping path but accepted
+    // shapes every other writing tool rejects -- an absolute path landing
+    // inside the root, for one -- and then wrote through the raw relative path
+    // rather than the resolved one. It also called projectPathFromUtf8 outside
+    // its own try, so a save_path that is not valid UTF-8 threw out of the
+    // handler instead of returning the error every other tool returns.
+    //
+    // project_path.hpp says why this function exists: repeating the traversal,
+    // UTF-8 and containment rules per writer is how two of them end up
+    // disagreeing. This one was the disagreement.
+    auto resolved = paths::resolveProjectFileForWrite(save_path);
+    if (resolved.isErr()) {
+        return CallToolResult::error("Invalid save_path: " + resolved.error().message);
+    }
+    const fs::path target_p = resolved.value();
+
     try {
-        auto canon_root = fs::weakly_canonical(current_root);
-        auto canon_target = fs::weakly_canonical(current_root / target_p);
-        auto [root_it, target_it] = std::mismatch(
-            canon_root.begin(), canon_root.end(),
-            canon_target.begin(), canon_target.end()
-        );
-        if (root_it != canon_root.end()) {
-            return CallToolResult::error("Access denied: save_path is outside the project root directory.");
-        }
-        if (fs::exists(canon_target) && !overwrite) {
+        std::error_code probe_error;
+        if (fs::exists(target_p, probe_error) && !probe_error && !overwrite) {
             return CallToolResult::error(
                 "Resource already exists; pass overwrite: true to replace it: " + save_path);
         }

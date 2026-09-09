@@ -1,4 +1,7 @@
 #include "didi/runtime/managed_process.hpp"
+#include "didi/offline/process_runner.hpp"
+#include "didi/offline/test_runner.hpp"
+#include <filesystem>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -84,6 +87,25 @@ struct ChildFixture {
                 fs::rename(partial, published, ec);
             }
             std::this_thread::sleep_for(std::chrono::seconds(60));
+            std::_Exit(38);
+        }
+        // Publishes its own pid and then holds. Used as the grandchild in the
+        // orphan test: the wrapper starts this in the background, so the pid
+        // file appears within milliseconds of launch rather than after an
+        // interpreter has finished starting up.
+        if (args[2] == "publish_self_and_hold" && args.size() == 4) {
+            const fs::path published(args[3]);
+            const fs::path partial(published.string() + ".partial");
+            {
+#if defined(_WIN32)
+                std::ofstream(partial) << static_cast<uint64_t>(GetCurrentProcessId());
+#else
+                std::ofstream(partial) << static_cast<uint64_t>(getpid());
+#endif
+            }
+            std::error_code ec;
+            fs::rename(partial, published, ec);
+            std::this_thread::sleep_for(std::chrono::seconds(120));
             std::_Exit(38);
         }
         if (args[2] == "report") {
@@ -403,6 +425,123 @@ void reapsOwnedChildWhenTheHostDiesAbnormally() {
 #endif
 }
 
+static void offlineRunnerDoesNotHandChildrenTheServerStdin() {
+    // The offline runner used to hand children this process's standard input.
+    // Didi speaks JSON-RPC on stdio, so a child that reads stdin reads the
+    // server's own requests, and two readers on one stream race whether or not
+    // the child ever wants input.
+    //
+    // What this proves, and what it does not. A command that reads until end of
+    // input now returns promptly instead of waiting for one that never comes.
+    // On a machine whose own stdin is already at end of file the child would
+    // return promptly either way, so this can pass without exercising the
+    // redirect. It cannot pass while the bug is present on a machine with an
+    // open stdin, which is the case that hangs a real session, and it never
+    // fails spuriously. Distinguishing the mechanism would mean observing the
+    // child's handle, which is not portable.
+    didi::offline::ProcessRequest request;
+    request.working_directory = std::filesystem::temp_directory_path();
+    request.timeout = std::chrono::milliseconds(5000);
+#if defined(_WIN32)
+    request.executable = "cmd.exe";
+    request.arguments = {"/c", "more"};
+#else
+    request.executable = "/bin/sh";
+    request.arguments = {"-c", "cat"};
+#endif
+
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = didi::offline::runProcess(request);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+
+    CHECK_PROCESS(result.isOk());
+    CHECK_PROCESS(!result.value().timed_out);
+    CHECK_PROCESS(
+        std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() < 4000);
+}
+
+static void testSessionTimeoutKillsTheWholeProcessTree() {
+    // Break reported in #351: runSession spawned Godot with no job object on
+    // Windows and no process group on POSIX, then killed a single process on
+    // timeout. When Godot resolves to a godot.cmd wrapper the launch goes
+    // through cmd.exe, so the thing being killed is the interpreter and the
+    // engine keeps running detached.
+    //
+    // The wrapper is what makes this reproducible: without one, the spawned
+    // process is the target and killing it directly is enough. So the test
+    // points GODOT_BIN at a wrapper that starts a background grandchild which
+    // publishes its own pid, and then checks the grandchild is gone once the
+    // session has timed out.
+#if defined(__APPLE__)
+    // Same exemption the sibling test above takes, for the same reason.
+    return;
+#else
+    Temp temp;
+    const auto published = temp.path / "grandchild.pid";
+    const auto published_text = published.generic_string();
+
+    // The wrapper drives this same test binary rather than an interpreter.
+    // The first version used PowerShell for the grandchild and failed on CI
+    // with "grandchild != 0": the session timeout killed the tree before
+    // PowerShell had finished starting, so the pid file never appeared. That
+    // guard doing its job is the only reason it was not a silent pass.
+    const auto self = selfPath().string();
+
+#if defined(_WIN32)
+    const auto wrapper = temp.path / "godot.cmd";
+    {
+        std::ofstream script(wrapper);
+        script << "@echo off\n"
+               << "start \"\" /b \"" << self << "\" --didi-managed-child "
+               << "publish_self_and_hold \"" << published_text << "\"\n"
+               << "\"" << self << "\" --didi-managed-child hold_long\n";
+    }
+    _putenv_s("GODOT_BIN", wrapper.string().c_str());
+#else
+    const auto wrapper = temp.path / "godot.sh";
+    {
+        std::ofstream script(wrapper);
+        script << "#!/bin/sh\n"
+               << "\"" << self << "\" --didi-managed-child publish_self_and_hold \""
+               << published_text << "\" &\n"
+               << "\"" << self << "\" --didi-managed-child hold_long\n";
+    }
+    fs::permissions(wrapper, fs::perms::owner_all | fs::perms::group_read |
+                                 fs::perms::group_exec);
+    setenv("GODOT_BIN", wrapper.c_str(), 1);
+#endif
+
+    // Short, because the whole point is what survives the timeout.
+    const auto result = didi::offline::TestRunner::runSession("res://none.tscn", 6, true, true, {});
+    CHECK_PROCESS(result.exit_code == 124);
+
+    uint64_t grandchild = 0;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    while (!grandchild && std::chrono::steady_clock::now() < deadline) {
+        std::ifstream(published) >> grandchild;
+        if (!grandchild) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    // If the wrapper never got far enough to publish a pid there is nothing to
+    // assert about, and passing on that would be pretending. The wrapper has
+    // ninety seconds of sleep ahead of it, so the only way the file is missing
+    // is that the grandchild never started.
+    CHECK_PROCESS(grandchild != 0);
+
+    // The tree, not just the interpreter. Give the kernel a moment: a job
+    // closing kills asynchronously.
+    deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    while (processAlive(grandchild) && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    CHECK_PROCESS(!processAlive(grandchild));
+
+#if defined(_WIN32)
+    _putenv_s("GODOT_BIN", "");
+#else
+    unsetenv("GODOT_BIN");
+#endif
+#endif
+}
+
 struct RegisterManagedProcess {
     RegisterManagedProcess() {
         registerTest("ManagedProcess.ReportsArgumentsAndExit", reportsArgumentsAndExit);
@@ -413,6 +552,10 @@ struct RegisterManagedProcess {
                      reapsOwnedChildWhenTheHostDiesAbnormally);
         registerTest("ManagedProcess.FailedNativeLaunchLeavesObjectReusable",
                      failedNativeLaunchLeavesObjectReusable);
+        registerTest("ProcessRunner.ChildDoesNotInheritServerStdin",
+                     offlineRunnerDoesNotHandChildrenTheServerStdin);
+        registerTest("TestRunner.TimeoutKillsTheWholeProcessTree",
+                     testSessionTimeoutKillsTheWholeProcessTree);
 #if !defined(_WIN32)
         registerTest("ManagedProcess.LaunchClosesDescriptorsAboveSoftLimit",
                      launchClosesDescriptorsAboveSoftLimit);

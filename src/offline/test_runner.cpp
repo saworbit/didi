@@ -283,12 +283,52 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
                                         ? nullptr
                                         : process_command->application_name.c_str();
 
-    if (!CreateProcessW(application_name, cmd_writable.data(), NULL, NULL, TRUE, 0,
-                        NULL, NULL, &si, &pi)) {
+    // Suspended, so the process can be put in a job before it runs anything.
+    // Assigning after launch leaves a window in which the child is outside the
+    // job, and a child that spawns during that window escapes it permanently.
+    if (!CreateProcessW(application_name, cmd_writable.data(), NULL, NULL, TRUE,
+                        CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
         CloseHandle(hWritePipe);
         CloseHandle(hReadPipe);
         result.success = false;
         result.summary = "Failed to spawn Godot process. Ensure 'godot' is in system PATH.";
+        return result;
+    }
+
+    // A job with KILL_ON_JOB_CLOSE, because TerminateProcess on the timeout
+    // path only kills what pi.hProcess points at. When Godot is resolved to a
+    // godot.cmd or godot.bat wrapper the launch goes through cmd.exe, so
+    // pi.hProcess is the interpreter and killing it leaves the engine running
+    // detached -- holding file locks, burning CPU, and interfering with the
+    // next session. The job covers the whole tree, and because the kernel kills
+    // it when the last handle closes, it also covers Didi exiting abnormally
+    // mid-run. runtime/managed_process.cpp and offline/process_runner.cpp both
+    // already do this; this spawner was the one that did not.
+    HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    if (job) {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits,
+                                     sizeof(limits)) ||
+            !AssignProcessToJobObject(job, pi.hProcess)) {
+            CloseHandle(job);
+            job = nullptr;
+        }
+    }
+
+    // Resume whether or not the job was established. Failing to contain the
+    // child is worse than not running it, but refusing to run a test session
+    // because a job object could not be created would be a new failure mode in
+    // its own right; the process is still terminated directly on timeout.
+    if (ResumeThread(pi.hThread) == static_cast<DWORD>(-1)) {
+        TerminateProcess(pi.hProcess, 1);
+        if (job) CloseHandle(job);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        CloseHandle(hWritePipe);
+        CloseHandle(hReadPipe);
+        result.success = false;
+        result.summary = "Failed to resume the Godot process after launch.";
         return result;
     }
 
@@ -360,6 +400,8 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
     CloseHandle(hReadPipe);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
+    // Last: closing this kills anything still in the job, which is the point.
+    if (job) CloseHandle(job);
 
 #else
     int pipefd[2];
@@ -380,6 +422,10 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
 
     if (pid == 0) {
         // Child process
+        // Its own process group, so the timeout path can signal the whole tree
+        // rather than only the process this fork produced. Godot spawns
+        // helpers; killing the parent alone orphans them.
+        setpgid(0, 0);
         close(pipefd[0]);
         dup2(pipefd[1], STDOUT_FILENO);
         dup2(pipefd[1], STDERR_FILENO);
@@ -433,7 +479,9 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
 
         auto elapsed = std::chrono::steady_clock::now() - start_time;
         if (elapsed > timeout_dur) {
-            kill(pid, SIGKILL);
+            // The group, not the process. A negative pid signals every member,
+            // which is what setpgid in the child above made possible.
+            if (kill(-pid, SIGKILL) != 0) kill(pid, SIGKILL);
             waitpid(pid, &status, 0);
             result.exit_code = 124;
             result.summary = "Test session timed out after " + std::to_string(timeout_seconds) + " seconds.";

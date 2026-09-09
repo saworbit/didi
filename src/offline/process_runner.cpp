@@ -116,18 +116,37 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
     }
     SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0);
 
+    // NUL, not this process's standard input. Didi is an MCP server speaking
+    // JSON-RPC on stdio, so handing a child the real stdin handle puts a
+    // `dotnet build` or a headless Godot in a position to consume bytes the
+    // server's reader was waiting for. Nothing has to go wrong for that to
+    // hurt: two readers on one stream is a race whether or not the child ever
+    // wants input, and a child that does want input blocks until timeout on
+    // data that will never be typed. runtime/managed_process.cpp already opens
+    // NUL for the same reason.
+    SECURITY_ATTRIBUTES input_security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+    HANDLE null_input = CreateFileW(L"NUL", GENERIC_READ,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE, &input_security,
+                                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (null_input == INVALID_HANDLE_VALUE) {
+        CloseHandle(read_pipe);
+        CloseHandle(write_pipe);
+        return Error::internal("Failed to open NUL for child standard input");
+    }
+
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     startup.dwFlags = STARTF_USESTDHANDLES;
     startup.hStdOutput = write_pipe;
     startup.hStdError = write_pipe;
-    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdInput = null_input;
     PROCESS_INFORMATION process{};
     const std::wstring working_directory = request.working_directory.wstring();
     const BOOL launched = CreateProcessW(
         nullptr, mutable_command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
         nullptr, working_directory.c_str(), &startup, &process);
     CloseHandle(write_pipe);
+    CloseHandle(null_input);
     if (!launched) {
         const DWORD code = GetLastError();
         CloseHandle(read_pipe);
@@ -199,6 +218,15 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
         dup2(output_pipe[1], STDOUT_FILENO);
         dup2(output_pipe[1], STDERR_FILENO);
         close(output_pipe[1]);
+        // /dev/null, not the server's standard input. See the Windows branch:
+        // Didi reads JSON-RPC on stdin, and a child sharing that descriptor can
+        // consume the server's own requests. If /dev/null cannot be opened the
+        // child exits rather than inheriting stdin, because running with the
+        // wrong stdin is the failure this is here to prevent.
+        const int null_input = open("/dev/null", O_RDONLY);
+        if (null_input < 0) _exit(126);
+        if (dup2(null_input, STDIN_FILENO) < 0) _exit(126);
+        if (null_input != STDIN_FILENO) close(null_input);
         if (chdir(request.working_directory.c_str()) != 0) _exit(126);
         std::vector<std::string> storage;
         storage.reserve(request.arguments.size() + 1);

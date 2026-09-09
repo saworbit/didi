@@ -3008,6 +3008,37 @@ static void test_resource_create_refuses_a_target_it_cannot_write() {
     ASSERT_TRUE(!registry.callTool("resource_create", didi::json{
         {"save_path", "res://materials/stone.RES"}}).isError);
 
+    // Containment, which this tool used to check with its own copy of the
+    // rules rather than through paths::resolveProjectFileForWrite. The copy
+    // caught an escaping path but accepted shapes every other writing tool
+    // refuses, and then wrote through the raw relative path instead of the
+    // resolved one.
+    for (const char* escaping : {"res://../escaped.tres",
+                                 "res://materials/../../escaped.tres",
+                                 "../escaped.tres"}) {
+        const auto refused = registry.callTool("resource_create", didi::json{
+            {"save_path", escaping},
+            {"resource_type", "Resource"}});
+        ASSERT_TRUE(refused.isError);
+        ASSERT_TRUE(!std::filesystem::exists(
+            std::filesystem::current_path().parent_path() / "escaped.tres"));
+    }
+
+    // An absolute path is refused for being absolute, not merely for landing
+    // somewhere unwelcome: one inside the project root used to be accepted
+    // here and rejected by every other writer.
+    const auto outside = (std::filesystem::temp_directory_path() /
+                          "didi-resource-create-escape.tres").generic_string();
+    ASSERT_TRUE(registry.callTool("resource_create", didi::json{
+        {"save_path", outside}, {"resource_type", "Resource"}}).isError);
+    ASSERT_TRUE(!std::filesystem::exists(outside));
+
+    const auto inside_but_absolute =
+        (std::filesystem::current_path() / "absolute_inside.tres").generic_string();
+    ASSERT_TRUE(registry.callTool("resource_create", didi::json{
+        {"save_path", inside_but_absolute}, {"resource_type", "Resource"}}).isError);
+    ASSERT_TRUE(!std::filesystem::exists("absolute_inside.tres"));
+
     registry.setIpcClient(nullptr);
 }
 
