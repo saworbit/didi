@@ -811,6 +811,13 @@ try {
             @{ name = "children"; expression = "node.get_child_count()";
                context_node = "/root/RuntimeRoot" }) }),
         (Tool-Request 323 "eval_gdscript" @{ expression = "node.get_child_count()"; context_node = "/root/RuntimeRoot" }),
+        # A probe has to be able to read a number off a property. The read is
+        # prebound as a value before the expression is parsed, so taking a
+        # component off it reaches no object; the bare form still does and is
+        # still refused.
+        (Tool-Request 2370 "eval_gdscript" @{ expression = "node.get('position').x"; context_node = "/root/RuntimeRoot/Spatial/RayTarget2D" }),
+        (Tool-Request 2371 "eval_gdscript" @{ expression = "position.x"; context_node = "/root/RuntimeRoot/Spatial/RayTarget2D" }),
+        (Tool-Request 2372 "eval_gdscript" @{ expression = "node.get('position').script"; context_node = "/root/RuntimeRoot/Spatial/RayTarget2D" }),
         (Tool-Request 324 "eval_gdscript" @{ expression = "[1, 2, 3]"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 325 "eval_gdscript" @{ expression = "{'answer': 42, 'ok': true}"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 326 "eval_gdscript" @{ expression = "Vector2(3, 4)"; context_node = "/root/RuntimeRoot" }),
@@ -960,6 +967,17 @@ try {
     Assert-True (@($blind.stuck_intervals).Count -eq 0) "An expression nobody could read was reported as a soft lock."
     Assert-True ($blind.probes[0].readings -eq 0) "An unreadable probe reported readings it did not take."
     Assert-True ($null -ne $blind.probes[0].last_read_error) "An unreadable probe did not say why it could not be read."
+    Assert-True ($blind.measured -eq $false) "A run in which no probe read anything did not say it measured nothing."
+    Assert-True (@($blind.unread_probes) -contains "unreadable") "A run that measured nothing did not name the probe that never read."
+    Assert-True ($explored.measured -eq $true) "A run whose probe was read reported that it measured nothing."
+
+    # A component of a property read is the only way a probe can sample a
+    # number, and every other way through an object is still refused.
+    $componentRead = Tool-Payload $runtimeById[2370]
+    Assert-True ($componentRead.value -eq 2) "A component of a property read did not evaluate against the running game."
+    Assert-True ($runtimeById[2371].result.isError) "A bare property read reached the engine."
+    Assert-True ($runtimeById[2371].result.content[0].text -match "property reads are forbidden") "A bare property read was refused for the wrong reason."
+    Assert-True ($runtimeById[2372].result.isError) "A non-component member of a property read was accepted."
 
     Assert-True $runtimeById[2364].result.isError "An action the project does not define was accepted, and the run reported driving a game it never touched."
     Assert-True $runtimeById[2365].result.isError "A stuck window longer than the run was accepted, and nothing could ever have reported it."

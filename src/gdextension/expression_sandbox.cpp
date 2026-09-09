@@ -349,6 +349,38 @@ std::string mathConstructorAt(const std::vector<Token>& tokens, size_t receiver_
     return {};
 }
 
+// Whether the token before `receiver_end` closes a direct node.get("name")
+// property read.
+//
+// The read is replaced with a prebound input before the expression is parsed,
+// so by execution time there is no object left to reach through: the value is
+// already a Variant of one of the types isSafePreboundPropertyType allows, none
+// of which is an Object, an Array or a Dictionary. Reading a component off it
+// is the same act as reading one off Vector2(10, 20), which is already allowed.
+//
+// It exists because runtime_explore_scene had no way to sample a number.
+// position.x is forbidden, node.get("position") is a Vector2 and a probe needs
+// a scalar, so every probe in field trial 03 read nothing at all and the run
+// still reported a clean twelve seconds.
+bool isPreboundPropertyRead(const std::vector<Token>& tokens, size_t receiver_end) {
+    if (receiver_end < 5 || tokens[receiver_end].text != ")") return false;
+    return tokens[receiver_end - 1].kind == TokenKind::String &&
+           tokens[receiver_end - 2].text == "(" &&
+           tokens[receiver_end - 3].kind == TokenKind::Identifier &&
+           tokens[receiver_end - 3].text == "get" && tokens[receiver_end - 4].text == "." &&
+           tokens[receiver_end - 5].kind == TokenKind::Identifier &&
+           tokens[receiver_end - 5].text == "node";
+}
+
+// The components a prebound property can carry. The allowed prebound types are
+// Vector2, Vector3 and Color plus scalars, so this is their members and
+// nothing else; anything else fails at execution rather than reading something
+// unintended.
+bool isPreboundComponent(const std::string& component) {
+    return component == "x" || component == "y" || component == "z" || component == "r" ||
+           component == "g" || component == "b" || component == "a";
+}
+
 bool isMathComponent(const std::string& constructor, const std::string& component) {
     if (constructor == "Vector2") return component == "x" || component == "y";
     if (constructor == "Vector3") {
@@ -457,7 +489,15 @@ Result<void> validateTokens(const std::vector<Token>& tokens) {
                 !method_call && index > 0 && index + 1 < tokens.size() &&
                 tokens[index + 1].kind == TokenKind::Identifier &&
                 isMathComponent(mathConstructorAt(tokens, index - 1), tokens[index + 1].text);
-            if (!method_call && !component_read) {
+            // node.get("position").x. The read in front of the dot is prebound
+            // as a value before the expression is parsed, so this reads a
+            // component off a value rather than through an object.
+            const bool prebound_component_read =
+                !method_call && index > 0 && index + 1 < tokens.size() &&
+                tokens[index + 1].kind == TokenKind::Identifier &&
+                isPreboundComponent(tokens[index + 1].text) &&
+                isPreboundPropertyRead(tokens, index - 1);
+            if (!method_call && !component_read && !prebound_component_read) {
                 return Error::invalidArgument(
                     "Object member/property reads are forbidden in read-only expressions");
             }

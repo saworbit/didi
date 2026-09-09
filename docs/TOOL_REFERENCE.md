@@ -730,7 +730,7 @@ Drives a running game for a bounded window and reports what happened. It holds o
 This is the pairing `runtime_inject_input` and `runtime_watch_invariants` cannot make between them. Injection presses a button and returns; watching samples every frame but presses nothing. A character that walks into a wall and stops responding is only visible to something doing both at frame rate, because from outside you see a position before the press and a position after it, never the second in between where nothing happened.
 
 - `actions` (`array`, required, 1 to 8). InputMap action names. Names must not repeat, and one action is down at a time.
-- `probes` (`array`, required, 1 to 4). Each takes an `expression` against an optional `context_node`, evaluating to a number or a boolean, through the same sandbox `runtime_watch_invariants` uses.
+- `probes` (`array`, required, 1 to 4). Each takes an `expression` against an optional `context_node`, evaluating to a number or a boolean, through the same sandbox `runtime_watch_invariants` uses. `node` is the context node and a property is read with `node.get("name")`; a component of that read is a number, as in `node.get("position").x`. A bare `position.x` reads through an object and is refused.
 - `duration_ms` (`integer`, default `5000`, 250 to 60000).
 - `action_hold_ms` (`integer`, default `250`, 16 to 10000). How long one action is held before the schedule moves on.
 - `stuck_ms` (`integer`, default `3000`, 100 to 60000). How long every probe must stay still for that to be reported. Must not exceed `duration_ms`.
@@ -744,6 +744,8 @@ This is the pairing `runtime_inject_input` and `runtime_watch_invariants` cannot
 **Input actions, not movement.** Nothing outside a project's own controller knows how that project moves its player. Setting a position directly would move the sprite without running any of that, which proves nothing about whether the game can be played. Pressing the project's own actions runs the project's own code. `nav_query_path` and the `spatial_query_*` family are how an agent decides where to go; this is how it gets there.
 
 **A probe that cannot be read is not a probe that stayed still.** An expression that fails every frame produces no value, and no value is not stillness. It is reported with zero readings and its `last_read_error`, and it never contributes a stuck interval. A typo in an expression must not come back as a frozen game.
+
+Because of that, a run in which nothing could be read has no stuck intervals and no engine errors, which on its own reads as a clean exploration. It is not: it is a window in which nothing was sampled. Every probe that never returned a value is named in `unread_probes`, and `measured` is `false` when none of them did.
 
 **It reports, it does not judge.** The response carries `verdict: "none"` in as many words. A cutscene, an open menu and a genuine soft lock are the same thing from here: a window in which nothing moved. Which one it was is the caller's to know. Nothing in the response says whether a level is beatable.
 

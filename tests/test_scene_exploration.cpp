@@ -225,6 +225,28 @@ void test_a_probe_that_cannot_be_read_is_not_a_soft_lock() {
     ASSERT_EQ(payload["probes"][0]["readings"].get<int>(), 0);
     ASSERT_EQ(payload["probes"][0]["last_read_error"], "no property named posiiton");
     ASSERT_TRUE(!payload["probes"][0]["moved"].get<bool>());
+    // And the run says at the top level that it measured nothing. Everything
+    // above reads as a clean exploration on its own: frames observed, no engine
+    // errors, no stuck intervals, verdict none. It was a window in which
+    // nothing was sampled at all, and a caller skimming has to be able to see
+    // the difference without opening every probe.
+    ASSERT_TRUE(!payload["measured"].get<bool>());
+    ASSERT_EQ(payload["unread_probes"].size(), 1u);
+    ASSERT_EQ(payload["unread_probes"][0], payload["probes"][0]["name"]);
+}
+
+// A run that read something says so, and names nothing.
+void test_a_run_that_reads_its_probe_is_measured() {
+    auto params = minimalParams();
+    params["duration_ms"] = 1000;
+    params["stuck_ms"] = 400;
+    SceneExploration exploration{parsed(params)};
+    for (int64_t elapsed = 0; elapsed <= 1000; elapsed += 250) {
+        if (exploration.observe(elapsed, readingOf(static_cast<double>(elapsed)))) break;
+    }
+    const auto payload = exploration.response(false);
+    ASSERT_TRUE(payload["measured"].get<bool>());
+    ASSERT_TRUE(!payload.contains("unread_probes"));
 }
 
 void test_a_survey_run_records_more_than_one_interval() {
@@ -314,6 +336,8 @@ struct RegisterSceneExplorationTests {
                      test_a_value_that_stops_moving_is_reported_with_the_action_held);
         registerTest("SceneExploration.UnreadableProbeIsNotASoftLock",
                      test_a_probe_that_cannot_be_read_is_not_a_soft_lock);
+        registerTest("SceneExploration.MeasuredRunNamesNoUnreadProbes",
+                     test_a_run_that_reads_its_probe_is_measured);
         registerTest("SceneExploration.SurveyRecordsSeveralIntervals",
                      test_a_survey_run_records_more_than_one_interval);
         registerTest("SceneExploration.EngineErrorStopsTheRun",
