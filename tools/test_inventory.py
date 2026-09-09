@@ -460,6 +460,12 @@ def render_inventory(suites: list[Suite]) -> str:
         "- Compiler and sanitizer diagnostics. ASan and UBSan run the native "
         "suite again under instrumentation; they add coverage, not cases."
     )
+    lines.append(
+        "- The libFuzzer targets in `fuzz/`. They generate their own inputs "
+        "rather than asserting a fixed set, so counting them as tests would "
+        "be counting the wrong thing: three targets is not three cases, and "
+        "the number that matters is the corpus, which grows on its own."
+    )
     lines.append("")
 
     return "\n".join(lines) + "\n"

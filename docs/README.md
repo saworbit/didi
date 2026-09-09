@@ -34,6 +34,7 @@ record is kept for the reasoning, not because it describes today's behaviour.
 | [Administrator and Operations Guide](ADMIN_GUIDE.md) | DACL hardening, headless CI, observability and troubleshooting. |
 | [Developer and Extension Guide](DEVELOPER_GUIDE.md) | Building from source, the test suites, and adding a tool. |
 | [Test Inventory](TEST_INVENTORY.md) | Generated. What each suite contains and how many cases it runs, derived from the suites themselves. |
+| [Fuzz Targets](../fuzz/README.md) | The three decoders that read untrusted bytes, why those three, and how to run one locally. |
 | [Brand Identity](brand/BRAND.md) | The mark, wordmark, lockups and palette, and the assets they generate from. |
 
 ## The surface, and where it is going
