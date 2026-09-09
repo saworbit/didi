@@ -493,6 +493,32 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # The platform gate comes first, before anything looks for a binary. On a
+    # platform this page does not describe there is nothing to check and
+    # nothing safe to write, and that is true whether or not a build exists --
+    # so demanding one first would report a missing build as the problem when
+    # the real answer is "not here". It did exactly that on the lint runner,
+    # which has no build at all.
+    current = platform.system()
+    if current != REFERENCE_PLATFORM and not args.json:
+        if args.check:
+            print(
+                f"test_inventory: skipped on {current}. The published counts are "
+                f"the {REFERENCE_PLATFORM} figures, and the native suite is "
+                "platform-conditional, so there is nothing here to compare "
+                f"against. The {REFERENCE_PLATFORM} job checks them."
+            )
+            return 0
+        print(
+            f"test_inventory: refusing to regenerate on {current}. The page "
+            f"publishes the {REFERENCE_PLATFORM} figures and this platform "
+            "registers a different set of native tests, so writing here would "
+            f"replace them with numbers the page does not claim. Regenerate on "
+            f"{REFERENCE_PLATFORM}, or use --json to inspect this platform.",
+            file=sys.stderr,
+        )
+        return 2
+
     try:
         binary = None if args.no_native else resolve_test_binary(args.test_binary)
         suites = collect(binary)
@@ -521,30 +547,6 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "test_inventory: refusing to write an inventory with no native suite; "
             "--no-native is for --json only.",
-            file=sys.stderr,
-        )
-        return 2
-
-    # Everything from here writes or verifies the published page, and the page
-    # states one platform's figures. On any other platform the honest answers
-    # are "nothing to check" and "I will not overwrite this with numbers that
-    # do not describe it".
-    current = platform.system()
-    if current != REFERENCE_PLATFORM:
-        if args.check:
-            print(
-                f"test_inventory: skipped on {current}. The published counts are "
-                f"the {REFERENCE_PLATFORM} figures, and the native suite is "
-                "platform-conditional, so there is nothing here to compare "
-                f"against. The {REFERENCE_PLATFORM} job checks them."
-            )
-            return 0
-        print(
-            f"test_inventory: refusing to regenerate on {current}. The page "
-            f"publishes the {REFERENCE_PLATFORM} figures and this platform "
-            "registers a different set of native tests, so writing here would "
-            f"replace them with numbers the page does not claim. Regenerate on "
-            f"{REFERENCE_PLATFORM}, or use --json to inspect this platform.",
             file=sys.stderr,
         )
         return 2

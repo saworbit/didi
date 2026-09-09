@@ -8,8 +8,12 @@ build. These run in the lint workflow, with no compiler and no test binary.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -205,15 +209,59 @@ class ReferencePlatformTests(unittest.TestCase):
         )
         self.assertIn(inventory.REFERENCE_PLATFORM, rendered)
 
+    def _run(self, argv, system):
+        """Run main() as though on *system*, returning (code, stdout, stderr).
+
+        The environment is stripped of DIDI_TEST_BINARY and the working
+        directory moved away from any build tree, because the point of these
+        tests is that the platform is decided *before* anything looks for a
+        binary. An earlier version checked only the exit code, and passed on a
+        machine with no build for entirely the wrong reason -- the missing
+        binary also returns 2 -- then failed on the lint runner, which has no
+        build and needs the skip.
+        """
+
+        out, err = io.StringIO(), io.StringIO()
+        environment = {k: v for k, v in os.environ.items() if k != "DIDI_TEST_BINARY"}
+        with tempfile.TemporaryDirectory() as empty:
+            previous = os.getcwd()
+            os.chdir(empty)
+            try:
+                # BINARY_CANDIDATES resolves against REPO_ROOT, which is
+                # absolute, so changing directory alone would not hide a local
+                # build. Empty it, and the "no binary anywhere" condition the
+                # lint runner is actually in gets reproduced on any machine.
+                with mock.patch.object(inventory.platform, "system", return_value=system), \
+                        mock.patch.object(inventory, "BINARY_CANDIDATES", ()), \
+                        mock.patch.dict(os.environ, environment, clear=True), \
+                        contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    code = inventory.main(argv)
+            finally:
+                os.chdir(previous)
+        return code, out.getvalue(), err.getvalue()
+
     def test_check_is_a_skip_not_a_failure_off_the_reference_platform(self):
-        with mock.patch.object(inventory.platform, "system", return_value="Linux"):
-            self.assertEqual(inventory.main(["--check"]), 0)
+        for system in ("Linux", "Darwin"):
+            with self.subTest(system=system):
+                code, out, _ = self._run(["--check"], system)
+                self.assertEqual(code, 0)
+                self.assertIn(f"skipped on {system}", out)
+                self.assertIn(inventory.REFERENCE_PLATFORM, out)
 
     def test_regeneration_refuses_off_the_reference_platform(self):
         # The dangerous direction: writing another platform's numbers into a
-        # page that claims Windows figures would be silent and wrong.
-        with mock.patch.object(inventory.platform, "system", return_value="Darwin"):
-            self.assertEqual(inventory.main([]), 2)
+        # page that claims Windows figures would be silent and wrong. Assert
+        # the reason, not just the exit code -- a missing build also returns 2.
+        code, _, err = self._run([], "Darwin")
+        self.assertEqual(code, 2)
+        self.assertIn("refusing to regenerate on Darwin", err)
+
+    def test_the_platform_decision_precedes_looking_for_a_binary(self):
+        # The regression that reached CI: the gate sat after binary
+        # resolution, so on a machine with no build the answer was "no
+        # didi_tests binary found" rather than "not this platform".
+        _, out, err = self._run(["--check"], "Linux")
+        self.assertNotIn("No didi_tests binary found", out + err)
 
 
 class RenderingTests(unittest.TestCase):
