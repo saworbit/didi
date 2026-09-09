@@ -4,29 +4,19 @@ name: CodeQL
 # the only automated security signal here was Dependabot, which watches
 # dependencies and says nothing at all about the C++ that ships.
 #
-# Path filters are safe on this workflow because it is deliberately not a
-# required status check -- a skipped run blocks nothing.
+# No path filter. Every pull request gets static analysis, because a change
+# that "only touches docs" is exactly the sort of claim worth checking rather
+# than trusting -- and because OpenSSF Scorecard's SAST check scores on whether
+# a SAST tool ran on the commits, not on whether one exists.
+#
+# The cost is controlled below rather than here: the Python and Actions
+# analyses are about a minute and always run, while the C++ analysis takes
+# closer to twenty and runs only when something can reach the compiler.
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'src/**'
-      - 'include/**'
-      - 'tests/**'
-      - 'tools/**'
-      - 'cmake/**'
-      - 'CMakeLists.txt'
-      - '.github/workflows/**'
   pull_request:
     branches: [ main ]
-    paths:
-      - 'src/**'
-      - 'include/**'
-      - 'tests/**'
-      - 'tools/**'
-      - 'cmake/**'
-      - 'CMakeLists.txt'
-      - '.github/workflows/**'
   schedule:
     # Weekly, so a newly published query still finds an old defect in code
     # nobody has touched. Off-peak on purpose.
@@ -41,36 +31,71 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Does anything in this change reach the C++ compiler? Twenty minutes of C++
+  # analysis on a change to a Markdown file is the waste the CI restructure
+  # existed to remove; skipping analysis altogether on such a change is the
+  # blind spot this workflow exists to remove. Both are avoidable.
+  changes:
+    name: Does this reach the compiler
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      cpp: ${{ steps.classify.outputs.cpp }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify
+        id: classify
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Fail towards analysing. A skipped analysis that should have run is
+          # a defect that reaches main unexamined.
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "cpp=true" >> "$GITHUB_OUTPUT"
+            echo "Analysing C++ (event: $EVENT_NAME)"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA" || echo "__ALL__")
+          if [ -z "$changed" ] || [ "$changed" = "__ALL__" ]; then
+            echo "cpp=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if printf '%s\n' "$changed" | grep -Eq '^(src/|include/|tests/|cmake/|fuzz/|CMakeLists\.txt$)'; then
+            echo "cpp=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "cpp=false" >> "$GITHUB_OUTPUT"
+          fi
+          printf '%s\n' "$changed" | awk '{ print "  " $0 }'
+
+  # Fast, and unconditional. About a minute each, so there is no reason to
+  # decide whether they are worth running.
   analyze:
     name: Analyze (${{ matrix.language }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
-      # Upload results to the code-scanning dashboard.
       security-events: write
-      # Read the workflow run for the Actions analysis.
       actions: read
       contents: read
     strategy:
       fail-fast: false
       matrix:
         include:
-          # C++ has no build-free mode: CodeQL observes the real compiler, so
-          # the analysis is only as complete as the build it watches. This
-          # builds every target, tests included.
-          - language: c-cpp
-            build-mode: manual
-            runner: ubuntu-latest
-          # The repository's Python is build tooling and test harnesses, and it
-          # reads paths, runs subprocesses and parses untrusted JSON.
+          # Build tooling and test harnesses that read paths, run subprocesses
+          # and parse untrusted JSON.
           - language: python
-            build-mode: none
-            runner: ubuntu-latest
           # The workflows themselves. zizmor covers the security shapes; this
           # covers what GitHub's own queries know about Actions.
           - language: actions
-            build-mode: none
-            runner: ubuntu-latest
 
     steps:
       - name: Checkout Repository
@@ -82,20 +107,52 @@ jobs:
         uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.build-mode }}
-          # security-extended adds the lower-severity queries. The C++ here
-          # parses untrusted JSON-RPC off a pipe, so the extra reach is worth
-          # the extra minutes.
+          build-mode: none
+          queries: security-extended
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          category: /language:${{ matrix.language }}
+
+  # Separate job rather than a third matrix entry, because a job-level `if:`
+  # cannot see the matrix context -- actionlint rejects it, which is the point
+  # of running actionlint. This is the leg worth gating: it builds every target
+  # and takes closer to twenty minutes.
+  analyze-cpp:
+    name: Analyze (c-cpp)
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          languages: c-cpp
+          # C++ has no build-free mode: CodeQL observes the real compiler, so
+          # the analysis is only as complete as the build it watches.
+          build-mode: manual
+          # security-extended adds the lower-severity queries. This code parses
+          # untrusted JSON-RPC off a pipe, so the extra reach earns its minutes.
           queries: security-extended
 
       - name: Install Build Tools
-        if: matrix.build-mode == 'manual'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends ninja-build build-essential
 
       - name: Build For Analysis
-        if: matrix.build-mode == 'manual'
         run: |
           cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build --parallel
@@ -103,4 +160,4 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
-          category: /language:${{ matrix.language }}
+          category: /language:c-cpp

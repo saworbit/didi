@@ -60,8 +60,12 @@ REFERENCE_PLATFORM = "Windows"
 INVENTORY_PATH = REPO_ROOT / "docs" / "TEST_INVENTORY.md"
 README_PATH = REPO_ROOT / "README.md"
 
-BADGE_START = "<!-- test-count:start -->"
-BADGE_END = "<!-- test-count:end -->"
+# The tests badge is located by its own shields.io URL. Comment markers around
+# it were tried first and had to go: see apply_badge for what they did to the
+# rendered README.
+BADGE_PATTERN = re.compile(
+    r"(?P<prefix>https://img\.shields\.io/badge/tests-)(?P<count>\d+)(?P<suffix>-)"
+)
 
 # Where a build can plausibly be. Ordered by how likely it is to be the one the
 # caller means; every candidate is still checked so a wrong guess reports the
@@ -348,28 +352,32 @@ def collect(binary: Path | None) -> list[Suite]:
     return suites
 
 
-def render_badge(test_total: int) -> str:
-    """Return the README badge markup for *test_total* automated tests."""
-
-    return (
-        f"{BADGE_START}"
-        f"[![Tests](https://img.shields.io/badge/tests-{test_total}-2ea043"
-        f"?logo=pytest&logoColor=white)](docs/TEST_INVENTORY.md)"
-        f"{BADGE_END}"
-    )
-
-
 def apply_badge(readme_text: str, test_total: int) -> str:
-    """Replace the marked badge in *readme_text*, or raise if it is missing."""
+    """Rewrite the count inside the tests badge URL, or raise if it is absent.
 
-    start = readme_text.find(BADGE_START)
-    end = readme_text.find(BADGE_END)
-    if start == -1 or end == -1 or end < start:
+    The badge is found by its own URL. An earlier version wrapped it in
+    ``<!-- test-count:start -->`` markers, which broke the rendered page: a
+    line beginning with ``<!--`` is a raw HTML block in CommonMark, so GitHub
+    emitted the entire badge line as literal text and split the badge row into
+    two paragraphs around it. Nothing about the number was wrong; the marker
+    itself was the defect.
+    """
+
+    updated, replacements = BADGE_PATTERN.subn(
+        lambda match: f"{match.group('prefix')}{test_total}{match.group('suffix')}",
+        readme_text,
+    )
+    if replacements == 0:
         raise InventoryError(
-            f"README.md has no {BADGE_START} ... {BADGE_END} region to update. "
-            "Add the markers around the tests badge."
+            "README.md has no tests badge to update. Expected a shields.io URL "
+            "of the form https://img.shields.io/badge/tests-<count>-<colour>."
         )
-    return readme_text[:start] + render_badge(test_total) + readme_text[end + len(BADGE_END):]
+    if replacements > 1:
+        raise InventoryError(
+            f"README.md has {replacements} tests badges. One of them would go "
+            "stale without anything noticing, so this refuses to guess."
+        )
+    return updated
 
 
 def render_inventory(suites: list[Suite]) -> str:
@@ -451,6 +459,12 @@ def render_inventory(suites: list[Suite]) -> str:
     lines.append(
         "- Compiler and sanitizer diagnostics. ASan and UBSan run the native "
         "suite again under instrumentation; they add coverage, not cases."
+    )
+    lines.append(
+        "- The libFuzzer targets in `fuzz/`. They generate their own inputs "
+        "rather than asserting a fixed set, so counting them as tests would "
+        "be counting the wrong thing: three targets is not three cases, and "
+        "the number that matters is the corpus, which grows on its own."
     )
     lines.append("")
 

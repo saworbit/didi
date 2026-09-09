@@ -190,6 +190,82 @@ static void test_ipc_framing() {
     ASSERT_EQ((*parsed)["str"].get<std::string>(), "hello world");
 }
 
+// Everything above round-trips a frame this code wrote itself, which is the
+// only shape the decoder was ever tested against. A decoder is defined by what
+// it does with input it did not write.
+static void test_ipc_framing_rejects_hostile_lengths() {
+    size_t consumed = 12345;
+
+    // The length field is attacker-controlled and four bytes wide. Written as
+    // `4 + len`, the bounds check was 32-bit unsigned arithmetic: 0xFFFFFFFC
+    // plus 4 is 0, so the guard passed for any buffer and a four-gigabyte
+    // std::string was constructed from eight bytes. It segfaulted.
+    for (uint32_t hostile : {0xFFFFFFFFu, 0xFFFFFFFCu, 0xFFFFFFFDu, 0x80000000u, 0x7FFFFFFFu}) {
+        std::vector<uint8_t> frame = {
+            static_cast<uint8_t>(hostile & 0xFF),
+            static_cast<uint8_t>((hostile >> 8) & 0xFF),
+            static_cast<uint8_t>((hostile >> 16) & 0xFF),
+            static_cast<uint8_t>((hostile >> 24) & 0xFF),
+            'n', 'u', 'l', 'l',
+        };
+        consumed = 12345;
+        auto parsed = didi::ipc::parseFramedMessage(frame.data(), frame.size(), consumed);
+        ASSERT_TRUE(!parsed.has_value());
+        ASSERT_EQ(consumed, 0u);
+    }
+
+    // A header that promises one more byte than arrived.
+    {
+        std::vector<uint8_t> frame = {0x05, 0x00, 0x00, 0x00, '1', '2', '3', '4'};
+        consumed = 12345;
+        auto parsed = didi::ipc::parseFramedMessage(frame.data(), frame.size(), consumed);
+        ASSERT_TRUE(!parsed.has_value());
+        ASSERT_EQ(consumed, 0u);
+    }
+
+    // Shorter than the header itself, including empty.
+    for (size_t prefix = 0; prefix < 4; ++prefix) {
+        std::vector<uint8_t> frame(prefix, 0xFF);
+        consumed = 12345;
+        auto parsed = didi::ipc::parseFramedMessage(frame.data(), frame.size(), consumed);
+        ASSERT_TRUE(!parsed.has_value());
+        ASSERT_EQ(consumed, 0u);
+    }
+
+    // Well formed but not JSON: rejected without consuming, so a caller cannot
+    // be walked past the end of its own buffer by a bad payload.
+    {
+        std::vector<uint8_t> frame = {0x03, 0x00, 0x00, 0x00, '{', '{', '{'};
+        consumed = 12345;
+        auto parsed = didi::ipc::parseFramedMessage(frame.data(), frame.size(), consumed);
+        ASSERT_TRUE(!parsed.has_value());
+    }
+
+    // A zero-length frame is a complete header describing no payload.
+    {
+        std::vector<uint8_t> frame = {0x00, 0x00, 0x00, 0x00};
+        consumed = 12345;
+        auto parsed = didi::ipc::parseFramedMessage(frame.data(), frame.size(), consumed);
+        ASSERT_TRUE(!parsed.has_value());
+    }
+
+    // The exact-fit and trailing-bytes cases still work: a fix that simply
+    // rejected everything would pass every assertion above.
+    {
+        auto frame = didi::ipc::frameMessage(didi::json{{"ok", true}});
+        consumed = 0;
+        auto parsed = didi::ipc::parseFramedMessage(frame.data(), frame.size(), consumed);
+        ASSERT_TRUE(parsed.has_value());
+        ASSERT_EQ(consumed, frame.size());
+
+        frame.push_back('X');
+        consumed = 0;
+        auto with_trailer = didi::ipc::parseFramedMessage(frame.data(), frame.size(), consumed);
+        ASSERT_TRUE(with_trailer.has_value());
+        ASSERT_EQ(consumed, frame.size() - 1);
+    }
+}
+
 static void test_ipc_client_server_roundtrip() {
 #if defined(_WIN32)
     std::string test_pipe = "\\\\.\\pipe\\godot_didi_ipc_unit_test";
@@ -1170,6 +1246,8 @@ static void test_a_client_does_not_reuse_a_connection_the_server_may_be_recyclin
 struct RegisterIpcTests {
     RegisterIpcTests() {
         registerTest("IPC.Framing", test_ipc_framing);
+        registerTest("IPC.FramingRejectsHostileLengths",
+                     test_ipc_framing_rejects_hostile_lengths);
         registerTest("IPC.ClientServerRoundtrip", test_ipc_client_server_roundtrip);
         registerTest("IPC.SecondClientConnectsWhileFirstIsIdle", test_second_client_can_connect_while_the_first_sits_idle);
         registerTest("IPC.IdleClientServedAfterRecycle",

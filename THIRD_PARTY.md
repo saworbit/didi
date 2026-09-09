@@ -15,6 +15,21 @@ written down is a dependency nobody checks.
 
 Each file keeps its upstream copyright header. Do not strip it.
 
+CodeQL findings in these files are dismissed rather than excluded.
+`stb_image_write.h` alone accounted for five of the ten findings in CodeQL's
+first pass over this repository, all integer-multiplication overflows in code
+this project is told not to modify. Five alerts that can never be actioned are
+how a Security tab stops being read.
+
+Dismissal rather than exclusion is forced rather than preferred: `paths-ignore`
+does not apply to a compiled language whose analysis builds the code, so there
+is no configuration that removes them. Each carries a written reason pointing
+here. The risk of a vendored file is managed by the process below -- knowing
+what is in the tree and what updating it involves -- not by an alert nobody can
+close. The fuzz targets in [`fuzz/`](fuzz/README.md) cover `json.hpp` where it
+matters, by driving it through this project's own parsers on the untrusted
+input path.
+
 `extension_api.json` and `gdextension_interface.h` at the repository root are
 not these files. They are local dumps produced from a Godot build, they are
 gitignored, and nothing compiles against them.
@@ -34,7 +49,11 @@ live harness runs against real 4.5.1 and 4.7.2 editors. Both have to stay true.
 
 Dependabot watches the GitHub Actions the workflows pin, weekly, and the Python
 pin in `requirements-dev.txt`, monthly, through
-[`.github/dependabot.yml`](.github/dependabot.yml).
+[`.github/dependabot.yml`](.github/dependabot.yml). Both carry a seven-day
+cooldown, so a brand-new release is not adopted on the day it is published --
+long enough for a compromised publish to be caught and yanked. Cooldown does not
+apply to security updates, so a fix for a known vulnerability still arrives at
+once.
 
 Actions are pinned to commit SHAs rather than tags, each with a `# vX.Y.Z`
 comment beside it. `tools/validate_documentation.py` rejects a workflow that

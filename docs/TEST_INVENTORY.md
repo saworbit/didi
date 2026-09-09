@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **804** |
+| Automated tests | **807** |
 | Live-harness assertions | 783 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**514 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**515 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -33,7 +33,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `ExpressionSandbox` | 6 |
 | `GDScript` | 16 |
 | `Hierarchy` | 5 |
-| `IPC` | 23 |
+| `IPC` | 24 |
 | `ImageDiff` | 10 |
 | `ImportHealth` | 15 |
 | `InvariantWatch` | 4 |
@@ -78,7 +78,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**290 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**292 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
@@ -97,7 +97,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_phase7_plan_ownership.py` | 10 |
 | `test_phase7_schema_contract.py` | 4 |
 | `test_phase7_signal_admission.py` | 3 |
-| `test_test_inventory.py` | 23 |
+| `test_test_inventory.py` | 25 |
 | `test_tool_output_schema_contract.py` | 4 |
 | `test_yolo_mode.py` | 6 |
 
@@ -114,4 +114,5 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 - The end-to-end MCP conversation in `.github/workflows/ci.yml`, which drives the built binary over stdio and asserts the wire surface against the manifest that same binary emits.
 - `tools/validate_documentation.py`, which checks the documentation contract rather than the code, and reports its own findings.
 - Compiler and sanitizer diagnostics. ASan and UBSan run the native suite again under instrumentation; they add coverage, not cases.
+- The libFuzzer targets in `fuzz/`. They generate their own inputs rather than asserting a fixed set, so counting them as tests would be counting the wrong thing: three targets is not three cases, and the number that matters is the corpus, which grows on its own.
 

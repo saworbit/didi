@@ -9,7 +9,7 @@
 [![CI](https://github.com/saworbit/didi/actions/workflows/ci.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/saworbit/didi/actions/workflows/codeql.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/saworbit/didi/badge)](https://scorecard.dev/viewer/?uri=github.com/saworbit/didi)
-<!-- test-count:start -->[![Tests](https://img.shields.io/badge/tests-804-2ea043?logo=pytest&logoColor=white)](docs/TEST_INVENTORY.md)<!-- test-count:end -->
+[![Tests](https://img.shields.io/badge/tests-807-2ea043?logo=pytest&logoColor=white)](docs/TEST_INVENTORY.md)
 [![Release](https://img.shields.io/github/v/release/saworbit/didi?logo=github&color=blue)](https://github.com/saworbit/didi/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Godot Engine](https://img.shields.io/badge/Godot-4.5%2B-478cbf?logo=godotengine&logoColor=white)](https://godotengine.org/)
@@ -22,7 +22,7 @@
 
 **Didi** (`godot-mcp-native`) is a high-performance, native [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for **Godot 4.5+**, engineered in **C++20** as a standalone executable (`didi.exe` on Windows, `didi` on POSIX) and an in-engine GDExtension library for the target platform.
 
-The current documented release is **1.6.0**.
+The current documented release is **1.7.0**.
 
 ---
 
@@ -51,6 +51,7 @@ The current documented release is **1.6.0**.
 | 📝 [**Changelog**](CHANGELOG.md) | **All** | Version history and notable changes. |
 | 🤝 [**Contributing**](CONTRIBUTING.md) | **Contributors** | Build, test, and review expectations for a change you want merged. |
 | 💚 [**Code of Conduct**](CODE_OF_CONDUCT.md) | **Everyone** | How people here are expected to treat each other, and how to report a problem. |
+| 🤖 [**On the Use of AI**](AI.md) | **Everyone** | Where AI was used to build Didi, what checks it, where it is no help at all, and who is responsible when it is wrong. |
 | 📦 [**Third Party Code**](THIRD_PARTY.md) | **Maintainers / Security** | The vendored sources no package manager resolves, their versions, and what Dependabot does not cover. |
 | 🎨 [**Brand Identity**](docs/brand/BRAND.md) | **Contributors / Maintainers** | The mark, wordmark, lockups, palette, and the assets they generate from. |
 

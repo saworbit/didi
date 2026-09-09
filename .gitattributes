@@ -3,6 +3,7 @@
 
 # Source code files - use LF line endings
 *.cpp text eol=lf
+*.cc text eol=lf
 *.c text eol=lf
 *.hpp text eol=lf
 *.h text eol=lf

@@ -23,6 +23,13 @@ updates:
     labels:
       - dependencies
       - ci
+    # Wait a week before offering a brand-new release. A compromised publish is
+    # usually caught and yanked within days, and this is the window in which an
+    # automated bump would otherwise adopt it on the day it lands. Cooldown does
+    # not apply to security updates, so a fix for a known CVE still arrives
+    # immediately -- which is what makes the delay safe rather than merely slow.
+    cooldown:
+      default-days: 7
     # One pull request for the routine bumps instead of six. A grouped update
     # either passes CI as a set or fails as a set, which is the same review
     # either way and a great deal less noise.
@@ -48,3 +55,5 @@ updates:
       prefix: deps
     labels:
       - dependencies
+    cooldown:
+      default-days: 7

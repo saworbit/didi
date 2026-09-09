@@ -82,7 +82,12 @@ jobs:
 
           # Anything that cannot reach the compiler, the tool manifest, the
           # documentation contract, or any test. Everything else builds.
-          build_ignored='^(docs/brand/|\.github/ISSUE_TEMPLATE/|\.github/pull_request_template\.md$|\.github/FUNDING\.yml$|\.github/CODEOWNERS$|\.github/labeler\.yml$|\.github/release\.yml$|\.github/workflows/(codeql|supply-chain|triage)\.yml$|\.editorconfig$|\.gitattributes$|\.gitignore$|LICENSE$|CODE_OF_CONDUCT\.md$)'
+          #
+          # AI.md is prose about how this repository gets built. It states no
+          # count the manifest owns, so the documentation contract that runs
+          # against the built binary has nothing in it to check; its links are
+          # covered by Validate Docs, which needs no build at all.
+          build_ignored='^(docs/brand/|\.github/ISSUE_TEMPLATE/|\.github/pull_request_template\.md$|\.github/FUNDING\.yml$|\.github/CODEOWNERS$|\.github/labeler\.yml$|\.github/release\.yml$|\.github/workflows/(codeql|supply-chain|triage)\.yml$|\.editorconfig$|\.gitattributes$|\.gitignore$|LICENSE$|CODE_OF_CONDUCT\.md$|AI\.md$)'
 
           # Only these can change what a running Godot editor or a sanitizer
           # build observes. Prose cannot, which is the whole point.
