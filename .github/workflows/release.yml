@@ -96,7 +96,7 @@ jobs:
           apt-get update -qq
           apt-get install -y --no-install-recommends \
             build-essential ca-certificates curl git \
-            python3 python3-venv python3-pip python-is-python3
+            ninja-build python3 python3-venv python3-pip python-is-python3
           # The container runs as root against a workspace it does not own, so
           # git refuses to touch it without this.
           git config --global --add safe.directory '*'
@@ -113,6 +113,12 @@ jobs:
         uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2.2.0
         with:
           cmake-version: '3.28.x'
+
+      # The Linux container gets ninja from apt above; macOS builds on the host
+      # and has none by default.
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
 
       # ctest runs the Python contract suite as well as the native one, and that
       # suite needs the pinned jsonschema. Without this the release gate fails on
@@ -154,14 +160,33 @@ jobs:
           fi
           echo "DIDI_RELEASE_PYTHON=$RESOLVED" >> "$GITHUB_ENV"
 
-      - name: Configure CMake
-        # bash on every runner, and the interpreter path read out of the
-        # environment rather than interpolated into the command line. A `${{ }}`
-        # expansion is textual substitution into the shell before it runs, so
-        # it is the shape a workflow injection takes even when today's value is
-        # a path this workflow computed itself.
+      # Two steps rather than one with a conditional generator argument,
+      # because macOS runners still ship bash 3.2 and expanding an empty array
+      # under `set -u` there is an error rather than nothing. ci.yml splits the
+      # same way.
+      #
+      # The interpreter path is read out of the environment rather than
+      # interpolated into the command line: a `${{ }}` expansion is textual
+      # substitution into the shell before it runs, which is the shape a
+      # workflow injection takes even when today's value is a path this
+      # workflow computed itself.
+      - name: Configure CMake (Windows)
+        if: runner.os == 'Windows'
         shell: bash
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="$DIDI_RELEASE_PYTHON"
+
+      # Ninja, matching ci.yml. This job used the default generator and took
+      # fifty minutes on macOS against ten on Linux and seven on Windows, for
+      # the same code -- close enough to the timeout that a release was one
+      # slow day from failing. Deliberately no ccache: a release should be
+      # built from clean, and the generator was the difference that mattered.
+      - name: Configure CMake (POSIX Ninja)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cmake -B build -S . -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPython3_EXECUTABLE="$DIDI_RELEASE_PYTHON"
 
       - name: Build Release Binaries
         run: cmake --build build --config Release --parallel
