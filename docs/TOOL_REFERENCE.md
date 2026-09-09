@@ -397,6 +397,10 @@ Errors: `400`, `404`, `409` editor session, `500`, `501`, `504` if the call itse
 
 Both are API-blocked under the approved contracts and are not callable.
 
+**Advance a running game instead of `physics_simulate_step`.** Pause with `runtime_set_paused`, then `runtime_step` a known number of frames, then read the result back with `runtime_get_tree`, `eval_gdscript` or `viewport_capture_frame`. Say what this is: `runtime_step` advances process callbacks, so the physics ticks inside them are the engine's own, at the engine's delta and at whatever count its frame pacing produces. It is not the blocked contract, which is an exact number of physics ticks at a caller-supplied delta, and a result that depends on the delta must not be read as if it were. What it does give is determinism the wall clock does not: the step verifies the pause, advances exactly the frames requested, and re-pauses before it answers, so the state read afterwards is the state that frame produced.
+
+**Bake before the session instead of `nav_bake_mesh`.** `nav_query_path` queries the map the running project already has, and never bakes. Bake the `NavigationRegion2D`/`NavigationRegion3D` in the editor, or from the project's own GDScript, and commit the result with the scene; then query it. Didi does not wrap the bake, because the contract that blocked it is the frozen-source one — parser exclusion, pre-parse aggregates, source revalidation, bounded completion — and a wrapper would ship every one of those unproven while reporting success.
+
 ## 6. TileMap and GridMap
 
 All three tools are implemented live in editor sessions.
@@ -789,6 +793,8 @@ Errors: `400` malformed batch, `409` editor session, `413` request over 32 KiB, 
 
 `runtime_get_call_stack` is API-blocked under the approved contract and is not callable.
 
+**Read the fault instead.** `runtime_read_output` carries `error_type`, and for a script fault the originating `file`, `function` and `line` are the script's own. That is the frame the error was raised in, which is the frame most worth having; it is one frame and not a stack, and it exists only where the engine reported an error. To get closer to the cause, pair it with `runtime_watch_invariants`, which pauses the game on the frame a condition turns, so the state that produced the fault is still there to read with `runtime_get_tree` and `eval_gdscript` rather than reconstructed from callers.
+
 ## 9. Editor lifecycle
 
 All four tools are live-only:
@@ -986,7 +992,7 @@ Timeout checks run before/after policy, context resolution, parse, execution, an
 
 ### Runtime debugger tools still unavailable
 
-`runtime_get_call_stack` remains registered with `implemented: false`; Phase 3 does not read debugger stacks. Input injection is `runtime_inject_input` and profiler telemetry is `runtime_read_profiler`, both delivered under Phase 7C.
+`runtime_get_call_stack` remains registered with `implemented: false`; Phase 3 does not read debugger stacks. Reach for `runtime_read_output` and `runtime_watch_invariants` instead, as described under [Reserved runtime schemas](#reserved-runtime-schemas--unimplemented). Input injection is `runtime_inject_input` and profiler telemetry is `runtime_read_profiler`, both delivered under Phase 7C.
 
 
 ## Tool annotations and structured results

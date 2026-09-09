@@ -36,6 +36,24 @@ Historical entries describe the surface advertised by those releases. For the ex
   The eight bytes that used to segfault the frame decoder are a committed seed,
   re-executed on every fuzz job for as long as the target exists.
 
+- The live harness now proves the loop composed rather than in halves: pause a
+  running game, inject one action, advance exactly one frame, and read back the
+  fixture's own `_input` and `_process` counters.
+
+  Both halves were already covered, and neither covered this. Stepping was
+  proven on a paused game; injected delivery was proven on a running one, read
+  back after a profiler window had let real time pass. An agent does neither.
+  It pauses, presses, advances a known number of frames and looks, and nothing
+  in the suite said the press is there when it looks. Six assertions now say
+  it, with no sleep and no profiler wait between the press and the read, so
+  what passes is determinism and not the wall clock being generous.
+
+  What they claim is bounded on purpose: the press is observed no later than
+  the completion of the step that follows it, and injecting does not resume the
+  game. Which side of the step the engine flushes the event on is left unpinned,
+  because that is the engine's business and an assertion about it would break
+  on a change nobody using Didi would care about.
+
 ### Changed
 
 - CodeQL now runs on every pull request rather than on a path filter. A change
@@ -60,6 +78,21 @@ Historical entries describe the surface advertised by those releases. For the ex
   process launches that advertise `openWorldHint: true`, one is the documented
   `DIDI_SESSION_DIR` override, and one is a test probe reading its own
   argument. [SECURITY.md](SECURITY.md) records each disposition.
+
+- The three API-blocked names now say what to use instead. `physics_simulate_step`,
+  `nav_bake_mesh` and `runtime_get_call_stack` stay registered and unimplemented,
+  and the documentation stopped ending the sentence there.
+
+  Silence reads as absence. An agent told only that a name is not callable
+  concludes the capability does not exist, and `LLM_INSTRUCTIONS.md` then sent
+  it to hand-edit project files -- which is where every field trial's damage
+  happened. Each blocked name now names its stand-in and, in the same breath,
+  what the stand-in is not: `runtime_step` advances whole frames and not exact
+  physics ticks at a caller's delta, a region baked in the editor is a bake
+  Didi did not perform and cannot verify, and an error's originating file,
+  function and line are one frame and not a stack. A stand-in offered without
+  its limits is the same false success the trials named as the worst defect
+  class, arriving in prose instead of in a response.
 
 ---
 

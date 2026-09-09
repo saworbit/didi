@@ -192,7 +192,15 @@ Do not call these names while `implemented` is false:
 - Physics/navigation: `physics_simulate_step`, `nav_bake_mesh`.
 - Runtime introspection: `runtime_get_call_stack`.
 
-If a task requires one of these capabilities, state the limitation and use ordinary project-file edits or a separate Godot test script only when the user has authorized that work.
+Reach for the stand-in before you reach for a file edit. Each is a different thing from the name it stands in for, so say which one you used and what it does not prove:
+
+| Blocked name | Use instead | What it is not |
+| :--- | :--- | :--- |
+| `physics_simulate_step` | `runtime_set_paused` `{paused: true}`, then `runtime_step` `{frames: N}`, then read back with `runtime_get_tree`, `eval_gdscript` or `viewport_capture_frame`. The step verifies the pause, advances exactly `N` process callbacks, and re-pauses before answering. | Not an exact count of physics ticks, and not a caller-supplied delta. The ticks inside those frames are the engine's, at the engine's delta. Do not report a delta-dependent result as if the delta were yours. |
+| `nav_bake_mesh` | Bake the `NavigationRegion2D`/`NavigationRegion3D` in the editor or from the project's own GDScript, commit it with the scene, then `nav_query_path`. | Not a bake Didi performed or can verify. `nav_query_path` reports the map that exists; an empty map answers `reachable: false` rather than baking one. |
+| `runtime_get_call_stack` | `runtime_read_output` for the `error_type` plus the `file`, `function` and `line` a script fault was raised in; `runtime_watch_invariants` to pause the game on the frame a condition turns, then read the live state. | Not a stack. One frame, only where the engine reported an error. |
+
+If a task needs more than the stand-in gives, state the limitation. Use ordinary project-file edits or a separate Godot test script only when the user has authorized that work.
 
 ## Verification loop
 
