@@ -66,9 +66,22 @@ produced an out-of-bounds read, and each of the two sees only one half of that.
 Assert invariants, not just absence of crashes. A target that only checks
 "did not crash" finds memory errors and nothing else; the interesting failures
 are usually a decoder disagreeing with its own contract. `fuzz_framed_message`
-checks that a decoder reporting progress made some and never claims to have
-consumed more than it was given — either would walk a caller off the end of its
-own buffer without ever tripping a sanitizer.
+checks that a caller can never be advanced past the end of its own buffer,
+which would not trip a sanitizer on its own.
+
+**Assert the contract the code has, not the one you wish it had.** Both of
+these targets failed on their first CI run, and neither had found a bug. One
+claimed that returning no message implied consuming no bytes; the decoder
+deliberately reports how many bytes a malformed frame occupied so a caller can
+skip it, and the crashing input was a seed committed in the same change. The
+other claimed a parsed request has a non-empty method; the parser requires
+`method` to be a string and says nothing about its length, which matches
+JSON-RPC 2.0. A fuzz target that asserts wishes reports them as bugs, and the
+cost is not just noise — it is that a real finding then arrives looking exactly
+like the two you already learned to dismiss.
+
+Both are now recorded as explicit "deliberately not asserted" comments rather
+than deleted, so the next person does not re-add them.
 
 Add the target to `DIDI_FUZZ_TARGETS` in `CMakeLists.txt` and to the matrix in
 `.github/workflows/fuzz.yml`. Both lists are short and explicit on purpose: a

@@ -28,13 +28,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         return 0;
     }
 
-    // The shape checks are the contract. A request that parses must satisfy
-    // them, because everything downstream dispatches on exactly these fields:
-    // a request with no method would reach the registry as a lookup of the
-    // empty string.
-    if (request->method.empty()) {
-        __builtin_trap();
-    }
+    // Deliberately not asserted: that a parsed request has a non-empty method.
+    // The first version of this target claimed that and the fuzzer produced
+    // {"jsonrpc":"2.0","id":1,"method":""} within seconds. The parser requires
+    // `method` to be present and a string, and says nothing about its length,
+    // which matches JSON-RPC 2.0 -- an empty name is a name the registry does
+    // not have, and it is answered with method-not-found like any other. The
+    // assertion encoded what this author expected rather than what the parser
+    // promises, and a fuzz target that asserts wishes reports them as bugs.
 
     // A notification is defined by the absence of an id. If both were true at
     // once, a response would be addressed to a caller that never asked.

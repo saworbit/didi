@@ -22,18 +22,33 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     size_t consumed = 0;
     auto message = didi::ipc::parseFramedMessage(data, size, consumed);
 
-    // The contract, asserted on every input rather than only on the ones a
-    // human thought of: a decoder that reports progress must have made some,
-    // and it can never claim to have consumed more than it was given. Either
-    // would walk a caller off the end of its own buffer.
-    if (message.has_value()) {
-        if (consumed == 0 || consumed > size) {
-            __builtin_trap();
-        }
-    } else if (consumed != 0) {
-        // Nothing decoded means nothing consumed; otherwise a caller advances
-        // past bytes that were never accepted.
+    // The safety property, asserted on every input rather than only on the
+    // ones a human thought of: a caller must never be advanced past the end of
+    // the buffer it owns.
+    if (consumed > size) {
         __builtin_trap();
     }
+
+    // A message that decoded must have occupied some bytes.
+    if (message.has_value() && consumed == 0) {
+        __builtin_trap();
+    }
+
+    // Deliberately not asserted: that returning no message implies consuming
+    // nothing. The first version of this target claimed exactly that and the
+    // fuzzer rejected it on the first run, using a seed committed alongside
+    // it -- four zero bytes, a complete header describing an empty payload.
+    // The decoder sets bytes_consumed before it tries to parse, so a frame
+    // whose payload is not JSON reports the bytes it occupied and then returns
+    // nothing.
+    //
+    // That is a defensible contract rather than a defect: it lets a caller
+    // skip a malformed frame instead of re-reading it forever, and the two
+    // "no message" cases stay distinguishable because the incomplete ones set
+    // bytes_consumed to zero explicitly. It is worth knowing that the
+    // distinction is load-bearing and undocumented, though -- a caller that
+    // treats every nullopt as "wait for more data" will spin on a bad payload.
+    // There are no production callers today; the shipping IPC paths have their
+    // own reader.
     return 0;
 }
