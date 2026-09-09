@@ -127,6 +127,12 @@ struct SessionDescriptor {
     std::string endpoint;
     int64_t started_at_ms{0};
     std::string protocol_version;
+    // Which build of Didi published this session, which is the extension's
+    // build and not the server's. Optional, and empty when the extension that
+    // published the descriptor predates the field. Empty is itself an answer:
+    // it means the bridge is older than this server, so it is reported rather
+    // than passed over.
+    std::string build_id;
 
     json toJson(bool include_token = false) const;
     // Which session something happened on, without the address to reach it.

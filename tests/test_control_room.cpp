@@ -359,6 +359,61 @@ void test_bridge_light_states() {
     }
 }
 
+// A bridge from another build is amber, never green.
+//
+// This is the only light that can see it. The version fact is the server's own
+// and reads 1.6.0 for both binaries, and the protocol version does not move
+// when a tool contract changes, so a stale extension used to report healthy
+// while refusing calls the schema said were supported.
+void test_bridge_build_mismatch_is_amber() {
+    // Same build: green, and the fact says which build.
+    {
+        ControlRoomInputs in;
+        in.connected = true;
+        in.session_kind = "editor";
+        in.server_build_id = "1.6.0+aaaaaaaaaaaa.20260909T000000";
+        in.bridge_build_id = in.server_build_id;
+        const auto model = buildControlRoomModel(in, {});
+        ASSERT_EQ(lightState(model, "Bridge"), "ok");
+        ASSERT_EQ(factValue(model, "Bridge build"), in.server_build_id);
+    }
+    // Different build: amber, with both identities and what to do about it.
+    {
+        ControlRoomInputs in;
+        in.connected = true;
+        in.session_kind = "editor";
+        in.server_build_id = "1.6.0+aaaaaaaaaaaa.20260909T000000";
+        in.bridge_build_id = "1.6.0+bbbbbbbbbbbb.20260903T000000";
+        const auto model = buildControlRoomModel(in, {});
+        ASSERT_EQ(lightState(model, "Bridge"), "warn");
+        const auto reason = lightReason(model, "Bridge");
+        ASSERT_TRUE(reason.find("1.6.0+bbbbbbbbbbbb.20260903T000000") != std::string::npos);
+        ASSERT_TRUE(reason.find("1.6.0+aaaaaaaaaaaa.20260909T000000") != std::string::npos);
+        ASSERT_TRUE(reason.find("build/addons/didi") != std::string::npos);
+    }
+    // An extension older than the field publishes no identity at all. That is a
+    // mismatch, not an unknown to be rendered as a success.
+    {
+        ControlRoomInputs in;
+        in.connected = true;
+        in.session_kind = "editor";
+        in.server_build_id = "1.6.0+aaaaaaaaaaaa.20260909T000000";
+        in.bridge_build_id = std::string();
+        const auto model = buildControlRoomModel(in, {});
+        ASSERT_EQ(lightState(model, "Bridge"), "warn");
+    }
+    // Nothing attached: no bridge fact, and the light is whatever the route says.
+    {
+        ControlRoomInputs in;
+        in.connected = true;
+        in.session_kind = "editor";
+        in.server_build_id = "1.6.0+aaaaaaaaaaaa.20260909T000000";
+        const auto model = buildControlRoomModel(in, {});
+        ASSERT_EQ(lightState(model, "Bridge"), "ok");
+        ASSERT_EQ(factValue(model, "Bridge build"), "<missing>");
+    }
+}
+
 void test_safety_and_project_and_work_lights() {
     {
         ControlRoomInputs in;
@@ -619,6 +674,8 @@ struct Register {
         registerTest("ControlRoom.ClippingNeverSplitsUtf8",
                      test_clipping_never_splits_a_utf8_sequence);
         registerTest("ControlRoom.BridgeLightStates", test_bridge_light_states);
+        registerTest("ControlRoom.BridgeBuildMismatchIsAmber",
+                     test_bridge_build_mismatch_is_amber);
         registerTest("ControlRoom.SafetyProjectAndWorkLights",
                      test_safety_and_project_and_work_lights);
         registerTest("ControlRoom.ToolModesMatchDiscovery", test_tool_modes_match_discovery);

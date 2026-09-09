@@ -171,8 +171,11 @@ See the [Roadmap](docs/ROADMAP.md), [Phase 7 feasibility evidence](docs/PHASE_7_
    cmake --build build --config Release
    ```
 2. **Enable Godot Plugin**:
-   Copy `addons/didi` to your project and check **Enable** in **Project Settings $\rightarrow$ Plugins**.
+   Copy `build/addons/didi` into your project as `addons/didi` and check **Enable** in **Project Settings $\rightarrow$ Plugins**.
    A **Didi** tab appears beside 2D, 3D and Script.
+   The build assembles the addon under `build/`. The `addons/didi` folder in this repository is
+   the manifest that goes into that assembly, not a build output, so its `bin/` holds whatever
+   was last put there by hand.
 3. **Connect AI Assistant**:
    Open the Didi tab, go to **Connect**, and copy the generated configuration — it already
    carries the located binary and this project's path. Or write it by hand into

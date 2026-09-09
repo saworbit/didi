@@ -104,6 +104,17 @@ struct ControlRoomSession {
 struct ControlRoomInputs {
     std::string server_name;
     std::string server_version;
+    // This binary's build identity, and the one the attached bridge published.
+    //
+    // They are different files. A user copies the addon into a project once and
+    // rebuilds the server many times, so the pair drifts apart quietly, and a
+    // stale bridge answers every call with the tool contract of whatever build
+    // it came from. Nothing else in this dashboard can tell: the version is the
+    // server's own, and the protocol version does not move on a contract change.
+    std::string server_build_id;
+    // Absent when nothing is attached. Present and empty means the bridge is
+    // from a build that predates the field, which is itself a mismatch.
+    std::optional<std::string> bridge_build_id;
     std::vector<std::string> protocol_versions;
 
     std::string project_root;
