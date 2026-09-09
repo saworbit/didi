@@ -736,6 +736,20 @@ try {
         (Tool-Request 364 "runtime_step" @{ frames = 3 }),
         (Tool-Request 365 "eval_gdscript" @{ expression = "node.get('process_priority')" }),
         (Tool-Request 366 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 2 }),
+        # The loop composed, on a paused game, with no wall clock in it. The
+        # halves above are each proven under conditions the other does not
+        # share: stepping is proven while paused, and injected delivery is
+        # proven further up on a running game, read back after a profiler
+        # window has let real time pass. An agent does neither. It pauses,
+        # presses, advances one frame and looks, and nothing so far says the
+        # press is there when it looks. These six requests say it.
+        (Tool-Request 2380 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }),
+        (Tool-Request 2381 "runtime_inject_input" @{ events = @(
+            @{ type = "action"; action_name = "ui_accept"; pressed = $true }) }),
+        (Tool-Request 2382 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }),
+        (Tool-Request 2383 "runtime_step" @{ frames = 1 }),
+        (Tool-Request 2384 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }),
+        (Tool-Request 2385 "eval_gdscript" @{ expression = "node.get('process_priority')"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 367 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot/RuntimeChild/Nested"; max_depth = 1 }),
         (Tool-Request 379 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot/RuntimeChild"; max_depth = 1 }),
         (Tool-Request 307 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 17 }),
@@ -1193,6 +1207,33 @@ try {
     Assert-True ($multiStep.frames -eq 3 -and $multiStep.paused -eq $true) "Three-frame step did not report exact, re-paused completion."
     Assert-True ($multiStepFrame -eq ($afterStep + 3) -and $multiStepEval.value -eq $multiStepFrame) "Three-frame step did not advance live state by exactly three frames."
     Assert-True ($multiStepTree.paused -eq $true) "Three-frame step left the game running."
+
+    # Pause, press, advance exactly one frame, look. The counters come from the
+    # fixture's own _input and _process, so this is what the game observed and
+    # not what Didi reported dispatching. Nothing here waits: no sleep, no
+    # profiler window, no second request hoping the first has landed by now.
+    # What this proves is that the press is observed no later than the step
+    # that follows it completes. It deliberately does not pin the press to one
+    # side of that step: whether the engine flushes it on a paused iteration or
+    # on the stepped frame is the engine's business and could change, and an
+    # agent needs the press to be there when it looks, not to have arrived at a
+    # particular moment inside the window it bounded.
+    $loopBefore = Tool-Payload $runtimeById[2380]
+    $loopInjected = Tool-Payload $runtimeById[2382]
+    $loopStep = Tool-Payload $runtimeById[2383]
+    $loopAfter = Tool-Payload $runtimeById[2384]
+    $loopEval = Tool-Payload $runtimeById[2385]
+    $loopInputBefore = Runtime-InputCounter $loopBefore
+    $loopInputAfter = Runtime-InputCounter $loopAfter
+    $loopFrameBefore = Runtime-FrameCounter $loopBefore
+    $loopFrameAfter = Runtime-FrameCounter $loopAfter
+    Assert-True ($loopBefore.paused -eq $true) "The composed loop did not start from a paused game."
+    Assert-True ($loopInjected.paused -eq $true) "Injecting input resumed a paused game; a press must not advance the frames the caller is counting."
+    Assert-True (($loopInputAfter - $loopInputBefore) -eq 1) "One press across one stepped frame was observed $($loopInputAfter - $loopInputBefore) times, expected 1; a press an agent cannot see by the end of the frame it advanced is not a closed loop."
+    Assert-True (($loopFrameAfter - $loopFrameBefore) -eq 1) "The composed loop advanced from frame $loopFrameBefore to $loopFrameAfter, expected exactly one."
+    Assert-True ($loopStep.frames -eq 1 -and $loopStep.paused -eq $true -and $loopAfter.paused -eq $true) "The composed loop did not finish re-paused, so the next press would land in an unknown number of frames."
+    Assert-True ($loopEval.value -eq $loopFrameAfter -and $loopEval.session_kind -eq "game") "The stepped frame read back through the tree and through an expression disagree ($loopFrameAfter against $($loopEval.value))."
+
     $cappedTree = Tool-Payload $runtimeById[367]
     $cappedTreeBytes = [Text.Encoding]::UTF8.GetByteCount([string]$runtimeById[367].result.content[0].text)
     Assert-True ($cappedTree.node_count -lt 10000 -and $cappedTree.max_nodes -eq 10000 -and $cappedTree.truncated) "Runtime tree did not stop at the serialized response budget before the node cap."
