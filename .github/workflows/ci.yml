@@ -196,14 +196,21 @@ jobs:
           import re
           import sys
 
-          import jsonschema
+          from importlib.metadata import version
+
+          # importlib.metadata rather than jsonschema.__version__. The
+          # attribute is deprecated as of 4.26.0 and its own warning says it
+          # will be removed, at which point this check would raise
+          # AttributeError and take the release gate down with it. The
+          # deprecation surfaced on the 4.26.0 bump, before it could bite.
+          installed = version('jsonschema')
 
           pin = re.search(r'^jsonschema==([^\s#]+)', pathlib.Path('requirements-dev.txt').read_text(encoding='utf-8'), re.M)
           if pin is None:
               sys.exit('requirements-dev.txt no longer pins an exact jsonschema version')
-          if jsonschema.__version__ != pin.group(1):
-              sys.exit(f'installed jsonschema {jsonschema.__version__}, pinned {pin.group(1)}')
-          print(f'jsonschema {jsonschema.__version__} matches the pin')
+          if installed != pin.group(1):
+              sys.exit(f'installed jsonschema {installed}, pinned {pin.group(1)}')
+          print(f'jsonschema {installed} matches the pin')
           EOF
           echo "DIDI_SCHEMA_PYTHON=$VENV_PY" >> "$GITHUB_ENV"
 
