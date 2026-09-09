@@ -29,6 +29,13 @@ Historical entries describe the surface advertised by those releases. For the ex
     --signer-workflow saworbit/didi/.github/workflows/release.yml
   ```
 
+  `--source-ref` is part of the documented check for a reason: the release
+  workflow can also be run manually as a rehearsal, and those runs sign too, so
+  their provenance carries the same repository and the same signer workflow.
+  Only the ref separates a published release from a dry run, so a verification
+  that omits it would accept a rehearsal artifact as something the project
+  published.
+
   There is no signing key. The certificate is issued to the workflow run's own
   OIDC identity and expires in minutes, so there is nothing for a maintainer to
   leak, rotate or lose. The bundle ships as a release asset rather than living

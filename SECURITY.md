@@ -66,22 +66,32 @@ Each release contains, alongside the platform archives:
 | `SHA256SUMS` | The archives are intact and match what was built. |
 | `didi-<tag>.intoto.jsonl` | The signed provenance bundle, for verifying offline. |
 
-**The check worth running.** This asserts not merely that the archive is
-signed, but that it was produced by this repository's release workflow — the
-part an attacker cannot reproduce by signing something of their own:
+**The check worth running.** Each constraint is doing work, and dropping any of
+them weakens the answer:
 
 ```bash
 gh attestation verify didi-linux-x64.tar.gz \
   --repo saworbit/didi \
-  --signer-workflow saworbit/didi/.github/workflows/release.yml
+  --signer-workflow saworbit/didi/.github/workflows/release.yml \
+  --source-ref refs/tags/v1.6.0
 ```
 
-**Offline**, using the bundle from the release rather than the GitHub API:
+| Constraint | What it rules out |
+| --- | --- |
+| `--repo` | An attestation from some other project entirely. |
+| `--signer-workflow` | Anything in this repository other than the release workflow. An attacker can sign something of their own; they cannot produce a signature attributed to this workflow. |
+| `--source-ref` | **A rehearsal artifact.** The release workflow can also be run manually, and those runs sign too, so their provenance carries the same repository and the same signer workflow. Only the ref separates a published release from a dry run, so pin it to the tag you are verifying. |
+
+**Offline**, using the bundle from the release rather than the GitHub API. The
+constraints are the same: verifying offline is about not calling the API, not
+about checking less.
 
 ```bash
 gh attestation verify didi-linux-x64.tar.gz \
   --bundle didi-v1.6.0.intoto.jsonl \
-  --repo saworbit/didi
+  --repo saworbit/didi \
+  --signer-workflow saworbit/didi/.github/workflows/release.yml \
+  --source-ref refs/tags/v1.6.0
 ```
 
 **Checksums**, if all you want to know is that the download is undamaged:

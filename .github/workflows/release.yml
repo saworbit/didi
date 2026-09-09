@@ -313,7 +313,15 @@ jobs:
           # offline, and it is the form OpenSSF Scorecard reads: the
           # Signed-Releases check inspects release assets and recognises
           # `*.intoto.jsonl`, not the attestation store.
-          cp "$BUNDLE" "dist/didi-${TAG}.intoto.jsonl"
+          #
+          # The ref is sanitised because it is only a tag on a tag run. On a
+          # rehearsal it is the branch name, and branch names contain slashes:
+          # `feat/signing` would make this a path into a directory that does
+          # not exist, `cp` would fail, `set -e` would abort, and the rehearsal
+          # would upload nothing at the exact moment it is meant to prove
+          # itself. It did precisely that on the first branch to reach here.
+          safe_ref="${TAG//[^A-Za-z0-9._-]/-}"
+          cp "$BUNDLE" "dist/didi-${safe_ref}.intoto.jsonl"
           ls -l dist
 
       - name: Create GitHub Release
