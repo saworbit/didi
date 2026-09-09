@@ -51,6 +51,7 @@ The current documented release is **1.6.0**.
 | 📝 [**Changelog**](CHANGELOG.md) | **All** | Version history and notable changes. |
 | 🤝 [**Contributing**](CONTRIBUTING.md) | **Contributors** | Build, test, and review expectations for a change you want merged. |
 | 💚 [**Code of Conduct**](CODE_OF_CONDUCT.md) | **Everyone** | How people here are expected to treat each other, and how to report a problem. |
+| 🤖 [**On the Use of AI**](AI.md) | **Everyone** | Where AI was used to build Didi, what checks it, where it is no help at all, and who is responsible when it is wrong. |
 | 📦 [**Third Party Code**](THIRD_PARTY.md) | **Maintainers / Security** | The vendored sources no package manager resolves, their versions, and what Dependabot does not cover. |
 | 🎨 [**Brand Identity**](docs/brand/BRAND.md) | **Contributors / Maintainers** | The mark, wordmark, lockups, palette, and the assets they generate from. |
 

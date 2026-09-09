@@ -20,6 +20,32 @@ involves. Add a row there if you vendor anything else.
 
 ---
 
+## 🤖 AI-Assisted Contributions
+
+Yes, you may use an AI assistant on a pull request. So do I, and [AI.md](AI.md) says so at
+the root of the repository rather than in a footnote.
+
+None of the terms below are about disclosure. They are the same ones I hold myself to.
+
+1. **Run it.** Build it, run the suites, and exercise the behavior you changed in a real
+   Godot editor if it touches a live tool. A patch that has only been read is not a patch
+   that has been tested.
+2. **Understand it.** Review will ask you why the change is shaped the way it is, and "that
+   is what it generated" is not an answer to that question.
+3. **No success stubs.** This is where assistants fail most often, so it is where reviewers
+   look first. A registered name that cannot execute reports `implemented: false` and
+   rejects calls; see **Capability Honesty** below.
+4. **Check every API against the pinned engine.** Plausible method names that no Godot
+   version ever had are the second most common failure. Verify against `extension_api.json`
+   for the version in front of you, or `resources/didi_class_reference.json`.
+5. **Your name goes on it.** Where a line came from does not change who chose to submit it.
+
+Please leave tool attribution out of the history: no generated-by footers, co-author
+trailers, or model names in commit messages, pull request bodies, or review comments. They
+add noise to the log and change nothing about who is responsible.
+
+---
+
 ## 🛠️ Engineering Principles
 
 1. **Native Performance First**: Didi avoids heavy runtimes (no Node.js, Python, or WebSockets). All core logic is implemented in modern C++20.
