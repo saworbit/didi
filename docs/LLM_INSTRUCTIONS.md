@@ -82,7 +82,7 @@ Use `viewport_capture_frame`.
 
 - `is_live_frame: true` means pixels came from a live viewport. `session_kind` says which process they came from.
 - `is_live_frame: false` means a synthesized offline grid preview.
-- Use `camera_identifier: "editor_2d"` or `"active_editor_view_2d"` for the 2D viewport; other values currently select the first 3D editor viewport.
+- Use `camera_identifier: "editor_2d"`, `"active_editor_view_2d"`, `"2d"` or `"canvas_item"` for the 2D viewport, and `"active_editor_view"`, `"editor_3d"`, `"active_editor_view_3d"` or `"3d"` for the first 3D editor viewport. Any other value is refused; it used to return the 3D viewport described as whatever was asked for.
 - Attached to a game, omit `camera_identifier`: a game has one root viewport and the editor selectors are refused there. The result reports `camera_identifier: "root_viewport"`.
 - A viewport that is not on screen has no size, and the capture is refused rather than returned as a few pixels. For an editor viewport that means the main screen you asked for is not the selected one; switch to it in the editor and call again.
 - Do not assume requested resolution, camera-node selection, or debug flags were applied. Named-node isolation is supported only on a live editor and success must include `state_restored: true`.

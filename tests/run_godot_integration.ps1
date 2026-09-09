@@ -1867,7 +1867,13 @@ try {
         # The 2D viewport control has no size while another main screen is
         # selected. Godot hands back its 2x2 minimum rather than refusing, and
         # capturing that used to be reported as a normal successful live frame.
-        (Tool-Request 2257 "viewport_capture_frame" @{ camera_identifier = "editor_2d" })
+        (Tool-Request 2257 "viewport_capture_frame" @{ camera_identifier = "editor_2d" }),
+        # The other two spellings of the same viewport. They used to miss the
+        # 2D branch entirely and hand back the 3D viewport under the caller's
+        # own label, which for a 2D project reads as an empty scene.
+        (Tool-Request 2258 "viewport_capture_frame" @{ camera_identifier = "2d" }),
+        (Tool-Request 2259 "viewport_capture_frame" @{ camera_identifier = "canvas_item" }),
+        (Tool-Request 2261 "viewport_capture_frame" @{ camera_identifier = "not_a_viewport" })
     )
     $rawPhase4Responses = $phase4Requests | & $didiExecutable --project $fixtureRoot
     $phase4Responses = @($rawPhase4Responses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
@@ -1877,13 +1883,24 @@ try {
     # Either a real frame or a refusal that says why. A four-pixel image
     # described as a live capture is neither, and a caller cannot tell it from a
     # scene that happens to be empty.
-    $collapsed = $phase4ById[2257]
-    if ($collapsed.result.isError) {
-        Assert-True ($collapsed.result.content[0].text -match "no size on screen") "A degenerate viewport capture was refused without saying why."
-    } else {
-        $collapsedFrame = Tool-Payload $collapsed
-        Assert-True ($collapsedFrame.resolution.width -ge 8 -and $collapsedFrame.resolution.height -ge 8) "viewport_capture_frame reported a degenerate frame as a successful live capture."
+    foreach ($twoDId in @(2257, 2258, 2259)) {
+        $collapsed = $phase4ById[$twoDId]
+        if ($collapsed.result.isError) {
+            Assert-True ($collapsed.result.content[0].text -match "no size on screen") "A degenerate viewport capture was refused without saying why."
+        } else {
+            $collapsedFrame = Tool-Payload $collapsed
+            Assert-True ($collapsedFrame.resolution.width -ge 8 -and $collapsedFrame.resolution.height -ge 8) "viewport_capture_frame reported a degenerate frame as a successful live capture."
+        }
     }
+    # All three name the same viewport, so they answer the same way. One of them
+    # succeeding while another refuses is the defect: it means only some of the
+    # spellings reach the 2D branch.
+    $twoDOutcomes = @(2257, 2258, 2259) | ForEach-Object { [bool]$phase4ById[$_].result.isError }
+    Assert-True ((($twoDOutcomes | Sort-Object -Unique) | Measure-Object).Count -eq 1) "The 2D viewport aliases did not agree; one resolved to a different viewport."
+    # A name that is neither viewport is refused rather than resolved to 3D.
+    $unknownCamera = $phase4ById[2261]
+    Assert-True ($unknownCamera.result.isError -eq $true) "An unknown camera_identifier was captured instead of refused."
+    Assert-True ($unknownCamera.result.content[0].text -match "camera_identifier must be one of") "An unknown camera_identifier was refused without naming what it accepts."
 
     $isolated = Tool-Payload $phase4ById[412]
     Assert-True ($isolated.isolated -eq $true -and $isolated.state_restored -eq $true) "Isolated capture did not confirm reversible state restoration."

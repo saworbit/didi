@@ -19,8 +19,10 @@ json VisualTestLab::createLab(const json& params) {
     DIDI_LOG_INFO("VISUAL_TEST_LAB", "Creating Visual Test Lab for asset: ", target_path);
 
     // Render an initial viewport preview from the front camera
+    // No camera_identifier: lab_camera_front named no editor viewport and was
+    // resolved to the 3D one anyway, so leaving it out captures the same frame
+    // and says so honestly.
     json capture_params = {
-        {"camera_identifier", "lab_camera_front"},
         {"resolution", {{"width", 1024}, {"height", 768}}}
     };
     json capture_result = ViewportRenderer::instance().captureViewport(capture_params);

@@ -2524,6 +2524,39 @@ static void test_property_type_mismatch_names_every_scalar_type_in_words() {
                 "NodePath");
 }
 
+// Every spelling of the 2D viewport resolves to the 2D viewport.
+//
+// #209 taught editor_2d to refuse a viewport with no size on screen. Its two
+// aliases were not in that branch, so with a Node2D scene open and the editor
+// on the 3D main screen they returned the 3D grid described as '2d'. One table
+// now answers for all of them, and a name in neither list is refused rather
+// than resolved to 3D, because that was the same wrong picture with a
+// different label.
+static void test_editor_viewport_identifiers_agree() {
+    using didi::godot::EditorViewport;
+    using didi::godot::selectEditorViewport;
+
+    for (const char* name : {"editor_2d", "active_editor_view_2d", "2d", "canvas_item"}) {
+        const auto selected = selectEditorViewport(name);
+        ASSERT_TRUE(selected.has_value());
+        ASSERT_TRUE(*selected == EditorViewport::TwoD);
+    }
+    for (const char* name : {"active_editor_view", "editor_3d", "active_editor_view_3d", "3d"}) {
+        const auto selected = selectEditorViewport(name);
+        ASSERT_TRUE(selected.has_value());
+        ASSERT_TRUE(*selected == EditorViewport::ThreeD);
+    }
+    // Nothing, not 3D. A name nobody defined used to come back as a full size
+    // picture of the 3D viewport carrying the caller's own label.
+    for (const char* name : {"", "lab_camera_front", "EDITOR_2D", "2 d", "canvasitem"}) {
+        ASSERT_TRUE(!selectEditorViewport(name).has_value());
+    }
+    // The refusal names what it would have taken.
+    const auto list = didi::godot::editorViewportIdentifierList();
+    ASSERT_TRUE(list.find("canvas_item") != std::string::npos);
+    ASSERT_TRUE(list.find("active_editor_view") != std::string::npos);
+}
+
 // The message is the only thing that changes. This pins the accept/reject set
 // so a future edit to the wording cannot quietly start coercing a string into
 // a number, which is the false success #213 to #217 were about.
@@ -3143,6 +3176,8 @@ struct RegisterToolTests {
         registerTest("Tools.ProjectAuditImportHealth",
                      test_project_audit_exposes_optional_import_health);
         registerTest("Tools.SceneGetSelectionContract", test_scene_get_selection_contract);
+        registerTest("Tools.EditorViewportIdentifiersAgree",
+                     test_editor_viewport_identifiers_agree);
         registerTest("Tools.PropertyAdmissionReadsTheNumber",
                      test_property_admission_reads_the_number_not_its_json_spelling);
         registerTest("Tools.ScriptCreate",

@@ -205,7 +205,7 @@ Diagnostics are computed against the file after it is written, so they include t
 
 ### `viewport_capture_frame` — Live + offline
 
-Live mode copies RGBA8 pixels from the active editor 3D viewport, or from the 2D editor viewport when `camera_identifier` is `editor_2d` or `active_editor_view_2d`, and encodes them as PNG. Attached to a game it captures the root viewport instead; a game has one and `camera_identifier` is refused there. `session_kind` says which process the pixels came from. Offline mode returns an attributed synthetic grid preview.
+Live mode copies RGBA8 pixels from the active editor 3D viewport, or from the 2D editor viewport when `camera_identifier` is `editor_2d`, `active_editor_view_2d`, `2d` or `canvas_item`, and encodes them as PNG. The 3D names are `active_editor_view`, `editor_3d`, `active_editor_view_3d` and `3d`, and an identifier in neither list is refused rather than resolved to 3D. Attached to a game it captures the root viewport instead; a game has one and `camera_identifier` is refused there. `session_kind` says which process the pixels came from. Offline mode returns an attributed synthetic grid preview.
 
 A viewport that is not the one on screen has no size, and Godot returns its 2x2 minimum rather than refusing. A capture below 8 pixels on either edge is refused and says so, because a caller cannot tell a four-pixel image from a scene that happens to be empty. For an editor viewport it means the requested main screen is not the selected one.
 
