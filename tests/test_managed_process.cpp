@@ -1,5 +1,6 @@
 #include "didi/runtime/managed_process.hpp"
 #include "didi/offline/process_runner.hpp"
+#include "didi/offline/test_runner.hpp"
 #include <filesystem>
 #include <chrono>
 #include <cstdlib>
@@ -440,6 +441,80 @@ static void offlineRunnerDoesNotHandChildrenTheServerStdin() {
         std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() < 4000);
 }
 
+static void testSessionTimeoutKillsTheWholeProcessTree() {
+    // Break reported in #351: runSession spawned Godot with no job object on
+    // Windows and no process group on POSIX, then killed a single process on
+    // timeout. When Godot resolves to a godot.cmd wrapper the launch goes
+    // through cmd.exe, so the thing being killed is the interpreter and the
+    // engine keeps running detached.
+    //
+    // The wrapper is what makes this reproducible: without one, the spawned
+    // process is the target and killing it directly is enough. So the test
+    // points GODOT_BIN at a wrapper that starts a background grandchild which
+    // publishes its own pid, and then checks the grandchild is gone once the
+    // session has timed out.
+#if defined(__APPLE__)
+    // Same exemption the sibling test above takes, for the same reason.
+    return;
+#else
+    Temp temp;
+    const auto published = temp.path / "grandchild.pid";
+    const auto published_text = published.generic_string();
+
+#if defined(_WIN32)
+    const auto wrapper = temp.path / "godot.cmd";
+    {
+        std::ofstream script(wrapper);
+        script << "@echo off\n"
+               << "start \"\" /b powershell -NoProfile -Command \"$PID | Out-File -Encoding ascii '"
+               << published_text << "'; Start-Sleep -Seconds 90\"\n"
+               << "powershell -NoProfile -Command \"Start-Sleep -Seconds 90\"\n";
+    }
+    _putenv_s("GODOT_BIN", wrapper.string().c_str());
+#else
+    const auto wrapper = temp.path / "godot.sh";
+    {
+        std::ofstream script(wrapper);
+        script << "#!/bin/sh\n"
+               << "sh -c 'echo $$ > \"" << published_text << "\"; sleep 90' &\n"
+               << "sleep 90\n";
+    }
+    fs::permissions(wrapper, fs::perms::owner_all | fs::perms::group_read |
+                                 fs::perms::group_exec);
+    setenv("GODOT_BIN", wrapper.c_str(), 1);
+#endif
+
+    // Short, because the whole point is what survives the timeout.
+    const auto result = didi::offline::TestRunner::runSession("res://none.tscn", 3, true, true, {});
+    CHECK_PROCESS(result.exit_code == 124);
+
+    uint64_t grandchild = 0;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    while (!grandchild && std::chrono::steady_clock::now() < deadline) {
+        std::ifstream(published) >> grandchild;
+        if (!grandchild) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    // If the wrapper never got far enough to publish a pid there is nothing to
+    // assert about, and passing on that would be pretending. The wrapper has
+    // ninety seconds of sleep ahead of it, so the only way the file is missing
+    // is that the grandchild never started.
+    CHECK_PROCESS(grandchild != 0);
+
+    // The tree, not just the interpreter. Give the kernel a moment: a job
+    // closing kills asynchronously.
+    deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    while (processAlive(grandchild) && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    CHECK_PROCESS(!processAlive(grandchild));
+
+#if defined(_WIN32)
+    _putenv_s("GODOT_BIN", "");
+#else
+    unsetenv("GODOT_BIN");
+#endif
+#endif
+}
+
 struct RegisterManagedProcess {
     RegisterManagedProcess() {
         registerTest("ManagedProcess.ReportsArgumentsAndExit", reportsArgumentsAndExit);
@@ -452,6 +527,8 @@ struct RegisterManagedProcess {
                      failedNativeLaunchLeavesObjectReusable);
         registerTest("ProcessRunner.ChildDoesNotInheritServerStdin",
                      offlineRunnerDoesNotHandChildrenTheServerStdin);
+        registerTest("TestRunner.TimeoutKillsTheWholeProcessTree",
+                     testSessionTimeoutKillsTheWholeProcessTree);
 #if !defined(_WIN32)
         registerTest("ManagedProcess.LaunchClosesDescriptorsAboveSoftLimit",
                      launchClosesDescriptorsAboveSoftLimit);

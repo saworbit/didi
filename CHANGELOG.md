@@ -35,6 +35,12 @@ Historical entries describe the surface advertised by those releases. For the ex
   `setpgid` and the timeout signals the process group rather than the single
   process.
 
+  Covered by a test that reproduces the orphan: `GODOT_BIN` points at a wrapper
+  script that starts a background grandchild publishing its own pid, the
+  session is given three seconds, and the grandchild must be gone afterwards.
+  Against the unfixed runner it fails on `!processAlive(grandchild)` and leaves
+  three live processes behind, which is the defect as a user meets it.
+
 - `resource_create` validates its target through
   `paths::resolveProjectFileForWrite` instead of its own copy of the rules
   (#352), and writes through the resolved path rather than the raw relative

@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **808** |
+| Automated tests | **809** |
 | Live-harness assertions | 789 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**516 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**517 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -63,6 +63,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `SceneExploration` | 9 |
 | `Segmentation` | 5 |
 | `SpeculativeVerify` | 5 |
+| `TestRunner` | 1 |
 | `Tools` | 59 |
 | `UiListControls` | 6 |
 | `ViewportIsolation` | 2 |
