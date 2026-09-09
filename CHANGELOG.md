@@ -11,6 +11,21 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
+### Fixed
+
+- The workflows that assert the pinned `jsonschema` version no longer read
+  `jsonschema.__version__`. That attribute is deprecated as of 4.26.0 and its
+  own warning says it will be removed, at which point the check would have
+  raised `AttributeError` and taken the release gate down with it -- on a
+  routine dependency bump, in the job that packages a release.
+
+  `importlib.metadata.version` instead, which is what the deprecation warning
+  points at. Verified under 4.26.0 with deprecation warnings promoted to
+  errors, and verified to still reject a mismatch.
+
+  Found by installing the version Dependabot proposed and running the check
+  against it, rather than by reading the diff. The diff is one line.
+
 ### Added
 
 - Fuzz targets for the three places Didi reads bytes it did not write: the IPC
