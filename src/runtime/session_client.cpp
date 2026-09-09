@@ -201,16 +201,33 @@ bool isLowerHex(const std::string& value, size_t length) {
     });
 }
 
+// build_id is optional and every other field is required. It has to be
+// optional: an extension built before the field existed publishes a descriptor
+// without it, and refusing that descriptor would turn a stale bridge from a
+// thing the dashboard can report into a session nothing can reach at all.
 bool hasOnlyDescriptorFields(const json& value) {
-    static const std::set<std::string> fields = {
+    static const std::set<std::string> required = {
         "schema_version", "session_id", "token", "pid", "kind", "project_path",
         "endpoint", "started_at_ms", "protocol_version"
     };
-    if (value.size() != fields.size()) return false;
+    static const std::set<std::string> optional = {"build_id"};
     for (auto it = value.begin(); it != value.end(); ++it) {
-        if (!fields.count(it.key())) return false;
+        if (!required.count(it.key()) && !optional.count(it.key())) return false;
+    }
+    for (const auto& field : required) {
+        if (!value.contains(field)) return false;
     }
     return true;
+}
+
+// A build identity is printed on a dashboard and compared against this
+// server's, so it is bounded and kept to characters that cannot break either.
+bool validBuildId(const std::string& value) {
+    if (value.empty() || value.size() > 128) return false;
+    return std::all_of(value.begin(), value.end(), [](unsigned char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
+               (c >= 'A' && c <= 'Z') || c == '.' || c == '+' || c == '-' || c == '_';
+    });
 }
 
 bool validEndpoint(const std::string& endpoint, uint64_t pid, const std::string& session_id,
@@ -1586,6 +1603,7 @@ json SessionDescriptor::toJson(bool include_token) const {
         {"kind", kind}, {"project_path", project_path}, {"endpoint", endpoint},
         {"started_at_ms", started_at_ms}, {"protocol_version", protocol_version}
     };
+    if (!build_id.empty()) value["build_id"] = build_id;
     if (include_token) value["token"] = token;
     return value;
 }
@@ -1607,6 +1625,11 @@ Result<SessionDescriptor> SessionDescriptor::fromJson(const json& value) {
             !value.at("protocol_version").is_string() || value.at("protocol_version") != "1.3") {
             return Error::invalidArgument("Invalid session descriptor values");
         }
+        if (value.contains("build_id") &&
+            (!value.at("build_id").is_string() ||
+             !validBuildId(value.at("build_id").get<std::string>()))) {
+            return Error::invalidArgument("Invalid session descriptor values");
+        }
         SessionDescriptor descriptor;
         descriptor.schema_version = value.at("schema_version").get<int>();
         descriptor.session_id = value.at("session_id").get<std::string>();
@@ -1617,6 +1640,9 @@ Result<SessionDescriptor> SessionDescriptor::fromJson(const json& value) {
         descriptor.endpoint = value.at("endpoint").get<std::string>();
         descriptor.started_at_ms = value.at("started_at_ms").get<int64_t>();
         descriptor.protocol_version = value.at("protocol_version").get<std::string>();
+        if (value.contains("build_id")) {
+            descriptor.build_id = value.at("build_id").get<std::string>();
+        }
         return descriptor;
     } catch (const std::exception&) {
         return Error::invalidArgument("Invalid session descriptor values");

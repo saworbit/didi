@@ -3,6 +3,30 @@ project(didi VERSION 1.6.0 LANGUAGES C CXX)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+# The build identity, which is not the version. Two installs can both be 1.6.0
+# and still be different builds, because the server binary and the GDExtension
+# are copied around separately. The commit says which source, and the configure
+# stamp separates two builds of the same source, so the pair matches only when
+# it was configured together. The commit is best effort: without git it reads
+# nogit, and the stamp alone still separates two configures.
+find_package(Git QUIET)
+set(DIDI_BUILD_COMMIT "nogit")
+if(GIT_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" rev-parse --short=12 HEAD
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE DIDI_BUILD_COMMIT_RAW
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE DIDI_BUILD_COMMIT_STATUS
+    )
+    if(DIDI_BUILD_COMMIT_STATUS EQUAL 0 AND DIDI_BUILD_COMMIT_RAW)
+        set(DIDI_BUILD_COMMIT "${DIDI_BUILD_COMMIT_RAW}")
+    endif()
+endif()
+string(TIMESTAMP DIDI_BUILD_STAMP "%Y%m%dT%H%M%S" UTC)
+set(DIDI_BUILD_ID "${PROJECT_VERSION}+${DIDI_BUILD_COMMIT}.${DIDI_BUILD_STAMP}")
+
 # The version had to be typed into four files and kept in step by a documentation
 # check. Everything in C++ now reads it from here, generated from project()
 # above, so those two spellings cannot drift and there is nothing to remember.
