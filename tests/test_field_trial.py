@@ -8,6 +8,15 @@ import unittest
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+# tests/ is imported two ways -- as the top level directory by unittest
+# discover, and as tests.<module> by the explicit invocations in CI -- and only
+# one of these resolves at a time.
+try:
+    import didi_binary as _binary
+except ImportError:
+    from tests import didi_binary as _binary
+
 COVERAGE_PATH = REPOSITORY_ROOT / "tools" / "field-trial" / "coverage.py"
 SPEC = importlib.util.spec_from_file_location("field_trial_coverage", COVERAGE_PATH)
 if SPEC is None or SPEC.loader is None:
@@ -106,6 +115,11 @@ class SeedTests(unittest.TestCase):
         self.didi.write_text("binary", encoding="utf-8")
         self.godot = self.root / "godot.exe"
         self.godot.write_text("binary", encoding="utf-8")
+        # A build tree always has an assembled addon beside the server, and the
+        # seed now refuses without one, so the fixture has to have one too.
+        self.extension = self.root / "addons" / "didi" / "bin" / "didi_extension.dll"
+        self.extension.parent.mkdir(parents=True)
+        self.extension.write_text("extension", encoding="utf-8")
 
     def seed(self, target):
         return SEED.seed(
@@ -163,6 +177,108 @@ class SeedTests(unittest.TestCase):
                 godot_exe=self.godot,
                 repository=REPOSITORY_ROOT,
             )
+
+    def test_baseline_records_the_build_and_the_addon_that_serves_it(self):
+        # Trial 03 was scored against a server it named and a bridge it did not,
+        # and lost an hour to the difference. The seed cannot see the bridge that
+        # will answer, but it can record the one the tester is supposed to
+        # install, which is enough for review to tell them apart afterwards.
+        target = self.root / "trial"
+        baseline = self.seed(target)
+        self.assertIn("server_build_id", baseline)
+        self.assertEqual(baseline["addon"]["extension_binary"], str(self.extension))
+        self.assertRegex(baseline["addon"]["extension_sha256"], r"^[0-9a-f]{64}$")
+
+    def test_refuses_a_build_tree_with_no_assembled_addon(self):
+        # Without one, every live tool reports unavailable for the whole run and
+        # the trial measures the offline surface while claiming to measure Didi.
+        self.extension.unlink()
+        with self.assertRaises(FileNotFoundError):
+            self.seed(self.root / "trial")
+
+    def test_a_refused_seed_creates_nothing(self):
+        self.extension.unlink()
+        target = self.root / "trial"
+        with self.assertRaises(FileNotFoundError):
+            self.seed(target)
+        self.assertFalse(target.exists())
+
+
+class WriteManifestTests(unittest.TestCase):
+    def setUp(self):
+        self._temp = tempfile.TemporaryDirectory()
+        self.root = Path(self._temp.name)
+        self.addCleanup(self._temp.cleanup)
+        self.destination = self.root / "tool-manifest.baseline.json"
+
+    def test_an_unusable_binary_falls_back_to_the_supplied_manifest(self):
+        fallback = self.root / "pinned.json"
+        fallback.write_text(json.dumps({"names": {"implemented": ["scene_create"]}}), encoding="utf-8")
+        source = SEED.write_manifest(self.root / "not-a-binary", self.destination, fallback)
+        self.assertEqual(source, "copied")
+        self.assertTrue(self.destination.is_file())
+
+    def test_no_binary_and_no_fallback_is_reported_rather_than_guessed(self):
+        # A trial that cannot be scored against the surface it was handed is not
+        # a trial, and the caller has to be able to refuse before it spends.
+        self.assertEqual(SEED.write_manifest(self.root / "absent", self.destination), "none")
+        self.assertFalse(self.destination.exists())
+
+    def test_the_real_binary_is_preferred_over_a_file_lying_around(self):
+        # Gating trial 01 scored a binary emitting 94 canonical against an
+        # on-disk manifest claiming 83, so the uncalled set was wrong about
+        # eleven tools while looking entirely normal. Skips without a build,
+        # which is how every test that drives the real binary behaves.
+        didi = _binary.resolve()
+        stale = self.root / "stale.json"
+        stale.write_text(json.dumps({"names": {"implemented": []}}), encoding="utf-8")
+        self.assertEqual(SEED.write_manifest(Path(didi), self.destination, stale), "dumped")
+        written = json.loads(self.destination.read_text(encoding="utf-8"))
+        self.assertTrue(written["names"]["implemented"])
+
+
+class ParseBuildIdTests(unittest.TestCase):
+    def test_reads_the_build_line_and_not_the_version_line(self):
+        output = "didi (godot-mcp-native) v1.7.0\nbuild 1.7.0+e35b24c71aed.20260909T093746\n"
+        self.assertEqual(SEED.parse_build_id(output), "1.7.0+e35b24c71aed.20260909T093746")
+
+    def test_a_build_too_old_to_print_one_reports_none(self):
+        self.assertIsNone(SEED.parse_build_id("didi (godot-mcp-native) v1.6.0\n"))
+
+    def test_an_empty_build_line_is_not_an_identity(self):
+        self.assertIsNone(SEED.parse_build_id("build   \n"))
+
+
+class AddonRecordTests(unittest.TestCase):
+    def setUp(self):
+        self._temp = tempfile.TemporaryDirectory()
+        self.root = Path(self._temp.name)
+        self.addCleanup(self._temp.cleanup)
+        self.didi = self.root / "build-ninja" / "didi.exe"
+        self.didi.parent.mkdir(parents=True)
+        self.didi.write_text("binary", encoding="utf-8")
+        self.built = self.root / "build-ninja" / "addons" / "didi" / "bin" / "didi_extension.dll"
+        self.built.parent.mkdir(parents=True)
+        self.built.write_text("built", encoding="utf-8")
+        self.checked_in = self.root / "addons" / "didi" / "bin" / "didi_extension.dll"
+        self.checked_in.parent.mkdir(parents=True)
+
+    def test_names_the_repository_copy_as_stale_when_it_differs(self):
+        # The #325 trap: that directory is gitignored, written by no build step,
+        # and holds whatever was last dropped in it by hand. It is the file a
+        # tester following the old README installed, and it looks identical.
+        self.checked_in.write_text("six days older", encoding="utf-8")
+        record = SEED.addon_record(self.didi, self.root)
+        self.assertTrue(record["repository_copy_is_stale"])
+        self.assertNotEqual(record["extension_sha256"], record["repository_copy_sha256"])
+
+    def test_an_identical_repository_copy_is_not_stale(self):
+        self.checked_in.write_text("built", encoding="utf-8")
+        self.assertFalse(SEED.addon_record(self.didi, self.root)["repository_copy_is_stale"])
+
+    def test_no_repository_copy_at_all_is_not_stale(self):
+        self.assertFalse(SEED.addon_record(self.didi, self.root)["repository_copy_is_stale"])
+        self.assertIsNone(SEED.addon_record(self.didi, self.root)["repository_copy"])
 
 
 GATES_PATH = REPOSITORY_ROOT / "tools" / "field-trial" / "gates.py"
@@ -740,6 +856,207 @@ class CycleSummaryTests(unittest.TestCase):
             self.assertEqual(len(written), 1)
             summary = json.loads(written[0].read_text(encoding="utf-8"))
             self.assertEqual(summary["outcome"], "dry_run")
+
+
+BRIDGE_PATH = REPOSITORY_ROOT / "tools" / "field-trial" / "bridge.py"
+BRIDGE_SPEC = importlib.util.spec_from_file_location("field_trial_bridge", BRIDGE_PATH)
+if BRIDGE_SPEC is None or BRIDGE_SPEC.loader is None:
+    raise ImportError(f"Cannot load bridge reporter from {BRIDGE_PATH}")
+BRIDGE = importlib.util.module_from_spec(BRIDGE_SPEC)
+BRIDGE_SPEC.loader.exec_module(BRIDGE)
+
+
+def call_and_result(tool, payload, identifier="toolu_1", content_blocks=False):
+    """One assistant call and the user turn carrying its result."""
+    body = json.dumps(payload)
+    result = (
+        [{"type": "text", "text": body}] if content_blocks else body
+    )
+    return [
+        json.dumps({"message": {"content": [
+            {"type": "tool_use", "id": identifier, "name": f"mcp__didi__{tool}", "input": {}}
+        ]}}),
+        json.dumps({"message": {"content": [
+            {"type": "tool_result", "tool_use_id": identifier, "content": result}
+        ]}}),
+    ]
+
+
+class BridgeObservationTests(unittest.TestCase):
+    def test_a_matching_pairing_reports_no_complaint_field(self):
+        # The asymmetry worth encoding once: bridge_build_matches is written
+        # only when the two disagree, so a match is an absence and a reader that
+        # requires the field to be true finds a mismatch everywhere.
+        lines = call_and_result("runtime_get_session", {"server_build_id": "1.7.0+abc.1"})
+        observations = BRIDGE.extract_observations(lines)
+        self.assertEqual(len(observations), 1)
+        self.assertTrue(observations[0]["matches"])
+
+    def test_an_explicit_false_is_a_mismatch(self):
+        lines = call_and_result(
+            "runtime_attach_session",
+            {"server_build_id": "1.7.0+abc.1", "bridge_build_matches": False},
+        )
+        self.assertFalse(BRIDGE.extract_observations(lines)[0]["matches"])
+
+    def test_reads_a_result_written_as_content_blocks(self):
+        lines = call_and_result(
+            "runtime_get_session", {"server_build_id": "1.7.0+abc.1"}, content_blocks=True
+        )
+        self.assertEqual(len(BRIDGE.extract_observations(lines)), 1)
+
+    def test_ignores_a_payload_that_did_not_come_from_a_didi_call(self):
+        # A tester that cats the server log into a Read result must not be able
+        # to manufacture evidence about the bridge.
+        lines = [json.dumps({"message": {"content": [
+            {"type": "tool_use", "id": "t1", "name": "Read", "input": {}}
+        ]}}), json.dumps({"message": {"content": [
+            {"type": "tool_result", "tool_use_id": "t1",
+             "content": json.dumps({"server_build_id": "1.7.0+abc.1"})}
+        ]}})]
+        self.assertEqual(BRIDGE.extract_observations(lines), [])
+
+    def test_skips_results_that_are_not_json_without_raising(self):
+        lines = [json.dumps({"message": {"content": [
+            {"type": "tool_use", "id": "t1", "name": "mcp__didi__scene_create", "input": {}}
+        ]}}), json.dumps({"message": {"content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": "Error: something broke"}
+        ]}})]
+        self.assertEqual(BRIDGE.extract_observations(lines), [])
+
+
+class BridgeVerdictTests(unittest.TestCase):
+    def test_no_observation_is_not_a_clean_run(self):
+        report = BRIDGE.bridge_verdict([])
+        self.assertEqual(report["verdict"], BRIDGE.NOT_OBSERVED)
+        self.assertIn("unaccounted for", report["note"])
+
+    def test_all_matching_observations_are_matched(self):
+        observations = [
+            {"tool": "runtime_get_session", "server_build_id": "b1", "matches": True},
+            {"tool": "runtime_attach_session", "server_build_id": "b1", "matches": True},
+        ]
+        self.assertEqual(BRIDGE.bridge_verdict(observations)["verdict"], BRIDGE.MATCHED)
+
+    def test_one_mismatch_among_many_decides_the_run(self):
+        observations = [
+            {"tool": "runtime_get_session", "server_build_id": "b1", "matches": True},
+            {"tool": "runtime_attach_session", "server_build_id": "b1", "matches": False},
+        ]
+        report = BRIDGE.bridge_verdict(observations)
+        self.assertEqual(report["verdict"], BRIDGE.MISMATCHED)
+        self.assertEqual(report["mismatched_observations"], 1)
+
+    def test_a_server_the_harness_did_not_seed_is_a_mismatch(self):
+        # The case the server cannot see for itself: a tester that pointed its
+        # client at another didi.exe gets a happily agreeing pair, and the pair
+        # answers a different question than the one the trial asked.
+        observations = [{"tool": "runtime_get_session", "server_build_id": "other", "matches": True}]
+        report = BRIDGE.bridge_verdict(observations, seeded_build_id="seeded")
+        self.assertEqual(report["verdict"], BRIDGE.MISMATCHED)
+        self.assertIn("did not seed", report["note"])
+
+    def test_the_seeded_build_answering_itself_stays_matched(self):
+        observations = [{"tool": "runtime_get_session", "server_build_id": "seeded", "matches": True}]
+        self.assertEqual(
+            BRIDGE.bridge_verdict(observations, seeded_build_id="seeded")["verdict"],
+            BRIDGE.MATCHED,
+        )
+
+
+TRIAL_PATH = REPOSITORY_ROOT / "tools" / "field-trial" / "trial.py"
+TRIAL_SPEC = importlib.util.spec_from_file_location("field_trial_trial", TRIAL_PATH)
+if TRIAL_SPEC is None or TRIAL_SPEC.loader is None:
+    raise ImportError(f"Cannot load trial loop from {TRIAL_PATH}")
+TRIAL = importlib.util.module_from_spec(TRIAL_SPEC)
+TRIAL_SPEC.loader.exec_module(TRIAL)
+
+
+class CoverageDeltaTests(unittest.TestCase):
+    def report(self, called, implemented):
+        return {
+            "called": {name: 1 for name in called},
+            "totals": {"distinct_called": len(called), "implemented": implemented,
+                       "invocations": len(called)},
+        }
+
+    def test_a_first_run_has_no_previous_to_compare_against(self):
+        delta = TRIAL.coverage_delta(None, self.report(["scene_create"], 112))
+        self.assertIsNone(delta["previous"])
+        self.assertEqual(delta["newly_called"], [])
+
+    def test_names_the_tools_that_changed_hands(self):
+        previous = self.report(["scene_create", "editor_undo"], 91)
+        current = self.report(["scene_create", "runtime_step"], 112)
+        delta = TRIAL.coverage_delta(previous, current)
+        self.assertEqual(delta["newly_called"], ["runtime_step"])
+        self.assertEqual(delta["no_longer_called"], ["editor_undo"])
+
+    def test_the_denominators_travel_with_the_numbers(self):
+        # Trial 03 read as a regression at 32.1% against trial 01's 39.6%
+        # entirely because the implemented surface grew from 91 to 112 beneath
+        # it. A comparison that shows one and hides the other invites that.
+        delta = TRIAL.coverage_delta(self.report(["a"], 91), self.report(["a", "b"], 112))
+        self.assertEqual(delta["previous"]["implemented"], 91)
+        self.assertEqual(delta["current"]["implemented"], 112)
+
+
+class TrialSummaryTests(unittest.TestCase):
+    def test_the_bridge_verdict_is_rendered_above_the_coverage_table(self):
+        summary = TRIAL.trial_summary(
+            "trial-1", [{"name": "score", "status": "ok", "detail": ""}], "scored",
+            baseline={"commit": "abc", "server_build_id": "b1"},
+            delta={"previous": None, "current": {"distinct_called": 3, "implemented": 112,
+                                                 "invocations": 9},
+                   "newly_called": [], "no_longer_called": []},
+            bridge_report={"verdict": "not_observed", "note": "nothing attached"},
+        )
+        rendered = TRIAL.render_summary(summary)
+        self.assertLess(rendered.index("## Bridge"), rendered.index("## Coverage"))
+        self.assertIn("not_observed", rendered)
+
+    def test_records_the_first_failed_phase_by_name(self):
+        summary = TRIAL.trial_summary(
+            "trial-1",
+            [{"name": "seed", "status": "ok"}, {"name": "run", "status": "failed"}],
+            "run_timeout",
+        )
+        self.assertEqual(summary["failed_phase"], "run")
+
+    def test_dry_run_seeds_and_launches_no_tester(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            didi = root / "build-ninja" / "didi.exe"
+            didi.parent.mkdir(parents=True)
+            didi.write_text("binary", encoding="utf-8")
+            extension = didi.parent / "addons" / "didi" / "bin" / "didi_extension.dll"
+            extension.parent.mkdir(parents=True)
+            extension.write_text("extension", encoding="utf-8")
+            godot = root / "godot.exe"
+            godot.write_text("binary", encoding="utf-8")
+            manifest = root / "tool-manifest.json"
+            manifest.write_text(
+                json.dumps({"names": {"implemented": ["scene_create"]}}), encoding="utf-8"
+            )
+            artifacts = root / "artifacts"
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = TRIAL.main([
+                    "--dry-run", "--artifacts", str(artifacts),
+                    "--didi-exe", str(didi), "--godot-exe", str(godot),
+                    "--manifest", str(manifest),
+                ])
+            self.assertEqual(code, 1)
+            written = list(artifacts.glob("trial-*/trial.json"))
+            self.assertEqual(len(written), 1)
+            summary = json.loads(written[0].read_text(encoding="utf-8"))
+            self.assertEqual(summary["outcome"], "dry_run")
+            # The seed is real even in a dry run: it is the half that has to be
+            # right before spending anything on the half that costs money.
+            self.assertIn("addon", summary["baseline"])
+            self.assertEqual(
+                [phase["status"] for phase in summary["phases"] if phase["name"] == "run"],
+                ["skipped"],
+            )
 
 
 if __name__ == "__main__":
