@@ -11,6 +11,24 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
+No changes yet since 1.7.0. The block below states the current surface
+rather than anything this release changed, which is why it lives here and
+not in a version section.
+
+<!-- phase7-current-status:start -->
+**Status:** `PARTIAL_DELIVERY`
+**Canonical implementation:** `112/115`
+**Phase 7 registrations:** `3/18` unimplemented
+**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
+<!-- phase7-current-status:end -->
+
+Discovery now exposes 115 canonical tools plus 10 legacy registrations (125 total). 112 canonical tools are implemented and 3 remain unimplemented.
+The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
+
+---
+
+## [1.7.0] - 2026-09-09
+
 ### Added
 
 - Signed releases. Every release archive now carries SLSA build provenance,
@@ -337,8 +355,6 @@ Historical entries describe the surface advertised by those releases. For the ex
   before the limit is consulted, and a genuine limit returns `429`. Every held
   route is released on shutdown, not only the selected one.
 
-### Fixed
-
 - A request no longer inherits a Godot session it never chose. Attaching set one
   route for the whole process and every later request acquired it, so on a
   process serving more than one task an agent could read from, or mutate, an
@@ -457,16 +473,6 @@ Historical entries describe the surface advertised by those releases. For the ex
   time check that refuses when either test-only target exists with the option
   off, rather than a comment asking the next person not to do it again. A clean
   test-off build produces exactly the server binary and the extension.
-
-<!-- phase7-current-status:start -->
-**Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `112/115`
-**Phase 7 registrations:** `3/18` unimplemented
-**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
-<!-- phase7-current-status:end -->
-
-Discovery now exposes 115 canonical tools plus 10 legacy registrations (125 total). 112 canonical tools are implemented and 3 remain unimplemented.
-The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
 ---
 

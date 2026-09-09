@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(didi VERSION 1.6.0 LANGUAGES C CXX)
+project(didi VERSION 1.7.0 LANGUAGES C CXX)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
