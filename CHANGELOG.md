@@ -11,6 +11,24 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
+No changes yet since 1.8.0. The block below states the current surface
+rather than anything this release changed, which is why it lives here and
+not in a version section.
+
+<!-- phase7-current-status:start -->
+**Status:** `PARTIAL_DELIVERY`
+**Canonical implementation:** `112/115`
+**Phase 7 registrations:** `3/18` unimplemented
+**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
+<!-- phase7-current-status:end -->
+
+Discovery now exposes 115 canonical tools plus 10 legacy registrations (125 total). 112 canonical tools are implemented and 3 remain unimplemented.
+The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
+
+---
+
+## [1.8.0] - 2026-09-10
+
 ### Fixed
 
 - `Tools.OfflineCapabilityIsDerived` sets up the tool registry it reads instead
@@ -178,32 +196,6 @@ Historical entries describe the surface advertised by those releases. For the ex
   because that is the engine's business and an assertion about it would break
   on a change nobody using Didi would care about.
 
-- A field trial can be run unattended. `tools/field-trial/trial.py` seeds the
-  working directory, briefs a fresh tester in its own client session, and scores
-  what that tester did from the transcript rather than from its own account of
-  itself. `--dry-run` exercises everything except the spending.
-
-  The reason to automate it is not the agent's hour, it is the maintainer's.
-  Three trials have now produced defects no suite found, and each cost a morning
-  of seeding by hand and remembering which manifest to score against.
-
-  It also closes the finding trial 03 paid for. A trial is seeded against a
-  server binary and scored against that binary's manifest, while the live half
-  of every call is answered by a GDExtension the tester installs by hand and no
-  artifact recorded. That run spent about an hour concluding a shipped
-  capability did not exist, because the bridge answering it was six days older
-  than the server. The seed now records the server's build id and the hash of
-  the addon the tester is meant to install, and `bridge.py` reads back the
-  pairing the server reported on every live session call. Its third verdict is
-  the one worth having: a run where no call ever reported a pairing is
-  `not_observed`, not clean, because nothing in it says which build served it.
-
-- `didi --version` prints the build id under the release version.
-
-  The version cannot tell two builds apart, and the server and the GDExtension
-  are separate files a user copies around separately. A session that has
-  attached reports both halves and says whether they match; before one is
-  attached, this is the only way to record which build a run was handed.
 
 ### Changed
 
@@ -272,23 +264,6 @@ Historical entries describe the surface advertised by those releases. For the ex
   function and line are one frame and not a stack. A stand-in offered without
   its limits is the same false success the trials named as the worst defect
   class, arriving in prose instead of in a response.
-
----
-
-The block below states the current surface rather than anything a release
-changed, which is why it lives here and not in a version section.
-
-<!-- phase7-current-status:start -->
-**Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `112/115`
-**Phase 7 registrations:** `3/18` unimplemented
-**Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
-<!-- phase7-current-status:end -->
-
-Discovery now exposes 115 canonical tools plus 10 legacy registrations (125 total). 112 canonical tools are implemented and 3 remain unimplemented.
-The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
-
----
 
 ## [1.7.0] - 2026-09-09
 
