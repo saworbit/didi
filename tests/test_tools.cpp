@@ -3220,7 +3220,14 @@ static void test_rename_refuses_what_it_cannot_do_safely() {
 // assertion and then drifts as tools are added; this asserts the property
 // instead, so it cannot be right today and wrong next month.
 void test_offline_capability_is_derived_not_listed() {
-    const auto tools = didi::mcp::ToolRegistry::instance().listTools();
+    // Registered here rather than inherited from whichever test ran before.
+    // Reading the registry without filling it made this pass only in a full
+    // run and fail on its own, which is the opposite of what running a single
+    // test is for. The emptiness check below was telling the truth.
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto tools = registry.listTools();
     ASSERT_TRUE(!tools.empty());
 
     std::vector<std::string> offline;
