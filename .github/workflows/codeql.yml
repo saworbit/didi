@@ -108,7 +108,6 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: none
-          config-file: .github/codeql/codeql-config.yml
           queries: security-extended
 
       - name: Perform CodeQL Analysis
@@ -144,7 +143,6 @@ jobs:
           # C++ has no build-free mode: CodeQL observes the real compiler, so
           # the analysis is only as complete as the build it watches.
           build-mode: manual
-          config-file: .github/codeql/codeql-config.yml
           # security-extended adds the lower-severity queries. This code parses
           # untrusted JSON-RPC off a pipe, so the extra reach earns its minutes.
           queries: security-extended

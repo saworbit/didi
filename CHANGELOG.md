@@ -44,15 +44,19 @@ Historical entries describe the surface advertised by those releases. For the ex
   Actions are about a minute each and always run, while the C++ analysis takes
   closer to twenty and runs only when something can reach the compiler.
 
-- The three vendored files recorded in [THIRD_PARTY.md](THIRD_PARTY.md) are
-  excluded from CodeQL analysis. `stb_image_write.h` alone accounted for five
-  of the ten findings in CodeQL's first pass, all integer-multiplication
-  overflows in code this project is told not to modify. Alerts that can never
-  be actioned are how a Security tab stops being read; the risk of a vendored
-  file is managed by knowing what is in the tree and what updating it involves.
+- All ten of CodeQL's first-pass findings were triaged and dismissed with
+  written reasons rather than left open. Alerts that can never be actioned are
+  how a Security tab stops being read, and the next real finding then arrives
+  looking exactly like the ones already learned to be ignored.
 
-  The remaining five findings were triaged and dismissed with written reasons
-  rather than left open. None was a new defect: three are operator-nominated
+  Five of them are integer-multiplication overflows inside
+  `stb_image_write.h`, vendored code this project is told not to modify. The
+  first attempt excluded the vendored files through a CodeQL configuration
+  file; it was loaded and had no effect. `paths-ignore` applies to interpreted
+  languages and to compiled languages analysed without a build, and this
+  analysis builds, because CodeQL for C++ observes the real compiler. The
+  configuration file was removed rather than left in the tree describing a
+  control that was not in force. None was a new defect: three are operator-nominated
   process launches that advertise `openWorldHint: true`, one is the documented
   `DIDI_SESSION_DIR` override, and one is a test probe reading its own
   argument. [SECURITY.md](SECURITY.md) records each disposition.
