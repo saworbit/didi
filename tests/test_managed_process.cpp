@@ -1,4 +1,6 @@
 #include "didi/runtime/managed_process.hpp"
+#include "didi/offline/process_runner.hpp"
+#include <filesystem>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -403,6 +405,41 @@ void reapsOwnedChildWhenTheHostDiesAbnormally() {
 #endif
 }
 
+static void offlineRunnerDoesNotHandChildrenTheServerStdin() {
+    // The offline runner used to hand children this process's standard input.
+    // Didi speaks JSON-RPC on stdio, so a child that reads stdin reads the
+    // server's own requests, and two readers on one stream race whether or not
+    // the child ever wants input.
+    //
+    // What this proves, and what it does not. A command that reads until end of
+    // input now returns promptly instead of waiting for one that never comes.
+    // On a machine whose own stdin is already at end of file the child would
+    // return promptly either way, so this can pass without exercising the
+    // redirect. It cannot pass while the bug is present on a machine with an
+    // open stdin, which is the case that hangs a real session, and it never
+    // fails spuriously. Distinguishing the mechanism would mean observing the
+    // child's handle, which is not portable.
+    didi::offline::ProcessRequest request;
+    request.working_directory = std::filesystem::temp_directory_path();
+    request.timeout = std::chrono::milliseconds(5000);
+#if defined(_WIN32)
+    request.executable = "cmd.exe";
+    request.arguments = {"/c", "more"};
+#else
+    request.executable = "/bin/sh";
+    request.arguments = {"-c", "cat"};
+#endif
+
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = didi::offline::runProcess(request);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+
+    CHECK_PROCESS(result.isOk());
+    CHECK_PROCESS(!result.value().timed_out);
+    CHECK_PROCESS(
+        std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() < 4000);
+}
+
 struct RegisterManagedProcess {
     RegisterManagedProcess() {
         registerTest("ManagedProcess.ReportsArgumentsAndExit", reportsArgumentsAndExit);
@@ -413,6 +450,8 @@ struct RegisterManagedProcess {
                      reapsOwnedChildWhenTheHostDiesAbnormally);
         registerTest("ManagedProcess.FailedNativeLaunchLeavesObjectReusable",
                      failedNativeLaunchLeavesObjectReusable);
+        registerTest("ProcessRunner.ChildDoesNotInheritServerStdin",
+                     offlineRunnerDoesNotHandChildrenTheServerStdin);
 #if !defined(_WIN32)
         registerTest("ManagedProcess.LaunchClosesDescriptorsAboveSoftLimit",
                      launchClosesDescriptorsAboveSoftLimit);
