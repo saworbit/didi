@@ -82,7 +82,7 @@ jobs:
 
           # Anything that cannot reach the compiler, the tool manifest, the
           # documentation contract, or any test. Everything else builds.
-          build_ignored='^(docs/brand/|\.github/ISSUE_TEMPLATE/|\.github/FUNDING\.yml$|\.github/CODEOWNERS$|\.github/labeler\.yml$|\.github/release\.yml$|\.github/workflows/(codeql|supply-chain|triage)\.yml$|\.editorconfig$|\.gitattributes$|\.gitignore$|LICENSE$|CODE_OF_CONDUCT\.md$)'
+          build_ignored='^(docs/brand/|\.github/ISSUE_TEMPLATE/|\.github/pull_request_template\.md$|\.github/FUNDING\.yml$|\.github/CODEOWNERS$|\.github/labeler\.yml$|\.github/release\.yml$|\.github/workflows/(codeql|supply-chain|triage)\.yml$|\.editorconfig$|\.gitattributes$|\.gitignore$|LICENSE$|CODE_OF_CONDUCT\.md$)'
 
           # Only these can change what a running Godot editor or a sanitizer
           # build observes. Prose cannot, which is the whole point.
