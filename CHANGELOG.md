@@ -13,6 +13,46 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ### Added
 
+- Signed releases. Every release archive now carries SLSA build provenance,
+  signed through Sigstore by the release workflow, plus a `SHA256SUMS` file and
+  the provenance bundle as `didi-<tag>.intoto.jsonl`.
+
+  Didi ships prebuilt binaries, so "did this archive come from that source" has
+  to be answerable by someone holding only the download. Until now it was not
+  answerable at all. The check that matters names the workflow, not just the
+  repository, because an attacker can sign something of their own but cannot
+  produce a signature attributed to this repository's release workflow:
+
+  ```bash
+  gh attestation verify didi-linux-x64.tar.gz \
+    --repo saworbit/didi \
+    --signer-workflow saworbit/didi/.github/workflows/release.yml
+  ```
+
+  `--source-ref` is part of the documented check for a reason: the release
+  workflow can also be run manually as a rehearsal, and those runs sign too, so
+  their provenance carries the same repository and the same signer workflow.
+  Only the ref separates a published release from a dry run, so a verification
+  that omits it would accept a rehearsal artifact as something the project
+  published.
+
+  There is no signing key. The certificate is issued to the workflow run's own
+  OIDC identity and expires in minutes, so there is nothing for a maintainer to
+  leak, rotate or lose. The bundle ships as a release asset rather than living
+  only in GitHub's attestation store, so verification works offline for someone
+  who would rather not call the GitHub API -- and because that is the form
+  OpenSSF Scorecard's Signed-Releases check reads.
+
+  `SHA256SUMS` is covered by the same attestation, so it cannot be swapped
+  independently of the archives it describes. [SECURITY.md](SECURITY.md) has
+  the verification commands.
+
+- A rehearsal for the release pipeline. Running the release workflow manually
+  now builds, checksums and signs exactly what a tag would, then leaves the
+  result as a workflow artifact instead of publishing it. The signing path used
+  to be reachable only by tagging a real release, which meant the only way to
+  find out whether it worked was to do the thing that cannot be undone.
+
 - Repository automation and supply-chain hardening. Someone assessing this
   project from the outside can now see what is enforced rather than what is
   claimed.
@@ -109,6 +149,29 @@ Historical entries describe the surface advertised by those releases. For the ex
 - Added opt-in managed editor recovery: isolated project copies, saved-file checkpoints, one owned-editor restart, explicit reconciliation and preserved-workspace restoration. Four recovery tools expose state and actions without replaying uncertain edits. Ordinary attachment and runtime_launch remain unchanged. See [Managed Recovery](docs/MANAGED_RECOVERY.md) for coverage and limitations.
 
 ### Changed
+
+- The Linux release artifact is built *inside* Ubuntu 22.04 rather than *on*
+  it. The `ubuntu-22.04` runner image is being retired -- deprecation from
+  2026-09-17, unsupported from 2027-04-17 -- and GitHub brownouts already kill
+  jobs using the label. One killed a release rehearsal mid-compile, which is
+  how this was found rather than by a failed release.
+
+  The label was chosen for glibc in the first place: a binary built against
+  2.35 starts on Ubuntu 22.04 and Debian 12, and one built on a newer host does
+  not. Moving to `ubuntu-24.04` would have raised the floor to glibc 2.39 and
+  silently dropped every Ubuntu 22.04 LTS and Debian 12 user -- a decision about
+  who can run Didi, not a CI fix. Building in a pinned `ubuntu:22.04` container
+  on a supported runner keeps the floor exactly where it was.
+
+  The image is pinned by digest, because this build feeds the provenance
+  attestation: what built the binary should be a fact rather than whatever the
+  tag pointed at that day.
+
+- Corrected the documented Linux minimum in
+  [Administrator Guide](docs/ADMIN_GUIDE.md) from Ubuntu 20.04+ to Ubuntu
+  22.04+ / glibc 2.35+. It had not been true of a published archive for some
+  time: the build host sets the floor, and it had been 22.04. Nothing about
+  what ships changed here -- only the claim made about it.
 
 - CI decides what to run instead of running everything. A single cheap job
   classifies the changed files, and the two 30-minute Windows Godot integration
