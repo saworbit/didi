@@ -8147,29 +8147,119 @@ json GodotBridge::execute(const std::string& method, const json& params,
     }
 
     if (method == "scene.instantiateNode") {
-        if (!params.value("scene_path", "").empty()) {
-            return errorJson(501, "PackedScene instantiation is outside the Phase 1 built-in-node bridge");
-        }
         auto root = editedSceneRoot(editor);
         if (root.isErr()) return errorJson(root.error().code, root.error().message);
         auto parent = resolveNode(root.value(), params.value("parent_path", "/root"));
         if (parent.isErr()) return errorJson(parent.error().code, parent.error().message);
+        const std::string instance_scene_path = params.value("scene_path", "");
         std::string node_type = params.value("node_type", "Node");
-        NativeName type_name(node_type);
-        auto node = constructObject(type_name.ptr());
-        if (!node) return errorJson(400, "Godot ClassDB could not instantiate node type: " + node_type);
-        auto node_class = makeString("Node");
-        auto is_node_variant = node_class.isOk()
-            ? callObject(node, "Object", "is_class", 3927539163LL, {&node_class.value()})
-            : Result<VariantValue>(node_class.error());
-        auto is_node = is_node_variant.isOk()
-            ? scalarFromVariant<GDExtensionBool>(is_node_variant.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
-            : Result<GDExtensionBool>(is_node_variant.error());
-        if (is_node.isErr() || !is_node.value()) {
-            GodotApi::instance().object_destroy(node);
-            return is_node.isErr()
-                ? errorJson(is_node.error().code, is_node.error().message)
-                : errorJson(400, "Godot ClassDB type does not inherit Node: " + node_type);
+        GDExtensionObjectPtr node = nullptr;
+
+        if (!instance_scene_path.empty()) {
+            // Putting a packed scene in the tree is close to the most common
+            // single operation in Godot editing, and scene_pack_branch produced
+            // scenes nothing in the surface could then consume. The instance is
+            // made the way the editor makes one, so what is saved is an
+            // instance of the scene rather than a copy of its nodes.
+            auto valid_scene = validateResPath(instance_scene_path, ".tscn");
+            if (valid_scene.isErr()) {
+                return errorJson(valid_scene.error().code, valid_scene.error().message);
+            }
+            auto loader = singleton("ResourceLoader");
+            if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
+            auto scene_path_value = makeString(instance_scene_path);
+            auto packed_hint = makeString("PackedScene");
+            auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
+            if (scene_path_value.isErr() || packed_hint.isErr() || cache_mode.isErr()) {
+                return errorJson(500, "Failed to construct scene resource arguments");
+            }
+            auto exists_value = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                                           {&scene_path_value.value(), &packed_hint.value()});
+            if (exists_value.isErr()) {
+                return errorJson(exists_value.error().code, exists_value.error().message);
+            }
+            auto scene_exists = scalarFromVariant<GDExtensionBool>(exists_value.value(),
+                                                                   GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (scene_exists.isErr()) {
+                return errorJson(scene_exists.error().code, scene_exists.error().message);
+            }
+            if (!scene_exists.value()) {
+                return errorJson(404, "PackedScene not found: " + instance_scene_path);
+            }
+            auto resource = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                                       {&scene_path_value.value(), &packed_hint.value(),
+                                        &cache_mode.value()});
+            if (resource.isErr()) return errorJson(resource.error().code, resource.error().message);
+            auto packed = objectFromVariant(resource.value());
+            if (packed.isErr() || !packed.value()) {
+                return errorJson(422, "Resource is not a loadable PackedScene: " + instance_scene_path);
+            }
+            auto packed_class = makeString("PackedScene");
+            auto class_value = packed_class.isOk()
+                ? callObject(packed.value(), "Object", "is_class", 3927539163LL,
+                             {&packed_class.value()})
+                : Result<VariantValue>(packed_class.error());
+            auto is_packed = class_value.isOk()
+                ? scalarFromVariant<GDExtensionBool>(class_value.value(),
+                                                     GDEXTENSION_VARIANT_TYPE_BOOL)
+                : Result<GDExtensionBool>(class_value.error());
+            if (is_packed.isErr() || !is_packed.value()) {
+                return is_packed.isErr()
+                    ? errorJson(is_packed.error().code, is_packed.error().message)
+                    : errorJson(422, "Resource is not a PackedScene: " + instance_scene_path);
+            }
+            // A scene whose root script or dependency is missing answers false
+            // here, and instantiating it anyway returns null and puts the reason
+            // in a console the caller cannot read.
+            auto can_value = callObject(packed.value(), "PackedScene", "can_instantiate",
+                                        36873697LL);
+            if (can_value.isErr()) return errorJson(can_value.error().code, can_value.error().message);
+            auto can_instantiate = scalarFromVariant<GDExtensionBool>(
+                can_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (can_instantiate.isErr()) {
+                return errorJson(can_instantiate.error().code, can_instantiate.error().message);
+            }
+            if (!can_instantiate.value()) {
+                return errorJson(422, "PackedScene cannot be instantiated, so something it depends "
+                                      "on is missing or failed to load: " + instance_scene_path);
+            }
+            // GEN_EDIT_STATE_INSTANCE, which is what the editor's own scene drop
+            // uses. It is the difference between a saved instance of the scene
+            // and a saved copy of the nodes that were in it.
+            auto edit_state = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
+            if (edit_state.isErr()) return errorJson(edit_state.error().code, edit_state.error().message);
+            auto instance = callObject(packed.value(), "PackedScene", "instantiate", 2628778455LL,
+                                       {&edit_state.value()});
+            if (instance.isErr()) return errorJson(instance.error().code, instance.error().message);
+            auto instance_node = objectFromVariant(instance.value());
+            if (instance_node.isErr() || !instance_node.value()) {
+                return errorJson(500, "Godot returned no node for PackedScene: " + instance_scene_path);
+            }
+            node = instance_node.value();
+            // Report what was made, not what the caller happened to type in
+            // node_type, which this branch does not use.
+            auto instance_class = callObject(node, "Object", "get_class", 201670096LL);
+            auto instance_class_name = instance_class.isOk()
+                ? stringFromVariant(instance_class.value(), GDEXTENSION_VARIANT_TYPE_STRING)
+                : Result<std::string>(instance_class.error());
+            if (instance_class_name.isOk()) node_type = instance_class_name.value();
+        } else {
+            NativeName type_name(node_type);
+            node = constructObject(type_name.ptr());
+            if (!node) return errorJson(400, "Godot ClassDB could not instantiate node type: " + node_type);
+            auto node_class = makeString("Node");
+            auto is_node_variant = node_class.isOk()
+                ? callObject(node, "Object", "is_class", 3927539163LL, {&node_class.value()})
+                : Result<VariantValue>(node_class.error());
+            auto is_node = is_node_variant.isOk()
+                ? scalarFromVariant<GDExtensionBool>(is_node_variant.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+                : Result<GDExtensionBool>(is_node_variant.error());
+            if (is_node.isErr() || !is_node.value()) {
+                GodotApi::instance().object_destroy(node);
+                return is_node.isErr()
+                    ? errorJson(is_node.error().code, is_node.error().message)
+                    : errorJson(400, "Godot ClassDB type does not inherit Node: " + node_type);
+            }
         }
         if (!params.value("name", "").empty()) {
             auto name = makeStringName(params.value("name", ""));
@@ -8255,7 +8345,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
             GodotApi::instance().object_destroy(node);
             return errorJson(preflight.error().code, preflight.error().message);
         }
-        auto action = createAction(manager.value(), "Didi: instantiate " + node_type, root.value());
+        auto action = createAction(manager.value(),
+                                   instance_scene_path.empty()
+                                       ? "Didi: instantiate " + node_type
+                                       : "Didi: instantiate " + instance_scene_path,
+                                   root.value());
         if (action.isErr()) { GodotApi::instance().object_destroy(node); return errorJson(action.error().code, action.error().message); }
         auto keep = managerReference(manager.value(), "add_do_reference", node);
         auto add = managerMethod(manager.value(), "add_do_method", parent.value(), "add_child",
@@ -8284,6 +8378,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                          ? actual_path.value()
                                          : logical_parent.value() + "/" + logical_name},
                        {"undo_redo_registered", true}};
+        // Which scene this is an instance of, so the caller can tell an
+        // instance apart from a node of the same class that merely looks like
+        // one in the tree.
+        if (!instance_scene_path.empty()) result["scene_path"] = instance_scene_path;
         if (actual_path.isErr()) result["node_path_verified"] = false;
         return liveResult(result);
     }

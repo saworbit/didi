@@ -39,7 +39,7 @@ Offline hierarchy results come from parsing a `.tscn` file and contain `source: 
 
 When live, use focused tools:
 
-- `scene_instantiate_node` for built-in ClassDB node types only.
+- `scene_instantiate_node` for built-in ClassDB node types, and for instancing a packed scene through `scene_path`.
 - `scene_remove_node`, `scene_reparent_node`, and `scene_duplicate_node` for structural changes.
 - `scene_set_property` for existing properties. Its `value` is the property read back after the commit, not the argument you sent. Check `applied`: a successful call with `applied: false` means Godot discarded the write, and the scene is not what you asked for.
 - Send `{"x": .., "y": ..}` or `{"x": .., "y": .., "z": ..}` for a Vector2/Vector3, whole numbers for the integer versions, `{"r": .., "g": .., "b": ..}` with an optional `a` or a `"#rrggbb"` string for a Color, and a `res://` path for a Resource slot. `null` clears a resource slot. An extra or missing member is refused rather than dropped.
@@ -55,7 +55,7 @@ Use logical paths shaped like `/root/<edited-scene-root>/Child`. `/root` by itse
 
 Property values are limited to JSON null, boolean, signed integer, real, and string values compatible with the existing Godot property type. Do not send Vector, Transform, Color, Resource, Object, array, or dictionary values in Phase 1.
 
-Do not use `scene_path` for PackedScene instantiation; it is not implemented. Do not use the legacy `mutate_scene_tree` or `instantiate_asset` names.
+Pass `scene_path` to `scene_instantiate_node` to put an instance of a `.tscn` in the edited scene, which is what `scene_pack_branch` output is for. Do not use the legacy `mutate_scene_tree` or `instantiate_asset` names.
 
 ### Wire scripts, groups, and project configuration
 

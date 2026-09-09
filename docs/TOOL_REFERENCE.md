@@ -42,13 +42,13 @@ The live walk is separately capped at 100000 nodes and 8 MiB so a large edited s
 
 ### `scene_instantiate_node` — Live
 
-Creates a built-in ClassDB node under the active edited scene and registers add/remove operations with UndoRedo.
+Creates a built-in ClassDB node, or an instance of a packed scene, under the active edited scene and registers add/remove operations with UndoRedo.
 
-- `node_type` (`string`, default `"Node"`).
+- `node_type` (`string`, default `"Node"`). Ignored when `scene_path` is given.
 - `parent_path` (`string`, default `"/root"`).
 - `name` (`string`, optional).
 - `properties` (`object`, optional): Initial property values. Each value is a JSON null, boolean, signed integer, real, string, or a vector/colour object compatible with that property's Godot type, the same contract as `scene_set_property`'s `value`.
-- `scene_path` is present in the schema, but PackedScene instantiation currently returns `501`.
+- `scene_path` (`string`, optional): a `res://` `.tscn` to instance rather than a type to construct. The instance is made with `GEN_EDIT_STATE_INSTANCE`, which is what the editor's own scene drop uses, so the scene file records an instance of that scene and not a copy of its nodes. `properties` still applies, to the instance root. The result reports the instance's own class in `node_type` and echoes `scene_path`. A missing scene is `404`, a resource that is not a PackedScene is `422`, and so is one whose dependencies did not load, because instantiating that returns nothing and puts the reason in a console the caller cannot read.
 
 ### `scene_remove_node` — Live
 
@@ -635,7 +635,7 @@ Each entry carries `node_path` relative to the edited scene root, plus `class` a
 
 ### `instantiate_asset` — Unimplemented legacy name
 
-Asset or PackedScene instantiation is not implemented.
+Not implemented. To put a packed scene in the edited scene, pass `scene_path` to `scene_instantiate_node`.
 
 ### `project_search_text` and `project_search_symbols` — Offline
 

@@ -1138,12 +1138,12 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "scene_instantiate_node";
-        t.description = "Creates a built-in ClassDB node in the active edited scene with UndoRedo; PackedScene paths are not implemented.";
+        t.description = "Creates a built-in ClassDB node, or an instance of a packed scene, in the active edited scene with UndoRedo.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
-                {"node_type", {{"type", "string"}, {"default", "Node"}, {"description", "Built-in ClassDB Node type to instantiate"}}},
-                {"scene_path", {{"type", "string"}, {"description", "Optional .tscn path"}}},
+                {"node_type", {{"type", "string"}, {"default", "Node"}, {"description", "Built-in ClassDB Node type to instantiate. Ignored when scene_path is given: the instance is whatever the scene's root is, and the result reports its class."}}},
+                {"scene_path", {{"type", "string"}, {"description", "A res:// .tscn to instance instead of constructing a type, as the editor does when a scene is dropped into the tree. What the scene file records is an instance of that scene, not a copy of its nodes."}}},
                 {"parent_path", {{"type", "string"}, {"default", "/root"}}},
                 {"name", {{"type", "string"}, {"description", "Node name"}}},
                 // These values reach the same validator as scene_set_property's
