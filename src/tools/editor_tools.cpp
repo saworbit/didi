@@ -1,6 +1,7 @@
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/offline/resource_indexer.hpp"
 
 namespace didi {
 namespace mcp {
@@ -46,6 +47,10 @@ CallToolResult handleEditorReloadProject(const json& args, std::shared_ptr<ipc::
         }
         return CallToolResult::error("Editor reload project failed: " + res.error().message);
     }
+    // Offline this is the whole job. Callers reach for it after changing files
+    // outside Didi, and it used to report a re-index while the cached index
+    // carried on answering with what it read before.
+    offline::ResourceIndexer::invalidateSharedIndex();
     return CallToolResult::successJson({
         {"status", "offline"},
         {"message", "Offline caches re-indexed."}

@@ -3,6 +3,7 @@
 #include "didi/common/project_path.hpp"
 
 #include <fstream>
+#include <memory>
 #include <sstream>
 
 namespace didi::offline {
@@ -23,13 +24,24 @@ bool carriesReferences(const std::string& type) {
 
 } // namespace
 
-ProjectTextScan scanProjectText(const std::string& root_dir) {
-    ResourceIndexer indexer;
-    indexer.scan(root_dir);
+ProjectTextScan scanProjectText(const std::string& root_dir, ScanIndex index) {
+    // The shared index is the same one every read tool uses, so inspecting a
+    // resource and then asking for its impact crawls the tree once rather than
+    // twice. A caller that is about to rewrite files asks for a fresh crawl.
+    ResourceIndexer local;
+    std::shared_ptr<const ResourceIndexer> shared;
+    const ResourceIndexer* indexer = nullptr;
+    if (index == ScanIndex::shared) {
+        shared = ResourceIndexer::sharedIndex(root_dir);
+        indexer = shared.get();
+    } else {
+        local.scan(root_dir);
+        indexer = &local;
+    }
 
     ProjectTextScan scan;
-    scan.resources = indexer.query("res://");
-    scan.truncated = indexer.truncated();
+    scan.resources = indexer->query("res://");
+    scan.truncated = indexer->truncated();
 
     const auto root = paths::projectPathFromUtf8(root_dir);
     for (const auto& resource : scan.resources) {

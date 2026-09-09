@@ -479,6 +479,11 @@ void collectNodePathImpacts(const ProjectTextScan& scan, const std::string& targ
     const auto normalized_target = normalizedNodePath(target);
 
     for (const auto& source : scan.sources) {
+        // Every match below is gated on the same substring one line at a time,
+        // so a file that does not contain it anywhere can produce nothing. It
+        // used to be masked and split into a heap string per line first, for
+        // every scene and script in the project, and thrown away.
+        if (source.contents.find(normalized_target) == std::string::npos) continue;
         const bool gdscript = strings::endsWith(source.path, ".gd");
         const bool csharp = strings::endsWith(source.path, ".cs");
         const bool godot_resource = strings::endsWith(source.path, ".tscn") ||
@@ -629,7 +634,11 @@ Result<json> renameReferences(const std::string& root_dir, const ProjectRenameOp
         return Error::invalidArgument("target and new_name are the same, so there is nothing to do");
     }
 
-    const auto scan = scanProjectText(root_dir);
+    // Its own crawl, not the shared one. This rewrites files, and a resource
+    // created outside Didi while the cached list was alive would be missing
+    // from it, which is the same half-applied rename the truncation check below
+    // refuses.
+    const auto scan = scanProjectText(root_dir, ScanIndex::fresh);
     // A partial read of the project is the one input this must refuse. Renaming
     // the references in the files that were read and leaving the rest is
     // precisely the half-applied change this exists to prevent, and the caller

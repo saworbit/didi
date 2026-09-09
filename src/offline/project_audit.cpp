@@ -138,9 +138,10 @@ std::unordered_set<std::string> usedSignalNames(
 } // namespace
 
 json auditProject(const std::string& root_dir, const ProjectAuditOptions& options) {
-    ResourceIndexer indexer;
-    indexer.scan(root_dir);
-    const auto resources = indexer.query("res://");
+    // Shared with the other read tools, so a run of resource_inspect,
+    // project_list_resources and project_analyze_bloat crawls the tree once.
+    const auto indexer = ResourceIndexer::sharedIndex(root_dir);
+    const auto resources = indexer->query("res://");
 
     const auto root = paths::projectPathFromUtf8(root_dir);
 
@@ -250,7 +251,7 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         {"import_issues", import_health["import_issues"]},
         {"import_issue_count", import_health["import_issue_count"]}
     };
-    if (indexer.truncated()) result["truncated"] = true;
+    if (indexer->truncated()) result["truncated"] = true;
     if (import_health.contains("import_scan_truncated")) {
         result["import_scan_truncated"] = true;
     }

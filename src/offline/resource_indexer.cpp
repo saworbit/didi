@@ -401,14 +401,32 @@ std::unordered_map<std::string, SharedIndexEntry>& sharedIndexCache() {
     return cache;
 }
 
+// The cache key has to name the directory, not the spelling of it. Most tools
+// ask for ".", so keying on the string handed in files two different projects
+// under one key and serves each the other's index. Resolving first is also what
+// lets two tools that spell the same project differently share one crawl, which
+// is the entire point of the cache.
+//
+// A path that cannot be resolved keys on the normalised absolute form, and if
+// even that fails, on what was passed. Failing to share a crawl costs a scan.
+std::string sharedIndexKey(const std::string& root_dir) {
+    std::error_code error;
+    const auto resolved = fs::weakly_canonical(fs::path(root_dir), error);
+    if (!error && !resolved.empty()) return resolved.lexically_normal().string();
+    const auto absolute = fs::absolute(fs::path(root_dir), error);
+    if (!error && !absolute.empty()) return absolute.lexically_normal().string();
+    return root_dir;
+}
+
 } // namespace
 
 std::shared_ptr<const ResourceIndexer> ResourceIndexer::sharedIndex(const std::string& root_dir) {
+    const auto key = sharedIndexKey(root_dir);
     const auto now = std::chrono::steady_clock::now();
     {
         std::lock_guard<std::mutex> lock(sharedIndexMutex());
         auto& cache = sharedIndexCache();
-        const auto found = cache.find(root_dir);
+        const auto found = cache.find(key);
         if (found != cache.end() && now - found->second.scanned_at < kSharedIndexLifetime) {
             return found->second.index;
         }
@@ -418,7 +436,7 @@ std::shared_ptr<const ResourceIndexer> ResourceIndexer::sharedIndex(const std::s
     fresh->scan(root_dir);
 
     std::lock_guard<std::mutex> lock(sharedIndexMutex());
-    sharedIndexCache()[root_dir] = SharedIndexEntry{fresh, std::chrono::steady_clock::now()};
+    sharedIndexCache()[key] = SharedIndexEntry{fresh, std::chrono::steady_clock::now()};
     return fresh;
 }
 

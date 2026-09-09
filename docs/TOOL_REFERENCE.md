@@ -797,12 +797,12 @@ Errors: `400` malformed batch, `409` editor session, `413` request over 32 KiB, 
 
 ## 9. Editor lifecycle
 
-All four tools are live-only:
+All four tools are live-only, and the first three return an error when no editor is connected:
 
 - `editor_undo`: Undoes the active edited scene's most recent UndoRedo action.
 - `editor_redo`: Redoes the active edited scene's next action.
 - `editor_save_scene`: Calls `EditorInterface.save_scene` for the active scene.
-- `editor_reload_project`: Requests an `EditorFileSystem.scan_sources` rescan; it is not a full editor restart. Phase 6 requires an exact dry-run confirmation token.
+- `editor_reload_project`: Requests an `EditorFileSystem.scan_sources` rescan; it is not a full editor restart. Phase 6 requires an exact dry-run confirmation token. With no editor connected it drops Didi's cached resource index instead, so the next offline read crawls the project again.
 
 ## 10. Phase 2 project wiring
 
