@@ -41,7 +41,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `ManagedProcess` | 6 |
 | `McpServer` | 32 |
 | `Phase5` | 15 |
-| `Phase6` | 13 |
+| `Phase6` | 15 |
 | `Phase7Contract` | 9 |
 | `Phase7Diagnostics` | 1 |
 | `Phase7Navigation` | 1 |

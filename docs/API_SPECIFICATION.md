@@ -146,8 +146,10 @@ called without a token returns an `input_required` result instead of `428`:
 
 - `inputRequests` carries an `elicitation/create` in form mode. The message names
   the tool and the target, and the schema is a single `confirm` boolean.
-- `_meta.didi.mutation_preview` carries the real dry-run preview, so a client can
-  show a person what will actually change rather than just a tool name.
+- `_meta.didi.mutation_preview` carries the same dry-run preview the tool would
+  return, so a client can show a person the tool, the target and the project it
+  is bound to. The preview does not open the target, so it names what would be
+  changed and not what the change would be; `preview_kind` says so.
 - `requestState` binds the offer to the tool it was minted for. A retry naming a
   different tool is refused, so one approval cannot authorise a different act.
 
@@ -239,7 +241,7 @@ Tool execution failures use MCP `result.isError: true` with explanatory text. JS
 
 ### Mutation safety extension
 
-Every implemented mutating tool schema includes `dry_run: boolean`. With `dry_run: true`, dispatch stops at the registry boundary and returns `dry_run: true` plus `mutation_preview`; no mutation handler or external process executes. The preview is bound to the tool, sanitized arguments, canonical project, execution mode, optional session ID, and route generation.
+Every implemented mutating tool schema includes `dry_run: boolean`. With `dry_run: true`, dispatch stops at the registry boundary and returns `dry_run: true` plus `mutation_preview`; no mutation handler or external process executes. The preview is bound to the tool, sanitized arguments, canonical project, execution mode, optional session ID, and route generation. It reports `preview_kind: "argument_binding"`: it binds those arguments to a token and does not read the target, so `changes[].before` says that rather than showing prior state.
 
 `runtime_restore_checkpoint`, `editor_reload_project`, `script_patch_method`/`patch_script_symbols`, `signal_emit`, `project_rename_references`, `project_apply_changes`, and `blackboard_clear` always require confirmation. `resource_create`, `script_create`, `viewport_create_test_lab`/`create_visual_test_lab`, `project_export`, and `gridmap_export_mesh_library` require confirmation when `overwrite: true`. The preview's `confirmation_token` is 64 lowercase hexadecimal characters, expires after 120 seconds, is consumed on its first validation attempt, and fails on any argument/context mismatch or replay. A request must not combine `dry_run: true` with `confirmation_token`. The startup-only YOLO override is described above.
 
@@ -253,7 +255,7 @@ Before an ordinary authorized request dispatches, `ensureEditor()` may consume t
 
 An uncertain edit is never replayed. `not_started` means dispatch did not begin; a live/transport `unknown_outcome` means the edit may have applied, summarized as `failed_or_unknown` in the recovery operation. Applied edits whose protection fails report `applied_persistence_failed`, `applied_checkpoint_failed`, or `applied_journal_failed`; successful protection records `completed_saved_files_checkpointed`. `requires_reconciliation` blocks further mutations until explicit reconciliation: restore a checkpoint, or inspect and accept saved files using `runtime_checkpoint` with `accept_current_files: true` only after the uncertain original editor is proven stopped. A running replacement editor alone does not clear this latch. See the [Tool Reference](TOOL_REFERENCE.md#managed-editor-recovery) for lifecycle states and reconciliation outcomes.
 
-`runtime_restore_checkpoint` requires a listed `checkpoint_id` and the exact dry-run preview's confirmation token. It verifies/stages the checkpoint, stops only the owned editor, preserves the prior project, installs the copy, and launches an editor. Restore does not reset the automatic restart budget; only a new managed host invocation does, and it must use a fresh workspace.
+`runtime_restore_checkpoint` requires a listed `checkpoint_id` and the confirmation token from a dry-run preview taken on the same arguments. It verifies/stages the checkpoint, stops only the owned editor, preserves the prior project, installs the copy, and launches an editor. Restore does not reset the automatic restart budget; only a new managed host invocation does, and it must use a fresh workspace.
 
 ---
 
