@@ -129,6 +129,32 @@ static void test_gdscript_colon_rule_requires_else_as_a_complete_token() {
     ASSERT_EQ(missing_colon_count, 2);
     ASSERT_EQ(missing_colon_lines[0], 3);
     ASSERT_EQ(missing_colon_lines[1], 4);
+
+    // A four-character name followed by a space puts a space at index 4 and
+    // used to be read as an else header. This is the script from #371, which
+    // Godot 4.7.2 accepts with exit code 0.
+    const auto valid = didi::offline::GDScriptDiagnostics::analyze(
+        "", "extends Node\n"
+            "\n"
+            "var hits: int = 0\n"
+            "\n"
+            "func increment() -> void:\n"
+            "    hits += 1\n");
+    for (const auto& diagnostic : valid) {
+        ASSERT_TRUE(diagnostic.rule != "missing_colon");
+    }
+
+    // The keyword itself still needs its colon, with or without a space.
+    const auto headers = didi::offline::GDScriptDiagnostics::analyze(
+        "", "else:\n\telse :\n\telse\n");
+    int header_errors = 0;
+    for (const auto& diagnostic : headers) {
+        if (diagnostic.rule == "missing_colon") {
+            ++header_errors;
+            ASSERT_EQ(diagnostic.line, 3);
+        }
+    }
+    ASSERT_EQ(header_errors, 1);
 }
 
 static void test_gdscript_diagnostics_ignore_brackets_in_strings_and_comments() {

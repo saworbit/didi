@@ -11,9 +11,8 @@ Historical entries describe the surface advertised by those releases. For the ex
 
 ## [Unreleased]
 
-No changes yet since 1.8.0. The block below states the current surface
-rather than anything this release changed, which is why it lives here and
-not in a version section.
+The status block below states the current surface rather than anything this
+release changed, which is why it lives here and not in a version section.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
@@ -24,6 +23,14 @@ not in a version section.
 
 Discovery now exposes 115 canonical tools plus 10 legacy registrations (125 total). 112 canonical tools are implemented and 3 remain unimplemented.
 The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
+
+### Fixed
+
+- The offline `missing_colon` rule no longer reads a four-character name
+  followed by a space as an `else` header, so a plain `hits += 1` stops being
+  reported as an `else` statement missing its colon (#371). Unlike the other
+  block keywords, `else` carries no trailing space, and the check for what
+  follows it never confirmed the line started with `else` at all.
 
 ---
 
