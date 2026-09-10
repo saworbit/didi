@@ -68,6 +68,18 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `script_reflect_class` no longer gives advice it cannot honour, and says when
+  the pinned API is not the engine you are running (#405). Its description told
+  the caller to attach a live editor for the running engine's own state, and the
+  tool has no live mode, so following it returned the same answer. It now says
+  what the shipped dump covers and points a script class at
+  `script_get_symbols`. Separately, the session descriptor gained an optional
+  `engine_version`, which the extension fills from the engine itself, so with an
+  editor attached the response carries `attached_engine_version` and
+  `api_version_matches_attached_engine`. Major and minor are compared, so a
+  patch difference is not a mismatch, and an extension older than the field
+  reports `null` rather than a match it cannot vouch for.
+
 - `viewport_create_test_lab` names `runtime_launch` in the message it returns
   (#408). It told the caller to run `execute_test_session`, which is one of the
   ten legacy aliases, so a client that lists tools by canonical name and follows

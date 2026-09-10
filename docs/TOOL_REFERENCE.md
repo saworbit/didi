@@ -193,7 +193,9 @@ Didi therefore reads the `[autoload]` section of `project.godot` and demotes tho
 
 Reflects a Godot engine class offline from the API dump pinned in the repository, covering every class the engine registers rather than a hand-picked few. Returns `inherits`, `properties` (with `read_only` where there is no setter), `methods` (return type and rendered argument list, with `static`, `const` and `virtual` where they apply), `signals` and `enums`.
 
-`api_version` names the Godot version the reflection describes, and `source` is `extension_api`. This is not live ClassDB reflection: it describes the pinned API, not the editor you happen to be running, and it does not know about script classes. Attach a live editor for those.
+`api_version` names the Godot version the reflection describes, and `source` is `extension_api`. This is not live ClassDB reflection: it describes the pinned API, not the editor you happen to be running, and it does not know about script classes. This tool has no live mode, so attaching an editor does not change the answer; read a script class with `script_get_symbols` instead.
+
+With an editor attached, the response carries `attached_engine_version` and `api_version_matches_attached_engine`, comparing the major and minor of the pinned dump against the engine the bridge is running in. A patch difference is not a mismatch. `null` in either field means the extension is older than the descriptor's `engine_version`, so the comparison could not be made; unknown is not a match.
 
 If the reference file is not installed next to the binary, `source` is `builtin_snapshot` and coverage falls back to a small built-in map.
 
