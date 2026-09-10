@@ -1,0 +1,12 @@
+[
+ ["get_scene_hierarchy", {"root_path": "res://main.tscn"}],
+ ["get_scene_hierarchy", {"root_path": "res://does_not_exist.tscn"}],
+ ["get_scene_hierarchy", {"root_path": "res://../outside.tscn"}],
+ ["get_scene_hierarchy", {"root_path": "res://main.tscn/../main.tscn"}],
+ ["get_scene_hierarchy", {"root_path": "/root/Main/Child"}],
+ ["get_scene_hierarchy", {"root_path": "/root/Bogus/DoesNotExist"}],
+ ["get_scene_hierarchy", {"root_path": "res://project.godot"}],
+ ["get_scene_hierarchy", {"root_path": ""}],
+ ["project_analyze_impact", {"target": "res://does_not_exist.gd"}],
+ ["project_analyze_impact", {"target": "res://player.gd"}]
+]
