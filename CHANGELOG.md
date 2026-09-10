@@ -68,6 +68,11 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `viewport_create_test_lab` names `runtime_launch` in the message it returns
+  (#408). It told the caller to run `execute_test_session`, which is one of the
+  ten legacy aliases, so a client that lists tools by canonical name and follows
+  the instruction was being steered onto the deprecated surface.
+
 - `tools/call` now checks the `inputSchema` each tool publishes before anything
   dispatches (#397). The schemas were advisory: `additionalProperties: false`
   was not applied, so `blackboard_read` accepted an argument it does not have,
