@@ -292,9 +292,13 @@ MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
             {"route_generation", context.route_generation},
             {"arguments", previewArguments(sanitized)},
             {"binding_hash", bindingHash(binding, sanitized, context)},
+            // The preview binds arguments to a token. It does not open the
+            // target, so it cannot say what would change, and it says that
+            // plainly rather than calling itself exact (#407).
+            {"preview_kind", "argument_binding"},
             {"changes", json::array({{{"kind", "planned_mutation"},
                                        {"target", previewArguments(sanitized)},
-                                       {"before", "not read or modified during dry-run"}}})},
+                                       {"before", "not read: this preview binds arguments to a token and does not show what would change"}}})},
             {"requires_confirmation", requires_confirmation}
         };
         if (requires_confirmation) {
@@ -330,30 +334,48 @@ MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
     }
     if (confirmation_token.empty()) {
         return errorDecision(binding, 428,
-                             "This mutation requires an exact dry-run preview and confirmation token",
+                             "This mutation requires a dry-run preview and the confirmation token "
+                             "it returns, spent on the same arguments. The preview binds those "
+                             "arguments; it does not read the target or show what would change.",
                              context);
     }
 
-    Confirmation confirmation;
+    // A token is spent when it is spent, not when it is offered. Erasing on the
+    // way in meant one mistyped argument killed the token the caller had just
+    // previewed, and the retry with the exact previewed arguments came back
+    // "unknown or already used" (#398). An expired token is dropped, because it
+    // is dead either way; a mismatch leaves it where it was.
+    enum class TokenVerdict { Unknown, Expired, Mismatch, Spendable };
+    TokenVerdict verdict = TokenVerdict::Unknown;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         const auto found = m_confirmations.find(confirmation_token);
         if (found == m_confirmations.end()) {
-            return errorDecision(binding, 409,
-                                 "Confirmation token is unknown or already used", context);
+            verdict = TokenVerdict::Unknown;
+        } else if (found->second.expires_at_ms < now) {
+            verdict = TokenVerdict::Expired;
+            m_confirmations.erase(found);
+        } else if (found->second.invoked_name != binding.invoked_name ||
+                   found->second.arguments != sanitized ||
+                   !sameContext(found->second.context, context)) {
+            verdict = TokenVerdict::Mismatch;
+        } else {
+            verdict = TokenVerdict::Spendable;
+            m_confirmations.erase(found);
         }
-        confirmation = std::move(found->second);
-        m_confirmations.erase(found);
     }
-    if (confirmation.expires_at_ms < now) {
+    if (verdict == TokenVerdict::Unknown) {
+        return errorDecision(binding, 409,
+                             "Confirmation token is unknown or already used", context);
+    }
+    if (verdict == TokenVerdict::Expired) {
         return errorDecision(binding, 410, "Confirmation token has expired", context);
     }
-    if (confirmation.invoked_name != binding.invoked_name ||
-        confirmation.arguments != sanitized ||
-        !sameContext(confirmation.context, context)) {
+    if (verdict == TokenVerdict::Mismatch) {
         return errorDecision(
             binding, 409,
-            "Confirmation token does not match this tool, arguments, project, or session",
+            "Confirmation token does not match this tool, arguments, project, or session. "
+            "The token is still valid; retry with the arguments you previewed.",
             context);
     }
     MutationDecision decision;

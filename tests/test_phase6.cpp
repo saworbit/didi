@@ -435,6 +435,73 @@ TEST(Phase6, AliasConfirmationTokensRejectCrossNameUseBothDirections) {
     ASSERT_EQ(canonical_rejected.payload["error"]["code"], 409);
 }
 
+// A token is spent on the mutation it authorises, not on an attempt that never
+// got past its own binding check. Erasing on the way in meant one mistyped
+// argument killed the token the caller had just previewed (#398).
+TEST(Phase6, RejectedConfirmationLeavesTheTokenSpendable) {
+    ScopedPhase6Directory directory("token-survives-mismatch");
+    didi::mcp::MutationSafety safety;
+    const auto context = offlineContext(directory.root);
+    const didi::json arguments = {
+        {"file_path", "res://player.gd"}, {"method_name", "take_damage"},
+        {"new_definition", "func take_damage(): pass"}
+    };
+
+    const auto preview = evaluateBinding(
+        safety, "script_patch_method", dryRun(arguments), context);
+    ASSERT_FALSE(preview.is_error);
+    const auto token = preview.payload["mutation_preview"]["confirmation_token"]
+                           .get<std::string>();
+
+    // The same token spent on arguments the preview was not taken for.
+    auto wrong = arguments;
+    wrong["method_name"] = "heal";
+    wrong["confirmation_token"] = token;
+    const auto mismatch = evaluateBinding(safety, "script_patch_method", wrong, context);
+    ASSERT_TRUE(mismatch.is_error);
+    ASSERT_EQ(mismatch.payload["error"]["code"], 409);
+
+    // The call the token was minted for still goes through.
+    auto exact = arguments;
+    exact["confirmation_token"] = token;
+    const auto spent = evaluateBinding(safety, "script_patch_method", exact, context);
+    ASSERT_FALSE(spent.is_error);
+
+    // And once it is spent it is gone.
+    const auto reused = evaluateBinding(safety, "script_patch_method", exact, context);
+    ASSERT_TRUE(reused.is_error);
+    ASSERT_EQ(reused.payload["error"]["code"], 409);
+}
+
+// The gate used to demand an "exact" preview and hand back one that had not
+// read anything. It now says what the preview is (#407).
+TEST(Phase6, PreviewSaysItOnlyBindsArguments) {
+    ScopedPhase6Directory directory("preview-honesty");
+    didi::mcp::MutationSafety safety;
+    const auto context = offlineContext(directory.root);
+    const didi::json arguments = {
+        {"file_path", "res://player.gd"}, {"method_name", "tick"},
+        {"new_definition", "func tick(): pass"}
+    };
+
+    const auto preview = evaluateBinding(
+        safety, "script_patch_method", dryRun(arguments), context);
+    ASSERT_FALSE(preview.is_error);
+    const auto& mutation_preview = preview.payload["mutation_preview"];
+    ASSERT_EQ(mutation_preview["preview_kind"], "argument_binding");
+    const auto before =
+        mutation_preview["changes"][0]["before"].get<std::string>();
+    ASSERT_TRUE(before.find("does not show what would change") != std::string::npos);
+
+    // And the refusal that demands it no longer calls it exact.
+    const auto ungated = evaluateBinding(safety, "script_patch_method", arguments, context);
+    ASSERT_TRUE(ungated.is_error);
+    ASSERT_EQ(ungated.payload["error"]["code"], 428);
+    const auto message = ungated.payload["error"]["message"].get<std::string>();
+    ASSERT_TRUE(message.find("exact") == std::string::npos);
+    ASSERT_TRUE(message.find("does not read the target") != std::string::npos);
+}
+
 TEST(Phase6, RuntimeInputAliasDryRunKeepsInvokedIdentity) {
     ScopedPhase6Directory directory("input-alias-identity");
     didi::mcp::MutationSafety safety;
