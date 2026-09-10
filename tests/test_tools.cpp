@@ -2979,6 +2979,12 @@ static void test_writers_drop_the_shared_index_so_the_next_read_sees_them() {
     ASSERT_TRUE(didi::offline::ResourceIndexer::sharedIndex(".")
                     ->findExact("res://addons/didi/test_lab_sandbox.tscn") != nullptr);
 
+    // What it tells the caller to run next has to be a name the caller can find
+    // in tools/list by its canonical spelling (#408).
+    const auto lab_message = didi::json::parse(lab.content[0].text)["message"].get<std::string>();
+    ASSERT_TRUE(lab_message.find("runtime_launch") != std::string::npos);
+    ASSERT_TRUE(lab_message.find("execute_test_session") == std::string::npos);
+
     didi::offline::ResourceIndexer::invalidateSharedIndex();
     registry.setIpcClient(nullptr);
 }

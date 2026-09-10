@@ -403,7 +403,10 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
         {"target_resource_path", target_path},
         {"environment", env},
         {"camera_rig", rig},
-        {"message", "Created sandbox scene at " + lab_scene_path + ". Open Godot Editor to view live or run `execute_test_session`."}
+        // runtime_launch, not the execute_test_session alias this used to name.
+        // A client that lists tools by canonical name and follows the message
+        // is being steered onto the deprecated surface (#408).
+        {"message", "Created sandbox scene at " + lab_scene_path + ". Open Godot Editor to view live or run `runtime_launch`."}
     };
     return CallToolResult::successJson(res);
 }
