@@ -15,7 +15,7 @@ Yes. A great deal of it.
 ## Why the question lands a little differently here
 
 Didi is a machine for handing a live Godot editor to a language model. That is not a side
-effect of the design, it is the entire product: 115 canonical tools whose only purpose is
+effect of the design, it is the entire product: 116 canonical tools whose only purpose is
 to let something that is not you move a node, patch a script, drive the game and look at
 the result.
 

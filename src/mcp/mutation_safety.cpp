@@ -17,6 +17,9 @@ const std::unordered_set<std::string_view> kMutations = {
     "scene_set_property", "scene_duplicate_node", "scene_add_to_group",
     "scene_remove_from_group", "scene_create", "scene_open", "scene_close",
     "scene_pack_branch", "signal_connect", "signal_disconnect", "signal_emit",
+    // Runs arbitrary project code, so it is a mutation whatever the method
+    // happens to do.
+    "scene_call_method",
     "script_patch_method", "patch_script_symbols", "script_create",
     "script_attach_to_node",
     "script_detach_from_node", "physics_simulate_step", "nav_bake_mesh",
@@ -57,6 +60,10 @@ const std::unordered_set<std::string_view> kMutations = {
 const std::unordered_set<std::string_view> kAlwaysConfirmed = {
     "runtime_restore_checkpoint",
     "editor_reload_project", "script_patch_method", "patch_script_symbols", "signal_emit",
+    // Always, not on a flag: the tool runs a method body it cannot read and
+    // cannot undo. What the method does is the project's business, so the only
+    // honest gate is the caller confirming they meant this method on this node.
+    "scene_call_method",
     // Always, not on a flag: it rewrites several files at once, there is no
     // editor undo stack behind a file on disk, and the preview is the only
     // chance to see which files it is about to touch.

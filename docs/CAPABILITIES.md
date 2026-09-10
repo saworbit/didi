@@ -33,7 +33,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-The current source / Unreleased surface registers 115 canonical tool names. 112 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 112 canonical tools are implemented. Ten legacy names are registered separately, for exactly 125 `tools/list` entries. The latest documented release is 1.8.0; its historical surface is recorded in the changelog.
+The current source / Unreleased surface registers 116 canonical tool names. 113 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 113 canonical tools are implemented. Ten legacy names are registered separately, for exactly 126 `tools/list` entries. The latest documented release is 1.8.0; its historical surface is recorded in the changelog.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
@@ -43,6 +43,7 @@ The current source / Unreleased surface registers 115 canonical tool names. 112 
 | `live` | `script_attach_to_node`, `script_detach_from_node`, `scene_list_groups`, `scene_add_to_group`, `scene_remove_from_group`, `scene_get_group_members` | Uses live nodes; mutations are registered with the edited scene's UndoRedo history. |
 | `live` | `project_list_autoloads`, `project_set_autoload`, `project_remove_autoload`, `project_list_input_actions`, `project_set_input_action`, `project_remove_input_action`, `project_get_setting` | Uses Godot `ProjectSettings`; writes save atomically and roll back in memory if persistence fails. Input actions reload the live `InputMap`. |
 | `live`, `offline_fallback` | `project_set_setting` | Live it uses Godot `ProjectSettings` and rolls back in memory if the save fails. With no session attached it writes `project.godot` directly, atomically, and reports `execution_mode: "offline_fallback"` with the literal it wrote. The offline route is what lets an agent enable the Didi addon in a project that does not have it yet. |
+| `live` | `scene_call_method` | Runs a method the node's own script declares, in the editor's process. The allowlist is `Script.get_script_method_list()`, so every engine method is out of reach by construction; leading-underscore names and non-`@tool` scripts are refused. A coroutine is awaited and the result carries the value its `completed` signal delivered. Always confirmed. |
 | `live` | `scene_create`, `scene_open`, `scene_close`, `scene_pack_branch` | Uses `PackedScene`, `ResourceLoader`, `ResourceSaver`, and `EditorInterface` with path and overwrite guards. |
 | `offline_fallback` (local management) | `runtime_list_sessions`, `runtime_attach_session`, `runtime_detach_session`, `runtime_get_session` | Scans validated access-controlled descriptors and changes the selected route in the standalone MCP process. Public payloads use `execution_mode: "local_session_management"` and never return the private token. |
 | `live` | `runtime_read_logs`, `runtime_read_output`, `runtime_set_paused`, `runtime_step`, `runtime_stop`, `runtime_get_tree`, `eval_gdscript`, `runtime_watch_invariants`, `runtime_explore_scene`, `spatial_query_raycast_batch` | Requires an authenticated auto-selected or explicitly attached editor/game session. Operations execute on that Godot process's main thread and identify `session_kind`; game-only control rejects editor sessions. |
@@ -88,7 +89,7 @@ applies unweakened.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `112/115`
+**Canonical implementation:** `113/116`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->

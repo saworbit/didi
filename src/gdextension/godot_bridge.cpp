@@ -20,6 +20,8 @@
 #include <cstring>
 #include <filesystem>
 #include <limits>
+#include <map>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <tuple>
@@ -1887,6 +1889,348 @@ Result<void> GodotBridge::selectMainScreen(const std::string& name) {
                                {&screen.value()});
     if (selected.isErr()) return selected.error();
     return Result<void>::ok();
+}
+
+namespace {
+
+// The coroutine waits scene_call_method has outstanding.
+//
+// Each entry holds the GDScript waiter object that is doing the awaiting. The
+// Variant owns a reference to it, so erasing the entry drops that reference and
+// the engine frees the RefCounted; nothing here is manually freed.
+struct ScriptCallWait {
+    VariantValue waiter;
+    std::string method_name;
+};
+
+std::mutex g_script_call_mutex;
+std::map<uint64_t, ScriptCallWait> g_script_calls;
+uint64_t g_next_script_call_id = 1;
+constexpr size_t kMaxPendingScriptCalls = 16;
+
+} // namespace
+
+std::optional<json> GodotBridge::collectScriptCall(uint64_t await_id) {
+    std::lock_guard<std::mutex> lock(g_script_call_mutex);
+    auto found = g_script_calls.find(await_id);
+    if (found == g_script_calls.end()) return std::nullopt;
+
+    const auto read = [&](const char* property) -> Result<VariantValue> {
+        auto object = objectFromVariant(found->second.waiter);
+        if (object.isErr() || !object.value()) return Error::internal("The coroutine waiter is gone");
+        auto name = makeStringName(property);
+        if (name.isErr()) return name.error();
+        return callObject(object.value(), "Object", "get", 2760726917LL, {&name.value()});
+    };
+
+    auto finished_value = read("finished");
+    if (finished_value.isErr()) {
+        g_script_calls.erase(found);
+        return json(nullptr);
+    }
+    auto finished = scalarFromVariant<GDExtensionBool>(finished_value.value(),
+                                                       GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (finished.isErr() || finished.value() == 0) return std::nullopt;
+
+    json value = nullptr;
+    auto returned = read("value");
+    if (returned.isOk()) {
+        auto rendered = variantToJson(returned.value(), 0, true);
+        if (rendered.isOk()) value = rendered.value();
+    }
+    // Erasing drops the last reference this side holds, and the waiter is a
+    // RefCounted, so the engine frees it here rather than at some later scan.
+    g_script_calls.erase(found);
+    return value;
+}
+
+void GodotBridge::abandonScriptCall(uint64_t await_id) {
+    std::lock_guard<std::mutex> lock(g_script_call_mutex);
+    g_script_calls.erase(await_id);
+}
+
+json GodotBridge::callScriptMethod(const json& params,
+                                   std::optional<PendingScriptCall>& pending) {
+    pending.reset();
+    const auto fail = [](int code, const std::string& message) {
+        return json{{"error", {{"code", code}, {"message", message}}}};
+    };
+
+    if (!params.is_object() || !params.contains("target_node") ||
+        !params["target_node"].is_string() ||
+        params["target_node"].get<std::string>().empty() ||
+        params["target_node"].get<std::string>().size() > 1024 ||
+        !params.contains("method_name") || !params["method_name"].is_string()) {
+        return fail(400, "scene_call_method needs target_node and method_name");
+    }
+    const auto method_name = params["method_name"].get<std::string>();
+    if (method_name.empty() || method_name.size() > 128) {
+        return fail(400, "method_name must be 1 to 128 characters");
+    }
+    // Godot uses a leading underscore for engine callbacks and for a script's
+    // own private helpers. Calling _ready or _process by hand corrupts a node's
+    // state in a way no caller intends, so the prefix is refused whatever the
+    // script declares.
+    if (method_name.front() == '_') {
+        return fail(403,
+                    "Refusing to call \"" + method_name +
+                        "\". A leading underscore is Godot's mark for an engine callback or a "
+                        "script's private helper, and calling one by hand corrupts node state. "
+                        "Expose the behaviour under a name without the underscore.");
+    }
+    const auto arguments = params.value("arguments", json::array());
+    if (!arguments.is_array() || arguments.size() > 8) {
+        return fail(400, "arguments must be an array of at most 8 values");
+    }
+    std::function<bool(const json&, int)> supported = [&](const json& value, int depth) {
+        if (depth > 4) return false;
+        if (value.is_null() || value.is_boolean() || value.is_number_integer()) return true;
+        if (value.is_number_unsigned()) {
+            return value.get<uint64_t>() <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+        }
+        if (value.is_number_float()) return std::isfinite(value.get<double>());
+        if (value.is_string()) return value.get_ref<const std::string&>().size() <= 4096;
+        if (value.is_array()) {
+            if (value.size() > 64) return false;
+            for (const auto& element : value) if (!supported(element, depth + 1)) return false;
+            return true;
+        }
+        if (value.is_object()) {
+            if (value.size() > 64) return false;
+            for (auto it = value.begin(); it != value.end(); ++it) {
+                if (it.key().size() > 4096 || !supported(it.value(), depth + 1)) return false;
+            }
+            return true;
+        }
+        return false;
+    };
+    for (const auto& argument : arguments) {
+        if (!supported(argument, 0)) {
+            return fail(400, "arguments hold a value scene_call_method cannot pass to Godot");
+        }
+    }
+    try {
+        if (arguments.dump().size() > 8u * 1024u) return fail(413, "arguments exceed 8 KiB");
+    } catch (const json::exception&) {
+        return fail(400, "arguments are not valid JSON text");
+    }
+
+    auto editor = editorInterface();
+    if (editor.isErr()) return fail(editor.error().code, editor.error().message);
+    auto root = editedSceneRoot(editor.value());
+    if (root.isErr()) return fail(root.error().code, root.error().message);
+    auto target = resolveNode(root.value(), params["target_node"].get<std::string>());
+    if (target.isErr()) return fail(target.error().code, target.error().message);
+
+    // The allowlist is the node's own script, and nothing else. Every engine
+    // method is out of reach by construction rather than by enumeration: free,
+    // queue_free, set_script and the rest are declared by ClassDB, so none of
+    // them appears here.
+    auto script_value = callObject(target.value(), "Object", "get_script", 1214101251LL);
+    if (script_value.isErr()) return fail(500, script_value.error().message);
+    auto script = objectFromVariant(script_value.value());
+    if (script.isErr() || !script.value()) {
+        return fail(422,
+                    "The node has no script, so it declares no methods to call. Engine methods "
+                    "are deliberately out of reach here; the typed tools cover those.");
+    }
+    // The editor only creates a script instance for a @tool script. Without
+    // one the node carries the script resource, has_method answers true, and
+    // the call returns nil having run nothing. That silence is the worst
+    // possible answer, so it is turned into a refusal that names the cause.
+    auto tool_value = callObject(script.value(), "Script", "is_tool", 36873697LL);
+    if (tool_value.isErr()) return fail(500, tool_value.error().message);
+    auto is_tool = scalarFromVariant<GDExtensionBool>(tool_value.value(),
+                                                      GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (is_tool.isErr()) return fail(500, is_tool.error().message);
+    if (is_tool.value() == 0) {
+        return fail(422,
+                    "The node's script is not a @tool script, so the editor has not created an "
+                    "instance of it and there is nothing to run. Calling it would return nothing "
+                    "having done nothing. Add @tool to the script if it is meant to act in the "
+                    "editor, or run the project and drive it there.");
+    }
+
+    // The leaf script's list already carries methods it inherits from a base
+    // script, so a project that splits behaviour across scripts works without
+    // this walking a chain.
+    auto method_list = callObject(script.value(), "Script", "get_script_method_list", 2915620761LL);
+    if (method_list.isErr()) return fail(500, method_list.error().message);
+    auto count_value = callVariant(method_list.value(), "size");
+    if (count_value.isErr()) return fail(500, count_value.error().message);
+    auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (count.isErr()) return fail(500, count.error().message);
+
+    json declared = json::array();
+    std::optional<json> chosen;
+    for (int64_t index = 0; index < count.value(); ++index) {
+        auto position = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (position.isErr()) continue;
+        auto entry = callVariant(method_list.value(), "get", {&position.value()});
+        if (entry.isErr()) continue;
+        auto rendered = variantToJson(entry.value(), 0, true);
+        if (rendered.isErr() || !rendered.value().is_object()) continue;
+        const auto name = rendered.value().value("name", std::string());
+        if (name.empty() || name.front() == '_') continue;
+        declared.push_back(name);
+        if (name == method_name) chosen = rendered.value();
+    }
+    if (!chosen.has_value()) {
+        return fail(404,
+                    "\"" + method_name + "\" is not a method this node's script declares. "
+                    "scene_call_method calls project methods only. Declared: " +
+                    declared.dump());
+    }
+
+    const auto declared_arguments = chosen->value("args", json::array());
+    if (!declared_arguments.is_array()) return fail(500, "Godot returned an unreadable method list");
+    if (declared_arguments.size() != arguments.size()) {
+        return fail(409, "\"" + method_name + "\" takes " +
+                             std::to_string(declared_arguments.size()) + " argument(s) and " +
+                             std::to_string(arguments.size()) + " were given");
+    }
+    // Each argument has to fit the parameter Godot declared, checked before
+    // anything runs. A mismatch inside the engine is a crash or a silent
+    // conversion, and neither is an answer.
+    for (size_t index = 0; index < arguments.size(); ++index) {
+        const auto& declared_argument = declared_arguments[index];
+        if (!declared_argument.is_object()) continue;
+        const auto type = declared_argument.value("type", static_cast<int64_t>(0));
+        const auto& given = arguments[index];
+        bool compatible = true;
+        switch (type) {
+            case GDEXTENSION_VARIANT_TYPE_NIL: compatible = true; break;
+            case GDEXTENSION_VARIANT_TYPE_BOOL: compatible = given.is_boolean(); break;
+            case GDEXTENSION_VARIANT_TYPE_INT:
+                compatible = given.is_number_integer() || given.is_number_unsigned();
+                break;
+            case GDEXTENSION_VARIANT_TYPE_FLOAT: compatible = given.is_number(); break;
+            case GDEXTENSION_VARIANT_TYPE_STRING:
+            case GDEXTENSION_VARIANT_TYPE_STRING_NAME:
+            case GDEXTENSION_VARIANT_TYPE_NODE_PATH:
+                compatible = given.is_string();
+                break;
+            case GDEXTENSION_VARIANT_TYPE_ARRAY: compatible = given.is_array(); break;
+            case GDEXTENSION_VARIANT_TYPE_DICTIONARY: compatible = given.is_object(); break;
+            default:
+                // An untyped parameter, or one whose type this cannot construct
+                // from JSON. Untyped is common in GDScript and is allowed;
+                // anything else is refused rather than guessed at.
+                compatible = declared_argument.value("type", static_cast<int64_t>(0)) ==
+                                 GDEXTENSION_VARIANT_TYPE_NIL ||
+                             given.is_null();
+                break;
+        }
+        if (!compatible) {
+            return fail(409, "argument " + std::to_string(index + 1) + " of \"" + method_name +
+                                 "\" does not fit the parameter type the script declares");
+        }
+    }
+
+    json argument_array = arguments;
+    auto godot_arguments = makeJsonVariant(argument_array);
+    if (godot_arguments.isErr()) return fail(400, godot_arguments.error().message);
+    auto godot_name = makeStringName(method_name);
+    if (godot_name.isErr()) return fail(500, godot_name.error().message);
+
+    auto returned = callObject(target.value(), "Object", "callv", 1260104456LL,
+                               {&godot_name.value(), &godot_arguments.value()});
+    if (returned.isErr()) return fail(returned.error().code, returned.error().message);
+
+    // A GDScript function containing await hands back a GDScriptFunctionState
+    // instead of the value. The class is not in the GDExtension class list, so
+    // it is identified by name; Object.is_class would have been the obvious
+    // check and its hash differs on 4.7.2.
+    bool is_coroutine = false;
+    if (GodotApi::instance().variant_get_type(returned.value().ptr()) ==
+        GDEXTENSION_VARIANT_TYPE_OBJECT) {
+        auto returned_object = objectFromVariant(returned.value());
+        if (returned_object.isOk() && returned_object.value()) {
+            auto class_value = callObject(returned_object.value(), "Object", "get_class", 201670096LL);
+            if (class_value.isOk()) {
+                auto class_name = stringFromVariant(class_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                is_coroutine = class_name.isOk() && class_name.value() == "GDScriptFunctionState";
+            }
+            if (is_coroutine) {
+                // The value arrives on the state's completed signal, and the
+                // extension has no way to receive one: a custom Callable is
+                // built and invoked correctly but never reached by the signal,
+                // and a normal Callable needs an Object with a registered
+                // method. GDScript's own await is the mechanism for this, so
+                // the addon does the waiting and this polls it.
+                auto loader = singleton("ResourceLoader");
+                if (loader.isErr()) return fail(loader.error().code, loader.error().message);
+                auto waiter_path = makeString("res://addons/didi/didi_await.gd");
+                auto type_hint = makeString("");
+                auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
+                if (waiter_path.isErr() || type_hint.isErr() || cache_mode.isErr()) {
+                    return fail(500, "Failed to construct the coroutine waiter request");
+                }
+                auto script_value = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                                               {&waiter_path.value(), &type_hint.value(),
+                                                &cache_mode.value()});
+                auto waiter_script = script_value.isOk() ? objectFromVariant(script_value.value())
+                                                         : Result<GDExtensionObjectPtr>(script_value.error());
+                if (waiter_script.isErr() || !waiter_script.value()) {
+                    return fail(501,
+                                "\"" + method_name + "\" is a coroutine, and this project's copy of "
+                                "the addon has no res://addons/didi/didi_await.gd to await it with. "
+                                "The method has started and will finish on its own. Copy the built "
+                                "addon folder in again.");
+                }
+                json empty = json::array();
+                auto no_arguments = makeJsonVariant(empty);
+                if (no_arguments.isErr()) return fail(500, no_arguments.error().message);
+                auto new_name = makeStringName("new");
+                if (new_name.isErr()) return fail(500, new_name.error().message);
+                auto waiter = callObject(waiter_script.value(), "Object", "callv", 1260104456LL,
+                                         {&new_name.value(), &no_arguments.value()});
+                if (waiter.isErr()) return fail(waiter.error().code, waiter.error().message);
+                auto waiter_object = objectFromVariant(waiter.value());
+                if (waiter_object.isErr() || !waiter_object.value()) {
+                    return fail(500, "The coroutine waiter could not be constructed");
+                }
+
+                json watch_arguments = json::array();
+                auto watch_array = makeJsonVariant(watch_arguments);
+                if (watch_array.isErr()) return fail(500, watch_array.error().message);
+                auto appended = callVariant(watch_array.value(), "append", {&returned.value()});
+                if (appended.isErr()) return fail(500, appended.error().message);
+                auto watch_name = makeStringName("watch");
+                if (watch_name.isErr()) return fail(500, watch_name.error().message);
+                auto watching = callObject(waiter_object.value(), "Object", "callv", 1260104456LL,
+                                           {&watch_name.value(), &watch_array.value()});
+                if (watching.isErr()) return fail(watching.error().code, watching.error().message);
+
+                uint64_t await_id = 0;
+                {
+                    std::lock_guard<std::mutex> lock(g_script_call_mutex);
+                    if (g_script_calls.size() >= kMaxPendingScriptCalls) {
+                        return fail(429, "Too many coroutine calls are already being awaited");
+                    }
+                    await_id = g_next_script_call_id++;
+                    ScriptCallWait entry;
+                    entry.waiter = std::move(waiter.value());
+                    entry.method_name = method_name;
+                    g_script_calls.emplace(await_id, std::move(entry));
+                }
+                PendingScriptCall wait;
+                wait.await_id = await_id;
+                wait.target_node = params["target_node"].get<std::string>();
+                wait.method_name = method_name;
+                pending = wait;
+                return json::object();
+            }
+        }
+    }
+
+    auto value = variantToJson(returned.value(), 0, true);
+    if (value.isErr()) return fail(value.error().code, value.error().message);
+    return json{{"status", "success"},
+                {"target_node", params["target_node"]},
+                {"method_name", method_name},
+                {"awaited", false},
+                {"returned", value.value()}};
 }
 
 Result<bool> GodotBridge::isEditorFilesystemScanning() {

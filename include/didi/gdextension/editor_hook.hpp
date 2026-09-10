@@ -179,6 +179,13 @@ private:
     json executeOnMainThread(const std::string& method, const json& params);
     void processRuntimeStepFrame();
     void processAssetReimportFrame();
+    // Runs a scene_call_method, and parks it when the method is a coroutine.
+    // Returns false when the request is not one of these, so the caller runs
+    // the ordinary synchronous path.
+    bool scheduleScriptCall(const json& params,
+                            const std::shared_ptr<std::promise<json>>& promise,
+                            const std::shared_ptr<CommandControl>& control);
+    void processScriptCallFrame();
     // Selects the main screen a capture needs, then answers it a frame later.
     // Returns false when the request does not need this, so the caller runs the
     // ordinary synchronous path.
@@ -216,6 +223,20 @@ private:
         // is any main screen an addon contributes.
         std::string previous_screen;
         int remaining_frames{1};
+        std::shared_ptr<std::promise<json>> response_promise;
+        std::shared_ptr<CommandControl> control;
+    };
+
+    // A scene_call_method whose method turned out to be a coroutine.
+    //
+    // The value arrives on the completed signal rather than from the call, so
+    // the request is answered from the frame loop when it lands, or when the
+    // caller's timeout runs out (#389).
+    struct PendingScriptCallRequest {
+        uint64_t await_id{0};
+        std::string target_node;
+        std::string method_name;
+        std::chrono::steady_clock::time_point deadline;
         std::shared_ptr<std::promise<json>> response_promise;
         std::shared_ptr<CommandControl> control;
     };
@@ -271,6 +292,7 @@ private:
     std::recursive_mutex m_reimportMutex;
     RuntimeStepGate m_runtimeStepGate;
     std::optional<PendingRuntimeStep> m_pendingRuntimeStep;
+    std::optional<PendingScriptCallRequest> m_pendingScriptCall;
     std::optional<PendingMainScreenCapture> m_pendingMainScreenCapture;
     std::optional<PendingAssetReimport> m_pendingAssetReimport;
     std::mutex m_profilerMutex;

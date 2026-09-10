@@ -326,6 +326,62 @@ CallToolResult handleSceneReparentNode(const json& args, std::shared_ptr<ipc::II
     return CallToolResult::error("Godot Editor is offline. Launch Godot to reparent nodes with UndoRedo.");
 }
 
+// Calls a method the target node's own script declares.
+//
+// The bounds are checked here as well as in the bridge, the way signal_emit's
+// are, so a malformed request is refused without waking an engine. The bridge
+// owns the part this side cannot know: which methods the script actually
+// declares, and whether the one named turned out to be a coroutine (#389).
+CallToolResult handleSceneCallMethod(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!args.is_object()) {
+        return CallToolResult::error("Invalid scene_call_method request: arguments must be an object.");
+    }
+    const std::string target_node = args.value("target_node", "");
+    const std::string method_name = args.value("method_name", "");
+    if (target_node.empty() || target_node.size() > 1024) {
+        return CallToolResult::error("Parameter 'target_node' is required.");
+    }
+    if (method_name.empty() || method_name.size() > 128) {
+        return CallToolResult::error("Parameter 'method_name' is required and must be 1 to 128 characters.");
+    }
+    if (method_name.front() == '_') {
+        return CallToolResult::error(
+            "Refusing to call \"" + method_name +
+            "\". A leading underscore is Godot's mark for an engine callback or a script's "
+            "private helper, and calling one by hand corrupts node state. Expose the behaviour "
+            "under a name without the underscore.");
+    }
+    if (args.contains("arguments")) {
+        if (!args["arguments"].is_array() || args["arguments"].size() > 8) {
+            return CallToolResult::error(
+                "Parameter 'arguments' must be an array of at most 8 values.");
+        }
+        try {
+            if (args["arguments"].dump().size() > 8u * 1024u) {
+                return CallToolResult::error("Parameter 'arguments' exceeds 8 KiB.");
+            }
+        } catch (const json::exception&) {
+            return CallToolResult::error("Parameter 'arguments' is not valid JSON text.");
+        }
+    }
+    if (args.contains("timeout_seconds")) {
+        const auto& value = args["timeout_seconds"];
+        if ((!value.is_number_integer() && !value.is_number_unsigned()) ||
+            value.get<int64_t>() < 1 || value.get<int64_t>() > 120) {
+            return CallToolResult::error("Parameter 'timeout_seconds' must be an integer from 1 to 120.");
+        }
+    }
+
+    if (ipc && ipc->isConnected()) {
+        auto res = ipc->sendRequest("scene.callMethod", args, ::didi::ipc::kWaitForDefinitiveResponse);
+        if (res.isOk()) return CallToolResult::successJson(res.value());
+        return CallToolResult::error("Failed to call the method: " + res.error().message);
+    }
+    return CallToolResult::error(
+        "Godot Editor is offline. scene_call_method runs project code in the editor's own "
+        "process, so it has no offline meaning. Launch Godot and attach.");
+}
+
 CallToolResult handleSceneSetProperty(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     std::string target_node = args.value("target_node", "");
     std::string property_name = args.value("property_name", "");

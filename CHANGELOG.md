@@ -16,15 +16,30 @@ release changed, which is why it lives here and not in a version section.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `112/115`
+**Canonical implementation:** `113/116`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 115 canonical tools plus 10 legacy registrations (125 total). 112 canonical tools are implemented and 3 remain unimplemented.
+Discovery now exposes 116 canonical tools plus 10 legacy registrations (126 total). 113 canonical tools are implemented and 3 remain unimplemented.
 The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
 ### Added
+
+- `scene_call_method` runs a method the target node's own script declares, and
+  returns what it returned (#389). Didi could read a project completely and
+  could not press its main verb: `eval_gdscript` is read-only by contract, an
+  outbound signal announces work that never happened, and the editor dock a
+  human would click is not reachable. The allowlist is the node's own script,
+  so every engine method is out of reach by construction rather than by a
+  denylist, and leading-underscore names are refused. A coroutine is awaited
+  and the result carries the value its `completed` signal delivered, because
+  the call itself hands back a `GDScriptFunctionState` and answering with that
+  would report work that has not happened. The script must be a `@tool` script,
+  which is refused explicitly rather than returning the nothing Godot hands
+  back. Always confirmed. Recorded in
+  [Surface Amendments](docs/SURFACE_AMENDMENTS.md); the canonical surface is now
+  116 names.
 
 - `viewport_capture_frame` can select the editor main screen it needs (#381). An
   editor viewport has no size unless its main screen is the one showing, so the
