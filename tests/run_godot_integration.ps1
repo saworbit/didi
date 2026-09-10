@@ -1371,6 +1371,13 @@ try {
         # shader's own uniforms, and would read the pass shader's if one had
         # been left behind.
         (Tool-Request 2325 "shader_list_uniforms" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override" }),
+        # An editor viewport has no size unless its main screen is the selected
+        # one, and nothing in the surface could select one, so an unattended
+        # agent could never capture one (#381). Both are asked for with the
+        # opt-in, whichever screen the editor happens to be showing.
+        (Tool-Request 2340 "viewport_capture_frame" @{ camera_identifier = "editor_2d"; select_main_screen = $true }),
+        (Tool-Request 2341 "viewport_capture_frame" @{ camera_identifier = "editor_3d"; select_main_screen = $true }),
+        (Tool-Request 2342 "viewport_capture_frame" @{ camera_identifier = "not_a_viewport"; select_main_screen = $true }),
         # A proposal drawn over the scene, and the proof it did not touch it.
         # The captures on either side are what show the boxes arrived and left.
         (Tool-Request 2330 "viewport_capture_frame" @{ camera_identifier = "active_editor_view" }),
@@ -1752,6 +1759,19 @@ try {
         $bitmap.Dispose(); $stream.Dispose()
         return $cyan
     }
+    # The refusal #381 is about names the main screen as the cause and tells the
+    # caller to switch to it, which is the one thing an agent could not do. With
+    # the opt-in it must never be the answer, whichever screen was showing when
+    # the call arrived.
+    foreach ($screenCapture in @(@{ Id = 2340; What = "2D" }, @{ Id = 2341; What = "3D" })) {
+        $captureText = ($byId[$screenCapture.Id].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+        Assert-True ($captureText -notmatch "has no size on screen") "A $($screenCapture.What) capture with select_main_screen still refused for the main screen not being selected."
+        Assert-True (-not $byId[$screenCapture.Id].result.isError) "A $($screenCapture.What) capture with select_main_screen failed: $captureText"
+    }
+    # The opt-in has to know which screen to select, so a camera_identifier that
+    # names no editor viewport is refused rather than guessed at.
+    Assert-True $byId[2342].result.isError "select_main_screen accepted a camera_identifier that names no editor viewport."
+
     $cyanBefore = Ghost-Signature $byId[2330]
     $cyanDuring = Ghost-Signature $byId[2332]
     $cyanAfter = Ghost-Signature $byId[2335]

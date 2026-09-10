@@ -1652,7 +1652,9 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"resolution", {{"type", "object"}, {"default", {{"width", 256}, {"height", 192}}}, {"description", "Offline preview size; reserved and ignored by live capture"}}},
                 {"render_debug_flags", {{"type", "array"}}},
                 {"node_isolation_path", {{"type", "string"}}},
-                {"isolation_background", {{"type", "string"}, {"enum", {"original", "transparent"}}, {"default", "original"}}}
+                {"isolation_background", {{"type", "string"}, {"enum", {"original", "transparent"}}, {"default", "original"}}},
+                {"select_main_screen", {{"type", "boolean"}, {"default", false},
+                                        {"description", "Select the editor main screen this camera_identifier belongs to before capturing, then put the previous one back. An editor viewport has no size unless its main screen is showing, so without this an unattended agent cannot capture one at all. Editor sessions only."}}}
             }}
         };
         t.handler = [this](const json& args) { return handleCaptureViewport(args, m_ipcClient); };

@@ -1683,6 +1683,106 @@ Result<void> GodotBridge::startAssetReimport(const ReimportBatch& batch) {
     return Result<void>::ok();
 }
 
+namespace {
+
+// What Godot calls the main screen a given editor class belongs to.
+//
+// set_main_screen_editor takes the tab's name and there is no getter, so the
+// only way back is the class of whichever child of the main screen container
+// is visible. Godot wraps the Script and Game screens in a WindowWrapper so
+// they can be torn off into their own window, which is why those two are found
+// one level down.
+const char* mainScreenNameForClass(const std::string& class_name) {
+    if (class_name == "CanvasItemEditor") return "2D";
+    if (class_name == "Node3DEditor") return "3D";
+    if (class_name == "ScriptEditor") return "Script";
+    if (class_name == "GameView") return "Game";
+    if (class_name == "EditorAssetLibrary") return "AssetLib";
+    return nullptr;
+}
+
+} // namespace
+
+std::optional<std::string> GodotBridge::currentMainScreenName() {
+    auto editor = editorInterface();
+    if (editor.isErr()) return std::nullopt;
+    auto container = callObject(editor.value(), "EditorInterface", "get_editor_main_screen", 1706218421LL);
+    if (container.isErr()) return std::nullopt;
+    auto container_object = objectFromVariant(container.value());
+    if (container_object.isErr() || !container_object.value()) return std::nullopt;
+
+    auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    if (include_internal.isErr()) return std::nullopt;
+    auto children = callObject(container_object.value(), "Node", "get_children", 873284517LL,
+                               {&include_internal.value()});
+    if (children.isErr()) return std::nullopt;
+    auto count_value = callVariant(children.value(), "size");
+    if (count_value.isErr()) return std::nullopt;
+    auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (count.isErr()) return std::nullopt;
+
+    const auto classOf = [&](GDExtensionObjectPtr object) -> std::optional<std::string> {
+        auto value = callObject(object, "Object", "get_class", 201670096LL);
+        if (value.isErr()) return std::nullopt;
+        auto text = stringFromVariant(value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+        if (text.isErr()) return std::nullopt;
+        return text.value();
+    };
+
+    for (int64_t index = 0; index < count.value(); ++index) {
+        auto position = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (position.isErr()) continue;
+        auto child_value = callVariant(children.value(), "get", {&position.value()});
+        if (child_value.isErr()) continue;
+        auto child = objectFromVariant(child_value.value());
+        if (child.isErr() || !child.value()) continue;
+        auto visible_value = callObject(child.value(), "CanvasItem", "is_visible", 36873697LL);
+        if (visible_value.isErr()) continue;
+        auto visible = scalarFromVariant<GDExtensionBool>(visible_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (visible.isErr() || visible.value() == 0) continue;
+
+        const auto child_class = classOf(child.value());
+        if (!child_class.has_value()) return std::nullopt;
+        if (const char* name = mainScreenNameForClass(*child_class)) return std::string(name);
+        // A wrapper holds the screen that was torn off; the class inside it is
+        // the one that names the tab.
+        auto inner = callObject(child.value(), "Node", "get_children", 873284517LL,
+                                {&include_internal.value()});
+        if (inner.isErr()) return std::nullopt;
+        auto inner_count_value = callVariant(inner.value(), "size");
+        if (inner_count_value.isErr()) return std::nullopt;
+        auto inner_count = scalarFromVariant<int64_t>(inner_count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (inner_count.isErr()) return std::nullopt;
+        for (int64_t inner_index = 0; inner_index < inner_count.value(); ++inner_index) {
+            auto inner_position = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, inner_index);
+            if (inner_position.isErr()) continue;
+            auto inner_value = callVariant(inner.value(), "get", {&inner_position.value()});
+            if (inner_value.isErr()) continue;
+            auto inner_child = objectFromVariant(inner_value.value());
+            if (inner_child.isErr() || !inner_child.value()) continue;
+            const auto inner_class = classOf(inner_child.value());
+            if (!inner_class.has_value()) continue;
+            if (const char* name = mainScreenNameForClass(*inner_class)) return std::string(name);
+        }
+        // Visible, and none of the classes Godot ships. An addon's main screen
+        // is named by the addon, which nothing here can read back.
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+Result<void> GodotBridge::selectMainScreen(const std::string& name) {
+    auto editor = editorInterface();
+    if (editor.isErr()) return editor.error();
+    auto screen = makeString(name);
+    if (screen.isErr()) return screen.error();
+    // The bind carries hash 83702148 on Godot 4.5.1, 4.6.2 and 4.7.2.
+    auto selected = callObject(editor.value(), "EditorInterface", "set_main_screen_editor", 83702148LL,
+                               {&screen.value()});
+    if (selected.isErr()) return selected.error();
+    return Result<void>::ok();
+}
+
 Result<bool> GodotBridge::isEditorFilesystemScanning() {
     auto editor = editorInterface();
     if (editor.isErr()) return editor.error();
