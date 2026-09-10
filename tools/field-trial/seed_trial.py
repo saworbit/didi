@@ -51,6 +51,13 @@ def parse_build_id(version_output: str) -> str | None:
     return None
 
 
+# Both probes below run the server under test to ask it about itself, and both
+# are documented as never fatal. A probe that never returns is worse than a
+# fatal one: it takes the whole seed with it and says nothing. Generous, because
+# a cold start on a loaded machine is not a fault.
+_PROBE_TIMEOUT_SECONDS = 60
+
+
 def _server_build_id(didi_exe: Path) -> str | None:
     """What the server says it was built from, or None when it will not say.
 
@@ -60,9 +67,10 @@ def _server_build_id(didi_exe: Path) -> str | None:
     """
     try:
         result = subprocess.run(
-            [str(didi_exe), "--version"], capture_output=True, text=True, check=False
+            [str(didi_exe), "--version"], capture_output=True, text=True, check=False,
+            timeout=_PROBE_TIMEOUT_SECONDS,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return None
     if result.returncode != 0:
         return None
@@ -133,9 +141,10 @@ def write_manifest(didi_exe: Path, destination: Path, fallback: Path | None = No
     """
     try:
         result = subprocess.run(
-            [str(didi_exe), "--dump-tool-manifest"], capture_output=True, text=True, check=False
+            [str(didi_exe), "--dump-tool-manifest"], capture_output=True, text=True, check=False,
+            timeout=_PROBE_TIMEOUT_SECONDS,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         result = None
     if result is not None and result.returncode == 0:
         try:

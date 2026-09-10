@@ -213,6 +213,22 @@ jobs:
           print(f'jsonschema {installed} matches the pin')
           EOF
           echo "DIDI_SCHEMA_PYTHON=$VENV_PY" >> "$GITHUB_ENV"
+          # CMake gets the same interpreter, because ctest's Python suite is
+          # this build tree's and two of its modules import jsonschema at module
+          # scope. The interpreter CMake finds on its own is the runner's, which
+          # does not have it: on macOS that is deliberate, since PEP 668 is why
+          # the dependencies are in a virtual environment at all. release.yml
+          # already hands CMake this path, which is the only reason the release
+          # job's ctest could import those modules while a pull request could
+          # not have.
+          #
+          # Absolute, and on Windows in the form CMake executes: this step runs
+          # in bash, so $PWD there is a /d/a/... path CMake cannot run.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            echo "DIDI_CMAKE_PYTHON=$(cygpath -m "$PWD/$VENV_PY")" >> "$GITHUB_ENV"
+          else
+            echo "DIDI_CMAKE_PYTHON=$PWD/$VENV_PY" >> "$GITHUB_ENV"
+          fi
 
       - name: Run Phase 7 schema and ownership contracts
         shell: bash
@@ -221,15 +237,18 @@ jobs:
 
       - name: Configure CMake (Windows)
         if: runner.os == 'Windows'
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="$DIDI_CMAKE_PYTHON"
 
       - name: Configure CMake (POSIX Ninja)
         if: runner.os != 'Windows'
+        shell: bash
         run: |
           cmake -B build -S . -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DPython3_EXECUTABLE="$DIDI_CMAKE_PYTHON"
 
       - name: Compile Targets in Parallel
         run: cmake --build build --config Release --parallel
@@ -264,6 +283,22 @@ jobs:
           else
             ./build/didi_tests
           fi
+
+      - name: Run The Suites The Way The Release Runs Them
+        shell: bash
+        run: |
+          # The release workflow gates a tag on `ctest`, and nothing else ran
+          # it. Every step above runs the native binary directly and then names
+          # Python modules one at a time, in separate processes and separate
+          # jobs; ctest runs one process over all of them through unittest
+          # discovery. That is a different composition, and the 1.8.0 release
+          # was the first thing to execute it -- which it did for thirty-four
+          # minutes before it was cancelled.
+          #
+          # A release must not be the first run of a command. This is the same
+          # invocation release.yml uses, so the tag can no longer be the place
+          # it is tried.
+          ctest --test-dir build -C Release --output-on-failure
 
       - name: Verify the published test counts match the suites that ran
         shell: bash

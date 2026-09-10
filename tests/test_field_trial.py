@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
@@ -37,6 +38,52 @@ def transcript_line(*tool_names):
             }
         }
     )
+
+
+_REAL_SUBPROCESS_RUN = subprocess.run
+_TEMPORARY_ROOT = Path(tempfile.gettempdir()).resolve()
+
+
+def _refuse_to_launch_a_fixture(command, *args, **kwargs):
+    """Fail a fixture binary's launch here rather than in the kernel.
+
+    The seed asks the server it was handed for its build id and its tool
+    manifest. Every server in this module is a few bytes of text with an .exe
+    name, written into a temporary directory, so those launches can only ever
+    fail and OSError is the answer the tests are written against.
+
+    Getting that answer from Windows costs a CreateProcess on a brand new file
+    in the temporary directory, and that call goes through the antivirus filter
+    driver on the way. Normally instant. Behind the native suite's thirty
+    thousand freshly written checkpoint files it stopped coming back: a 1.8.0
+    release attempt sat in one of these for thirty-four minutes with a flat
+    processor, and py-spy showed it parked inside _execute_child.
+
+    A timeout on the subprocess does not cover this. subprocess.run's timeout
+    bounds the wait for a child that started; a block inside _execute_child is
+    the child never starting, and no argument to run() reaches it.
+
+    The rule is the path, not the name: anything under the system temporary
+    directory was put there by a fixture in this file and is not a program.
+    git is never there, so the tests that shell out to a real one are untouched.
+    """
+    try:
+        executable = Path(str(command[0])).resolve()
+    except (IndexError, TypeError, OSError, ValueError):
+        return _REAL_SUBPROCESS_RUN(command, *args, **kwargs)
+    if _TEMPORARY_ROOT == executable or _TEMPORARY_ROOT in executable.parents:
+        raise OSError(8, "not a valid application")
+    return _REAL_SUBPROCESS_RUN(command, *args, **kwargs)
+
+
+def setUpModule():
+    # seed_trial and trial both reach the one subprocess module, so this is the
+    # single place that covers every fixture in the file.
+    SEED.subprocess.run = _refuse_to_launch_a_fixture
+
+
+def tearDownModule():
+    SEED.subprocess.run = _REAL_SUBPROCESS_RUN
 
 
 class ExtractInvocationsTests(unittest.TestCase):

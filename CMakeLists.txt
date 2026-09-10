@@ -404,17 +404,31 @@ if(DIDI_BUILD_TESTS)
     # The suite resolves project fixtures relative to the working directory, and
     # CI runs it from the repository root. Say so rather than depending on where
     # ctest happens to be invoked from.
+    #
+    # Both suites carry a timeout. ctest holds a test's output until that test
+    # ends, so a suite that stops making progress prints nothing at all: the
+    # 1.8.0 release attempt sat in the Python suite for thirty-four minutes and
+    # the log recorded one line, the one saying it had started. A bound well
+    # above the worst time either suite has taken turns that into a failure
+    # that arrives with the output attached, and well below the release job's
+    # own ninety minutes so the bound is the thing that fires.
     set_tests_properties(didi_tests PROPERTIES
-        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        TIMEOUT 600)
 
     if(Python3_Interpreter_FOUND)
         # Discovery rather than a module list, so this cannot drift from the
         # list CI names explicitly. tests/ is not a package, so it has to be the
         # top level directory too.
+        #
+        # Verbose, because this is the only place the suite runs as one process
+        # and the only record of a stalled run was a row of dots. Named tests
+        # cost nothing to print and say where it stopped.
         add_test(NAME didi_python_tests
-                 COMMAND "${Python3_EXECUTABLE}" -m unittest discover
+                 COMMAND "${Python3_EXECUTABLE}" -u -m unittest discover -v
                          -s tests -t tests -p "test_*.py"
                  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+        set_tests_properties(didi_python_tests PROPERTIES TIMEOUT 1200)
     endif()
 endif()
 

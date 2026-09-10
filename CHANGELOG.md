@@ -31,6 +31,48 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- Seeding a field trial no longer tries to execute a file that is not a
+  program, and no longer waits forever when a probe does not come back. The
+  seed asks the server it was handed for its build id and its tool manifest,
+  and the unit tests hand it a fixture six bytes long with an `.exe` name. On
+  Windows that launch reaches the antivirus filter driver before it fails, and
+  behind the native suite's thirty thousand freshly written files it stopped
+  coming back: a 1.8.0 release attempt sat in that one call for thirty-four
+  minutes with a flat processor and one line of log.
+
+  The module refuses those launches itself now, raising what the operating
+  system would have raised, so every outcome is unchanged and nothing is
+  spawned. The rule is the path rather than the name: anything under the system
+  temporary directory was put there by a fixture in that file and is not a
+  program, while `git` never is, so the tests that shell out to a real one are
+  untouched. It is one guard for the whole module because there are three such
+  fixtures and fixing the first one only moved the stall to the third.
+
+  Both probes also carry a timeout, which is a different fault. `subprocess`
+  bounds the wait for a child that started; a block inside `_execute_child` is
+  the child never starting, and no argument reaches it. The timeout is there for
+  a server that answers slowly, not for this.
+
+- `ctest` says where it stopped. Both suites carry a timeout below the release
+  job's own, and the Python suite runs unbuffered and verbose, so a run that
+  stalls fails at a known bound and names the test it was in. Thirty-four
+  minutes of the release attempt above produced one line, the one saying the
+  suite had started.
+
+- Every pull request now runs `ctest` against the same interpreter the release
+  hands CMake. `release.yml` passes its virtual environment's Python through
+  `-DPython3_EXECUTABLE` and `ci.yml` did not, so ctest's Python suite ran on
+  the runner's own interpreter, which has no `jsonschema` and cannot import two
+  of the modules. That difference is the only reason the release job's ctest
+  could load them while a pull request's could not.
+
+- Every pull request now runs `ctest`, which is what gates a tag. Nothing else
+  ran it: the other steps run the native binary directly and then name Python
+  modules one at a time, in separate processes and separate jobs, while `ctest`
+  runs one process over all of them through unittest discovery. That is a
+  different composition, and cutting 1.8.0 was the first thing to execute it. A
+  release should not be the first run of a command.
+
 - `Tools.OfflineCapabilityIsDerived` sets up the tool registry it reads instead
   of inheriting whatever an earlier test left there. It passed only in a full
   run and failed on its own, which is the opposite of what running a single test
