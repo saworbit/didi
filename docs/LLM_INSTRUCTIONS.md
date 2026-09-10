@@ -66,6 +66,7 @@ Pass `scene_path` to `scene_instantiate_node` to put an instance of a `.tscn` in
 - `project_set_autoload` persists the setting but cannot make the attached editor register the singleton; it returns `requires_editor_restart: true`. Until that editor restarts, every script referencing the new singleton fails to compile with `Identifier not found`. Those errors are the tool's doing, not your script's, so do not rewrite working code to chase them.
 - `script_check_syntax` reports autoload identifiers at `severity: "warning"` with a `note`, not as errors. The Godot compiler check runs in a process with no SceneTree, so it can never see an autoload; that is permanent and separate from the restart limitation above. `has_errors` is therefore a verdict about your script. Do not rewrite working code because a warning names an autoload.
 - Treat `replace: true`, `overwrite: true`, and `discard_unsaved: true` as explicit destructive intent. Do not add them speculatively.
+- `scene_call_method` is how you press a project's own verbs, and the only tool that runs project code. It calls methods the node's script declares and refuses everything else, so reach for it when a project exposes the action you want as a public method rather than trying to reproduce that action yourself. It always needs a `dry_run` preview and the `confirmation_token` it returns. The script has to be a `@tool` script, and a coroutine is awaited: the result says `awaited: true` and carries the value the coroutine returned.
 - Input events must use the documented key, mouse-button, joypad-button, or joypad-motion shapes.
 
 Project-wide mutations are persisted immediately. Re-read the corresponding list/get tool after each write.
@@ -161,7 +162,7 @@ Use `runtime_launch` to start a separate Godot process, optionally headless, for
 
 ### Observe or control an already-running session
 
-Ordinary Didi starts detached and exposes 115 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
+Ordinary Didi starts detached and exposes 116 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
 
 1. Call `runtime_list_sessions`, preferably with the canonical project path.
 2. Choose the intended `editor` or `game` descriptor and call `runtime_attach_session` if deterministic auto-selection did not choose it.
@@ -178,12 +179,12 @@ Treat `eval_gdscript` as a small read-only expression language. Prefer literals,
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `112/115`
+**Canonical implementation:** `113/116`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 112/115 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 113/116 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
 All 15 feasible Phase 7 names are delivered and callable, including `tilemap_set_cells`, `tilemap_get_used_rect`, and `gridmap_set_cells` in editor sessions. Do not call or advertise the remaining 3 as available; feasibility is not implementation. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 

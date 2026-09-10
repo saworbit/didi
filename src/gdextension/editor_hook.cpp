@@ -124,6 +124,7 @@ void EditorHook::processQueue() {
         processSceneExplorationFrame();
         GodotBridge::instance().processDeferredReindexFrame();
         processMainScreenCaptureFrame();
+        processScriptCallFrame();
         return;
     }
     m_pumping = true;
@@ -212,6 +213,10 @@ void EditorHook::processQueue() {
                 scheduleMainScreenCapture(cmd.params, cmd.response_promise, cmd.control)) {
                 continue;
             }
+            if (cmd.method == "scene.callMethod" &&
+                scheduleScriptCall(cmd.params, cmd.response_promise, cmd.control)) {
+                continue;
+            }
             json result = executeOnMainThread(cmd.method, cmd.params);
             cmd.control->markCompleted();
             fulfillCommand(cmd.response_promise, cmd.control, std::move(result));
@@ -229,6 +234,7 @@ void EditorHook::processQueue() {
     processSceneExplorationFrame();
     GodotBridge::instance().processDeferredReindexFrame();
     processMainScreenCaptureFrame();
+    processScriptCallFrame();
     processPendingQuitFrame();
 }
 
@@ -957,6 +963,103 @@ void EditorHook::processMainScreenCaptureFrame() {
                   restored ? " restored" : " not restored");
     ready->control->markCompleted();
     fulfillCommand(ready->response_promise, ready->control, std::move(result));
+}
+
+bool EditorHook::scheduleScriptCall(
+    const json& params,
+    const std::shared_ptr<std::promise<json>>& promise,
+    const std::shared_ptr<CommandControl>& control) {
+    const auto refuse = [&](int code, const std::string& message) {
+        control->markCompleted();
+        fulfillCommand(promise, control, {{"error", {{"code", code}, {"message", message}}}});
+        return true;
+    };
+    if (m_sessionKind != runtime::SessionKind::editor) {
+        return refuse(409, "scene_call_method resolves against the edited scene, so it needs an "
+                           "editor session.");
+    }
+
+    int timeout_seconds = 10;
+    if (params.is_object() && params.contains("timeout_seconds")) {
+        const auto& value = params["timeout_seconds"];
+        if ((!value.is_number_integer() && !value.is_number_unsigned()) ||
+            value.get<int64_t>() < 1 || value.get<int64_t>() > 120) {
+            return refuse(400, "timeout_seconds must be an integer from 1 to 120");
+        }
+        timeout_seconds = static_cast<int>(value.get<int64_t>());
+    }
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_reimportMutex);
+        if (m_pendingScriptCall.has_value()) {
+            return refuse(409, "A coroutine started by scene_call_method is still running");
+        }
+    }
+
+    std::optional<GodotBridge::PendingScriptCall> pending;
+    json result = GodotBridge::instance().callScriptMethod(params, pending);
+    if (!pending.has_value()) {
+        // Either it finished or it failed; both are answers.
+        control->markCompleted();
+        fulfillCommand(promise, control, std::move(result));
+        return true;
+    }
+
+    std::lock_guard<std::recursive_mutex> lock(m_reimportMutex);
+    m_pendingScriptCall = PendingScriptCallRequest{
+        pending->await_id, pending->target_node, pending->method_name,
+        std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds),
+        promise, control};
+    DIDI_LOG_INFO("EDITOR_HOOK", "Awaiting the coroutine ", pending->method_name,
+                  " started on ", pending->target_node);
+    return true;
+}
+
+void EditorHook::processScriptCallFrame() {
+    std::optional<PendingScriptCallRequest> ready;
+    std::optional<json> value;
+    bool timed_out = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_reimportMutex);
+        if (!m_pendingScriptCall.has_value()) return;
+        value = GodotBridge::instance().collectScriptCall(m_pendingScriptCall->await_id);
+        timed_out = !value.has_value() &&
+                    std::chrono::steady_clock::now() > m_pendingScriptCall->deadline;
+        if (!value.has_value() && !timed_out) return;
+        ready = std::move(m_pendingScriptCall);
+        m_pendingScriptCall.reset();
+    }
+
+    json response;
+    if (timed_out) {
+        // The coroutine is still running and Didi has stopped waiting. Saying
+        // that is the answer; claiming a result would be a lie, and claiming a
+        // failure would be one too, because the method may yet finish.
+        GodotBridge::instance().abandonScriptCall(ready->await_id);
+        response = {{"error",
+                     {{"code", 504},
+                      {"message", "\"" + ready->method_name +
+                                      "\" is a coroutine that had not finished when the timeout "
+                                      "ran out. It has started and may still complete; nothing "
+                                      "was rolled back. Verify the effect rather than retrying "
+                                      "blindly."},
+                      {"data", {{"outcome", "unknown_outcome"},
+                                {"awaited", true},
+                                {"target_node", ready->target_node},
+                                {"method_name", ready->method_name}}}}}};
+    } else {
+        response = {{"status", "success"},
+                    {"target_node", ready->target_node},
+                    {"method_name", ready->method_name},
+                    {"awaited", true},
+                    {"returned", *value},
+                    {"execution_mode", "live"},
+                    {"is_live_engine", true},
+                    {"session_kind", "editor"}};
+        DIDI_LOG_INFO("EDITOR_HOOK", "Coroutine ", ready->method_name, " completed");
+    }
+    ready->control->markCompleted();
+    fulfillCommand(ready->response_promise, ready->control, std::move(response));
 }
 
 void EditorHook::processAssetReimportFrame() {

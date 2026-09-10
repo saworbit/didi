@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 115 canonical tool names plus 10 legacy names (125 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 116 canonical tool names plus 10 legacy names (126 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `112/115`
+**Canonical implementation:** `113/116`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 112/115 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 113/116 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -93,6 +93,27 @@ Returns one existing scalar property. Metadata and export hints are not returned
 
 - `target_node` (`string`, required).
 - `property_name` (`string`, required).
+
+### `scene_call_method` — Live
+
+Calls a method the target node's own script declares, and returns what it returned. This is the only tool that runs project code, and everything about it follows from that.
+
+- `target_node` (`string`, required): a node in the active edited scene.
+- `method_name` (`string`, required).
+- `arguments` (`array`, optional): at most 8 positional values.
+- `timeout_seconds` (`integer`, optional, default 10, 1 to 120): how long to wait when the method is a coroutine.
+
+**What it will call, and what it will not.** The allowlist is the node's own script, read from `Script.get_script_method_list()`. That list already contains methods inherited from a base script, so a project that splits behaviour across scripts works without naming each one. Everything else is out of reach by construction rather than by a denylist: `free`, `queue_free`, `set_script`, `set`, `call`, `connect`, `add_child` and every other engine method is declared by ClassDB, not by the project, so none of them is in the list. The operations Didi should perform on the engine already have typed tools with their own guards. Names beginning with `_` are refused whatever the script declares, because that prefix is Godot's mark for an engine callback or a private helper and calling one by hand corrupts node state.
+
+**The script must be a `@tool` script.** The editor creates a script instance only for those. Without one the node carries the script, `has_method` answers true, and a call returns nothing having run nothing. That silence is refused with `422` naming the cause, rather than reported as a result.
+
+**Arity and types are checked before anything runs.** The count must match, and each argument must fit the parameter type the script declares, checked against the method list the same way `signal_emit` checks against the signal list. Arguments are JSON null, booleans, integers, finite reals, strings, arrays and string-keyed dictionaries, nested at most 4 levels and 8 KiB in total.
+
+**Coroutines.** A GDScript function containing `await` returns a `GDScriptFunctionState` rather than its value, and answering with that object would report work that has not happened. The tool waits: the result carries `awaited: true` and the value the coroutine's `completed` signal delivered. If it has not finished by `timeout_seconds`, the call returns `504` with `outcome: "unknown_outcome"` saying the method started and may still complete, rather than claiming either a result or a failure. The waiting is done by `addons/didi/didi_await.gd`, so a project whose copy of the addon predates this tool gets `501` naming that file instead of a silent wrong answer.
+
+**Safety.** A mutation, and always confirmed: preview with `dry_run: true`, then repeat the exact call with the `confirmation_token` it returns. The tool cannot read the method body, so the caller confirming they meant this method on this node is the only honest gate. Live only, editor sessions; there is no offline meaning to running project code.
+
+Results carry `target_node`, `method_name`, `awaited`, and `returned`.
 
 ### `scene_duplicate_node` — Live
 

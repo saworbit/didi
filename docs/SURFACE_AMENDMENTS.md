@@ -55,7 +55,8 @@ and verification, and it fails visibly wherever the surface has a hole.
 Six amendments are implemented: `runtime_read_output`, `audio_list_buses` and
 `audio_configure_bus`, all recorded below with tri-engine feasibility evidence,
 plus `project_audit_assets`, `project_analyze_impact`,
-`runtime_explore_scene`, `didi_control_room` and `ui_list_controls`. One
+`runtime_explore_scene`, `didi_control_room`, `ui_list_controls` and
+`scene_call_method`. One
 amendment adds no name and changes an existing contract: `scene_close` reads
 real dirty state where the engine can report it. One is withdrawn: raising the engine floor to
 Godot 4.7, refused in favour of runtime capability detection so that 4.5 and 4.6
@@ -64,6 +65,88 @@ August 2026 competitive review and are proposed, not accepted, in
 [Realignment Implementation Plan](REALIGNMENT_IMPLEMENTATION_PLAN.md):
 `runtime_read_output`, `ui_list_controls`, `godot_api_reference`, and an `until`
 parameter on the existing `runtime_step` (a change, not a new name).
+
+### ACCEPTED (IMPLEMENTED): `scene_call_method`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `scene_call_method` |
+| **Failing workflow** | *Bake the level and prove it baked.* Reported from a field test against HammerForge (#389). The addon exposes `bake()`, `bake_selected()`, `bake_dirty()` and `bake_dry_run()` as ordinary public GDScript on the scene root, and its own dock does nothing more exotic than `await dock.level_root.bake(...)`. Didi could read 157 nodes of that project and could not press its main verb. Every route was closed: `eval_gdscript` is read-only by contract and its call allowlist could never include `bake`; the bake signals are outbound notifications, so `signal_emit` announces a bake that never happened; `ui_list_controls` is scoped to the edited scene and returns nothing for an editor dock; `runtime_inject_input` is game only. A surface reporting `67 live now` against that project could observe everything and cause nothing. |
+| **Execution modes** | `live`. Editor sessions, the same as `scene_set_property` and `signal_emit`, which resolve against the edited scene root. |
+| **Safety class** | `remove/overwrite`. Dry run **and** a confirmation token. A method body is arbitrary project code and this tool cannot know what it does, which is precisely the argument for the strictest class rather than against the tool. `signal_emit` is already always-confirmed for a weaker reason. |
+| **Proving test** | Native: `Tools.SceneCallMethodGated` covers the offline refusal, the dry-run preview reaching no engine, and the confirmation token being required; `Tools.SceneCallMethodAnnotations` requires it to be annotated as a mutation; `SceneCallMethod.RequestValidation` covers the argument bounds, the underscore refusal and the arity rules on the tool side. Godot integration: requests 2400 to 2423 call a plain method and read its return, call a coroutine, read the value its `completed` signal carried and confirm the side effect through a separate read, refuse a leading-underscore name, an engine method, a wrong arity, an argument of the wrong type, a script that is not a `@tool` script and a node with no script, and prove the confirmation gate is there by calling without a token. The behavioural half runs under `--yolo` for the same reason `project_apply_changes` does, because a batch is built before the process starts and the token only exists in a response; the gate is asserted in a separate batch with confirmations on. |
+| **Reviewer** | Unassigned. A mutation, and the widest one in the surface, so the security review is the substance of this record rather than a line in it. See **What it will not call** below. |
+
+**What it will not call.** The tool calls methods the node's own script declares
+and nothing else. `Object.get_script()` returns null for a node without one and
+the call is refused; `Script.get_script_method_list()` on the leaf script is the
+allowlist, and it already contains inherited script methods, so a project that
+splits behaviour across a base script keeps working without the tool walking a
+chain. Names beginning with `_` are refused whatever the script declares.
+
+This is the security boundary, and it is a boundary rather than a denylist on
+purpose. Every engine method is out of reach by construction: `free`,
+`queue_free`, `set_script`, `set`, `call`, `connect`, `emit_signal`,
+`add_child`, `set_process` and the rest are declared by ClassDB, not by the
+project, so none of them is in the allowlist and none had to be enumerated. A
+denylist would need extending for every engine version and would still be a list
+of the dangerous methods somebody thought of. The things Didi should do to the
+engine already have typed tools with their own guards: `scene_remove_node`
+removes, `scene_set_property` sets, `script_attach_to_node` attaches.
+
+The refusal of `_` names is the one rule that is a convention rather than a
+mechanism. Godot uses that prefix for engine callbacks and for private helpers,
+and calling `_ready` or `_process` by hand is a way to corrupt a node's state
+that no caller intends. A project that genuinely wants a verb driven from
+outside can name it without the underscore, which is what HammerForge did.
+
+**Bounds.** At most 8 arguments, each a JSON null, boolean, integer, finite
+real, string, array or string-keyed dictionary nested at most 4 levels, and at
+most 8 KiB of arguments in total. Arity must match the declared method exactly
+and each argument must be compatible with its declared parameter type, checked
+against `get_script_method_list()` before anything is called, the same way
+`signal_emit` checks against `get_signal_list()`. The return value is serialised
+through the existing bounded Variant-to-JSON conversion, and a value it cannot
+represent is reported as its type name rather than dropped.
+
+**Coroutines.** `bake()` is `await`ed by its own caller, so a contract that only
+handles synchronous returns fails on the first real target. Established by probe
+on 4.7.2, and this is why the tool is not a thin wrapper:
+
+- GDScript refuses a bare coroutine call at parse time. That is a compiler rule
+  and does not apply to `Object.callv`, which is what the bridge uses.
+- `callv` on a coroutine returns an Object of class `GDScriptFunctionState`,
+  not a Signal and not the eventual value. Returning that to the caller would
+  report a bake that has not happened.
+- `GDScriptFunctionState` is not in the GDExtension class list, so the bridge
+  cannot bind its members by class and hash. It is still reachable: `get_class`
+  identifies it and `Object.connect` is bound for every Object.
+- Its `completed` signal carries the real return value. Measured: a call to
+  `bake(true, false)` delivered `true` to a one-shot handler, and the
+  coroutine's side effect had happened by then.
+
+So the bridge connects `completed` with a custom Callable made through
+`callable_custom_create2`, which needs no class registration and therefore adds
+no object to ObjectDB. The request is answered from the frame loop when that
+Callable fires, carrying `awaited: true` and the real value, or a timeout that
+says the coroutine was still running rather than claiming a result.
+
+**Feasibility, established 2026-09-10.** Every bind is hash-identical across the
+supported range:
+
+| Method | 4.5.1 | 4.6.2 | 4.7.2 |
+| :--- | :--- | :--- | :--- |
+| `Object.callv` | 1260104456 | 1260104456 | 1260104456 |
+| `Object.has_method` | 2619796661 | 2619796661 | 2619796661 |
+| `Object.get_script` | 1214101251 | 1214101251 | 1214101251 |
+| `Object.connect` | 1518946055 | 1518946055 | 1518946055 |
+| `Object.get_class` | 201670096 | 201670096 | 201670096 |
+| `Script.get_script_method_list` | 2915620761 | 2915620761 | 2915620761 |
+
+`Object.is_class` is deliberately absent from that list. It carries 3927539163
+on 4.5.1 and 4.6.2 and 2619796661 on 4.7.2, so the coroutine check uses
+`get_class` and a string comparison instead of the bind that would have been the
+obvious choice.
 
 ### ACCEPTED (IMPLEMENTED): `runtime_read_output`
 

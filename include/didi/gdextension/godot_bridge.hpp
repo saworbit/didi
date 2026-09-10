@@ -95,6 +95,33 @@ public:
     Result<ReimportBatch> beginAssetReimport(const std::vector<std::string>& paths);
     Result<bool> isEditorFilesystemScanning();
 
+    // A coroutine started by scene_call_method and not finished yet.
+    //
+    // Object.callv on a GDScript function containing await returns a
+    // GDScriptFunctionState rather than the value. Answering with that object
+    // would report a bake that has not happened, so the call is parked until
+    // the state's completed signal carries the real return value (#389).
+    struct PendingScriptCall {
+        uint64_t await_id{0};
+        std::string target_node;
+        std::string method_name;
+    };
+
+    // Runs one script-declared method on a node in the edited scene.
+    //
+    // Returns the finished payload when the method returned normally. When it
+    // returned a coroutine, `pending` names the wait and the caller answers
+    // later through collectScriptCall.
+    json callScriptMethod(const json& params, std::optional<PendingScriptCall>& pending);
+
+    // The value a parked coroutine produced, or nothing while it is still
+    // running. Removes the wait once it answers.
+    std::optional<json> collectScriptCall(uint64_t await_id);
+
+    // Drops a wait whose caller has given up, so a coroutine that never
+    // finishes does not hold its captured value forever.
+    void abandonScriptCall(uint64_t await_id);
+
     // What the engine knows about a resource Didi just wrote.
     struct WrittenResourceUid {
         std::string uid;          // the uid:// in the file, empty when it has none

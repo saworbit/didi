@@ -66,6 +66,10 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // 4.7.2 -- the trial the earlier attempt never ran, having only ever
         // exercised the test-seam build.
         , "signal_list_connections", "signal_connect", "signal_disconnect", "signal_emit"
+        // Runs a method the node's own script declares, in the editor's
+        // process. There is no offline meaning: the method is project code and
+        // running it needs the engine that owns the scene (#389).
+        , "scene_call_method"
         // Reads a ShaderMaterial off a node in the edited scene, so it needs the
         // editor's scene and has no offline reading to fall back to.
         , "shader_list_uniforms", "shader_set_uniform", "shader_get_visual_graph"
@@ -152,6 +156,7 @@ CallToolResult handleSceneInstantiateNode(const json& args, std::shared_ptr<ipc:
 CallToolResult handleSceneRemoveNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleSceneReparentNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleSceneSetProperty(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleSceneCallMethod(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleSceneGetProperty(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleSceneDuplicateNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleMutateSceneTree(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -1427,6 +1432,27 @@ void ToolRegistry::registerAllDefaultTools() {
             {"required", {"target_node", "property_name", "value"}}
         };
         t.handler = [this](const json& args) { return handleSceneSetProperty(args, m_ipcClient); };
+        registerTool(t);
+    }
+    {
+        ToolDefinition t;
+        t.name = "scene_call_method";
+        t.description = "Calls a method the target node's own script declares, and returns what it returned. Project methods only: engine methods are out of reach by construction, because the allowlist is the script's own method list.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target_node", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024},
+                                 {"description", "Node path inside the active edited scene."}}},
+                {"method_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128},
+                                 {"description", "A method the node's script declares. Names beginning with an underscore are refused: that is Godot's mark for an engine callback or a private helper."}}},
+                {"arguments", {{"type", "array"}, {"maxItems", 8},
+                               {"description", "Positional arguments. JSON null, booleans, integers, finite reals, strings, arrays and string-keyed dictionaries, nested at most 4 levels and 8 KiB in total. The count and each type must match what the script declares."}}},
+                {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 120}, {"default", 10},
+                                     {"description", "How long to wait when the method turns out to be a coroutine. A timeout reports that it was still running rather than claiming a result."}}}
+            }},
+            {"required", {"target_node", "method_name"}}
+        };
+        t.handler = [this](const json& args) { return handleSceneCallMethod(args, m_ipcClient); };
         registerTool(std::move(t));
     }
     {

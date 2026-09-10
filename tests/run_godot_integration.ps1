@@ -168,6 +168,16 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
 Copy-Item -LiteralPath $sourceFixtureRoot -Destination $fixtureRoot -Recurse
 
+# scene_call_method awaits a coroutine through a GDScript helper that ships in
+# the addon, so the fixture needs it. Copied from the repository's own addon
+# folder rather than checked into the fixture, because two copies of one script
+# is how they drift apart.
+$awaitHelperSource = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot (Join-Path ".." (Join-Path "addons" (Join-Path "didi" "didi_await.gd")))))
+if (-not (Test-Path -LiteralPath $awaitHelperSource)) {
+    throw "The coroutine waiter the integration needs is missing: $awaitHelperSource"
+}
+Copy-Item -LiteralPath $awaitHelperSource -Destination (Join-Path $fixtureRoot (Join-Path "addons" (Join-Path "didi" "didi_await.gd"))) -Force
+
 # The addon script ships with a .uid sidecar, which makes it the one resource
 # the project files and the running engine are both certain to know. Read it
 # rather than hard-coding it, so a regenerated fixture does not silently turn
@@ -2294,6 +2304,101 @@ try {
     # Read directly rather than through Tool-Payload: this response is meant to
     # be an error, and the report is the payload of it.
     Assert-True $applyById[642].result.isError "A proposal that was not applied came back as a plain success."
+
+    # scene_call_method. The verb an agent could observe a project having and
+    # could not press (#389).
+    #
+    # One batch, and it needs --yolo for the same reason project_apply_changes
+    # above does: the tool always asks for a confirmation token, the token is
+    # only in the response to the dry run, and a batch is built before the
+    # process starts. The gate itself is asserted separately below, without
+    # --yolo, so turning it off here proves the behaviour and not the absence
+    # of a guard.
+    $callRequests = @(
+        (@{ jsonrpc = "2.0"; id = 2400; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 2401 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 2402 "scene_open" @{ scene_path = "res://main.tscn" }),
+        (Tool-Request 2403 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/SmokeRoot"; name = "CallProbe" }),
+        (Tool-Request 2404 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/CallProbe"; script_path = "res://call_probe.gd" }),
+        # A plain method, and the value it returned.
+        (Tool-Request 2405 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "add_numbers"; arguments = @(2, 3) }),
+        (Tool-Request 2406 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "describe"; arguments = @() }),
+        # A coroutine, and the value its completed signal carried.
+        (Tool-Request 2407 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "bake"; arguments = @($true, $false); timeout_seconds = 20 }),
+        # The side effect, read back separately rather than trusted from the
+        # response that caused it.
+        (Tool-Request 2408 "scene_get_property" @{ target_node = "/root/SmokeRoot/CallProbe"; property_name = "bakes" }),
+        # Everything the allowlist is for.
+        (Tool-Request 2409 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "_private_helper"; arguments = @() }),
+        (Tool-Request 2410 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "free"; arguments = @() }),
+        (Tool-Request 2411 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "add_numbers"; arguments = @(1) }),
+        (Tool-Request 2412 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "add_numbers"; arguments = @("two", "three") }),
+        # A node whose script is not a @tool script has no instance to run.
+        (Tool-Request 2413 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/SmokeRoot"; name = "PlainProbe" }),
+        (Tool-Request 2414 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/PlainProbe"; script_path = "res://plain_probe.gd" }),
+        (Tool-Request 2415 "scene_call_method" @{ target_node = "/root/SmokeRoot/PlainProbe"; method_name = "add_numbers"; arguments = @(2, 3) }),
+        # A node with no script at all declares nothing to call.
+        (Tool-Request 2416 "scene_call_method" @{ target_node = "/root/SmokeRoot/Container"; method_name = "add_numbers"; arguments = @(2, 3) }),
+        (Tool-Request 2417 "scene_remove_node" @{ target_node = "/root/SmokeRoot/CallProbe" }),
+        (Tool-Request 2418 "scene_remove_node" @{ target_node = "/root/SmokeRoot/PlainProbe" })
+    )
+    $rawCallResponses = $callRequests | & $didiExecutable --project $fixtureRoot --yolo
+    $callResponses = @($rawCallResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
+    Assert-True ($callResponses.Count -eq $callRequests.Count) "Expected $($callRequests.Count) scene_call_method responses, received $($callResponses.Count)."
+    $callById = @{}
+    foreach ($response in $callResponses) { $callById[[int]$response.id] = $response }
+
+    $addResult = Tool-Payload $callById[2405]
+    Assert-True ($addResult.returned -eq 5) "scene_call_method did not return what the method returned: $($addResult | ConvertTo-Json -Depth 6 -Compress)"
+    Assert-True ($addResult.awaited -eq $false) "A synchronous method reported that it was awaited."
+    Assert-True ((Tool-Payload $callById[2406]).returned -eq "call probe") "A string return was not carried back."
+
+    # The coroutine. Object.callv hands back a GDScriptFunctionState rather than
+    # the value, so returning that object would report a bake that has not
+    # happened. The value has to be the one the completed signal carried.
+    $bakeResult = Tool-Payload $callById[2407]
+    Assert-True ($bakeResult.awaited -eq $true) "A coroutine was not reported as awaited."
+    Assert-True ($bakeResult.returned -eq $true) "The coroutine's return value was lost: $($bakeResult | ConvertTo-Json -Depth 6 -Compress)"
+    Assert-True ((Tool-Payload $callById[2408]).value -eq 1) "The coroutine was reported as finished without its side effect having happened."
+
+    foreach ($refusal in @(
+        @{ Id = 2409; What = "a leading-underscore method"; Match = "underscore" },
+        @{ Id = 2410; What = "an engine method"; Match = "script declares" },
+        @{ Id = 2411; What = "the wrong argument count"; Match = "argument" },
+        @{ Id = 2412; What = "an argument of the wrong type"; Match = "parameter type" },
+        @{ Id = 2415; What = "a script that is not a @tool script"; Match = "@tool" },
+        @{ Id = 2416; What = "a node with no script"; Match = "no script" })) {
+        Assert-True $callById[$refusal.Id].result.isError "scene_call_method accepted $($refusal.What)."
+        $refusalText = ($callById[$refusal.Id].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+        Assert-True ($refusalText -match $refusal.Match) "The refusal of $($refusal.What) did not say why: $refusalText"
+    }
+
+    # The gate, with confirmations on. An ordinary call must not execute; it
+    # must come back asking to be confirmed.
+    $callGateRequests = @(
+        (@{ jsonrpc = "2.0"; id = 2420; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (Tool-Request 2421 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 2422 "scene_call_method" @{ target_node = "/root/SmokeRoot"; method_name = "add_numbers"; arguments = @(2, 3) }),
+        (Tool-Request 2423 "scene_call_method" @{ target_node = "/root/SmokeRoot"; method_name = "add_numbers"; arguments = @(2, 3); dry_run = $true })
+    )
+    $rawCallGate = $callGateRequests | & $didiExecutable --project $fixtureRoot
+    $callGate = @($rawCallGate | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
+    $callGateById = @{}
+    foreach ($response in $callGate) { $callGateById[[int]$response.id] = $response }
+
+    # Read directly rather than through Tool-Payload: this response is meant to
+    # be an error, and the refusal is the thing being asserted.
+    Assert-True $callGateById[2422].result.isError "scene_call_method ran project code without a confirmation token."
+    $callGateRefusal = ($callGateById[2422].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+    Assert-True ($callGateRefusal -match "confirmation token") "scene_call_method was refused for a reason other than the missing confirmation."
+
+    # The dry run is where the token comes from, and it must not have run the
+    # method to produce one.
+    $gated = Tool-Payload $callGateById[2423]
+    Assert-True ($null -ne $gated.mutation_preview) "A scene_call_method dry run returned no preview."
+    Assert-True ($gated.mutation_preview.requires_confirmation -eq $true) "scene_call_method did not require confirmation."
+    Assert-True ($gated.mutation_preview.confirmation_token -match '^[0-9a-f]{64}$') "scene_call_method did not issue a confirmation token."
+    Assert-True ($null -eq $gated.returned) "A scene_call_method dry run reported a return value, so it ran the method."
     $refused = $applyById[642].result.content[0].text | ConvertFrom-Json
     Assert-True ($refused.applied -eq $false) "A proposal whose scene run failed was written into the project anyway."
     Assert-True ($refused.scene_run.ok -eq $false) "The refused apply did not say the scene run is what stopped it."

@@ -271,6 +271,7 @@ set(DIDI_ADDON_MANIFEST_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_diagnostics.gd"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_log.gd"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_session.gd"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_await.gd"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_settings.gd"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_mark.svg"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_mark_compact.svg"
@@ -357,6 +358,7 @@ set(TEST_SOURCES
     tests/test_autoload_diagnostics.cpp
     tests/test_resource_indexer.cpp
     tests/test_resource_references.cpp
+    tests/test_scene_call_method.cpp
     tests/test_import_health.cpp
     tests/test_blackboard.cpp
     tests/test_blackboard_resources.cpp
