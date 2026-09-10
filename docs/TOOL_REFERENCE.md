@@ -162,6 +162,12 @@ Runs Didi's string/comment-aware lightweight GDScript diagnostics. When an in-pr
 - At least one is required.
 - Legacy alias: `analyze_script_diagnostics`.
 
+Godot's `--headless --check-only` runs in a process with no `SceneTree`, and a project's autoload singletons are registered when the `SceneTree` is built. So the check reports `Compile Error: Identifier not found: <Name>` for every autoload a script names, on every call, for a script the engine compiles and runs without complaint. This is permanent. It is not the `project_set_autoload` limitation below, which clears when the editor restarts; no invocation avoids this one, and `--path`, the `res://` spelling and `--editor` were all confirmed to report it on Godot 4.7.2.
+
+Didi therefore reads the `[autoload]` section of `project.godot` and demotes those diagnostics to `severity: "warning"`, adding a `note` saying why. When they were the only errors, the `Compilation failed` line the compiler prints after them is demoted too, so `has_errors` is a verdict about the script rather than about the checker. Nothing is dropped, so an autoload whose own script is broken is still visible. An `Identifier not found` naming anything that is not a registered autoload stays an error, and a real parse error beside an autoload one keeps `has_errors: true`.
+
+`script_create` and `script_patch_method` surface the same check and get the same treatment.
+
 ### `script_reflect_class` — Offline
 
 Reflects a Godot engine class offline from the API dump pinned in the repository, covering every class the engine registers rather than a hand-picked few. Returns `inherits`, `properties` (with `read_only` where there is no setter), `methods` (return type and rendered argument list, with `static`, `const` and `virtual` where they apply), `signals` and `enums`.
@@ -199,7 +205,7 @@ Rewrites a matching GDScript symbol in a project-root-confined file, then runs t
 - `symbol_type` (`string`, default `"function"`).
 - Legacy alias: `patch_script_symbols`.
 
-Diagnostics are computed against the file after it is written, so they include the Godot compiler check when a Godot binary is discoverable, not only the lexical rules. `has_errors: true` means the patch left the file in a state the compiler rejects, and the same diagnostics `script_check_syntax` would report are returned here.
+Diagnostics are computed against the file after it is written, so they include the Godot compiler check when a Godot binary is discoverable, not only the lexical rules. `has_errors: true` means the patch left the file in a state the compiler rejects, and the same diagnostics `script_check_syntax` would report are returned here. That includes the autoload demotion described under `script_check_syntax`.
 
 ## 4. Viewport and visual helpers
 
@@ -818,7 +824,7 @@ All Phase 2 tools are live-only and execute on Godot's main thread. They do not 
 ### Autoloads
 
 - `project_list_autoloads`: returns sorted `{name, path, singleton}` entries.
-- `project_set_autoload`: requires identifier `name` and existing `res://` script or scene `path`; `singleton` defaults to `true`. Existing entries require `replace: true`. The setting is persisted, but the attached editor does not pick it up: Godot registers an autoload's global name through editor-internal paths a GDExtension cannot reach. The result carries `registered_in_attached_editor: false`, `requires_editor_restart: true`, and a `limitation` stating it. Until that editor restarts, scripts referencing a newly added singleton report `Identifier not found`, and a removed one keeps resolving. `editor_reload_project` does not change either.
+- `project_set_autoload`: requires identifier `name` and existing `res://` script or scene `path`; `singleton` defaults to `true`. Existing entries require `replace: true`. The setting is persisted, but the attached editor does not pick it up: Godot registers an autoload's global name through editor-internal paths a GDExtension cannot reach. The result carries `registered_in_attached_editor: false`, `requires_editor_restart: true`, and a `limitation` stating it. Until that editor restarts, scripts referencing a newly added singleton report `Identifier not found`, and a removed one keeps resolving. `editor_reload_project` does not change either. That is the editor's own compilation. `script_check_syntax` reports the same message for a different and permanent reason, and handles it; see that tool.
 - `project_remove_autoload`: requires `name` and rejects missing entries.
 
 Mutations use Godot's `autoload/<name>` representation, call `ProjectSettings.save()`, and restore the previous value if saving fails.
