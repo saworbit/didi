@@ -2511,6 +2511,95 @@ static void test_class_reflection() {
     ASSERT_TRUE(parsed["methods"].contains("move_and_slide"));
 }
 
+// The pinned class reference is one engine's API and the editor in front of the
+// caller may be another. Didi published its own build identity and never the
+// engine's, so a 4.5.1 editor was handed 4.7 method sets with no hint (#405).
+static void test_class_reflection_reports_a_version_mismatch_with_the_attached_engine() {
+    class EngineSessionClient final : public didi::runtime::IRuntimeSessionClient {
+    public:
+        explicit EngineSessionClient(std::string version) : m_version(std::move(version)) {}
+        bool connect(const std::string&, int) override { return false; }
+        void disconnect() override {}
+        bool isConnected() const override { return true; }
+        didi::Result<didi::json> sendRequest(const std::string&, const didi::json&, int) override {
+            return didi::Error::internal("reflection must not issue a live request");
+        }
+        didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
+            return didi::json::object();
+        }
+        didi::Result<didi::json> attachSession(const std::string&) override {
+            return didi::Error::internal("attach must not be called");
+        }
+        didi::Result<didi::json> detachSession() override { return didi::json::object(); }
+        std::optional<didi::runtime::SessionDescriptor> activeSession() const override {
+            didi::runtime::SessionDescriptor descriptor{
+                1, "0123456789abcdef0123456789abcdef", std::string(64, 'a'), 1,
+                "editor", "C:/project", "\\\\.\\pipe\\godot_didi_1", 1, "1.3"};
+            descriptor.engine_version = m_version;
+            return descriptor;
+        }
+
+    private:
+        std::string m_version;
+    };
+
+    // The registry is a singleton shared by every test in this binary, so the
+    // client this installs has to come off even when an assertion throws.
+    struct RestoreClient {
+        ~RestoreClient() { didi::mcp::ToolRegistry::instance().setIpcClient(nullptr); }
+    } restore_client;
+
+    auto& reg = didi::mcp::ToolRegistry::instance();
+    reg.registerAllDefaultTools();
+
+    const auto reflect = [&reg](const std::string& engine_version) {
+        reg.setIpcClient(std::make_shared<EngineSessionClient>(engine_version));
+        const auto result = reg.callTool("script_reflect_class", {{"class_name", "Sprite2D"}});
+        ASSERT_TRUE(!result.isError);
+        return didi::json::parse(result.content[0].text);
+    };
+
+    // Whatever the shipped dump is pinned to, its own line matches itself and a
+    // different minor does not. Deriving the matching case from api_version
+    // keeps this from going stale the next time the dump is regenerated.
+    const auto pinned = reflect("").value("api_version", std::string());
+    ASSERT_TRUE(!pinned.empty());
+    const auto digit = pinned.find_first_of("0123456789");
+    const auto minor_dot = pinned.find('.', digit);
+    const auto major = pinned.substr(digit, minor_dot - digit);
+    const auto minor = pinned.substr(minor_dot + 1, 1);
+    const auto same = "Godot v" + major + "." + minor + ".9.stable.official";
+    const auto other = "Godot v" + major + "." +
+                       std::to_string(std::stoi(minor) + 1) + ".0.stable.official";
+
+    const auto matching = reflect(same);
+    ASSERT_EQ(matching["attached_engine_version"], same);
+    ASSERT_EQ(matching["api_version_matches_attached_engine"], true);
+
+    const auto mismatched = reflect(other);
+    ASSERT_EQ(mismatched["attached_engine_version"], other);
+    ASSERT_EQ(mismatched["api_version_matches_attached_engine"], false);
+
+    // An extension older than the field publishes no version. Unknown is not a
+    // match, and reporting one would be worse than reporting nothing.
+    const auto unknown = reflect("");
+    ASSERT_TRUE(unknown["attached_engine_version"].is_null());
+    ASSERT_TRUE(unknown["api_version_matches_attached_engine"].is_null());
+
+    // With no editor attached there is nothing to compare against, so neither
+    // field is invented.
+    reg.setIpcClient(nullptr);
+    const auto detached = didi::json::parse(
+        reg.callTool("script_reflect_class", {{"class_name", "Sprite2D"}}).content[0].text);
+    ASSERT_TRUE(!detached.contains("attached_engine_version"));
+    ASSERT_TRUE(!detached.contains("api_version_matches_attached_engine"));
+
+    // And the description no longer tells the caller to attach a live editor
+    // for a tool that has no live mode.
+    const auto description = detached["description"].get<std::string>();
+    ASSERT_TRUE(description.find("Attach a live editor") == std::string::npos);
+}
+
 static void test_symbol_extraction() {
     auto& reg = didi::mcp::ToolRegistry::instance();
     reg.registerAllDefaultTools();
@@ -3315,6 +3404,8 @@ struct RegisterToolTests {
                      test_hierarchy_node_budget_reports_what_it_cut);
         registerTest("Hierarchy.SummaryCountsWithoutTheTree",
                      test_hierarchy_summary_counts_without_dumping_the_tree);
+        registerTest("Tools.ClassReflectionVersusAttachedEngine",
+                     test_class_reflection_reports_a_version_mismatch_with_the_attached_engine);
         registerTest("Hierarchy.ViewOptionsRejectMalformed",
                      test_hierarchy_view_options_reject_malformed_requests);
         registerTest("Hierarchy.OfflineAppliesViewOptions",

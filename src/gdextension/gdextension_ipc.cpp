@@ -1,5 +1,6 @@
 #include "didi/gdextension/gdextension_ipc.hpp"
 #include "didi/gdextension/editor_hook.hpp"
+#include "didi/gdextension/gdextension_api.hpp"
 #include "didi/gdextension/runtime_request_router.hpp"
 #include "didi/common/logger.hpp"
 
@@ -26,7 +27,8 @@ bool GDExtensionIpc::start(const std::string& kind, const std::string& project_p
     EditorHook::instance();
     EditorHook::instance().setSessionKind(kind);
 
-    const auto prepared = m_sessionHost.prepare(kind, project_path);
+    const auto prepared = m_sessionHost.prepare(kind, project_path,
+                                                GodotApi::instance().engineVersionString());
     if (prepared.isErr()) {
         DIDI_LOG_ERROR("GDEXT_IPC", "Unable to prepare runtime session: ", prepared.error().message);
         return false;

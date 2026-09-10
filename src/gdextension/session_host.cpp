@@ -220,7 +220,8 @@ Result<void> writeDescriptorAtomically(const std::filesystem::path& destination,
 
 } // namespace
 
-Result<void> SessionHost::prepare(const std::string& kind, const std::string& project_path) {
+Result<void> SessionHost::prepare(const std::string& kind, const std::string& project_path,
+                                  const std::string& engine_version) {
     if (kind != "editor" && kind != "game") return Error::invalidArgument("Session kind must be editor or game");
     if (project_path.empty()) return Error::invalidArgument("Session project path must not be empty");
 
@@ -262,6 +263,10 @@ Result<void> SessionHost::prepare(const std::string& kind, const std::string& pr
     // own so a bridge from another build is visible instead of silently serving
     // an older tool contract while everything reports healthy.
     descriptor.build_id = kBuildId;
+    // Which Godot this extension was loaded into. The server has a class
+    // reference pinned to one engine version and could not say whether the
+    // editor in front of the caller was that engine (#405).
+    descriptor.engine_version = engine_version;
     auto directory = sessionDirectory();
     if (directory.isErr()) return directory.error();
     m_descriptorPath = directory.value() / (descriptor.session_id + ".json");

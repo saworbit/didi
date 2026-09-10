@@ -74,9 +74,25 @@ public:
             variant_get_type = (GDExtensionInterfaceVariantGetType)p_get_proc_address("variant_get_type");
             packed_byte_array_operator_index_const = (GDExtensionInterfacePackedByteArrayOperatorIndexConst)p_get_proc_address("packed_byte_array_operator_index_const");
             register_main_loop_callbacks = (GDExtensionInterfaceRegisterMainLoopCallbacks)p_get_proc_address("register_main_loop_callbacks");
+            // Which engine this extension was loaded into. Didi published its
+            // own build identity and never the engine's, so nothing could tell
+            // a caller that the pinned class reference is from a different
+            // minor than the editor in front of them (#405). get_godot_version2
+            // has been there since 4.5, which is this project's floor.
+            get_godot_version2 = (GDExtensionInterfaceGetGodotVersion2)p_get_proc_address("get_godot_version2");
         }
 
         m_initialized = p_get_proc_address != nullptr && m_library != nullptr;
+    }
+
+    // The engine's own version string, for example
+    // "Godot v4.5.1.stable.official". Empty when the engine did not offer the
+    // call, which is itself an answer and is published as such.
+    std::string engineVersionString() const {
+        if (!get_godot_version2) return {};
+        GDExtensionGodotVersion2 version{};
+        get_godot_version2(&version);
+        return version.string ? std::string(version.string) : std::string{};
     }
 
     bool isInitialized() const { return m_initialized; }
@@ -126,6 +142,7 @@ public:
     GDExtensionInterfaceVariantGetType variant_get_type{nullptr};
     GDExtensionInterfacePackedByteArrayOperatorIndexConst packed_byte_array_operator_index_const{nullptr};
     GDExtensionInterfaceRegisterMainLoopCallbacks register_main_loop_callbacks{nullptr};
+    GDExtensionInterfaceGetGodotVersion2 get_godot_version2{nullptr};
 
 private:
     GodotApi() = default;
