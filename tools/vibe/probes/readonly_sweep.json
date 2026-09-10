@@ -1,0 +1,19 @@
+[
+ ["didi_control_room", {}],
+ ["get_scene_hierarchy", {"root_path": "res://main.tscn"}],
+ ["get_scene_hierarchy", {"summary": true}],
+ ["project_list_resources", {}],
+ ["project_get_uid_map", {}],
+ ["project_search_text", {"query": "Sprite2D"}],
+ ["project_search_symbols", {"query": "take_damage"}],
+ ["script_get_symbols", {"file_path": "res://player.gd"}],
+ ["script_check_syntax", {"file_path": "res://player.gd"}],
+ ["script_reflect_class", {"class_name": "Sprite2D"}],
+ ["project_audit_assets", {}],
+ ["project_analyze_impact", {"target": "Player"}],
+ ["project_list_export_presets", {}],
+ ["blackboard_list_keys", {}],
+ ["blackboard_task_list", {}],
+ ["runtime_list_sessions", {}],
+ ["runtime_get_session", {}]
+]

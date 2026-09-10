@@ -1,0 +1,14 @@
+[
+ ["blackboard_read", {"totally_unknown_arg": 5}],
+ ["project_get_setting", {}],
+ ["project_get_setting", {"setting_path": "application/config/name"}],
+ ["get_scene_hierarchy", {"root_path": "res://main.tscn", "max_depth": "banana"}],
+ ["get_scene_hierarchy", {"root_path": "res://main.tscn", "max_depth": -5}],
+ ["scene_set_property", {"property_name": "position", "value": {"x": 99, "y": 99}}],
+ ["scene_remove_node", {"node_path": "/root/Main/Child"}],
+ ["scene_add_to_group", {"group": "probe_group_no_target"}],
+ ["scene_get_group_members", {"group": "probe_group_no_target"}],
+ ["scene_remove_from_group", {"group": "probe_group_no_target"}],
+ ["signal_list_connections", {"node_path": "/root/Main/Child"}],
+ ["scene_pack_branch", {"target_node": "/root/Main/Child", "output_path": "res://packed.tscn"}]
+]
