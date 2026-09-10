@@ -16,6 +16,16 @@ struct ViewportPixels {
     std::vector<uint8_t> rgba;
 };
 
+// One accepted asset_reimport batch, split by which engine call each path
+// needs. Godot's import system owns only the files carrying a .import
+// sidecar; reimport_files errors on anything else, and update_file is the
+// documented way to tell the editor a plain project file changed on disk.
+struct ReimportBatch {
+    std::vector<std::string> paths;
+    std::vector<std::string> reimported;
+    std::vector<std::string> refreshed;
+};
+
 struct VisibilityRestorePoint {
     uint64_t instance_id{0};
     std::string class_name;
@@ -80,9 +90,9 @@ public:
     // Split so the caller can publish its pending request before the reimport
     // starts. EditorFileSystem.reimport_files re-enters the main-loop callback,
     // and a nested frame that cannot see the request misses the scanning window.
-    Result<std::vector<std::string>> resolveReimportPaths(const std::vector<std::string>& paths);
-    Result<void> startAssetReimport(const std::vector<std::string>& resolved_paths);
-    Result<std::vector<std::string>> beginAssetReimport(const std::vector<std::string>& paths);
+    Result<ReimportBatch> resolveReimportPaths(const std::vector<std::string>& paths);
+    Result<void> startAssetReimport(const ReimportBatch& batch);
+    Result<ReimportBatch> beginAssetReimport(const std::vector<std::string>& paths);
     Result<bool> isEditorFilesystemScanning();
     Result<ViewportIsolationState> beginViewportIsolation(const std::string& node_path,
                                                           const std::string& camera_identifier,

@@ -835,7 +835,8 @@ void EditorHook::scheduleAssetReimport(
     // scan it was waiting for.
     const auto now = std::chrono::steady_clock::now();
     m_pendingAssetReimport.emplace(PendingAssetReimport{
-        resolved.value(), ReimportProgress(now, std::chrono::milliseconds(timeout_ms)),
+        resolved.value().paths, resolved.value().reimported, resolved.value().refreshed,
+        ReimportProgress(now, std::chrono::milliseconds(timeout_ms)),
         promise, control
     });
 
@@ -848,7 +849,9 @@ void EditorHook::scheduleAssetReimport(
                                     {"message", started.error().message}}}});
         return;
     }
-    DIDI_LOG_INFO("EDITOR_HOOK", "Started bounded asset reimport for ", resolved.value().size(), " path(s)");
+    DIDI_LOG_INFO("EDITOR_HOOK", "Started bounded asset reimport for ",
+                  resolved.value().reimported.size(), " imported and ",
+                  resolved.value().refreshed.size(), " refreshed path(s)");
 }
 
 void EditorHook::processAssetReimportFrame() {
@@ -887,6 +890,8 @@ void EditorHook::processAssetReimportFrame() {
             } else {
                 response = {{"paths", completed->paths},
                             {"accepted_count", completed->paths.size()},
+                            {"reimported", completed->reimported},
+                            {"refreshed", completed->refreshed},
                             {"elapsed_ms", elapsed}, {"idle", true},
                             {"execution_mode", "live"}, {"is_live_engine", true},
                             {"session_kind", "editor"}};

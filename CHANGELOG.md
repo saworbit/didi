@@ -26,6 +26,22 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `asset_reimport` no longer reports success for a path Godot has no importer
+  for (#374). Godot's import system owns only the files carrying a `.import`
+  sidecar, and `EditorFileSystem.reimport_files` printed
+  `importer for type '' not found` to the editor output for each of the others
+  while returning nothing the tool could see. The batch is now split by what
+  each path needs: sidecar files go to `reimport_files`, and the rest go to
+  `EditorFileSystem.update_file`, which is the call Godot documents for a file
+  changed outside the editor. The result carries both lists as `reimported`
+  and `refreshed`.
+
+- `scene_create` now creates the project-contained parent directory of a
+  nested scene path instead of returning a bare `ResourceSaver.save failed
+  with Error 19` (#372). `script_create` and `resource_create` already created
+  theirs, so the writers disagreed with each other. `scene_pack_branch` shares
+  the same save path and gets the same behaviour.
+
 - The offline `missing_colon` rule no longer reads a four-character name
   followed by a space as an `else` header, so a plain `hits += 1` stops being
   reported as an `else` statement missing its colon (#371). Unlike the other

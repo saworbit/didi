@@ -1595,7 +1595,7 @@ GodotBridge& GodotBridge::instance() {
     return bridge;
 }
 
-Result<std::vector<std::string>> GodotBridge::beginAssetReimport(
+Result<ReimportBatch> GodotBridge::beginAssetReimport(
     const std::vector<std::string>& paths) {
     auto resolved = resolveReimportPaths(paths);
     if (resolved.isErr()) return resolved.error();
@@ -1604,7 +1604,7 @@ Result<std::vector<std::string>> GodotBridge::beginAssetReimport(
     return resolved;
 }
 
-Result<std::vector<std::string>> GodotBridge::resolveReimportPaths(
+Result<ReimportBatch> GodotBridge::resolveReimportPaths(
     const std::vector<std::string>& paths) {
     namespace fs = std::filesystem;
     if (paths.empty() || paths.size() > 256) {
@@ -1618,8 +1618,8 @@ Result<std::vector<std::string>> GodotBridge::resolveReimportPaths(
     if (ec || !fs::is_directory(root, ec)) return Error::internal("Godot project root is unavailable");
 
     std::set<std::string> unique;
-    std::vector<std::string> normalized;
-    normalized.reserve(paths.size());
+    ReimportBatch batch;
+    batch.paths.reserve(paths.size());
     for (const auto& path : paths) {
         if (path.size() < 7 || path.size() > 1024 || path.find('\0') != std::string::npos ||
             strings::startsWith(path, "res://.godot/") || strings::endsWith(path, ".import")) {
@@ -1639,20 +1639,42 @@ Result<std::vector<std::string>> GodotBridge::resolveReimportPaths(
         if (!unique.insert(resource_path).second) {
             return Error::invalidArgument("Reimport paths must be unique after normalization");
         }
-        normalized.push_back(resource_path);
+        // Godot's import system owns exactly the files that carry a .import
+        // sidecar. reimport_files reads the importer name out of that file, so
+        // a path without one reaches the engine as "importer for type '' not
+        // found" printed to the editor output while this tool reported success.
+        // EditorFileSystem.update_file is the documented call for the rest:
+        // "can be used to update text files saved by an external program".
+        auto sidecar = candidate;
+        sidecar += ".import";
+        std::error_code sidecar_error;
+        const bool imported = fs::is_regular_file(sidecar, sidecar_error) && !sidecar_error;
+        batch.paths.push_back(resource_path);
+        (imported ? batch.reimported : batch.refreshed).push_back(resource_path);
     }
 
-    return normalized;
+    return batch;
 }
 
-Result<void> GodotBridge::startAssetReimport(const std::vector<std::string>& resolved_paths) {
+Result<void> GodotBridge::startAssetReimport(const ReimportBatch& batch) {
     auto editor = editorInterface();
     if (editor.isErr()) return editor.error();
     auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
     if (filesystem.isErr()) return filesystem.error();
     auto object = objectFromVariant(filesystem.value());
     if (object.isErr() || !object.value()) return Error::notConnected("EditorFileSystem is unavailable");
-    json path_array = resolved_paths;
+    // update_file is synchronous and starts no scan, so it goes first and the
+    // scanning window the frame loop waits on belongs to the reimport alone.
+    // The bind carries hash 83702148 on Godot 4.5.1, 4.6.2 and 4.7.2.
+    for (const auto& path : batch.refreshed) {
+        auto godot_path = makeString(path);
+        if (godot_path.isErr()) return godot_path.error();
+        auto updated = callObject(object.value(), "EditorFileSystem", "update_file", 83702148LL,
+                                  {&godot_path.value()});
+        if (updated.isErr()) return updated.error();
+    }
+    if (batch.reimported.empty()) return Result<void>::ok();
+    json path_array = batch.reimported;
     auto godot_paths = makeJsonVariant(path_array);
     if (godot_paths.isErr()) return godot_paths.error();
     auto started = callObject(object.value(), "EditorFileSystem", "reimport_files", 4015028928LL,
@@ -7386,6 +7408,38 @@ json GodotBridge::execute(const std::string& method, const json& params,
 
         if (target_exists.value() && !params.value("overwrite", false)) {
             return errorJson(409, "Scene target already exists; pass overwrite: true to replace it");
+        }
+
+        // Only the two writers reach this line, and ResourceSaver cannot create
+        // the directory it writes into: a missing parent came back as a bare
+        // Error 19 with nothing in it naming the cause. script_create and
+        // resource_create both create theirs. validateResPath has already
+        // refused traversal, absolute paths and backslashes, so the target is
+        // project-contained by construction and the check below is a second
+        // reading of that rather than the only one.
+        {
+            namespace fs = std::filesystem;
+            auto project_path = resolveGodotProjectPath();
+            if (project_path.isErr()) {
+                return errorJson(project_path.error().code, project_path.error().message);
+            }
+            std::error_code ec;
+            const auto root = fs::weakly_canonical(
+                didi::paths::projectPathFromUtf8(project_path.value()), ec);
+            if (ec || !fs::is_directory(root, ec)) {
+                return errorJson(500, "Godot project root is unavailable");
+            }
+            const auto target = root / didi::paths::projectPathFromUtf8(scene_path.substr(6));
+            const auto parent = target.parent_path();
+            if (!pathWithin(root, parent)) {
+                return errorJson(400, "Scene path resolves outside the project: " + scene_path);
+            }
+            std::error_code directory_error;
+            fs::create_directories(parent, directory_error);
+            if (directory_error && !fs::is_directory(parent, ec)) {
+                return errorJson(500, "Cannot create the directory for " + scene_path + ": " +
+                                      directory_error.message());
+            }
         }
 
         GDExtensionObjectPtr packed_root = nullptr;
