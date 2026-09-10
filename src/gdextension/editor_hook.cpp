@@ -122,6 +122,7 @@ void EditorHook::processQueue() {
         processProfilerFrame();
         processInvariantWatchFrame();
         processSceneExplorationFrame();
+        GodotBridge::instance().processDeferredReindexFrame();
         return;
     }
     m_pumping = true;
@@ -221,6 +222,7 @@ void EditorHook::processQueue() {
     processProfilerFrame();
     processInvariantWatchFrame();
     processSceneExplorationFrame();
+    GodotBridge::instance().processDeferredReindexFrame();
     processPendingQuitFrame();
 }
 

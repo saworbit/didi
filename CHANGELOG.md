@@ -43,6 +43,17 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   plugin in `editor_plugins/enabled`, and names the fix for each; both are file
   stats, so they answer in the state where nothing live can.
 
+- `scene_create` and `scene_pack_branch` no longer write a uid the engine never
+  learns (#379). `ResourceSaver.save` puts the uid in the file, but only Godot's
+  own save callback registers it with `ResourceUID`, and that callback does
+  nothing while `EditorFileSystem` is scanning, which is exactly the window an
+  agent writes in after attaching to a freshly started editor. The scan's
+  directory snapshot predates the file, so the scan did not pick it up either.
+  Every load of a referencing scene then warned and fell back to the text path.
+  Both writers now call `EditorFileSystem.update_file`, report `uid` and
+  `uid_registered`, and when a scan deferred the work they say so and Didi
+  re-indexes the path once the filesystem settles.
+
 - `script_check_syntax` no longer reports a false error for every script that
   names an autoload (#383). Godot's `--headless --check-only` runs in a process
   with no `SceneTree`, which is where autoloads are registered, so it reported

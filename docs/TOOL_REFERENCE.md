@@ -877,6 +877,10 @@ Group mutations use UndoRedo.
 - `scene_close`: closes the active scene. It probes for the `EditorInterface.get_unsaved_scenes` bind, which exists from Godot 4.7. Where it exists and the engine omits the active scene from the unsaved list, a call with no arguments closes and returns `dirty_state: "clean"`. Where the bind is missing (Godot 4.5 and 4.6), where the active scene has never been saved and so has no path for the engine to name, or where the engine reports the scene as unsaved, the call is refused with `409` unless `discard_unsaved: true` is passed. Results carry `dirty_state_readable` (whether this engine can answer), `dirty_state` (`clean` or `unchecked`), and `discarded_unsaved` (the flag as passed).
 - `scene_pack_branch`: requires `target_node` and `scene_path`; duplicates the branch, normalizes descendant ownership, packs it, and protects existing targets unless `overwrite: true`.
 
+Both writers report the uid the scene file carries and whether the engine has been taught it: `uid`, and `uid_registered`. `ResourceSaver.save` writes the uid into the file, but only Godot's own save callback puts it in `ResourceUID`, and that callback does nothing while `EditorFileSystem` is scanning. A scene written inside that window used to end up with a uid in the file that the engine had never heard of, so every load of a scene referencing it printed `ext_resource, invalid UID ... using text path instead`, in the editor, in `runtime_launch` and in an exported game.
+
+Didi now calls `EditorFileSystem.update_file` after each save. When a scan is running that call cannot take effect, so the result carries `uid_registered: false`, `uid_registration_deferred: true` and a `limitation` saying so, and Didi re-indexes the path as soon as the scan finishes. Nothing else is required of the caller; `editor_reload_project` is no longer the repair for this.
+
 Scene paths reject absolute filesystem paths, backslashes, and parent-relative segments.
 
 ## 11. Phase 3 runtime sessions
