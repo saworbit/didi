@@ -134,7 +134,32 @@ bool asksForANamedType(const json& value) {
     return !name.empty() && name[0] >= 'A' && name[0] <= 'Z';
 }
 
-Result<std::string> tresLiteral(const json& value, const std::string& property);
+// What a .tres needs at the top of the file for the references its body makes.
+//
+// A property that points at another resource is not a value: it is a name that
+// only means anything because a header entry declares it. So the writer cannot
+// render a property in isolation any more. It renders into a collector, which
+// accumulates the [ext_resource] lines to emit and knows which [sub_resource]
+// ids are legal to name at this point in the file.
+struct ExternalReference {
+    std::string path;
+    std::string type;
+    std::string uid;
+    std::string id;
+};
+
+struct ReferenceScope {
+    std::vector<ExternalReference> externals;
+    // The sub-resource ids already declared above the current point in the
+    // file. Godot's parser resolves SubResource against what it has already
+    // read, so naming one declared further down yields a null rather than an
+    // error, which is the kind of silent wrong write this writer exists to
+    // refuse.
+    std::vector<std::string> visible_sub_ids;
+};
+
+Result<std::string> tresLiteral(const json& value, const std::string& property,
+                                ReferenceScope* scope = nullptr);
 
 Result<std::string> tresComponentLiteral(const ComponentType& type, const json& value,
                                          const std::string& property) {
@@ -162,7 +187,59 @@ Result<std::string> tresComponentLiteral(const ComponentType& type, const json& 
     return out.str();
 }
 
-Result<std::string> tresNamedTypeLiteral(const json& value, const std::string& property) {
+// Whether the project holds this path, and what Godot calls it.
+//
+// An [ext_resource] carries the type and the uid of what it points at, so a
+// reference to a file that is not there cannot be written correctly and is not
+// written at all. That refusal is the point: the alternative is a .tres that
+// loads with a null where the texture should be.
+Result<ExternalReference> resolveExternalReference(const json& value, const std::string& property) {
+    const auto path_value = value.find("path");
+    if (path_value == value.end() || !path_value->is_string() ||
+        path_value->get<std::string>().empty()) {
+        return Error::invalidArgument("Property \"" + property +
+                                      "\" declares type ExtResource, which needs the resource it "
+                                      "points at under \"path\"");
+    }
+    const auto path = path_value->get<std::string>();
+    if (path.rfind("res://", 0) != 0) {
+        return Error::invalidArgument("Property \"" + property +
+                                      "\" declares type ExtResource with path \"" + path +
+                                      "\", which must be a res:// path inside this project");
+    }
+    ExternalReference reference;
+    reference.path = path;
+    const auto indexer = offline::ResourceIndexer::sharedIndex(".");
+    if (const auto* found = indexer->findExact(path)) {
+        reference.type = found->type;
+        reference.uid = found->uid;
+    } else {
+        return Error::notFound("Property \"" + property +
+                               "\" declares type ExtResource pointing at " + path +
+                               ", which is not in this project. A .tres naming a file that is "
+                               "not there loads with nothing in that slot.");
+    }
+    // The caller wins where they say so: the index guesses a type from the file
+    // extension, and a custom Resource script is the case it cannot guess.
+    const auto declared = value.find("resource_type");
+    if (declared != value.end()) {
+        if (!declared->is_string() || declared->get<std::string>().empty()) {
+            return Error::invalidArgument("Property \"" + property +
+                                          "\" declares an ExtResource whose resource_type must be "
+                                          "a non-empty string");
+        }
+        reference.type = declared->get<std::string>();
+    }
+    if (reference.type.empty()) {
+        return Error::invalidArgument(
+            "Property \"" + property + "\" declares an ExtResource pointing at " + path +
+            ", whose resource type could not be determined. Pass resource_type to name it.");
+    }
+    return reference;
+}
+
+Result<std::string> tresNamedTypeLiteral(const json& value, const std::string& property,
+                                         ReferenceScope* scope) {
     const auto name = value.at("type").get<std::string>();
     if (const auto* component = findComponentType(name)) {
         if (name == "Color" && !value.contains("a")) {
@@ -190,7 +267,7 @@ Result<std::string> tresNamedTypeLiteral(const json& value, const std::string& p
         out << name << "(";
         bool first = true;
         for (const auto& element : *items) {
-            auto rendered = tresLiteral(element, property);
+            auto rendered = tresLiteral(element, property, scope);
             if (rendered.isErr()) return rendered.error();
             if (!first) out << ", ";
             first = false;
@@ -199,11 +276,47 @@ Result<std::string> tresNamedTypeLiteral(const json& value, const std::string& p
         out << ")";
         return out.str();
     }
+    if (name == "ExtResource" || name == "SubResource") {
+        if (!scope) {
+            return Error::invalidArgument(
+                "Property \"" + property + "\" declares type " + name +
+                ", which is only meaningful inside a resource this writer is assembling.");
+        }
+        if (name == "ExtResource") {
+            auto reference = resolveExternalReference(value, property);
+            if (reference.isErr()) return reference.error();
+            // One header entry per path, however many properties name it.
+            for (const auto& existing : scope->externals) {
+                if (existing.path == reference.value().path) return "ExtResource(\"" + existing.id + "\")";
+            }
+            reference.value().id = std::to_string(scope->externals.size() + 1) + "_didi";
+            const auto id = reference.value().id;
+            scope->externals.push_back(std::move(reference.value()));
+            return "ExtResource(\"" + id + "\")";
+        }
+        const auto id_value = value.find("id");
+        if (id_value == value.end() || !id_value->is_string() ||
+            id_value->get<std::string>().empty()) {
+            return Error::invalidArgument("Property \"" + property +
+                                          "\" declares type SubResource, which needs the id of a "
+                                          "sub_resources entry under \"id\"");
+        }
+        const auto id = id_value->get<std::string>();
+        if (std::find(scope->visible_sub_ids.begin(), scope->visible_sub_ids.end(), id) ==
+            scope->visible_sub_ids.end()) {
+            return Error::invalidArgument(
+                "Property \"" + property + "\" names sub-resource \"" + id +
+                "\", which is not declared above it. Add it to sub_resources, and put it before "
+                "anything that references it: Godot resolves SubResource against what it has "
+                "already read, so a later one reads as null.");
+        }
+        return "SubResource(\"" + id + "\")";
+    }
     return Error::invalidArgument(
         "Property \"" + property + "\" declares type " + name +
         ", which resource_create cannot write. It writes the vector and colour "
-        "types, NodePath, StringName and the packed arrays. A SubResource has no "
-        "representation here: write that part of the file by hand.");
+        "types, NodePath, StringName, the packed arrays, and the ExtResource and "
+        "SubResource references.");
 }
 
 // Renders one value as the Godot text-resource literal it stands for, or says
@@ -214,7 +327,8 @@ Result<std::string> tresNamedTypeLiteral(const json& value, const std::string& p
 // value away, with the engine's complaints going to a console nobody is
 // reading. A refusal costs the caller one call. A silent wrong write costs
 // them the time they spend debugging the animation instead of the file.
-Result<std::string> tresLiteral(const json& value, const std::string& property) {
+Result<std::string> tresLiteral(const json& value, const std::string& property,
+                                ReferenceScope* scope) {
     if (value.is_string()) return "\"" + escapeTresString(value.get<std::string>()) + "\"";
     if (value.is_boolean()) return std::string(value.get<bool>() ? "true" : "false");
     if (value.is_number()) return value.dump();
@@ -224,7 +338,7 @@ Result<std::string> tresLiteral(const json& value, const std::string& property) 
         out << "[";
         bool first = true;
         for (const auto& element : value) {
-            auto rendered = tresLiteral(element, property);
+            auto rendered = tresLiteral(element, property, scope);
             if (rendered.isErr()) return rendered.error();
             if (!first) out << ", ";
             first = false;
@@ -237,7 +351,7 @@ Result<std::string> tresLiteral(const json& value, const std::string& property) 
         return Error::invalidArgument("Property \"" + property +
                                       "\" holds a value resource_create cannot write");
     }
-    if (asksForANamedType(value)) return tresNamedTypeLiteral(value, property);
+    if (asksForANamedType(value)) return tresNamedTypeLiteral(value, property, scope);
 
     // No named type, so the shape decides, as it always has.
     if (value.size() == 4 && hasNumericKeys(value, {"r", "g", "b", "a"})) {
@@ -264,7 +378,7 @@ Result<std::string> tresLiteral(const json& value, const std::string& property) 
     out << "{";
     bool first = true;
     for (auto entry = value.begin(); entry != value.end(); ++entry) {
-        auto rendered = tresLiteral(entry.value(), property);
+        auto rendered = tresLiteral(entry.value(), property, scope);
         if (rendered.isErr()) return rendered.error();
         if (!first) out << ", ";
         first = false;
@@ -354,6 +468,70 @@ Result<std::vector<std::pair<std::string, json>>> orderedProperties(const json& 
 
 } // namespace
 
+// The [sub_resource] blocks a resource carries inside itself.
+//
+// An array rather than an object, for the same reason properties are: the order
+// is load-bearing. Godot resolves a SubResource against the blocks it has
+// already read, so the one that is referenced has to be written first, and a
+// JSON object cannot carry that.
+struct SubResourceSpec {
+    std::string id;
+    std::string resource_type;
+    std::vector<std::pair<std::string, json>> properties;
+};
+
+bool isUsableSubResourceId(const std::string& id) {
+    if (id.empty() || id.size() > 128) return false;
+    for (unsigned char character : id) {
+        if (!std::isalnum(character) && character != '_' && character != '-') return false;
+    }
+    return true;
+}
+
+Result<std::vector<SubResourceSpec>> parseSubResources(const json& args) {
+    std::vector<SubResourceSpec> parsed;
+    if (!args.is_object() || !args.contains("sub_resources")) return parsed;
+    const auto& entries = args["sub_resources"];
+    if (!entries.is_array()) {
+        return Error::invalidArgument(
+            "sub_resources must be an array of {id, resource_type, properties} entries, in the "
+            "order they should appear in the file");
+    }
+    if (entries.size() > 64) {
+        return Error::invalidArgument("sub_resources holds at most 64 entries");
+    }
+    for (const auto& entry : entries) {
+        if (!entry.is_object()) {
+            return Error::invalidArgument("Each sub_resources entry must be an object");
+        }
+        SubResourceSpec spec;
+        spec.id = entry.value("id", std::string());
+        spec.resource_type = entry.value("resource_type", std::string());
+        if (!isUsableSubResourceId(spec.id)) {
+            return Error::invalidArgument(
+                "Each sub_resources entry needs an \"id\" of letters, digits, underscores or "
+                "hyphens; it is the name properties use to point at it");
+        }
+        if (spec.resource_type.empty()) {
+            return Error::invalidArgument("sub_resources entry \"" + spec.id +
+                                          "\" needs a \"resource_type\", such as TileSetAtlasSource");
+        }
+        for (const auto& existing : parsed) {
+            if (existing.id == spec.id) {
+                return Error::invalidArgument("sub_resources declares \"" + spec.id + "\" twice");
+            }
+        }
+        auto properties = orderedProperties(entry.value("properties", json::object()));
+        if (properties.isErr()) {
+            return Error::invalidArgument("sub_resources entry \"" + spec.id + "\": " +
+                                          properties.error().message);
+        }
+        spec.properties = std::move(properties.value());
+        parsed.push_back(std::move(spec));
+    }
+    return parsed;
+}
+
 CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     std::string resource_type = args.value("resource_type", "StandardMaterial3D");
     std::string save_path = args.value("save_path", "");
@@ -369,6 +547,10 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
 
     auto ordered = orderedProperties(properties);
     if (ordered.isErr()) return CallToolResult::error(ordered.error().message);
+
+    auto sub_parsed = parseSubResources(args);
+    if (sub_parsed.isErr()) return CallToolResult::error(sub_parsed.error().message);
+    const auto& sub_resources = sub_parsed.value();
 
     // The body written below is Godot text-resource markup and nothing else.
     // Writing it to any path the caller names produced a .gd file full of
@@ -430,16 +612,58 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     // Everything is rendered before anything is written, so a property this
     // writer cannot express refuses the call instead of leaving a half-written
     // resource that reports success.
-    std::ostringstream out;
-    out << "[gd_resource type=\"" << resource_type << "\" format=3]\n\n"
-        << "[resource]\n";
+    //
+    // The body is rendered first and the header second, because the header is
+    // made of what the body turned out to reference: which files got an
+    // [ext_resource] line, and how many entries load_steps has to count.
+    ReferenceScope scope;
+    std::ostringstream sub_blocks;
+    json sub_written = json::array();
+    for (const auto& sub : sub_resources) {
+        std::ostringstream block;
+        block << "\n[sub_resource type=\"" << sub.resource_type << "\" id=\"" << sub.id << "\"]\n";
+        json names = json::array();
+        for (const auto& [name, value] : sub.properties) {
+            auto literal = tresLiteral(value, sub.id + "." + name, &scope);
+            if (literal.isErr()) return CallToolResult::error(literal.error().message);
+            block << name << " = " << literal.value() << "\n";
+            names.push_back(name);
+        }
+        // Only now is this id nameable. A sub-resource that referenced itself,
+        // or one declared after it, would read as null in Godot.
+        scope.visible_sub_ids.push_back(sub.id);
+        sub_blocks << block.str();
+        sub_written.push_back({{"id", sub.id}, {"resource_type", sub.resource_type},
+                               {"properties_written", std::move(names)}});
+    }
+
+    std::ostringstream body;
+    body << "\n[resource]\n";
     json written_order = json::array();
     for (const auto& [name, value] : ordered.value()) {
-        auto literal = tresLiteral(value, name);
+        auto literal = tresLiteral(value, name, &scope);
         if (literal.isErr()) return CallToolResult::error(literal.error().message);
-        out << name << " = " << literal.value() << "\n";
+        body << name << " = " << literal.value() << "\n";
         written_order.push_back(name);
     }
+
+    std::ostringstream out;
+    const size_t load_steps = scope.externals.size() + sub_resources.size() + 1;
+    out << "[gd_resource type=\"" << resource_type << "\"";
+    // Godot writes load_steps only when there is more than the resource itself,
+    // and omitting it where it is 1 is what the editor's own files look like.
+    if (load_steps > 1) out << " load_steps=" << load_steps;
+    out << " format=3]\n";
+    json externals_written = json::array();
+    for (const auto& reference : scope.externals) {
+        out << "\n[ext_resource type=\"" << reference.type << "\"";
+        if (!reference.uid.empty()) out << " uid=\"" << reference.uid << "\"";
+        out << " path=\"" << reference.path << "\" id=\"" << reference.id << "\"]\n";
+        externals_written.push_back({{"path", reference.path}, {"resource_type", reference.type},
+                                     {"id", reference.id}, {"uid", reference.uid}});
+    }
+    out << sub_blocks.str() << body.str();
+
     auto written = files::writeFileAtomically(target_p, out.str());
     offline::ResourceIndexer::invalidateSharedIndex();
     if (written.isErr()) {
@@ -452,7 +676,10 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         {"resource_type", resource_type},
         // In file order, because that is the order Godot applies them in and
         // the caller has no other way to see what it got.
-        {"properties_written", std::move(written_order)}
+        {"properties_written", std::move(written_order)},
+        {"sub_resources_written", std::move(sub_written)},
+        {"external_references", std::move(externals_written)},
+        {"load_steps", load_steps}
     });
 }
 

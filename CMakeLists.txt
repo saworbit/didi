@@ -356,6 +356,7 @@ set(TEST_SOURCES
     tests/test_script_patch.cpp
     tests/test_autoload_diagnostics.cpp
     tests/test_resource_indexer.cpp
+    tests/test_resource_references.cpp
     tests/test_import_health.cpp
     tests/test_blackboard.cpp
     tests/test_blackboard_resources.cpp

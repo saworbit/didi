@@ -447,9 +447,38 @@ Like every mutating Phase 7 live tool, these setters return `504 unknown_outcome
 
 Writes a textual `.tres` file under the project root. Strings, booleans, numbers, arrays and objects are rendered as Godot literals: `{x,y}`, `{x,y,z}`, `{x,y,z,w}` and `{r,g,b(,a)}` become Vector2, Vector3, Vector4 and Color, and any other object becomes a Dictionary. Nested values go through the same writer, so an array of `{r,g,b}` objects comes out as an array of `Color(...)`.
 
-Give an object a `"type"` to choose the literal yourself, which is the only way to say what the JSON cannot: `Vector2i`, `Vector3i`, `Vector4i`, `Quaternion` and `Color` take their components, `NodePath` and `StringName` take their text under `"value"`, and the packed arrays take their elements under `"values"`. A capitalised type this writer does not know is refused, and so is a `SubResource`, which has no representation here. Nothing falls through to JSON: a value that cannot be written refuses the call naming the property, because a resource reported as created with a field thrown away costs more than a refusal does.
+Give an object a `"type"` to choose the literal yourself, which is the only way to say what the JSON cannot: `Vector2i`, `Vector3i`, `Vector4i`, `Quaternion` and `Color` take their components, `NodePath` and `StringName` take their text under `"value"`, and the packed arrays take their elements under `"values"`. A capitalised type this writer does not know is refused. Nothing falls through to JSON: a value that cannot be written refuses the call naming the property, because a resource reported as created with a field thrown away costs more than a refusal does.
 
 Order is the caller's to set. Godot applies indexed sub-properties in file order and `tracks/0/type` is what creates track 0, so pass `properties` as an array of `{name, value}` entries when that matters; a JSON object cannot carry an order and its keys are written sorted. The result lists `properties_written` in file order.
+
+#### References to other resources
+
+A property can point at another resource, which is what every composite Godot resource is made of: a TileSet holds a `TileSetAtlasSource` that holds a texture, and a ShaderMaterial holds a shader.
+
+- `{"type": "ExtResource", "path": "res://art/tiles.png"}` references a file in the project. The writer emits an `[ext_resource]` entry carrying the type and uid it reads out of the project index, gives it an id, and writes `ExtResource("id")` in place. One entry per path however many properties name it. Pass `resource_type` to name the type yourself where the index cannot tell, such as a custom Resource script. A path that is not in the project is refused: a `.tres` naming a file that is not there loads with nothing in that slot.
+- `sub_resources` declares the `[sub_resource]` blocks the file carries inside itself, as an array of `{id, resource_type, properties}` in the order they should appear. Their properties follow exactly the same rules as the top-level ones, references included, so there is no second dialect to learn. `{"type": "SubResource", "id": "..."}` then names one.
+- Only an id declared **above** the point that names it can be used. Godot resolves a `SubResource` against the blocks it has already read, so a reference to one declared further down loads as null rather than failing, and the writer refuses it instead.
+- `load_steps` is computed from the external references, the sub-resources and the resource itself. Do not pass it.
+
+The result adds `external_references` (path, resource type, id and uid for each header entry), `sub_resources_written` (id, type and the properties each got, in file order) and `load_steps`.
+
+```json
+{
+  "save_path": "res://art/arena_tileset.tres",
+  "resource_type": "TileSet",
+  "sub_resources": [
+    { "id": "TileSetAtlasSource_1", "resource_type": "TileSetAtlasSource",
+      "properties": [
+        { "name": "texture", "value": { "type": "ExtResource", "path": "res://art/arena_tiles.png" } },
+        { "name": "texture_region_size", "value": { "type": "Vector2i", "x": 32, "y": 32 } }
+      ] }
+  ],
+  "properties": [
+    { "name": "tile_size", "value": { "type": "Vector2i", "x": 32, "y": 32 } },
+    { "name": "sources/0", "value": { "type": "SubResource", "id": "TileSetAtlasSource_1" } }
+  ]
+}
+```
 
 Didi does not instantiate or validate the requested Resource class in Godot.
 

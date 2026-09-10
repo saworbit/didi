@@ -24,6 +24,22 @@ release changed, which is why it lives here and not in a version section.
 Discovery now exposes 115 canonical tools plus 10 legacy registrations (125 total). 112 canonical tools are implemented and 3 remain unimplemented.
 The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
+### Added
+
+- `resource_create` can express a reference to another resource, so the
+  composite resources are authorable at last (#380). A property value of
+  `{"type": "ExtResource", "path": "res://..."}` becomes an `[ext_resource]`
+  entry carrying the type and uid read from the project index, and a new
+  `sub_resources` argument declares `[sub_resource]` blocks that
+  `{"type": "SubResource", "id": "..."}` names. Sub-resource properties follow
+  the same rules as top-level ones, so there is no second dialect, and
+  `load_steps` is computed rather than guessed. A reference to a file that is
+  not in the project, or to a sub-resource id not declared above the point that
+  names it, is refused: Godot resolves those to null rather than failing, which
+  is a resource reported as written and quietly wrong. TileSet,
+  AnimationLibrary, SpriteFrames, Theme and ShaderMaterial no longer have to be
+  written by hand outside the tool surface.
+
 ### Fixed
 
 - `runtime_attach_session` no longer attaches a session belonging to a different
