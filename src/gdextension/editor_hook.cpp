@@ -123,6 +123,7 @@ void EditorHook::processQueue() {
         processInvariantWatchFrame();
         processSceneExplorationFrame();
         GodotBridge::instance().processDeferredReindexFrame();
+        processMainScreenCaptureFrame();
         return;
     }
     m_pumping = true;
@@ -207,6 +208,10 @@ void EditorHook::processQueue() {
                 scheduleRuntimeStep(frames, cmd.response_promise, cmd.control);
                 continue;
             }
+            if (cmd.method == "vision.captureViewport" &&
+                scheduleMainScreenCapture(cmd.params, cmd.response_promise, cmd.control)) {
+                continue;
+            }
             json result = executeOnMainThread(cmd.method, cmd.params);
             cmd.control->markCompleted();
             fulfillCommand(cmd.response_promise, cmd.control, std::move(result));
@@ -223,6 +228,7 @@ void EditorHook::processQueue() {
     processInvariantWatchFrame();
     processSceneExplorationFrame();
     GodotBridge::instance().processDeferredReindexFrame();
+    processMainScreenCaptureFrame();
     processPendingQuitFrame();
 }
 
@@ -854,6 +860,103 @@ void EditorHook::scheduleAssetReimport(
     DIDI_LOG_INFO("EDITOR_HOOK", "Started bounded asset reimport for ",
                   resolved.value().reimported.size(), " imported and ",
                   resolved.value().refreshed.size(), " refreshed path(s)");
+}
+
+bool EditorHook::scheduleMainScreenCapture(
+    const json& params,
+    const std::shared_ptr<std::promise<json>>& promise,
+    const std::shared_ptr<CommandControl>& control) {
+    if (!params.is_object() || params.value("select_main_screen", false) != true) return false;
+
+    const auto refuse = [&](int code, const std::string& message) {
+        control->markCompleted();
+        fulfillCommand(promise, control, {{"error", {{"code", code}, {"message", message}}}});
+        return true;
+    };
+
+    if (m_sessionKind != runtime::SessionKind::editor) {
+        return refuse(409, "select_main_screen applies to an editor session. A game has one "
+                           "viewport and no main screen to choose.");
+    }
+    const auto identifier = params.value("camera_identifier", std::string());
+    const auto viewport = selectEditorViewport(identifier);
+    if (!viewport.has_value()) {
+        return refuse(400, "select_main_screen needs a camera_identifier naming an editor "
+                           "viewport, one of " + editorViewportIdentifierList() + "; received \"" +
+                           identifier + "\"");
+    }
+    const std::string target = *viewport == EditorViewport::TwoD ? "2D" : "3D";
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_reimportMutex);
+        if (m_pendingMainScreenCapture.has_value()) {
+            return refuse(409, "A main-screen capture is already in flight");
+        }
+    }
+
+    // Read before switching, or there is nothing left to go back to.
+    const auto previous = GodotBridge::instance().currentMainScreenName();
+    if (previous.has_value() && *previous == target) {
+        // Already there, so nothing to select, wait for or restore. The
+        // ordinary synchronous path is the honest answer.
+        return false;
+    }
+    auto selected = GodotBridge::instance().selectMainScreen(target);
+    if (selected.isErr()) {
+        return refuse(selected.error().code, selected.error().message);
+    }
+
+    std::lock_guard<std::recursive_mutex> lock(m_reimportMutex);
+    m_pendingMainScreenCapture = PendingMainScreenCapture{
+        params, target, previous.value_or(std::string()), 1, promise, control
+    };
+    DIDI_LOG_INFO("EDITOR_HOOK", "Selected the ", target,
+                  " main screen for a capture; answering next frame");
+    return true;
+}
+
+void EditorHook::processMainScreenCaptureFrame() {
+    std::optional<PendingMainScreenCapture> ready;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_reimportMutex);
+        if (!m_pendingMainScreenCapture.has_value()) return;
+        if (m_pendingMainScreenCapture->remaining_frames > 0) {
+            --m_pendingMainScreenCapture->remaining_frames;
+            return;
+        }
+        ready = std::move(m_pendingMainScreenCapture);
+        m_pendingMainScreenCapture.reset();
+    }
+
+    json result = ViewportRenderer::instance().captureViewport(ready->params,
+                                                               sessionKindName(m_sessionKind));
+
+    // Put the editor back the way it was found, whatever the capture did. A
+    // main screen an addon owns cannot be named back, so that is said rather
+    // than silently left on the one this selected.
+    bool restored = false;
+    if (!ready->previous_screen.empty()) {
+        restored = GodotBridge::instance().selectMainScreen(ready->previous_screen).isOk();
+    }
+    if (result.is_object()) {
+        result["main_screen_selected"] = ready->selected_screen;
+        result["main_screen_restored"] = restored;
+        if (!ready->previous_screen.empty()) {
+            result["previous_main_screen"] = ready->previous_screen;
+        } else {
+            result["main_screen_restore_note"] =
+                "The main screen that was showing is one Didi cannot name back, which is any "
+                "screen an addon contributes, so the editor is left on " + ready->selected_screen +
+                ".";
+        }
+    }
+    DIDI_LOG_INFO("EDITOR_HOOK", "Captured on the ", ready->selected_screen,
+                  " main screen; previous screen ",
+                  ready->previous_screen.empty() ? std::string("could not be named")
+                                                 : ready->previous_screen,
+                  restored ? " restored" : " not restored");
+    ready->control->markCompleted();
+    fulfillCommand(ready->response_promise, ready->control, std::move(result));
 }
 
 void EditorHook::processAssetReimportFrame() {

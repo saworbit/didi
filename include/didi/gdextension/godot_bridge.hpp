@@ -114,6 +114,21 @@ public:
     // Re-indexes anything registerWrittenResourceUid could not, once the
     // editor filesystem is idle. Called once per frame by the editor hook.
     void processDeferredReindexFrame();
+
+    // The editor main screen: the 2D/3D/Script/Game/AssetLib tab bar, plus any
+    // main screen an addon adds.
+    //
+    // An editor viewport has no size unless its main screen is the selected
+    // one, so a capture of it is impossible without this, and nothing in the
+    // tool surface could select one. Switching main screens is the one thing a
+    // person does with a mouse that an unattended agent could not do at all
+    // (#381).
+    //
+    // Reading the current one is by class of the visible child, because Godot
+    // exposes a setter and no getter. The built-in screens are all identifiable
+    // that way; an addon's is not, and that is reported rather than guessed.
+    std::optional<std::string> currentMainScreenName();
+    Result<void> selectMainScreen(const std::string& name);
     Result<ViewportIsolationState> beginViewportIsolation(const std::string& node_path,
                                                           const std::string& camera_identifier,
                                                           const std::string& isolation_background);

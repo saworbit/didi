@@ -179,6 +179,13 @@ private:
     json executeOnMainThread(const std::string& method, const json& params);
     void processRuntimeStepFrame();
     void processAssetReimportFrame();
+    // Selects the main screen a capture needs, then answers it a frame later.
+    // Returns false when the request does not need this, so the caller runs the
+    // ordinary synchronous path.
+    bool scheduleMainScreenCapture(const json& params,
+                                   const std::shared_ptr<std::promise<json>>& promise,
+                                   const std::shared_ptr<CommandControl>& control);
+    void processMainScreenCaptureFrame();
     void processProfilerFrame();
     void processInvariantWatchFrame();
     void processSceneExplorationFrame();
@@ -192,6 +199,23 @@ private:
         int requested_frames{0};
         int remaining_frames{0};
         bool awaiting_next_callback{true};
+        std::shared_ptr<std::promise<json>> response_promise;
+        std::shared_ptr<CommandControl> control;
+    };
+
+    // A capture that had to change the editor's main screen first.
+    //
+    // Selecting a main screen resizes the viewport through the control layout,
+    // which happens on the next process frame; RenderingServer.force_draw does
+    // not do it, measured on 4.7.2. So the capture cannot be answered in the
+    // frame that asked for it (#381).
+    struct PendingMainScreenCapture {
+        json params;
+        std::string selected_screen;
+        // Empty when the screen that was showing is one this cannot name, which
+        // is any main screen an addon contributes.
+        std::string previous_screen;
+        int remaining_frames{1};
         std::shared_ptr<std::promise<json>> response_promise;
         std::shared_ptr<CommandControl> control;
     };
@@ -247,6 +271,7 @@ private:
     std::recursive_mutex m_reimportMutex;
     RuntimeStepGate m_runtimeStepGate;
     std::optional<PendingRuntimeStep> m_pendingRuntimeStep;
+    std::optional<PendingMainScreenCapture> m_pendingMainScreenCapture;
     std::optional<PendingAssetReimport> m_pendingAssetReimport;
     std::mutex m_profilerMutex;
     std::optional<PendingProfilerRead> m_pendingProfilerRead;
