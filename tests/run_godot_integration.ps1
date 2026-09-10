@@ -1638,6 +1638,11 @@ try {
         (Tool-Request 110 "scene_remove_from_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two_transient" }),
         (Tool-Request 111 "scene_close" @{ discard_unsaved = $true }),
         (Tool-Request 112 "scene_create" @{ scene_path = "res:////escape.tscn" }),
+        # A nested path whose parent directory does not exist yet. ResourceSaver
+        # cannot create it, so this used to come back as a bare Error 19 while
+        # script_create and resource_create both made theirs.
+        (Tool-Request 2389 "scene_create" @{ scene_path = "res://nested/probe/created_nested.tscn"; root_type = "Node2D"; root_name = "Nested" }),
+        (Tool-Request 2390 "scene_close" @{ discard_unsaved = $true }),
         # UID resolution against the engine's own ResourceUID table. The addon
         # script ships with a .uid sidecar, so the files and the engine both
         # know it and must agree. The rest are the honest misses.
@@ -1938,6 +1943,11 @@ try {
         (Tool-Request 412 "viewport_capture_frame" @{ camera_identifier = "active_editor_view"; node_isolation_path = "/root/SmokeRoot/Subject"; isolation_background = "original" }),
         (Tool-Request 413 "scene_get_property" @{ target_node = "/root/SmokeRoot/Container"; property_name = "visible" }),
         (Tool-Request 414 "asset_reimport" @{ paths = @("res://reimport_probe.svg"); timeout_ms = 10000 }),
+        # A script has no importer, so reimport_files printed one editor error
+        # per path while this tool reported success. Godot documents
+        # EditorFileSystem.update_file for exactly that file, so the batch is
+        # split by which call each path needs.
+        (Tool-Request 2391 "asset_reimport" @{ paths = @("res://subject.gd", "res://reimport_probe.svg"); timeout_ms = 10000 }),
         (Tool-Request 415 "scene_set_property" @{ target_node = "/root/SmokeRoot/Container"; property_name = "visible"; value = $false }),
         (Tool-Request 416 "viewport_diff_capture" @{ baseline_capture_id = $phase4Baseline.capture_id; camera_identifier = "active_editor_view"; threshold = 0 }),
         (Tool-Request 417 "editor_undo" @{}),
@@ -1987,6 +1997,15 @@ try {
     Assert-True ((Tool-Payload $phase4ById[413]).value -eq $true) "Isolation left an unrelated visual branch hidden."
     $reimport = Tool-Payload $phase4ById[414]
     Assert-True ($reimport.accepted_count -eq 1 -and $reimport.idle -eq $true) "Editor-backed asset reimport did not reach a stable idle state."
+    Assert-True (@($reimport.reimported) -contains "res://reimport_probe.svg" -and @($reimport.refreshed).Count -eq 0) "An imported asset was not routed to reimport_files."
+    $mixedReimport = Tool-Payload $phase4ById[2391]
+    Assert-True ($mixedReimport.accepted_count -eq 2 -and $mixedReimport.idle -eq $true) "Mixed asset reimport did not reach a stable idle state."
+    Assert-True (@($mixedReimport.reimported).Count -eq 1 -and @($mixedReimport.reimported) -contains "res://reimport_probe.svg") "Mixed reimport did not route the imported asset to reimport_files."
+    Assert-True (@($mixedReimport.refreshed).Count -eq 1 -and @($mixedReimport.refreshed) -contains "res://subject.gd") "Mixed reimport did not route the script to update_file."
+    # The symptom itself. reimport_files prints this to the editor output and
+    # returns nothing, so a caller reading only the tool result saw success.
+    $reimportLog = ((Get-Content $stdoutPath, $stderrPath -ErrorAction SilentlyContinue) -join "`n")
+    Assert-True ($reimportLog -notmatch "importer for type") "asset_reimport queued a file Godot has no importer for."
     $changedDiff = Tool-Payload $phase4ById[416]
     Assert-True ($changedDiff.changed_pixels -gt 0 -and $null -ne $changedDiff.bounding_box) "Visual mutation did not produce a bounded non-empty pixel diff."
     Assert-True ($changedDiff.comparison_capture_id -match '^[0-9a-f]{32}$') "Viewport diff did not retain the fresh comparison capture."
@@ -2721,6 +2740,8 @@ try {
     Assert-True ((Tool-Payload $byId[96]).closed -eq $true) "Reopened clean scene could not be closed."
     Assert-True $byId[97].result.isError "Missing PackedScene returned fake open success."
     Assert-True $byId[98].result.isError "Absolute filesystem scene path was accepted."
+    $nested = Tool-Payload $byId[2389]
+    Assert-True ($nested.saved -eq $true -and $nested.opened -eq $true) "scene_create did not create the missing project directory for a nested scene path."
     Assert-True ((Tool-Payload $byId[99]).opened -eq $true) "Explicit scene overwrite failed."
     Assert-True ((Tool-Payload $byId[100]).scene_tree.name -eq "Replaced") "Explicit scene overwrite did not replace the root."
     Assert-True ((Tool-Payload $byId[101]).closed -eq $true) "Clean replaced scene could not be closed."

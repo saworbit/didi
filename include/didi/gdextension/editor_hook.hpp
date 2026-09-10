@@ -198,6 +198,8 @@ private:
 
     struct PendingAssetReimport {
         std::vector<std::string> paths;
+        std::vector<std::string> reimported;
+        std::vector<std::string> refreshed;
         ReimportProgress progress;
         std::shared_ptr<std::promise<json>> response_promise;
         std::shared_ptr<CommandControl> control;
