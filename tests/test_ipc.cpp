@@ -943,6 +943,29 @@ static void test_posix_client_accepts_fragmented_response_header() {
 
 static void test_posix_client_uses_one_deadline_for_slow_trickle() {
     // Break caught: each payload fragment receives a fresh timeout budget.
+    //
+    // The numbers come from the three facts the test needs rather than from how
+    // close to the deadline they can get:
+    //
+    //   gap < deadline              so a per-fragment budget survives every gap
+    //                               and waits for the whole trickle. Widening
+    //                               the gap past the deadline would make the
+    //                               regression time out too, and the test would
+    //                               pass for the wrong reason.
+    //   fragments * gap > bound     so that waiting is what the bound catches.
+    //   bound > deadline + slack    so one shared deadline gives up well inside
+    //                               it, even on a loaded runner.
+    //
+    // The first version paired a 100 ms deadline with a 220 ms bound, which is
+    // 120 ms of margin. That is not a margin on a shared runner: macOS went red
+    // on it. Scaling all three up buys slack on both sides at the cost of a
+    // fifth of a second in the passing path.
+    constexpr auto kRequestDeadline = std::chrono::milliseconds(200);
+    constexpr auto kFragmentGap = std::chrono::milliseconds(150);
+    constexpr auto kGaveUpEarly = std::chrono::milliseconds(600);
+    // Eight fragments at 150 ms is 1200 ms before the payload is complete, so
+    // the regression misses the bound by 600 ms and the fix meets it by 400.
+
     const auto path = rawSocketPath("slow-trickle");
     const int listener = createRawListener(path);
     std::thread peer([&] {
@@ -951,8 +974,10 @@ static void test_posix_client_uses_one_deadline_for_slow_trickle() {
             const std::array<uint8_t, 4> header{8, 0, 0, 0};
             (void)rawWriteExact(client, header.data(), header.size());
             for (uint8_t byte = 0; byte < 8; ++byte) {
+                // Stops as soon as the client has gone, so the fix does not pay
+                // for the whole trickle it declined to wait for.
                 if (!rawWriteExact(client, &byte, 1)) break;
-                std::this_thread::sleep_for(std::chrono::milliseconds(40));
+                std::this_thread::sleep_for(kFragmentGap);
             }
         }
         if (client >= 0) close(client);
@@ -961,7 +986,8 @@ static void test_posix_client_uses_one_deadline_for_slow_trickle() {
     auto client = didi::ipc::createIpcClient();
     const bool connected = client->connect(path, 1000);
     const auto started = std::chrono::steady_clock::now();
-    const auto result = client->sendRequest("session.handshake", {}, 100);
+    const auto result = client->sendRequest(
+        "session.handshake", {}, static_cast<int>(kRequestDeadline.count()));
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - started);
     client->disconnect();
@@ -970,7 +996,7 @@ static void test_posix_client_uses_one_deadline_for_slow_trickle() {
     unlink(path.c_str());
     ASSERT_TRUE(connected);
     ASSERT_TRUE(result.isErr());
-    ASSERT_TRUE(elapsed < std::chrono::milliseconds(220));
+    ASSERT_TRUE(elapsed < kGaveUpEarly);
 }
 
 static void test_posix_handshake_rejects_large_response_before_allocation() {
