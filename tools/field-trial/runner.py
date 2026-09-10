@@ -8,11 +8,14 @@ blast radius are unit-tested rather than discovered in a runaway run.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
 
 CLAUDE = "claude"
+CODEX = "codex"
+ENGINES = (CLAUDE, CODEX)
 DEFAULT_PROJECTS_ROOT = Path.home() / ".claude" / "projects"
 
 
@@ -61,6 +64,100 @@ def build_command(
     if model:
         command += ["--model", model]
     return command
+
+
+def toml_value(value: object) -> str:
+    """A TOML literal for a `codex -c key=value` override.
+
+    Literal strings, because every value that goes through here is a Windows
+    path or an argument list holding one, and a basic string would need every
+    backslash doubled by whoever wrote the caller. A literal string cannot
+    express a quote or a newline, so those are refused here rather than emitted
+    as something TOML will misread.
+    """
+    if isinstance(value, (list, tuple)):
+        return "[" + ",".join(toml_value(item) for item in value) + "]"
+    text = str(value)
+    if "'" in text or "\n" in text:
+        raise ValueError(f"Cannot express {text!r} as a TOML literal string")
+    return f"'{text}'"
+
+
+def codex_mcp_overrides(mcp_config: dict) -> list[str]:
+    """The `-c` flags that put the seed's MCP servers in front of a Codex tester.
+
+    Codex configures MCP servers in `config.toml` rather than from a file the
+    way the Claude client does, so the seed's `.mcp.json` is translated rather
+    than duplicated. One seed artifact then describes the server under test for
+    both engines, which is what makes two runs comparable at all.
+    """
+    overrides: list[str] = []
+    for name, server in (mcp_config.get("mcpServers") or {}).items():
+        command = server.get("command")
+        if not command:
+            raise ValueError(f"MCP server {name} in the seed has no command to launch")
+        overrides += ["-c", f"mcp_servers.{name}.command={toml_value(command)}"]
+        arguments = server.get("args") or []
+        if arguments:
+            overrides += ["-c", f"mcp_servers.{name}.args={toml_value(arguments)}"]
+    return overrides
+
+
+def build_codex_command(
+    mcp_config: dict | None = None,
+    add_dirs: list[str] | None = None,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+) -> list[str]:
+    """The exact argv for one non-interactive Codex run.
+
+    Three flags carry the weight and none of them is optional:
+
+    `--json` is the transcript. Codex files a rollout of its own under
+    `CODEX_HOME`, but naming that file means guessing at a timestamp, while the
+    event stream is handed straight to the caller and holds a completed MCP call
+    as one record with the server, the tool and the result together.
+
+    `--ignore-user-config` is this engine's `--strict-mcp-config`. Without it a
+    tester sees every MCP server and plugin the machine happens to have enabled,
+    and a trial scored against a different tool set than it was seeded with is
+    not a trial. It drops the model too, which is why the model is passed
+    explicitly rather than left to the config that was just discarded.
+
+    `--skip-git-repo-check` because a seeded trial directory is deliberately not
+    a repository: the brief forbids committing anything, so there is nothing for
+    one to hold.
+
+    There is no cost ceiling to set. Codex has no equivalent of
+    `--max-budget-usd`, so the timeout in `run_agent` is the only bound on a run
+    that has stopped finishing, and that is worth knowing before walking away
+    from one rather than after.
+    """
+    command = [
+        CODEX,
+        "exec",
+        "--json",
+        "--ignore-user-config",
+        "--skip-git-repo-check",
+        "--sandbox", "danger-full-access",
+        "--dangerously-bypass-approvals-and-sandbox",
+    ]
+    if model:
+        command += ["--model", model]
+    if reasoning_effort:
+        command += ["-c", f"model_reasoning_effort={toml_value(reasoning_effort)}"]
+    if mcp_config:
+        command += codex_mcp_overrides(mcp_config)
+    for directory in add_dirs or []:
+        command += ["--add-dir", directory]
+    # The prompt goes in on stdin, as it does for the other engine and for the
+    # same reason: --add-dir and -c both take a value, and a trailing positional
+    # is read as one of them whenever the last flag is the one that takes it.
+    return command
+
+
+def read_mcp_config(path: Path) -> dict:
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def transcript_slug(absolute_path: str) -> str:

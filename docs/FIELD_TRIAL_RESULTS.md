@@ -4,6 +4,8 @@ Results of field trial runs. Method and apparatus are in [Field Trial Design](FI
 
 One section per run. Keep the numbers, because the point of a repeatable seed is that two runs can be compared.
 
+Every section records which client hosted the tester. Trials 01 through 03 were Claude and trial 04 was Codex, and the comparison that buys the most is between engines rather than between consecutive runs of one.
+
 ---
 
 ## Trial 01, 2026-09-03
@@ -183,6 +185,92 @@ This tester read the briefing and the three field-trial design documents before 
 
 ---
 
+## Trial 04, 2026-09-10
+
+**Seed:** commit `fcfa676`, Didi 1.8.0, build `1.8.0+fcfa676d1729.20260910T014252`, Godot 4.7.2 stable, Windows. Identical briefing and identical bare seed to trials 01 through 03.
+
+**Tester: Codex, `gpt-5.6-sol` at high reasoning effort.** The first three runs were all the same client, and this one exists to find out which of their findings were about agents and which were about that client. Run through `tools/field-trial/trial.py --engine codex`.
+
+**Outcome:** all six required features delivered again. Both endings reached live and captured from the running game. The final headless launch returned `success true`, `exit_code 0` and an empty `errors` array, and an attached game session reported zero engine warning or error records while running.
+
+**Bridge: matched**, on 21 observations. This is the first run where the pairing was confirmed end to end rather than reconstructed afterwards. The seed recorded that the repository's own `addons/didi` was present and differed from the built one, so the tester had the same two indistinguishable addons in front of it that cost trial 03 an hour, and it installed the right one. The #325 documentation fix held.
+
+### Coverage against every previous run
+
+| Metric | Trial 01 | Trial 02 | Trial 03 | Trial 04 |
+| :--- | ---: | ---: | ---: | ---: |
+| Tester | claude | claude | claude | codex |
+| Distinct implemented tools called | 36 | 37 | 36 | 36 |
+| Coverage | 39.6% | 40.7% | 32.1% | 32.1% |
+| Total invocations | 156 | 313 | 174 | 244 |
+| Ledger entries | 18 | 23 | 19 | 23 |
+| Entries verdicted `failed` | 6 | 9 | 9 | 7 |
+| Issues filed | 9 | 6 | 7 | 4 |
+
+Newly reached: `blackboard_read`, `blackboard_write`, `project_apply_changes`, `project_audit_assets`, `project_list_resources`, `project_set_setting`, `runtime_detach_session`, `runtime_stop`, `script_check_syntax`, `script_patch_method`. Four of those had never been reached by any run: `blackboard_read`, `project_apply_changes`, `project_list_resources` and `runtime_detach_session`.
+
+No longer reached: `resource_inspect`, `runtime_explore_scene`, `runtime_step`, `runtime_watch_invariants`, `scene_close`, `scene_get_property`, `scene_remove_node`, `scene_set_property`, `tilemap_set_cells`, `ui_list_controls`.
+
+### The plateau is a property of the task, not of one client
+
+**36, 37, 36, 36.** Four runs of the same seed, two clients from different vendors, and the count of distinct tools an agent reaches for did not move. Ten tools changed hands in this run, in each direction, and the total came out where it always does.
+
+Three runs of one client could not distinguish a fact about agents from a habit of that client, and the honest reading after trial 03 was that we did not know which we had. We know now. The number is about the task and the surface, and moving it means changing one of those, not waiting for a better tester.
+
+**60 of 112 implemented tools have now been called by nobody**, across four independent runs and two engines. Two entries in that set have been named in every previous write-up and survive this one:
+
+- **`editor_undo` and `editor_redo`: still zero calls.** UndoRedo safety is Didi's headline differentiator. Four testers, two vendors, and it has never once occurred to any of them, though every mutation response carries `undo_redo_registered: true`. This is no longer a run-specific observation. Either the capability needs to be surfaced where an agent is already looking, or it is a guarantee that agents want honoured rather than driven.
+- **All four `signal_*` tools: still zero calls**, in a task whose central requirement is signal-driven scoring. Trial 01 concluded the tools and the task were aimed at different things, because `signal_connect` edits serialised connections while gameplay signals belong in `_ready()`. A second engine reaching the same conclusion independently confirms that reading. This one is working as designed and should stop being counted as a discoverability failure.
+
+### The blackboard instruction landed for the first time
+
+Trials 01, 02 and 03 all failed to record anything on the blackboard, though the briefing asks for it directly. The write-up after trial 03 said that at three for three the honest reading was that the instruction does not survive the task rather than that three testers were careless.
+
+That reading was wrong, and this run is the correction. `.didi/blackboard/field-trial.json` holds the architecture overview, the combat and input decisions and the canonical node paths, written under `blackboard_write` with a stated reason on each entry, and read back with `blackboard_read`. The instruction survives the task. It did not survive three runs of one client.
+
+### The dominant wall was `project_apply_changes` on a project with no git
+
+The tester's own answer to what would have helped most, and it is the second entry in a 23 entry ledger:
+
+```
+project_apply_changes {"changes":[{"path":"res://TRIAL_LOG.md", ...}]}
+The project is not inside a git work tree, so there is no cheap way to build
+an isolated copy of it to check against
+```
+
+The seed creates a bare directory with a `project.godot` and nothing else, deliberately, because that is where real users start. A Godot project is not a git repository unless someone makes it one, and the atomic multi-file write refuses every project in that state. Every multi-file edit and every Markdown update in this run went to a direct-file fallback because of it.
+
+This did not appear in trials 01 through 03 because none of those testers reached for the tool at all. It is the clearest single instance of what a second engine buys: a wall that three runs walked past without touching.
+
+### Issues filed
+
+Four, #371 through #374, all labelled `field-trial` and all `bug`. Fewer than any previous run, against a cap of twenty, with the rest of the friction recorded in the ledger and declined with a reason, which is the behaviour the protocol asks for.
+
+- **#371** `missing_colon` treats four-character assignments as `else` statements.
+- **#372** `scene_create` fails on a missing project-contained parent directory.
+- **#373** the enabled extension leaks one ObjectDB instance on clean game exit.
+- **#374** `asset_reimport` reports success while Godot rejects GDScript paths.
+
+#374 is the false-success class again, now found by a third independent tester. Trial 02 named mutations that report success without succeeding as the most serious defect the trials produce, trial 03 found two more, and the pattern has now survived a change of engine. Nothing about it was an artifact of one client's reading of a response.
+
+### Composition still moves out of the scene file
+
+Trial 03 filed #328 as its highest-leverage missing capability: `scene_pack_branch` produces a correct `enemy.tscn` and then nothing can place one, because `scene_instantiate_node` returns 501 for a `scene_path` and `instantiate_asset` is reserved.
+
+`scenes/main.tscn` in this run contains zero `instance=ExtResource` nodes, and `scripts/main.gd` preloads `res://scenes/enemy.tscn` and instantiates three copies in `_ready()`. A different engine, given the same task, produced the same fallback and the same shape of project: correct game, and a scene file that has stopped describing the scene. #328 is confirmed rather than merely repeated.
+
+### Caveat on comparability
+
+Two differences from trials 01 through 03 belong on the record rather than in a footnote.
+
+**The tester had skills loaded.** `--ignore-user-config` suppresses `config.toml`, which is how this engine's MCP servers and plugins are configured, but it does not suppress `$CODEX_HOME/skills`. The tester therefore had a set of user-level workflow skills available and used them: it wrote a spec and a plan under `docs/superpowers/` before building anything. Trials 01 through 03 had whatever their own client loads by default. Neither run is skill-free, and the two sets are not the same set.
+
+**There was no cost ceiling.** Codex has no equivalent of `--max-budget-usd`, so the three hour timeout was the only bound on this run. It finished in about fifty minutes and the point never arose, but a run on this engine is bounded by the clock rather than by spend.
+
+Two leftovers from earlier work were running on the machine throughout: trial 03's Godot editor, open since the previous day on `D:\didi-trials\trial-20260908-2309`, and unrelated Codex sessions. Auto-attach is scoped to the project root, so neither could capture this run, and the bridge verdict confirms every observation came from the seeded build.
+
+---
+
 ## When to use Didi, and when not
 
 Drawn from what the run actually did rather than from the tool list. This belongs in agent-facing guidance.
@@ -199,7 +287,7 @@ Drawn from what the run actually did rather than from the tool list. This belong
 
 ## Measurement
 
-Coverage cannot come from the server log. `handleRequest` logs `Method: tools/call` and the tool name appears only in the `TOOL_EXEC` line written when a call throws, so log-based scoring silently under-reports every tool that worked. It comes from the client transcript, where each invocation is a `tool_use` block named `mcp__didi__<tool>`:
+Coverage cannot come from the server log. `handleRequest` logs `Method: tools/call` and the tool name appears only in the `TOOL_EXEC` line written when a call throws, so log-based scoring silently under-reports every tool that worked. It comes from the client transcript, which `tools/field-trial/transcripts.py` reads for whichever client hosted the run: a `tool_use` block named `mcp__didi__<tool>` correlated to a later `tool_result` for the Claude client, and a single `item.completed` event carrying the server, the tool and the result together for `codex exec --json`. Either way the reader is the same call:
 
 ```
 python tools/field-trial/coverage.py \

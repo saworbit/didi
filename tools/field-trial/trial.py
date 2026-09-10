@@ -81,10 +81,18 @@ def trial_summary(
     delta: dict | None = None,
     bridge_report: dict | None = None,
     issues: list[dict] | None = None,
+    engine: str = runner.CLAUDE,
+    model: str | None = None,
 ) -> dict:
     return {
         "trial_id": trial_id,
         "outcome": outcome,
+        # Which client hosted the tester, recorded beside the result rather than
+        # in the baseline, because the seed is the same either way. That is the
+        # point: an engine is a variable of the run, not of the apparatus, and
+        # the first thing anyone comparing two runs needs to know.
+        "engine": engine,
+        "model": model,
         "baseline": baseline,
         "coverage": delta,
         "bridge": bridge_report,
@@ -103,10 +111,14 @@ def render_summary(summary: dict) -> str:
     something nobody has identified, and putting it first invites reading it as
     if it were not.
     """
+    tester = summary.get("engine") or runner.CLAUDE
+    if summary.get("model"):
+        tester += f" ({summary['model']})"
     lines = [
         f"# Field trial {summary['trial_id']}",
         "",
         f"Outcome: {summary['outcome']}",
+        f"Tester: {tester}",
     ]
     baseline = summary.get("baseline") or {}
     if baseline:
@@ -158,6 +170,29 @@ def render_summary(summary: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def signed_in(engine: str, result: subprocess.CompletedProcess) -> bool:
+    """Whether the client just said it holds credentials.
+
+    Each client answers in its own shape and neither reads the other's. Codex
+    prints a sentence, and prints it on **stderr**, which is what broke the
+    first attempt at this run: a preflight reading only stdout refused a client
+    that was signed in the whole time. Claude prints JSON on stdout and says so
+    in a field.
+
+    Both are read as: a clean exit plus an affirmative answer. A client that
+    cannot be asked is not signed in, because a run that starts unauthenticated
+    burns the seed and the clock and leaves no transcript to score.
+    """
+    if result.returncode != 0:
+        return False
+    if engine == runner.CODEX:
+        return "logged in" in ((result.stdout or "") + (result.stderr or "")).lower()
+    try:
+        return json.loads(result.stdout or "{}").get("loggedIn") is True
+    except json.JSONDecodeError:
+        return False
+
+
 def run(command: list[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         command, cwd=str(cwd), capture_output=True, text=True,
@@ -197,9 +232,14 @@ def main(argv: list[str] | None = None) -> int:
                         default=REPOSITORY / "build-ninja" / "tool-manifest.json")
     parser.add_argument("--godot-exe", type=Path,
                         default=Path(r"C:\Godot\Godot_v4.7.2-stable_win64_console.exe"))
-    parser.add_argument("--budget-usd", type=float, default=40.0)
+    parser.add_argument("--budget-usd", type=float, default=40.0,
+                        help="Cost ceiling for the tester. Claude only; Codex has no equivalent")
     parser.add_argument("--timeout-seconds", type=int, default=10800)
+    parser.add_argument("--engine", choices=runner.ENGINES, default=runner.CLAUDE,
+                        help="Which client hosts the tester")
     parser.add_argument("--model", help="Model for the tester session")
+    parser.add_argument("--reasoning-effort",
+                        help="Reasoning effort for the tester session (Codex)")
     parser.add_argument("--compare", type=Path, help="A previous run's coverage.json")
     parser.add_argument("--dry-run", action="store_true",
                         help="Exercise the orchestration without launching a tester")
@@ -217,7 +257,10 @@ def main(argv: list[str] | None = None) -> int:
         phases.append({"name": name, "status": status, "detail": detail})
 
     def finish(outcome: str) -> int:
-        summary = trial_summary(trial_id, phases, outcome, baseline, delta, bridge_report, issues)
+        summary = trial_summary(
+            trial_id, phases, outcome, baseline, delta, bridge_report, issues,
+            engine=args.engine, model=args.model,
+        )
         destination = target if target.exists() else args.artifacts / trial_id
         destination.mkdir(parents=True, exist_ok=True)
         (destination / "trial.json").write_text(
@@ -239,20 +282,21 @@ def main(argv: list[str] | None = None) -> int:
         record("preflight", "skipped", "dry run: the client is not looked up")
     else:
         try:
-            client = runner.resolve_executable()
+            client = runner.resolve_executable(args.engine)
         except FileNotFoundError as error:
             record("preflight", "failed", str(error))
             return finish("client_unavailable")
-        status = run([client, "auth", "status"], REPOSITORY)
-        try:
-            signed_in = json.loads(status.stdout or "{}").get("loggedIn") is True
-        except json.JSONDecodeError:
-            signed_in = False
-        if not signed_in:
+        if args.engine == runner.CODEX:
+            status = run([client, "login", "status"], REPOSITORY)
+            remedy = "run `codex login`"
+        else:
+            status = run([client, "auth", "status"], REPOSITORY)
+            remedy = "run `claude auth login`"
+        if not signed_in(args.engine, status):
             record("preflight", "failed",
-                   "the client is not signed in; run `claude auth login` and try again")
+                   f"the {args.engine} client is not signed in; {remedy} and try again")
             return finish("not_authenticated")
-        record("preflight", "ok", f"client at {client}")
+        record("preflight", "ok", f"{args.engine} at {client}")
 
     try:
         baseline = seed_trial.seed(
@@ -280,15 +324,23 @@ def main(argv: list[str] | None = None) -> int:
 
     session_id = str(uuid.uuid4())
     brief = (HERE / "TRIAL_BRIEF.md").read_text(encoding="utf-8")
-    command = runner.build_command(
-        session_id=session_id,
-        budget_usd=args.budget_usd,
-        mcp_config=str(target / ".mcp.json"),
-        permission_mode="bypassPermissions",
-        allowed_tools=["Bash", "Read", "Edit", "Write", "Glob", "Grep", "mcp__didi"],
-        add_dirs=[str(REPOSITORY)],
-        model=args.model,
-    )
+    if args.engine == runner.CODEX:
+        command = runner.build_codex_command(
+            mcp_config=runner.read_mcp_config(target / ".mcp.json"),
+            add_dirs=[str(REPOSITORY)],
+            model=args.model,
+            reasoning_effort=args.reasoning_effort,
+        )
+    else:
+        command = runner.build_command(
+            session_id=session_id,
+            budget_usd=args.budget_usd,
+            mcp_config=str(target / ".mcp.json"),
+            permission_mode="bypassPermissions",
+            allowed_tools=["Bash", "Read", "Edit", "Write", "Glob", "Grep", "mcp__didi"],
+            add_dirs=[str(REPOSITORY)],
+            model=args.model,
+        )
     started = datetime.now(timezone.utc).isoformat()
     try:
         completed = runner.run_agent(
@@ -305,7 +357,15 @@ def main(argv: list[str] | None = None) -> int:
     record("run", "ok" if completed.returncode == 0 else "failed",
            f"exit {completed.returncode}")
 
-    transcript = runner.transcript_path(target, session_id)
+    if args.engine == runner.CODEX:
+        # Codex prints its transcript rather than filing one under a path the
+        # harness can name, so the run's own stdout is the record. Written even
+        # when the run failed: a tester that died halfway still called tools,
+        # and the ledger it left is the most valuable artifact here.
+        transcript = target / "agent.jsonl"
+        transcript.write_text(completed.stdout or "", encoding="utf-8")
+    else:
+        transcript = runner.transcript_path(target, session_id)
     if not transcript.is_file():
         record("score", "failed", f"no transcript at {transcript}")
         return finish("no_transcript")

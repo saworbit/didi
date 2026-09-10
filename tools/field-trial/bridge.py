@@ -26,6 +26,7 @@ session, so the live half of that run is unaccounted for rather than clean.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 from pathlib import Path
 from typing import Iterable
@@ -34,36 +35,12 @@ MATCHED = "matched"
 MISMATCHED = "mismatched"
 NOT_OBSERVED = "not_observed"
 
-
-def _blocks(record: object) -> list[dict]:
-    if not isinstance(record, dict):
-        return []
-    message = record.get("message")
-    if not isinstance(message, dict):
-        return []
-    content = message.get("content")
-    if not isinstance(content, list):
-        return []
-    return [block for block in content if isinstance(block, dict)]
-
-
-def _result_text(block: dict) -> str:
-    """The text of a tool result, whichever shape the client wrote it in.
-
-    A result arrives as a plain string or as a list of content blocks depending
-    on the tool and the client version, and a reader that handles only the shape
-    it happened to see first reports a clean bridge for a run it could not read.
-    """
-    content = block.get("content")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "\n".join(
-            part.get("text", "")
-            for part in content
-            if isinstance(part, dict) and isinstance(part.get("text"), str)
-        )
-    return ""
+_TRANSCRIPTS = Path(__file__).resolve().parent / "transcripts.py"
+_SPEC = importlib.util.spec_from_file_location("field_trial_transcripts", _TRANSCRIPTS)
+if _SPEC is None or _SPEC.loader is None:
+    raise ImportError(f"Cannot load the transcript reader from {_TRANSCRIPTS}")
+transcripts = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(transcripts)
 
 
 def extract_observations(
@@ -71,51 +48,31 @@ def extract_observations(
 ) -> list[dict]:
     """Every server/bridge pairing this run observed, in the order it saw them.
 
-    Results are correlated back to the call that produced them rather than
-    scanned loose, so a log file the tester happened to read, or a payload it
-    quoted into a note, cannot be counted as evidence about the bridge.
+    Results reach here already correlated to the call that produced them, so a
+    log file the tester happened to read, or a payload it quoted into a note,
+    cannot be counted as evidence about the bridge.
     """
-    prefix = f"mcp__{server}__"
-    pending: dict[str, str] = {}
     observations: list[dict] = []
-    for line in transcript_lines:
-        stripped = line.strip()
-        if not stripped:
+    for invocation in transcripts.iter_invocations(transcript_lines, server=server):
+        if invocation.result is None:
             continue
         try:
-            record = json.loads(stripped)
+            payload = json.loads(invocation.result)
         except json.JSONDecodeError:
             continue
-        for block in _blocks(record):
-            kind = block.get("type")
-            if kind == "tool_use":
-                name = block.get("name")
-                identifier = block.get("id")
-                if isinstance(name, str) and name.startswith(prefix) and isinstance(identifier, str):
-                    pending[identifier] = name[len(prefix) :]
-                continue
-            if kind != "tool_result":
-                continue
-            tool = pending.get(block.get("tool_use_id"))
-            if tool is None:
-                continue
-            try:
-                payload = json.loads(_result_text(block))
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(payload, dict):
-                continue
-            build = payload.get("server_build_id")
-            if not isinstance(build, str) or not build:
-                continue
-            observations.append(
-                {
-                    "tool": tool,
-                    "server_build_id": build,
-                    # Absent means matched. Present means the server said no.
-                    "matches": payload.get("bridge_build_matches", True) is not False,
-                }
-            )
+        if not isinstance(payload, dict):
+            continue
+        build = payload.get("server_build_id")
+        if not isinstance(build, str) or not build:
+            continue
+        observations.append(
+            {
+                "tool": invocation.tool,
+                "server_build_id": build,
+                # Absent means matched. Present means the server said no.
+                "matches": payload.get("bridge_build_matches", True) is not False,
+            }
+        )
     return observations
 
 

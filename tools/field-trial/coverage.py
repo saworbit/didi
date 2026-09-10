@@ -2,34 +2,26 @@
 
 The server logs `Method: tools/call` at DEBUG and names the tool only when a
 call throws, so the server log cannot say which tools a tester reached for. The
-client transcript can: every invocation is a `tool_use` block named
-`mcp__<server>__<tool>`. This reads that transcript and compares it against the
-manifest the trial was seeded with, so the interesting number is not how much
-worked but which implemented tools never occurred to the tester at all.
+client transcript can, and `transcripts.py` reads it for whichever client hosted
+the run. This compares that against the manifest the trial was seeded with, so
+the interesting number is not how much worked but which implemented tools never
+occurred to the tester at all.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 from pathlib import Path
 from typing import Iterable
 
-
-def _tool_use_blocks(record: object) -> list[dict]:
-    if not isinstance(record, dict):
-        return []
-    message = record.get("message")
-    if not isinstance(message, dict):
-        return []
-    content = message.get("content")
-    if not isinstance(content, list):
-        return []
-    return [
-        block
-        for block in content
-        if isinstance(block, dict) and block.get("type") == "tool_use"
-    ]
+_TRANSCRIPTS = Path(__file__).resolve().parent / "transcripts.py"
+_SPEC = importlib.util.spec_from_file_location("field_trial_transcripts", _TRANSCRIPTS)
+if _SPEC is None or _SPEC.loader is None:
+    raise ImportError(f"Cannot load the transcript reader from {_TRANSCRIPTS}")
+transcripts = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(transcripts)
 
 
 def extract_invocations(
@@ -37,24 +29,13 @@ def extract_invocations(
 ) -> dict[str, int]:
     """Count invocations by bare tool name, keyed off the MCP server alias.
 
-    A transcript is appended to while a session runs and can hold partial or
-    non-message records, so an unreadable line is skipped rather than fatal.
+    A call with no recorded answer still counts. Coverage asks what the tester
+    reached for, and reaching for a tool and getting nothing back is the case
+    the uncalled set most needs to keep.
     """
-    prefix = f"mcp__{server}__"
     counts: dict[str, int] = {}
-    for line in transcript_lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            record = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        for block in _tool_use_blocks(record):
-            name = block.get("name")
-            if isinstance(name, str) and name.startswith(prefix):
-                tool = name[len(prefix) :]
-                counts[tool] = counts.get(tool, 0) + 1
+    for invocation in transcripts.iter_invocations(transcript_lines, server=server):
+        counts[invocation.tool] = counts.get(invocation.tool, 0) + 1
     return counts
 
 
