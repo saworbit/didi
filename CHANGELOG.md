@@ -26,6 +26,15 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- The extension no longer leaks one ObjectDB instance on a clean engine exit
+  (#373). Its engine output logger is a `RefCounted`, and shutdown dropped the
+  reference taken at install without freeing what that drop released. Godot
+  documents `unreference()` as returning true when the object should be freed
+  after the decrement, and freeing is the caller's job. The instance stayed in
+  ObjectDB with its class already unregistered, which is why the verbose
+  report named no class. A game process now exits with no leak warning, and
+  the live harness asserts that.
+
 - `asset_reimport` no longer reports success for a path Godot has no importer
   for (#374). Godot's import system owns only the files carrying a `.import`
   sidecar, and `EditorFileSystem.reimport_files` printed

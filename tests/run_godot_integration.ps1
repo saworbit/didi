@@ -3089,6 +3089,17 @@ try {
     Assert-True ($completePublicTranscript -notmatch [regex]::Escape($gameSessionToken)) "Game session token leaked into a response or complete engine/process log transcript."
     Assert-True ($completePublicTranscript -notmatch [regex]::Escape($shutdownGameSessionToken)) "Shutdown-game session token leaked into a response or complete engine/process log transcript."
 
+    # The extension dropped its engine output logger without freeing it, so
+    # every clean game exit reported one leaked ObjectDB instance. A game
+    # process runs no editor tooling, so anything left in ObjectDB there is
+    # the extension's.
+    $gameEngineTranscript = @(
+        Get-Content $gameStdoutPath, $gameStderrPath, $gameEngineLogPath,
+            $shutdownGameStdoutPath, $shutdownGameStderrPath, $shutdownGameEngineLogPath `
+            -ErrorAction SilentlyContinue
+    ) -join "`n"
+    Assert-True ($gameEngineTranscript -notmatch "ObjectDB instance") "A game process exited with a leaked ObjectDB instance."
+
     $unexpectedSourceArtifacts = @(Get-ChildItem -LiteralPath $sourceFixtureRoot -Force -Recurse | Where-Object {
         $_.Name -like "*.didi-retired-*" -or
         $_.Name -in @("packed_branch.tscn", "created_phase2.tscn", "transient_probe.tscn", "instance_host.tscn")
