@@ -744,6 +744,37 @@ static void test_project_impact_traces_a_file_target_and_rejects_a_malformed_one
                     .callTool("project_analyze_impact",
                               didi::json{{"target", "character_health"}, {"max_impacts", 0}})
                     .isError);
+
+    // A path with no file behind it and a real file with no dependents used to
+    // give byte-identical answers, so "safe to delete" and "you typed it wrong"
+    // read the same (#404).
+    const auto real = didi::json::parse(
+        registry.callTool("project_analyze_impact",
+                          didi::json{{"target", "res://scripts/other.gd"}})
+            .content[0].text);
+    ASSERT_EQ(real["target_exists"], true);
+
+    const auto typo = didi::json::parse(
+        registry.callTool("project_analyze_impact",
+                          didi::json{{"target", "res://scripts/does_not_exist.gd"}})
+            .content[0].text);
+    ASSERT_EQ(typo["target_exists"], false);
+    ASSERT_EQ(typo["impact_count"], 0u);
+    bool says_so = false;
+    for (const auto& limitation : typo["limitations"]) {
+        if (limitation.get<std::string>().find("No file exists at this res:// path") !=
+            std::string::npos) {
+            says_so = true;
+        }
+    }
+    ASSERT_TRUE(says_so);
+
+    // A uid is resolved by the engine's own table, so this cannot be answered
+    // from a file scan and says that rather than guessing.
+    const auto uid = didi::json::parse(
+        registry.callTool("project_analyze_impact", didi::json{{"target", "uid://abc123"}})
+            .content[0].text);
+    ASSERT_TRUE(uid["target_exists"].is_null());
 }
 
 static void test_project_impact_traces_exact_node_paths() {
@@ -1761,6 +1792,47 @@ static void test_hierarchy_summary_counts_without_dumping_the_tree() {
     ASSERT_EQ(shaped["branches"][0]["node_count"], 5u);
     ASSERT_TRUE(!shaped.contains("children"));
     ASSERT_TRUE(!shaped["branches"][0].contains("children"));
+}
+
+// Offline there is no scene tree, only .tscn files. Every root_path that was
+// not a .tscn used to be replaced by the project main scene and answered as if
+// it were the question asked, so a node path that does not exist came back as
+// the whole main scene with isError false (#401).
+static void test_offline_hierarchy_refuses_what_it_cannot_read_and_says_when_it_substitutes() {
+    ScopedToolProject project("hierarchy-offline-substitution");
+    writeAuditFile("project.godot",
+                   "config_version=5\n\n[application]\n\nrun/main_scene=\"res://main.tscn\"\n");
+    writeAuditFile("main.tscn",
+                   "[gd_scene format=3]\n\n"
+                   "[node name=\"Main\" type=\"Node2D\"]\n"
+                   "[node name=\"Child\" type=\"Node2D\" parent=\".\"]\n");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+
+    // Not a .tscn, so it is refused rather than answered from a different file.
+    for (const auto& root : {"/root/Main/Child", "/root/Bogus/DoesNotExist",
+                             "res://project.godot", "res://scenes/level.scn"}) {
+        const auto result =
+            registry.callTool("get_scene_hierarchy", didi::json{{"root_path", root}});
+        ASSERT_TRUE(result.isError);
+    }
+
+    // Omitting root_path still answers from the main scene, and now says which
+    // file answered so the reply cannot be read as a scoped one.
+    const auto defaulted = registry.callTool("get_scene_hierarchy", didi::json::object());
+    ASSERT_TRUE(!defaulted.isError);
+    const auto payload = didi::json::parse(defaulted.content[0].text);
+    ASSERT_EQ(payload["file_path"], "res://main.tscn");
+    ASSERT_EQ(payload["substituted_main_scene"], true);
+    ASSERT_EQ(payload["requested_root_path"], "");
+
+    // A named .tscn is answered on its own terms, with no substitution flag.
+    const auto named = registry.callTool("get_scene_hierarchy",
+                                         didi::json{{"root_path", "res://main.tscn"}});
+    ASSERT_TRUE(!named.isError);
+    const auto named_payload = didi::json::parse(named.content[0].text);
+    ASSERT_TRUE(!named_payload.contains("substituted_main_scene"));
 }
 
 static void test_hierarchy_view_options_reject_malformed_requests() {
@@ -3404,6 +3476,8 @@ struct RegisterToolTests {
                      test_hierarchy_node_budget_reports_what_it_cut);
         registerTest("Hierarchy.SummaryCountsWithoutTheTree",
                      test_hierarchy_summary_counts_without_dumping_the_tree);
+        registerTest("Hierarchy.OfflineSubstitutionIsRefusedOrDeclared",
+                     test_offline_hierarchy_refuses_what_it_cannot_read_and_says_when_it_substitutes);
         registerTest("Tools.ClassReflectionVersusAttachedEngine",
                      test_class_reflection_reports_a_version_mismatch_with_the_attached_engine);
         registerTest("Hierarchy.ViewOptionsRejectMalformed",

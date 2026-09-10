@@ -9,8 +9,10 @@
 #include <algorithm>
 #include <cctype>
 #include <functional>
+#include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <regex>
 #include <sstream>
 #include <tuple>
@@ -837,6 +839,16 @@ Result<json> analyzeImpact(const std::string& root_dir, const ProjectImpactOptio
     json counts = json::object();
     for (const auto& [kind, count] : counts_by_kind) counts[kind] = count;
 
+    // resolved_kind describes the shape of the string, not whether anything is
+    // behind it, so a typo'd res:// path came back byte-identical to a real file
+    // with no dependents: the answer to "is it safe to delete this" and the
+    // answer to "you typed it wrong" were the same response (#404).
+    std::optional<bool> target_exists;
+    if (file_target && strings::startsWith(target, "res://")) {
+        std::error_code exists_error;
+        target_exists = std::filesystem::exists(root / target.substr(6), exists_error);
+    }
+
     bool truncated = scan.truncated;
     json result = {
         {"target", target},
@@ -857,6 +869,14 @@ Result<json> analyzeImpact(const std::string& root_dir, const ProjectImpactOptio
     // In the payload, not only the docs. A caller who reads the impacts and not
     // this will treat an empty list as permission, which is the one conclusion
     // a static read cannot support.
+    if (target_exists.has_value()) {
+        result["target_exists"] = *target_exists;
+    } else if (file_target) {
+        // uid:// is resolved by the engine's own table, which is not readable
+        // from a file scan, so this cannot be answered rather than guessed.
+        result["target_exists"] = nullptr;
+    }
+
     result["limitations"] = json::array({
         "A name built at runtime cannot be followed, so an empty impact list is "
         "not proof that nothing depends on the target.",
@@ -865,6 +885,15 @@ Result<json> analyzeImpact(const std::string& root_dir, const ProjectImpactOptio
         "A node path built dynamically or stored in a variable cannot be followed; "
         "node-path results cover only static serialized paths and direct code literals."
     });
+    if (target_exists.has_value() && !*target_exists) {
+        result["limitations"].push_back(
+            "No file exists at this res:// path, so the empty impact list says the "
+            "target was not found, not that nothing depends on it.");
+    } else if (file_target && !target_exists.has_value()) {
+        result["limitations"].push_back(
+            "A uid:// target is resolved by the engine's own table, which a file "
+            "scan cannot read, so whether the target exists is unknown here.");
+    }
     return result;
 }
 

@@ -374,6 +374,18 @@ CallToolResult handleProjectListExportPresets(const json& args, std::shared_ptr<
     auto root = projectRoot();
     if (root.isErr()) return CallToolResult::error(root.error().message);
     const auto path = root.value() / "export_presets.cfg";
+    // Godot writes this file the first time a preset is added, so a project
+    // that has never configured an export simply has none. That is a normal
+    // state and the honest answer is an empty list, not a file error naming a
+    // path the user never created (#403). A file that is there and cannot be
+    // read is still an error.
+    std::error_code exists_error;
+    if (!std::filesystem::exists(path, exists_error)) {
+        return CallToolResult::successJson({{"presets", json::array()}, {"preset_count", 0},
+                                            {"execution_mode", "offline_fallback"},
+                                            {"sensitive_options_omitted", true},
+                                            {"presets_file_exists", false}});
+    }
     auto contents = readBounded(path, kMaxPresetFile);
     if (contents.isErr()) return CallToolResult::error(contents.error().message);
     auto presets = offline::parseExportPresets(contents.value());
@@ -381,7 +393,9 @@ CallToolResult handleProjectListExportPresets(const json& args, std::shared_ptr<
         return CallToolResult::error("export_presets.cfg is malformed or contains no complete unique presets");
     }
     return CallToolResult::successJson({{"presets", presets}, {"preset_count", presets.size()},
-                                       {"execution_mode", "offline_fallback"}, {"sensitive_options_omitted", true}});
+                                       {"execution_mode", "offline_fallback"},
+                                       {"sensitive_options_omitted", true},
+                                       {"presets_file_exists", true}});
 }
 
 CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

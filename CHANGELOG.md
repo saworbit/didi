@@ -68,6 +68,31 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- Offline `scene_get_hierarchy` no longer answers a different question than the
+  one asked (#401). Any `root_path` that did not end in `.tscn` was replaced by
+  the project main scene and returned as an ordinary success, so a node path
+  that does not exist, a `res://project.godot`, and a binary `.scn` all came
+  back as the whole main scene with nothing saying the request had been
+  substituted. A non-`.tscn` path is now refused, and the main-scene default for
+  an omitted `root_path` reports `requested_root_path` and
+  `substituted_main_scene`.
+
+- `project_list_export_presets` reports no presets instead of a file error
+  (#403). Godot writes `export_presets.cfg` the first time a preset is added, so
+  a project that has never configured an export has no file, and the answer was
+  a failure naming an absolute host path the user never created. A missing file
+  is now an empty list with `presets_file_exists: false`. A file that exists and
+  cannot be read or parsed is still an error.
+
+- `project_analyze_impact` says whether the target exists (#404).
+  `resolved_kind: "file"` describes the shape of the string, so a typo'd
+  `res://` path returned a clean empty result byte-identical to a real file with
+  no dependents: the answer to "is it safe to delete this" and the answer to
+  "you typed it wrong" were the same response. A `res://` target now reports
+  `target_exists`, and an absent one adds a limitation saying the empty list
+  means not found. A `uid://` target reports `null`, because the engine resolves
+  those from a table a file scan cannot read.
+
 - `script_reflect_class` no longer gives advice it cannot honour, and says when
   the pinned API is not the engine you are running (#405). Its description told
   the caller to attach a live editor for the running engine's own state, and the

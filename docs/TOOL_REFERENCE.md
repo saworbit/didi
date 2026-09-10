@@ -28,7 +28,9 @@ Phase 7 is `PARTIAL_DELIVERY`. The implementation is 113/116 canonical tools, an
 
 Returns a recursive hierarchy. Live results contain node name, class, logical path, and children; unsupported bulk fields are named in `omitted_fields`. Offline mode parses an explicit in-project `.tscn` file, or the `run/main_scene` declared by the project-root `project.godot`, and returns `source: "parsed_tscn_file"`. It does not probe `demo/` or recursively guess a scene.
 
-- `root_path` (`string`, default `"/root"`): Live logical node path or offline `.tscn` path.
+Offline there is no scene tree, so a `root_path` that is not a `.tscn` is refused rather than answered from a different file. A node path scopes the result only with an editor attached. Omitting `root_path`, or passing `/root` or `.`, still reads the main scene, and the response then carries `requested_root_path` and `substituted_main_scene: true` so it cannot be read as a scoped answer.
+
+- `root_path` (`string`, default `"/root"`): Live logical node path, or an in-project `.tscn` path offline.
 - `max_depth` (`integer`, default `10`, live maximum `64`).
 - `include_properties` (`boolean`, default `true`): Honored by the offline parser; live bulk properties are omitted.
 - `include_signals` and `include_scripts` (`boolean`, default `true`): Currently reported as omitted in live mode.
@@ -588,7 +590,7 @@ Answers what else changes if this changes. Renaming a variable or a signal can b
 - `target` (`string`, required, 1-256 bytes). A canonical `res://` path, lowercase-alphanumeric `uid://` value, static Godot node path such as `.`, `..`, `Player/Sprite`, `/root`, `%Player`, `Hand/Sword/%Hilt`, or `$Player/Sprite`, or a single Godot identifier. Quoted calls may contain valid spaces, punctuation, or UTF-8 node names.
 - `max_impacts` (`integer`, 1-5000, default `500`).
 
-A target that is neither a resource path, a validated node path, nor a single identifier is rejected rather than answered with an empty report, because "nothing depends on this" and "you asked the wrong question" must not look the same to a caller about to delete something.
+A target that is neither a resource path, a validated node path, nor a single identifier is rejected rather than answered with an empty report, because "nothing depends on this" and "you asked the wrong question" must not look the same to a caller about to delete something. For the same reason a `res://` target reports `target_exists`, since `resolved_kind` describes the shape of the string and not whether a file is behind it. A `uid://` target reports `target_exists: null`: the engine resolves those from its own table, which a file scan cannot read.
 
 Reported kinds are the forms Godot writes:
 
@@ -1142,6 +1144,8 @@ Requires a normalized existing `shader_path` ending in `.gdshader`; `timeout_sec
 ### `project_list_export_presets` — Offline
 
 Accepts no arguments and parses the project-root `export_presets.cfg` without launching Godot. It returns deterministic preset records containing only index, name, platform, runnable, export filter, and export path. Platform option fields and their values are never returned. Malformed sections and duplicate preset names are rejected.
+
+Godot writes `export_presets.cfg` the first time a preset is added, so a project that has never configured an export has no file. That is an empty list with `presets_file_exists: false`, not an error. A file that is there and cannot be read or parsed is still an error, so "no presets" and "the file is broken" stay different answers.
 
 ### `project_export` — Offline
 
