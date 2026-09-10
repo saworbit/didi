@@ -63,6 +63,7 @@ Pass `scene_path` to `scene_instantiate_node` to put an instance of a `.tscn` in
 - Use `scene_add_to_group`, `scene_remove_from_group`, `scene_list_groups`, and `scene_get_group_members` for edited-scene-confined groups.
 - Use typed autoload and InputMap tools for `autoload/*` and `input/*`; never route those namespaces through `project_set_setting`.
 - `project_set_autoload` persists the setting but cannot make the attached editor register the singleton; it returns `requires_editor_restart: true`. Until that editor restarts, every script referencing the new singleton fails to compile with `Identifier not found`. Those errors are the tool's doing, not your script's, so do not rewrite working code to chase them.
+- `script_check_syntax` reports autoload identifiers at `severity: "warning"` with a `note`, not as errors. The Godot compiler check runs in a process with no SceneTree, so it can never see an autoload; that is permanent and separate from the restart limitation above. `has_errors` is therefore a verdict about your script. Do not rewrite working code because a warning names an autoload.
 - Treat `replace: true`, `overwrite: true`, and `discard_unsaved: true` as explicit destructive intent. Do not add them speculatively.
 - Input events must use the documented key, mouse-button, joypad-button, or joypad-motion shapes.
 
