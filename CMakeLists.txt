@@ -353,6 +353,7 @@ set(TEST_SOURCES
     tests/test_expression_sandbox.cpp
     tests/test_tools.cpp
     tests/test_script_patch.cpp
+    tests/test_autoload_diagnostics.cpp
     tests/test_resource_indexer.cpp
     tests/test_import_health.cpp
     tests/test_blackboard.cpp

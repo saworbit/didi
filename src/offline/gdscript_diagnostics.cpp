@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <cstdlib>
 #include <chrono>
+#include <algorithm>
 #include <cctype>
 #include <optional>
 #include <thread>
@@ -346,6 +347,100 @@ static std::string escapeRegex(std::string_view str) {
     return out;
 }
 
+
+// The autoload singleton names this project registers.
+//
+// project.godot is an ini file, so the names live as keys under [autoload].
+// Reading them is the whole basis for the demotion below: an identifier that is
+// a registered autoload here is one the engine resolves at run time, whatever a
+// single-file compiler check says about it.
+std::vector<std::string> GDScriptDiagnostics::projectAutoloadNames() {
+    std::vector<std::string> names;
+    std::ifstream input(paths::projectPathFromUtf8("project.godot"), std::ios::binary);
+    if (!input.is_open()) return names;
+    std::string line;
+    bool in_autoload = false;
+    while (std::getline(input, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        const auto text = strings::trim(line);
+        if (!text.empty() && text.front() == '[') {
+            in_autoload = text == "[autoload]";
+            continue;
+        }
+        if (!in_autoload || text.empty() || text.front() == ';') continue;
+        const auto equals = text.find('=');
+        if (equals == std::string::npos || equals == 0) continue;
+        auto name = strings::trim(text.substr(0, equals));
+        if (!name.empty()) names.push_back(std::move(name));
+    }
+    return names;
+}
+
+// The identifier a "Identifier not found" diagnostic names, or nothing.
+static std::optional<std::string> unresolvedIdentifierIn(const std::string& message) {
+    static const std::string marker = "Identifier not found: ";
+    const auto at = message.find(marker);
+    if (at == std::string::npos) return std::nullopt;
+    auto name = strings::trim(message.substr(at + marker.size()));
+    while (!name.empty() && (name.back() == '.' || name.back() == '"')) name.pop_back();
+    if (name.empty()) return std::nullopt;
+    return name;
+}
+
+// Whether this is the cascade the compiler prints once it has given up on a
+// file, rather than a fault of its own.
+static bool isCompilationFailedCascade(const ScriptDiagnostic& diagnostic) {
+    return diagnostic.message.find("Failed to load script") != std::string::npos &&
+           diagnostic.message.find("Compilation failed") != std::string::npos;
+}
+
+// Godot's `--headless --check-only` runs in a process with no SceneTree, and a
+// project's autoload singletons are registered when the SceneTree is built. So
+// the check reports `Identifier not found` for every autoload, on every call,
+// for a script the engine compiles and runs without complaint. No invocation
+// avoids it: --path, res:// spelling and --editor were all tried on 4.7.2 and
+// all report it.
+//
+// The diagnostic is therefore demoted rather than dropped. An autoload whose
+// own script is broken is still worth seeing, and a warning keeps it visible
+// while leaving `has_errors` usable as a verdict, which is the thing this cost
+// callers (#383).
+void GDScriptDiagnostics::demoteAutoloadDiagnostics(
+    std::vector<ScriptDiagnostic>& diags, const std::vector<std::string>& autoloads) {
+    if (diags.empty() || autoloads.empty()) return;
+
+    bool demoted_any = false;
+    bool real_error_remains = false;
+    for (auto& diagnostic : diags) {
+        if (diagnostic.severity != "error") continue;
+        if (isCompilationFailedCascade(diagnostic)) continue;
+        const auto identifier = unresolvedIdentifierIn(diagnostic.message);
+        if (identifier &&
+            std::find(autoloads.begin(), autoloads.end(), *identifier) != autoloads.end()) {
+            diagnostic.severity = "warning";
+            diagnostic.note = *identifier + " is an autoload in this project. The Godot compiler "
+                              "check runs in a separate process with no SceneTree, which is where "
+                              "autoloads are registered, so it cannot see it. The engine resolves "
+                              "this identifier at run time. Do not rewrite the script for this.";
+            demoted_any = true;
+            continue;
+        }
+        real_error_remains = true;
+    }
+    if (!demoted_any || real_error_remains) return;
+
+    // Nothing real was left, so the compiler's own conclusion was reached only
+    // from diagnostics that are not true here. Leaving it at error level would
+    // keep has_errors true and undo the whole point.
+    for (auto& diagnostic : diags) {
+        if (diagnostic.severity == "error" && isCompilationFailedCascade(diagnostic)) {
+            diagnostic.severity = "warning";
+            diagnostic.note = "The only compile errors named autoloads this check cannot see, so "
+                              "the failure it reports is not one the engine has.";
+        }
+    }
+}
+
 std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const std::string& script_file_path) {
     std::vector<ScriptDiagnostic> diags;
     std::string actual_path = script_file_path;
@@ -551,6 +646,7 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const s
         }
     }
 
+    demoteAutoloadDiagnostics(diags, projectAutoloadNames());
     return diags;
 }
 
