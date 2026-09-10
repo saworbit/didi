@@ -220,6 +220,17 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Added
 
+- `viewport_capture_frame` can select the editor main screen it needs (#381). An
+  editor viewport has no size unless its main screen is the one showing, so the
+  capture refused with a message telling the caller to switch to it in the
+  editor, which is the one thing an unattended agent could not do and no tool
+  could do for it. `select_main_screen: true` now selects the screen the
+  `camera_identifier` belongs to, waits the frame the control layout needs,
+  captures, and puts the previous screen back. The result reports
+  `main_screen_selected`, `main_screen_restored` and `previous_main_screen`; a
+  main screen an addon contributes cannot be named back, and that is stated
+  rather than implied. Default behaviour is unchanged.
+
 - A field trial can be run unattended. `tools/field-trial/trial.py` seeds the
   working directory, briefs a fresh tester in its own client session, and scores
   what that tester did from the transcript rather than from its own account of

@@ -215,8 +215,13 @@ Live mode copies RGBA8 pixels from the active editor 3D viewport, or from the 2D
 
 A viewport that is not the one on screen has no size, and Godot returns its 2x2 minimum rather than refusing. A capture below 8 pixels on either edge is refused and says so, because a caller cannot tell a four-pixel image from a scene that happens to be empty. For an editor viewport it means the requested main screen is not the selected one.
 
+`select_main_screen: true` selects the main screen the requested `camera_identifier` belongs to, waits a frame for the viewport to be laid out, captures, then puts the previous screen back. Without it, that refusal is a dead end for an unattended caller: the fix it names is switching main screens in the editor, and nothing else in the surface can do that. Selecting a main screen resizes the viewport through the control layout, which happens on the next process frame, so the call is answered a frame later; `RenderingServer.force_draw` does not do it.
+
+The result carries `main_screen_selected`, `main_screen_restored` and `previous_main_screen`. The previous screen is read back by the class of the visible main-screen child, because Godot exposes a setter and no getter: `2D`, `3D`, `Script`, `Game` and `AssetLib` are all identifiable that way, and a main screen an addon contributes is not. In that case the editor is left on the screen that was selected, `main_screen_restored` is `false`, and `main_screen_restore_note` says so rather than the result implying a restore that did not happen. The flag is editor-only, and a `camera_identifier` naming no editor viewport is refused rather than guessed at.
+
 - `camera_identifier` (`string`, default `"active_editor_view"`).
 - `resolution` remains reserved for live capture; offline preview honors it with each dimension clamped to 16–1024. `render_debug_flags` remains unsupported.
+- `select_main_screen` (`boolean`, default `false`).
 - `node_isolation_path` optionally names a node in the active edited scene. The live renderer preserves that branch and its ancestors, temporarily hides unrelated visible 2D/3D branches, and restores every saved value before success. `isolation_background` is `original` (default) or `transparent`. Isolation is editor-only and refused on a game session.
 - Legacy alias: `capture_viewport`.
 
