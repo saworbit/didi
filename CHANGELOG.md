@@ -26,6 +26,18 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `script_check_syntax` no longer reports a false error for every script that
+  names an autoload (#383). Godot's `--headless --check-only` runs in a process
+  with no `SceneTree`, which is where autoloads are registered, so it reported
+  `Identifier not found` for a script the engine compiles and runs. It did so
+  permanently, not until the next editor restart. Didi now reads the
+  `[autoload]` section of `project.godot` and demotes those diagnostics to
+  warnings carrying a `note`, along with the `Compilation failed` line that
+  followed only from them, so `has_errors` is a verdict about the script again.
+  An `Identifier not found` naming anything else stays an error, and a real
+  parse error beside an autoload one keeps `has_errors: true`. `script_create`
+  and `script_patch_method` surface the same check and get the same treatment.
+
 - Didi can now enable its own addon in a project that does not have it (#382).
   Every `project_*` writer was live-only, a live session needs the addon, and
   enabling the addon is a `project_set_setting` write, so the first call an

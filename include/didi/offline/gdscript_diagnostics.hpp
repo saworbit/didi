@@ -16,15 +16,21 @@ struct ScriptDiagnostic {
     std::string severity; // "error", "warning", "info"
     std::string message;
     std::string rule;
+    // Why this diagnostic is not what it appears to be. Present only when
+    // something demoted it, so an unannotated diagnostic reads exactly as it
+    // did before.
+    std::string note;
 
     json toJson() const {
-        return {
+        json out = {
             {"line", line},
             {"column", column},
             {"severity", severity},
             {"message", message},
             {"rule", rule}
         };
+        if (!note.empty()) out["note"] = note;
+        return out;
     }
 };
 
@@ -45,6 +51,17 @@ public:
                                            const std::string& symbol_type = "function");
 
     static std::vector<ScriptDiagnostic> runGodotCompilerCheck(const std::string& script_file_path);
+
+    // The autoload singleton names project.godot registers, read from the
+    // project root this process is running in.
+    static std::vector<std::string> projectAutoloadNames();
+
+    // Demotes the diagnostics the Godot compiler check raises only because it
+    // runs in a process with no SceneTree, so `has_errors` is a verdict about
+    // the script rather than about the checker. Exposed so it can be exercised
+    // without a Godot binary.
+    static void demoteAutoloadDiagnostics(std::vector<ScriptDiagnostic>& diagnostics,
+                                          const std::vector<std::string>& autoload_names);
 
     static json reflectClass(const std::string& class_name);
     static json extractSymbols(const std::string& source_text);
