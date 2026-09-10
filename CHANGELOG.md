@@ -78,6 +78,11 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   a second line of defence. Two of this project's own tests were calling tools
   with argument names the schemas do not have, and passing.
 
+- `viewport_capture_passes` publishes the segmentation pass it has always drawn.
+  Its schema listed three pass kinds and capped the array at three; the engine
+  side takes four. Enforcing that schema turned the understatement into a
+  refusal of a picture the tool takes, which is how it was found.
+
 - `scene_add_to_group` and `scene_remove_from_group` no longer target the edited
   scene root when `target_node` is missing (#396). Both declare it required, and
   omitting it added the group to whatever the editor had open, reported success,

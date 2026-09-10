@@ -2032,10 +2032,10 @@ void ToolRegistry::registerAllDefaultTools() {
             {"type", "object"},
             {"properties", {
                 {"passes", {
-                    {"type", "array"}, {"minItems", 1}, {"maxItems", 3},
+                    {"type", "array"}, {"minItems", 1}, {"maxItems", 4},
                     {"description", "Which pictures to take, returned as one image each in this order. A pass named twice is refused."},
                     {"items", {{"type", "string"},
-                               {"enum", json::array({"color", "depth", "normal"})}}}
+                               {"enum", json::array({"color", "depth", "normal", "segmentation"})}}}
                 }},
                 {"camera_identifier", {{"type", "string"}, {"description", "Editor sessions only; a game has one root viewport."}}},
                 {"depth_far", {{"type", "number"}, {"exclusiveMinimum", 0}, {"maximum", 1000000},

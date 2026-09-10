@@ -1107,6 +1107,13 @@ static void test_tools_call_enforces_the_published_input_schema() {
     // A call that satisfies the schema is not touched by any of this.
     const auto allowed = call("blackboard_read", {{"board", "default"}});
     ASSERT_TRUE(!allowed.result["isError"].get<bool>());
+
+    // Enforcing a schema that understates the tool is worse than not enforcing
+    // it. viewport_capture_passes draws a segmentation pass and its schema said
+    // three kinds, so this refuses a picture the engine takes.
+    const auto segmentation = call("viewport_capture_passes",
+                                   {{"passes", didi::json::array({"segmentation"})}});
+    ASSERT_TRUE(segmentation.result.dump().find("invalid_arguments") == std::string::npos);
 }
 
 // prompts/list says which arguments are required, so prompts/get means it
