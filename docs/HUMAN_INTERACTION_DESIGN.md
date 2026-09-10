@@ -185,7 +185,8 @@ window, so a staged migration remains comfortable.
 1. **Protocol revision upgrade.** *Done.* `server/discover`, per-request version
    negotiation, dual-era gating, and the modern result shapes.
 2. **Elicitation for confirmation-gated mutations.** *Done.* A client that can
-   ask a person is given the real dry-run preview to show them. A client that
+   ask a person is given the dry-run preview to show them, which names the
+   tool, the target and the project rather than the prior state. A client that
    cannot is not silently downgraded: every mutation records whether it was
    confirmed by a `human`, by an `agent` echoing a token, or `skipped` entirely
    under YOLO mode.

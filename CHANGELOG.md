@@ -111,6 +111,22 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   collapsed to `res://`, handing an agent an instruction to diagnose the whole
   project. It is an invalid-params error naming the argument.
 
+- A confirmation token is no longer consumed by an attempt that failed its own
+  binding check (#398). The token was erased from the map before expiry and
+  argument binding were checked, so one mistyped argument burned the token the
+  caller had just previewed and the retry with the exact previewed arguments
+  came back "unknown or already used". A token is now spent only on the mutation
+  it authorises. An expired token is still dropped, and the mismatch message
+  says the token is still good.
+
+- The mutation gate no longer calls its preview exact (#407). The `428` demanded
+  "an exact dry-run preview" and the preview it demanded reported
+  `before: "not read or modified during dry-run"`, so a person approving a token
+  had nothing to approve on. The preview now reports
+  `preview_kind: "argument_binding"` and says plainly that it binds arguments
+  and does not read the target. What it does has not changed; what it claims
+  has.
+
 - `runtime_attach_session` no longer attaches a session belonging to a different
   project than the server's root (#387). Automatic selection has always required
   the project paths to match; naming a session skipped the check, so a server
