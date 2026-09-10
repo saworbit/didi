@@ -42,6 +42,34 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `runtime_attach_session` no longer attaches a session belonging to a different
+  project than the server's root (#387). Automatic selection has always required
+  the project paths to match; naming a session skipped the check, so a server
+  started on one project would serve another project's scene tree, and route
+  mutations into it, while still reporting its own root. It now refuses with
+  `409` naming both paths, and `allow_foreign_project: true` is the explicit way
+  to do it anyway, which reports `project_mismatch: true` and the limitation.
+
+- `didi_control_room` no longer reports another project's session as this
+  project's, and the Project light is a real preflight (#388). The Bridge reason
+  is computed against descriptors for this project root, so a project with no
+  addon is no longer told to "attach one" because some unrelated editor happens
+  to be open, which is the instruction that produced the cross-project attach
+  above. The Project light checks for `addons/didi/didi.gdextension` and for the
+  plugin in `editor_plugins/enabled`, and names the fix for each; both are file
+  stats, so they answer in the state where nothing live can.
+
+- `scene_create` and `scene_pack_branch` no longer write a uid the engine never
+  learns (#379). `ResourceSaver.save` puts the uid in the file, but only Godot's
+  own save callback registers it with `ResourceUID`, and that callback does
+  nothing while `EditorFileSystem` is scanning, which is exactly the window an
+  agent writes in after attaching to a freshly started editor. The scan's
+  directory snapshot predates the file, so the scan did not pick it up either.
+  Every load of a referencing scene then warned and fell back to the text path.
+  Both writers now call `EditorFileSystem.update_file`, report `uid` and
+  `uid_registered`, and when a scan deferred the work they say so and Didi
+  re-indexes the path once the filesystem settles.
+
 - `script_check_syntax` no longer reports a false error for every script that
   names an autoload (#383). Godot's `--headless --check-only` runs in a process
   with no `SceneTree`, which is where autoloads are registered, so it reported

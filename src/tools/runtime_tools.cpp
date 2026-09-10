@@ -253,7 +253,11 @@ CallToolResult handleRuntimeAttachSession(const json& args, std::shared_ptr<runt
     }
     const auto session_id = args["session_id"].get<std::string>();
     if (session_id.empty()) return sessionError(Error::invalidArgument("session_id is required"), sessions);
-    auto result = sessions->attachSession(session_id);
+    if (args.contains("allow_foreign_project") && !args["allow_foreign_project"].is_boolean()) {
+        return sessionError(Error::invalidArgument("allow_foreign_project must be a boolean"), sessions);
+    }
+    const bool allow_foreign_project = args.value("allow_foreign_project", false);
+    auto result = sessions->attachSession(session_id, allow_foreign_project);
     return result.isOk() ? localSessionSuccess(result.value()) : sessionError(result.error(), sessions);
 }
 
