@@ -4,7 +4,7 @@ Results of field trial runs. Method and apparatus are in [Field Trial Design](FI
 
 One section per run. Keep the numbers, because the point of a repeatable seed is that two runs can be compared.
 
-Every section records which client hosted the tester. Trials 01 through 03 were Claude and trial 04 was Codex, and the comparison that buys the most is between engines rather than between consecutive runs of one.
+Every section records which client hosted the tester. Trials 01 through 03 and trial 05 were Claude and trial 04 was Codex, and the comparison that buys the most is between engines rather than between consecutive runs of one.
 
 ---
 
@@ -268,6 +268,107 @@ Two differences from trials 01 through 03 belong on the record rather than in a 
 **There was no cost ceiling.** Codex has no equivalent of `--max-budget-usd`, so the three hour timeout was the only bound on this run. It finished in about fifty minutes and the point never arose, but a run on this engine is bounded by the clock rather than by spend.
 
 Two leftovers from earlier work were running on the machine throughout: trial 03's Godot editor, open since the previous day on `D:\didi-trials\trial-20260908-2309`, and unrelated Codex sessions. Auto-attach is scoped to the project root, so neither could capture this run, and the bridge verdict confirms every observation came from the seeded build.
+
+---
+
+## Trial 05, 2026-09-10
+
+**Seed:** commit `8e11c31`, Didi 1.8.0, build `1.8.0+8e11c31e41e1.20260910T044028`, Godot 4.7.2 stable, Windows. Identical briefing and identical bare seed to trials 01 through 04.
+
+**Tester: Claude, `claude-opus-5`.** Run through `tools/field-trial/trial.py` with no engine flag. The build was made at HEAD before the run rather than reused, so this trial is the first to exercise #376 and #377.
+
+**Outcome:** all six required features delivered again. Both endings reached live and captured from the running game. `runtime_read_output` returned two records, both the tester's own prints, nothing at warning or error level, and the final headless launch was clean.
+
+**Bridge: matched**, on 8 observations. The seed again recorded the repository's own `addons/didi` as present and different from the built one, and the tester again installed the right one. Two runs now on the #325 fix.
+
+**Cost and clock:** $18.64 and 238 turns in 22 minutes wall clock, against a $40 ceiling. The fastest run of the five by a wide margin, and the first where the ceiling was recorded rather than absent.
+
+### Coverage against every previous run
+
+| Metric | Trial 01 | Trial 02 | Trial 03 | Trial 04 | Trial 05 |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| Tester | claude | claude | claude | codex | claude |
+| Distinct implemented tools called | 36 | 37 | 36 | 36 | 38 |
+| Coverage | 39.6% | 40.7% | 32.1% | 32.1% | 33.9% |
+| Total invocations | 156 | 313 | 174 | 244 | 160 |
+| Ledger entries | 18 | 23 | 19 | 23 | 16 |
+| Entries verdicted `failed` | 6 | 9 | 9 | 7 | 5 |
+| Issues filed | 9 | 6 | 7 | 4 | 5 |
+
+Newly reached against trial 04: `editor_reload_project`, `project_get_uid_map`, `resource_inspect`, `runtime_explore_scene`, `runtime_set_paused`, `runtime_step`, `scene_add_to_group`, `scene_get_property`, `scene_remove_node`, `scene_set_property`, `tilemap_set_cells`, `ui_list_controls`. No longer reached: `asset_reimport`, `blackboard_read`, `project_apply_changes`, `project_list_resources`, `runtime_detach_session`, `runtime_get_tree`, `runtime_read_logs`, `scene_open`, `script_patch_method`, `tilemap_get_used_rect`.
+
+Almost all of that movement is the engine changing back. Ten of the twelve newly reached were reached by a Claude run before, and seven of the ten no longer reached were reached only by trial 04.
+
+### The reached surface has stopped growing
+
+**Not one tool in this run had gone uncalled by every previous run.** Twelve names changed hands against trial 04 and every one of them had been reached by trial 01, 02 or 03. The union of everything five testers on two engines have ever reached is unchanged, and **60 of 112 implemented tools have still been called by nobody**.
+
+That is a stronger statement than the plateau recorded after trial 04. That one said the count of tools any single agent reaches is stable at about 36. This one says the *set* has closed: a fifth run, on the client that produced three of the previous four, added nothing to it. The 52 tools outside the union are not waiting for a tester that thinks to use them. They are outside what this task asks for, and nothing about the run will change that. Moving the number means changing the task or the surface.
+
+Two entries in the uncalled set have now survived five runs and both were called out in every previous write-up:
+
+- **`editor_undo` and `editor_redo`: still zero calls**, five runs, two vendors, though every mutation response in this run carried `undo_redo_registered: true` and the tester quoted that field approvingly in its ledger. It reads the guarantee and never drives it. That is the answer to the question trial 04 left open: agents want UndoRedo honoured, not exposed.
+- **All four `signal_*` tools: still zero calls.** Trial 01 concluded the tools and the task were aimed at different things and trial 04 confirmed it on a second engine. Three engines-worth of evidence now. This should stop being counted.
+
+### Three fixes from trial 03 held, and one of them reversed a standing finding
+
+`resource_create` (#327) wrote a multi-track keyframed `Animation` correctly: ordered-array `properties`, `PackedFloat32Array` times, `Vector2(1, 1)` values, a file indistinguishable from what Godot's own animation editor writes. Trial 03's version of this call produced an Animation that loaded, reported one track and had discarded every field on it.
+
+`runtime_explore_scene` (#329) reads project state now, and it is what rescued the run. See below.
+
+**`scene_instantiate_node` with a `scene_path` writes a real instance (#328).** `scenes/main.tscn` contains three `instance=ExtResource("5_choun")` nodes and a `PackedScene` `ext_resource` header. Trials 03 and 04 both ended with a `main.tscn` holding zero instances and a `_ready()` that preloaded and instanced by hand, and both write-ups named that as the difference between authoring a project and generating one. That finding is retired. The scene file describes the scene again, on the first run after the fix, without the tester being told anything about it.
+
+### The dominant wall is a bootstrap deadlock
+
+The first entry in the ledger, at four minutes in:
+
+```
+project_set_setting {"setting":"editor_plugins/enabled",
+                     "value":["res://addons/didi/plugin.cfg"]}
+{"error":{"code":503,"message":"No atomic runtime route is available for live dispatch"}}
+```
+
+Every `project_*` writer is live-only. A live session requires the addon to be enabled. Enabling the addon is a `project_set_setting` write. **Didi cannot install itself into a project**, and the seeded bare project is exactly the state every real user starts in. The tester copied the addon with the shell and hand-wrote the `[editor_plugins]` section, which is what the quickstart tells a human to do; an agent handed a project and a server has no route at all. Filed as #382.
+
+This is the same shape as trial 04's `project_apply_changes` wall, and for the same underlying reason: a tool's precondition is something the seed deliberately does not provide. Trial 04 needed a git work tree that a Godot project does not have. This one needs a live session that the project cannot have until the tool that needs it has already run.
+
+### `resource_create` still cannot say "this points at that"
+
+The tester's own answer to what would have helped most, and the more valuable half of #327's story. The ordered-array form and Vector2 inference are right; what is missing is any way to express a reference to another resource. There is no representation for an `ext_resource` or a `sub_resource` in the properties contract, so `sources/0` was written as the quoted string it was passed and the TileSet would not load.
+
+The class that excludes is not marginal: TileSet, AnimationLibrary, SpriteFrames, Theme, ShaderMaterial, StyleBox. Two of the run's three hand-written files exist only because of it, and requirement 2 asks for a TileSet by name. It also forced a design choice worth recording, because it looks like preference and is not: the `bob` animation is a correct `Animation` resource that `enemy.gd` has to install into the `AnimationPlayer` at `_ready`, because an `AnimationLibrary` is a resource holding a reference to another resource and nothing can write one. Filed as #380.
+
+Trial 03's `resource_create` finding was that it reported success for a file Godot misread. That half is fixed. The half that remains is the one it could not have found, because it never got past the first.
+
+### A false failure, where every previous run found false successes
+
+`script_check_syntax` returns `has_errors: true` and `Compile Error: Identifier not found: GameState` for four of the run's five scripts. All five are correct: the game runs, the HUD updates, the engine logs nothing. The check runs in a separate `godot --headless --check-only` process that never registers the project's autoloads, so it is wrong for any script in any project that uses a singleton, permanently, and not in the way `project_set_autoload`'s documented restart limitation is wrong. The tester re-tested after an editor restart and after the game had demonstrably run through the singleton. Filed as #383.
+
+Trials 02, 03 and 04 all named mutations that report success without succeeding as the most serious class the trials produce. This is the mirror image and it costs the same thing: the response is the agent's entire world model, and a tool that cries wolf on every autoload user teaches an agent to stop reading it. The tester ignored the diagnostics and trusted `runtime_launch`, which is the right call and also the end of that tool's usefulness.
+
+`scene_create` and `scene_pack_branch` writing a UID the engine never learns (#379) is a quieter member of the same family. The header is correct, `project_get_uid_map` resolves the path to that very UID in the reverse direction, and the engine warns on every load because nobody told its index. `editor_reload_project` repairs it by rescanning the whole project.
+
+### The run's best moment was a bug that was not one
+
+Four rounds convinced `runtime_inject_input` was broken: the player would not move for an action event, a key event, or with the game window focused. It was about to be filed.
+
+`runtime_explore_scene` is what stopped it. Driving the same build for four seconds, it reported `moved: true` with x from 480 to 711 and y from 272 to 499. The player had been wedged between three `CharacterBody2D` enemies that had converged and stopped dead on top of it. Injection was never broken, and a fresh session moved the player 230 px/s for as long as it was held.
+
+This is the tool trial 03 filed #329 against for being unable to read `position.x`, the example in its own schema, while reporting a clean run over 721 frames of measuring nothing. Fixed, it is the tool that answered the question the tester actually had, and the ledger says so directly: a tool that presses the project's own actions and reports whether anything moved is worth more than one that presses a button.
+
+### The blackboard instruction landed halfway
+
+`blackboard_write` four times, with architecture, node paths and the trial outcome, and `blackboard_read` not once. Trial 04, on the other engine, did both. So the correction recorded after trial 04 holds, and the instruction does survive the task, but the read half did not survive this run, and no Claude tester has yet read back what it wrote.
+
+### Issues filed
+
+Five, #379 through #383, all labelled `field-trial`: two `bug`, three `enhancement`. Against a cap of twenty. Three further findings were recorded in the ledger and deliberately not filed: a `runtime_launch` that returned an empty `logs` array for a run that printed and could not be reproduced, the pause-and-step stand-in advancing a `move_and_slide` body 0.063 pixels across 30 stepped frames, and `project_list_input_actions` returning roughly nine thousand tokens of built-in `ui_*` actions to show five project-defined ones.
+
+The unfiled `runtime_launch` finding deserves the same eye as #383. `{"exit_code":124,"logs":[],"errors":[],"warnings":[]}` is indistinguishable from a clean run in a payload a caller is expected to check for emptiness. One occurrence and no reproduction is the right reason not to file it; it is the wrong reason to forget it.
+
+### Caveat on comparability
+
+The tester recorded, in the ledger before its first entry, that the session harness asks for a brainstorming skill before creative work, that the skill is a dialogue with the user, that this run is unattended and forbids questions, and that it therefore recorded the design on the blackboard and proceeded. Trial 04 recorded the same class of difference from the other direction: its skills were loaded and it used them to write a spec and a plan first. No run in this series has been skill-free and no two have had the same set.
 
 ---
 
