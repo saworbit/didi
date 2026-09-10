@@ -95,6 +95,26 @@ public:
     Result<ReimportBatch> beginAssetReimport(const std::vector<std::string>& paths);
     Result<bool> isEditorFilesystemScanning();
 
+    // What the engine knows about a resource Didi just wrote.
+    struct WrittenResourceUid {
+        std::string uid;          // the uid:// in the file, empty when it has none
+        bool registered{false};   // whether ResourceUID resolves it back to the path
+        bool deferred{false};     // whether a retry was queued because a scan is running
+    };
+
+    // Teaches the engine about a file Didi wrote behind the editor's back.
+    //
+    // ResourceSaver.save writes the uid into the file, and in a settled editor
+    // Godot's own save callback indexes it. While EditorFileSystem is scanning
+    // that callback does nothing, the scan's directory snapshot predates the
+    // file, and the uid ends up in the file but not in ResourceUID. Everything
+    // outside the editor then warns on every load (#379).
+    WrittenResourceUid registerWrittenResourceUid(const std::string& resource_path);
+
+    // Re-indexes anything registerWrittenResourceUid could not, once the
+    // editor filesystem is idle. Called once per frame by the editor hook.
+    void processDeferredReindexFrame();
+
     // The editor main screen: the 2D/3D/Script/Game/AssetLib tab bar, plus any
     // main screen an addon adds.
     //

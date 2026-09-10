@@ -1130,13 +1130,18 @@ public:
     // means by attaching. Opening the route is the same work either way; only
     // whether the selection moves differs.
     Result<json> attachSession(const std::string& session_id) override {
-        return openRoute(session_id, true);
+        return openRoute(session_id, true, false);
+    }
+
+    Result<json> attachSession(const std::string& session_id,
+                               bool allow_foreign_project) override {
+        return openRoute(session_id, true, allow_foreign_project);
     }
 
     // Holds a route without moving the selection, so a request that named its
     // own session cannot take the process out from under a legacy client.
     Result<json> openSessionRoute(const std::string& session_id) override {
-        return openRoute(session_id, false);
+        return openRoute(session_id, false, false);
     }
 
     Result<json> detachSession() override {
@@ -1344,7 +1349,8 @@ private:
     }
 
     // Opens a route to one session, or reuses the one already held for it.
-    Result<json> openRoute(const std::string& session_id, bool make_selected) {
+    Result<json> openRoute(const std::string& session_id, bool make_selected,
+                           bool allow_foreign_project) {
         if (session_id.empty()) return Error::invalidArgument("session_id is required");
         if (make_selected) {
             std::lock_guard<std::mutex> lock(m_mutex);
@@ -1380,7 +1386,34 @@ private:
                                   });
         if (found == sessions.end()) return Error::notFound("Runtime session not found: " + session_id);
         if (!found->alive) return Error::notConnected("Runtime session is stale: " + session_id);
-        return attachDescriptor(found->descriptor, make_selected);
+        // The session belongs to whichever project its editor has open, and
+        // this server belongs to the root it was started on. When those differ
+        // every live call afterwards reads and writes the other project, under
+        // a server still reporting this one as its root. Auto-selection has
+        // always required the match; naming a session skipped it (#387).
+        const bool foreign = !m_projectRoot.empty() &&
+                             found->descriptor.project_path != m_projectRoot;
+        if (foreign && !allow_foreign_project) {
+            return Error(409,
+                         "Runtime session belongs to a different project than this server. "
+                         "The session has " + found->descriptor.project_path +
+                         " open; this server was started on " + m_projectRoot +
+                         ". Live calls would read and write that other project. Start Godot on "
+                         "this project, or pass allow_foreign_project: true if driving the other "
+                         "one is what you mean.",
+                         json{{"session_project_path", found->descriptor.project_path},
+                              {"server_project_root", m_projectRoot},
+                              {"session_id", session_id}});
+        }
+        auto attached = attachDescriptor(found->descriptor, make_selected);
+        if (attached.isOk() && foreign && attached.value().is_object()) {
+            attached.value()["project_mismatch"] = true;
+            attached.value()["server_project_root"] = m_projectRoot;
+            attached.value()["limitation"] =
+                "This session has a different project open than the server's root. Every live "
+                "call on it reads and writes that project, not this one.";
+        }
+        return attached;
     }
 
     void releaseDeadRoutes() {

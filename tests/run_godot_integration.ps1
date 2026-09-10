@@ -2718,6 +2718,22 @@ try {
 
     Assert-True $byId[86].result.isError "Scene close discarded unsaved edits without explicit permission."
     Assert-True ((Tool-Payload $byId[87]).saved -eq $true) "Packed branch did not report a saved PackedScene."
+
+    # A scene Didi writes carries a uid, and the engine has to be taught it.
+    # ResourceSaver.save writes the uid into the file; only Godot's own save
+    # callback indexes it, and that does nothing while EditorFileSystem is
+    # scanning. Left alone, every load of a referencing scene warned and fell
+    # back to the text path (#379). Both writers now report what the engine
+    # knows, and say so when a scan deferred it.
+    foreach ($sceneWrite in @(@{ Id = 87; What = "Packed branch" }, @{ Id = 92; What = "Created scene" })) {
+        $written = Tool-Payload $byId[$sceneWrite.Id]
+        Assert-True ($written.uid -match '^uid://[0-9a-z]+$') "$($sceneWrite.What) did not report the uid it wrote."
+        Assert-True ($null -ne $written.uid_registered) "$($sceneWrite.What) did not say whether the engine knows its uid."
+        if ($written.uid_registered -ne $true) {
+            Assert-True ($written.uid_registration_deferred -eq $true) "$($sceneWrite.What) reported an unregistered uid without saying a scan deferred it."
+            Assert-True (-not [string]::IsNullOrWhiteSpace($written.limitation)) "$($sceneWrite.What) deferred uid registration without stating the limitation."
+        }
+    }
     Assert-True $byId[88].result.isError "Packed branch overwrote an existing scene without overwrite: true."
     Assert-True ((Tool-Payload $byId[89]).opened -eq $true) "Packed branch could not be opened."
     $packedHierarchy = Tool-Payload $byId[90]

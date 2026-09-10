@@ -320,14 +320,30 @@ void test_bridge_light_states() {
         ASSERT_EQ(lightState(model, "Bridge"), "bad");
         ASSERT_TRUE(lightReason(model, "Bridge").find("addon") != std::string::npos);
     }
-    // Published but not selected: amber, never red, because the bridge is there.
+    // Published for this project but not selected: amber, never red, because the
+    // bridge is there and attaching it is the right next move.
     {
         ControlRoomInputs in;
         in.descriptors_present = true;
+        in.descriptors_for_this_project = true;
         in.sessions = {makeSession("s1", "editor")};
         const auto model = buildControlRoomModel(in, {});
         ASSERT_EQ(lightState(model, "Bridge"), "warn");
-        ASSERT_TRUE(!lightReason(model, "Bridge").empty());
+        ASSERT_TRUE(lightReason(model, "Bridge").find("this project") != std::string::npos);
+    }
+    // Break caught: sessions exist, but all for other projects. Telling the
+    // caller to "attach one" is what sends them into a cross-project attach
+    // that serves someone else's scene tree (#388), so this is red and says so.
+    {
+        ControlRoomInputs in;
+        in.descriptors_present = true;
+        in.descriptors_for_this_project = false;
+        in.sessions = {makeSession("s1", "editor")};
+        const auto model = buildControlRoomModel(in, {});
+        ASSERT_EQ(lightState(model, "Bridge"), "bad");
+        const auto reason = lightReason(model, "Bridge");
+        ASSERT_TRUE(reason.find("No published descriptor for this project") != std::string::npos);
+        ASSERT_TRUE(reason.find("Other projects") != std::string::npos);
     }
     // Selected but no authenticated lease: red, and that is a fact about the route.
     {
@@ -417,10 +433,29 @@ void test_bridge_build_mismatch_is_amber() {
 void test_safety_and_project_and_work_lights() {
     {
         ControlRoomInputs in;
+        in.addon_present = true;
+        in.addon_enabled = true;
         const auto model = buildControlRoomModel(in, {});
         ASSERT_EQ(lightState(model, "Safety"), "ok");
         ASSERT_EQ(lightState(model, "Project"), "ok");
         ASSERT_EQ(lightState(model, "Work"), "unknown");
+    }
+    // Break caught: a project that has never had the addon installed read as
+    // green, so the one thing blocking every live tool was the one thing the
+    // dashboard did not mention (#388).
+    {
+        ControlRoomInputs in;
+        const auto model = buildControlRoomModel(in, {});
+        ASSERT_EQ(lightState(model, "Project"), "warn");
+        ASSERT_TRUE(lightReason(model, "Project").find("addons/didi") != std::string::npos);
+    }
+    // Present but not switched on is a different fix, so it is a different reason.
+    {
+        ControlRoomInputs in;
+        in.addon_present = true;
+        const auto model = buildControlRoomModel(in, {});
+        ASSERT_EQ(lightState(model, "Project"), "warn");
+        ASSERT_TRUE(lightReason(model, "Project").find("editor_plugins/enabled") != std::string::npos);
     }
     {
         ControlRoomInputs in;
@@ -440,9 +475,12 @@ void test_safety_and_project_and_work_lights() {
     }
     {
         ControlRoomInputs in;
+        in.addon_present = true;
+        in.addon_enabled = true;
         in.project_readable = false;
         const auto model = buildControlRoomModel(in, {});
         ASSERT_EQ(lightState(model, "Project"), "warn");
+        ASSERT_TRUE(lightReason(model, "Project").find("readable") != std::string::npos);
     }
     {
         ControlRoomInputs in;

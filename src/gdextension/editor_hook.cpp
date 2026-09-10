@@ -122,6 +122,7 @@ void EditorHook::processQueue() {
         processProfilerFrame();
         processInvariantWatchFrame();
         processSceneExplorationFrame();
+        GodotBridge::instance().processDeferredReindexFrame();
         processMainScreenCaptureFrame();
         return;
     }
@@ -226,6 +227,7 @@ void EditorHook::processQueue() {
     processProfilerFrame();
     processInvariantWatchFrame();
     processSceneExplorationFrame();
+    GodotBridge::instance().processDeferredReindexFrame();
     processMainScreenCaptureFrame();
     processPendingQuitFrame();
 }

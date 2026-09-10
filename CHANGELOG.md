@@ -24,7 +24,51 @@ release changed, which is why it lives here and not in a version section.
 Discovery now exposes 115 canonical tools plus 10 legacy registrations (125 total). 112 canonical tools are implemented and 3 remain unimplemented.
 The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
+### Added
+
+- `resource_create` can express a reference to another resource, so the
+  composite resources are authorable at last (#380). A property value of
+  `{"type": "ExtResource", "path": "res://..."}` becomes an `[ext_resource]`
+  entry carrying the type and uid read from the project index, and a new
+  `sub_resources` argument declares `[sub_resource]` blocks that
+  `{"type": "SubResource", "id": "..."}` names. Sub-resource properties follow
+  the same rules as top-level ones, so there is no second dialect, and
+  `load_steps` is computed rather than guessed. A reference to a file that is
+  not in the project, or to a sub-resource id not declared above the point that
+  names it, is refused: Godot resolves those to null rather than failing, which
+  is a resource reported as written and quietly wrong. TileSet,
+  AnimationLibrary, SpriteFrames, Theme and ShaderMaterial no longer have to be
+  written by hand outside the tool surface.
+
 ### Fixed
+
+- `runtime_attach_session` no longer attaches a session belonging to a different
+  project than the server's root (#387). Automatic selection has always required
+  the project paths to match; naming a session skipped the check, so a server
+  started on one project would serve another project's scene tree, and route
+  mutations into it, while still reporting its own root. It now refuses with
+  `409` naming both paths, and `allow_foreign_project: true` is the explicit way
+  to do it anyway, which reports `project_mismatch: true` and the limitation.
+
+- `didi_control_room` no longer reports another project's session as this
+  project's, and the Project light is a real preflight (#388). The Bridge reason
+  is computed against descriptors for this project root, so a project with no
+  addon is no longer told to "attach one" because some unrelated editor happens
+  to be open, which is the instruction that produced the cross-project attach
+  above. The Project light checks for `addons/didi/didi.gdextension` and for the
+  plugin in `editor_plugins/enabled`, and names the fix for each; both are file
+  stats, so they answer in the state where nothing live can.
+
+- `scene_create` and `scene_pack_branch` no longer write a uid the engine never
+  learns (#379). `ResourceSaver.save` puts the uid in the file, but only Godot's
+  own save callback registers it with `ResourceUID`, and that callback does
+  nothing while `EditorFileSystem` is scanning, which is exactly the window an
+  agent writes in after attaching to a freshly started editor. The scan's
+  directory snapshot predates the file, so the scan did not pick it up either.
+  Every load of a referencing scene then warned and fell back to the text path.
+  Both writers now call `EditorFileSystem.update_file`, report `uid` and
+  `uid_registered`, and when a scan deferred the work they say so and Didi
+  re-indexes the path once the filesystem settles.
 
 - `script_check_syntax` no longer reports a false error for every script that
   names an autoload (#383). Godot's `--headless --check-only` runs in a process

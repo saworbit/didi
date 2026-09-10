@@ -452,9 +452,38 @@ Like every mutating Phase 7 live tool, these setters return `504 unknown_outcome
 
 Writes a textual `.tres` file under the project root. Strings, booleans, numbers, arrays and objects are rendered as Godot literals: `{x,y}`, `{x,y,z}`, `{x,y,z,w}` and `{r,g,b(,a)}` become Vector2, Vector3, Vector4 and Color, and any other object becomes a Dictionary. Nested values go through the same writer, so an array of `{r,g,b}` objects comes out as an array of `Color(...)`.
 
-Give an object a `"type"` to choose the literal yourself, which is the only way to say what the JSON cannot: `Vector2i`, `Vector3i`, `Vector4i`, `Quaternion` and `Color` take their components, `NodePath` and `StringName` take their text under `"value"`, and the packed arrays take their elements under `"values"`. A capitalised type this writer does not know is refused, and so is a `SubResource`, which has no representation here. Nothing falls through to JSON: a value that cannot be written refuses the call naming the property, because a resource reported as created with a field thrown away costs more than a refusal does.
+Give an object a `"type"` to choose the literal yourself, which is the only way to say what the JSON cannot: `Vector2i`, `Vector3i`, `Vector4i`, `Quaternion` and `Color` take their components, `NodePath` and `StringName` take their text under `"value"`, and the packed arrays take their elements under `"values"`. A capitalised type this writer does not know is refused. Nothing falls through to JSON: a value that cannot be written refuses the call naming the property, because a resource reported as created with a field thrown away costs more than a refusal does.
 
 Order is the caller's to set. Godot applies indexed sub-properties in file order and `tracks/0/type` is what creates track 0, so pass `properties` as an array of `{name, value}` entries when that matters; a JSON object cannot carry an order and its keys are written sorted. The result lists `properties_written` in file order.
+
+#### References to other resources
+
+A property can point at another resource, which is what every composite Godot resource is made of: a TileSet holds a `TileSetAtlasSource` that holds a texture, and a ShaderMaterial holds a shader.
+
+- `{"type": "ExtResource", "path": "res://art/tiles.png"}` references a file in the project. The writer emits an `[ext_resource]` entry carrying the type and uid it reads out of the project index, gives it an id, and writes `ExtResource("id")` in place. One entry per path however many properties name it. Pass `resource_type` to name the type yourself where the index cannot tell, such as a custom Resource script. A path that is not in the project is refused: a `.tres` naming a file that is not there loads with nothing in that slot.
+- `sub_resources` declares the `[sub_resource]` blocks the file carries inside itself, as an array of `{id, resource_type, properties}` in the order they should appear. Their properties follow exactly the same rules as the top-level ones, references included, so there is no second dialect to learn. `{"type": "SubResource", "id": "..."}` then names one.
+- Only an id declared **above** the point that names it can be used. Godot resolves a `SubResource` against the blocks it has already read, so a reference to one declared further down loads as null rather than failing, and the writer refuses it instead.
+- `load_steps` is computed from the external references, the sub-resources and the resource itself. Do not pass it.
+
+The result adds `external_references` (path, resource type, id and uid for each header entry), `sub_resources_written` (id, type and the properties each got, in file order) and `load_steps`.
+
+```json
+{
+  "save_path": "res://art/arena_tileset.tres",
+  "resource_type": "TileSet",
+  "sub_resources": [
+    { "id": "TileSetAtlasSource_1", "resource_type": "TileSetAtlasSource",
+      "properties": [
+        { "name": "texture", "value": { "type": "ExtResource", "path": "res://art/arena_tiles.png" } },
+        { "name": "texture_region_size", "value": { "type": "Vector2i", "x": 32, "y": 32 } }
+      ] }
+  ],
+  "properties": [
+    { "name": "tile_size", "value": { "type": "Vector2i", "x": 32, "y": 32 } },
+    { "name": "sources/0", "value": { "type": "SubResource", "id": "TileSetAtlasSource_1" } }
+  ]
+}
+```
 
 Didi does not instantiate or validate the requested Resource class in Godot.
 
@@ -882,6 +911,10 @@ Group mutations use UndoRedo.
 - `scene_close`: closes the active scene. It probes for the `EditorInterface.get_unsaved_scenes` bind, which exists from Godot 4.7. Where it exists and the engine omits the active scene from the unsaved list, a call with no arguments closes and returns `dirty_state: "clean"`. Where the bind is missing (Godot 4.5 and 4.6), where the active scene has never been saved and so has no path for the engine to name, or where the engine reports the scene as unsaved, the call is refused with `409` unless `discard_unsaved: true` is passed. Results carry `dirty_state_readable` (whether this engine can answer), `dirty_state` (`clean` or `unchecked`), and `discarded_unsaved` (the flag as passed).
 - `scene_pack_branch`: requires `target_node` and `scene_path`; duplicates the branch, normalizes descendant ownership, packs it, and protects existing targets unless `overwrite: true`.
 
+Both writers report the uid the scene file carries and whether the engine has been taught it: `uid`, and `uid_registered`. `ResourceSaver.save` writes the uid into the file, but only Godot's own save callback puts it in `ResourceUID`, and that callback does nothing while `EditorFileSystem` is scanning. A scene written inside that window used to end up with a uid in the file that the engine had never heard of, so every load of a scene referencing it printed `ext_resource, invalid UID ... using text path instead`, in the editor, in `runtime_launch` and in an exported game.
+
+Didi now calls `EditorFileSystem.update_file` after each save. When a scan is running that call cannot take effect, so the result carries `uid_registered: false`, `uid_registration_deferred: true` and a `limitation` saying so, and Didi re-indexes the path as soon as the scan finishes. Nothing else is required of the caller; `editor_reload_project` is no longer the repair for this.
+
 Scene paths reject absolute filesystem paths, backslashes, and parent-relative segments.
 
 ## 11. Phase 3 runtime sessions
@@ -915,6 +948,8 @@ On POSIX the endpoint is the OS temporary directory plus `godot_didi_<project-ke
 Requires `session_id`. Didi connects to the exact validated process-unique endpoint and performs a token-authenticated protocol `1.3` handshake with a 3,000 ms finite deadline. The token is inserted only into the internal envelope and stripped before bridge dispatch, responses, logs, and diagnostics. Route replacement is transactional: connection, authentication, ID, or protocol failure leaves the previous session selected.
 
 Before transport connection, the MCP process acquires `<session-id>.lock` with an OS exclusive lock. One client can hold a runtime session; another explicit attach returns `423`. The kernel releases the lock if the owner exits or crashes, and the persistent metadata file contains no authentication token. POSIX normally retains that metadata file after release; ownership is enforced by the kernel lock, not file presence.
+
+A session belongs to whichever project its editor has open, and this server belongs to the root it was started on. When those differ, every live call afterwards reads and writes that other project under a server still reporting this one as its root. Automatic selection has always required the two to match; naming a session skipped the check. Attach now refuses a session from another project with `409`, and the error `data` carries `session_project_path`, `server_project_root` and `session_id` so a caller can see which of the two is wrong. Pass `allow_foreign_project: true` to attach anyway, which is treated as explicit intent the way `overwrite: true` is; the result then carries `project_mismatch: true`, `server_project_root`, and a `limitation` stating that live calls act on the other project.
 
 ### `runtime_detach_session` and `runtime_get_session` — Local session management
 
