@@ -661,7 +661,9 @@ Text matching is literal with optional ASCII case folding and whole-word boundar
 
 ### `asset_reimport` — Live
 
-Accepts `paths` containing 1–256 unique normalized `res://` source files and `timeout_ms` from 1–10,000. The editor revalidates the whole batch before calling `EditorFileSystem.reimport_files`, rejects `.godot`, `.import`, directories, and missing/out-of-project files, and allows one pending reimport. Success requires two consecutive main-loop callbacks with `is_scanning() == false`. A timeout returns `504` with an unknown outcome because Godot may finish afterward.
+Accepts `paths` containing 1–256 unique normalized `res://` source files and `timeout_ms` from 1–10,000. The editor revalidates the whole batch, rejects `.godot`, `.import`, directories, and missing/out-of-project files, and allows one pending reimport. Success requires two consecutive main-loop callbacks with `is_scanning() == false`. A timeout returns `504` with an unknown outcome because Godot may finish afterward.
+
+Godot's import system owns only the files that carry a `.import` sidecar. `EditorFileSystem.reimport_files` reads the importer name out of that sidecar, so a path without one reaches the engine as `importer for type '' not found` in the editor output while the call itself returns nothing to report. The batch is split by what each path needs: files with a sidecar go to `reimport_files`, and the rest go to `EditorFileSystem.update_file`, which Godot documents for a file a program outside the editor has changed. The result carries both lists as `reimported` and `refreshed`, so a caller reads which one happened rather than assuming.
 
 ### `audio_list_buses` — Live and offline
 
@@ -854,7 +856,7 @@ Group mutations use UndoRedo.
 
 ### Scene files
 
-- `scene_create`: requires normalized `scene_path` ending in `.tscn`; accepts `root_type` (`Node2D`, `Node3D`, or `Control`), `root_name`, and `overwrite`. It saves and verifies the active scene.
+- `scene_create`: requires normalized `scene_path` ending in `.tscn`; accepts `root_type` (`Node2D`, `Node3D`, or `Control`), `root_name`, and `overwrite`. It creates the project-contained parent directory when that directory does not exist, the way `script_create` and `resource_create` do, then saves and verifies the active scene.
 - `scene_open`: validates and opens an existing `PackedScene`, then verifies its active resource path.
 - `scene_close`: closes the active scene. It probes for the `EditorInterface.get_unsaved_scenes` bind, which exists from Godot 4.7. Where it exists and the engine omits the active scene from the unsaved list, a call with no arguments closes and returns `dirty_state: "clean"`. Where the bind is missing (Godot 4.5 and 4.6), where the active scene has never been saved and so has no path for the engine to name, or where the engine reports the scene as unsaved, the call is refused with `409` unless `discard_unsaved: true` is passed. Results carry `dirty_state_readable` (whether this engine can answer), `dirty_state` (`clean` or `unchecked`), and `discarded_unsaved` (the flag as passed).
 - `scene_pack_branch`: requires `target_node` and `scene_path`; duplicates the branch, normalizes descendant ownership, packs it, and protects existing targets unless `overwrite: true`.
