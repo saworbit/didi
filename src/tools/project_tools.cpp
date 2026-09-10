@@ -1,5 +1,6 @@
 #include "didi/mcp/project_tools.hpp"
 #include "didi/offline/project_search.hpp"
+#include "didi/offline/project_settings_file.hpp"
 
 #include <filesystem>
 #include <set>
@@ -91,8 +92,69 @@ CallToolResult handleProjectRemoveInputAction(const json& args, std::shared_ptr<
 CallToolResult handleProjectGetSetting(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     return forwardLiveProject(args, ipc, "project.getSetting", "read a project setting");
 }
+// Persists a project setting, using the editor when one is attached and
+// project.godot directly when none is.
+//
+// The offline route exists because of a deadlock, not for convenience. Every
+// project writer used to be live-only, a live session needs the Didi addon
+// enabled, and enabling the addon is a write to editor_plugins/enabled. An
+// agent handed a bare project could not perform the one call that would let it
+// perform any other (#382).
 CallToolResult handleProjectSetSetting(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    return forwardLiveProject(args, ipc, "project.setSetting", "persist a project setting");
+    if (ipc && ipc->isConnected()) {
+        return forwardLiveProject(args, ipc, "project.setSetting", "persist a project setting");
+    }
+    if (!args.is_object()) {
+        return CallToolResult::error("Invalid project setting request: arguments must be an object");
+    }
+    const std::string setting = args.value("setting", "");
+    const bool remove = args.value("remove", false);
+    if (remove && args.contains("value")) {
+        return CallToolResult::error("Specify either value or remove: true, not both");
+    }
+    if (!remove && !args.contains("value")) {
+        return CallToolResult::error("value is required unless remove is true");
+    }
+
+    std::error_code root_error;
+    const auto root = std::filesystem::current_path(root_error);
+    if (root_error) {
+        return CallToolResult::error("The project root cannot be resolved for an offline setting write");
+    }
+    auto written = offline::writeProjectSetting(
+        root, setting, remove ? json() : args["value"], remove);
+    if (written.isErr()) {
+        return CallToolResult::error("Failed to persist a project setting: " + written.error().message);
+    }
+
+    const auto& report = written.value();
+    json payload{
+        {"status", "success"},
+        {"setting", report.setting},
+        {"persisted", true},
+        {"removed", report.removed},
+        {"execution_mode", "offline_fallback"},
+        {"is_live_engine", false},
+        {"written_to", "res://project.godot"},
+        {"section", report.section},
+        {"key", report.key},
+        {"section_created", report.section_created},
+        {"replaced_existing", report.existed},
+        // Say what went into the file. An offline write has no engine to
+        // confirm it against, so the literal is the evidence that the value
+        // arrived as the caller meant it, not as a string that looks like it.
+        {"value_written", report.literal},
+        // Nothing is running to read this. A setting that gates engine
+        // start-up, editor_plugins/enabled above all, takes effect when Godot
+        // is next launched and not before.
+        {"limitation",
+         "project.godot was written directly because no editor session is attached. "
+         "Nothing has loaded the new value yet; it takes effect the next time Godot "
+         "starts. If a Godot editor is running on this project without the Didi addon, "
+         "close it before writing, because saving its own settings would overwrite this."}
+    };
+    if (report.existed) payload["previous_value"] = report.previous_literal;
+    return CallToolResult::successJson(std::move(payload));
 }
 
 CallToolResult handleProjectSearchText(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

@@ -36,7 +36,13 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // project_audit_assets: the scan is a file scan in both modes, and an
         // attached editor verifies its unresolved uid and missing path findings
         // and clears the ones it disproves, so the findings differ by mode.
-        "project_audit_assets"
+        "project_audit_assets",
+        // project_set_setting: live through ProjectSettings when an editor is
+        // attached, and straight into project.godot when none is. Declaring
+        // only live made the bootstrap impossible -- the addon is enabled by
+        // writing editor_plugins/enabled, and until it is enabled there is no
+        // session to write it through (#382).
+        "project_set_setting"
     };
     static const std::unordered_set<std::string> live = {
         "scene_instantiate_node", "scene_remove_node", "scene_reparent_node",
@@ -45,7 +51,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "editor_reload_project", "script_attach_to_node", "script_detach_from_node",
         "project_list_autoloads", "project_set_autoload", "project_remove_autoload",
         "project_list_input_actions", "project_set_input_action", "project_remove_input_action",
-        "project_get_setting", "project_set_setting", "scene_list_groups",
+        "project_get_setting", "scene_list_groups",
         "scene_add_to_group", "scene_remove_from_group", "scene_get_group_members",
         "scene_create", "scene_open", "scene_close", "scene_pack_branch",
         "runtime_read_logs", "runtime_read_output", "runtime_set_paused", "runtime_step", "runtime_stop",

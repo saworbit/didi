@@ -177,6 +177,7 @@ set(CORE_SOURCES
     src/offline/project_impact.cpp
     src/offline/project_text_scan.cpp
     src/offline/project_search.cpp
+    src/offline/project_settings_file.cpp
     src/offline/test_runner.cpp
     src/offline/process_runner.cpp
     src/offline/deep_domain_support.cpp
@@ -359,6 +360,7 @@ set(TEST_SOURCES
     tests/test_blackboard.cpp
     tests/test_blackboard_resources.cpp
     tests/test_project_search.cpp
+    tests/test_project_settings_file.cpp
     tests/test_image_diff.cpp
     tests/test_test_runner.cpp
     tests/test_phase5.cpp

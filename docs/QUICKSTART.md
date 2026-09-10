@@ -66,6 +66,20 @@ The addon is assembled in the build directory rather than in the source tree, so
 > Claude Code and Cursor, whose configuration lives inside the project, it can write the file.
 > The rest of this page is the same thing done by hand.
 
+> **No keyboard? Steps 2 to 4 have a tool route.** An agent handed a project path and an MCP
+> endpoint has no box to tick, so `project_set_setting` writes `project.godot` directly when no
+> editor session is attached:
+>
+> ```json
+> { "setting": "editor_plugins/enabled", "value": ["res://addons/didi/plugin.cfg"] }
+> ```
+>
+> Copy the built `addons/didi` folder in first; that copy is a filesystem step and is not part of
+> the tool surface. The call returns `execution_mode: "offline_fallback"` and nothing has loaded
+> the value yet, so start Godot afterwards and attach with `runtime_attach_session`. Close any
+> editor already open on the project before writing, because saving its own settings would
+> overwrite the file.
+
 ---
 
 ## 🤖 Step 3: Connect Your AI Assistant
