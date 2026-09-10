@@ -265,9 +265,15 @@ void removeEngineOutputLogger() {
     // describing it goes away, or a later log line calls into freed code.
     if (g_logger_object) {
         callOsLogger("remove_logger", g_logger_object);
-        // Release the reference taken at install. When this drops the count to
-        // zero the engine destroys the object and calls freeInstance.
-        callRefCounted(g_logger_object, "unreference");
+        // Release the reference taken at install. unreference() only decrements:
+        // Godot documents its return as "true if the object should be freed
+        // after the decrement", and freeing is the caller's job, which is what
+        // Ref<T>::unref does. Dropping the count and walking away left the
+        // instance in ObjectDB, so every clean engine exit reported one leaked
+        // instance with no class name, its class already unregistered below.
+        if (callRefCounted(g_logger_object, "unreference") && api.object_destroy) {
+            api.object_destroy(g_logger_object);
+        }
         g_logger_object = nullptr;
     }
     if (g_class_registered && api.classdb_unregister_extension_class && api.getLibrary()) {
