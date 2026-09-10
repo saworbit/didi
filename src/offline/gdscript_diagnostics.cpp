@@ -186,10 +186,14 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& fi
         };
 
         for (const auto& kw : block_keywords) {
+            // "else" carries no trailing space, so it needs the whole-token
+            // test the other keywords get for free: the line has to start with
+            // "else" and then end or continue with a colon or a space.
             const bool keyword_matches = kw == "else"
-                ? (trimmed == "else" ||
-                   (trimmed.size() > 4 &&
-                    (trimmed[4] == ':' || std::isspace(static_cast<unsigned char>(trimmed[4])))))
+                ? (strings::startsWith(trimmed, "else") &&
+                   (trimmed.size() == 4 ||
+                    trimmed[4] == ':' ||
+                    std::isspace(static_cast<unsigned char>(trimmed[4]))))
                 : strings::startsWith(trimmed, kw);
             if (keyword_matches) {
                 // If statement doesn't end with : and no trailing comment
