@@ -110,6 +110,7 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   Omitting `target_resource_path` rendered the template with the placeholder
   collapsed to `res://`, handing an agent an instruction to diagnose the whole
   project. It is an invalid-params error naming the argument.
+
 - A confirmation token is no longer consumed by an attempt that failed its own
   binding check (#398). The token was erased from the map before expiry and
   argument binding were checked, so one mistyped argument burned the token the
