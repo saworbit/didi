@@ -68,6 +68,44 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `tools/call` now checks the `inputSchema` each tool publishes before anything
+  dispatches (#397). The schemas were advisory: `additionalProperties: false`
+  was not applied, so `blackboard_read` accepted an argument it does not have,
+  and `required` was not applied, so `project_get_setting` with no `setting`
+  failed downstream as a `503` transport error. Every handler re-derived its own
+  checks by hand, so coverage was uneven. One check now reads the published
+  schema and refuses with a message naming the property; handler checks stay as
+  a second line of defence. Two of this project's own tests were calling tools
+  with argument names the schemas do not have, and passing.
+
+- `scene_add_to_group` and `scene_remove_from_group` no longer target the edited
+  scene root when `target_node` is missing (#396). Both declare it required, and
+  omitting it added the group to whatever the editor had open, reported success,
+  and left a mutation on a node the caller never named. A missing required
+  argument is now refused before the request reaches the editor.
+
+- A wrong argument type no longer reads as a server fault (#400). `max_depth`
+  given a string came back as `Internal error executing tool:
+  [json.exception.type_error.302] ...` and logged at ERROR. Declared types are
+  refused up front by name; anything the schema leaves open is reported as the
+  caller mistake it is, without quoting a C++ library.
+
+- Live Phase 7 tools no longer answer a bad argument with only a machine token
+  (#406). `invalid_signal_list_connections_request` and its siblings said
+  nothing about which property was wrong. The schema check runs first and names
+  it; the token stays in `data` as a stable machine code.
+
+- `dry_run` no longer mints a confirmation token for arguments the tool would
+  refuse (#399). The preview path skipped argument validation, so a call naming
+  `new_body` instead of `new_definition` was previewed, signed, and then
+  rejected on execution. The preview runs through the same check, so a token
+  exists only for a call that could have run.
+
+- `prompts/get` now requires the arguments `prompts/list` marks required (#402).
+  Omitting `target_resource_path` rendered the template with the placeholder
+  collapsed to `res://`, handing an agent an instruction to diagnose the whole
+  project. It is an invalid-params error naming the argument.
+
 - `runtime_attach_session` no longer attaches a session belonging to a different
   project than the server's root (#387). Automatic selection has always required
   the project paths to match; naming a session skipped the check, so a server
