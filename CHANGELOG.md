@@ -38,6 +38,17 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   parse error beside an autoload one keeps `has_errors: true`. `script_create`
   and `script_patch_method` surface the same check and get the same treatment.
 
+- Didi can now enable its own addon in a project that does not have it (#382).
+  Every `project_*` writer was live-only, a live session needs the addon, and
+  enabling the addon is a `project_set_setting` write, so the first call an
+  agent makes in a new project was the one call it could never make.
+  `project_set_setting` now falls back to writing `project.godot` directly when
+  no session is attached, reporting `execution_mode: "offline_fallback"` and
+  the literal it wrote. The value reach and the name rules are the live ones,
+  so a setting written offline is the Variant a live write would have stored.
+  QUICKSTART and LLM_INSTRUCTIONS now carry the bootstrap as a tool sequence
+  rather than only as a sequence of clicks.
+
 - The extension no longer leaks one ObjectDB instance on a clean engine exit
   (#373). Its engine output logger is a `RefCounted`, and shutdown dropped the
   reference taken at install without freeing what that drop released. Godot
