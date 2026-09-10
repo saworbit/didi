@@ -88,8 +88,8 @@ Assembled from sources that already exist. Nothing here is a new measurement.
 
 | Panel | Source | Light |
 | :--- | :--- | :--- |
-| **Bridge** | `acquireRuntimeRouteLease`, session descriptors | Green: connected and verified. Amber: descriptors present, none selected, or wrong kind. Red: none. |
-| **Project** | Launch arguments, `project.godot` | Green: canonical root resolved and still present. Amber: resolved at startup but no longer readable. |
+| **Bridge** | `acquireRuntimeRouteLease`, session descriptors | Green: connected and verified. Amber: a descriptor for **this project** is published and none selected, or wrong kind. Red: none for this project. Descriptors are counted per project root, because a session belonging to another project is not one this server can use, and telling the caller to attach it is what produces a cross-project attach. |
+| **Project** | Launch arguments, `project.godot`, `addons/didi` | Green (`Ready`): root resolved, `addons/didi/didi.gdextension` present, and `project.godot` lists the plugin under `editor_plugins/enabled`. Amber: root no longer readable, no addon in this project, or addon present but not enabled, each with its own fix. Both addon checks are stats, so they answer in exactly the state where no live route can exist. |
 | **Surface** | `ToolRegistry::buildManifest()` plus per-tool `currentMode` | Per row, not per panel. |
 | **Safety** | `MutationSafety`, `m_skipConfirmations`, managed-recovery state | Green: confirmations enforced. Amber: managed mode's automatic restart is armed. Red: confirmations skipped. |
 | **Work** | A plain stat for a blackboard file | Informational: present, or not. |

@@ -154,6 +154,65 @@ TEST(Phase6, RuntimeSessionLockIsExclusiveAndReleasedByRaii) {
     ASSERT_TRUE(replacement.isOk());
 }
 
+// Break caught: naming a session explicitly skipped the project check that
+// auto-selection has always applied, so a server started on project B would
+// attach project A's editor and serve its scene tree, with mutations routed
+// there too (#387).
+TEST(Phase6, AttachRefusesASessionFromAnotherProjectUnlessAsked) {
+    ScopedPhase6Directory directory("foreign-project");
+    const auto session_directory = directory.root / "sessions";
+    const auto other_project = directory.root / "other";
+    const auto this_project = directory.root / "mine";
+    std::filesystem::create_directories(session_directory);
+    std::filesystem::create_directories(other_project);
+    std::filesystem::create_directories(this_project);
+#if defined(_WIN32)
+    _putenv_s("DIDI_SESSION_DIR", session_directory.string().c_str());
+#else
+    setenv("DIDI_SESSION_DIR", session_directory.string().c_str(), 1);
+#endif
+    didi::godot::SessionHost host;
+    ASSERT_TRUE(host.prepare("editor", other_project.string()).isOk());
+    ASSERT_TRUE(host.publish().isOk());
+    const auto descriptor = host.descriptor();
+    ASSERT_TRUE(descriptor.has_value());
+    auto factory = [descriptor] {
+        return std::make_unique<Phase6RuntimeClient>(*descriptor);
+    };
+
+    auto client = didi::runtime::createRuntimeSessionClient(this_project.string(), factory);
+    const auto refused = client->attachSession(descriptor->session_id);
+    ASSERT_TRUE(refused.isErr());
+    ASSERT_EQ(refused.error().code, 409);
+    // The error has to name both paths, or the caller cannot tell which of the
+    // two is the one they got wrong.
+    ASSERT_TRUE(refused.error().message.find("different project") != std::string::npos);
+    ASSERT_TRUE(refused.error().data.contains("session_project_path"));
+    ASSERT_TRUE(refused.error().data.contains("server_project_root"));
+
+    // Explicit intent still works, and says loudly what it did.
+    const auto allowed = client->attachSession(descriptor->session_id, true);
+    ASSERT_TRUE(allowed.isOk());
+    ASSERT_TRUE(allowed.value().value("project_mismatch", false));
+    ASSERT_TRUE(!allowed.value().value("limitation", std::string()).empty());
+    client->disconnect();
+
+    // A session for this server's own project is untouched by any of it.
+    didi::godot::SessionHost local;
+    ASSERT_TRUE(local.prepare("editor", this_project.string()).isOk());
+    ASSERT_TRUE(local.publish().isOk());
+    const auto local_descriptor = local.descriptor();
+    ASSERT_TRUE(local_descriptor.has_value());
+    auto local_factory = [local_descriptor] {
+        return std::make_unique<Phase6RuntimeClient>(*local_descriptor);
+    };
+    auto matched = didi::runtime::createRuntimeSessionClient(this_project.string(), local_factory);
+    const auto attached = matched->attachSession(local_descriptor->session_id);
+    ASSERT_TRUE(attached.isOk());
+    ASSERT_FALSE(attached.value().value("project_mismatch", false));
+    matched->disconnect();
+}
+
 TEST(Phase6, RuntimeSessionClientsEnforceOneOwnerAndRecoverAfterDetach) {
     ScopedPhase6Directory directory("client-lock");
     const auto session_directory = directory.root / "sessions";

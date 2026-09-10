@@ -7,10 +7,36 @@
 #include "didi/offline/blackboard.hpp"
 
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 namespace didi {
 namespace mcp {
+
+// Whether project.godot lists the Didi plugin under editor_plugins/enabled.
+//
+// A substring match on the whole file would be wrong twice over: the string
+// appears in a comment or a different section just as readily, and the section
+// is what makes it mean anything. So this walks to [editor_plugins] and reads
+// only the enabled line. A read that fails answers false, which is the safe
+// direction: the light says check the addon rather than saying it is ready.
+bool didiPluginEnabledIn(const std::filesystem::path& root) {
+    std::ifstream input(root / "project.godot", std::ios::binary);
+    if (!input.is_open()) return false;
+    std::string line;
+    bool in_section = false;
+    while (std::getline(input, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        const auto text = strings::trim(line);
+        if (!text.empty() && text.front() == '[') {
+            in_section = text == "[editor_plugins]";
+            continue;
+        }
+        if (!in_section || text.rfind("enabled", 0) != 0) continue;
+        return text.find("res://addons/didi/plugin.cfg") != std::string::npos;
+    }
+    return false;
+}
 
 // The session list a client would get from runtime_list_sessions.
 //
@@ -81,6 +107,13 @@ CallToolResult handleControlRoom(const json& args, const std::shared_ptr<ipc::II
     if (!error) {
         inputs.project_root = paths::nativePathToUtf8(cwd);
         inputs.project_readable = std::filesystem::exists(cwd / "project.godot", error) && !error;
+        // The prerequisite for every live tool, answered from the filesystem so
+        // it answers when nothing is attached. The .gdextension file rather than
+        // the folder: a folder someone half-copied is not an installed addon.
+        inputs.addon_present =
+            std::filesystem::is_regular_file(cwd / "addons" / "didi" / "didi.gdextension", error) &&
+            !error;
+        inputs.addon_enabled = inputs.addon_present && didiPluginEnabledIn(cwd);
     } else {
         inputs.project_readable = false;
     }
@@ -101,6 +134,16 @@ CallToolResult handleControlRoom(const json& args, const std::shared_ptr<ipc::II
 
     inputs.sessions = gatherSessions(sessions);
     inputs.descriptors_present = !inputs.sessions.empty();
+    // Scoped to this project, because a session belonging to some other project
+    // is not a session this server can use.
+    for (const auto& session : inputs.sessions) {
+        if (paths::normalizedProjectPath(
+                paths::projectPathFromUtf8(session.descriptor.project_path)) ==
+            paths::normalizedProjectPath(paths::projectPathFromUtf8(inputs.project_root))) {
+            inputs.descriptors_for_this_project = true;
+            break;
+        }
+    }
 
     inputs.skip_confirmations = skip_confirmations;
     inputs.managed_recovery_armed = managed_recovery_armed;
