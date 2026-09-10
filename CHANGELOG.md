@@ -26,6 +26,17 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Added
 
+- `viewport_capture_frame` can select the editor main screen it needs (#381). An
+  editor viewport has no size unless its main screen is the one showing, so the
+  capture refused with a message telling the caller to switch to it in the
+  editor, which is the one thing an unattended agent could not do and no tool
+  could do for it. `select_main_screen: true` now selects the screen the
+  `camera_identifier` belongs to, waits the frame the control layout needs,
+  captures, and puts the previous screen back. The result reports
+  `main_screen_selected`, `main_screen_restored` and `previous_main_screen`; a
+  main screen an addon contributes cannot be named back, and that is stated
+  rather than implied. Default behaviour is unchanged.
+
 - `resource_create` can express a reference to another resource, so the
   composite resources are authorable at last (#380). A property value of
   `{"type": "ExtResource", "path": "res://..."}` becomes an `[ext_resource]`
@@ -263,17 +274,6 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   against it, rather than by reading the diff. The diff is one line.
 
 ### Added
-
-- `viewport_capture_frame` can select the editor main screen it needs (#381). An
-  editor viewport has no size unless its main screen is the one showing, so the
-  capture refused with a message telling the caller to switch to it in the
-  editor, which is the one thing an unattended agent could not do and no tool
-  could do for it. `select_main_screen: true` now selects the screen the
-  `camera_identifier` belongs to, waits the frame the control layout needs,
-  captures, and puts the previous screen back. The result reports
-  `main_screen_selected`, `main_screen_restored` and `previous_main_screen`; a
-  main screen an addon contributes cannot be named back, and that is stated
-  rather than implied. Default behaviour is unchanged.
 
 - A field trial can be run unattended. `tools/field-trial/trial.py` seeds the
   working directory, briefs a fresh tester in its own client session, and scores

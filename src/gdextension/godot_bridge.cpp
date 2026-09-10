@@ -1787,6 +1787,9 @@ void GodotBridge::processDeferredReindexFrame() {
         }
         DIDI_LOG_INFO("GODOT_BRIDGE", "Indexed ", path, " after the editor filesystem settled");
     }
+}
+
+namespace {
 
 // What Godot calls the main screen a given editor class belongs to.
 //
