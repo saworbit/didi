@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -17,6 +18,10 @@ public:
     const PromptDefinition* getPrompt(const std::string& name) const;
     std::vector<PromptDefinition> listPrompts() const;
     Result<json> getPromptResult(const std::string& name, const json& args);
+
+    // The first required argument the caller left out, if any.
+    std::optional<std::string> missingRequiredArgument(const std::string& name,
+                                                       const json& args) const;
 
     void registerAllDefaultPrompts();
 

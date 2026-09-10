@@ -6,6 +6,7 @@
 #include "didi/common/project_path.hpp"
 #include "didi/tools/resolved_tool_binding.hpp"
 #include "didi/mcp/phase7_schemas.hpp"
+#include "didi/mcp/schema_validation.hpp"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -883,6 +884,20 @@ std::optional<CallToolResult> ToolRegistry::selectNamedRuntimeRoute(
     return std::nullopt;
 }
 
+// The shape the rest of the surface already uses for a caller mistake: a
+// sentence a person or an agent can act on, plus a stable machine code beside
+// it rather than instead of it (#406).
+static CallToolResult invalidArgumentsError(const ResolvedToolBinding& binding,
+                                            const std::string& message) {
+    return CallToolResult::error(json{{"error", {
+        {"code", 400},
+        {"message", message},
+        {"data", {{"tool", binding.invoked_name},
+                  {"canonical_tool", binding.canonical_name},
+                  {"code", "invalid_arguments"},
+                  {"retryable", false}}}}}}.dump());
+}
+
 CallToolResult ToolRegistry::callTool(const std::string& name, const json& arguments,
                                       const RequestScope& scope) {
     const auto binding = resolveAliasBinding(name, arguments);
@@ -895,6 +910,13 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
     }
     if (!tool->capability.implemented) {
         return CallToolResult::error("Tool '" + name + "' is unimplemented: " + tool->capability.reason);
+    }
+    // The schema this tool publishes is what the caller was told it accepts, so
+    // it is checked here, once, before anything dispatches. Every route into a
+    // handler comes through this function, including the dry-run preview and a
+    // confirmed mutation, so nothing gets a second door (#397).
+    if (auto invalid = validateAgainstSchema(tool->inputSchema, arguments)) {
+        return invalidArgumentsError(binding, *invalid);
     }
     const bool recovery_tool = name == "runtime_checkpoint" || name == "runtime_recovery_status" || name == "runtime_restore_checkpoint" || name == "runtime_recover_editor";
     if (m_recovery) {
@@ -1079,6 +1101,18 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
                 }
             }
         }
+        return protected_mutation ? finish(std::move(result)) : std::move(result);
+    } catch (const json::type_error& e) {
+        // A handler read an argument at a type the value does not have. The
+        // schema check above names the property whenever the schema pins its
+        // type, so what lands here is a property the schema left open. That is
+        // still a caller mistake, not a fault in the server, and it should not
+        // read like one or quote a C++ library at the client (#400).
+        DIDI_LOG_WARN("TOOL_EXEC", "Wrong argument type calling tool '", name, "': ", e.what());
+        auto result = invalidArgumentsError(
+            binding, "An argument to '" + name +
+                         "' has the wrong type. Check the property types in this tool's "
+                         "inputSchema from tools/list.");
         return protected_mutation ? finish(std::move(result)) : std::move(result);
     } catch (const std::exception& e) {
         DIDI_LOG_ERROR("TOOL_EXEC", "Exception calling tool '", name, "': ", e.what());
