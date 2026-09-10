@@ -845,6 +845,16 @@ Key events may use `keycode`, `physical_keycode`, or `unicode` and optional `shi
 - `project_get_setting`: requires slash-delimited `setting`; missing settings and unsupported Godot Variant types are errors.
 - `project_set_setting`: requires `setting` and either `value` or `remove: true`, but not both. Values support JSON null, booleans, signed integers, finite reals, strings, arrays, and string-keyed dictionaries up to 16 levels. Writes to `autoload/*` and `input/*` are rejected in favor of typed tools.
 
+`project_set_setting` is the one project writer with an offline route. With an editor attached it goes through `ProjectSettings` as before. With no session attached it edits `project.godot` directly and reports `execution_mode: "offline_fallback"`, `written_to`, `section`, `key`, `value_written`, `previous_value` when it replaced one, plus `section_created` and `replaced_existing`. The same name rules and the same value reach apply in both modes, so a value written offline is the Variant a live write would have stored.
+
+That route exists for one reason: enabling the Didi addon is itself a `project_set_setting` write to `editor_plugins/enabled`, and until the addon is enabled there is no session to write it through. Use it to bootstrap a project:
+
+```json
+{ "setting": "editor_plugins/enabled", "value": ["res://addons/didi/plugin.cfg"] }
+```
+
+Copy the built `addons/didi` folder into the project first; that copy is a filesystem step and is not part of the tool surface. Nothing has loaded the value when the call returns, so start Godot afterwards and attach. If a Godot editor is already running on the project without the addon, close it before writing, because saving its own settings would overwrite the file.
+
 ### Scene groups
 
 - `scene_list_groups`: requires `target_node` and returns sorted group names.
