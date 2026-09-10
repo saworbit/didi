@@ -128,6 +128,20 @@ struct ControlRoomInputs {
     // Whether the extension published any descriptor at all, which is what
     // separates "no editor running" from "editor running, not attached".
     bool descriptors_present{false};
+    // Whether any of those descriptors belongs to this server's project root.
+    //
+    // Separate from descriptors_present because they answer different
+    // questions, and conflating them made the dashboard tell a project with no
+    // addon to "attach one" whenever an unrelated project happened to have an
+    // editor open (#388). Following that instruction is what produces a
+    // cross-project attach.
+    bool descriptors_for_this_project{false};
+
+    // The filesystem preflight for the addon this project needs. Both are plain
+    // stats and neither needs a live route, so they answer even in the state
+    // where nothing else can.
+    bool addon_present{false};
+    bool addon_enabled{false};
 
     std::vector<ControlRoomSession> sessions;
     std::optional<std::string> selected_session_id;

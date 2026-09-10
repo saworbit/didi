@@ -224,6 +224,20 @@ public:
     // Selects a session for the process. Sticky, and what the legacy
     // `runtime_attach_session` tool has always done.
     virtual Result<json> attachSession(const std::string& session_id) = 0;
+
+    // Attaching a session that belongs to a different project than the one this
+    // server was started on.
+    //
+    // Auto-selection has always required the project paths to match, but naming
+    // a session explicitly skipped that check, so a server pointed at project B
+    // would happily serve project A's scene tree and route mutations into it
+    // (#387). Refusing is the default; the flag is the caller saying they mean
+    // it. Implementations that do not route by project ignore it.
+    virtual Result<json> attachSession(const std::string& session_id,
+                                       bool allow_foreign_project) {
+        (void)allow_foreign_project;
+        return attachSession(session_id);
+    }
     virtual Result<json> detachSession() = 0;
 
     // Holds a route to one session without changing the process selection.

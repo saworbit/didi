@@ -103,9 +103,18 @@ json bridgeLight(const ControlRoomInputs& in) {
                      in.selected_session_id.value_or(""),
                      "A route is selected but did not produce an authenticated lease.");
     }
-    if (in.descriptors_present) {
+    if (in.descriptors_for_this_project) {
         return light("Bridge", "warn", "Detached", "",
-                     "Godot published a session and no route is selected. Attach one.");
+                     "Godot published a session for this project and no route is selected. "
+                     "Attach one.");
+    }
+    // Sessions exist, but for other projects. Saying "attach one" here sends the
+    // caller into an attach that would serve a different project's scene tree.
+    if (in.descriptors_present) {
+        return light("Bridge", "bad", "No session", "",
+                     "No published descriptor for this project. Other projects have sessions "
+                     "open; attaching one of those would read and write that project, not this "
+                     "one. Start Godot on this project with the Didi addon enabled.");
     }
     return light("Bridge", "bad", "No session", "",
                  "No published descriptor. Start Godot with the Didi addon enabled.");
@@ -123,12 +132,30 @@ json safetyLight(const ControlRoomInputs& in) {
     return light("Safety", "ok", "Confirmations enforced", "", "");
 }
 
+// The project light. Selected is not the same as ready.
+//
+// A project that has never had the addon installed read as green, so the one
+// thing standing between the caller and every live tool was the one thing the
+// dashboard did not mention (#388). Both checks below are stats on files this
+// server can already see, so they work in exactly the state where no live route
+// can exist.
 json projectLight(const ControlRoomInputs& in) {
     if (!in.project_readable) {
         return light("Project", "warn", "Root unreadable", in.project_root,
                      "The root resolved at startup is no longer readable.");
     }
-    return light("Project", "ok", "Selected", in.project_root, "");
+    if (!in.addon_present) {
+        return light("Project", "warn", "No addon", in.project_root,
+                     "This project has no addons/didi. Copy the built build/addons/didi folder "
+                     "into the project root, then enable the plugin.");
+    }
+    if (!in.addon_enabled) {
+        return light("Project", "warn", "Addon not enabled", in.project_root,
+                     "addons/didi is present but project.godot does not list it under "
+                     "editor_plugins/enabled. Enable it in Project Settings, or call "
+                     "project_set_setting with editor_plugins/enabled.");
+    }
+    return light("Project", "ok", "Ready", in.project_root, "");
 }
 
 json workLight(const ControlRoomInputs& in) {

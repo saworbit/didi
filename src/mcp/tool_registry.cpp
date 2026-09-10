@@ -1242,7 +1242,9 @@ void ToolRegistry::registerAllDefaultTools() {
         t.inputSchema = {{"type", "object"}, {"properties", {
             {"session_id", {{"type", "string"}, {"description", "Exact lowercase 32-hex discovered session ID"},
                             {"minLength", 32}, {"maxLength", 32},
-                            {"pattern", "^[0-9a-f]{32}$"}}}
+                            {"pattern", "^[0-9a-f]{32}$"}}},
+            {"allow_foreign_project", {{"type", "boolean"}, {"default", false},
+                                       {"description", "Attach a session whose editor has a different project open than this server's root. Refused without it, because every live call would then read and write that other project."}}}
         }}, {"required", {"session_id"}}};
         t.handler = [this](const json& args) { return handleRuntimeAttachSession(args, m_runtimeSessionClient); };
         registerTool(std::move(t));
