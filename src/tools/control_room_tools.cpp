@@ -26,7 +26,7 @@ bool didiPluginEnabledIn(const std::filesystem::path& root) {
     std::string line;
     bool in_section = false;
     while (std::getline(input, line)) {
-        if (!line.empty() && line.back() == '') line.pop_back();
+        if (!line.empty() && line.back() == '\r') line.pop_back();
         const auto text = strings::trim(line);
         if (!text.empty() && text.front() == '[') {
             in_section = text == "[editor_plugins]";
