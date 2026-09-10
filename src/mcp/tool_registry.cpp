@@ -2231,8 +2231,11 @@ void ToolRegistry::registerAllDefaultTools() {
                      "choose the type yourself, give the object a \"type\": Vector2i, Vector3i, "
                      "Vector4i, Quaternion and Color take their components; NodePath and StringName "
                      "take their text under \"value\"; the packed arrays take their elements under "
-                     "\"values\". A type this cannot write is refused, and so is a SubResource, "
-                     "which has no representation here."},
+                     "\"values\". A property can also point at another resource: {\"type\": "
+                     "\"ExtResource\", \"path\": \"res://art/tiles.png\"} references a file in "
+                     "the project, and {\"type\": \"SubResource\", \"id\": \"Atlas_1\"} "
+                     "references an entry of sub_resources declared above it. A type this cannot "
+                     "write is refused rather than guessed at."},
                     {"oneOf", json::array({
                         json{{"type", "object"}},
                         json{{"type", "array"},
@@ -2242,6 +2245,23 @@ void ToolRegistry::registerAllDefaultTools() {
                                                         {"value", json::object()}}},
                                         {"required", json::array({"name", "value"})}}}}
                     })}
+                }},
+                {"sub_resources", {
+                    {"description",
+                     "The [sub_resource] blocks this resource carries inside itself, in the order "
+                     "they should appear. Each entry is {id, resource_type, properties}, and its "
+                     "properties follow exactly the same rules as the top-level ones. A property "
+                     "anywhere in the file names one with {\"type\": \"SubResource\", \"id\": "
+                     "...}, and only an id declared earlier can be named, because Godot resolves a "
+                     "SubResource against what it has already read. load_steps is computed from "
+                     "these and the external references; do not pass it."},
+                    {"type", "array"},
+                    {"maxItems", 64},
+                    {"items", {{"type", "object"},
+                               {"properties", {{"id", {{"type", "string"}, {"minLength", 1}}},
+                                               {"resource_type", {{"type", "string"}, {"minLength", 1}}},
+                                               {"properties", json::object()}}},
+                               {"required", json::array({"id", "resource_type"})}}}
                 }},
                 {"overwrite", {{"type", "boolean"}, {"default", false}}}
             }},
