@@ -38,10 +38,20 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   Windows that launch reaches the antivirus filter driver before it fails, and
   behind the native suite's thirty thousand freshly written files it stopped
   coming back: a 1.8.0 release attempt sat in that one call for thirty-four
-  minutes with a flat processor and one line of log. The tests now refuse the
-  launch themselves, with the same error the operating system would have
-  returned, and both probes carry a timeout, because a probe documented as
-  never fatal must not be able to take the whole seed with it.
+  minutes with a flat processor and one line of log.
+
+  The module refuses those launches itself now, raising what the operating
+  system would have raised, so every outcome is unchanged and nothing is
+  spawned. The rule is the path rather than the name: anything under the system
+  temporary directory was put there by a fixture in that file and is not a
+  program, while `git` never is, so the tests that shell out to a real one are
+  untouched. It is one guard for the whole module because there are three such
+  fixtures and fixing the first one only moved the stall to the third.
+
+  Both probes also carry a timeout, which is a different fault. `subprocess`
+  bounds the wait for a child that started; a block inside `_execute_child` is
+  the child never starting, and no argument reaches it. The timeout is there for
+  a server that answers slowly, not for this.
 
 - `ctest` says where it stopped. Both suites carry a timeout below the release
   job's own, and the Python suite runs unbuffered and verbose, so a run that
