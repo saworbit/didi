@@ -385,7 +385,7 @@ TEST(Phase6, RegistryDryRunNeverDispatchesMutationHandler) {
     registry.setIpcClient(client);
     const auto result = registry.callTool(
         "scene_set_property",
-        {{"target_node", "/root/Player"}, {"property", "visible"},
+        {{"target_node", "/root/Player"}, {"property_name", "visible"},
          {"value", false}, {"dry_run", true}});
     ASSERT_FALSE(result.isError);
     ASSERT_EQ(client->requests, 0);

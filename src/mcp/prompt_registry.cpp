@@ -29,6 +29,25 @@ std::vector<PromptDefinition> PromptRegistry::listPrompts() const {
     return list;
 }
 
+// prompts/list publishes which arguments are required, so an omission is a
+// caller mistake and gets said out loud. Rendering the template anyway
+// collapsed the placeholder to its default and handed an agent a prompt telling
+// it to diagnose "res://", the whole project (#402).
+std::optional<std::string> PromptRegistry::missingRequiredArgument(
+    const std::string& name, const json& args) const {
+    const auto* prompt = getPrompt(name);
+    if (!prompt) return std::nullopt;
+    for (const auto& argument : prompt->arguments) {
+        if (!argument.required) continue;
+        if (args.is_object() && args.contains(argument.name) &&
+            !args[argument.name].is_null()) {
+            continue;
+        }
+        return argument.name;
+    }
+    return std::nullopt;
+}
+
 Result<json> PromptRegistry::getPromptResult(const std::string& name, const json& args) {
     auto prompt = getPrompt(name);
     if (!prompt) {

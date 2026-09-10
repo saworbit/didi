@@ -1403,7 +1403,6 @@ void test_wrong_kind_tool_dispatch_is_rejected_before_ipc() {
     registry.setIpcClient(game);
 
     size_t rejected_editor_tools = 0;
-    bool rejected_viewport = false;
     for (const auto& definition : registry.listTools()) {
         const bool supports_live = std::find(definition.capability.modes.begin(),
                                              definition.capability.modes.end(), "live") !=
@@ -1415,24 +1414,49 @@ void test_wrong_kind_tool_dispatch_is_rejected_before_ipc() {
         game->last_method.clear();
         const auto result = registry.callTool(definition.name, didi::json::object());
         ASSERT_TRUE(result.isError);
+        ASSERT_TRUE(game->last_method.empty());
+        ++rejected_editor_tools;
         const auto value = payload(result);
+        // Empty arguments do not satisfy every tool's published schema, and
+        // that check now runs first. Either refusal keeps the call away from
+        // the game; only the kind rejection carries a route in its payload.
+        if (!value.contains("execution_mode")) continue;
         ASSERT_EQ(value["execution_mode"], "live");
         ASSERT_EQ(value["session"]["kind"], "game");
         ASSERT_EQ(value["error"]["code"], 409);
         ASSERT_EQ(value["error"]["data"]["allowed_session_kinds"],
                   didi::json::array({"editor"}));
-        ASSERT_TRUE(game->last_method.empty());
-        ++rejected_editor_tools;
-        if (definition.name == "viewport_set_camera_transform") rejected_viewport = true;
     }
     ASSERT_TRUE(rejected_editor_tools >= 20);
-    ASSERT_TRUE(rejected_viewport);
+
+    // One editor-only tool called with arguments its schema accepts, so the
+    // kind gate is what refuses it and the whole 409 shape is exercised.
+    game->last_method.clear();
+    const auto camera = registry.callTool(
+        "viewport_set_camera_transform",
+        didi::json{{"camera_path", "/root/Main/Camera3D"},
+                   {"position", {{"x", 0.0}, {"y", 1.0}, {"z", 2.0}}}});
+    ASSERT_TRUE(camera.isError);
+    ASSERT_TRUE(game->last_method.empty());
+    const auto camera_payload = payload(camera);
+    ASSERT_EQ(camera_payload["execution_mode"], "live");
+    ASSERT_EQ(camera_payload["session"]["kind"], "game");
+    ASSERT_EQ(camera_payload["error"]["code"], 409);
+    ASSERT_EQ(camera_payload["error"]["data"]["allowed_session_kinds"],
+              didi::json::array({"editor"}));
 
     auto editor = std::make_shared<RoutedFake>("editor");
     registry.setIpcClient(editor);
-    for (const auto& name : {"runtime_set_paused", "runtime_step", "runtime_stop"}) {
+    // Game-only controls, each called with arguments its schema accepts, so
+    // the 409 under test is the kind gate and not the argument check.
+    for (const auto& call : {didi::json{{"tool", "runtime_set_paused"},
+                                        {"args", {{"paused", true}}}},
+                             didi::json{{"tool", "runtime_step"},
+                                        {"args", {{"frames", 1}}}},
+                             didi::json{{"tool", "runtime_stop"},
+                                        {"args", {{"exit_code", 0}}}}}) {
         editor->last_method.clear();
-        const auto control = registry.callTool(name, didi::json::object());
+        const auto control = registry.callTool(call["tool"].get<std::string>(), call["args"]);
         ASSERT_TRUE(control.isError);
         ASSERT_EQ(payload(control)["error"]["code"], 409);
         ASSERT_TRUE(editor->last_method.empty());
@@ -1653,7 +1677,11 @@ void test_provider_only_routes_are_kind_gated_and_fail_closed() {
 
     auto game = std::make_shared<ProviderOnlyFake>(descriptorFor("game"));
     registry.setIpcClient(game);
-    const auto wrong_kind = registry.callTool("viewport_set_camera_transform", didi::json::object());
+    // Arguments the published schema accepts, so what this exercises is the
+    // session-kind gate rather than the argument check that now runs first.
+    const didi::json camera_move{{"camera_path", "/root/Main/Camera3D"},
+                                 {"position", {{"x", 0.0}, {"y", 1.0}, {"z", 2.0}}}};
+    const auto wrong_kind = registry.callTool("viewport_set_camera_transform", camera_move);
     ASSERT_TRUE(wrong_kind.isError);
     const auto wrong_kind_payload = payload(wrong_kind);
     ASSERT_EQ(wrong_kind_payload["execution_mode"], "live");

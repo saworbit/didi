@@ -1046,6 +1046,101 @@ static void test_mcp_control_room_still_answers_without_the_ui_extension() {
     ASSERT_TRUE(response.result.contains("structuredContent"));
 }
 
+// The schema a tool publishes is the contract, and tools/call now holds the
+// server to it before anything dispatches (#397, #396, #400, #399).
+static void test_tools_call_enforces_the_published_input_schema() {
+    didi::mcp::McpServer server;
+    initializeServer(server);
+    didi::mcp::ToolRegistry::instance().registerAllDefaultTools();
+
+    const auto call = [&server](const std::string& tool, const didi::json& arguments) {
+        didi::mcp::JsonRpcRequest request;
+        request.id = 2;
+        request.method = "tools/call";
+        request.params = {{"name", tool}, {"arguments", arguments}};
+        return server.handleRequest(request);
+    };
+    const auto errorText = [](const didi::mcp::JsonRpcResponse& response) {
+        return response.result["content"][0]["text"].get<std::string>();
+    };
+
+    // additionalProperties: false is applied, and the message says what the
+    // tool does take instead of leaving the caller to diff the schema by eye.
+    const auto unknown = call("blackboard_read", {{"totally_unknown_arg", 5}});
+    ASSERT_TRUE(unknown.result["isError"].get<bool>());
+    ASSERT_TRUE(errorText(unknown).find("totally_unknown_arg") != std::string::npos);
+
+    // required is applied, and the refusal names the argument rather than
+    // failing downstream as a transport problem.
+    const auto missing = call("project_get_setting", didi::json::object());
+    ASSERT_TRUE(missing.result["isError"].get<bool>());
+    ASSERT_TRUE(errorText(missing).find("setting") != std::string::npos);
+    ASSERT_TRUE(errorText(missing).find("atomic runtime route") == std::string::npos);
+
+    // A mutation never picks its own target. Without target_node this used to
+    // reach the bridge and land the group on the edited scene root.
+    const auto unaimed = call("scene_add_to_group", {{"group", "enemies"}});
+    ASSERT_TRUE(unaimed.result["isError"].get<bool>());
+    ASSERT_TRUE(errorText(unaimed).find("target_node") != std::string::npos);
+
+    // A wrong argument type is a caller mistake, named as one, with no C++
+    // library in the text and no internal-error framing.
+    const auto wrong_type = call("get_scene_hierarchy",
+                                 {{"root_path", "res://main.tscn"}, {"max_depth", "banana"}});
+    ASSERT_TRUE(wrong_type.result["isError"].get<bool>());
+    const auto wrong_type_text = errorText(wrong_type);
+    ASSERT_TRUE(wrong_type_text.find("max_depth") != std::string::npos);
+    ASSERT_TRUE(wrong_type_text.find("json.exception") == std::string::npos);
+    ASSERT_TRUE(wrong_type_text.find("Internal error") == std::string::npos);
+
+    // A preview is only worth a token if the call it previews could run. This
+    // one names new_body, which is not a parameter, so no token is minted.
+    const auto preview = call("script_patch_method",
+                              {{"file_path", "res://player.gd"},
+                               {"method_name", "take_damage"},
+                               {"new_body", "func take_damage(): pass"},
+                               {"dry_run", true}});
+    ASSERT_TRUE(preview.result["isError"].get<bool>());
+    ASSERT_TRUE(errorText(preview).find("new_definition") != std::string::npos);
+    ASSERT_TRUE(preview.result.dump().find("confirmation_token") == std::string::npos);
+
+    // A call that satisfies the schema is not touched by any of this.
+    const auto allowed = call("blackboard_read", {{"board", "default"}});
+    ASSERT_TRUE(!allowed.result["isError"].get<bool>());
+
+    // Enforcing a schema that understates the tool is worse than not enforcing
+    // it. viewport_capture_passes draws a segmentation pass and its schema said
+    // three kinds, so this refuses a picture the engine takes.
+    const auto segmentation = call("viewport_capture_passes",
+                                   {{"passes", didi::json::array({"segmentation"})}});
+    ASSERT_TRUE(segmentation.result.dump().find("invalid_arguments") == std::string::npos);
+}
+
+// prompts/list says which arguments are required, so prompts/get means it
+// rather than rendering the placeholder away to res:// (#402).
+static void test_prompts_get_requires_the_arguments_it_publishes() {
+    didi::mcp::McpServer server;
+    initializeServer(server);
+
+    didi::mcp::JsonRpcRequest request;
+    request.id = 2;
+    request.method = "prompts/get";
+    request.params = {{"name", "godot_debug_visual_anomaly"},
+                      {"arguments", didi::json::object()}};
+    const auto response = server.handleRequest(request);
+    ASSERT_TRUE(response.error.has_value());
+    ASSERT_EQ(response.error->code, didi::mcp::JsonRpcErrorCode::InvalidParams);
+    ASSERT_TRUE(response.error->message.find("target_resource_path") != std::string::npos);
+
+    request.params = {{"name", "godot_debug_visual_anomaly"},
+                      {"arguments", {{"target_resource_path", "res://models/hero.glb"}}}};
+    const auto rendered = server.handleRequest(request);
+    ASSERT_TRUE(!rendered.error.has_value());
+    ASSERT_TRUE(rendered.result["messages"][0]["content"]["text"]
+                    .get<std::string>()
+                    .find("res://models/hero.glb") != std::string::npos);
+}
+
 struct RegisterJsonRpcTests {
     RegisterJsonRpcTests() {
         registerTest("JsonRpc.ParseValid", test_jsonrpc_parse_valid);
@@ -1056,6 +1151,10 @@ struct RegisterJsonRpcTests {
         registerTest("McpServer.ToolAvailability", test_mcp_tool_list_reports_current_availability);
         registerTest("McpServer.Phase7ParentGateAndAliasIdentity",
                      test_mcp_phase7_parent_gate_and_alias_identity);
+        registerTest("McpServer.EnforcesPublishedInputSchema",
+                     test_tools_call_enforces_the_published_input_schema);
+        registerTest("McpServer.PromptsGetRequiresPublishedArguments",
+                     test_prompts_get_requires_the_arguments_it_publishes);
         registerTest("McpServer.RejectsWrongParameterTypes", test_mcp_rejects_wrong_parameter_types);
         registerTest("McpServer.RejectsNonObjectArguments", test_mcp_rejects_non_object_arguments);
         registerTest("McpServer.RequestNotificationDoesNotExecuteTool",

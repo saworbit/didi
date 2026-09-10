@@ -852,6 +852,12 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         if (name.empty()) {
             return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams, "Prompt name is required");
         }
+        if (auto missing = PromptRegistry::instance().missingRequiredArgument(name, args)) {
+            return JsonRpcResponse::makeError(
+                req.id, JsonRpcErrorCode::InvalidParams,
+                "Prompt '" + name + "' requires the argument '" + *missing + "'.",
+                json{{"prompt", name}, {"argument", *missing}});
+        }
         auto p_res = PromptRegistry::instance().getPromptResult(name, args);
         if (p_res.isErr()) {
             return makeApplicationError(req.id, p_res.error());

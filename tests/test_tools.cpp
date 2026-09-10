@@ -125,6 +125,18 @@ private:
     std::filesystem::path m_root;
 };
 
+// A bad argument is refused either by the published schema, which is checked
+// once before dispatch, or by the handler's own check when the schema does not
+// pin that constraint. Both are argument errors and neither reaches a session,
+// so which one speaks is not what these tests are about.
+static bool refusedTheArguments(const didi::mcp::CallToolResult& result,
+                                const char* handler_message) {
+    if (!result.isError || result.content.empty()) return false;
+    const auto& text = result.content[0].text;
+    return text.find(handler_message) != std::string::npos ||
+           text.find("invalid_arguments") != std::string::npos;
+}
+
 static std::string readToolTestFile(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     std::ostringstream contents;
@@ -154,8 +166,7 @@ static void test_runtime_get_session_is_local_and_attach_rejects_non_string_id()
     ASSERT_TRUE(!current_json["session"].contains("token"));
 
     auto invalid_attach = reg.callTool("runtime_attach_session", {{"session_id", 42}});
-    ASSERT_TRUE(invalid_attach.isError);
-    ASSERT_TRUE(invalid_attach.content[0].text.find("session_id must be a string") != std::string::npos);
+    ASSERT_TRUE(refusedTheArguments(invalid_attach, "session_id must be a string"));
     reg.setIpcClient(nullptr);
 }
 
@@ -173,8 +184,7 @@ static void test_runtime_read_logs_rejects_invalid_cursor_limit_and_level() {
         didi::json{{"minimum_level", 3}}
     }) {
         const auto result = reg.callTool("runtime_read_logs", args);
-        ASSERT_TRUE(result.isError);
-        ASSERT_TRUE(result.content[0].text.find("Invalid runtime log request") != std::string::npos);
+        ASSERT_TRUE(refusedTheArguments(result, "Invalid runtime log request"));
     }
     reg.setIpcClient(nullptr);
 }
@@ -1868,8 +1878,7 @@ static void test_asset_reimport_public_validation_and_schema() {
         didi::json{{"paths", didi::json::array({"res://icon.svg"})}, {"timeout_ms", 0}}
     }) {
         const auto result = reg.callTool("asset_reimport", args);
-        ASSERT_TRUE(result.isError);
-        ASSERT_TRUE(result.content[0].text.find("Invalid asset reimport request") != std::string::npos);
+        ASSERT_TRUE(refusedTheArguments(result, "Invalid asset reimport request"));
     }
 }
 
@@ -1897,8 +1906,7 @@ static void test_viewport_diff_public_validation_and_schema() {
         didi::json{{"baseline_capture_id", std::string(32, 'a')}, {"threshold", 1.5}}
     }) {
         const auto result = reg.callTool("viewport_diff_capture", args);
-        ASSERT_TRUE(result.isError);
-        ASSERT_TRUE(result.content[0].text.find("Invalid viewport diff request") != std::string::npos);
+        ASSERT_TRUE(refusedTheArguments(result, "Invalid viewport diff request"));
     }
 }
 
@@ -2965,8 +2973,8 @@ static void test_writers_drop_the_shared_index_so_the_next_read_sees_them() {
     ASSERT_TRUE(didi::offline::ResourceIndexer::sharedIndex(".")
                     ->findExact("res://addons/didi/test_lab_sandbox.tscn") == nullptr);
     const auto lab = registry.callTool("viewport_create_test_lab", didi::json{
-        {"target_resource", "res://scripts/level.gd"}, {"lighting", "studio"},
-        {"orthographic", false}});
+        {"target_resource_path", "res://scripts/level.gd"},
+        {"environment", "studio_neutral"}, {"orthographic", false}});
     ASSERT_TRUE(!lab.isError);
     ASSERT_TRUE(didi::offline::ResourceIndexer::sharedIndex(".")
                     ->findExact("res://addons/didi/test_lab_sandbox.tscn") != nullptr);

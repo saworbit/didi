@@ -194,6 +194,7 @@ set(CORE_SOURCES
     src/tools/editor_tools.cpp
     src/tools/deep_domain_tools.cpp
     src/mcp/tool_availability.cpp
+    src/mcp/schema_validation.cpp
     src/mcp/control_room.cpp
     src/tools/control_room_tools.cpp
     ${CONTROL_ROOM_GENERATED_SOURCE}

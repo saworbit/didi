@@ -155,6 +155,13 @@ export_tool.handler = [this](const json& args) {
 registerTool(std::move(export_tool));
 ```
 
+`tools/call` checks arguments against this schema before it dispatches, so what
+you declare here is enforced, not documentation. Declare `required` for every
+argument the handler cannot do without, and add `"additionalProperties": false`
+when the tool has a closed set of arguments: that is what turns a mistyped
+property name into a message naming it rather than a silent default. Keep the
+handler's own checks for anything the schema cannot express.
+
 ### 2. Classify its execution modes
 
 Update `capabilityForTool` in `src/mcp/tool_registry.cpp`. Choose only modes backed by tests: `live`, `offline_fallback`, both, or `unimplemented`.
