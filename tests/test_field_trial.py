@@ -1106,5 +1106,222 @@ class TrialSummaryTests(unittest.TestCase):
             )
 
 
+TRANSCRIPTS_PATH = REPOSITORY_ROOT / "tools" / "field-trial" / "transcripts.py"
+TRANSCRIPTS_SPEC = importlib.util.spec_from_file_location(
+    "field_trial_transcripts", TRANSCRIPTS_PATH
+)
+if TRANSCRIPTS_SPEC is None or TRANSCRIPTS_SPEC.loader is None:
+    raise ImportError(f"Cannot load the transcript reader from {TRANSCRIPTS_PATH}")
+TRANSCRIPTS = importlib.util.module_from_spec(TRANSCRIPTS_SPEC)
+TRANSCRIPTS_SPEC.loader.exec_module(TRANSCRIPTS)
+
+
+def codex_call(tool, payload=None, server="didi", status="completed", event="item.completed"):
+    """One `codex exec --json` event for a completed MCP call."""
+    result = None
+    if payload is not None:
+        result = {"content": [{"type": "text", "text": json.dumps(payload)}]}
+    return json.dumps({
+        "type": event,
+        "item": {
+            "id": "item_0",
+            "type": "mcp_tool_call",
+            "server": server,
+            "tool": tool,
+            "arguments": {},
+            "result": result,
+            "error": None,
+            "status": status,
+        },
+    })
+
+
+class CodexTranscriptTests(unittest.TestCase):
+    def test_counts_a_completed_call_once(self):
+        counts = COVERAGE.extract_invocations([codex_call("scene_create")])
+        self.assertEqual(counts, {"scene_create": 1})
+
+    def test_the_started_event_is_not_a_second_invocation(self):
+        # Codex announces a call before it has an answer and again when it has
+        # one. Counting both doubles every number in the run.
+        lines = [
+            codex_call("scene_create", event="item.started"),
+            codex_call("scene_create", event="item.completed"),
+        ]
+        self.assertEqual(COVERAGE.extract_invocations(lines), {"scene_create": 1})
+
+    def test_ignores_a_call_to_another_mcp_server(self):
+        lines = [codex_call("search", server="something_else")]
+        self.assertEqual(COVERAGE.extract_invocations(lines), {})
+
+    def test_reads_the_build_pairing_out_of_a_codex_result(self):
+        lines = [codex_call("runtime_get_session", {"server_build_id": "1.8.0+abc.1"})]
+        observations = BRIDGE.extract_observations(lines)
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0]["server_build_id"], "1.8.0+abc.1")
+        self.assertTrue(observations[0]["matches"])
+
+    def test_a_codex_mismatch_is_still_a_mismatch(self):
+        lines = [codex_call(
+            "runtime_attach_session",
+            {"server_build_id": "1.8.0+abc.1", "bridge_build_matches": False},
+        )]
+        self.assertFalse(BRIDGE.extract_observations(lines)[0]["matches"])
+
+    def test_a_call_with_no_result_still_counts_as_reached_for(self):
+        # A run cut off mid-call reached for the tool. Coverage asks what the
+        # tester tried, and dropping the answerless ones flatters the uncalled
+        # set exactly where the run went wrong.
+        lines = [codex_call("scene_create", payload=None, status="failed")]
+        self.assertEqual(COVERAGE.extract_invocations(lines), {"scene_create": 1})
+        self.assertEqual(BRIDGE.extract_observations(lines), [])
+
+    def test_a_repeated_tool_keeps_each_result_with_its_own_call(self):
+        # The Claude shape puts results in later records, so correlation is by
+        # id. Two calls to one tool with different answers is where a reader
+        # that keys by name silently reports the wrong one.
+        lines = call_and_result(
+            "runtime_get_session", {"server_build_id": "first"}, identifier="a"
+        ) + call_and_result(
+            "runtime_get_session", {"server_build_id": "second"}, identifier="b"
+        )
+        self.assertEqual(
+            [o["server_build_id"] for o in BRIDGE.extract_observations(lines)],
+            ["first", "second"],
+        )
+
+    def test_a_claude_call_with_no_result_is_counted_and_not_observed(self):
+        lines = [json.dumps({"message": {"content": [
+            {"type": "tool_use", "id": "t1", "name": "mcp__didi__scene_create", "input": {}}
+        ]}})]
+        self.assertEqual(COVERAGE.extract_invocations(lines), {"scene_create": 1})
+        self.assertEqual(BRIDGE.extract_observations(lines), [])
+
+
+class TomlValueTests(unittest.TestCase):
+    def test_a_windows_path_needs_no_escaping_as_a_literal(self):
+        self.assertEqual(
+            RUNNER.toml_value("D:\\didi\\build-ninja\\didi.exe"),
+            "'D:\\didi\\build-ninja\\didi.exe'",
+        )
+
+    def test_a_list_becomes_a_toml_array(self):
+        self.assertEqual(
+            RUNNER.toml_value(["--project", "D:\\t"]), "['--project','D:\\t']"
+        )
+
+    def test_refuses_what_a_literal_string_cannot_express(self):
+        # Emitting it anyway produces TOML that parses into something else,
+        # which is worse than refusing: the tester would launch against a
+        # server path nobody chose.
+        for bad in ("it's", "two\nlines"):
+            with self.assertRaises(ValueError):
+                RUNNER.toml_value(bad)
+
+
+class CodexCommandTests(unittest.TestCase):
+    SEEDED = {
+        "mcpServers": {
+            "didi": {
+                "command": "D:\\didi\\build-ninja\\didi.exe",
+                "args": ["--project", "D:\\didi-trials\\trial-04", "--log-level", "DEBUG"],
+            }
+        }
+    }
+
+    def test_translates_the_seed_rather_than_duplicating_it(self):
+        overrides = RUNNER.codex_mcp_overrides(self.SEEDED)
+        self.assertIn("mcp_servers.didi.command='D:\\didi\\build-ninja\\didi.exe'", overrides)
+        self.assertIn(
+            "mcp_servers.didi.args=['--project','D:\\didi-trials\\trial-04',"
+            "'--log-level','DEBUG']",
+            overrides,
+        )
+
+    def test_a_server_with_nothing_to_launch_is_refused(self):
+        with self.assertRaises(ValueError):
+            RUNNER.codex_mcp_overrides({"mcpServers": {"didi": {"args": ["--project"]}}})
+
+    def test_prints_a_transcript_the_harness_can_score(self):
+        self.assertIn("--json", RUNNER.build_codex_command())
+
+    def test_the_machines_own_config_is_kept_out_of_the_run(self):
+        # This engine's --strict-mcp-config. Without it the tester sees every
+        # server and plugin this machine happens to have enabled.
+        self.assertIn("--ignore-user-config", RUNNER.build_codex_command())
+
+    def test_no_positional_prompt_for_a_variadic_flag_to_swallow(self):
+        command = RUNNER.build_codex_command(
+            mcp_config=self.SEEDED, add_dirs=["D:\\didi"], model="a-model"
+        )
+        self.assertEqual(command[-2:], ["--add-dir", "D:\\didi"])
+
+    def test_the_model_is_named_because_the_config_holding_it_was_discarded(self):
+        command = RUNNER.build_codex_command(model="a-model", reasoning_effort="high")
+        self.assertEqual(command[command.index("--model") + 1], "a-model")
+        self.assertIn("model_reasoning_effort='high'", command)
+
+    def test_reads_the_seeded_config_off_disk(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".mcp.json"
+            path.write_text(json.dumps(self.SEEDED), encoding="utf-8")
+            self.assertEqual(RUNNER.read_mcp_config(path), self.SEEDED)
+
+
+class SignedInTests(unittest.TestCase):
+    @staticmethod
+    def result(returncode=0, stdout="", stderr=""):
+        return subprocess.CompletedProcess(["client"], returncode, stdout, stderr)
+
+    def test_codex_answers_on_stderr(self):
+        # This is not a hypothetical stream to be thorough about. `codex login
+        # status` prints its sentence on stderr, and a preflight reading only
+        # stdout refused trial 04's first launch with the client signed in.
+        self.assertTrue(
+            TRIAL.signed_in("codex", self.result(stderr="Logged in using ChatGPT\n"))
+        )
+
+    def test_codex_answering_on_stdout_is_read_too(self):
+        self.assertTrue(
+            TRIAL.signed_in("codex", self.result(stdout="Logged in using ChatGPT\n"))
+        )
+
+    def test_codex_saying_nothing_is_not_a_yes(self):
+        self.assertFalse(TRIAL.signed_in("codex", self.result()))
+
+    def test_claude_reports_a_field_on_stdout(self):
+        self.assertTrue(
+            TRIAL.signed_in("claude", self.result(stdout='{"loggedIn": true}'))
+        )
+        self.assertFalse(
+            TRIAL.signed_in("claude", self.result(stdout='{"loggedIn": false}'))
+        )
+
+    def test_an_unparseable_answer_is_not_a_yes(self):
+        self.assertFalse(TRIAL.signed_in("claude", self.result(stdout="not json")))
+
+    def test_a_client_that_failed_to_answer_is_not_signed_in(self):
+        for engine, stream in (("codex", "Logged in using ChatGPT"), ("claude", '{"loggedIn": true}')):
+            self.assertFalse(
+                TRIAL.signed_in(engine, self.result(returncode=1, stdout=stream, stderr=stream))
+            )
+
+
+class EngineSummaryTests(unittest.TestCase):
+    def test_the_summary_names_the_client_that_hosted_the_tester(self):
+        summary = TRIAL.trial_summary(
+            "trial-04", [], "scored", engine="codex", model="a-model"
+        )
+        self.assertEqual(summary["engine"], "codex")
+        self.assertIn("Tester: codex (a-model)", TRIAL.render_summary(summary))
+
+    def test_a_run_with_no_engine_recorded_reads_as_the_original_client(self):
+        # Trials 01 to 03 predate the field, and a report that leaves the tester
+        # blank for them invites reading three claude runs as unknown ones.
+        self.assertIn("Tester: claude", TRIAL.render_summary(
+            TRIAL.trial_summary("trial-01", [], "scored")
+        ))
+
+
 if __name__ == "__main__":
     unittest.main()
