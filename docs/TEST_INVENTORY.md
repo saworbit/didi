@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **901** |
+| Automated tests | **903** |
 | Live-harness assertions | 818 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**554 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**556 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -32,7 +32,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `EditorHook` | 5 |
 | `ExpressionSandbox` | 6 |
 | `GDScript` | 16 |
-| `Hierarchy` | 5 |
+| `Hierarchy` | 6 |
 | `IPC` | 24 |
 | `ImageDiff` | 10 |
 | `ImportHealth` | 15 |
@@ -40,7 +40,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `JsonRpc` | 4 |
 | `ManagedProcess` | 6 |
 | `McpServer` | 32 |
-| `Phase5` | 15 |
+| `Phase5` | 16 |
 | `Phase6` | 15 |
 | `Phase7Contract` | 9 |
 | `Phase7Diagnostics` | 1 |
