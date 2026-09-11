@@ -1,0 +1,10 @@
+[
+  ["script_attach_to_node", {"target_node": "/root/Main/Child", "script_path": "res://player.gd"}],
+  ["signal_connect", {"emitter_node": "/root/Main/Child", "signal_name": "died", "target_node": "/root/Main", "target_method": "nope"}],
+  ["signal_disconnect", {"emitter_node": "/root/Main/Child", "signal_name": "died", "target_node": "/root/Main", "target_method": "nope"}],
+  ["viewport_set_camera_transform", {"camera_path": "/root/Main/Child", "position": {"x": 1, "y": 2, "z": 3}}],
+  ["tilemap_get_used_rect", {"tilemap_path": "/root/Main/Child"}],
+  ["tilemap_get_used_rect", {"tilemap_path": "/root/Main/NoSuchNodeAtAll"}],
+  ["tilemap_set_cells", {"tilemap_path": "/root/Main/Child", "cells": [{"coords": {"x": 0, "y": 0}, "source_id": 0, "atlas_coords": {"x": 0, "y": 0}}]}],
+  ["gridmap_set_cells", {"gridmap_path": "/root/Main/Child", "cells": [{"position": {"x": 0, "y": 0, "z": 0}, "item": 0}]}]
+]
