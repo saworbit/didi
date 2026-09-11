@@ -1,0 +1,6 @@
+[
+  ["script_create", {"script_path": "res://never_existed_a.gd", "source_text": "extends Node\n", "overwrite": true}],
+  ["script_create", {"script_path": "res://never_existed_b.gd", "source_text": "extends Node\n"}],
+  ["resource_inspect", {"resource_path": "res://addons"}],
+  ["resource_inspect", {"resource_path": "res://totally_absent_xyz.tres"}]
+]

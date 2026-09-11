@@ -21,6 +21,7 @@ twice.
 | `probe.py` | Command line: list tools, print a schema, run one call or a file of calls. |
 | `probes/*.json` | Saved probe sequences. Each one is the reproduction for findings already filed. |
 | `probes/confirmation_token.py` | The confirmation gate walked end to end; a token cannot be carried between processes, so this one is a script. |
+| `probes/surface_census.py` | The same question asked of all 126 tools: who rejects an unknown argument, what `execution_mode` each reports, who answers with a bare string. |
 | `report.py` | Files a directory of finding bodies as issues in one pass. |
 
 The probe files are kept after their findings are fixed, and are worth re-running
@@ -83,10 +84,27 @@ such node" (#401). Neither state is a crash, so nothing else catches them.
 **Read the schema before believing a result.** Several tools take a parameter
 whose name is not the obvious guess: `target_node` not `node_path`, `setting`
 not `setting_path`, `scene_path` not `output_path`, `source_text` not `content`,
-`new_definition` not `new_body`. Since #397 landed the server rejects an unknown
-property by name, which makes the mistake cheap — before it, a guessed name
-either fell through to a confusing downstream error or succeeded against a
-default target. `probe.py --schema` is still faster than a round trip.
+`new_definition` not `new_body`. #397 made the server reject an unknown property
+by name, which makes the mistake cheap — but only on 50 of the 126 tools (#418).
+On the other 76 a guessed name is still accepted and ignored: `search_path`
+typo'd as `path` returns the whole project and calls it a success.
+`probe.py --schema` is still faster than a round trip.
+
+**Count it before you call it a bug.** Three of this session's findings only
+became findings once every tool was asked the same question: 50 of 126 reject an
+unknown argument, 26 report `offline_fallback` with an editor attached, 18
+answer with a bare string. Each looked like one tool misbehaving until the
+census showed a missing default. `probes/surface_census.py` runs all three in
+about a minute each; the numbers are in the session log and are worth diffing.
+
+**Narrow before you file, especially when two things changed.** This session
+nearly filed "`editor_undo` reports success without undoing anything" — the
+group list really was unchanged after an undo. The undo had reverted a node
+*rename* from an earlier probe, so the later reads were looking at a path that
+no longer existed. A tighter repro (set a property, undo, read it back) showed
+undo working correctly and reporting `409 Nothing to undo` on an exhausted
+stack. A sandbox accumulates state; a finding that depends on three earlier
+mutations is a finding about your probe order until proven otherwise.
 
 **Offline and live are different products.** The same argument can mean
 different things depending on whether an editor is attached, and the offline
@@ -101,6 +119,7 @@ next is not a test of the gate, it is a test of process lifetime.
 | Date | Scope | Server | Findings |
 | :--- | :--- | :--- | :--- |
 | 2026-09-11 | Offline surface, then a live 4.5.1 editor: protocol edges, argument validation, the confirmation gate, offline path resolution, honesty of empty results. | `1.8.0+11aa42d92371` | #396–#408, thirteen findings. All thirteen were fixed the same day, in PRs #409–#414. |
+| 2026-09-11 | Whole-surface censuses (unknown arguments, execution modes, error envelopes), then narrowing: non-ASCII identifiers, `dry_run` semantics, project.godot references, search coverage. | `1.8.0+6164335c8868` | #416–#427, twelve findings. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log

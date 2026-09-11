@@ -1,0 +1,6 @@
+[
+  ["viewport_toggle_debug_draw", {}],
+  ["viewport_set_camera_transform", {"camera_path": "/root/Main", "position": {"x": 1, "y": 2, "z": 3}}],
+  ["shader_list_uniforms", {"target_node": "/root/Main"}],
+  ["scene_set_property", {"target_node": "/root/Main/Child", "property_name": "position", "value": "not a vector"}]
+]

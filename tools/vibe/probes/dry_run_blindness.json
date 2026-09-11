@@ -1,0 +1,9 @@
+[
+  ["scene_remove_node", {"target_node": "/root/Main/Child", "dry_run": true}],
+  ["scene_remove_node", {"target_node": "/root/Main/NoSuchNode", "dry_run": true}],
+  ["scene_add_to_group", {"target_node": "/root/Main/NoSuchNode", "group": "ghost", "dry_run": true}],
+  ["scene_set_property", {"target_node": "/root/Main/NoSuchNode", "property_name": "position", "value": {"x": 1, "y": 2}, "dry_run": true}],
+  ["scene_set_property", {"target_node": "/root/Main/Child", "property_name": "no_such_prop", "value": 1, "dry_run": true}],
+  ["script_patch_method", {"file_path": "res://no_such_script.gd", "method_name": "f", "new_definition": "func f():\n\tpass\n", "dry_run": true}],
+  ["scene_add_to_group", {"target_node": "/root/Main/NoSuchNode", "group": "ghost"}]
+]

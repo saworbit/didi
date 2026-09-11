@@ -1,0 +1,11 @@
+[
+  ["project_search_text", {"query": "extends", "search_path": "res://addons", "max_results": 500}],
+  ["project_search_text", {"query": "extends", "path": "res://addons", "max_results": 500}],
+  ["project_search_text", {"query": "extends", "max_results": 500}],
+  ["project_search_text", {"query": "extends", "bogus_property_xyz": 1}],
+  ["project_search_symbols", {"query": "Player", "bogus_property_xyz": 1}],
+  ["get_scene_hierarchy", {"bogus_property_xyz": 1}],
+  ["project_list_resources", {"bogus_property_xyz": 1}],
+  ["script_get_symbols", {"script_path": "res://player.gd"}],
+  ["blackboard_read", {"key": "k", "bogus_property_xyz": 1}]
+]
