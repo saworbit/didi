@@ -636,11 +636,14 @@ Reads the project and reports four things nothing in a single file can show: ass
 - `include_broken_references` (`boolean`, default `true`).
 - `include_dead_signals` (`boolean`, default `true`).
 - `include_import_health` (`boolean`, default `true`).
+- `include_addon_orphans` (`boolean`, default `false`).
 - `max_findings` (`integer`, 1-5000, default `500`).
 
-At least one of the four must stay enabled.
+At least one of the four report switches must stay enabled.
 
 Orphan detection covers asset types only: `Texture2D`, `AudioStream`, `MeshResource`, `Font`, and `Shader`. Scenes and scripts are excluded on purpose, because a scene that nothing references is usually a level you open by hand. `.import` and `.uid` sidecars are excluded too.
+
+Files under `res://addons/` are excluded by default. That is a conventional Godot boundary: it holds third-party code a developer did not write and is not responsible for tidying, and an addon's own assets otherwise dominate the list in a small project. `excluded_addon_orphans` reports how many were left out and `addon_orphans_included` reports which way the switch was set, so the number is explainable; pass `include_addon_orphans` to count them.
 
 References are followed in every form Godot writes and people type: `[ext_resource path="res://..."]`, its `uid="uid://..."` form, `preload()` and `load()` in GDScript, `Load<T>()` in C#, and bare `uid://` string literals. Broken references are reported as `missing_file` or `unresolved_uid`.
 

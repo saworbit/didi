@@ -68,6 +68,16 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `project_audit_assets` does not call third-party addon files orphans (#427).
+  The tool's output is advice to delete files, and in a fresh project most of
+  that advice was about Didi's own brand assets: three of four orphans and 96%
+  of the reported orphan bytes. `res://addons/` is a conventional boundary in
+  Godot, holding code a developer did not write and is not responsible for
+  tidying, and the noise is worst in an empty project, which is when someone is
+  most likely to run an audit for the first time. Files beneath it are excluded
+  by default, `excluded_addon_orphans` says how many were left out so the number
+  is explainable, and `include_addon_orphans` asks for them back.
+
 - Every semantic failure carries a code (#420). Eighteen tools answered one with
   a bare JSON string: no code, no `data`, no `retryable`. The prose was the good
   part and is unchanged, but a client that switches on `error.code`, which is
