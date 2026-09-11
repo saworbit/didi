@@ -837,6 +837,73 @@ static void test_search_reads_project_text_and_counts_what_it_cannot() {
     ASSERT_TRUE(narrowed["unsearchable_files"].get<size_t>() > 0);
 }
 
+static void test_semantic_failures_carry_a_code_a_client_can_branch_on() {
+    // Break caught: eighteen tools answered a semantic failure with a bare JSON
+    // string. The prose was good, several of them the best on the surface, but
+    // a client that switches on error.code -- the documented way to tell
+    // retryable from not -- got undefined and had to substring-match English
+    // instead (#420).
+    ScopedToolProject project("error-envelope");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("player.gd", "extends Node\n");
+    writeAuditFile("art/logo.svg", "<svg/>\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto code_of = [&](const std::string& tool, const didi::json& arguments) {
+        const auto result = registry.callTool(tool, arguments);
+        if (!result.isError) return 0;
+        const auto parsed = didi::json::parse(result.content[0].text, nullptr, false);
+        if (parsed.is_discarded() || !parsed.is_object() || !parsed.contains("error")) return -1;
+        return parsed["error"].value("code", -1);
+    };
+
+    // A missing argument pair is a 400.
+    ASSERT_EQ(code_of("script_check_syntax", didi::json::object()), 400);
+    ASSERT_EQ(code_of("script_get_symbols", didi::json::object()), 400);
+
+    // Writing over something that is already there is a 409, which is the code
+    // this server uses elsewhere for exactly that.
+    ASSERT_EQ(code_of("script_create",
+                      didi::json{{"script_path", "res://player.gd"},
+                                 {"source_text", "extends Node\n"}}), 409);
+
+    // A resource that is not there is a 404.
+    ASSERT_EQ(code_of("resource_inspect",
+                      didi::json{{"resource_path", "res://nothing_here.tres"}}), 404);
+
+    // A mode that is switched off is a 501: the request was not wrong.
+    ASSERT_EQ(code_of("runtime_recovery_status", didi::json::object()), 501);
+}
+
+static void test_resource_inspect_tells_a_directory_from_an_absent_path() {
+    // Break caught: one message stood in for two states a caller has to tell
+    // apart, and they lead to different next actions -- fix the argument, or go
+    // find the file (#426).
+    ScopedToolProject project("resource-inspect-directory");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("art/logo.svg", "<svg/>\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto directory = registry.callTool(
+        "resource_inspect", didi::json{{"resource_path", "res://art"}});
+    ASSERT_TRUE(directory.isError);
+    const auto directory_text = directory.content[0].text;
+    ASSERT_TRUE(directory_text.find("is a directory") != std::string::npos);
+    ASSERT_TRUE(directory_text.find("project_list_resources") != std::string::npos);
+
+    const auto absent = registry.callTool(
+        "resource_inspect", didi::json{{"resource_path", "res://nothing_here.tres"}});
+    ASSERT_TRUE(absent.isError);
+    ASSERT_TRUE(absent.content[0].text.find("not found") != std::string::npos);
+
+    // The two answers are different, which is the whole point.
+    ASSERT_TRUE(directory_text != absent.content[0].text);
+}
+
 static void test_project_audit_survives_a_very_long_line() {
     // Break caught twice, from the same edit. Widening the signal scan's name
     // pattern to accept Unicode bytes first turned it into an alternation,
@@ -3739,6 +3806,10 @@ struct RegisterToolTests {
                      test_impact_reads_every_project_setting_that_holds_a_path);
         registerTest("Tools.SearchCountsUnsearchableFiles",
                      test_search_reads_project_text_and_counts_what_it_cannot);
+        registerTest("Tools.SemanticFailuresCarryACode",
+                     test_semantic_failures_carry_a_code_a_client_can_branch_on);
+        registerTest("Tools.ResourceInspectDirectoryVersusAbsent",
+                     test_resource_inspect_tells_a_directory_from_an_absent_path);
         registerTest("Tools.ProjectAuditLongLine",
                      test_project_audit_survives_a_very_long_line);
         registerTest("Tools.ProjectImpactFindings",

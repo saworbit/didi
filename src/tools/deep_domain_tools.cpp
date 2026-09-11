@@ -280,15 +280,15 @@ CallToolResult handleCSharpCheckBuild(const json& args, std::shared_ptr<ipc::IIp
     (void)ipc;
     if (!args.is_object()) return CallToolResult::error("C# build arguments must be an object");
     auto root = projectRoot();
-    if (root.isErr()) return CallToolResult::error(root.error().message);
+    if (root.isErr()) return CallToolResult::fromError(root.error());
     auto project = selectCSharpProject(root.value(), args);
-    if (project.isErr()) return CallToolResult::error(project.error().message);
+    if (project.isErr()) return CallToolResult::fromError(project.error());
     const std::string configuration = args.value("configuration", "Debug");
     if (configuration != "Debug" && configuration != "Release") {
         return CallToolResult::error("configuration must be Debug or Release");
     }
     auto timeout = timeoutSeconds(args, 60, 300);
-    if (timeout.isErr()) return CallToolResult::error(timeout.error().message);
+    if (timeout.isErr()) return CallToolResult::fromError(timeout.error());
 
     offline::ProcessRequest request;
     request.executable = dotnetExecutable();
@@ -333,17 +333,17 @@ CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::I
         return CallToolResult::error("shader_path is required and must be a string");
     }
     auto root = projectRoot();
-    if (root.isErr()) return CallToolResult::error(root.error().message);
+    if (root.isErr()) return CallToolResult::fromError(root.error());
     const std::string requested = args["shader_path"].get<std::string>();
     auto shader = paths::resolveProjectFile(requested);
-    if (shader.isErr()) return CallToolResult::error(shader.error().message);
+    if (shader.isErr()) return CallToolResult::fromError(shader.error());
     if (lower(shader.value().extension().string()) != ".gdshader") {
-        return CallToolResult::error("shader_path must name a .gdshader file");
+        return CallToolResult::errorJson(400, "shader_path must name a .gdshader file");
     }
     auto timeout = timeoutSeconds(args, 30, 300);
-    if (timeout.isErr()) return CallToolResult::error(timeout.error().message);
+    if (timeout.isErr()) return CallToolResult::fromError(timeout.error());
     auto helper = TemporaryScript::create("shader-check", shaderHelperSource());
-    if (helper.isErr()) return CallToolResult::error(helper.error().message);
+    if (helper.isErr()) return CallToolResult::fromError(helper.error());
     auto run = runGodot(root.value(), offline::isolatedGodotArguments(
         {"--path", paths::projectPathToUtf8(root.value()), "--script",
          paths::projectPathToUtf8(helper.value().path()), "--", requested}), timeout.value());
@@ -372,7 +372,7 @@ CallToolResult handleProjectListExportPresets(const json& args, std::shared_ptr<
     (void)ipc;
     if (!args.is_object() || !args.empty()) return CallToolResult::error("Export preset list arguments must be an empty object");
     auto root = projectRoot();
-    if (root.isErr()) return CallToolResult::error(root.error().message);
+    if (root.isErr()) return CallToolResult::fromError(root.error());
     const auto path = root.value() / "export_presets.cfg";
     // Godot writes this file the first time a preset is added, so a project
     // that has never configured an export simply has none. That is a normal
@@ -387,7 +387,7 @@ CallToolResult handleProjectListExportPresets(const json& args, std::shared_ptr<
                                             {"presets_file_exists", false}});
     }
     auto contents = readBounded(path, kMaxPresetFile);
-    if (contents.isErr()) return CallToolResult::error(contents.error().message);
+    if (contents.isErr()) return CallToolResult::fromError(contents.error());
     auto presets = offline::parseExportPresets(contents.value());
     if (presets.empty() && !strings::trim(contents.value()).empty()) {
         return CallToolResult::error("export_presets.cfg is malformed or contains no complete unique presets");
@@ -405,12 +405,12 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
         return CallToolResult::error("preset and output_path are required strings");
     }
     auto root = projectRoot();
-    if (root.isErr()) return CallToolResult::error(root.error().message);
+    if (root.isErr()) return CallToolResult::fromError(root.error());
     auto output = resolveOutputPath(root.value(), args["output_path"].get<std::string>());
-    if (output.isErr()) return CallToolResult::error(output.error().message);
+    if (output.isErr()) return CallToolResult::fromError(output.error());
     const std::string preset = args["preset"].get<std::string>();
     auto preset_file = readBounded(root.value() / "export_presets.cfg", kMaxPresetFile);
-    if (preset_file.isErr()) return CallToolResult::error(preset_file.error().message);
+    if (preset_file.isErr()) return CallToolResult::fromError(preset_file.error());
     const auto presets = offline::parseExportPresets(preset_file.value());
     const bool found = std::any_of(presets.begin(), presets.end(), [&](const json& item) {
         return item.value("name", "") == preset;
@@ -428,7 +428,7 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
         return CallToolResult::error("Export output already exists; pass overwrite: true to replace it");
     }
     auto timeout = timeoutSeconds(args, 300, 900);
-    if (timeout.isErr()) return CallToolResult::error(timeout.error().message);
+    if (timeout.isErr()) return CallToolResult::fromError(timeout.error());
     std::filesystem::create_directories(output.value().parent_path(), error);
     if (error) return CallToolResult::error("Failed to create export output directory");
     const std::string flag = mode == "pack" ? "--export-pack" :
@@ -459,15 +459,15 @@ CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<
         return CallToolResult::error("source_scene and output_path are required strings");
     }
     auto root = projectRoot();
-    if (root.isErr()) return CallToolResult::error(root.error().message);
+    if (root.isErr()) return CallToolResult::fromError(root.error());
     const std::string source_request = args["source_scene"].get<std::string>();
     auto source = paths::resolveProjectFile(source_request);
-    if (source.isErr()) return CallToolResult::error(source.error().message);
+    if (source.isErr()) return CallToolResult::fromError(source.error());
     if (lower(source.value().extension().string()) != ".tscn") {
         return CallToolResult::error("source_scene must name a .tscn file");
     }
     auto output = resolveOutputPath(root.value(), args["output_path"].get<std::string>());
-    if (output.isErr()) return CallToolResult::error(output.error().message);
+    if (output.isErr()) return CallToolResult::fromError(output.error());
     const auto extension = lower(output.value().extension().string());
     if (extension != ".meshlib" && extension != ".tres") {
         return CallToolResult::error("output_path must end in .meshlib or .tres");
@@ -483,11 +483,11 @@ CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<
         return CallToolResult::error("MeshLibrary output already exists; pass overwrite: true to replace it");
     }
     auto timeout = timeoutSeconds(args, 60, 300);
-    if (timeout.isErr()) return CallToolResult::error(timeout.error().message);
+    if (timeout.isErr()) return CallToolResult::fromError(timeout.error());
     std::filesystem::create_directories(output.value().parent_path(), error);
     if (error) return CallToolResult::error("Failed to create MeshLibrary output directory");
     auto helper = TemporaryScript::create("mesh-library", meshLibraryHelperSource());
-    if (helper.isErr()) return CallToolResult::error(helper.error().message);
+    if (helper.isErr()) return CallToolResult::fromError(helper.error());
     const std::string output_res = asResPath(root.value(), output.value());
     auto run = runGodot(root.value(), offline::isolatedGodotArguments(
         {"--path", paths::projectPathToUtf8(root.value()), "--script",
@@ -497,7 +497,7 @@ CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<
     if (run.value().timed_out) return CallToolResult::error("MeshLibrary conversion timed out; output status is unknown");
     if (run.value().exit_code != 0) return CallToolResult::error("MeshLibrary conversion failed: " + run.value().output);
     auto marker = parseMarker(run.value().output, "DIDI_PHASE5_RESULT:");
-    if (marker.isErr()) return CallToolResult::error(marker.error().message);
+    if (marker.isErr()) return CallToolResult::fromError(marker.error());
     if (!std::filesystem::is_regular_file(output.value(), error) || error) {
         return CallToolResult::error("Godot did not create the MeshLibrary output");
     }

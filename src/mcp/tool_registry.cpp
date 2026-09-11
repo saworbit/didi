@@ -1010,7 +1010,7 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
         const auto prior_session = m_runtimeSessionClient->activeSession();
         const auto ready = m_recovery->ensureEditor();
         if (ready.isErr() && (MutationSafety::isMutation(binding) || supports_live || m_recovery->status().value("state", "") == "restore_failed"))
-            return m_recovery->annotate(CallToolResult::error(ready.error().message));
+            return m_recovery->annotate(CallToolResult::fromError(ready.error()));
         const auto current_session = m_runtimeSessionClient->activeSession();
         if (ready.isOk() && MutationSafety::isMutation(binding) &&
             (!prior_session || !current_session || prior_session->session_id != current_session->session_id))
@@ -1020,7 +1020,7 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
     const bool protected_mutation = m_recovery && !recovery_tool && MutationSafety::isMutation(binding);
     if (protected_mutation) {
         auto prepared = m_recovery->beforeMutation(std::string(binding.canonical_name), authorized_arguments);
-        if (prepared.isErr()) return m_recovery->annotate(CallToolResult::error(prepared.error().message));
+        if (prepared.isErr()) return m_recovery->annotate(CallToolResult::fromError(prepared.error()));
     }
     int dispatched_requests = 0;
     auto finish = [&](CallToolResult result) {
@@ -1230,17 +1230,24 @@ void ToolRegistry::registerAllDefaultTools() {
             t.inputSchema["required"] = json::array({"checkpoint_id"});
         }
         t.handler = [this, operation = t.name](const json& args) {
-            if (!m_recovery) return CallToolResult::error("Managed recovery is disabled. Start Didi with --managed-editor and --recovery-workspace to use an isolated project copy.");
+            // 501: the mode is off, not the request wrong. A caller that
+            // branches on the code can tell those apart without reading prose.
+            if (!m_recovery) {
+                return CallToolResult::errorJson(
+                    501,
+                    "Managed recovery is disabled. Start Didi with --managed-editor and "
+                    "--recovery-workspace to use an isolated project copy.");
+            }
             if (operation == "runtime_recovery_status") return CallToolResult::successJson(m_recovery->status());
             if (operation == "runtime_recover_editor") {
                 auto recovered = m_recovery->ensureEditor();
-                if (recovered.isErr()) return m_recovery->annotate(CallToolResult::error(recovered.error().message));
+                if (recovered.isErr()) return m_recovery->annotate(CallToolResult::fromError(recovered.error()));
                 return CallToolResult::successJson(m_recovery->status());
             }
             Result<json> response = operation == "runtime_checkpoint"
                 ? m_recovery->checkpoint(args.value("accept_current_files", false))
                 : m_recovery->restore(args.value("checkpoint_id", ""));
-            if (response.isErr()) return m_recovery->annotate(CallToolResult::error(response.error().message));
+            if (response.isErr()) return m_recovery->annotate(CallToolResult::fromError(response.error()));
             return CallToolResult::successJson(response.value());
         };
         registerTool(std::move(t));

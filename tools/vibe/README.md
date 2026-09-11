@@ -96,7 +96,8 @@ an unknown argument, 26 report `offline_fallback` with an editor attached, 18
 answer with a bare string. Each looked like one tool misbehaving until the
 census showed a missing default. The first is now 121 of 126, and the five that
 are left are the unimplemented registrations, which refuse the whole call
-before any argument is read. `probes/surface_census.py` runs all three in
+before any argument is read. The third is now zero: every semantic failure
+carries a code (#420). `probes/surface_census.py` runs all three in
 about a minute each; the numbers are in the session log and are worth diffing.
 
 **Narrow before you file, especially when two things changed.** This session

@@ -60,7 +60,7 @@ struct ArgumentReader {
 };
 
 CallToolResult finish(const Result<json>& outcome) {
-    if (outcome.isErr()) return CallToolResult::error(outcome.error().message);
+    if (outcome.isErr()) return CallToolResult::fromError(outcome.error());
     return CallToolResult::successJson(outcome.value());
 }
 
