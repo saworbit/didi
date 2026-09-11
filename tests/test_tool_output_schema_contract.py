@@ -21,8 +21,11 @@ FIXTURE_PROJECT = REPOSITORY_ROOT / "tests" / "godot_smoke"
 # Arguments that exercise each schema-declaring tool offline.
 OFFLINE_CALLS = {
     "script_check_syntax": {"source_text": "extends Node\n"},
-    "project_search_text": {"query": "Node", "limit": 2},
-    "project_search_symbols": {"query": "_ready", "limit": 2},
+    # max_results, not limit. These read "limit" until #418 closed arguments by
+    # default; the wrong name was accepted, ignored, and the unbounded search it
+    # ran was reported as a success.
+    "project_search_text": {"query": "Node", "max_results": 2},
+    "project_search_symbols": {"query": "_ready", "max_results": 2},
     "project_list_resources": {},
     "runtime_list_sessions": {},
     "viewport_capture_frame": {

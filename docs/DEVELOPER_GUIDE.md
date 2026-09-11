@@ -157,10 +157,19 @@ registerTool(std::move(export_tool));
 
 `tools/call` checks arguments against this schema before it dispatches, so what
 you declare here is enforced, not documentation. Declare `required` for every
-argument the handler cannot do without, and add `"additionalProperties": false`
-when the tool has a closed set of arguments: that is what turns a mistyped
-property name into a message naming it rather than a silent default. Keep the
-handler's own checks for anything the schema cannot express.
+argument the handler cannot do without. A tool's arguments are closed by
+default, so a mistyped property name is a message naming it and listing what
+the tool does take; you do not have to remember `"additionalProperties": false`,
+and a new tool is covered on arrival. Declare `"additionalProperties": true`
+only if the tool genuinely takes arguments it does not publish. Nested objects
+are the other way round, because several of them are deliberately free-form
+maps: close one explicitly when it has a fixed set of keys.
+
+`type`, `enum`, `required`, `minimum`, `maximum`, `minLength`, `maxLength`,
+`minItems`, `maxItems`, `pattern` and `uniqueItems` are all enforced. Do not
+publish a keyword outside that list expecting it to hold; a schema keyword the
+server ignores is worse than one it never advertised. Keep the handler's own
+checks for anything the schema cannot express.
 
 ### 2. Classify its execution modes
 
