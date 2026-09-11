@@ -877,6 +877,61 @@ static void test_semantic_failures_carry_a_code_a_client_can_branch_on() {
     ASSERT_EQ(code_of("runtime_recovery_status", didi::json::object()), 501);
 }
 
+static void test_path_validation_failures_carry_a_code_too() {
+    // Break caught: the argument checks answered with an envelope, but the path
+    // validator's own verdict was handed back as a bare string by eight tools.
+    // The census in probes/surface_census.py could not see it, because it sends
+    // junk arguments and the argument check fires first. These failures need
+    // valid arguments naming a path that is not there (#460).
+    ScopedToolProject project("path-error-envelope");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("player.gd", "extends Node\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto code_of = [&](const std::string& tool, const didi::json& arguments) {
+        const auto result = registry.callTool(tool, arguments);
+        if (!result.isError) return 0;
+        const auto parsed = didi::json::parse(result.content[0].text, nullptr, false);
+        if (parsed.is_discarded() || !parsed.is_object() || !parsed.contains("error")) return -1;
+        return parsed["error"].value("code", -1);
+    };
+
+    // A script path that names nothing is a 404, the same code resource_inspect
+    // already answers the same question with.
+    const didi::json absent{{"file_path", "res://no_such.gd"}};
+    ASSERT_EQ(code_of("script_check_syntax", absent), 404);
+    ASSERT_EQ(code_of("analyze_script_diagnostics", absent), 404);
+    ASSERT_EQ(code_of("script_get_symbols", absent), 404);
+
+    // Parent traversal is a bad argument, not a missing file.
+    ASSERT_EQ(code_of("script_create",
+                      didi::json{{"script_path", "res://sub/../a.gd"},
+                                 {"source_text", "extends Node\n"}}), 400);
+
+    // Both test lab tools share one handler and one target_resource_path check.
+    const didi::json lab{{"target_resource_path", "res://no_such.tscn"}};
+    ASSERT_EQ(code_of("viewport_create_test_lab", lab), 404);
+    ASSERT_EQ(code_of("create_visual_test_lab", lab), 404);
+
+    // The search pair reads a directory, so a search_path that is not one is a
+    // 404 and traversal is a 400.
+    ASSERT_EQ(code_of("project_search_text",
+                      didi::json{{"query", "x"}, {"search_path", "res://no_such_dir"}}), 404);
+    ASSERT_EQ(code_of("project_search_symbols",
+                      didi::json{{"query", "x"}, {"search_path", "res://no_such_dir"}}), 404);
+    ASSERT_EQ(code_of("project_search_text",
+                      didi::json{{"query", "x"}, {"search_path", "res://sub/.."}}), 400);
+
+    // The sentence the tool put in front of the validator's message is still
+    // there. The envelope is the only thing that is new.
+    const auto result = registry.callTool("script_get_symbols", absent);
+    const auto parsed = didi::json::parse(result.content[0].text);
+    ASSERT_TRUE(parsed["error"]["message"].get<std::string>().rfind(
+                    "Invalid script file path: ", 0) == 0);
+}
+
 static void test_resource_inspect_tells_a_directory_from_an_absent_path() {
     // Break caught: one message stood in for two states a caller has to tell
     // apart, and they lead to different next actions -- fix the argument, or go
@@ -4055,6 +4110,8 @@ struct RegisterToolTests {
                      test_search_reads_project_text_and_counts_what_it_cannot);
         registerTest("Tools.SemanticFailuresCarryACode",
                      test_semantic_failures_carry_a_code_a_client_can_branch_on);
+        registerTest("Tools.PathValidationFailuresCarryACode",
+                     test_path_validation_failures_carry_a_code_too);
         registerTest("Tools.ResourceInspectDirectoryVersusAbsent",
                      test_resource_inspect_tells_a_directory_from_an_absent_path);
         registerTest("Tools.AuditSkipsAddonOrphans",

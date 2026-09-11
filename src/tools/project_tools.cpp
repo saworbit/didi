@@ -66,7 +66,7 @@ Result<offline::SearchOptions> parseSearchOptions(const json& args) {
 }
 
 CallToolResult searchError(const Error& error) {
-    return CallToolResult::error("Invalid project search request: " + error.message);
+    return CallToolResult::fromError(error, "Invalid project search request: ");
 }
 
 } // namespace

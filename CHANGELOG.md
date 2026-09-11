@@ -68,6 +68,20 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- Eight tools answer a path-validation failure with the error envelope
+  (#460). The argument checks already answered with `error.code`, so the census
+  in `probes/surface_census.py` reported no bare-string errors on this build:
+  it sends junk arguments, and the argument check fires first. Behind valid
+  arguments naming a path that is not there,
+  `script_check_syntax`, `analyze_script_diagnostics`, `script_get_symbols`,
+  `script_create`, `viewport_create_test_lab`, `create_visual_test_lab`,
+  `project_search_text` and `project_search_symbols` handed the validator's
+  message back unwrapped, so a client switching on `error.code` got
+  `undefined` and had to substring-match English. The validator already carried
+  the right code; prefixing its message by hand was what threw it away. Each of
+  the eight now carries it through: 404 for a path that is not there, 400 for
+  parent traversal. The sentence naming which argument was read is unchanged.
+
 - Live scene answers name the scene they describe, and `scene_create` says it
   changed which one that is (#448). `scene_create` opens the scene it writes,
   which it reported as `opened: true`. What it did not report was that every
