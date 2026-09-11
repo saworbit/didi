@@ -1932,9 +1932,13 @@ static void test_resource_create_serializes_colors_quaternions_and_dictionaries(
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
 
+    // A type the pinned API reference does not carry, because this is about how
+    // values are rendered rather than about which names a type declares, and
+    // the name check has nothing to compare a script class against. The
+    // declared-name check itself is covered in test_resource_references.cpp.
     const didi::json args = {
         {"save_path", "res://materials/typed.tres"},
-        {"resource_type", "StandardMaterial3D"},
+        {"resource_type", "DidiLiteralFixtureResource"},
         {"properties", {
             {"albedo_color", {{"r", 0.25}, {"g", 0.5}, {"b", 0.75}, {"a", 1.0}}},
             {"spin", {{"type", "Quaternion"}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"w", 1.0}}},
@@ -2091,7 +2095,7 @@ static void test_resource_create_refuses_what_it_cannot_write() {
     // A lowercase "type" is an ordinary dictionary key, not a type name.
     const auto dictionary = registry.callTool("resource_create", didi::json{
         {"save_path", "res://meta/notes.tres"},
-        {"resource_type", "Resource"},
+        {"resource_type", "DidiLiteralFixtureResource"},
         {"properties", {{"notes", {{"type", "material"}, {"revision", 3}}}}}
     });
     ASSERT_TRUE(!dictionary.isError);
