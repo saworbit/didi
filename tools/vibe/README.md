@@ -23,6 +23,8 @@ twice.
 | `probes/confirmation_token.py` | The confirmation gate walked end to end; a token cannot be carried between processes, so this one is a script. |
 | `probes/write_then_read_back.py` | Three mutations that report success, read back against the file they wrote. |
 | `probes/protocol_edges.py` | The wire below `tools/call`: stale cursors, a null id, an unknown tool, `arguments` that is not an object. |
+| `probes/path_errors.py` | The same nonexistent path asked of every tool that takes one; finds the failures that live *behind* valid arguments. |
+| `probes/schema_descriptions.py` | How many parameters a caller has to guess at: counts `description` across the whole surface. |
 | `probes/surface_census.py` | The same question asked of all 126 tools: who rejects an unknown argument, what `execution_mode` each reports, who answers with a bare string. |
 | `report.py` | Files a directory of finding bodies as issues in one pass. |
 
@@ -106,7 +108,10 @@ diffing. A fourth, `--which identifier-messages`, asks who answers with a token
 where a sentence belongs; it reports zero from junk arguments, because the
 argument check fires first, and the tokens live behind *valid* arguments that
 name the wrong thing (#441). A census that returns zero is a census asking the
-wrong question.
+wrong question. `probes/path_errors.py` is that lesson applied: the
+error-envelope census reports zero bare strings on `8fd6409`, and eight tools
+still return one — the argument check answers junk first, so the path validator
+is only reachable with arguments that are well-formed and wrong (#460).
 
 **Narrow before you file, especially when two things changed.** This session
 nearly filed "`editor_undo` reports success without undoing anything" — the
@@ -116,6 +121,14 @@ no longer existed. A tighter repro (set a property, undo, read it back) showed
 undo working correctly and reporting `409 Nothing to undo` on an exhausted
 stack. A sandbox accumulates state; a finding that depends on three earlier
 mutations is a finding about your probe order until proven otherwise.
+
+**Diff the tree around a census, not just after it.** A `/root/Main/Node` nobody
+had asked for appeared in this session's sandbox partway through a census, and
+finding out which call had put it there cost a fresh sandbox, a fresh editor and
+three replays. The answer was `scene_instantiate_node`, which has no required
+arguments and instantiates a bare `Node` when sent `{}` (#471). A census that
+sends a call per tool is a batch of mutations wearing a survey's clothes: read
+the hierarchy between calls, keep the diff, and the bisect is already done.
 
 **A mutation that reports success has still only told you it ran.** Four of
 this session's findings are a tool doing something adjacent to the request and
@@ -148,6 +161,8 @@ next is not a test of the gate, it is a test of process lifetime.
 | 2026-09-11 | Whole-surface censuses (unknown arguments, execution modes, error envelopes), then narrowing: non-ASCII identifiers, `dry_run` semantics, project.godot references, search coverage. | `1.8.0+6164335c8868` | #416–#427, twelve findings. |
 
 | 2026-09-11 | Mutation honesty (write, then read back from the file and the engine), scene identity across a scene switch, semantic failures behind valid arguments, and the JSON-RPC layer below `tools/call`. | `1.8.0+5c34220b7d42` | #437-#450, fourteen findings. |
+
+| 2026-09-12 | Inverse pairs and duplicates, path forms, property coercion, the confirmation preview, resource honesty, and two new whole-surface censuses. | `1.8.0+8fd6409268ac` | #460-#472, thirteen findings. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log
