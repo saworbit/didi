@@ -20,6 +20,7 @@
 #include <cstring>
 #include <filesystem>
 #include <limits>
+#include <unordered_map>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -41,6 +42,151 @@ json errorJson(int code, const std::string& message) {
 
 json errorJson(int code, const std::string& message, json data) {
     return {{"error", {{"code", code}, {"message", message}, {"data", std::move(data)}}}};
+}
+
+// A semantic failure, said in a sentence, with the identifier kept as a stable
+// code under `data.code`.
+//
+// These used to answer with the identifier as the whole message. That is the
+// string a client shows a person, and `target_method_not_found` does not say
+// which method was looked for or on which node, so the one thing the caller
+// needed was the one thing missing. #406 and #424 fixed the argument
+// rejections; this is the same treatment for the failures underneath them.
+//
+// The sentence comes from bridgeErrorSentence, so every identifier has one in a
+// single place rather than at 120 call sites, and a site with something useful
+// to add passes it through `detail` and `data`.
+json bridgeError(int code, const std::string& identifier, json data = json::object(),
+                 const std::string& detail = {});
+
+// One sentence per identifier, in one place. A call site that has something
+// useful to add -- which node, which method, which type it found instead --
+// passes it as `detail`, and it is appended to the sentence.
+const std::map<std::string, std::string>& bridgeErrorSentences() {
+    static const std::map<std::string, std::string> sentences = {
+    {"camera_path_does_not_resolve_to_camera3d",
+     "That path resolves to a node, but not to a Camera3D."},
+    {"camera_postcondition_mismatch",
+     "The camera's transform did not read back as written after the change was committed."},
+    {"camera_postcondition_read_failed",
+     "The camera's transform could not be read back after the change was committed."},
+    {"camera_state_read_failed",
+     "The camera's current transform could not be read, so there would have been nothing to undo back to."},
+    {"camera_undo_registration_failed",
+     "The change could not be registered with the editor's undo history, so it was not made."},
+    {"debug_draw_postcondition_mismatch",
+     "The viewport's debug draw mode did not read back as set."},
+    {"debug_hint_read_failed",
+     "The viewport's debug draw mode could not be read."},
+    {"declared_signal_not_found",
+     "The emitter node declares no signal by that name."},
+    {"duplicate_gridmap_position",
+     "The same cell position appears more than once in this batch, and only one of them could win."},
+    {"duplicate_tilemap_coordinate",
+     "The same cell coordinate appears more than once in this batch, and only one of them could win."},
+    {"extension_protocol_error",
+     "The GDExtension interface returned something this build cannot read, so the result would not have been trustworthy."},
+    {"gridmap_item_not_found",
+     "The MeshLibrary on that GridMap has no item with that id."},
+    {"gridmap_postcondition_mismatch",
+     "The cells did not read back as written after the change was committed."},
+    {"gridmap_snapshot_failed",
+     "The cells could not be read before the change, so there would have been nothing to undo back to."},
+    {"gridmap_target_not_found",
+     "No node was found at that gridmap path."},
+    {"gridmap_target_wrong_type",
+     "That path resolves to a node, but not to a GridMap."},
+    {"gridmap_undo_registration_failed",
+     "The change could not be registered with the editor's undo history, so it was not made."},
+    {"invalid_phase7_signal_test_seam",
+     "That is not a seam this build admits."},
+    {"invalid_gridmap_set_cells_request",
+     "The arguments do not match the published shape for this tool."},
+    {"invalid_signal_emit_argument_encoding",
+     "An argument is not encoded the way this method expects."},
+    {"invalid_signal_emit_request",
+     "The arguments do not match the published shape for this tool."},
+    {"invalid_signal_list_connections_request",
+     "The arguments do not match the published shape for this tool."},
+    {"invalid_tilemap_get_used_rect_request",
+     "The arguments do not match the published shape for this tool."},
+    {"invalid_tilemap_set_cells_request",
+     "The arguments do not match the published shape for this tool."},
+    {"invalid_ui_list_controls_request",
+     "The arguments do not match the published shape for this tool."},
+    {"invalid_viewport_set_camera_transform_request",
+     "The arguments do not match the published shape for this tool."},
+    {"invalid_viewport_toggle_debug_draw_request",
+     "The arguments do not match the published shape for this tool."},
+    {"missing_or_ambiguous_signal_connection",
+     "No single existing connection matches that emitter, signal, target and method."},
+    {"required_bind_unavailable",
+     "A Godot method this call depends on is not available in the attached engine build, so the call was refused rather than half done."},
+    {"response_limit",
+     "The response grew past the size this method will send; ask for a narrower slice."},
+    {"session_kind_rejected",
+     "This method is not available on the attached session; it needs a different session kind."},
+    {"signal_argument_metadata_work_limit",
+     "Reading the signal argument metadata would cost more work than this method will spend; ask for a narrower slice."},
+    {"signal_connection_already_exists",
+     "That emitter, signal, target and method are already connected."},
+    {"signal_connection_metadata_work_limit",
+     "Reading the connection metadata would cost more work than this method will spend; ask for a narrower slice."},
+    {"signal_connection_state_inconsistent",
+     "The engine reported the connection in two states at once, so nothing was changed."},
+    {"signal_emit_argument_count_exceeded",
+     "More arguments were given than this method will emit."},
+    {"signal_emit_argument_type_mismatch",
+     "An argument is not the type that signal declares in that position."},
+    {"signal_emit_arguments_too_large",
+     "The arguments are larger than this method will emit."},
+    {"signal_emit_arity_mismatch",
+     "The number of arguments given does not match what that signal declares."},
+    {"signal_emit_failed",
+     "The engine refused the emit."},
+    {"signal_metadata_work_limit",
+     "Reading the signal metadata would cost more work than this method will spend; ask for a narrower slice."},
+    {"signal_target_arity_incompatible",
+     "The target method cannot accept the arguments that signal carries."},
+    {"signal_undo_redo_registration_failed",
+     "The change could not be registered with the editor's undo history, so it was not made."},
+    {"target_method_not_found",
+     "The target node has no method by that name."},
+    {"tilemap_layer_has_no_tileset",
+     "That TileMapLayer has no TileSet, so no cell can be placed on it."},
+    {"tilemap_postcondition_mismatch",
+     "The cells did not read back as written after the change was committed."},
+    {"tilemap_snapshot_failed",
+     "The cells could not be read before the change, so there would have been nothing to undo back to."},
+    {"tilemap_target_not_found",
+     "No node was found at that tilemap path."},
+    {"tilemap_target_wrong_type",
+     "That path resolves to a node, but not to a TileMapLayer."},
+    {"tilemap_tile_not_found",
+     "The TileSet on that layer has no tile for the source id and atlas coordinates given."},
+    {"tilemap_undo_registration_failed",
+     "The change could not be registered with the editor's undo history, so it was not made."},
+    {"unsupported_existing_connection_flags",
+     "The existing connection carries connect flags this method will not change."},
+    {"unsupported_signal_emit_argument",
+     "An argument is of a type this method has no way to send."},
+    };
+    return sentences;
+}
+
+json bridgeError(int code, const std::string& identifier, json data, const std::string& detail) {
+    const auto& sentences = bridgeErrorSentences();
+    const auto found = sentences.find(identifier);
+    // An identifier with no sentence is still better said than printed bare,
+    // and a test pins that every identifier in this file has one.
+    std::string message = found == sentences.end()
+                              ? "The engine refused this call (" + identifier + ")."
+                              : found->second;
+    if (!detail.empty()) message += " " + detail;
+    if (!data.is_object()) data = json::object();
+    data["code"] = identifier;
+    if (!data.contains("retryable")) data["retryable"] = false;
+    return errorJson(code, message, std::move(data));
 }
 
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
@@ -498,6 +644,37 @@ Result<VariantValue> callObject(GDExtensionObjectPtr object, const char* class_n
                                 const char* method_name, int64_t hash,
                                 const std::vector<const VariantValue*>& arguments = {});
 Result<VariantValue> makeVector3(double x, double y, double z);
+
+// The class Godot gives a node, for saying what was found instead of what was
+// wanted. Empty when the engine will not say, in which case the sentence simply
+// omits the type rather than inventing one.
+std::string nodeClassName(GDExtensionObjectPtr object) {
+    auto value = callObject(object, "Object", "get_class", 201670096LL);
+    if (value.isErr()) return {};
+    auto text = stringFromVariant(value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+    return text.isErr() ? std::string() : text.value();
+}
+
+// "That path resolves to a node, but not to a TileMapLayer; it is a Node2D."
+//
+// A path that resolves to nothing and a path that resolves to the wrong kind of
+// node are different problems with different fixes, and both used to answer
+// with the same identifier. A caller that cannot tell them apart retries the
+// path when it should be looking at the node, or the other way round.
+json wrongNodeTypeError(const std::string& identifier, const std::string& path,
+                        GDExtensionObjectPtr object) {
+    const auto found = nodeClassName(object);
+    json data = {{"path", path}};
+    std::string detail = "Path " + path;
+    if (found.empty()) {
+        detail += " was searched.";
+    } else {
+        data["found_type"] = found;
+        detail += " is a " + found + ".";
+    }
+    return bridgeError(404, identifier, std::move(data), detail);
+}
+
 Result<VariantValue> makeVector2i(int64_t x, int64_t y);
 Result<VariantValue> makeVector3i(int64_t x, int64_t y, int64_t z);
 
@@ -2625,7 +2802,7 @@ Result<VariantValue> buildInjectedEvent(const runtime::InjectedInputEvent& spec)
 // InputMap.has_action is 2619796661 on Godot 4.5.1, 4.6.2 and 4.7.2, checked by
 // dumping the extension API from each rather than assuming hashes are stable.
 json inputMapMissingActions(const json& params, const std::string& session_kind) {
-    if (session_kind != "game") return errorJson(409, "session_kind_rejected");
+    if (session_kind != "game") return bridgeError(409, "session_kind_rejected");
     if (!params.is_object() || !params.contains("actions") || !params["actions"].is_array()) {
         return errorJson(400, "actions must be an array");
     }
@@ -2656,7 +2833,7 @@ json inputMapMissingActions(const json& params, const std::string& session_kind)
 }
 
 json injectInput(const json& params, const std::string& session_kind) {
-    if (session_kind != "game") return errorJson(409, "session_kind_rejected");
+    if (session_kind != "game") return bridgeError(409, "session_kind_rejected");
     auto parsed = runtime::parseInputInjectionRequest(params);
     if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
     auto input = singleton("Input");
@@ -4204,7 +4381,7 @@ Result<GDExtensionObjectPtr> resolveAnimationPlayer(const std::string& path, con
 json uiListControls(const json& params, const std::string& session_kind) {
     if (!hasOnlyKeys(params, {"root_path", "max_results", "visible_only", "include_text",
                               "class_filter"})) {
-        return errorJson(400, "invalid_ui_list_controls_request");
+        return bridgeError(400, "invalid_ui_list_controls_request");
     }
     if (params.contains("root_path") &&
         (!params["root_path"].is_string() || params["root_path"].get<std::string>().size() > 1024)) {
@@ -4526,7 +4703,7 @@ json animListTracks(const json& params, const std::string& session_kind) {
 }
 
 json animPlayTrack(const json& params, const std::string& session_kind) {
-    if (session_kind != "game") return errorJson(409, "session_kind_rejected");
+    if (session_kind != "game") return bridgeError(409, "session_kind_rejected");
     auto parsed = runtime::parseAnimPlayRequest(params);
     if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
     for (const auto& bind : {std::make_tuple("AnimationMixer", "has_animation", 2619796661LL),
@@ -5035,7 +5212,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             "connect_postcondition_mismatch_rollback_failure"};
         if (!hasOnlyKeys(params, {"seam"}) || !params.contains("seam") ||
             !params["seam"].is_string() || !admitted.count(params["seam"].get<std::string>())) {
-            return errorJson(400, "invalid_phase7_signal_test_seam");
+            return bridgeError(400, "invalid_phase7_signal_test_seam");
         }
         g_phase7SignalTestSeam = params["seam"].get<std::string>();
         return liveResult({{"status", "configured"}});
@@ -5077,28 +5254,34 @@ json GodotBridge::execute(const std::string& method, const json& params,
     }
 
     if (method == "tilemap.getUsedRect") {
-        if (session_kind != "editor") return errorJson(409, "session_kind_rejected");
+        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
         if (!hasOnlyKeys(params, {"tilemap_path"}) || !params.contains("tilemap_path") ||
             !params["tilemap_path"].is_string() || params["tilemap_path"].get<std::string>().empty() ||
             params["tilemap_path"].get<std::string>().size() > 1024) {
-            return errorJson(400, "invalid_tilemap_get_used_rect_request");
+            return bridgeError(400, "invalid_tilemap_get_used_rect_request");
         }
         if (requireMethodBind("TileMapLayer", "get_used_rect", 410525958LL).isErr() ||
             requireMethodBind("Object", "is_class", 3927539163LL).isErr()) {
-            return errorJson(501, "required_bind_unavailable");
+            return bridgeError(501, "required_bind_unavailable");
         }
         auto root = editedSceneRoot(editor);
         if (root.isErr()) return errorJson(root.error().code, root.error().message);
         auto layer = resolveNode(root.value(), params["tilemap_path"].get<std::string>());
-        if (layer.isErr()) return errorJson(404, "tilemap_target_not_found");
+        const auto tilemap_path = params["tilemap_path"].get<std::string>();
+        if (layer.isErr()) {
+            return bridgeError(404, "tilemap_target_not_found", {{"path", tilemap_path}},
+                               "Path " + tilemap_path + " resolves to nothing.");
+        }
         auto correct_class = objectIsClass(layer.value(), "TileMapLayer");
         if (correct_class.isErr()) return errorJson(500, correct_class.error().message);
-        if (!correct_class.value()) return errorJson(404, "tilemap_target_not_found");
+        if (!correct_class.value()) {
+            return wrongNodeTypeError("tilemap_target_wrong_type", tilemap_path, layer.value());
+        }
         auto rect = callObject(layer.value(), "TileMapLayer", "get_used_rect", 410525958LL);
         if (rect.isErr()) return errorJson(500, rect.error().message);
         auto& api = GodotApi::instance();
         if (api.variant_get_type(rect.value().ptr()) != GDEXTENSION_VARIANT_TYPE_RECT2I ||
-            !api.variant_get_ptr_getter) return errorJson(500, "extension_protocol_error");
+            !api.variant_get_ptr_getter) return bridgeError(500, "extension_protocol_error");
         auto converter = api.get_variant_to_type_constructor(GDEXTENSION_VARIANT_TYPE_RECT2I);
         NativeName position_name("position"), size_name("size");
         auto get_position = position_name.valid()
@@ -5107,7 +5290,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto get_size = size_name.valid()
                             ? api.variant_get_ptr_getter(GDEXTENSION_VARIANT_TYPE_RECT2I, size_name.ptr())
                             : nullptr;
-        if (!converter || !get_position || !get_size) return errorJson(501, "required_bind_unavailable");
+        if (!converter || !get_position || !get_size) return bridgeError(501, "required_bind_unavailable");
         NativeValue native_rect(GDEXTENSION_VARIANT_TYPE_RECT2I);
         converter(native_rect.ptr(), rect.value().ptr());
         native_rect.markInitialized();
@@ -5119,10 +5302,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
         native_size.markInitialized();
         auto position_variant = variantFromNative(GDEXTENSION_VARIANT_TYPE_VECTOR2I, native_position.ptr());
         auto size_variant = variantFromNative(GDEXTENSION_VARIANT_TYPE_VECTOR2I, native_size.ptr());
-        if (position_variant.isErr() || size_variant.isErr()) return errorJson(500, "extension_protocol_error");
+        if (position_variant.isErr() || size_variant.isErr()) return bridgeError(500, "extension_protocol_error");
         auto position = integerVectorToJson(position_variant.value(), 2);
         auto size = integerVectorToJson(size_variant.value(), 2);
-        if (position.isErr() || size.isErr()) return errorJson(500, "extension_protocol_error");
+        if (position.isErr() || size.isErr()) return bridgeError(500, "extension_protocol_error");
         return liveResult({{"tilemap_path", params["tilemap_path"]},
                            {"position", position.value()}, {"size", size.value()},
                            {"end", {{"x", position.value()["x"].get<int64_t>() + size.value()["x"].get<int64_t>()},
@@ -5130,14 +5313,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
     }
 
     if (method == "tilemap.setCells") {
-        if (session_kind != "editor") return errorJson(409, "session_kind_rejected");
+        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
         if (!hasOnlyKeys(params, {"tilemap_path", "cells"}) ||
             !params.contains("tilemap_path") || !params["tilemap_path"].is_string() ||
             params["tilemap_path"].get<std::string>().empty() ||
             params["tilemap_path"].get<std::string>().size() > 1024 ||
             !params.contains("cells") || !params["cells"].is_array() ||
             params["cells"].empty() || params["cells"].size() > 256) {
-            return errorJson(400, "invalid_tilemap_set_cells_request");
+            return bridgeError(400, "invalid_tilemap_set_cells_request");
         }
         for (const auto& bind : {
                  std::make_tuple("Object", "is_class", 3927539163LL),
@@ -5151,16 +5334,22 @@ json GodotBridge::execute(const std::string& method, const json& params,
                  std::make_tuple("TileSet", "get_source", 1763540252LL),
                  std::make_tuple("TileSetAtlasSource", "get_tile_data", 3534028207LL)}) {
             if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr())
-                return errorJson(501, "required_bind_unavailable");
+                return bridgeError(501, "required_bind_unavailable");
         }
         if (preflightUndoManagerBindings().isErr() || preflightUndoRollbackBindings().isErr())
-            return errorJson(501, "required_bind_unavailable");
+            return bridgeError(501, "required_bind_unavailable");
         auto root = editedSceneRoot(editor);
         if (root.isErr()) return errorJson(root.error().code, root.error().message);
         auto layer = resolveNode(root.value(), params["tilemap_path"].get<std::string>());
-        if (layer.isErr()) return errorJson(404, "tilemap_target_not_found");
+        const auto tilemap_path = params["tilemap_path"].get<std::string>();
+        if (layer.isErr()) {
+            return bridgeError(404, "tilemap_target_not_found", {{"path", tilemap_path}},
+                               "Path " + tilemap_path + " resolves to nothing.");
+        }
         auto correct_class = objectIsClass(layer.value(), "TileMapLayer");
-        if (correct_class.isErr() || !correct_class.value()) return errorJson(404, "tilemap_target_not_found");
+        if (correct_class.isErr() || !correct_class.value()) {
+            return wrongNodeTypeError("tilemap_target_wrong_type", tilemap_path, layer.value());
+        }
         auto tile_set_variant = callObject(layer.value(), "TileMapLayer", "get_tile_set", 2678226422LL);
         if (tile_set_variant.isErr()) return errorJson(500, tile_set_variant.error().message);
         auto tile_set = objectFromVariant(tile_set_variant.value());
@@ -5171,7 +5360,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         // The cause is one unset property on the node, and it is worth saying so
         // before any cell is looked at.
         if (!tile_set.value()) {
-            return errorJson(409, "tilemap_layer_has_no_tileset",
+            return bridgeError(409, "tilemap_layer_has_no_tileset",
                              {{"tilemap_path", params["tilemap_path"].get<std::string>()},
                               {"retryable", false}});
         }
@@ -5191,23 +5380,23 @@ json GodotBridge::execute(const std::string& method, const json& params,
         std::set<std::pair<int64_t, int64_t>> seen;
         for (const auto& record : params["cells"]) {
             if (!record.is_object() || !record.contains("coords") || !record["coords"].is_array() ||
-                record["coords"].size() != 2) return errorJson(400, "invalid_tilemap_set_cells_request");
+                record["coords"].size() != 2) return bridgeError(400, "invalid_tilemap_set_cells_request");
             const auto x_value = boundedJsonInteger(record["coords"][0], -1048576, 1048576);
             const auto y_value = boundedJsonInteger(record["coords"][1], -1048576, 1048576);
             if (!x_value.has_value() || !y_value.has_value())
-                return errorJson(400, "invalid_tilemap_set_cells_request");
+                return bridgeError(400, "invalid_tilemap_set_cells_request");
             const int64_t x = *x_value;
             const int64_t y = *y_value;
-            if (!seen.emplace(x, y).second) return errorJson(409, "duplicate_tilemap_coordinate");
+            if (!seen.emplace(x, y).second) return bridgeError(409, "duplicate_tilemap_coordinate");
             const bool erase = record.contains("erase");
             if ((erase && (!hasOnlyKeys(record, {"coords", "erase"}) || !record["erase"].is_boolean() || !record["erase"].get<bool>())) ||
                 (!erase && (!hasOnlyKeys(record, {"coords", "source_id", "atlas_coords", "alternative_tile"}) ||
                             !record.contains("source_id") || !record["source_id"].is_number_integer() ||
                             !record.contains("atlas_coords") || !record["atlas_coords"].is_array() || record["atlas_coords"].size() != 2)))
-                return errorJson(400, "invalid_tilemap_set_cells_request");
+                return bridgeError(400, "invalid_tilemap_set_cells_request");
             auto coords = makeVector2i(x, y);
             auto empty_atlas = makeVector2i(-1, -1);
-            if (coords.isErr() || empty_atlas.isErr()) return errorJson(501, "required_bind_unavailable");
+            if (coords.isErr() || empty_atlas.isErr()) return bridgeError(501, "required_bind_unavailable");
             int64_t source = -1, alternative = -1;
             VariantValue atlas = std::move(empty_atlas.value());
             if (!erase) {
@@ -5216,44 +5405,44 @@ json GodotBridge::execute(const std::string& method, const json& params,
                     ? boundedJsonInteger(record["alternative_tile"], 0, 65535)
                     : std::optional<int64_t>(0);
                 if (!source_value_int.has_value() || !alternative_value_int.has_value())
-                    return errorJson(400, "invalid_tilemap_set_cells_request");
+                    return bridgeError(400, "invalid_tilemap_set_cells_request");
                 source = *source_value_int;
                 alternative = *alternative_value_int;
                 const auto ax_value = boundedJsonInteger(record["atlas_coords"][0], 0, 1048576);
                 const auto ay_value = boundedJsonInteger(record["atlas_coords"][1], 0, 1048576);
                 if (!ax_value.has_value() || !ay_value.has_value())
-                    return errorJson(400, "invalid_tilemap_set_cells_request");
+                    return bridgeError(400, "invalid_tilemap_set_cells_request");
                 const int64_t ax = *ax_value;
                 const int64_t ay = *ay_value;
                 auto source_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, source);
                 auto has_source = callObject(tile_set.value(), "TileSet", "has_source", 1116898809LL, {&source_value.value()});
                 auto has_flag = has_source.isOk() ? scalarFromVariant<GDExtensionBool>(has_source.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
                                                   : Result<GDExtensionBool>(has_source.error());
-                if (has_flag.isErr() || !has_flag.value()) return errorJson(404, "tilemap_tile_not_found");
+                if (has_flag.isErr() || !has_flag.value()) return bridgeError(404, "tilemap_tile_not_found");
                 auto source_object_value = callObject(tile_set.value(), "TileSet", "get_source", 1763540252LL, {&source_value.value()});
                 auto source_object = source_object_value.isOk() ? objectFromVariant(source_object_value.value())
                                                                 : Result<GDExtensionObjectPtr>(source_object_value.error());
-                if (source_object.isErr() || !source_object.value()) return errorJson(404, "tilemap_tile_not_found");
+                if (source_object.isErr() || !source_object.value()) return bridgeError(404, "tilemap_tile_not_found");
                 auto atlas_class = objectIsClass(source_object.value(), "TileSetAtlasSource");
-                if (atlas_class.isErr() || !atlas_class.value()) return errorJson(404, "tilemap_tile_not_found");
+                if (atlas_class.isErr() || !atlas_class.value()) return bridgeError(404, "tilemap_tile_not_found");
                 auto requested_atlas = makeVector2i(ax, ay);
                 auto alternative_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, alternative);
                 auto tile_data_value = callObject(source_object.value(), "TileSetAtlasSource", "get_tile_data", 3534028207LL,
                                                   {&requested_atlas.value(), &alternative_value.value()});
                 auto tile_data = tile_data_value.isOk() ? objectFromVariant(tile_data_value.value())
                                                         : Result<GDExtensionObjectPtr>(tile_data_value.error());
-                if (tile_data.isErr() || !tile_data.value()) return errorJson(404, "tilemap_tile_not_found");
+                if (tile_data.isErr() || !tile_data.value()) return bridgeError(404, "tilemap_tile_not_found");
                 atlas = std::move(requested_atlas.value());
             }
             auto old_source_value = callObject(layer.value(), "TileMapLayer", "get_cell_source_id", 2485466453LL, {&coords.value()});
             auto old_atlas = callObject(layer.value(), "TileMapLayer", "get_cell_atlas_coords", 3050897911LL, {&coords.value()});
             auto old_alt_value = callObject(layer.value(), "TileMapLayer", "get_cell_alternative_tile", 2485466453LL, {&coords.value()});
-            if (old_source_value.isErr() || old_atlas.isErr() || old_alt_value.isErr()) return errorJson(500, "tilemap_snapshot_failed");
+            if (old_source_value.isErr() || old_atlas.isErr() || old_alt_value.isErr()) return bridgeError(500, "tilemap_snapshot_failed");
             auto old_source = scalarFromVariant<int64_t>(old_source_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
             auto old_alt = scalarFromVariant<int64_t>(old_alt_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
             auto old_atlas_json = integerVectorToJson(old_atlas.value(), 2);
             auto atlas_json = integerVectorToJson(atlas, 2);
-            if (old_source.isErr() || old_alt.isErr() || old_atlas_json.isErr() || atlas_json.isErr()) return errorJson(500, "tilemap_snapshot_failed");
+            if (old_source.isErr() || old_alt.isErr() || old_atlas_json.isErr() || atlas_json.isErr()) return bridgeError(500, "tilemap_snapshot_failed");
             const bool changed = old_source.value() != source || old_alt.value() != alternative || old_atlas_json.value() != atlas_json.value();
             cells.push_back(Cell{std::move(coords.value()), erase, source, std::move(atlas), alternative,
                                  old_source.value(), std::move(old_atlas.value()), old_alt.value(), changed});
@@ -5276,7 +5465,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (registered.isOk()) registered = cell.old_source < 0
                 ? managerMethod(manager.value(), "add_undo_method", layer.value(), "erase_cell", {&cell.coords})
                 : managerMethod(manager.value(), "add_undo_method", layer.value(), "set_cell", {&cell.coords, &old_source_value.value(), &cell.old_atlas, &old_alt_value.value()});
-            if (registered.isErr()) { abandonAction(manager.value()); return errorJson(500, "tilemap_undo_registration_failed"); }
+            if (registered.isErr()) { abandonAction(manager.value()); return bridgeError(500, "tilemap_undo_registration_failed"); }
         }
         auto committed = commitAction(manager.value());
         if (committed.isErr()) return errorJson(500, committed.error().message);
@@ -5295,7 +5484,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 expected_atlas.isErr() || observed_source.value() != cell.source ||
                 observed_alt.value() != cell.alternative || observed_atlas.value() != expected_atlas.value()) {
                 const auto restored = undoLastAction(manager.value(), root.value());
-                return errorJson(500, "tilemap_postcondition_mismatch", {{"outcome", restored.isOk() ? "rolled_back" : "unknown"}});
+                return bridgeError(500, "tilemap_postcondition_mismatch", {{"outcome", restored.isOk() ? "rolled_back" : "unknown"}});
             }
         }
         return liveResult({{"requested_cells", cells.size()}, {"changed_cells", changed_count},
@@ -5303,28 +5492,34 @@ json GodotBridge::execute(const std::string& method, const json& params,
     }
 
     if (method == "gridmap.setCells") {
-        if (session_kind != "editor") return errorJson(409, "session_kind_rejected");
+        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
         if (!hasOnlyKeys(params, {"gridmap_path", "cells"}) || !params.contains("gridmap_path") ||
             !params["gridmap_path"].is_string() || params["gridmap_path"].get<std::string>().empty() ||
             params["gridmap_path"].get<std::string>().size() > 1024 ||
             !params.contains("cells") || !params["cells"].is_array() || params["cells"].empty() ||
-            params["cells"].size() > 256) return errorJson(400, "invalid_gridmap_set_cells_request");
+            params["cells"].size() > 256) return bridgeError(400, "invalid_gridmap_set_cells_request");
         for (const auto& bind : {std::make_tuple("Object", "is_class", 3927539163LL),
                  std::make_tuple("GridMap", "get_mesh_library", 3350993772LL),
                  std::make_tuple("GridMap", "set_cell_item", 3449088946LL),
                  std::make_tuple("GridMap", "get_cell_item", 3724960147LL),
                  std::make_tuple("GridMap", "get_cell_item_orientation", 3724960147LL),
                  std::make_tuple("MeshLibrary", "get_item_list", 1930428628LL)}) {
-            if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) return errorJson(501, "required_bind_unavailable");
+            if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) return bridgeError(501, "required_bind_unavailable");
         }
         if (preflightUndoManagerBindings().isErr() || preflightUndoRollbackBindings().isErr())
-            return errorJson(501, "required_bind_unavailable");
+            return bridgeError(501, "required_bind_unavailable");
         auto root = editedSceneRoot(editor);
         if (root.isErr()) return errorJson(root.error().code, root.error().message);
         auto grid = resolveNode(root.value(), params["gridmap_path"].get<std::string>());
-        if (grid.isErr()) return errorJson(404, "gridmap_target_not_found");
+        const auto gridmap_path = params["gridmap_path"].get<std::string>();
+        if (grid.isErr()) {
+            return bridgeError(404, "gridmap_target_not_found", {{"path", gridmap_path}},
+                               "Path " + gridmap_path + " resolves to nothing.");
+        }
         auto correct_class = objectIsClass(grid.value(), "GridMap");
-        if (correct_class.isErr() || !correct_class.value()) return errorJson(404, "gridmap_target_not_found");
+        if (correct_class.isErr() || !correct_class.value()) {
+            return wrongNodeTypeError("gridmap_target_wrong_type", gridmap_path, grid.value());
+        }
         auto library_value = callObject(grid.value(), "GridMap", "get_mesh_library", 3350993772LL);
         auto library = library_value.isOk() ? objectFromVariant(library_value.value())
                                             : Result<GDExtensionObjectPtr>(library_value.error());
@@ -5342,32 +5537,32 @@ json GodotBridge::execute(const std::string& method, const json& params,
         for (const auto& record : params["cells"]) {
             if (!hasOnlyKeys(record, {"position", "item", "orientation"}) || !record.contains("position") ||
                 !record["position"].is_array() || record["position"].size() != 3 || !record.contains("item") ||
-                !record["item"].is_number_integer()) return errorJson(400, "invalid_gridmap_set_cells_request");
+                !record["item"].is_number_integer()) return bridgeError(400, "invalid_gridmap_set_cells_request");
             int64_t xyz[3];
             for (int axis = 0; axis < 3; ++axis) {
                 const auto coordinate = boundedJsonInteger(record["position"][axis], -1048576, 1048576);
-                if (!coordinate.has_value()) return errorJson(400, "invalid_gridmap_set_cells_request");
+                if (!coordinate.has_value()) return bridgeError(400, "invalid_gridmap_set_cells_request");
                 xyz[axis] = *coordinate;
             }
-            if (!seen.emplace(xyz[0], xyz[1], xyz[2]).second) return errorJson(409, "duplicate_gridmap_position");
+            if (!seen.emplace(xyz[0], xyz[1], xyz[2]).second) return bridgeError(409, "duplicate_gridmap_position");
             const auto item_value = boundedJsonInteger(record["item"], -1, 2147483647LL);
             const auto orientation_value = record.contains("orientation")
                 ? boundedJsonInteger(record["orientation"], 0, 23)
                 : std::optional<int64_t>(0);
             if (!item_value.has_value() || !orientation_value.has_value())
-                return errorJson(400, "invalid_gridmap_set_cells_request");
+                return bridgeError(400, "invalid_gridmap_set_cells_request");
             const int64_t item = *item_value;
             const int64_t orientation = *orientation_value;
-            if (item == -1 && orientation != 0) return errorJson(400, "invalid_gridmap_set_cells_request");
-            if (item >= 0 && (!library.isOk() || !library.value() || !item_ids.count(item))) return errorJson(404, "gridmap_item_not_found");
+            if (item == -1 && orientation != 0) return bridgeError(400, "invalid_gridmap_set_cells_request");
+            if (item >= 0 && (!library.isOk() || !library.value() || !item_ids.count(item))) return bridgeError(404, "gridmap_item_not_found");
             auto position = makeVector3i(xyz[0], xyz[1], xyz[2]);
-            if (position.isErr()) return errorJson(501, "required_bind_unavailable");
+            if (position.isErr()) return bridgeError(501, "required_bind_unavailable");
             auto old_item_value = callObject(grid.value(), "GridMap", "get_cell_item", 3724960147LL, {&position.value()});
             auto old_orientation_value = callObject(grid.value(), "GridMap", "get_cell_item_orientation", 3724960147LL, {&position.value()});
-            if (old_item_value.isErr() || old_orientation_value.isErr()) return errorJson(500, "gridmap_snapshot_failed");
+            if (old_item_value.isErr() || old_orientation_value.isErr()) return bridgeError(500, "gridmap_snapshot_failed");
             auto old_item = scalarFromVariant<int64_t>(old_item_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
             auto old_orientation = scalarFromVariant<int64_t>(old_orientation_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (old_item.isErr() || old_orientation.isErr()) return errorJson(500, "gridmap_snapshot_failed");
+            if (old_item.isErr() || old_orientation.isErr()) return bridgeError(500, "gridmap_snapshot_failed");
             const bool changed = item != old_item.value() || (item >= 0 && orientation != old_orientation.value());
             cells.push_back(Cell{std::move(position.value()), item, orientation, old_item.value(), old_orientation.value(), changed});
         }
@@ -5385,7 +5580,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto old_orientation = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.old_orientation);
             auto registered = managerMethod(manager.value(), "add_do_method", grid.value(), "set_cell_item", {&cell.position, &item.value(), &orientation.value()});
             if (registered.isOk()) registered = managerMethod(manager.value(), "add_undo_method", grid.value(), "set_cell_item", {&cell.position, &old_item.value(), &old_orientation.value()});
-            if (registered.isErr()) { abandonAction(manager.value()); return errorJson(500, "gridmap_undo_registration_failed"); }
+            if (registered.isErr()) { abandonAction(manager.value()); return bridgeError(500, "gridmap_undo_registration_failed"); }
         }
         auto committed = commitAction(manager.value());
         if (committed.isErr()) return errorJson(500, committed.error().message);
@@ -5400,7 +5595,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 observed_item.value() != cell.item ||
                 (cell.item >= 0 && observed_orientation.value() != cell.orientation)) {
                 const auto restored = undoLastAction(manager.value(), root.value());
-                return errorJson(500, "gridmap_postcondition_mismatch", {{"outcome", restored.isOk() ? "rolled_back" : "unknown"}});
+                return bridgeError(500, "gridmap_postcondition_mismatch", {{"outcome", restored.isOk() ? "rolled_back" : "unknown"}});
             }
         }
         return liveResult({{"requested_cells", cells.size()}, {"changed_cells", changed_count},
@@ -5408,7 +5603,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
     }
 
     if (method == "vision.setCameraTransform") {
-        if (session_kind != "editor") return errorJson(409, "session_kind_rejected");
+        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
         auto vector_is_valid = [](const json& value, double limit) {
             if (!value.is_object() || value.size() != 3) return false;
             for (const auto* axis : {"x", "y", "z"}) {
@@ -5430,7 +5625,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             (params.contains("fov") &&
              (!params["fov"].is_number() || !std::isfinite(params["fov"].get<double>()) ||
               params["fov"].get<double>() < 1.0 || params["fov"].get<double>() > 179.0))) {
-            return errorJson(400, "invalid_viewport_set_camera_transform_request");
+            return bridgeError(400, "invalid_viewport_set_camera_transform_request");
         }
 
         for (const auto& bind : {
@@ -5447,11 +5642,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
                  std::make_tuple("UndoRedo", "undo", 2240911060LL)}) {
             if (requireMethodBind(std::get<0>(bind), std::get<1>(bind),
                                   std::get<2>(bind)).isErr()) {
-                return errorJson(501, "required_bind_unavailable");
+                return bridgeError(501, "required_bind_unavailable");
             }
         }
         if (preflightUndoManagerBindings().isErr()) {
-            return errorJson(501, "required_bind_unavailable");
+            return bridgeError(501, "required_bind_unavailable");
         }
 
         auto root = editedSceneRoot(editor);
@@ -5467,40 +5662,40 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto is_camera = scalarFromVariant<GDExtensionBool>(
             class_result.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
         if (is_camera.isErr()) return errorJson(500, is_camera.error().message);
-        if (!is_camera.value()) return errorJson(404, "camera_path_does_not_resolve_to_camera3d");
+        if (!is_camera.value()) return bridgeError(404, "camera_path_does_not_resolve_to_camera3d");
 
         auto old_position = callObject(camera.value(), "Node3D", "get_position", 3360562783LL);
         auto old_rotation = callObject(camera.value(), "Node3D", "get_rotation_degrees", 3360562783LL);
         auto old_fov_value = callObject(camera.value(), "Camera3D", "get_fov", 1740695150LL);
         if (old_position.isErr() || old_rotation.isErr() || old_fov_value.isErr()) {
-            return errorJson(500, "camera_state_read_failed");
+            return bridgeError(500, "camera_state_read_failed");
         }
         auto old_position_json = pointVariantToJson(old_position.value(), 3);
         auto old_rotation_json = pointVariantToJson(old_rotation.value(), 3);
         auto old_fov = scalarFromVariant<double>(old_fov_value.value(),
                                                  GDEXTENSION_VARIANT_TYPE_FLOAT);
         if (old_position_json.isErr() || old_rotation_json.isErr() || old_fov.isErr()) {
-            return errorJson(500, "extension_protocol_error");
+            return bridgeError(500, "extension_protocol_error");
         }
 
         const auto& requested_position = params["position"];
         auto new_position = makeVector3(requested_position["x"].get<double>(),
                                         requested_position["y"].get<double>(),
                                         requested_position["z"].get<double>());
-        if (new_position.isErr()) return errorJson(501, "required_bind_unavailable");
+        if (new_position.isErr()) return bridgeError(501, "required_bind_unavailable");
         std::optional<VariantValue> new_rotation;
         if (params.contains("rotation_degrees")) {
             const auto& requested = params["rotation_degrees"];
             auto value = makeVector3(requested["x"].get<double>(), requested["y"].get<double>(),
                                      requested["z"].get<double>());
-            if (value.isErr()) return errorJson(501, "required_bind_unavailable");
+            if (value.isErr()) return bridgeError(501, "required_bind_unavailable");
             new_rotation.emplace(std::move(value.value()));
         }
         std::optional<VariantValue> new_fov;
         if (params.contains("fov")) {
             auto value = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT,
                                     params["fov"].get<double>());
-            if (value.isErr()) return errorJson(501, "required_bind_unavailable");
+            if (value.isErr()) return bridgeError(501, "required_bind_unavailable");
             new_fov.emplace(std::move(value.value()));
         }
 
@@ -5531,7 +5726,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         if (registered.isErr()) {
             abandonAction(manager.value());
-            return errorJson(500, "camera_undo_registration_failed");
+            return bridgeError(500, "camera_undo_registration_failed");
         }
         auto committed = commitAction(manager.value());
         if (committed.isErr()) return errorJson(500, committed.error().message);
@@ -5541,7 +5736,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto observed_fov_value = callObject(camera.value(), "Camera3D", "get_fov", 1740695150LL);
         if (observed_position.isErr() || observed_rotation.isErr() || observed_fov_value.isErr()) {
             (void)undoLastAction(manager.value(), root.value());
-            return errorJson(500, "camera_postcondition_read_failed");
+            return bridgeError(500, "camera_postcondition_read_failed");
         }
         auto observed_position_json = pointVariantToJson(observed_position.value(), 3);
         auto observed_rotation_json = pointVariantToJson(observed_rotation.value(), 3);
@@ -5550,7 +5745,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (observed_position_json.isErr() || observed_rotation_json.isErr() ||
             observed_fov.isErr()) {
             (void)undoLastAction(manager.value(), root.value());
-            return errorJson(500, "extension_protocol_error");
+            return bridgeError(500, "extension_protocol_error");
         }
         auto close_enough = [](double left, double right) {
             return std::abs(left - right) <=
@@ -5574,7 +5769,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         if (!matched) {
             const auto restored = undoLastAction(manager.value(), root.value());
-            return errorJson(500, "camera_postcondition_mismatch",
+            return bridgeError(500, "camera_postcondition_mismatch",
                              {{"outcome", restored.isOk() ? "rolled_back" : "unknown"},
                               {"rollback", restored.isOk() ? "completed" : "failed"},
                               {"retryable", false}});
@@ -5592,14 +5787,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
     }
 
     if (method == "vision.toggleDebugDraw") {
-        if (session_kind != "editor") return errorJson(409, "session_kind_rejected");
+        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
         if (!hasOnlyKeys(params, {"collision_shapes", "navigation_mesh", "wireframe"}) ||
             (!params.contains("collision_shapes") && !params.contains("navigation_mesh")) ||
             (params.contains("collision_shapes") && !params["collision_shapes"].is_boolean()) ||
             (params.contains("navigation_mesh") && !params["navigation_mesh"].is_boolean()) ||
             (params.contains("wireframe") &&
              (!params["wireframe"].is_boolean() || params["wireframe"].get<bool>()))) {
-            return errorJson(400, "invalid_viewport_toggle_debug_draw_request");
+            return bridgeError(400, "invalid_viewport_toggle_debug_draw_request");
         }
         for (const auto& bind : {
                  std::make_pair("is_debugging_collisions_hint", 36873697LL),
@@ -5607,7 +5802,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                  std::make_pair("is_debugging_navigation_hint", 36873697LL),
                  std::make_pair("set_debug_navigation_hint", 2586408642LL)}) {
             if (requireMethodBind("SceneTree", bind.first, bind.second).isErr()) {
-                return errorJson(501, "required_bind_unavailable");
+                return bridgeError(501, "required_bind_unavailable");
             }
         }
         auto tree = liveSceneTree();
@@ -5623,7 +5818,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto old_collision = read_hint("is_debugging_collisions_hint");
         auto old_navigation = read_hint("is_debugging_navigation_hint");
         if (old_collision.isErr() || old_navigation.isErr()) {
-            return errorJson(500, "debug_hint_read_failed");
+            return bridgeError(500, "debug_hint_read_failed");
         }
         auto set_hint = [&](const char* setter, bool enabled) -> Result<void> {
             auto value = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
@@ -5673,7 +5868,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
              observed_navigation.value() == old_navigation.value());
         if (!matched) {
             const bool restored = restore_hints();
-            return errorJson(500, "debug_draw_postcondition_mismatch",
+            return bridgeError(500, "debug_draw_postcondition_mismatch",
                              {{"outcome", restored ? "rolled_back" : "unknown"},
                               {"rollback", restored ? "completed" : "failed"},
                               {"retryable", false}});
@@ -5689,7 +5884,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
 
     if (method == "signal.listConnections" || method == "signal.connect" ||
         method == "signal.disconnect" || method == "signal.emit") {
-        if (session_kind != "editor") return errorJson(409, "session_kind_rejected");
+        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
 
         auto bounded_string = [](const json& value, size_t minimum, size_t maximum) {
             if (!value.is_string()) return false;
@@ -5957,13 +6152,13 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (!hasOnlyKeys(params, {"target_node"}) ||
                 !params.contains("target_node") ||
                 !bounded_string(params["target_node"], 1, 1024)) {
-                return errorJson(400, "invalid_signal_list_connections_request");
+                return bridgeError(400, "invalid_signal_list_connections_request");
             }
             if (!preflight_object_binds({
                     {"get_signal_list", 3995934104LL},
                     {"get_signal_connection_list", 3147814860LL},
                     {"is_class", 3927539163LL}})) {
-                return errorJson(501, "required_bind_unavailable");
+                return bridgeError(501, "required_bind_unavailable");
             }
             auto root = editedSceneRoot(editor);
             if (root.isErr()) return errorJson(root.error().code, root.error().message);
@@ -5971,39 +6166,39 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (target.isErr()) return errorJson(target.error().code, target.error().message);
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
             if (takePhase7SignalTestSeam("malformed_metadata")) {
-                return errorJson(500, "extension_protocol_error");
+                return bridgeError(500, "extension_protocol_error");
             }
 #endif
             auto signals = callObject(target.value(), "Object", "get_signal_list", 3995934104LL);
             if (signals.isErr()) return errorJson(500, signals.error().message);
             auto native_signal_count = array_size(signals.value());
             if (native_signal_count.isErr() || native_signal_count.value() < 0) {
-                return errorJson(500, "extension_protocol_error");
+                return bridgeError(500, "extension_protocol_error");
             }
             if (native_signal_count.value() > kSignalNativeWorkCeiling) {
-                return errorJson(413, "signal_metadata_work_limit");
+                return bridgeError(413, "signal_metadata_work_limit");
             }
             struct SignalRecord { std::string name; json arguments; };
             std::vector<SignalRecord> descriptors;
             descriptors.reserve(static_cast<size_t>(native_signal_count.value()));
             for (int64_t index = 0; index < native_signal_count.value(); ++index) {
                 auto native_descriptor = array_at(signals.value(), index);
-                if (native_descriptor.isErr()) return errorJson(500, "extension_protocol_error");
+                if (native_descriptor.isErr()) return bridgeError(500, "extension_protocol_error");
                 auto serialized = variantToJson(native_descriptor.value());
                 if (serialized.isErr() || !serialized.value().is_object() ||
                     !serialized.value().contains("name") ||
                     !serialized.value()["name"].is_string()) {
-                    return errorJson(500, "extension_protocol_error");
+                    return bridgeError(500, "extension_protocol_error");
                 }
                 auto arguments = serialized.value().value("args", json::array());
-                if (!arguments.is_array()) return errorJson(500, "extension_protocol_error");
+                if (!arguments.is_array()) return bridgeError(500, "extension_protocol_error");
                 if (arguments.size() > static_cast<size_t>(kSignalArgumentWorkCeiling)) {
-                    return errorJson(413, "signal_argument_metadata_work_limit");
+                    return bridgeError(413, "signal_argument_metadata_work_limit");
                 }
                 const auto name = serialized.value()["name"].get<std::string>();
                 auto validated = utf8_prefix(name, name.size());
                 if (validated.isErr() || validated.value().size() != name.size()) {
-                    return errorJson(500, "extension_protocol_error");
+                    return bridgeError(500, "extension_protocol_error");
                 }
                 descriptors.push_back({name, std::move(arguments)});
             }
@@ -6025,7 +6220,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 const auto& descriptor = descriptors[signal_index];
                 const auto& raw_name = descriptor.name;
                 auto name = utf8_prefix(raw_name, 256);
-                if (name.isErr()) return errorJson(500, "extension_protocol_error");
+                if (name.isErr()) return bridgeError(500, "extension_protocol_error");
                 if (name.value().size() != raw_name.size()) {
                     mark_truncated("bytes");
                 }
@@ -6037,14 +6232,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 }
                 for (size_t argument_index = 0; argument_index < argument_count; ++argument_index) {
                     auto parsed = parse_argument_metadata(raw_arguments[argument_index]);
-                    if (parsed.isErr()) return errorJson(500, "extension_protocol_error");
+                    if (parsed.isErr()) return bridgeError(500, "extension_protocol_error");
                     const auto& raw_argument_name = parsed.value().name;
                     auto validated = utf8_prefix(raw_argument_name, raw_argument_name.size());
                     if (validated.isErr() || validated.value().size() != raw_argument_name.size()) {
-                        return errorJson(500, "extension_protocol_error");
+                        return bridgeError(500, "extension_protocol_error");
                     }
                     auto argument_name = utf8_prefix(raw_argument_name, 256);
-                    if (argument_name.isErr()) return errorJson(500, "extension_protocol_error");
+                    if (argument_name.isErr()) return bridgeError(500, "extension_protocol_error");
                     if (argument_name.value().size() != raw_argument_name.size()) {
                         mark_truncated("bytes");
                     }
@@ -6061,10 +6256,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 if (connection_values.isErr()) return errorJson(500, connection_values.error().message);
                 auto connection_count_result = array_size(connection_values.value());
                 if (connection_count_result.isErr() || connection_count_result.value() < 0) {
-                    return errorJson(500, "extension_protocol_error");
+                    return bridgeError(500, "extension_protocol_error");
                 }
                 if (connection_count_result.value() > kSignalNativeWorkCeiling) {
-                    return errorJson(413, "signal_connection_metadata_work_limit");
+                    return bridgeError(413, "signal_connection_metadata_work_limit");
                 }
                 struct ConnectionRecord {
                     std::optional<std::string> target_node;
@@ -6077,13 +6272,13 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 for (int64_t connection_index = 0;
                      connection_index < connection_count_result.value(); ++connection_index) {
                     auto connection = array_at(connection_values.value(), connection_index);
-                    if (connection.isErr()) return errorJson(500, "extension_protocol_error");
+                    if (connection.isErr()) return bridgeError(500, "extension_protocol_error");
                     auto callable = dictionary_field(connection.value(), "callable");
                     auto flags_value = dictionary_field(connection.value(), "flags");
                     if (callable.isErr() || flags_value.isErr() ||
                         GodotApi::instance().variant_get_type(callable.value().ptr()) !=
                             GDEXTENSION_VARIANT_TYPE_CALLABLE) {
-                        return errorJson(500, "extension_protocol_error");
+                        return bridgeError(500, "extension_protocol_error");
                     }
                     auto flags = scalarFromVariant<int64_t>(
                         flags_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
@@ -6091,10 +6286,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
                     auto callable_method_value = callVariant(callable.value(), "get_method");
                     if (flags.isErr() || callable_object_value.isErr() ||
                         callable_method_value.isErr()) {
-                        return errorJson(500, "extension_protocol_error");
+                        return bridgeError(500, "extension_protocol_error");
                     }
                     if (flags.value() < 0 || flags.value() > 15) {
-                        return errorJson(500, "extension_protocol_error");
+                        return bridgeError(500, "extension_protocol_error");
                     }
                     auto callable_object = objectFromVariant(callable_object_value.value());
                     const auto callable_method_type = GodotApi::instance().variant_get_type(
@@ -6102,13 +6297,13 @@ json GodotBridge::execute(const std::string& method, const json& params,
                     auto callable_method = stringFromVariant(
                         callable_method_value.value(), callable_method_type);
                     if (callable_object.isErr() || callable_method.isErr()) {
-                        return errorJson(500, "extension_protocol_error");
+                        return bridgeError(500, "extension_protocol_error");
                     }
                     auto validated_method = utf8_prefix(
                         callable_method.value(), callable_method.value().size());
                     if (validated_method.isErr() ||
                         validated_method.value().size() != callable_method.value().size()) {
-                        return errorJson(500, "extension_protocol_error");
+                        return bridgeError(500, "extension_protocol_error");
                     }
                     std::optional<std::string> target_path;
                     if (callable_object.value()) {
@@ -6127,7 +6322,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                 auto validated_path = utf8_prefix(path.value(), path.value().size());
                                 if (validated_path.isErr() ||
                                     validated_path.value().size() != path.value().size()) {
-                                    return errorJson(500, "extension_protocol_error");
+                                    return bridgeError(500, "extension_protocol_error");
                                 }
                                 target_path = path.value();
                             }
@@ -6160,14 +6355,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
                      connection_index < connection_count; ++connection_index) {
                     const auto& record = normalized_connections[connection_index];
                     auto bounded_method = utf8_prefix(record.target_method, 128);
-                    if (bounded_method.isErr()) return errorJson(500, "extension_protocol_error");
+                    if (bounded_method.isErr()) return bridgeError(500, "extension_protocol_error");
                     if (bounded_method.value().size() != record.target_method.size()) {
                         mark_truncated("bytes");
                     }
                     json target_path = nullptr;
                     if (record.target_node.has_value()) {
                         auto bounded_path = utf8_prefix(*record.target_node, 1024);
-                        if (bounded_path.isErr()) return errorJson(500, "extension_protocol_error");
+                        if (bounded_path.isErr()) return bridgeError(500, "extension_protocol_error");
                         if (bounded_path.value().size() != record.target_node->size()) {
                             mark_truncated("bytes");
                         }
@@ -6196,7 +6391,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                              {"truncated_at", truncated_at}};
             auto live = liveResult(response);
             if (live.dump().size() > 64u * 1024u) {
-                return errorJson(413, "response_limit");
+                return bridgeError(413, "response_limit");
             }
             return live;
         }
@@ -6235,7 +6430,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 !GodotApi::instance().variant_get_ptr_constructor(
                     GDEXTENSION_VARIANT_TYPE_CALLABLE, 2) ||
                 !GodotApi::instance().variant_call) {
-                return errorJson(501, "required_bind_unavailable");
+                return bridgeError(501, "required_bind_unavailable");
             }
             if (requireMethodBind("EditorUndoRedoManager", "get_object_history_id",
                                   1107568780LL).isErr() ||
@@ -6243,7 +6438,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                   2417974513LL).isErr() ||
                 requireMethodBind("UndoRedo", "has_undo", 36873697LL).isErr() ||
                 requireMethodBind("UndoRedo", "undo", 2240911060LL).isErr()) {
-                return errorJson(501, "required_bind_unavailable");
+                return bridgeError(501, "required_bind_unavailable");
             }
 
             auto root = editedSceneRoot(editor);
@@ -6257,7 +6452,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto signal_name_value = makeStringName(signal_name);
             auto method_name_value = makeStringName(target_method);
             if (signal_name_value.isErr() || method_name_value.isErr()) {
-                return errorJson(500, "extension_protocol_error");
+                return bridgeError(500, "extension_protocol_error");
             }
             auto has_signal_value = callObject(
                 emitter.value(), "Object", "has_signal", 2619796661LL,
@@ -6266,18 +6461,30 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 target.value(), "Object", "has_method", 2619796661LL,
                 {&method_name_value.value()});
             if (has_signal_value.isErr() || has_method_value.isErr()) {
-                return errorJson(500, "extension_protocol_error");
+                return bridgeError(500, "extension_protocol_error");
             }
             auto has_signal = scalarFromVariant<GDExtensionBool>(
                 has_signal_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
             auto has_method = scalarFromVariant<GDExtensionBool>(
                 has_method_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
             if (has_signal.isErr() || has_method.isErr()) {
-                return errorJson(500, "extension_protocol_error");
+                return bridgeError(500, "extension_protocol_error");
             }
-            if (!has_signal.value() || !has_method.value()) {
-                return errorJson(404, !has_signal.value() ? "declared_signal_not_found"
-                                                          : "target_method_not_found");
+            if (!has_signal.value()) {
+                return bridgeError(
+                    404, "declared_signal_not_found",
+                    {{"emitter_node", params["emitter_node"].get<std::string>()},
+                     {"signal_name", signal_name}},
+                    "Looked for signal '" + signal_name + "' on " +
+                        params["emitter_node"].get<std::string>() + ".");
+            }
+            if (!has_method.value()) {
+                return bridgeError(
+                    404, "target_method_not_found",
+                    {{"target_node", params["target_node"].get<std::string>()},
+                     {"target_method", target_method}},
+                    "Looked for method '" + target_method + "' on " +
+                        params["target_node"].get<std::string>() + ".");
             }
             auto signal = signal_metadata(emitter.value(), signal_name);
             auto target_metadata = method_metadata(target.value(), target_method);
@@ -6290,10 +6497,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (signal_arity < target_metadata.value().required_arguments ||
                 (!target_metadata.value().vararg &&
                  signal_arity > target_metadata.value().total_arguments)) {
-                return errorJson(409, "signal_target_arity_incompatible");
+                return bridgeError(409, "signal_target_arity_incompatible");
             }
             auto callable = make_callable(target.value(), target_method);
-            if (callable.isErr()) return errorJson(501, "required_bind_unavailable");
+            if (callable.isErr()) return bridgeError(501, "required_bind_unavailable");
 
             struct ExactConnection {
                 VariantValue callable;
@@ -6356,19 +6563,19 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 connected_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
             auto matches = exact_connections();
             if (connected.isErr() || matches.isErr()) {
-                return errorJson(500, "extension_protocol_error");
+                return bridgeError(500, "extension_protocol_error");
             }
             if ((connected.value() != 0) != !matches.value().empty()) {
-                return errorJson(500, "signal_connection_state_inconsistent");
+                return bridgeError(500, "signal_connection_state_inconsistent");
             }
             if (is_connect && !matches.value().empty()) {
-                return errorJson(409, "signal_connection_already_exists");
+                return bridgeError(409, "signal_connection_already_exists");
             }
             if (is_disconnect && matches.value().size() != 1) {
-                return errorJson(409, "missing_or_ambiguous_signal_connection");
+                return bridgeError(409, "missing_or_ambiguous_signal_connection");
             }
             if (is_disconnect && matches.value().front().flags != 2) {
-                return errorJson(409, "unsupported_existing_connection_flags");
+                return bridgeError(409, "unsupported_existing_connection_flags");
             }
 
             auto manager = undoManager(editor);
@@ -6398,7 +6605,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                      &flags_value.value()});
             }
             if (do_method.isErr() || undo_method.isErr()) {
-                return errorJson(500, "signal_undo_redo_registration_failed");
+                return bridgeError(500, "signal_undo_redo_registration_failed");
             }
             auto committed = commitAction(manager.value());
             if (committed.isErr()) return errorJson(500, committed.error().message);
@@ -6522,28 +6729,28 @@ json GodotBridge::execute(const std::string& method, const json& params,
             !params.contains("signal_name") ||
             !bounded_string(params["signal_name"], 1, 128) ||
             (params.contains("arguments") && !params["arguments"].is_array())) {
-            return errorJson(400, "invalid_signal_emit_request");
+            return bridgeError(400, "invalid_signal_emit_request");
         }
         const auto emit_arguments = params.value("arguments", json::array());
         if (emit_arguments.size() > 16) {
-            return errorJson(400, "signal_emit_argument_count_exceeded");
+            return bridgeError(400, "signal_emit_argument_count_exceeded");
         }
         for (const auto& argument : emit_arguments) {
             if (!valid_emit_value(argument, 0)) {
-                return errorJson(400, "unsupported_signal_emit_argument");
+                return bridgeError(400, "unsupported_signal_emit_argument");
             }
         }
         try {
             if (emit_arguments.dump().size() > 32u * 1024u) {
-                return errorJson(413, "signal_emit_arguments_too_large");
+                return bridgeError(413, "signal_emit_arguments_too_large");
             }
         } catch (const json::exception&) {
-            return errorJson(400, "invalid_signal_emit_argument_encoding");
+            return bridgeError(400, "invalid_signal_emit_argument_encoding");
         }
         if (!preflight_object_binds({{"get_signal_list", 3995934104LL},
                                      {"has_signal", 2619796661LL},
                                      {"emit_signal", 4047867050LL}})) {
-            return errorJson(501, "required_bind_unavailable");
+            return bridgeError(501, "required_bind_unavailable");
         }
         auto root = editedSceneRoot(editor);
         if (root.isErr()) return errorJson(root.error().code, root.error().message);
@@ -6559,11 +6766,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto has_signal = scalarFromVariant<GDExtensionBool>(
             has_signal_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
         if (has_signal.isErr()) return errorJson(500, has_signal.error().message);
-        if (!has_signal.value()) return errorJson(404, "declared_signal_not_found");
+        if (!has_signal.value()) return bridgeError(404, "declared_signal_not_found");
         auto metadata = signal_metadata(target.value(), signal_name);
         if (metadata.isErr()) return errorJson(metadata.error().code, metadata.error().message);
         if (metadata.value().arguments.size() != emit_arguments.size()) {
-            return errorJson(409, "signal_emit_arity_mismatch");
+            return bridgeError(409, "signal_emit_arity_mismatch");
         }
         auto compatible_argument = [](const json& argument,
                                       const SignalArgumentMetadata& metadata) {
@@ -6640,24 +6847,24 @@ json GodotBridge::execute(const std::string& method, const json& params,
         };
         for (size_t index = 0; index < emit_arguments.size(); ++index) {
             if (!compatible_argument(emit_arguments[index], metadata.value().arguments[index])) {
-                return errorJson(400, "signal_emit_argument_type_mismatch");
+                return bridgeError(400, "signal_emit_argument_type_mismatch");
             }
         }
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
         if (takePhase7SignalTestSeam("missing_required_api")) {
-            return errorJson(501, "required_bind_unavailable");
+            return bridgeError(501, "required_bind_unavailable");
         }
 #endif
         for (size_t index = 0; index < emit_arguments.size(); ++index) {
             if (!preflight_json_variant(
                     emit_arguments[index],
                     static_cast<GDExtensionVariantType>(metadata.value().arguments[index].type))) {
-                return errorJson(501, "required_bind_unavailable");
+                return bridgeError(501, "required_bind_unavailable");
             }
         }
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
         if (takePhase7SignalTestSeam("conversion_failure")) {
-            return errorJson(500, "extension_protocol_error");
+            return bridgeError(500, "extension_protocol_error");
         }
 #endif
         std::vector<VariantValue> native_arguments;
@@ -6674,7 +6881,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                emit_arguments[index].is_null()
                            ? Result<VariantValue>(VariantValue{})
                            : makeJsonVariant(emit_arguments[index]));
-            if (converted.isErr()) return errorJson(500, "extension_protocol_error");
+            if (converted.isErr()) return bridgeError(500, "extension_protocol_error");
             native_arguments.push_back(std::move(converted.value()));
         }
         std::vector<const VariantValue*> call_arguments{&signal_name_value.value()};
@@ -6686,7 +6893,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto emit_code = scalarFromVariant<int64_t>(
             emitted.value(), GDEXTENSION_VARIANT_TYPE_INT);
         if (emit_code.isErr()) return errorJson(500, emit_code.error().message);
-        if (emit_code.value() != 0) return errorJson(500, "signal_emit_failed");
+        if (emit_code.value() != 0) return bridgeError(500, "signal_emit_failed");
         return liveResult({{"emitted", true},
                            {"argument_count", emit_arguments.size()},
                            {"outcome", "completed"},
@@ -8313,7 +8520,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                      std::make_tuple("VisualShader", "get_node_position", 2175036082LL),
                      std::make_tuple("VisualShader", "get_node_connections", 1441964831LL)}) {
                 if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) {
-                    return errorJson(501, "required_bind_unavailable");
+                    return bridgeError(501, "required_bind_unavailable");
                 }
             }
         }
@@ -8323,11 +8530,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
                  std::make_tuple("Shader", "get_mode", 3392948163LL),
                  std::make_tuple("ShaderMaterial", "get_shader_parameter", 2760726917LL)}) {
             if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) {
-                return errorJson(501, "required_bind_unavailable");
+                return bridgeError(501, "required_bind_unavailable");
             }
         }
         if (setting && preflightUndoManagerBindings().isErr()) {
-            return errorJson(501, "required_bind_unavailable");
+            return bridgeError(501, "required_bind_unavailable");
         }
         auto root = editedSceneRoot(editor);
         if (root.isErr()) return errorJson(root.error().code, root.error().message);
@@ -9869,6 +10076,10 @@ std::optional<std::string> describeRealRangeRefusal(const std::string& property_
         }
     }
     return std::nullopt;
+}
+
+const std::map<std::string, std::string>& bridgeErrorSentenceTable() {
+    return bridgeErrorSentences();
 }
 
 PropertyTypeMatch matchJsonToPropertyType(const json& value, int godot_type) {

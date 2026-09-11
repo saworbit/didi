@@ -44,9 +44,23 @@ std::optional<json> validateSessionKindForMethod(
                        : policy == runtime::LiveSessionKindPolicy::game_only
                              ? json::array({"game"})
                              : json::array({"editor", "game"});
+    // A sentence, with the identifier kept as a stable code in data. This is
+    // the most-reached of the raw identifiers #441 was about: the hook rejects
+    // before the bridge is entered, so this is the one a caller actually sees.
+    std::string allowed_text;
+    for (size_t index = 0; index < allowed.size(); ++index) {
+        if (index > 0) allowed_text += " or ";
+        allowed_text += allowed[index].get<std::string>();
+    }
+    const std::string selected_text =
+        selected.has_value() ? "a " + std::string(*selected) + " session" : "no session";
+    const std::string sentence = std::string(method) + " needs " +
+                                 (allowed.size() == 1 ? "an " : "a ") + allowed_text +
+                                 " session, and " + selected_text + " is selected.";
     return json{{"error", {{"code", 409},
-                            {"message", "session_kind_rejected"},
-                            {"data", {{"method", method},
+                            {"message", sentence},
+                            {"data", {{"code", "session_kind_rejected"},
+                                      {"method", method},
                                       {"selected_session_kind",
                                        selected.has_value() ? json(*selected) : json(nullptr)},
                                       {"allowed_session_kinds", std::move(allowed)},

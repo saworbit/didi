@@ -242,6 +242,8 @@ A `method_name` declared more than once as a member of the script, once at the t
 
 Diagnostics are computed against the file after it is written, so they include the Godot compiler check when a Godot binary is discoverable, not only the lexical rules. `has_errors: true` means the patch left the file in a state the compiler rejects, and the same diagnostics `script_check_syntax` would report are returned here. That includes the autoload demotion described under `script_check_syntax`.
 
+Every bridge failure carries a sentence in `message` and its stable identifier in `data.code`. The identifiers are worth matching on and are not going to change; the sentences are what a person reads. A node path that resolves to nothing answers `tilemap_target_not_found` or `gridmap_target_not_found` and says the path resolved to nothing; a path that resolves to a node of the wrong type answers `tilemap_target_wrong_type` or `gridmap_target_wrong_type` and names the type it found instead. These are different problems with different fixes, so they are different answers.
+
 ## 4. Viewport and visual helpers
 
 ### `viewport_capture_frame` — Live + offline

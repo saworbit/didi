@@ -148,7 +148,7 @@ void test_phase7_viewport_methods_are_editor_only_but_reach_the_bridge() {
             hook, method, method == std::string_view("vision.setCameraTransform")
                               ? camera : didi::json{{"collision_shapes", true}});
         ASSERT_TRUE(response.contains("error"));
-        ASSERT_TRUE(response["error"]["message"] != "session_kind_rejected");
+        ASSERT_TRUE(response.value("error", didi::json::object()).value("data", didi::json::object()).value("code", std::string()) != "session_kind_rejected");
         ASSERT_TRUE(response["error"]["message"].get<std::string>().find("no trustworthy live implementation") ==
                     std::string::npos);
     }
@@ -159,7 +159,7 @@ void test_phase7_viewport_methods_are_editor_only_but_reach_the_bridge() {
         const auto response = didi::godot::EditorHookTestAccess::executeOnMainThread(
             hook, method, didi::json::object());
         ASSERT_EQ(response["error"]["code"], 409);
-        ASSERT_EQ(response["error"]["message"], "session_kind_rejected");
+        ASSERT_EQ(response["error"]["data"]["code"], "session_kind_rejected");
     }
     didi::godot::EditorHookTestAccess::setSessionKind(hook, std::nullopt);
 }

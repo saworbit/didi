@@ -16,10 +16,12 @@ struct RegisterPhase7TileGrid { RegisterPhase7TileGrid() { registerTest("Phase7T
 // TASK 4 TILE GRID BEHAVIOR BEGIN
 #include "didi/common/ipc_channel.hpp"
 #include "didi/gdextension/editor_hook.hpp"
+#include "didi/gdextension/godot_bridge.hpp"
 #include "didi/tools/resolved_tool_binding.hpp"
 
 #include <memory>
 #include <limits>
+#include <string>
 #include <vector>
 
 #define ASSERT_EQ(a, b) ASSERT_TRUE((a) == (b))
@@ -240,10 +242,52 @@ static void test_the_published_cell_shape_is_enforced_by_the_schema() {
     }
 }
 
+// Break caught: the semantic failures in the bridge answered with the
+// identifier as the whole message, which is the string a client shows a
+// person. `target_method_not_found` does not say which method was looked for or
+// on which node, so the one thing the caller needed was the one thing missing.
+// #406 and #424 fixed the argument rejections; these sit underneath them
+// (#441).
+static void test_every_bridge_identifier_says_a_sentence() {
+    const auto& sentences = didi::godot::bridgeErrorSentenceTable();
+    ASSERT_TRUE(!sentences.empty());
+
+    for (const auto& [identifier, sentence] : sentences) {
+        // A sentence, not the identifier spelled differently: real words, a
+        // full stop, and no snake_case left in it.
+        ASSERT_TRUE(!sentence.empty());
+        ASSERT_TRUE(sentence.find('_') == std::string::npos);
+        ASSERT_TRUE(sentence.back() == '.');
+        ASSERT_TRUE(sentence.find(' ') != std::string::npos);
+        ASSERT_TRUE(sentence != identifier);
+    }
+
+    // The identifier is worth keeping as a stable code, so both of the pair
+    // #443 is about are present and say different things.
+    ASSERT_TRUE(sentences.count("tilemap_target_not_found") == 1);
+    ASSERT_TRUE(sentences.count("tilemap_target_wrong_type") == 1);
+    ASSERT_TRUE(sentences.at("tilemap_target_not_found") !=
+                sentences.at("tilemap_target_wrong_type"));
+    ASSERT_TRUE(sentences.count("gridmap_target_not_found") == 1);
+    ASSERT_TRUE(sentences.count("gridmap_target_wrong_type") == 1);
+
+    // The ones the report reached by hand.
+    for (const auto* named : {"target_method_not_found", "declared_signal_not_found",
+                              "camera_path_does_not_resolve_to_camera3d",
+                              "tilemap_layer_has_no_tileset", "gridmap_item_not_found",
+                              "unsupported_existing_connection_flags",
+                              "missing_or_ambiguous_signal_connection"}) {
+        ASSERT_TRUE(sentences.count(named) == 1);
+    }
+}
+
 struct RegisterPhase7TileGridBehavior {
     RegisterPhase7TileGridBehavior() {
         registerTest("Phase7TileGrid.PublishedCellShapeIsEnforced",
                      test_the_published_cell_shape_is_enforced_by_the_schema);
+
+        registerTest("Phase7TileGrid.BridgeIdentifiersSaySentences",
+                     test_every_bridge_identifier_says_a_sentence);
         registerTest("Phase7TileGrid.StrictBatchValidation", test_phase7_tile_grid_handlers_reject_invalid_batches_before_dispatch);
         registerTest("Phase7TileGrid.ExactForwarding", test_phase7_tile_grid_handlers_forward_exact_requests_once);
         registerTest("Phase7TileGrid.EditorOnlyAdmission", test_phase7_tile_grid_methods_are_editor_only_but_reach_the_bridge);

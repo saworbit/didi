@@ -1961,7 +1961,7 @@ void test_phase7_queue_and_direct_guards_reject_before_engine_work() {
         hook.processQueue();
         const auto queued_response = queued.response.get();
         ASSERT_EQ(queued_response["error"]["code"], 409);
-        ASSERT_EQ(queued_response["error"]["message"], "session_kind_rejected");
+        ASSERT_EQ(queued_response["error"]["data"]["code"], "session_kind_rejected");
         ASSERT_EQ(queued_response["error"]["data"]["retryable"], false);
         ASSERT_EQ(didi::godot::EditorHookTestAccess::queueDepth(hook), 0u);
         ASSERT_FALSE(didi::godot::EditorHookTestAccess::runtimeStepActive(hook));
@@ -1975,14 +1975,14 @@ void test_phase7_queue_and_direct_guards_reject_before_engine_work() {
         hook.processQueue();
         const auto raced_response = timeout_race.response.get();
         ASSERT_EQ(raced_response["error"]["code"], 409);
-        ASSERT_EQ(raced_response["error"]["message"], "session_kind_rejected");
+        ASSERT_EQ(raced_response["error"]["data"]["code"], "session_kind_rejected");
         ASSERT_FALSE(timeout_race.control->hasEverStarted());
         ASSERT_EQ(timeout_race.control->state(), didi::godot::CommandState::Cancelled);
 
         const auto direct = didi::godot::EditorHookTestAccess::executeOnMainThread(
             hook, entry.method, didi::json::object());
         ASSERT_EQ(direct["error"]["code"], 409);
-        ASSERT_EQ(direct["error"]["message"], "session_kind_rejected");
+        ASSERT_EQ(direct["error"]["data"]["code"], "session_kind_rejected");
         ASSERT_FALSE(didi::godot::EditorHookTestAccess::runtimeStepActive(hook));
         ASSERT_FALSE(didi::godot::EditorHookTestAccess::hasPendingRuntimeStep(hook));
         ASSERT_FALSE(didi::godot::EditorHookTestAccess::hasPendingAssetReimport(hook));

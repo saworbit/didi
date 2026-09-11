@@ -3,6 +3,7 @@
 #include "didi/common/json.hpp"
 #include "didi/common/types.hpp"
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -242,6 +243,15 @@ json realToJson(double value);
 // running engine.
 std::optional<std::string> describeRealRangeRefusal(const std::string& property_name,
                                                     const json& value, int godot_type);
+
+// Every bridge failure identifier this build can answer with, and the sentence
+// it says.
+//
+// These used to answer with the identifier as the whole message, which is the
+// string a client shows a person: `target_method_not_found` does not say which
+// method was looked for or on which node. Exported so a test can assert that
+// no identifier reaches a caller without a sentence, without a running engine.
+const std::map<std::string, std::string>& bridgeErrorSentenceTable();
 
 } // namespace godot
 } // namespace didi
