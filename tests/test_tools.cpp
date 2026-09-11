@@ -1056,6 +1056,42 @@ static void test_dry_run_reads_its_target_before_describing_it() {
                     .find("Probe") != std::string::npos);
 }
 
+static void test_an_empty_new_definition_never_mints_a_token() {
+    // Break caught: new_definition had no minLength, so "" passed validation,
+    // the dry run accepted it, read the target and minted a confirmation token,
+    // and the execute path then refused the same arguments with a bare string
+    // saying new_definition was missing when it was supplied. The check was a
+    // truthiness test on a string (#440).
+    ScopedToolProject project("empty-new-definition");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("plain.gd", "extends Node\n\nfunc hello() -> void:\n\tpass\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    for (const bool previewing : {true, false}) {
+        didi::json call{{"file_path", "res://plain.gd"},
+                        {"method_name", "hello"},
+                        {"new_definition", ""}};
+        if (previewing) call["dry_run"] = true;
+        const auto result = registry.callTool("script_patch_method", call);
+        ASSERT_TRUE(result.isError);
+        // Refused by the published schema, so no token exists to be spent and
+        // the file is untouched.
+        ASSERT_TRUE(result.content[0].text.find("new_definition") != std::string::npos);
+        ASSERT_TRUE(result.content[0].text.find("confirmation_token") == std::string::npos);
+    }
+    ASSERT_TRUE(readToolTestFile("plain.gd").find("func hello() -> void:") != std::string::npos);
+
+    // The advice it used to give could not be followed: symbol_name is not in
+    // this tool's published schema, so sending it is rejected as unknown.
+    const auto by_symbol_name = registry.callTool(
+        "script_patch_method", didi::json{{"file_path", "res://plain.gd"},
+                                          {"symbol_name", "hello"},
+                                          {"new_definition", "func hello() -> void:\n\treturn\n"}});
+    ASSERT_TRUE(by_symbol_name.isError);
+}
+
 static void test_project_audit_survives_a_very_long_line() {
     // Break caught twice, from the same edit. Widening the signal scan's name
     // pattern to accept Unicode bytes first turned it into an alternation,
@@ -3974,6 +4010,8 @@ struct RegisterToolTests {
                      test_local_work_is_not_reported_as_a_fallback);
         registerTest("Tools.DryRunReadsItsTarget",
                      test_dry_run_reads_its_target_before_describing_it);
+        registerTest("Tools.EmptyNewDefinitionMintsNoToken",
+                     test_an_empty_new_definition_never_mints_a_token);
         registerTest("Tools.ProjectAuditLongLine",
                      test_project_audit_survives_a_very_long_line);
         registerTest("Tools.ProjectImpactFindings",
