@@ -68,6 +68,22 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- Work that was never engine work is no longer reported as a fallback (#419).
+  26 tools reported `execution_mode: "offline_fallback"` with a healthy editor
+  attached. That is the label this server uses to mean you did not get the good
+  answer and should attach an editor and ask again, so a caller branching on it,
+  or an agent reading it as a quality signal, concluded that reattaching would
+  improve an answer that was already authoritative. It cannot: the blackboard is
+  a file on disk, `project_search_text` walks the project tree,
+  `script_patch_method` rewrites a `.gd` file. It also buried the genuine
+  signal, because `viewport_capture_frame` and `capture_viewport` really do
+  synthesize a preview when there is no live frame and meant something different
+  by the same word. A tool with no `live` path now reports `local`, joining
+  `local_status` and `local_session_management`, and `offline_fallback` is left
+  to the seven tools for which it is true. The registration's `executionModes`
+  vocabulary is unchanged; this is the payload's own field, which already
+  differed for the session-management tools.
+
 - `project_audit_assets` does not call third-party addon files orphans (#427).
   The tool's output is advice to delete files, and in a fresh project most of
   that advice was about Didi's own brand assets: three of four orphans and 96%

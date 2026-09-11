@@ -92,12 +92,14 @@ implemented tool answers the same way and a new tool is covered on arrival.
 
 **Count it before you call it a bug.** Three of this session's findings only
 became findings once every tool was asked the same question: 50 of 126 rejected
-an unknown argument, 26 report `offline_fallback` with an editor attached, 18
-answer with a bare string. Each looked like one tool misbehaving until the
+an unknown argument, 26 reported `offline_fallback` with an editor attached, 18
+answered with a bare string. Each looked like one tool misbehaving until the
 census showed a missing default. The first is now 121 of 126, and the five that
 are left are the unimplemented registrations, which refuse the whole call
-before any argument is read. The third is now zero: every semantic failure
-carries a code (#420). `probes/surface_census.py` runs all three in
+before any argument is read. The second is now 7, all of them tools that
+really do have a live path to fall back from (#419). The third is now zero:
+every semantic failure carries a code (#420). `probes/surface_census.py` runs
+all three in
 about a minute each; the numbers are in the session log and are worth diffing.
 
 **Narrow before you file, especially when two things changed.** This session

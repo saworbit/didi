@@ -1961,7 +1961,10 @@ try {
     $phase4Baseline = Tool-Payload $phase4BaselineById[403]
     Assert-True ($phase4Baseline.capture_id -match '^[0-9a-f]{32}$') "Live baseline capture did not return a bounded process-local ID."
     $textSearch = Tool-Payload $phase4BaselineById[404]
-    Assert-True ($textSearch.execution_mode -eq "offline_fallback" -and @($textSearch.matches).Count -eq 2) "Bounded project text search did not find the fixture probe."
+    # local, not offline_fallback: this search walks the project tree and has no
+    # engine path to fall back from, so there is nothing an attached editor would
+    # improve (#419).
+    Assert-True ($textSearch.execution_mode -eq "local" -and @($textSearch.matches).Count -eq 2) "Bounded project text search did not find the fixture probe."
     Assert-True ($textSearch.matches[0].path -eq "res://subject.gd") "Project text search leaked a non-resource result path."
     $symbolSearch = Tool-Payload $phase4BaselineById[405]
     Assert-True ($symbolSearch.lexical -eq $true -and @($symbolSearch.matches).Count -eq 1) "Lexical symbol search did not find exactly one fixture function."

@@ -21,7 +21,7 @@ Every tool and resource definition includes `_meta.didi`:
 
 - `executionModes` lists supported execution paths.
 - `implemented` is false for names reserved only for protocol compatibility.
-- `currentMode` is `live`, `offline_fallback`, `unavailable`, or `unimplemented` for the current process.
+- `currentMode` is `live`, `offline_fallback`, `unavailable`, or `unimplemented` for the current process. That is the registration's vocabulary. A result payload's `execution_mode` is a separate statement about the call that just ran, and it distinguishes work that was never engine work: a tool with no `live` path reports `local`, not `offline_fallback`, whether or not a session is attached. `offline_fallback` in a payload means the call would have gone to the engine and could not, which is the only case where reattaching would improve the answer. `local_status` and `local_session_management` are the two more specific members of the same family.
 - `sessionKind` is the selected route's `editor` or `game` kind and is omitted when no route is selected.
 - `editorConnected` is true only when the selected route is both connected and an editor; a connected game reports false.
 - `liveAvailable` is true only when a route is connected, the definition implements `live`, and the selected kind is allowed for that exact tool/resource. Logs, tree inspection, evaluation and viewport capture allow editor or game; pause/step/stop allow only game; other live tools and resources are editor-only by default.
