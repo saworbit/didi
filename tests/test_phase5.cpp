@@ -262,6 +262,28 @@ TEST(Phase5, ListsExportPresetsWithoutOptionSecrets) {
     ASSERT_TRUE(payload.dump().find("secret/token") == std::string::npos);
 }
 
+// Godot writes export_presets.cfg the first time a preset is added, so a
+// project that has never configured an export simply has none. That used to be
+// a file error naming a path the user never created (#403).
+TEST(Phase5, NoExportPresetsFileIsAnEmptyListNotAnError) {
+    ScopedPhase5Project project("preset-list-absent");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto result = registry.callTool("project_list_export_presets", didi::json::object());
+    ASSERT_TRUE(!result.isError);
+    const auto payload = toolPayload(result);
+    ASSERT_EQ(payload["preset_count"], 0);
+    ASSERT_EQ(payload["presets"], didi::json::array());
+    ASSERT_EQ(payload["presets_file_exists"], false);
+
+    // A file that is there and cannot be parsed is still an error, so "no
+    // presets" and "the file is broken" stay different answers.
+    std::ofstream("export_presets.cfg") << "this is not a preset file";
+    const auto malformed = registry.callTool("project_list_export_presets", didi::json::object());
+    ASSERT_TRUE(malformed.isError);
+}
+
 TEST(Phase5, OfflineWritersRejectTraversalBeforeProcessLaunch) {
     ScopedPhase5Project project("path-rejection");
     std::ofstream("export_presets.cfg")

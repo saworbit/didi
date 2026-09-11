@@ -67,10 +67,23 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
         return CallToolResult::error("Failed to query scene hierarchy from Godot: " + res.error().message);
     }
 
-    // Offline mode: resolve scene file path if root is a node path (/root) or empty
-    std::string root = args.value("root_path", "");
-    if (root.empty() || root == "/root" || root == "." || !strings::endsWith(root, ".tscn")) {
+    // Offline mode. With no editor there is no scene tree to walk, so a request
+    // is answered from a .tscn file or it is refused. Anything that was not a
+    // .tscn used to fall back to the main scene silently, so a node path that
+    // does not exist, a res://project.godot, or a binary .scn all came back as
+    // the whole main scene with nothing saying the question had been replaced
+    // (#401).
+    const std::string requested = args.value("root_path", "");
+    const bool substituted = requested.empty() || requested == "/root" || requested == ".";
+    std::string root = requested;
+    if (substituted) {
         root = findProjectMainScene();
+    } else if (!strings::endsWith(root, ".tscn")) {
+        return CallToolResult::error(
+            "With no editor attached this reads a .tscn file, and '" + requested +
+            "' is not one. Pass a res:// path to a .tscn, or omit root_path for the "
+            "project's main scene. A node path can only be scoped to with an editor "
+            "attached.");
     }
     if (root.empty()) {
         return CallToolResult::error(
@@ -196,7 +209,13 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
             {"path", "/root"},
             {"children", json::array()}
         };
-        return CallToolResult::successJson({{"source", "parsed_tscn_file"}, {"file_path", root}, {"scene_tree", empty_tree}});
+        json empty_res = {{"source", "parsed_tscn_file"}, {"file_path", root},
+                          {"scene_tree", empty_tree}};
+        if (substituted) {
+            empty_res["requested_root_path"] = requested;
+            empty_res["substituted_main_scene"] = true;
+        }
+        return CallToolResult::successJson(std::move(empty_res));
     }
 
     std::unordered_map<int, std::vector<int>> children_by_index;
@@ -261,6 +280,12 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
             {"file_path", root},
             {"scene_tree", std::move(tree)}
         };
+        // The caller asked for the main scene without naming it. Say which file
+        // answered, so the reply cannot be read as a scoped one.
+        if (substituted) {
+            tree_res["requested_root_path"] = requested;
+            tree_res["substituted_main_scene"] = true;
+        }
         return shapedHierarchyResult(std::move(tree_res), view.value());
     }
 
