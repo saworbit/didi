@@ -68,6 +68,22 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- Three request edges below `tools/call` answer the way the specification says
+  (#445, #446, #447). A request with an explicit `id: null` was parsed as an
+  ordinary request and answered with a result. MCP narrows JSON-RPC here: the id
+  must be a string or a number and must not be null, because null is how a
+  response marks a request whose id could not be read, so answering one puts a
+  response on the wire no client can match to a request. It is now `-32600`,
+  beside the two neighbouring checks that were already there. `tools/list`,
+  `resources/list` and `prompts/list` took any `cursor` and answered with the
+  whole first page, which reads as a successful page to a client that kept a
+  cursor across a restart, and can loop; all three answer in one page and issue
+  no cursor, so any cursor is one this server did not issue and is refused with
+  `-32602`. And a `tools/call` naming a tool no registration carries answered
+  with a bare string inside an `isError` result, the last failure in the surface
+  shaped unlike every other; the specification calls an unknown tool a protocol
+  error, so it is now `-32602` carrying the name.
+
 - A dry run reads its target, so a preview of a mutation that cannot succeed is
   no longer shaped like a preview of one that will (#417). Every preview was an
   echo of the arguments: `scene_remove_node` previewed against a node that does

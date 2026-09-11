@@ -27,7 +27,7 @@ Didi accepts exactly one JSON-RPC object per line, terminated by `\n` or `\r\n`.
 }
 ```
 
-Requests require `jsonrpc: "2.0"` and a string `method`. When present, `id` must be a string, number, or `null`, and `params` must be an object or array. JSON syntax/conversion failures, including numeric overflow, return `-32700`; a parsed value that violates this request shape returns `-32600` and echoes a legal request ID when available.
+Requests require `jsonrpc: "2.0"` and a string `method`. When present, `id` must be a string or a number and must not be `null`, which is where MCP narrows JSON-RPC: `null` is how a response marks a request whose id could not be read, so a request carrying one can never be matched to its answer. `params` must be an object or array. JSON syntax/conversion failures, including numeric overflow, return `-32700`; a parsed value that violates this request shape returns `-32600` and echoes a legal request ID when available.
 
 ### Standard Success Response:
 ```json
@@ -220,6 +220,8 @@ ightarrow$ Server | Reports supported protocol versions, capabilities, and serve
 | `prompts/get` | Client $\rightarrow$ Server | Evaluates a prompt template with provided arguments |
 
 Only `notifications/*` methods may omit `id`. Request-only methods such as `tools/call`, `resources/read`, and `prompts/get` are ignored when sent as notifications and cannot execute mutations. For calls and prompt retrievals, `name`/`uri` must be strings and an `arguments` member, when present, must be an object; violations return `-32602` without terminating the server.
+
+A `tools/call` naming a tool no registration carries returns `-32602` with the name, which the specification calls a protocol error rather than a tool result. `tools/list`, `resources/list` and `prompts/list` each answer in one page and return no `nextCursor`, so this server issues no cursor; a `cursor` sent to any of them is refused with `-32602`.
 
 ### Didi capability extension
 

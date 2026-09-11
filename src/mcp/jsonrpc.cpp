@@ -27,7 +27,11 @@ std::optional<JsonRpcRequest> JsonRpcRequest::fromJson(const json& j) {
     req.method = j["method"].get<std::string>();
 
     if (j.contains("id")) {
-        if (!j["id"].is_null() && !j["id"].is_string() && !j["id"].is_number()) {
+        // MCP narrows JSON-RPC here: the id must be a string or a number and
+        // must not be null. Null is how JSON-RPC marks a response to a request
+        // whose id could not be read, so answering one with a result puts a
+        // response on the wire that no client can match to a request.
+        if (!j["id"].is_string() && !j["id"].is_number()) {
             return std::nullopt;
         }
         req.id = j["id"];

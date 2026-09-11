@@ -1206,6 +1206,80 @@ static void test_prompts_get_requires_the_arguments_it_publishes() {
                     .find("res://models/hero.glb") != std::string::npos);
 }
 
+static void test_mcp_refuses_a_null_request_id_on_the_wire() {
+    // Break caught: a request with an explicit null id was parsed as an
+    // ordinary request and answered with a result, so a response went out that
+    // no client can match to a request. MCP narrows JSON-RPC here: the id must
+    // be a string or a number and must not be null.
+    didi::mcp::McpServer server;
+    const auto output = runStdioWithInput(
+        server,
+        "{\"jsonrpc\":\"2.0\",\"id\":null,\"method\":\"ping\"}\n"
+        "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"ping\"}\n");
+
+    std::istringstream lines(output);
+    std::vector<didi::json> responses;
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (!line.empty()) responses.push_back(didi::json::parse(line));
+    }
+    ASSERT_EQ(responses.size(), 2u);
+    ASSERT_TRUE(!responses[0].contains("result"));
+    ASSERT_EQ(responses[0]["error"]["code"], didi::mcp::JsonRpcErrorCode::InvalidRequest);
+    ASSERT_TRUE(responses[0]["id"].is_null());
+
+    // A notification still carries no id and still gets no reply, and an
+    // ordinary id is still answered.
+    ASSERT_EQ(responses[1]["id"], 5);
+    ASSERT_TRUE(responses[1].contains("result"));
+}
+
+static void test_mcp_refuses_a_cursor_it_never_issued() {
+    // Break caught: all three list methods took any cursor and answered with
+    // the whole first page, which reads as a successful page to a client that
+    // kept a cursor across a restart. These lists are complete and issue no
+    // cursor, so every cursor is unknown.
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+
+    for (const char* method : {"tools/list", "resources/list", "prompts/list"}) {
+        didi::mcp::JsonRpcRequest paged;
+        paged.id = 1;
+        paged.method = method;
+        paged.params = modernMeta("2026-07-28");
+        paged.params["cursor"] = "garbage";
+        const auto refused = server.handleRequest(paged);
+        ASSERT_TRUE(refused.error.has_value());
+        ASSERT_EQ(static_cast<int>(refused.error->code), -32602);
+
+        didi::mcp::JsonRpcRequest whole;
+        whole.id = 2;
+        whole.method = method;
+        whole.params = modernMeta("2026-07-28");
+        ASSERT_TRUE(!server.handleRequest(whole).error.has_value());
+    }
+}
+
+static void test_mcp_answers_an_unknown_tool_with_a_protocol_error() {
+    // Break caught: the dispatch answered a name no registration carries with
+    // a bare string inside an isError result, the one failure in the surface
+    // shaped unlike every other. The specification calls an unknown tool a
+    // protocol error.
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+
+    didi::mcp::JsonRpcRequest call;
+    call.id = 910;
+    call.method = "tools/call";
+    call.params = modernMeta("2026-07-28");
+    call.params["name"] = "no_such_tool";
+    call.params["arguments"] = didi::json::object();
+    const auto response = server.handleRequest(call);
+    ASSERT_TRUE(response.error.has_value());
+    ASSERT_EQ(static_cast<int>(response.error->code), -32602);
+    ASSERT_TRUE(response.error->message.find("no_such_tool") != std::string::npos);
+}
+
 struct RegisterJsonRpcTests {
     RegisterJsonRpcTests() {
         registerTest("JsonRpc.ParseValid", test_jsonrpc_parse_valid);
@@ -1261,6 +1335,12 @@ struct RegisterJsonRpcTests {
                      test_mcp_malformed_modern_request_does_not_execute_the_tool);
         registerTest("McpServer.MalformedModernMetadataRefused",
                      test_mcp_malformed_modern_metadata_types_are_refused);
+        registerTest("McpServer.NullRequestIdRefused",
+                     test_mcp_refuses_a_null_request_id_on_the_wire);
+        registerTest("McpServer.UnknownCursorRefused",
+                     test_mcp_refuses_a_cursor_it_never_issued);
+        registerTest("McpServer.UnknownToolIsAProtocolError",
+                     test_mcp_answers_an_unknown_tool_with_a_protocol_error);
         registerTest("McpServer.ModernRequestIdShape",
                      test_mcp_modern_request_ids_must_be_a_string_or_integer);
         registerTest("McpServer.LegacyUiDeclarationStaysLegacy",
