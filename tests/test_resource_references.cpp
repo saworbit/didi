@@ -147,17 +147,19 @@ void gives_one_header_entry_to_a_path_named_twice() {
     ProjectFixture project("shared");
     const auto result = create({
         {"save_path", "res://art/two.tres"},
-        {"resource_type", "Resource"},
+        {"resource_type", "StandardMaterial3D"},
         {"properties", json::array({
-            {{"name", "a"}, {"value", {{"type", "ExtResource"}, {"path", "res://art/tiles.png"}}}},
-            {{"name", "b"}, {"value", {{"type", "ExtResource"}, {"path", "res://art/tiles.png"}}}}
+            {{"name", "albedo_texture"},
+             {"value", {{"type", "ExtResource"}, {"path", "res://art/tiles.png"}}}},
+            {{"name", "normal_texture"},
+             {"value", {{"type", "ExtResource"}, {"path", "res://art/tiles.png"}}}}
         })}
     });
     ASSERT_TRUE(!result.isError);
     const auto contents = project.read("art/two.tres");
     ASSERT_EQ(contents.find("[ext_resource"), contents.rfind("[ext_resource"));
-    ASSERT_TRUE(contents.find("a = ExtResource(\"1_didi\")") != std::string::npos);
-    ASSERT_TRUE(contents.find("b = ExtResource(\"1_didi\")") != std::string::npos);
+    ASSERT_TRUE(contents.find("albedo_texture = ExtResource(\"1_didi\")") != std::string::npos);
+    ASSERT_TRUE(contents.find("normal_texture = ExtResource(\"1_didi\")") != std::string::npos);
     ASSERT_EQ(payloadOf(result).value("load_steps", 0), 2);
 }
 
@@ -168,9 +170,10 @@ void refuses_a_reference_to_a_file_that_is_not_in_the_project() {
     ProjectFixture project("missing");
     const auto result = create({
         {"save_path", "res://art/broken.tres"},
-        {"resource_type", "Resource"},
+        {"resource_type", "StandardMaterial3D"},
         {"properties", json::array({
-            {{"name", "t"}, {"value", {{"type", "ExtResource"}, {"path", "res://art/absent.png"}}}}
+            {{"name", "albedo_texture"},
+             {"value", {{"type", "ExtResource"}, {"path", "res://art/absent.png"}}}}
         })}
     });
     ASSERT_TRUE(result.isError);
@@ -183,9 +186,10 @@ void refuses_a_reference_outside_the_project() {
     ProjectFixture project("outside");
     const auto result = create({
         {"save_path", "res://art/outside.tres"},
-        {"resource_type", "Resource"},
+        {"resource_type", "StandardMaterial3D"},
         {"properties", json::array({
-            {{"name", "t"}, {"value", {{"type", "ExtResource"}, {"path", "/etc/passwd"}}}}
+            {{"name", "albedo_texture"},
+             {"value", {{"type", "ExtResource"}, {"path", "/etc/passwd"}}}}
         })}
     });
     ASSERT_TRUE(result.isError);
@@ -197,9 +201,9 @@ void refuses_a_sub_resource_id_that_was_never_declared() {
     ProjectFixture project("undeclared");
     const auto result = create({
         {"save_path", "res://art/undeclared.tres"},
-        {"resource_type", "Resource"},
+        {"resource_type", "Material"},
         {"properties", json::array({
-            {{"name", "t"}, {"value", {{"type", "SubResource"}, {"id", "Nope"}}}}
+            {{"name", "next_pass"}, {"value", {{"type", "SubResource"}, {"id", "Nope"}}}}
         })}
     });
     ASSERT_TRUE(result.isError);
@@ -216,11 +220,11 @@ void refuses_a_sub_resource_naming_one_declared_below_it() {
         {"save_path", "res://art/forward.tres"},
         {"resource_type", "Resource"},
         {"sub_resources", json::array({
-            {{"id", "First"}, {"resource_type", "Resource"},
+            {{"id", "First"}, {"resource_type", "Material"},
              {"properties", json::array({
-                 {{"name", "x"}, {"value", {{"type", "SubResource"}, {"id", "Second"}}}}
+                 {{"name", "next_pass"}, {"value", {{"type", "SubResource"}, {"id", "Second"}}}}
              })}},
-            {{"id", "Second"}, {"resource_type", "Resource"}}
+            {{"id", "Second"}, {"resource_type", "Material"}}
         })},
         {"properties", json::array()}
     });
@@ -237,17 +241,17 @@ void lets_a_sub_resource_name_one_declared_above_it() {
         {"save_path", "res://art/backward.tres"},
         {"resource_type", "Resource"},
         {"sub_resources", json::array({
-            {{"id", "First"}, {"resource_type", "Resource"}},
-            {{"id", "Second"}, {"resource_type", "Resource"},
+            {{"id", "First"}, {"resource_type", "Material"}},
+            {{"id", "Second"}, {"resource_type", "Material"},
              {"properties", json::array({
-                 {{"name", "x"}, {"value", {{"type", "SubResource"}, {"id", "First"}}}}
+                 {{"name", "next_pass"}, {"value", {{"type", "SubResource"}, {"id", "First"}}}}
              })}}
         })},
         {"properties", json::array()}
     });
     ASSERT_TRUE(!result.isError);
     const auto contents = project.read("art/backward.tres");
-    ASSERT_TRUE(contents.find("x = SubResource(\"First\")") != std::string::npos);
+    ASSERT_TRUE(contents.find("next_pass = SubResource(\"First\")") != std::string::npos);
     ASSERT_EQ(payloadOf(result).value("load_steps", 0), 3);
 }
 
@@ -283,8 +287,88 @@ void refuses_a_malformed_sub_resources_argument() {
     ASSERT_TRUE(!project.exists("art/m4.tres"));
 }
 
+// Break caught: whatever names `properties` carried were written into the
+// [resource] block and reported in properties_written. Godot drops a property
+// the type does not have when it loads the file, silently, and no tool in the
+// surface would show the loss: resource_inspect reports type, size, uid and
+// dependencies, and no properties.
+void refuses_properties_the_type_does_not_declare() {
+    ProjectFixture project("undeclared-properties");
+    const auto result = create({
+        {"save_path", "res://art/r1.tres"},
+        {"resource_type", "Resource"},
+        {"properties", json::array({
+            {{"name", "a"}, {"value", 1}},
+            {{"name", "b"}, {"value", "two"}}
+        })}
+    });
+    ASSERT_TRUE(result.isError);
+    ASSERT_TRUE(textOf(result).find("'a'") != std::string::npos);
+    ASSERT_TRUE(textOf(result).find("'b'") != std::string::npos);
+    ASSERT_TRUE(textOf(result).find("Resource") != std::string::npos);
+    // Checked before anything is rendered, so nothing is written.
+    ASSERT_TRUE(!project.exists("art/r1.tres"));
+
+    // A name the type does declare still goes through, and the result says the
+    // check ran.
+    const auto declared = create({
+        {"save_path", "res://art/r2.tres"},
+        {"resource_type", "Resource"},
+        {"properties", json::array({{{"name", "resource_name"}, {"value", "arena"}}})}
+    });
+    ASSERT_TRUE(!declared.isError);
+    ASSERT_EQ(payloadOf(declared)["property_check"]["checked"], true);
+
+    // A sub-resource gets the same check, named by its id.
+    const auto sub = create({
+        {"save_path", "res://art/r3.tres"},
+        {"resource_type", "Resource"},
+        {"sub_resources", json::array({
+            {{"id", "Inner_1"}, {"resource_type", "Material"},
+             {"properties", json::array({{{"name", "nope"}, {"value", 1}}})}}
+        })},
+        {"properties", json::array()}
+    });
+    ASSERT_TRUE(sub.isError);
+    ASSERT_TRUE(textOf(sub).find("Inner_1") != std::string::npos);
+    ASSERT_TRUE(!project.exists("art/r3.tres"));
+}
+
+// The API dump lists only the inspector-visible set, so the names Godot stores
+// without declaring -- sources/0 on a TileSet, _data on a Curve -- have to keep
+// working. They are reported rather than refused, and a type the reference does
+// not carry at all is not checked rather than refused.
+void writes_storage_only_and_unknown_types_without_refusing() {
+    ProjectFixture project("storage-only");
+    const auto stored = create({
+        {"save_path", "res://art/curve.tres"},
+        {"resource_type", "Curve"},
+        {"properties", json::array({
+            {{"name", "bake_resolution"}, {"value", 100}},
+            {{"name", "_data"}, {"value", json::array()}}
+        })}
+    });
+    ASSERT_TRUE(!stored.isError);
+    const auto payload = payloadOf(stored);
+    ASSERT_EQ(payload["property_check"]["checked"], true);
+    ASSERT_EQ(payload["property_check"]["not_declared_but_written"].size(), size_t(1));
+    ASSERT_EQ(payload["property_check"]["not_declared_but_written"][0], "_data");
+
+    const auto unknown_type = create({
+        {"save_path", "res://art/custom.tres"},
+        {"resource_type", "MyCustomResourceClass"},
+        {"properties", json::array({{{"name", "whatever"}, {"value", 1}}})}
+    });
+    ASSERT_TRUE(!unknown_type.isError);
+    ASSERT_EQ(payloadOf(unknown_type)["property_check"]["checked"], false);
+}
+
 struct Register {
     Register() {
+        registerTest("resource_references.refuses_undeclared_properties",
+                     refuses_properties_the_type_does_not_declare);
+        registerTest("resource_references.storage_only_names_still_write",
+                     writes_storage_only_and_unknown_types_without_refusing);
         registerTest("resource_references.tileset_with_atlas_and_texture",
                      writes_a_tileset_with_an_atlas_source_and_a_texture);
         registerTest("resource_references.shared_path_gets_one_entry",

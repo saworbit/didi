@@ -68,6 +68,25 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `resource_create` checks property names against the type before it writes
+  anything (#444). Whatever names `properties` carried went into the
+  `[resource]` block and came back in `properties_written`. Godot drops a
+  property the type does not have when it loads the file, silently, so the call
+  reported four properties written and the loaded resource had none of them, and
+  nothing in the surface could show the loss: `resource_inspect` reports type,
+  file size, uid and dependencies, and no properties. Names are now checked
+  against what the pinned API dump declares for the type and its ancestors, and
+  an undeclared one is refused naming it, before anything is rendered. Three
+  cases are deliberately not refused: `script`, which is how a resource gets
+  properties of its own; a name beginning with `_` or containing `/`, because
+  the dump lists only the inspector-visible set while Godot stores more than
+  that, and `_data` on a Curve or `sources/0` on a TileSet have to keep working;
+  and any name on a type the reference does not carry, such as a script class,
+  because there is nothing to check it against. The result carries
+  `property_check` saying whether the check ran and which storage-only names
+  went in unverified, and `sub_resource_property_checks` says the same per
+  sub-resource.
+
 - The verification sandbox says which repository it used, and refuses one that
   merely encloses the project (#450). `verifyChangesInSandbox` resolved the
   repository with `git rev-parse --show-toplevel` from the project root and used
