@@ -2533,6 +2533,17 @@ try {
     Assert-True ($selection.count -eq $selection.selected.Count) "scene_get_selection count disagrees with the array it reported."
     Assert-True ($selection.selected_total -ge $selection.count) "scene_get_selection reported fewer total than named."
     Assert-True ($selection.truncated -is [bool]) "scene_get_selection did not report truncation as a boolean."
+    # Every live scene answer used to be true of "the edited scene" and name no
+    # scene, so a caller had no way to notice the scene had moved under it
+    # (#448). Both of these carry the edited scene's res:// path now, and the
+    # binds behind it resolve only on a real engine.
+    Assert-True ($selection.PSObject.Properties.Name -contains "scene_file_path") "scene_get_selection did not name the scene its selection belongs to."
+    $liveHierarchy = Tool-Payload $byId[28]
+    Assert-True ($liveHierarchy.PSObject.Properties.Name -contains "scene_file_path") "scene_get_hierarchy did not name the scene it described."
+    Assert-True ($liveHierarchy.scene_file_path -eq $selection.scene_file_path) "scene_get_hierarchy and scene_get_selection disagree about which scene is open."
+    # And a node that is not there says where it looked, so "not found" cannot
+    # be read as "the node went away" when the edited scene simply moved.
+    Assert-True ($byId[21].result.content[0].text -match "searched") "A scene node 404 did not say which scene it searched."
     # The harness cannot select a node from outside the editor, so the non-empty
     # case is not covered here. What is covered is the part that can be wrong
     # without anyone noticing: the binds.

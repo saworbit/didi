@@ -68,6 +68,21 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- Live scene answers name the scene they describe, and `scene_create` says it
+  changed which one that is (#448). `scene_create` opens the scene it writes,
+  which it reported as `opened: true`. What it did not report was that every
+  later `scene_*` call now answered about a different file, because no live
+  scene result carried the edited scene's path: a hierarchy came back with one
+  node and no field naming the scene it came from, and
+  `scene_get_property` on a node in the previous scene answered
+  `Scene node not found` without saying which scene it had searched. Both
+  answers were true of the wrong question, and the nodes were not gone, they
+  were in the other tab. `scene_get_hierarchy` and `scene_get_selection` now
+  carry `scene_file_path`, with `scene_is_unsaved` for a scene that has never
+  been saved; the scene node 404 names the scene it searched; and `scene_create`
+  reports `edited_scene_changed` and `previous_scene_file_path`. This is the
+  class #401 was about, one level up.
+
 - Every semantic failure in the Phase 7 bridge says a sentence, and a node of
   the wrong type is told apart from a path that resolves to nothing (#441,
   #443). #406 and #424 fixed the argument rejections; the failures underneath
