@@ -68,6 +68,30 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `script_patch_method` reads the replacement before it writes it, and keeps the
+  declaration where it found it (#438, #439, #440). Three separate ways to lose
+  a method silently. The replacement text was spliced over the target without
+  ever being parsed, so `new_definition: "var x = 1"` deleted `hello` and
+  reported `hello` patched, and a body under a mistyped name added that name
+  while the target stayed gone. The splice also wrote at column zero whatever
+  indentation the declaration was found at, so a method declared inside a nested
+  `class` was moved out of the class and the script stopped parsing, with the
+  write already done and nothing to roll back to. And a name declared both
+  inside a nested class and at the top level took the first match with no word
+  said about the other. Now: `new_definition` has to declare the symbol
+  `method_name` names, of the kind `symbol_type` asks for, or the call is
+  refused with a 400 and nothing is written; the replacement is reindented to
+  the declaration it replaces; and a name that matches more than one member
+  declaration is refused with the scopes and lines that matched. A local
+  variable that shares a member's name is not a second declaration and does not
+  trigger that. `new_definition`, `file_path` and `method_name` carry
+  `minLength: 1` in the published schema, so an empty one is rejected at
+  validation rather than previewing clean, minting a confirmation token and
+  failing the execute path. The required-argument refusal names the arguments
+  that are actually missing, uses the error envelope, and no longer offers
+  `symbol_name`, which this tool does not publish and would reject as an unknown
+  property.
+
 - `resource_create` checks property names against the type before it writes
   anything (#444). Whatever names `properties` carried went into the
   `[resource]` block and came back in `properties_written`. Godot drops a

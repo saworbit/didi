@@ -9,6 +9,8 @@
 #include <cctype>
 #include <fstream>
 #include <sstream>
+#include <string>
+#include <vector>
 #include <filesystem>
 
 namespace didi {
@@ -222,8 +224,20 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
     std::string new_definition = args.value("new_definition", "");
     std::string symbol_type = args.value("symbol_type", "function");
 
-    if (file_path.empty() || symbol_name.empty() || new_definition.empty()) {
-        return CallToolResult::error("Parameters 'file_path', 'method_name'/'symbol_name', and 'new_definition' are required.");
+    // Named one at a time, and only the published names. The old message listed
+    // all three whichever was missing, and offered 'symbol_name', which is not
+    // in this tool's schema and so is rejected as an unknown property.
+    std::vector<std::string> missing;
+    if (file_path.empty()) missing.push_back("'file_path'");
+    if (symbol_name.empty()) missing.push_back("'method_name'");
+    if (new_definition.empty()) missing.push_back("'new_definition'");
+    if (!missing.empty()) {
+        std::string names = missing.front();
+        for (size_t i = 1; i < missing.size(); ++i) {
+            names += (i + 1 == missing.size()) ? " and " + missing[i] : ", " + missing[i];
+        }
+        return CallToolResult::errorJson(
+            400, "Argument " + names + " is required and must not be empty.");
     }
 
     namespace fs = std::filesystem;
@@ -246,7 +260,7 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
 
     auto patch_res = offline::GDScriptDiagnostics::patchSymbol(original_content, symbol_name, new_definition, symbol_type);
     if (patch_res.isErr()) {
-        return CallToolResult::error("Patching error: " + patch_res.error().message);
+        return CallToolResult::errorJson(400, patch_res.error().message);
     }
 
     std::string patched_content = patch_res.value();

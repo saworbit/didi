@@ -1874,9 +1874,10 @@ void ToolRegistry::registerAllDefaultTools() {
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
-                {"file_path", {{"type", "string"}, {"description", "Target script path"}}},
-                {"method_name", {{"type", "string"}, {"description", "Method name to replace"}}},
-                {"new_definition", {{"type", "string"}, {"description", "New method implementation"}}},
+                {"file_path", {{"type", "string"}, {"minLength", 1}, {"description", "Target script path"}}},
+                {"method_name", {{"type", "string"}, {"minLength", 1}, {"description", "Method name to replace"}}},
+                {"new_definition", {{"type", "string"}, {"minLength", 1},
+                                    {"description", "New method implementation. It has to declare the symbol named by method_name."}}},
                 {"symbol_type", {{"type", "string"}, {"default", "function"}}}
             }},
             {"required", {"file_path", "method_name", "new_definition"}}

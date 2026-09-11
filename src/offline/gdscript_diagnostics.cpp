@@ -660,6 +660,41 @@ static size_t getIndentLevel(std::string_view line) {
     return count;
 }
 
+// Rewrites a replacement block so its declaration line sits at `target_indent`,
+// carrying the rest of the block with it. The block's own base indentation is
+// whatever its first meaningful line uses, so a body written at column zero and
+// a body already written at one tab both land in the same place.
+static std::string reindentDefinition(const std::string& definition,
+                                      const std::string& target_indent) {
+    std::vector<std::string> lines = strings::split(definition, '\n');
+    std::string base_indent;
+    bool base_found = false;
+    for (const auto& line : lines) {
+        if (strings::trim(line).empty()) continue;
+        const size_t end = line.find_first_not_of(" \t");
+        base_indent = end == std::string::npos ? std::string() : line.substr(0, end);
+        base_found = true;
+        break;
+    }
+    if (!base_found || base_indent == target_indent) return definition;
+
+    std::ostringstream out;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        const std::string& line = lines[i];
+        if (strings::trim(line).empty()) {
+            // A blank line carries no indentation to move.
+        } else if (strings::startsWith(line, base_indent)) {
+            out << target_indent << line.substr(base_indent.size());
+        } else {
+            // Shallower than the declaration it belongs to. Nothing sensible to
+            // strip, so shift it whole rather than lose its own indentation.
+            out << target_indent << line;
+        }
+        if (i + 1 < lines.size()) out << "\n";
+    }
+    return out.str();
+}
+
 Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_text,
                                                     const std::string& symbol_name,
                                                     const std::string& new_definition,
@@ -685,6 +720,10 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
     std::regex symbol_regex(pattern);
     int start_line = -1;
     int end_line = -1;
+    // Leading whitespace of the declaration being replaced. A method declared
+    // inside a nested class lives at one tab; writing the replacement at column
+    // zero moved it out of the class and left a script that does not parse.
+    std::string declaration_indent;
 
     // parseDeclaration balances annotation argument lists, so it recognises
     // declarations the pattern above cannot, such as @export_range(0, 100) var
@@ -692,19 +731,110 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
     const bool parsed_kind = symbol_type == "function" || symbol_type == "variable" ||
                              symbol_type == "constant" || symbol_type == "signal" ||
                              symbol_type == "enum";
+    auto kind_matches = [&](const GDScriptDeclaration& declaration) {
+        if (symbol_type == "variable") {
+            return declaration.kind == "variable" || declaration.kind == "constant";
+        }
+        return declaration.kind == symbol_type;
+    };
     auto declares_symbol = [&](const std::string& line) {
         const auto declaration = parseDeclaration(line);
         if (!declaration || declaration->name != symbol_name) return false;
-        if (symbol_type == "variable") {
-            return declaration->kind == "variable" || declaration->kind == "constant";
-        }
-        return declaration->kind == symbol_type;
+        return kind_matches(*declaration);
     };
 
+    // The replacement has to declare the symbol it replaces. Without this the
+    // text was spliced in whatever it was, so a body with a mistyped name, or
+    // no declaration at all, deleted the target and reported the patch done.
+    {
+        std::optional<GDScriptDeclaration> replacement;
+        for (const auto& line : strings::split(new_definition, '\n')) {
+            const std::string trimmed = strings::trim(line);
+            if (trimmed.empty() || strings::startsWith(trimmed, "#")) continue;
+            replacement = parseDeclaration(line);
+            // A bare annotation on its own line belongs to the declaration
+            // under it, the same rule the preamble scan below uses.
+            if (!replacement && strings::startsWith(trimmed, "@")) continue;
+            break;
+        }
+        const std::string wanted = "a " + symbol_type + " named '" + symbol_name + "'";
+        if (!replacement) {
+            return Error::invalidArgument(
+                "Argument 'new_definition' declares nothing. It has to declare " + wanted +
+                ", because that is what this call replaces.");
+        }
+        // Only for the kinds parseDeclaration models. An unrecognised
+        // symbol_type falls through to the regex path below, and this check has
+        // nothing to compare against.
+        if (parsed_kind && !kind_matches(*replacement)) {
+            return Error::invalidArgument(
+                "Argument 'new_definition' declares a " + replacement->kind + " named '" +
+                replacement->name + "', but this call asks for " + wanted + ".");
+        }
+        if (replacement->name != symbol_name) {
+            return Error::invalidArgument(
+                "Argument 'new_definition' declares '" + replacement->name +
+                "', not '" + symbol_name + "'. Patch the name it declares, or rename the "
+                "symbol in the replacement to match.");
+        }
+    }
+
+    // The declaration a line sits inside, found by walking back to the nearest
+    // shallower declaration. Block statements between the two are stepped over,
+    // so a var inside an `if` inside a func still reports the func.
+    auto enclosing_declaration = [&](size_t index) -> std::optional<GDScriptDeclaration> {
+        size_t limit = getIndentLevel(lines[index]);
+        for (size_t back = index; back > 0; --back) {
+            const std::string& candidate = lines[back - 1];
+            if (strings::trim(candidate).empty()) continue;
+            const size_t candidate_indent = getIndentLevel(candidate);
+            if (candidate_indent >= limit) continue;
+            limit = candidate_indent;
+            const auto declaration = parseDeclaration(candidate);
+            if (declaration) return declaration;
+        }
+        return std::nullopt;
+    };
+    auto scope_of = [&](size_t index) {
+        const auto enclosing = enclosing_declaration(index);
+        if (!enclosing) return std::string("top level");
+        return enclosing->kind + " " + enclosing->name;
+    };
+
+    std::vector<size_t> matches;
+    std::vector<size_t> member_matches;
     for (size_t i = 0; i < lines.size(); ++i) {
         const bool matched = parsed_kind ? declares_symbol(lines[i])
                                          : std::regex_search(lines[i], symbol_regex);
-        if (matched) {
+        if (!matched) continue;
+        matches.push_back(i);
+        const auto enclosing = enclosing_declaration(i);
+        if (!enclosing || enclosing->kind == "class") member_matches.push_back(i);
+    }
+
+    // A local named like the member is not a second declaration of it, so the
+    // ambiguity below is judged among members only. When every match is a local
+    // there is nothing to choose between and the first one still wins, as it
+    // always did.
+    if (!member_matches.empty()) matches = member_matches;
+
+    // One name can be declared once at the top level and again inside a nested
+    // class. Taking the first match rewrote whichever came first in the file
+    // and said nothing, so the caller could not tell which one it got.
+    if (matches.size() > 1) {
+        std::string scopes;
+        for (size_t k = 0; k < matches.size(); ++k) {
+            if (k > 0) scopes += ", ";
+            scopes += scope_of(matches[k]) + " (line " + std::to_string(matches[k] + 1) + ")";
+        }
+        return Error::invalidArgument(
+            "'" + symbol_name + "' is declared " + std::to_string(matches.size()) +
+            " times in this script: " + scopes +
+            ". Refusing to guess which one to patch.");
+    }
+
+    for (size_t i : matches) {
+        {
             // Check previous lines for annotations / doc comments. An @ line
             // that declares a symbol of its own, such as @export var alpha, is
             // the neighbour above the target rather than part of its preamble,
@@ -748,6 +878,9 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
                 j++;
             }
             end_line = static_cast<int>(last_body_line + 1);
+            const size_t indent_end = lines[i].find_first_not_of(" \t");
+            declaration_indent =
+                indent_end == std::string::npos ? std::string() : lines[i].substr(0, indent_end);
             break;
         }
     }
@@ -758,8 +891,9 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
         for (int i = 0; i < start_line; ++i) {
             result << lines[i] << "\n";
         }
-        result << new_definition;
-        if (!strings::endsWith(new_definition, "\n")) {
+        const std::string reindented = reindentDefinition(new_definition, declaration_indent);
+        result << reindented;
+        if (!strings::endsWith(reindented, "\n")) {
             result << "\n";
         }
         for (size_t i = end_line; i < lines.size(); ++i) {
