@@ -3175,10 +3175,15 @@ void ToolRegistry::registerAllDefaultTools() {
         {{"type", "object"}, {"properties", {{"setting", {{"type", "string"}}}}}, {"required", {"setting"}}},
         [this](const json& args) { return handleProjectGetSetting(args, m_ipcClient); });
     register_phase_two(
-        "project_set_setting", "Persists or explicitly removes a ProjectSettings value.",
+        "project_set_setting", "Persists or explicitly removes a ProjectSettings value. A name the engine does not define is refused unless create says otherwise, because a typo and a deliberate custom setting were written identically.",
         {{"type", "object"}, {"properties", {
-            {"setting", {{"type", "string"}}}, {"value", json::object()},
-            {"remove", {{"type", "boolean"}, {"default", false}}}
+            {"setting", {{"type", "string"},
+                         {"description", "Slash-delimited ProjectSettings name, such as display/window/size/viewport_width. Use the typed autoload and InputMap tools for those namespaces."}}},
+            {"value", json::object()},
+            {"remove", {{"type", "boolean"}, {"default", false},
+                        {"description", "Remove the setting instead of writing a value. Pass this or value, not both."}}},
+            {"create", {{"type", "boolean"}, {"default", false},
+                        {"description", "Write a setting name the engine does not already define. Off by default, because a misspelled built-in name is indistinguishable from a deliberate custom one and costs a key nothing reads. With an editor attached the result reports defined_by_engine; offline it is null, because there is no engine to ask."}}}
         }}, {"required", {"setting"}}},
         [this](const json& args) { return handleProjectSetSetting(args, m_ipcClient); });
 

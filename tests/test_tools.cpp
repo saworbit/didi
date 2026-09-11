@@ -1058,6 +1058,41 @@ static void test_instantiate_refuses_a_request_that_names_no_target() {
     ASSERT_TRUE(!definition->inputSchema["properties"]["node_type"].contains("default"));
 }
 
+static void test_offline_setting_write_admits_it_did_not_check_the_name() {
+    // Break caught: project_set_setting accepted any name, including one Godot
+    // does not define, and reported persisted: true. project_get_setting then
+    // returned it happily, so reading back did not catch it either, and the
+    // window the caller asked to resize never changed (#464).
+    //
+    // The live path asks ProjectSettings.has_setting and refuses an unknown
+    // name unless create says otherwise. Offline there is no engine to ask, and
+    // the shipped class reference publishes no ProjectSettings property list,
+    // so the honest answer is that the name was not checked.
+    ScopedToolProject project("setting-name-offline");
+    writeAuditFile("project.godot", "config_version=5\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto written = didi::json::parse(
+        registry.callTool("project_set_setting",
+                          didi::json{{"setting", "display/window/size/viewport_widht"},
+                                     {"value", 1280}})
+            .content[0].text);
+    ASSERT_EQ(written["persisted"], true);
+    ASSERT_TRUE(written["defined_by_engine"].is_null());
+    ASSERT_TRUE(written["limitation"].get<std::string>().find("not checked") !=
+                std::string::npos);
+
+    // The way through is published, or a caller cannot find it from the schema.
+    const auto* definition = registry.getTool("project_set_setting");
+    ASSERT_TRUE(definition != nullptr);
+    const auto& create = definition->inputSchema["properties"]["create"];
+    ASSERT_EQ(create["type"], "boolean");
+    ASSERT_EQ(create["default"], false);
+    ASSERT_TRUE(create.contains("description"));
+}
+
 static void test_audit_does_not_call_third_party_addon_files_orphans() {
     // Break caught: the audit's output is advice to delete files, and in a
     // fresh project most of that advice was about Didi's own brand assets --
@@ -4225,6 +4260,8 @@ struct RegisterToolTests {
                      test_api_version_note_compares_the_engine_line);
         registerTest("Tools.InstantiateRefusesNoTarget",
                      test_instantiate_refuses_a_request_that_names_no_target);
+        registerTest("Tools.OfflineSettingWriteAdmitsUncheckedName",
+                     test_offline_setting_write_admits_it_did_not_check_the_name);
         registerTest("Tools.AuditSkipsAddonOrphans",
                      test_audit_does_not_call_third_party_addon_files_orphans);
         registerTest("Tools.LocalWorkIsNotAFallback",

@@ -68,6 +68,22 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `project_set_setting` checks the setting name against the engine (#464). It
+  accepted any name, `display/window/size/viewport_widht` included, wrote it
+  into `project.godot` and reported `status: "success"` with
+  `persisted: true`. The window was unchanged and nothing in the engine would
+  ever read that key. `project_get_setting` then returned it happily, so
+  reading back to double-check did not catch it either. Godot does support
+  custom project settings, so an unknown name is a legitimate mode, but it was
+  indistinguishable from the overwhelmingly more common case. With an editor
+  attached, an undefined name is now a 404 naming `create: true`, using the
+  same `ProjectSettings.has_setting` the getter already answers with, and
+  every success carries `defined_by_engine`. Offline there is no engine to ask
+  and the shipped class reference publishes no `ProjectSettings` property
+  list, so that route reports `defined_by_engine: null`, says in `limitation`
+  that the name was not checked, and still writes. The addon bootstrap, which
+  is an offline write by necessity, is unaffected.
+
 - `scene_instantiate_node` refuses a request that names nothing to
   instantiate (#471). It declared no required arguments and sits behind no
   confirmation gate, so an empty argument object added a bare `Node` named
