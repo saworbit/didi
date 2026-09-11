@@ -131,7 +131,7 @@ void test_hook_admits_both_session_kinds_by_policy() {
                                {"start_point", v3(0, 0, 0)}, {"end_point", v3(1, 0, 0)},
                                {"camera_node", "/root/Scene/Camera3D"}});
             ASSERT_TRUE(response.contains("error"));
-            ASSERT_TRUE(response["error"]["message"] != "session_kind_rejected");
+            ASSERT_TRUE(response.value("error", didi::json::object()).value("data", didi::json::object()).value("code", std::string()) != "session_kind_rejected");
             ASSERT_TRUE(response["error"]["message"].get<std::string>().find("Editor-only method") ==
                         std::string::npos);
         }

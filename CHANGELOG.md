@@ -86,7 +86,10 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   `tilemap_target_wrong_type` naming the type it found, with
   `gridmap_target_wrong_type` beside it. Those are different problems with
   different fixes, and a caller that could not tell them apart retried the path
-  when it should have been looking at the node.
+  when it should have been looking at the node. The editor hook's own
+  `session_kind_rejected` is included: it rejects before the bridge is entered,
+  so it is the identifier a caller most often sees, and it now says which method
+  needs which session kind and which one is selected.
 
 - A number no float property can hold is refused rather than written as `inf`
   (#437). A Godot `float` property is `real_t`, 32 bits in a standard build, and

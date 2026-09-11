@@ -165,7 +165,7 @@ void test_hook_policy_for_list_and_play() {
     auto refused = didi::godot::EditorHookTestAccess::executeOnMainThread(
         hook, "anim.playTrack", {{"animation_player_path", "/root/Player"}, {"animation_name", "walk"}});
     ASSERT_EQ(refused["error"]["code"], 409);
-    ASSERT_EQ(refused["error"]["message"], "session_kind_rejected");
+    ASSERT_EQ(refused["error"]["data"]["code"], "session_kind_rejected");
     // The list reaches the bridge in a game session; without an engine that
     // is a not-ready error rather than a policy refusal.
     didi::godot::EditorHookTestAccess::setSessionKind(hook, didi::runtime::SessionKind::game);
@@ -175,7 +175,7 @@ void test_hook_policy_for_list_and_play() {
         auto admitted = didi::godot::EditorHookTestAccess::executeOnMainThread(
             hook, method, {{"animation_player_path", "/root/Player"}, {"animation_name", "walk"}});
         ASSERT_TRUE(admitted.contains("error"));
-        ASSERT_TRUE(admitted["error"]["message"] != "session_kind_rejected");
+        ASSERT_TRUE(admitted.value("error", didi::json::object()).value("data", didi::json::object()).value("code", std::string()) != "session_kind_rejected");
         ASSERT_TRUE(admitted["error"]["message"].get<std::string>().find("Editor-only method") == std::string::npos);
     }
     didi::godot::EditorHookTestAccess::setSessionKind(hook, std::nullopt);

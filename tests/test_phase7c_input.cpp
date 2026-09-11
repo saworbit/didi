@@ -154,7 +154,7 @@ void test_hook_rejects_editor_sessions_before_the_bridge() {
         hook, "runtime.injectInput",
         batch({{{"type", "action"}, {"action_name", "jump"}, {"pressed", true}}}));
     ASSERT_EQ(response["error"]["code"], 409);
-    ASSERT_EQ(response["error"]["message"], "session_kind_rejected");
+    ASSERT_EQ(response["error"]["data"]["code"], "session_kind_rejected");
     didi::godot::EditorHookTestAccess::setSessionKind(hook, std::nullopt);
 }
 
