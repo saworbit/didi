@@ -1,0 +1,8 @@
+[
+  ["scene_set_property", {"target_node": "Child", "property_name": "position", "value": {"x": 1e39, "y": 5}}],
+  ["scene_get_property", {"target_node": "Child", "property_name": "position"}],
+  ["scene_set_property", {"target_node": "Child", "property_name": "position", "value": {"x": null, "y": 5}}],
+  ["scene_set_property", {"target_node": "Child", "property_name": "rotation", "value": 1e39}],
+  ["scene_get_property", {"target_node": "Child", "property_name": "rotation"}],
+  ["editor_save_scene", {}]
+]

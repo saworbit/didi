@@ -21,6 +21,8 @@ twice.
 | `probe.py` | Command line: list tools, print a schema, run one call or a file of calls. |
 | `probes/*.json` | Saved probe sequences. Each one is the reproduction for findings already filed. |
 | `probes/confirmation_token.py` | The confirmation gate walked end to end; a token cannot be carried between processes, so this one is a script. |
+| `probes/write_then_read_back.py` | Three mutations that report success, read back against the file they wrote. |
+| `probes/protocol_edges.py` | The wire below `tools/call`: stale cursors, a null id, an unknown tool, `arguments` that is not an object. |
 | `probes/surface_census.py` | The same question asked of all 126 tools: who rejects an unknown argument, what `execution_mode` each reports, who answers with a bare string. |
 | `report.py` | Files a directory of finding bodies as issues in one pass. |
 
@@ -99,8 +101,12 @@ are left are the unimplemented registrations, which refuse the whole call
 before any argument is read. The second is now 7, all of them tools that
 really do have a live path to fall back from (#419). The third is now zero:
 every semantic failure carries a code (#420). `probes/surface_census.py` runs
-all three in
-about a minute each; the numbers are in the session log and are worth diffing.
+these in about a minute each; the numbers are in the session log and are worth
+diffing. A fourth, `--which identifier-messages`, asks who answers with a token
+where a sentence belongs; it reports zero from junk arguments, because the
+argument check fires first, and the tokens live behind *valid* arguments that
+name the wrong thing (#441). A census that returns zero is a census asking the
+wrong question.
 
 **Narrow before you file, especially when two things changed.** This session
 nearly filed "`editor_undo` reports success without undoing anything" — the
@@ -110,6 +116,21 @@ no longer existed. A tighter repro (set a property, undo, read it back) showed
 undo working correctly and reporting `409 Nothing to undo` on an exhausted
 stack. A sandbox accumulates state; a finding that depends on three earlier
 mutations is a finding about your probe order until proven otherwise.
+
+**A mutation that reports success has still only told you it ran.** Four of
+this session's findings are a tool doing something adjacent to the request and
+saying it did the request: a method patched at the wrong indentation (#438), a
+`new_definition` spliced in without being read (#439), resource properties the
+type does not have (#444), a float the property cannot hold (#437). None of them
+error, and in three of the four the tool's own response is consistent with
+itself. The file, or the engine loading the file, is the only witness. Read back
+with something other than the tool that wrote.
+
+**Ask what the answer is about, not just what it says.** `scene_get_hierarchy`
+returns a correct tree and never names the scene it came from, so after
+`scene_create` opens a new scene every later call is a true answer to a
+different question (#448). The same shape as #401. When a tool has an implicit
+subject, ask whether the response identifies it.
 
 **Offline and live are different products.** The same argument can mean
 different things depending on whether an editor is attached, and the offline
@@ -125,6 +146,8 @@ next is not a test of the gate, it is a test of process lifetime.
 | :--- | :--- | :--- | :--- |
 | 2026-09-11 | Offline surface, then a live 4.5.1 editor: protocol edges, argument validation, the confirmation gate, offline path resolution, honesty of empty results. | `1.8.0+11aa42d92371` | #396–#408, thirteen findings. All thirteen were fixed the same day, in PRs #409–#414. |
 | 2026-09-11 | Whole-surface censuses (unknown arguments, execution modes, error envelopes), then narrowing: non-ASCII identifiers, `dry_run` semantics, project.godot references, search coverage. | `1.8.0+6164335c8868` | #416–#427, twelve findings. |
+
+| 2026-09-11 | Mutation honesty (write, then read back from the file and the engine), scene identity across a scene switch, semantic failures behind valid arguments, and the JSON-RPC layer below `tools/call`. | `1.8.0+5c34220b7d42` | #437-#450, fourteen findings. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log

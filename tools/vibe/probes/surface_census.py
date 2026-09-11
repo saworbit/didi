@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -95,10 +96,38 @@ def error_envelopes(session: Session, tools: list[dict]) -> None:
         print(f"  {name:28} | {message[:110]}")
 
 
+IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$")
+
+
+def identifier_messages(session: Session, tools: list[dict]) -> None:
+    """Who answers with a token where a sentence belongs.
+
+    A bare string was #420 and a raw `invalid_<tool>_request` was #406; both
+    were about the envelope. This asks the narrower question the envelope does
+    not answer: the message inside it is what an agent shows its user, and
+    `target_method_not_found` names a condition without naming the method, the
+    node, or what to do instead.
+    """
+    tokens = []
+    for tool in tools:
+        payload, is_error = session.call(tool["name"], junk_arguments(tool.get("inputSchema", {})))
+        if not is_error or not isinstance(payload, dict):
+            continue
+        error = payload.get("error")
+        message = error.get("message") if isinstance(error, dict) else None
+        if isinstance(message, str) and IDENTIFIER.match(message.strip()):
+            upstream = error.get("data", {}).get("upstream_message") if isinstance(error, dict) else None
+            tokens.append((tool["name"], message.strip(), upstream))
+    print(f"identifier-shaped messages ({len(tokens)}):")
+    for name, message, upstream in tokens:
+        print(f"  {name:30} | {message} | upstream={upstream}")
+
+
 CENSUSES = {
     "unknown-arguments": unknown_arguments,
     "execution-modes": execution_modes,
     "error-envelopes": error_envelopes,
+    "identifier-messages": identifier_messages,
 }
 
 
