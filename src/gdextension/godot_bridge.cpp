@@ -9074,7 +9074,18 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto parent = resolveNode(root.value(), params.value("parent_path", "/root"));
         if (parent.isErr()) return errorJson(parent.error().code, parent.error().message);
         const std::string instance_scene_path = params.value("scene_path", "");
-        std::string node_type = params.value("node_type", "Node");
+        std::string node_type = params.value("node_type", "");
+        // The tool handler refuses this too, but mutate_scene_tree with
+        // action: "instantiate" forwards straight here without passing through
+        // it. The mutation happens on this side, so the refusal belongs on
+        // this side as well (#471).
+        if (node_type.empty() && instance_scene_path.empty()) {
+            return errorJson(400,
+                             "Name what to instantiate: node_type for a built-in ClassDB "
+                             "type, or scene_path for a res:// .tscn to instance. There is "
+                             "no default, because adding a bare Node to the edited scene is "
+                             "not what an empty request means.");
+        }
         GDExtensionObjectPtr node = nullptr;
 
         if (!instance_scene_path.empty()) {

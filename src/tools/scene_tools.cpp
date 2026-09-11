@@ -297,10 +297,27 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
 }
 
 CallToolResult handleSceneInstantiateNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    std::string node_type = args.value("node_type", "Node");
+    std::string node_type = args.value("node_type", "");
     std::string scene_path = args.value("scene_path", "");
     std::string parent_path = args.value("parent_path", "/root");
     std::string name = args.value("name", "");
+
+    // {} is what a caller sends when it has not decided yet, when a schema
+    // lookup failed, or when an argument-building step produced nothing.
+    // Everywhere else on this surface that costs one 400, because every other
+    // mutation either declares required arguments or sits behind the dry-run
+    // gate. Here it added a bare Node named Node to the edited scene and said
+    // nothing about having chosen both the parent and the type itself (#471).
+    //
+    // Defaulting parent_path to the edited root is reasonable: there is one
+    // obvious answer. Defaulting the thing being instantiated is not.
+    if (node_type.empty() && scene_path.empty()) {
+        return CallToolResult::errorJson(
+            400,
+            "Name what to instantiate: node_type for a built-in ClassDB type, or "
+            "scene_path for a res:// .tscn to instance. There is no default, because "
+            "adding a bare Node to the edited scene is not what an empty request means.");
+    }
 
     if (ipc && ipc->isConnected()) {
         auto res = ipc->sendRequest("scene.instantiateNode", args, ::didi::ipc::kWaitForDefinitiveResponse);

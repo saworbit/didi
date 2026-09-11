@@ -68,6 +68,22 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `scene_instantiate_node` refuses a request that names nothing to
+  instantiate (#471). It declared no required arguments and sits behind no
+  confirmation gate, so an empty argument object added a bare `Node` named
+  `Node` under the edited scene root, and repeat calls added `Node2`, `Node3`.
+  `{}` is what a caller sends when it has not decided yet, when a schema
+  lookup failed, or when an argument-building step produced nothing, and
+  everywhere else on this surface that costs one 400 because every other
+  mutation either declares required arguments or sits behind the dry-run gate.
+  Nothing in the response said it had chosen both the parent and the type
+  itself. One of `node_type` or `scene_path` is now required, and `node_type`
+  no longer advertises a default a client would fill in. Defaulting
+  `parent_path` to the edited root is unchanged; there is one obvious answer
+  for that. The refusal is in the bridge as well as the tool, because
+  `mutate_scene_tree` with `action: "instantiate"` forwards straight to the
+  bridge and the mutation happens on that side.
+
 - `res://.didi/` is not listed or searched as project content (#468). Didi
   keeps its blackboard and crash state there, and `query_project_resources`
   reported those files as project resources while `project_search_text`
