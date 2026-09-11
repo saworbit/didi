@@ -360,8 +360,8 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
     if (!target_path.empty()) {
         auto resolved = paths::resolveProjectFile(target_path);
         if (resolved.isErr()) {
-            return CallToolResult::error("Invalid target_resource_path: " +
-                                         resolved.error().message);
+            return CallToolResult::fromError(resolved.error(),
+                                             "Invalid target_resource_path: ");
         }
         target_resource = strings::startsWith(target_path, "res://")
                               ? target_path

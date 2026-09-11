@@ -110,8 +110,10 @@ argument check fires first, and the tokens live behind *valid* arguments that
 name the wrong thing (#441). A census that returns zero is a census asking the
 wrong question. `probes/path_errors.py` is that lesson applied: the
 error-envelope census reports zero bare strings on `8fd6409`, and eight tools
-still return one — the argument check answers junk first, so the path validator
-is only reachable with arguments that are well-formed and wrong (#460).
+still returned one — the argument check answers junk first, so the path
+validator is only reachable with arguments that are well-formed and wrong
+(#460). Those eight carry the envelope now; the probe stays, because the next
+validator to be wrapped by hand will land in the same blind spot.
 
 **Narrow before you file, especially when two things changed.** This session
 nearly filed "`editor_undo` reports success without undoing anything" — the

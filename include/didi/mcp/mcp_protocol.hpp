@@ -211,6 +211,16 @@ struct CallToolResult {
         return errorJson(error.code, error.message, std::move(data));
     }
 
+    // The same envelope, keeping the sentence a tool puts in front of a helper's
+    // message. A path validator says "file does not exist beneath the project
+    // root"; the tool says which argument it was reading. Prefixing the message
+    // by hand and passing the result to error() is what threw the code away at
+    // the eight path-validation sites in #460.
+    static CallToolResult fromError(const Error& error, const std::string& prefix) {
+        json data = error.data.is_object() ? error.data : json::object();
+        return errorJson(error.code, prefix + error.message, std::move(data));
+    }
+
     static CallToolResult errorJson(int code, std::string message, json data = json::object()) {
         if (!data.is_object()) data = json::object();
         if (!data.contains("retryable")) data["retryable"] = false;

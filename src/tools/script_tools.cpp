@@ -30,7 +30,7 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
     if (source_text.empty() && !file_path.empty()) {
         auto resolved = paths::resolveProjectFile(file_path);
         if (resolved.isErr()) {
-            return CallToolResult::error("Invalid script file path: " + resolved.error().message);
+            return CallToolResult::fromError(resolved.error(), "Invalid script file path: ");
         }
         analysis_path = paths::projectPathToUtf8(resolved.value());
     }
@@ -87,7 +87,7 @@ CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcCli
     namespace fs = std::filesystem;
     auto resolved = paths::resolveProjectFileForWrite(script_path);
     if (resolved.isErr()) {
-        return CallToolResult::error("Invalid script file path: " + resolved.error().message);
+        return CallToolResult::fromError(resolved.error(), "Invalid script file path: ");
     }
     const fs::path disk_path = resolved.value();
 
@@ -197,7 +197,7 @@ CallToolResult handleScriptGetSymbols(const json& args, std::shared_ptr<ipc::IIp
     if (source_text.empty() && !file_path.empty()) {
         auto resolved = paths::resolveProjectFile(file_path);
         if (resolved.isErr()) {
-            return CallToolResult::error("Invalid script file path: " + resolved.error().message);
+            return CallToolResult::fromError(resolved.error(), "Invalid script file path: ");
         }
         std::ifstream file(resolved.value());
         if (file.is_open()) {
@@ -243,7 +243,7 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
     namespace fs = std::filesystem;
     auto resolved = paths::resolveProjectFile(file_path);
     if (resolved.isErr()) {
-        return CallToolResult::error("Invalid script file path: " + resolved.error().message);
+        return CallToolResult::fromError(resolved.error(), "Invalid script file path: ");
     }
     const fs::path disk_path = resolved.value();
 
