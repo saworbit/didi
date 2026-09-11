@@ -68,6 +68,24 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- A number no float property can hold is refused rather than written as `inf`
+  (#437). A Godot `float` property is `real_t`, 32 bits in a standard build, and
+  `Vector2`, `Vector3` and `Color` are made of the same, so a JSON number above
+  about 3.4e38 became `inf` the moment it landed there. Three things then went
+  wrong and none was loud: the saved scene held `Vector2(inf, 5)`, which
+  propagates through the transform to every child on the next frame; the value
+  reported back was JSON `null`, which is not a number and cannot be sent back;
+  and `null` is also what a caller reads as unset, so an infinite value and an
+  unreadable one looked identical. `applied: false` was the only signal, and it
+  sits beside `status: "success"` where it also appears for a value the engine
+  merely coerced. `scene_set_property` and `scene_instantiate_node` now refuse
+  such a number, naming the property, the vector or colour component where there
+  is one, and the bound. Separately, a non-finite number read out of the engine
+  comes back as the string `"inf"`, `"-inf"` or `"nan"` instead of `null`,
+  because JSON has no spelling for them and nlohmann serialises all three as
+  `null`: nothing this tool accepts can produce one any more, but a scene
+  written by hand still can.
+
 - `script_patch_method` reads the replacement before it writes it, and keeps the
   declaration where it found it (#438, #439, #440). Three separate ways to lose
   a method silently. The replacement text was spliced over the target without

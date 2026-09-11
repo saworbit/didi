@@ -226,5 +226,22 @@ std::string describePropertyTypeMismatch(const std::string& property_name,
 // alone, so it holds with or without a running engine.
 bool jsonValueFitsPropertyType(const json& value, int variant_type);
 
+// A double in a form the wire can carry back. JSON has no spelling for inf or
+// nan and nlohmann serialises both as `null`, so a property holding inf used to
+// read back as null: not a number, not round-trippable, and identical on the
+// wire to "unset" or "unknown". Non-finite values come back as "inf", "-inf" or
+// "nan"; a finite one is unchanged.
+json realToJson(double value);
+
+// The refusal a caller reads when a number is outside what the property can
+// hold, or nothing when it fits.
+//
+// A Godot float property is real_t, 32-bit in a standard build, and Vector2,
+// Vector3 and Color are made of the same. A JSON number above about 3.4e38
+// becomes inf the moment it lands there. Pure, so it holds with or without a
+// running engine.
+std::optional<std::string> describeRealRangeRefusal(const std::string& property_name,
+                                                    const json& value, int godot_type);
+
 } // namespace godot
 } // namespace didi

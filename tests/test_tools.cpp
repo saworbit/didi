@@ -3342,6 +3342,57 @@ static void test_editor_viewport_identifiers_agree() {
     ASSERT_TRUE(list.find("active_editor_view") != std::string::npos);
 }
 
+// Break caught: a float property is 32-bit, so a JSON number above about
+// 3.4e38 became inf the moment it landed there. The write went through, the
+// scene file held Vector2(inf, 5), and the value reported back was JSON null,
+// which is what a caller reads as unset. applied: false was the only signal,
+// and it sits beside status: "success" where it also appears for a value the
+// engine merely coerced.
+static void test_a_number_no_float_property_can_hold_is_refused() {
+    using didi::godot::describeRealRangeRefusal;
+    using didi::godot::realToJson;
+
+    const auto rotation = describeRealRangeRefusal("rotation", didi::json(1e39),
+                                                   GDEXTENSION_VARIANT_TYPE_FLOAT);
+    ASSERT_TRUE(rotation.has_value());
+    ASSERT_TRUE(rotation->find("rotation") != std::string::npos);
+    ASSERT_TRUE(rotation->find("3.4e38") != std::string::npos);
+
+    // A vector names the component, because that is the one a caller has to
+    // change.
+    const didi::json position = {{"x", 1e39}, {"y", 5}};
+    const auto vector = describeRealRangeRefusal("position", position,
+                                                 GDEXTENSION_VARIANT_TYPE_VECTOR2);
+    ASSERT_TRUE(vector.has_value());
+    ASSERT_TRUE(vector->find("position") != std::string::npos);
+    ASSERT_TRUE(vector->find("\"x\"") != std::string::npos);
+
+    // Colour channels are reals too.
+    ASSERT_TRUE(describeRealRangeRefusal("modulate", didi::json{{"r", 1e39}, {"g", 0}, {"b", 0}},
+                                         GDEXTENSION_VARIANT_TYPE_COLOR).has_value());
+
+    // Everything a float property can hold still goes through, including the
+    // boundary itself and the whole-number form.
+    ASSERT_TRUE(!describeRealRangeRefusal("rotation", didi::json(3.4e38),
+                                          GDEXTENSION_VARIANT_TYPE_FLOAT).has_value());
+    ASSERT_TRUE(!describeRealRangeRefusal("rotation", didi::json(1),
+                                          GDEXTENSION_VARIANT_TYPE_FLOAT).has_value());
+    ASSERT_TRUE(!describeRealRangeRefusal("position", didi::json{{"x", -1000}, {"y", 5}},
+                                          GDEXTENSION_VARIANT_TYPE_VECTOR2).has_value());
+    // An integer vector is not made of reals, and a big int is not this bug.
+    ASSERT_TRUE(!describeRealRangeRefusal("size", didi::json{{"x", 1000000}, {"y", 5}},
+                                          GDEXTENSION_VARIANT_TYPE_VECTOR2I).has_value());
+
+    // And a value already in a scene that this cannot produce any more still
+    // has to read back as something JSON can carry. nlohmann serialises a
+    // non-finite double as null, which is not a number and is what a caller
+    // reads as unset.
+    ASSERT_EQ(realToJson(std::numeric_limits<double>::infinity()), didi::json("inf"));
+    ASSERT_EQ(realToJson(-std::numeric_limits<double>::infinity()), didi::json("-inf"));
+    ASSERT_EQ(realToJson(std::numeric_limits<double>::quiet_NaN()), didi::json("nan"));
+    ASSERT_EQ(realToJson(2.5), didi::json(2.5));
+}
+
 // The message is the only thing that changes. This pins the accept/reject set
 // so a future edit to the wording cannot quietly start coercing a string into
 // a number, which is the false success #213 to #217 were about.
@@ -3917,6 +3968,8 @@ struct RegisterToolTests {
                      test_property_type_mismatch_names_every_scalar_type_in_words);
         registerTest("Tools.PropertyTypeAcceptanceUnchanged",
                      test_property_type_acceptance_set_is_unchanged);
+        registerTest("Tools.RealRangeRefusal",
+                     test_a_number_no_float_property_can_hold_is_refused);
         registerTest("Tools.PropertyContractVectorsColorsResources",
                      test_property_contract_takes_vectors_colors_and_resource_paths);
         registerTest("Tools.DefaultRegistration", test_tool_registry_default_tools);

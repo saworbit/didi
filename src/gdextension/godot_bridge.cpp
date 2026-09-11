@@ -342,6 +342,26 @@ bool isResourcePathString(const json& value) {
     return true;
 }
 
+// The largest magnitude a Godot float property can hold.
+//
+// Godot stores a float property as real_t, which is 32-bit in a standard build,
+// and Vector2, Vector3 and Color are made of the same. A JSON number above this
+// becomes inf the moment it lands there: the scene file ends up holding
+// Vector2(inf, 5), inf propagates through the transform to every child on the
+// next frame, and the read back is a value JSON cannot spell.
+constexpr double kGodotRealMaximum = 3.4028234663852886e38;
+
+// Which member names carry reals, per property type. Empty for a type whose
+// members are whole numbers or which is not made of reals at all.
+std::vector<const char*> realMembersOfPropertyType(GDExtensionVariantType type) {
+    switch (type) {
+        case GDEXTENSION_VARIANT_TYPE_VECTOR2: return {"x", "y"};
+        case GDEXTENSION_VARIANT_TYPE_VECTOR3: return {"x", "y", "z"};
+        case GDEXTENSION_VARIANT_TYPE_COLOR: return {"r", "g", "b", "a"};
+        default: return {};
+    }
+}
+
 bool propertyTypeAcceptsJson(const json& value, GDExtensionVariantType type) {
     switch (type) {
         case GDEXTENSION_VARIANT_TYPE_NIL:
@@ -408,6 +428,21 @@ bool jsonScalarsEquivalent(const json& observed, const json& requested) {
     return observed == requested;
 }
 
+// Refuses a number the property cannot hold.
+//
+// A float property is 32-bit, so anything above about 3.4e38 becomes inf on the
+// way in. The write went through, the scene file ended up holding
+// Vector2(inf, 5), and the value reported back was JSON null, which is what a
+// caller reads as "unset". `applied: false` was the only signal, and it sits
+// beside `status: "success"` where it also appears for a value the engine
+// merely coerced. Refusing names the bound instead.
+Result<void> validateRealRangeForPropertyType(const std::string& property_name, const json& value,
+                                              GDExtensionVariantType type) {
+    const auto refusal = describeRealRangeRefusal(property_name, value, static_cast<int>(type));
+    if (refusal.has_value()) return Error::invalidArgument(*refusal);
+    return Result<void>::ok();
+}
+
 // The property name is not decoration. A scene_instantiate_node call carries
 // several properties, and a rejection that does not say which one leaves the
 // caller guessing at the very moment they have nothing else to look at.
@@ -415,7 +450,7 @@ Result<void> validateJsonForPropertyType(const std::string& property_name, const
                                          GDExtensionVariantType type) {
     switch (matchJsonToPropertyType(value, static_cast<int>(type))) {
         case PropertyTypeMatch::Compatible:
-            return Result<void>::ok();
+            return validateRealRangeForPropertyType(property_name, value, type);
         case PropertyTypeMatch::UnsupportedPropertyType:
             return Error::invalidArgument("Property \"" + property_name + "\" is a " +
                                           godotVariantTypeName(static_cast<int>(type)) +
@@ -718,7 +753,8 @@ Result<json> variantToJson(VariantValue& value, int depth = 0, bool lenient = fa
         }
         case GDEXTENSION_VARIANT_TYPE_FLOAT: {
             auto result = scalarFromVariant<double>(value, type);
-            return result.isOk() ? Result<json>(json(result.value())) : Result<json>(result.error());
+            return result.isOk() ? Result<json>(realToJson(result.value()))
+                                 : Result<json>(result.error());
         }
         case GDEXTENSION_VARIANT_TYPE_STRING:
         case GDEXTENSION_VARIANT_TYPE_STRING_NAME:
@@ -818,7 +854,7 @@ Result<json> builtinMembersToJson(VariantValue& value, GDExtensionVariantType ty
             // and why every existing reader here uses one.
             double component = 0.0;
             getter(native.ptr(), &component);
-            output[member] = component;
+            output[member] = realToJson(component);
         }
     }
     return output;
@@ -9802,6 +9838,38 @@ Result<std::vector<double>> GodotBridge::samplePerformanceMonitors(
 // engine. The set of accepted values lives in matchJsonToPropertyType alone:
 // the message is built from the same answer that rejects, and cannot drift
 // into describing a rule the check does not apply.
+
+json realToJson(double value) {
+    if (std::isfinite(value)) return json(value);
+    if (std::isnan(value)) return json("nan");
+    return json(value > 0 ? "inf" : "-inf");
+}
+
+std::optional<std::string> describeRealRangeRefusal(const std::string& property_name,
+                                                    const json& value, int godot_type) {
+    const auto type = static_cast<GDExtensionVariantType>(godot_type);
+    const auto out_of_range = [](const json& number) {
+        return number.is_number() && std::fabs(number.get<double>()) > kGodotRealMaximum;
+    };
+    const auto refuse = [&](const std::string& what, const json& number) {
+        return "Property \"" + property_name + "\"" + what +
+               " is stored as a 32-bit float, which cannot hold " + number.dump() +
+               ". The largest magnitude it can hold is about 3.4e38; anything beyond that "
+               "becomes inf, which would propagate through the scene and read back as a "
+               "value JSON cannot spell.";
+    };
+    if (type == GDEXTENSION_VARIANT_TYPE_FLOAT && out_of_range(value)) {
+        return refuse("", value);
+    }
+    if (!value.is_object()) return std::nullopt;
+    for (const auto* member : realMembersOfPropertyType(type)) {
+        const auto found = value.find(member);
+        if (found != value.end() && out_of_range(*found)) {
+            return refuse(std::string(" component \"") + member + "\"", *found);
+        }
+    }
+    return std::nullopt;
+}
 
 PropertyTypeMatch matchJsonToPropertyType(const json& value, int godot_type) {
     // Delegates the accept/reject decision to propertyTypeAcceptsJson rather
