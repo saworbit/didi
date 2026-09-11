@@ -563,6 +563,23 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         return JsonRpcResponse::makeError(req.id, static_cast<JsonRpcErrorCode>(-32002), "Server not initialized. Must call 'initialize' first.");
     }
 
+    // Every list method here answers in one page and never returns a
+    // nextCursor, so there is no cursor this server has ever issued. Accepting
+    // one and answering with page one reads as a successful page to a client
+    // that kept a cursor across a restart, and it can loop. The specification
+    // asks for -32602 for a cursor the server did not issue.
+    if (req.method == "tools/list" || req.method == "resources/list" ||
+        req.method == "prompts/list") {
+        if (req.params.is_object() && req.params.contains("cursor") &&
+            !req.params["cursor"].is_null()) {
+            return JsonRpcResponse::makeError(
+                req.id, JsonRpcErrorCode::InvalidParams,
+                "Unknown cursor. " + req.method +
+                    " answers in one page and issues no cursor, so any cursor sent to it is "
+                    "one this server did not issue. Call it again with no cursor.");
+        }
+    }
+
     // Tools
     if (req.method == "tools/list") {
         auto tools = ToolRegistry::instance().listTools();
@@ -614,6 +631,17 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                              : json::object();
         if (name.empty()) {
             return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams, "Tool name is required");
+        }
+        // A name no registration carries is a protocol error, not a tool
+        // result. The dispatch answered it with a bare string in an isError
+        // result, which is the one thing in the surface a client parsing error
+        // text would find shaped differently from every other failure. The
+        // specification calls an unknown tool a protocol error and gives
+        // -32602 for it.
+        if (!ToolRegistry::instance().getTool(name)) {
+            return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams,
+                                              "Unknown tool: " + name,
+                                              json{{"name", name}});
         }
         // The client is returning a person's decision on a previous offer.
         if (req.params.contains("inputResponses") && req.params["inputResponses"].is_object()) {
