@@ -59,7 +59,33 @@ std::string quoted(const std::string& name) {
 }
 
 std::optional<std::string> checkValue(const json& schema, const json& value,
-                                      const std::string& where, int depth);
+                                      const std::string& where, int depth,
+                                      const json& root);
+
+// A local reference, resolved against the document that carries it.
+//
+// The Phase 7 schemas are generated with their shared shapes under $defs and
+// named by $ref, which is how the same vector2i can appear in several places
+// without being written out three times. Nothing here resolved one, so every
+// subschema behind a $ref was skipped: tilemap_set_cells publishes coords as a
+// two-element array through $defs/vector2i and the object form went through
+// untouched, leaving the handler as the only check. Only same-document
+// references are followed; a remote one is not something a published input
+// schema should carry, and is left alone rather than guessed at.
+const json* resolveLocalRef(const json& schema, const json& root) {
+    const auto ref = schema.find("$ref");
+    if (ref == schema.end() || !ref->is_string()) return nullptr;
+    const auto& pointer = ref->get_ref<const std::string&>();
+    constexpr const char* kPrefix = "#/$defs/";
+    if (pointer.rfind(kPrefix, 0) != 0) return nullptr;
+    const auto name = pointer.substr(std::char_traits<char>::length(kPrefix));
+    if (name.empty() || name.find('/') != std::string::npos) return nullptr;
+    const auto defs = root.find("$defs");
+    if (defs == root.end() || !defs->is_object()) return nullptr;
+    const auto found = defs->find(name);
+    if (found == defs->end() || !found->is_object()) return nullptr;
+    return &(*found);
+}
 
 std::optional<std::string> checkType(const json& schema, const json& value,
                                      const std::string& where) {
@@ -147,8 +173,64 @@ std::optional<std::string> checkBounds(const json& schema, const json& value,
     return std::nullopt;
 }
 
+// The accepted shapes, when a schema publishes more than one.
+//
+// A tilemap cell is either a placement or an erase, so the published schema is
+// a oneOf of two object shapes. Nothing here read it, so neither shape was
+// enforced and the handler answered a violation with an opaque token.
+//
+// Reporting is the whole difficulty: "matches none of two shapes" tells a
+// caller nothing they can act on. When exactly one branch has all its required
+// properties present, that is the shape the caller was reaching for, and its
+// own message is the useful one. Otherwise the shapes are listed by what each
+// one demands.
+std::optional<std::string> checkOneOf(const json& schema, const json& value,
+                                      const std::string& where, int depth, const json& root) {
+    const auto branches = schema.find("oneOf");
+    if (branches == schema.end() || !branches->is_array() || branches->empty()) {
+        return std::nullopt;
+    }
+    if (depth >= kMaxDepth) return std::nullopt;
+
+    std::vector<const json*> candidates;
+    std::vector<std::string> demands;
+    for (const auto& branch : *branches) {
+        if (!branch.is_object()) continue;
+        if (!checkValue(branch, value, where, depth + 1, root)) return std::nullopt;
+
+        // Which branch was being aimed at. A branch whose required properties
+        // are all there is a shape the caller meant; one missing a required
+        // property is not.
+        bool required_present = true;
+        std::vector<std::string> names;
+        const auto required = branch.find("required");
+        if (required != branch.end() && required->is_array()) {
+            for (const auto& field : *required) {
+                if (!field.is_string()) continue;
+                const auto name = field.get<std::string>();
+                names.push_back(name);
+                if (!value.is_object() || !value.contains(name)) required_present = false;
+            }
+        }
+        if (required_present) candidates.push_back(&branch);
+        demands.push_back(names.empty() ? std::string("no required properties")
+                                        : joinNames(names));
+    }
+
+    if (candidates.size() == 1) {
+        return checkValue(*candidates.front(), value, where, depth + 1, root);
+    }
+    std::string shapes;
+    for (size_t i = 0; i < demands.size(); ++i) {
+        if (i > 0) shapes += "; or ";
+        shapes += demands[i];
+    }
+    return where + " does not match any accepted shape. One of these is needed: " + shapes + ".";
+}
+
 std::optional<std::string> checkObject(const json& schema, const json& value,
-                                       const std::string& where, int depth) {
+                                       const std::string& where, int depth,
+                                       const json& root) {
     const bool named = !where.empty();
     const auto properties = schema.find("properties");
     const bool has_properties = properties != schema.end() && properties->is_object();
@@ -203,7 +285,7 @@ std::optional<std::string> checkObject(const json& schema, const json& value,
         if (declared == properties->end() || !declared->is_object()) continue;
         const std::string child =
             named ? where + "." + it.key() : "Argument " + quoted(it.key());
-        if (auto problem = checkValue(*declared, it.value(), child, depth + 1)) {
+        if (auto problem = checkValue(*declared, it.value(), child, depth + 1, root)) {
             return problem;
         }
     }
@@ -211,9 +293,24 @@ std::optional<std::string> checkObject(const json& schema, const json& value,
 }
 
 std::optional<std::string> checkValue(const json& schema, const json& value,
-                                      const std::string& where, int depth) {
+                                      const std::string& where, int depth,
+                                      const json& root) {
     if (!schema.is_object()) return std::nullopt;
+    if (depth < kMaxDepth) {
+        if (const json* referenced = resolveLocalRef(schema, root)) {
+            if (auto problem = checkValue(*referenced, value, where, depth + 1, root)) {
+                return problem;
+            }
+        }
+    }
     if (auto problem = checkType(schema, value, where)) return problem;
+
+    // A fixed value, which is how a schema spells a discriminator: the erase
+    // form of a tilemap cell is the one whose `erase` is const true.
+    const auto fixed = schema.find("const");
+    if (fixed != schema.end() && *fixed != value) {
+        return where + " must be " + fixed->dump() + ".";
+    }
 
     const auto allowed = schema.find("enum");
     if (allowed != schema.end() && allowed->is_array() && !allowed->empty()) {
@@ -226,19 +323,36 @@ std::optional<std::string> checkValue(const json& schema, const json& value,
 
     if (auto problem = checkBounds(schema, value, where)) return problem;
 
+    if (auto problem = checkOneOf(schema, value, where, depth, root)) return problem;
+
     if (value.is_array() && depth < kMaxDepth) {
+        // Positional shapes. A Godot vector is published as prefixItems, one
+        // entry per component, which is what says a coordinate is a pair of
+        // integers rather than an array of anything.
+        const auto prefix = schema.find("prefixItems");
+        if (prefix != schema.end() && prefix->is_array()) {
+            const size_t counted = std::min(prefix->size(), value.size());
+            for (size_t index = 0; index < counted; ++index) {
+                if (!(*prefix)[index].is_object()) continue;
+                const std::string child = where + " entry " + std::to_string(index);
+                if (auto problem =
+                        checkValue((*prefix)[index], value[index], child, depth + 1, root)) {
+                    return problem;
+                }
+            }
+        }
         const auto items = schema.find("items");
         if (items != schema.end() && items->is_object()) {
             for (size_t index = 0; index < value.size(); ++index) {
                 const std::string child = where + " entry " + std::to_string(index);
-                if (auto problem = checkValue(*items, value[index], child, depth + 1)) {
+                if (auto problem = checkValue(*items, value[index], child, depth + 1, root)) {
                     return problem;
                 }
             }
         }
     }
 
-    if (value.is_object()) return checkObject(schema, value, where, depth);
+    if (value.is_object()) return checkObject(schema, value, where, depth, root);
     return std::nullopt;
 }
 
@@ -246,7 +360,7 @@ std::optional<std::string> checkValue(const json& schema, const json& value,
 
 std::optional<std::string> validateAgainstSchema(const json& schema, const json& arguments) {
     if (!schema.is_object() || !arguments.is_object()) return std::nullopt;
-    return checkObject(schema, arguments, "", 0);
+    return checkObject(schema, arguments, "", 0, schema);
 }
 
 } // namespace mcp
