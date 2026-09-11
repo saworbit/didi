@@ -224,11 +224,17 @@ Writes a new GDScript file under the project root and runs the same diagnostics 
 
 Rewrites a matching GDScript symbol in a project-root-confined file, then runs the available diagnostics.
 
-- `file_path` (`string`, required).
-- `method_name` (`string`, required).
-- `new_definition` (`string`, required).
+- `file_path` (`string`, required, non-empty).
+- `method_name` (`string`, required, non-empty).
+- `new_definition` (`string`, required, non-empty); it must declare the symbol `method_name` names.
 - `symbol_type` (`string`, default `"function"`).
 - Legacy alias: `patch_script_symbols`.
+
+The replacement is read before it is spliced. A `new_definition` that declares nothing, declares a different name, or declares a different kind of symbol is refused with a 400 and no write, because the old behaviour was to splice it anyway: a mistyped name deleted the target and still reported the method patched.
+
+The indentation of the declaration being replaced is preserved, so a method declared inside a nested `class` stays inside it.
+
+A `method_name` declared more than once as a member of the script, once at the top level and again inside a nested `class`, is refused with the scopes and line numbers rather than patched at the first match. A local variable inside a function body that happens to share the name is not a second declaration and does not trigger this.
 
 Diagnostics are computed against the file after it is written, so they include the Godot compiler check when a Godot binary is discoverable, not only the lexical rules. `has_errors: true` means the patch left the file in a state the compiler rejects, and the same diagnostics `script_check_syntax` would report are returned here. That includes the autoload demotion described under `script_check_syntax`.
 

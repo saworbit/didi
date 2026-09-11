@@ -629,6 +629,115 @@ static void test_reflect_class_answers_from_the_shipped_api_reference() {
     ASSERT_TRUE(unknown["properties"].empty());
 }
 
+static void test_gdscript_symbol_patch_keeps_a_nested_method_nested() {
+    // Break caught: the replacement was written at column zero whatever
+    // indentation the declaration was found at, so a method declared inside a
+    // nested class was moved to the top level and the script stopped parsing.
+    std::string original =
+        "extends Node\n\n"
+        "class Inner:\n"
+        "\tvar hp := 3\n"
+        "\tfunc inner_only(amount: int) -> void:\n"
+        "\t\thp -= amount\n\n"
+        "func outer_only() -> void:\n"
+        "\tpass\n";
+
+    auto patch_res = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "inner_only",
+        "func inner_only(amount: int) -> void:\n\thp -= amount * 2\n", "function");
+    ASSERT_TRUE(patch_res.isOk());
+
+    std::string expected =
+        "extends Node\n\n"
+        "class Inner:\n"
+        "\tvar hp := 3\n"
+        "\tfunc inner_only(amount: int) -> void:\n"
+        "\t\thp -= amount * 2\n\n"
+        "func outer_only() -> void:\n"
+        "\tpass\n";
+    ASSERT_EQ(patch_res.value(), expected);
+
+    // A replacement that already carries the target indentation lands in the
+    // same place rather than being shifted a second time.
+    auto preindented = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "inner_only",
+        "\tfunc inner_only(amount: int) -> void:\n\t\thp -= amount * 2\n", "function");
+    ASSERT_TRUE(preindented.isOk());
+    ASSERT_EQ(preindented.value(), expected);
+}
+
+static void test_gdscript_symbol_patch_refuses_an_ambiguous_name() {
+    // Break caught: with the same name declared in a nested class and at the
+    // top level, the first match won silently and the file ended up with two
+    // top level functions of one name.
+    std::string original =
+        "extends Node\n\n"
+        "class Inner:\n"
+        "\tvar hp := 3\n"
+        "\tfunc take_damage(amount: int) -> void:\n"
+        "\t\thp -= amount\n\n"
+        "func take_damage(amount: int) -> void:\n"
+        "\tprint(\"outer\", amount)\n";
+
+    auto patch_res = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "take_damage",
+        "func take_damage(amount: int) -> void:\n\tpass\n", "function");
+    ASSERT_TRUE(patch_res.isErr());
+
+    const std::string message = patch_res.error().message;
+    ASSERT_TRUE(message.find("declared 2 times") != std::string::npos);
+    ASSERT_TRUE(message.find("class Inner") != std::string::npos);
+    ASSERT_TRUE(message.find("top level") != std::string::npos);
+
+    // A local of the same name is not a second declaration of the member, so
+    // patching the member still goes through. Refusing here would have broken
+    // every script that reuses a name inside a function body.
+    std::string with_local =
+        "extends Node\n\n"
+        "var speed: float = 5.0\n\n"
+        "func warp() -> void:\n"
+        "\tif true:\n"
+        "\t\tvar speed := 1.0\n"
+        "\t\tprint(speed)\n";
+
+    auto local_res = didi::offline::GDScriptDiagnostics::patchSymbol(
+        with_local, "speed", "var speed: float = 20.0", "variable");
+    ASSERT_TRUE(local_res.isOk());
+    ASSERT_TRUE(local_res.value().find("var speed: float = 20.0") != std::string::npos);
+    ASSERT_TRUE(local_res.value().find("\t\tvar speed := 1.0") != std::string::npos);
+}
+
+static void test_gdscript_symbol_patch_refuses_a_replacement_that_declares_something_else() {
+    // Break caught: new_definition was spliced over the target without being
+    // read, so a body that was not a function, or was a function under another
+    // name, deleted the target and reported success.
+    std::string original =
+        "extends Node\n\n"
+        "func hello() -> void:\n"
+        "\tpass\n";
+
+    auto not_a_function = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "hello", "var x = 1\n", "function");
+    ASSERT_TRUE(not_a_function.isErr());
+    ASSERT_TRUE(not_a_function.error().message.find("declares a variable") != std::string::npos);
+
+    auto wrong_name = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "hello", "func wrong_name() -> void:\n\tpass\n", "function");
+    ASSERT_TRUE(wrong_name.isErr());
+    ASSERT_TRUE(wrong_name.error().message.find("'wrong_name'") != std::string::npos);
+
+    auto nothing = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "hello", "\t# just a comment\n", "function");
+    ASSERT_TRUE(nothing.isErr());
+    ASSERT_TRUE(nothing.error().message.find("declares nothing") != std::string::npos);
+
+    // The honest patch still goes through.
+    auto good = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "hello", "func hello() -> void:\n\treturn\n", "function");
+    ASSERT_TRUE(good.isOk());
+    ASSERT_TRUE(good.value().find("\treturn") != std::string::npos);
+}
+
 struct RegisterScriptPatchTests {
     RegisterScriptPatchTests() {
         registerTest("GDScript.DiagnosticsDeprecation", test_gdscript_diagnostics_deprecation);
@@ -646,6 +755,12 @@ struct RegisterScriptPatchTests {
                      test_gdscript_symbol_patch_keeps_the_blank_lines_after_the_symbol);
         registerTest("GDScript.PatchParameterizedAnnotation", test_gdscript_symbol_patch_parameterized_annotation);
         registerTest("GDScript.PatchKeepsAnnotatedNeighbour", test_gdscript_symbol_patch_keeps_annotated_neighbour);
+        registerTest("GDScript.PatchKeepsNestedMethodNested",
+                     test_gdscript_symbol_patch_keeps_a_nested_method_nested);
+        registerTest("GDScript.PatchRefusesAmbiguousName",
+                     test_gdscript_symbol_patch_refuses_an_ambiguous_name);
+        registerTest("GDScript.PatchRefusesMismatchedReplacement",
+                     test_gdscript_symbol_patch_refuses_a_replacement_that_declares_something_else);
         registerTest("GDScript.ExtractConstantsAndContainerTypes", test_gdscript_extract_symbols_constants_and_container_types);
         registerTest("GDScript.ExtractKeepsUnicodeIdentifiers", test_gdscript_extract_symbols_keeps_unicode_identifiers);
         registerTest("GDScript.ColonRuleAllowsContinuationsAndBraces", test_gdscript_colon_rule_allows_continuations_and_open_braces);
