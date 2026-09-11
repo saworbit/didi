@@ -68,6 +68,26 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- Every semantic failure in the Phase 7 bridge says a sentence, and a node of
+  the wrong type is told apart from a path that resolves to nothing (#441,
+  #443). #406 and #424 fixed the argument rejections; the failures underneath
+  them still answered with the identifier as the whole message, which is the
+  string a client shows a person. `target_method_not_found` does not say which
+  method was looked for or on which node, so the one thing the caller needed was
+  the one thing missing, and the same identifier appeared again as
+  `data.upstream_message`, so the envelope carried it twice and a sentence zero
+  times. All 129 of those sites now answer with a sentence and keep the
+  identifier as a stable code under `data.code`. `declared_signal_not_found` and
+  `target_method_not_found` name what was looked for and where;
+  `camera_path_does_not_resolve_to_camera3d` names the path and the type it
+  found instead. And `tilemap_target_not_found` no longer covers two different
+  problems: a path that resolves to nothing keeps that code and says so, while a
+  path that resolves to a node of the wrong type answers
+  `tilemap_target_wrong_type` naming the type it found, with
+  `gridmap_target_wrong_type` beside it. Those are different problems with
+  different fixes, and a caller that could not tell them apart retried the path
+  when it should have been looking at the node.
+
 - A number no float property can hold is refused rather than written as `inf`
   (#437). A Godot `float` property is `real_t`, 32 bits in a standard build, and
   `Vector2`, `Vector3` and `Color` are made of the same, so a JSON number above
