@@ -67,7 +67,12 @@ def main() -> int:
     parser.add_argument("--repo-root", default=str(REPOSITORY_ROOT))
     args = parser.parse_args()
 
-    directory = Path(args.directory)
+    # Resolved, because `gh` runs with the repository as its working directory
+    # and a relative --body-file is then looked for in the wrong place. A
+    # findings directory lives in a temp path, not in the repository, so the
+    # relative form fails on every entry at once -- thirteen identical "The
+    # system cannot find the file specified" lines and nothing filed.
+    directory = Path(args.directory).resolve()
     manifest = load(directory)
     print(f"{len(manifest)} findings in {directory}")
 
