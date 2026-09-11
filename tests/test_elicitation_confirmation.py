@@ -51,6 +51,12 @@ _executable = _binary.resolve
 class ElicitationConfirmationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # The gate arms on the target, not on the flag (#425), so the probe
+        # resource has to be there for an overwrite of it to be a gated
+        # mutation at all.
+        (FIXTURE_PROJECT / "tmp_elicitation_probe.tres").write_text(
+            '[gd_resource type="Resource" format=3]\n\n[resource]\n', encoding="utf-8"
+        )
         cls.executable = _executable()
         cls.process = subprocess.Popen(
             [str(cls.executable), "--project", str(FIXTURE_PROJECT)],
@@ -88,7 +94,8 @@ class ElicitationConfirmationTests(unittest.TestCase):
         return self._request("tools/call", params)
 
     def _gated_arguments(self):
-        # overwrite=true puts resource_create behind confirmation.
+        # overwrite=true over a file that is really there puts resource_create
+        # behind confirmation.
         return {"save_path": PROBE_RESOURCE, "resource_type": "Resource",
                 "overwrite": True}
 

@@ -2,11 +2,16 @@
 
 #include "didi/common/secure_random.hpp"
 
+#include "didi/common/project_path.hpp"
+#include "didi/tools/visual_test_lab_path.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <filesystem>
 #include <iomanip>
 #include <sstream>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace didi::mcp {
@@ -78,10 +83,51 @@ const std::unordered_set<std::string_view> kAlwaysConfirmed = {
     "blackboard_clear"
 };
 
-const std::unordered_set<std::string_view> kOverwriteConfirmed = {
-    "resource_create", "script_create", "viewport_create_test_lab", "create_visual_test_lab",
-    "project_export", "gridmap_export_mesh_library"
+// Each of these takes one path it writes to, and takes an overwrite flag to say
+// the caller accepts replacing whatever is there. The argument that names the
+// path differs per tool, so the gate has to be told which one it is; a tool
+// added here without an entry is gated on the flag alone, which is the old
+// behaviour and the safe direction to be wrong in.
+struct OverwriteTarget {
+    // The argument naming the path this tool writes to, or empty when the tool
+    // writes to one fixed path instead.
+    std::string_view argument;
+    std::string_view fixed_path;
 };
+
+const std::unordered_map<std::string_view, OverwriteTarget> kOverwriteConfirmed = {
+    {"resource_create", {"save_path", {}}},
+    {"script_create", {"script_path", {}}},
+    // The lab is written to one place whatever resource it is built around, so
+    // target_resource_path is the subject, not the file at risk.
+    {"viewport_create_test_lab", {{}, tools::kVisualTestLabScenePath}},
+    {"create_visual_test_lab", {{}, tools::kVisualTestLabScenePath}},
+    {"project_export", {"output_path", {}}},
+    {"gridmap_export_mesh_library", {"output_path", {}}}
+};
+
+// Whether the path this call writes to already has a file behind it. A path the
+// tool would refuse for its own reasons counts as occupied: the gate is not the
+// place to decide a path is invalid, and treating an unresolvable path as free
+// would skip the confirmation on the one case nobody has checked.
+bool overwriteTargetExists(const ResolvedToolBinding& binding, const json& arguments) {
+    const auto entry = kOverwriteConfirmed.find(binding.policy_source);
+    if (entry == kOverwriteConfirmed.end()) return true;
+    std::string path{entry->second.fixed_path};
+    if (path.empty()) {
+        const auto argument = std::string(entry->second.argument);
+        if (argument.empty() || !arguments.is_object() || !arguments.contains(argument) ||
+            !arguments[argument].is_string()) {
+            return true;
+        }
+        path = arguments[argument].get<std::string>();
+    }
+    const auto resolved = paths::resolveProjectFileForWrite(path);
+    if (resolved.isErr()) return true;
+    std::error_code error;
+    const bool exists = std::filesystem::exists(resolved.value(), error);
+    return error ? true : exists;
+}
 
 // Tools that start a subprocess against the project. Godot runs the project's
 // own scripts, extensions and export plugins on startup, and dotnet build can
@@ -138,8 +184,13 @@ bool MutationSafety::canRequireConfirmation(const ResolvedToolBinding& binding) 
 bool MutationSafety::requiresConfirmation(const ResolvedToolBinding& binding,
                                           const json& arguments) {
     if (kAlwaysConfirmed.count(binding.policy_source) != 0) return true;
-    return kOverwriteConfirmed.count(binding.policy_source) != 0 &&
-           arguments.value("overwrite", false);
+    if (kOverwriteConfirmed.count(binding.policy_source) == 0) return false;
+    if (!arguments.value("overwrite", false)) return false;
+    // On the state, not the flag. Writing a new file with overwrite: true and
+    // writing a new file without it have identical effects on disk, and gating
+    // only the first one cost two round trips per file to every generator and
+    // every repeatable setup step, including for the files that are new (#425).
+    return overwriteTargetExists(binding, arguments);
 }
 
 void MutationSafety::decorateSchema(const ResolvedToolBinding& binding, json& schema) {
@@ -325,12 +376,21 @@ MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
 
     if (!requires_confirmation) {
         if (has_confirmation) {
-            return errorDecision(binding, 400,
-                                 "This mutation does not require a confirmation token", context);
+            // A tool that can never require a token is told so. One that can
+            // falls through to spend it: the gate now arms on whether the
+            // target is there, so a token minted over a file that has since
+            // been removed would otherwise be refused for offering the
+            // confirmation the caller was told to get.
+            if (!canRequireConfirmation(binding)) {
+                return errorDecision(binding, 400,
+                                     "This mutation does not require a confirmation token",
+                                     context);
+            }
+        } else {
+            MutationDecision decision;
+            decision.arguments = std::move(sanitized);
+            return decision;
         }
-        MutationDecision decision;
-        decision.arguments = std::move(sanitized);
-        return decision;
     }
     if (confirmation_token.empty()) {
         return errorDecision(binding, 428,

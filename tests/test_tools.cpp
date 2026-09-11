@@ -667,6 +667,77 @@ static void test_project_audit_dead_signal_cost_does_not_follow_signal_count() {
     ASSERT_TRUE(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() < 20);
 }
 
+static void test_overwrite_gate_arms_on_the_target_not_the_flag() {
+    // Break caught: overwrite: true demanded a dry-run preview and a token even
+    // when nothing was behind the path, so writing a new file cost two extra
+    // round trips. Writing a new file with the flag and without it have
+    // identical effects on disk, and only one of them was gated (#425).
+    ScopedToolProject project("overwrite-gate");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("existing.gd", "extends Node\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto fresh = registry.callTool(
+        "script_create",
+        didi::json{{"script_path", "res://brand_new.gd"},
+                   {"source_text", "extends Node\n"},
+                   {"overwrite", true}});
+    ASSERT_TRUE(!fresh.isError);
+
+    // The half that must not change: a path with a file behind it is still
+    // gated, because that call destroys something.
+    const auto occupied = registry.callTool(
+        "script_create",
+        didi::json{{"script_path", "res://existing.gd"},
+                   {"source_text", "extends Node\n"},
+                   {"overwrite", true}});
+    ASSERT_TRUE(occupied.isError);
+    ASSERT_TRUE(occupied.content[0].text.find("428") != std::string::npos);
+
+    // And the file it just wrote is now a target that arms the gate, which is
+    // the same rule read a second time rather than a cached answer.
+    const auto second_write = registry.callTool(
+        "script_create",
+        didi::json{{"script_path", "res://brand_new.gd"},
+                   {"source_text", "extends Node2D\n"},
+                   {"overwrite", true}});
+    ASSERT_TRUE(second_write.isError);
+}
+
+static void test_overwrite_token_survives_a_target_that_disappears() {
+    // A token minted while the target was there has to stay spendable if the
+    // target goes before it is spent. Arming on state otherwise turns a correct
+    // preview-then-confirm into "this mutation does not require a confirmation
+    // token", which is the one answer the caller cannot act on.
+    ScopedToolProject project("overwrite-token-race");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("doomed.gd", "extends Node\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const didi::json arguments{{"script_path", "res://doomed.gd"},
+                               {"source_text", "extends Node2D\n"},
+                               {"overwrite", true}};
+
+    auto previewed = arguments;
+    previewed["dry_run"] = true;
+    const auto preview = registry.callTool("script_create", previewed);
+    ASSERT_TRUE(!preview.isError);
+    const auto payload = didi::json::parse(preview.content[0].text);
+    const auto token =
+        payload["mutation_preview"]["confirmation_token"].get<std::string>();
+
+    std::error_code error;
+    std::filesystem::remove("doomed.gd", error);
+
+    auto confirmed = arguments;
+    confirmed["confirmation_token"] = token;
+    const auto result = registry.callTool("script_create", confirmed);
+    ASSERT_TRUE(!result.isError);
+}
+
 static void test_project_audit_survives_a_very_long_line() {
     // Break caught twice, from the same edit. Widening the signal scan's name
     // pattern to accept Unicode bytes first turned it into an alternation,
@@ -3561,6 +3632,10 @@ struct RegisterToolTests {
                      test_audio_list_buses_follows_a_relocated_layout_setting);
         registerTest("Tools.ProjectAuditSignalScale",
                      test_project_audit_dead_signal_cost_does_not_follow_signal_count);
+        registerTest("Tools.OverwriteGateArmsOnTarget",
+                     test_overwrite_gate_arms_on_the_target_not_the_flag);
+        registerTest("Tools.OverwriteTokenSurvivesVanishedTarget",
+                     test_overwrite_token_survives_a_target_that_disappears);
         registerTest("Tools.ProjectAuditLongLine",
                      test_project_audit_survives_a_very_long_line);
         registerTest("Tools.ProjectImpactFindings",

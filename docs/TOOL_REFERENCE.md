@@ -216,7 +216,7 @@ Writes a new GDScript file under the project root and runs the same diagnostics 
 
 - `script_path` (`string`, required); must end in `.gd` and resolve inside the project root.
 - `source_text` (`string`, required); written verbatim.
-- `overwrite` (`boolean`, default `false`); an existing script is preserved unless explicitly set to `true`, and an overwrite requires a confirmation token.
+- `overwrite` (`boolean`, default `false`); an existing script is preserved unless explicitly set to `true`. The confirmation token is required when a file is actually there to be replaced, so writing a new file with the flag costs no more than writing one without it.
 
 `status` is `created_offline` or `replaced_offline`. Diagnostics are computed against the file after it is written, so they include the Godot compiler check when a Godot binary is discoverable.
 

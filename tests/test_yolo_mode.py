@@ -74,6 +74,15 @@ def _gated_arguments():
 
 class YoloModeTests(unittest.TestCase):
     @classmethod
+    def setUpClass(cls):
+        # The gate arms on the target, not on the flag (#425), so overwriting
+        # something that is not there is not a gated mutation and would leave
+        # every test below asserting against an ungated call.
+        (FIXTURE_PROJECT / "tmp_yolo_probe.tres").write_text(
+            '[gd_resource type="Resource" format=3]\n\n[resource]\n', encoding="utf-8"
+        )
+
+    @classmethod
     def tearDownClass(cls):
         written = FIXTURE_PROJECT / "tmp_yolo_probe.tres"
         if written.exists():
