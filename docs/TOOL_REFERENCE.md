@@ -46,7 +46,7 @@ The live walk is separately capped at 100000 nodes and 8 MiB so a large edited s
 
 Creates a built-in ClassDB node, or an instance of a packed scene, under the active edited scene and registers add/remove operations with UndoRedo.
 
-- `node_type` (`string`, default `"Node"`). Ignored when `scene_path` is given.
+- `node_type` (`string`). One of `node_type` or `scene_path` is required; there is no default, because an empty request must not add a node. Ignored when `scene_path` is given.
 - `parent_path` (`string`, default `"/root"`).
 - `name` (`string`, optional).
 - `properties` (`object`, optional): Initial property values. Each value is a JSON null, boolean, signed integer, real, string, or a vector/colour object compatible with that property's Godot type, the same contract as `scene_set_property`'s `value`.

@@ -1024,6 +1024,40 @@ static void test_api_version_note_compares_the_engine_line() {
                     ["api_version_matches_attached_engine"].is_null());
 }
 
+static void test_instantiate_refuses_a_request_that_names_no_target() {
+    // Break caught: scene_instantiate_node declared no required arguments and
+    // sits behind no confirmation gate, so an empty argument object added a
+    // bare Node named Node to the edited scene. {} is what a caller sends when
+    // it has not decided yet or when an argument-building step produced
+    // nothing, and everywhere else on this surface that costs one 400 (#471).
+    ScopedToolProject project("instantiate-needs-target");
+    writeAuditFile("project.godot", "config_version=5\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto empty = registry.callTool("scene_instantiate_node", didi::json::object());
+    ASSERT_TRUE(empty.isError);
+    const auto envelope = didi::json::parse(empty.content[0].text);
+    ASSERT_EQ(envelope["error"]["code"], 400);
+    const auto message = envelope["error"]["message"].get<std::string>();
+    ASSERT_TRUE(message.find("node_type") != std::string::npos);
+    ASSERT_TRUE(message.find("scene_path") != std::string::npos);
+
+    // The guard is about naming a target, not about being offline. A request
+    // that names one gets the offline answer it always did.
+    const auto named = registry.callTool("scene_instantiate_node",
+                                         didi::json{{"node_type", "Sprite2D"}});
+    ASSERT_TRUE(named.isError);
+    ASSERT_TRUE(named.content[0].text.find("offline") != std::string::npos);
+
+    // The schema must not still advertise a default for the thing that is now
+    // required, or a client fills it in and the refusal never fires.
+    const auto* definition = registry.getTool("scene_instantiate_node");
+    ASSERT_TRUE(definition != nullptr);
+    ASSERT_TRUE(!definition->inputSchema["properties"]["node_type"].contains("default"));
+}
+
 static void test_audit_does_not_call_third_party_addon_files_orphans() {
     // Break caught: the audit's output is advice to delete files, and in a
     // fresh project most of that advice was about Didi's own brand assets --
@@ -2651,7 +2685,10 @@ static void test_tool_capabilities_are_honest() {
               didi::json::array({"live", "offline_fallback"}));
     ASSERT_EQ(instantiate_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"live"}));
-    ASSERT_EQ(instantiate_json["inputSchema"]["properties"]["node_type"]["default"], "Node");
+    // node_type carried a default of "Node" until #471. A client that fills a
+    // default in turns an undecided request into a node in the user's scene,
+    // so the schema must not offer one.
+    ASSERT_TRUE(!instantiate_json["inputSchema"]["properties"]["node_type"].contains("default"));
     // Delivered in the Phase 7 partial delivery, so it must advertise a real
     // execution mode. A still-reserved Phase 7 name is checked below, so this
     // test keeps covering both sides of the split.
@@ -4186,6 +4223,8 @@ struct RegisterToolTests {
                      test_resource_inspect_reads_the_type_out_of_the_file);
         registerTest("Tools.ApiVersionNoteComparesEngineLine",
                      test_api_version_note_compares_the_engine_line);
+        registerTest("Tools.InstantiateRefusesNoTarget",
+                     test_instantiate_refuses_a_request_that_names_no_target);
         registerTest("Tools.AuditSkipsAddonOrphans",
                      test_audit_does_not_call_third_party_addon_files_orphans);
         registerTest("Tools.LocalWorkIsNotAFallback",
