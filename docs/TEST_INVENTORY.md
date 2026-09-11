@@ -31,7 +31,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `CrashCapture` | 3 |
 | `EditorHook` | 5 |
 | `ExpressionSandbox` | 6 |
-| `GDScript` | 17 |
+| `GDScript` | 20 |
 | `Hierarchy` | 6 |
 | `IPC` | 24 |
 | `ImageDiff` | 10 |
