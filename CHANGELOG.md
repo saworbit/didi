@@ -68,6 +68,29 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- The verification sandbox says which repository it used, and refuses one that
+  merely encloses the project (#450). `verifyChangesInSandbox` resolved the
+  repository with `git rev-parse --show-toplevel` from the project root and used
+  whatever came back, however far above the project it sat, reporting it only as
+  "the repository". A machine with a stray `git init` in the user profile made
+  that directory the repository for a sandbox project under `%TEMP%`: had it
+  carried a commit, the next step would have been `git worktree add` against the
+  home directory plus a copy of its uncommitted state, and the tool would have
+  reported `all_ok`. `repository_root` now names the work tree in the result and
+  in every error about it, and a repository that tracks nothing under the
+  project is refused naming both, because a tree that encloses the project
+  without holding it is far more likely to be an accident than an instruction. A
+  project in a repository of its own, and a project committed into a larger
+  repository, are both unaffected.
+
+- `project_apply_changes` fails in the same shape `project_verify_changes` does
+  (#449). The dry run answered with an envelope and the confirmed call did not:
+  apply built one by hand and only when the error carried data, so every failure
+  without data came back as a bare string with no code and no `retryable`. The
+  same condition reached through verify was wrapped and through apply was not.
+  This is the #420 family on a path the surface census does not reach, because
+  it is behind the confirmation gate.
+
 - The schema layer enforces the shapes it publishes, so `tilemap_set_cells`
   names the field the way `gridmap_set_cells` always has (#442). The validator
   resolved no `$ref`, read no `prefixItems`, no `oneOf` and no `const`. The

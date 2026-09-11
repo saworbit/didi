@@ -82,6 +82,11 @@ struct SpeculativeVerifyResult {
     // proposal was checked against rather than assuming it was checked against
     // whatever is on screen.
     std::string base_commit;
+    // The git work tree the copy was built from. Named because "the
+    // repository" used to be whichever work tree happened to enclose the
+    // project, reported only as "the repository", so a caller could not tell
+    // which tree a result or a refusal was about.
+    std::string repository_root;
     // Whether uncommitted work was carried across. A check run without it is
     // answering a question about a project nobody has.
     bool carried_uncommitted{false};

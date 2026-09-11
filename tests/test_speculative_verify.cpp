@@ -1,6 +1,8 @@
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/offline/speculative_verify.hpp"
 
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -163,6 +165,149 @@ void test_speculative_tool_is_registered_as_an_offline_read() {
     ASSERT_TRUE(description["description"].get<std::string>().rfind("UNIMPLEMENTED:", 0) != 0);
 }
 
+
+// A git repository built for the test, so which work tree encloses the project
+// is a fact about the fixture rather than about the machine the test runs on.
+class ScopedGitProject {
+public:
+    // `track_project` decides whether the repository knows anything about the
+    // nested project, which is the whole distinction under test. Tracking it
+    // means staging it, not committing it, so the run stops at the next check
+    // instead of building a worktree and shelling out to Godot.
+    ScopedGitProject(const std::string& suffix, bool track_project) {
+        m_previous = std::filesystem::current_path();
+        m_repository = std::filesystem::temp_directory_path() /
+                       ("didi-verify-scope-" + suffix + "-" +
+                        std::to_string(std::chrono::steady_clock::now()
+                                           .time_since_epoch()
+                                           .count()));
+        m_project = m_repository / "nested" / "game";
+        std::filesystem::create_directories(m_project);
+        std::ofstream(m_repository / "unrelated.txt", std::ios::binary) << "not the project\n";
+        std::ofstream(m_project / "project.godot", std::ios::binary) << "config_version=5\n";
+
+        git("init");
+        git("config user.email didi@example.invalid");
+        git("config user.name Didi");
+        // Deliberately no commit. The enclosing check runs before the
+        // missing-commit check, so the refusal under test still fires, and the
+        // tracked case stops at the next check instead of building a worktree
+        // and shelling out to Godot.
+        git("add unrelated.txt");
+        if (track_project) git("add nested");
+        std::filesystem::current_path(m_project);
+    }
+
+    ~ScopedGitProject() {
+        std::error_code ignored;
+        std::filesystem::current_path(m_previous, ignored);
+        std::filesystem::remove_all(m_repository, ignored);
+    }
+
+    bool usable() const { return m_usable; }
+
+private:
+    void git(const std::string& arguments) {
+        const std::string command = "git -C \"" +
+                                    m_repository.string() + "\" " + arguments +
+#if defined(_WIN32)
+                                    " >NUL 2>NUL";
+#else
+                                    " >/dev/null 2>&1";
+#endif
+        if (std::system(command.c_str()) != 0) m_usable = false;
+    }
+
+    std::filesystem::path m_repository;
+    std::filesystem::path m_project;
+    std::filesystem::path m_previous;
+    bool m_usable{true};
+};
+
+// Break caught: whichever work tree enclosed the project was adopted, however
+// far above it sat, and was reported only as "the repository". A stray git init
+// in a home directory made that directory the repository: the next step would
+// have been a worktree of it plus a copy of its uncommitted state, reported as
+// all_ok (#450).
+void test_an_enclosing_repository_is_refused_and_named() {
+    didi::offline::SpeculativeVerifyRequest request;
+    didi::offline::SpeculativeChange change;
+    change.path = "res://v1.gd";
+    change.relative = "v1.gd";
+    change.content = "extends Node\n";
+    request.changes.push_back(change);
+
+    {
+        ScopedGitProject enclosing("encloses", false);
+        if (enclosing.usable()) {
+            const auto refused = didi::offline::verifyChangesInSandbox(request);
+            ASSERT_TRUE(refused.isErr());
+            ASSERT_EQ(refused.error().code, 409);
+            // Named, in the sentence and in the data, so "the repository" is
+            // identifiable.
+            ASSERT_TRUE(refused.error().message.find("tracks nothing under") !=
+                        std::string::npos);
+            ASSERT_TRUE(refused.error().data.is_object());
+            ASSERT_TRUE(refused.error().data.contains("repository_root"));
+            ASSERT_TRUE(!refused.error()
+                             .data["repository_root"]
+                             .get<std::string>()
+                             .empty());
+        }
+    }
+
+    // The nested project case #450 calls intended behaviour is unchanged: a
+    // repository that holds the project gets past this check and on to the
+    // next one. Here that next one is the missing-commit refusal, which is
+    // also where "the repository" used to be an unidentifiable phrase and now
+    // names the tree.
+    {
+        ScopedGitProject holding("holds", true);
+        if (holding.usable()) {
+            const auto later = didi::offline::verifyChangesInSandbox(request);
+            ASSERT_TRUE(later.isErr());
+            ASSERT_TRUE(later.error().message.find("tracks nothing under") ==
+                        std::string::npos);
+            ASSERT_TRUE(later.error().message.find("has no commit") != std::string::npos);
+            ASSERT_TRUE(later.error().data.is_object());
+            ASSERT_TRUE(later.error().data.contains("repository_root"));
+        }
+    }
+}
+
+// Break caught: the dry run answered with an envelope and the confirmed call
+// did not. project_apply_changes built one by hand and only when the error
+// carried data, so the same condition reached through verify was wrapped and
+// through apply was a bare string (#449).
+void test_apply_and_verify_fail_in_the_same_shape() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const json arguments = {{"changes", json::array({change("res://v1.gd", "extends Node\n")})}};
+
+    ScopedGitProject project("same-shape", false);
+    if (!project.usable()) return;
+
+    const auto verified = registry.callTool("project_verify_changes", arguments);
+    auto applied_arguments = arguments;
+    applied_arguments["confirmation_token"] = "not-a-real-token";
+    const auto applied = registry.callTool("project_apply_changes", applied_arguments);
+
+    ASSERT_TRUE(verified.isError);
+    ASSERT_TRUE(applied.isError);
+    for (const auto* result : {&verified, &applied}) {
+        ASSERT_TRUE(!result->content.empty());
+        const auto payload = json::parse(result->content[0].text, nullptr, false);
+        // The whole complaint: one of these used to be a sentence and the other
+        // JSON, so a client parsing error text got two different things.
+        ASSERT_TRUE(!payload.is_discarded());
+        ASSERT_TRUE(payload.contains("error"));
+        ASSERT_TRUE(payload["error"].contains("code"));
+        ASSERT_TRUE(payload["error"].contains("data"));
+        ASSERT_TRUE(payload["error"]["data"].contains("retryable"));
+    }
+}
+
 struct RegisterSpeculativeVerify {
     RegisterSpeculativeVerify() {
         registerTest("SpeculativeVerify.RequestDescribesAProposal",
@@ -175,6 +320,10 @@ struct RegisterSpeculativeVerify {
                      test_speculative_request_takes_a_scene_to_run);
         registerTest("SpeculativeVerify.ApplyIsAConfirmedMutation",
                      test_apply_tool_is_registered_as_a_confirmed_mutation);
+        registerTest("SpeculativeVerify.EnclosingRepositoryRefusedAndNamed",
+                     test_an_enclosing_repository_is_refused_and_named);
+        registerTest("SpeculativeVerify.ApplyAndVerifyFailAlike",
+                     test_apply_and_verify_fail_in_the_same_shape);
     }
 } g_registerSpeculativeVerify;
 

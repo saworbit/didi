@@ -560,6 +560,8 @@ Checks a set of proposed file contents together in an isolated copy of the proje
 
 So the proposal is written into a git worktree built from `HEAD`, every proposed `.gd` file is checked there with the rest of the proposal in place, and the worktree is removed again, including on the paths that fail. The project must sit inside a git work tree; the tool refuses otherwise rather than falling back to copying a project directory, which for a Godot project means its imported assets too.
 
+Which work tree is used is stated rather than assumed. `repository_root` names the git work tree the copy was built from, in the result and in every error about it, so "the repository" is identifiable. A work tree that merely encloses the project is refused: when the project sits below the repository root and the repository tracks nothing under it, the enclosing tree is far more likely to be an accident, such as a stray `git init` in a home directory, than an instruction to copy it. A project in a repository of its own, and a project committed into a larger repository, are both unaffected.
+
 Uncommitted work is carried across, because a check that ignored it would answer a question about a project nobody has open. `base_commit` reports what the copy was built from and `carried_uncommitted` whether that patch was applied. Untracked files cannot be carried, so they are named in `untracked_excluded` rather than counted: a proposal that depends on one would otherwise be checked against a project missing it.
 
 Each entry in `scripts` carries `ok` and, when it failed, the engine's own `detail`. `all_ok` is the verdict for the set. A script is judged by the engine's error stream as well as its exit code: `--check-only` exits 0 for a plain syntax error while printing the parse error, and exits 1 for a `preload` that resolves to nothing, so the exit code alone calls half of the broken scripts fine.
@@ -578,6 +580,8 @@ Checks a proposal in an isolated copy and, only if it passes, writes it into the
 The verification runs here rather than being taken on trust from an earlier call. A caller that verified a minute ago is describing a project that may have moved since, and the point of this tool is that what reaches the working tree is the thing that was just proved.
 
 A proposal that does not pass writes nothing. The response is the verification report with `applied: false`, and the result is marked as an error so a caller cannot read it as a success with a footnote.
+
+A failure of the check itself, as opposed to a proposal that did not hold up, answers with the same error envelope `project_verify_changes` uses, including behind the confirmation gate.
 
 Every file is staged before any is replaced, so the write cannot stop half applied because the last file was the one that could not be written. If a replacement still fails, the error names `committed_files` and `unchanged_files` rather than reporting a failure that sounds total. `applied_files` lists what reached the working tree.
 

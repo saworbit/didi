@@ -811,13 +811,12 @@ CallToolResult handleProjectApplyChanges(const json& args) {
     }
     auto applied = offline::applyVerifiedChanges(parsed.value());
     if (applied.isErr()) {
-        const auto& failure = applied.error();
-        if (failure.data.is_object() && !failure.data.empty()) {
-            return CallToolResult::error(
-                json{{"error", {{"code", failure.code}, {"message", failure.message},
-                                {"data", failure.data}}}}.dump());
-        }
-        return CallToolResult::error(failure.message);
+        // The same envelope project_verify_changes uses. This built one by hand
+        // and only when the error carried data, so every failure without data
+        // came back as a bare string: the same condition reached through
+        // verify was wrapped and through apply was not, on a path the surface
+        // census does not reach because it is behind the confirmation gate.
+        return CallToolResult::fromError(applied.error());
     }
     auto payload = applied.value().toJson();
     payload["execution_mode"] = "offline_fallback";
