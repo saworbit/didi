@@ -113,7 +113,7 @@ CallToolResult handleProjectSetSetting(const json& args, std::shared_ptr<ipc::II
         return CallToolResult::error("Specify either value or remove: true, not both");
     }
     if (!remove && !args.contains("value")) {
-        return CallToolResult::error("value is required unless remove is true");
+        return CallToolResult::errorJson(400, "value is required unless remove is true");
     }
 
     std::error_code root_error;

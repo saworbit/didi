@@ -87,9 +87,10 @@ def unwrap(response: dict) -> tuple[Any, bool | None]:
     """The payload a caller actually wants, and whether the tool reported an error.
 
     A `tools/call` result carries the same JSON twice: once parsed in
-    `structuredContent` and once as text in `content[0].text`. Not every tool
-    sets `structuredContent` -- notably the plain-string argument errors -- so
-    this falls back to the text rather than reporting nothing.
+    `structuredContent` and once as text in `content[0].text`. An error never
+    sets `structuredContent`, so this falls back to the text rather than
+    reporting nothing. Since #420 that text always parses as an error envelope
+    with a code; it used to be a bare string for eighteen tools.
     """
     result = response.get("result")
     if result is None:

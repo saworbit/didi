@@ -192,6 +192,33 @@ struct CallToolResult {
         res.isError = true;
         return res;
     }
+
+    // The envelope the rest of the surface answers a failure with. Most tools
+    // built one of these by hand; eighteen returned the message as a bare JSON
+    // string with no code, so a client that switches on error.code -- the
+    // documented way to tell retryable from not -- got undefined and had to
+    // fall back to substring-matching English prose (#420).
+    //
+    // The prose is the good part and is kept as it was. Only the wrapper is
+    // new. `code` is the HTTP-shaped status this server already uses elsewhere
+    // for the same situation: 400 for a bad argument, 404 for something that is
+    // not there, 409 for a conflict with what is, 501 for a mode that is off.
+    // An Error already carries the code and the message. Answering with only
+    // its message threw the code away at 68 call sites, which is how a 404 and
+    // a 409 both reached the client as prose with nothing to branch on.
+    static CallToolResult fromError(const Error& error) {
+        json data = error.data.is_object() ? error.data : json::object();
+        return errorJson(error.code, error.message, std::move(data));
+    }
+
+    static CallToolResult errorJson(int code, std::string message, json data = json::object()) {
+        if (!data.is_object()) data = json::object();
+        if (!data.contains("retryable")) data["retryable"] = false;
+        auto res = error(json{{"error", {{"code", code},
+                                         {"message", std::move(message)},
+                                         {"data", std::move(data)}}}}.dump());
+        return res;
+    }
 };
 
 using ToolHandler = std::function<CallToolResult(const json& arguments)>;

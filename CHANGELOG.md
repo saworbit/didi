@@ -68,6 +68,33 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- Every semantic failure carries a code (#420). Eighteen tools answered one with
+  a bare JSON string: no code, no `data`, no `retryable`. The prose was the good
+  part and is unchanged, but a client that switches on `error.code`, which is
+  the documented way to tell retryable from not, got `undefined` from those
+  eighteen and had to substring-match English instead. Most of them were losing
+  a code that already existed, because 31 call sites answered with an `Error`'s
+  message and dropped its `code`. `script_create` over an existing file is the
+  409 this server uses elsewhere for a conflict, a blackboard task that is not
+  there is a 404 rather than an invalid argument, and managed recovery being
+  switched off is a 501 rather than a bad request.
+
+- `viewport_toggle_debug_draw` and `viewport_set_camera_transform` say what was
+  wrong instead of returning a C++ identifier (#424). Both answered every
+  argument mistake with a single token such as
+  `invalid_viewport_toggle_debug_draw_request`, which is neither prose a person
+  can act on nor a code a client can branch on, and carried no
+  `"code": "invalid_arguments"` the way the other argument errors do. Calling
+  `viewport_toggle_debug_draw` with `{}` was the worst of it, because the
+  requirement it broke is expressed with `anyOf`, so the identifier was the
+  entire explanation of which of its flags it wanted. `shader_set_uniform`
+  reports the node it could not find rather than `shader_target_not_found`.
+
+- `resource_inspect` tells a directory from a path with nothing behind it
+  (#426). Both were "Resource not found", and they lead to different next
+  actions: fix the argument, or go find the file. A directory now says so and
+  points at `project_list_resources`.
+
 - `project_analyze_impact` reads every `project.godot` setting that holds a
   path, not only `[autoload]` (#421). `run/main_scene` is the most load-bearing
   path a Godot project has and is exactly what someone runs an impact analysis

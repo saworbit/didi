@@ -20,7 +20,8 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
     std::string source_text = args.value("source_text", "");
 
     if (file_path.empty() && source_text.empty()) {
-        return CallToolResult::error("Parameter 'file_path' or 'source_text' is required.");
+        return CallToolResult::errorJson(
+            400, "Parameter 'file_path' or 'source_text' is required.");
     }
 
     std::string analysis_path = file_path;
@@ -91,8 +92,8 @@ CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcCli
     std::error_code probe_error;
     const bool already_there = fs::is_regular_file(disk_path, probe_error) && !probe_error;
     if (already_there && !overwrite) {
-        return CallToolResult::error(
-            "Script already exists; pass overwrite: true to replace it: " + script_path);
+        return CallToolResult::errorJson(
+            409, "Script already exists; pass overwrite: true to replace it: " + script_path);
     }
     if (disk_path.has_parent_path()) {
         std::error_code directory_error;
@@ -205,7 +206,8 @@ CallToolResult handleScriptGetSymbols(const json& args, std::shared_ptr<ipc::IIp
     }
 
     if (source_text.empty()) {
-        return CallToolResult::error("No source text or valid script file found for symbol extraction.");
+        return CallToolResult::errorJson(
+            400, "No source text or valid script file found for symbol extraction.");
     }
 
     json syms = offline::GDScriptDiagnostics::extractSymbols(source_text);

@@ -996,7 +996,7 @@ Result<json> blackboardTaskUpdate(const BlackboardTaskUpdateRequest& request,
 
         const auto found = board.tasks.find(request.task_id);
         if (found == board.tasks.end()) {
-            return Error::invalidArgument("task '" + request.task_id + "' does not exist");
+            return Error::notFound("task '" + request.task_id + "' does not exist");
         }
         json task = *found;
         const std::string status = task.value("status", std::string());
@@ -1077,7 +1077,7 @@ Result<json> blackboardTaskComplete(const BlackboardTaskCompleteRequest& request
 
         const auto found = board.tasks.find(request.task_id);
         if (found == board.tasks.end()) {
-            return Error::invalidArgument("task '" + request.task_id + "' does not exist");
+            return Error::notFound("task '" + request.task_id + "' does not exist");
         }
         json task = *found;
         if (task.value("status", std::string()) == kStatusCompleted) {

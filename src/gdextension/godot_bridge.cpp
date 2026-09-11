@@ -8298,7 +8298,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
         const auto target_path = params["target_node"].get<std::string>();
         const auto property = params["property_name"].get<std::string>();
         auto node = resolveNode(root.value(), target_path);
-        if (node.isErr()) return errorJson(404, "shader_target_not_found");
+        // The resolver already says which path it could not find. The
+        // identifier said neither what was looked for nor what happened (#424).
+        if (node.isErr()) return errorJson(404, node.error().message);
 
         auto has_property = objectHasProperty(node.value(), property);
         if (has_property.isErr()) return errorJson(has_property.error().code, has_property.error().message);

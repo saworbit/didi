@@ -546,10 +546,10 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     }
 
     auto ordered = orderedProperties(properties);
-    if (ordered.isErr()) return CallToolResult::error(ordered.error().message);
+    if (ordered.isErr()) return CallToolResult::fromError(ordered.error());
 
     auto sub_parsed = parseSubResources(args);
-    if (sub_parsed.isErr()) return CallToolResult::error(sub_parsed.error().message);
+    if (sub_parsed.isErr()) return CallToolResult::fromError(sub_parsed.error());
     const auto& sub_resources = sub_parsed.value();
 
     // The body written below is Godot text-resource markup and nothing else.
@@ -569,7 +569,8 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
                 std::tolower(static_cast<unsigned char>(character)));
         }
         if (extension != ".tres" && extension != ".res") {
-            return CallToolResult::error(
+            return CallToolResult::errorJson(
+                400,
                 "resource_create writes Godot text-resource markup, so save_path must end in "
                 ".tres or .res; received \"" + save_path +
                 "\". Use script_create for a GDScript file.");
@@ -625,7 +626,7 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         json names = json::array();
         for (const auto& [name, value] : sub.properties) {
             auto literal = tresLiteral(value, sub.id + "." + name, &scope);
-            if (literal.isErr()) return CallToolResult::error(literal.error().message);
+            if (literal.isErr()) return CallToolResult::fromError(literal.error());
             block << name << " = " << literal.value() << "\n";
             names.push_back(name);
         }
@@ -642,7 +643,7 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     json written_order = json::array();
     for (const auto& [name, value] : ordered.value()) {
         auto literal = tresLiteral(value, name, &scope);
-        if (literal.isErr()) return CallToolResult::error(literal.error().message);
+        if (literal.isErr()) return CallToolResult::fromError(literal.error());
         body << name << " = " << literal.value() << "\n";
         written_order.push_back(name);
     }
@@ -686,7 +687,7 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
 CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     std::string resource_path = args.value("resource_path", "");
     if (resource_path.empty()) {
-        return CallToolResult::error("Parameter 'resource_path' is required.");
+        return CallToolResult::errorJson(400, "Parameter 'resource_path' is required.");
     }
 
     // Exact match. A prefix match reported res://player.gd.uid or
@@ -697,7 +698,19 @@ CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpc
         return CallToolResult::successJson(found->toJson());
     }
 
-    return CallToolResult::error("Resource not found: " + resource_path);
+    // "You pointed at a directory, pass a file" and "that path does not
+    // exist" lead to different next actions -- fix the argument, or go find the
+    // file -- and one message supported neither (#426).
+    const auto resolved = paths::resolveProjectFileForWrite(resource_path);
+    if (resolved.isOk()) {
+        std::error_code directory_error;
+        if (std::filesystem::is_directory(resolved.value(), directory_error) && !directory_error) {
+            return CallToolResult::errorJson(
+                400, resource_path + " is a directory, not a resource. Use "
+                                     "project_list_resources to list what is beneath it.");
+        }
+    }
+    return CallToolResult::errorJson(404, "Resource not found: " + resource_path);
 }
 
 CallToolResult handleAudioConfigureBus(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -731,7 +744,7 @@ CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcC
     }
 
     auto layout = offline::readAudioBusLayout(".");
-    if (layout.isErr()) return CallToolResult::error(layout.error().message);
+    if (layout.isErr()) return CallToolResult::fromError(layout.error());
     auto payload = layout.value();
     payload["execution_mode"] = "offline_fallback";
     payload["is_live_engine"] = false;
@@ -786,7 +799,7 @@ CallToolResult handleProjectVerifyChanges(const json& args) {
     }
     auto verified = offline::verifyChangesInSandbox(parsed.value());
     if (verified.isErr()) {
-        return CallToolResult::error(verified.error().message);
+        return CallToolResult::fromError(verified.error());
     }
     return CallToolResult::successJson(verified.value().toJson());
 }
@@ -836,7 +849,7 @@ CallToolResult handleProjectAnalyzeImpact(const json& args, std::shared_ptr<ipc:
     }
 
     auto report = offline::analyzeImpact(".", options);
-    if (report.isErr()) return CallToolResult::error(report.error().message);
+    if (report.isErr()) return CallToolResult::fromError(report.error());
     auto payload = report.value();
     payload["execution_mode"] = "offline_fallback";
     return CallToolResult::successJson(std::move(payload));

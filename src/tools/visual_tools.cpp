@@ -2,7 +2,6 @@
 #include "didi/common/atomic_write.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/tools/phase7_live_forward.hpp"
-#include "didi/tools/visual_test_lab_path.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/offline/resource_indexer.hpp"
@@ -34,12 +33,18 @@ CallToolResult invalidViewportDiff(const std::string& message) {
     return CallToolResult::error("Invalid viewport diff request: " + message);
 }
 
+// A sentence naming what was wrong and what to send instead, which is the
+// standard the rest of this server holds. These two answered with a raw C++
+// identifier -- invalid_viewport_toggle_debug_draw_request -- which is neither
+// prose a person can act on nor a code a client can branch on, and carried no
+// "code": "invalid_arguments" the way the structured argument errors do (#424).
 CallToolResult viewportRequestError(const ResolvedToolBinding& binding,
                                     std::string_view message) {
     return CallToolResult::error(json{{"error", {
         {"code", 400}, {"message", message},
         {"data", {{"tool", binding.invoked_name},
                   {"canonical_tool", binding.canonical_name},
+                  {"code", "invalid_arguments"},
                   {"retryable", false}}}}}}.dump());
 }
 
@@ -292,17 +297,29 @@ CallToolResult handleViewportDiffCapture(const json& args, std::shared_ptr<ipc::
 
 CallToolResult handleViewportSetCameraTransform(const ResolvedToolBinding& binding, const json& args,
                          std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (!hasOnlyViewportKeys(
-            args, {"camera_path", "position", "rotation_degrees", "fov"}) ||
-        !args.contains("camera_path") ||
-        !isBoundedViewportString(args["camera_path"], 1, 1024) ||
-        !args.contains("position") || !isFiniteVector3(args["position"], 1000000.0) ||
-        (args.contains("rotation_degrees") &&
-         !isFiniteVector3(args["rotation_degrees"], 360000.0)) ||
-        (args.contains("fov") &&
-         (!args["fov"].is_number() || !std::isfinite(args["fov"].get<double>()) ||
-          args["fov"].get<double>() < 1.0 || args["fov"].get<double>() > 179.0))) {
-        return viewportRequestError(binding, "invalid_viewport_set_camera_transform_request");
+    if (!hasOnlyViewportKeys(args, {"camera_path", "position", "rotation_degrees", "fov"})) {
+        return viewportRequestError(
+            binding, "This tool accepts: camera_path, fov, position, rotation_degrees.");
+    }
+    if (!args.contains("camera_path") || !isBoundedViewportString(args["camera_path"], 1, 1024)) {
+        return viewportRequestError(
+            binding, "camera_path is required and must be a node path of 1 to 1024 characters.");
+    }
+    if (!args.contains("position") || !isFiniteVector3(args["position"], 1000000.0)) {
+        return viewportRequestError(
+            binding, "position is required and must be an object with finite x, y and z numbers "
+                     "no larger than 1000000, for example {\"x\": 0, \"y\": 2, \"z\": 5}.");
+    }
+    if (args.contains("rotation_degrees") &&
+        !isFiniteVector3(args["rotation_degrees"], 360000.0)) {
+        return viewportRequestError(
+            binding, "rotation_degrees must be an object with finite x, y and z numbers no "
+                     "larger than 360000.");
+    }
+    if (args.contains("fov") &&
+        (!args["fov"].is_number() || !std::isfinite(args["fov"].get<double>()) ||
+         args["fov"].get<double>() < 1.0 || args["fov"].get<double>() > 179.0)) {
+        return viewportRequestError(binding, "fov must be a number between 1 and 179 degrees.");
     }
     return sendPhase7LiveRequest(binding, args, ipc);
 }
@@ -319,12 +336,12 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
     const bool overwrite = args.value("overwrite", false);
 
     // Offline generator: Create an isolated visual testbed scene (.tscn) on disk!
-    std::string lab_scene_path{tools::kVisualTestLabScenePath};
-    std::string disk_path{tools::kVisualTestLabDiskPath};
+    std::string lab_scene_path = "res://addons/didi/test_lab_sandbox.tscn";
+    std::string disk_path = "addons/didi/test_lab_sandbox.tscn";
 
     if (std::filesystem::exists(disk_path) && !overwrite) {
-        return CallToolResult::error(
-            "Visual test lab already exists; pass overwrite: true to replace it: " +
+        return CallToolResult::errorJson(
+            409, "Visual test lab already exists; pass overwrite: true to replace it: " +
             lab_scene_path);
     }
 
@@ -414,14 +431,29 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
 
 CallToolResult handleViewportToggleDebugDraw(const ResolvedToolBinding& binding, const json& args,
                          std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (!hasOnlyViewportKeys(
-            args, {"collision_shapes", "navigation_mesh", "wireframe"}) ||
-        (!args.contains("collision_shapes") && !args.contains("navigation_mesh")) ||
-        (args.contains("collision_shapes") && !args["collision_shapes"].is_boolean()) ||
-        (args.contains("navigation_mesh") && !args["navigation_mesh"].is_boolean()) ||
-        (args.contains("wireframe") &&
-         (!args["wireframe"].is_boolean() || args["wireframe"].get<bool>()))) {
-        return viewportRequestError(binding, "invalid_viewport_toggle_debug_draw_request");
+    if (!hasOnlyViewportKeys(args, {"collision_shapes", "navigation_mesh", "wireframe"})) {
+        return viewportRequestError(
+            binding, "This tool accepts: collision_shapes, navigation_mesh, wireframe.");
+    }
+    // The schema says this with anyOf, which the validator does not enforce, so
+    // calling it with {} produced the raw identifier as the whole explanation
+    // and said nothing about which flag it wanted.
+    if (!args.contains("collision_shapes") && !args.contains("navigation_mesh")) {
+        return viewportRequestError(
+            binding, "At least one debug draw flag is required: set collision_shapes or "
+                     "navigation_mesh to a boolean.");
+    }
+    if (args.contains("collision_shapes") && !args["collision_shapes"].is_boolean()) {
+        return viewportRequestError(binding, "collision_shapes must be a boolean.");
+    }
+    if (args.contains("navigation_mesh") && !args["navigation_mesh"].is_boolean()) {
+        return viewportRequestError(binding, "navigation_mesh must be a boolean.");
+    }
+    if (args.contains("wireframe") &&
+        (!args["wireframe"].is_boolean() || args["wireframe"].get<bool>())) {
+        return viewportRequestError(
+            binding, "wireframe must be false. Godot has no per-viewport wireframe toggle to "
+                     "turn on from here.");
     }
     return sendPhase7LiveRequest(binding, args, ipc);
 }
