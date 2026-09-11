@@ -1434,6 +1434,35 @@ Result<GDExtensionObjectPtr> editedSceneRoot(GDExtensionObjectPtr editor) {
 
 Result<std::string> nodeString(GDExtensionObjectPtr node, const char* method, int64_t hash);
 
+// The res:// path of the scene currently open in the editor, or empty for one
+// that has never been saved.
+//
+// Every live scene answer was true of "the edited scene" and named no scene, so
+// a caller had no way to notice the scene had moved under it: scene_create
+// opens what it writes, and from that point every later scene_* call answered
+// about a different file. The same is true of the node 404s, which said a node
+// was not found without saying where they looked.
+//
+// Node.get_scene_file_path carries the same method hash on 4.5.1, 4.6.2 and
+// 4.7.2, so pinning it costs nothing across the engines CI covers.
+std::string editedScenePath(GDExtensionObjectPtr root) {
+    if (!root) return {};
+    auto value = callObject(root, "Node", "get_scene_file_path", 201670096LL);
+    if (value.isErr()) return {};
+    auto text = stringFromVariant(value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+    return text.isErr() ? std::string() : text.value();
+}
+
+// Adds the edited scene's identity to a live scene answer. `unsaved` rather
+// than a missing field for a scene that has never been saved, because absent
+// would read as "this build does not report it".
+void addEditedSceneIdentity(json& payload, GDExtensionObjectPtr root) {
+    const auto path = editedScenePath(root);
+    payload["scene_file_path"] = path.empty() ? json(nullptr) : json(path);
+    if (path.empty()) payload["scene_is_unsaved"] = true;
+}
+
+
 Result<std::string> relativePathWithinEditedRoot(GDExtensionObjectPtr root,
                                                  GDExtensionObjectPtr target) {
     if (root == target) return std::string(".");
@@ -1482,7 +1511,15 @@ Result<GDExtensionObjectPtr> resolveNode(GDExtensionObjectPtr root, const std::s
     if (result.isErr()) return result.error();
     auto object = objectFromVariant(result.value());
     if (object.isErr()) return object.error();
-    if (!object.value()) return Error::notFound("Scene node not found: " + path);
+    if (!object.value()) {
+        // Which scene was searched. scene_create opens what it writes, so a
+        // path that was there a call ago can be absent now because the edited
+        // scene moved rather than because the node went away.
+        const auto scene = editedScenePath(root);
+        return Error::notFound("Scene node not found: " + path + " (searched " +
+                               (scene.empty() ? std::string("the unsaved edited scene")
+                                              : scene) + ")");
+    }
     auto within_root = relativePathWithinEditedRoot(root, object.value());
     if (within_root.isErr()) return within_root.error();
     return object.value();
@@ -8380,10 +8417,23 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                            {&path.value()});
                 if (reloaded.isErr()) return openFailure(reloaded.error());
             }
+            // What was open before this call replaces it. `opened: true` said
+            // the new scene was open and nothing said the old one no longer
+            // was, so every later scene_* call answered about a different file
+            // with no field naming either one.
+            auto previous_root = editedSceneRoot(editor);
+            const std::string previous_scene =
+                previous_root.isOk() ? editedScenePath(previous_root.value()) : std::string();
+
             auto opened = open_and_verify();
             if (opened.isErr()) return openFailure(opened.error());
-            return liveResult(uidFields({{"status", "success"}, {"saved", true}, {"opened", true},
-                                         {"scene_path", scene_path}}));
+            json created = uidFields({{"status", "success"}, {"saved", true}, {"opened", true},
+                                      {"scene_path", scene_path}});
+            created["edited_scene_changed"] = previous_scene != scene_path;
+            created["previous_scene_file_path"] =
+                previous_scene.empty() ? json(nullptr) : json(previous_scene);
+            created["scene_file_path"] = scene_path;
+            return liveResult(created);
         }
         return liveResult(uidFields({{"status", "success"}, {"saved", true},
                                      {"scene_path", scene_path},
@@ -8452,11 +8502,13 @@ json GodotBridge::execute(const std::string& method, const json& params,
             selected.push_back(std::move(entry));
         }
 
-        return liveResult({{"status", "success"},
-                           {"selected", selected},
-                           {"count", selected.size()},
-                           {"selected_total", total},
-                           {"truncated", total > reported}});
+        json selection_result = {{"status", "success"},
+                                 {"selected", selected},
+                                 {"count", selected.size()},
+                                 {"selected_total", total},
+                                 {"truncated", total > reported}};
+        addEditedSceneIdentity(selection_result, root);
+        return liveResult(selection_result);
     }
 
     if (method == "editor.getState" || method == "scene.getHierarchy") {
@@ -8493,6 +8545,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                  {"max_response_bytes", kMaxHierarchyResponseBytes},
                                  {"message", "Use focused property/signal tools for fields omitted from hierarchy traversal."}};
         if (budget.truncated) hierarchy_result["truncated"] = true;
+        addEditedSceneIdentity(hierarchy_result, root);
         return liveResult(hierarchy_result);
     }
 

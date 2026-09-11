@@ -93,6 +93,8 @@ Non-finite numbers read back as the strings `"inf"`, `"-inf"` and `"nan"` rather
 
 The property is read back after the commit, and the result reports what it now holds rather than what was requested. `value` is that observed state, `old_value` is what it held before, `requested_value` is the argument, and `applied` says whether the two now agree. A committed UndoRedo action is not a changed property: Godot discards some writes, such as `anchors_preset` on a Control still in `layout_mode` 0, and those return `applied: false` with `value` unchanged. Numbers are compared by value, so writing an integer to a float property is `applied: true`.
 
+Every live scene answer names the scene it is about. `scene_get_hierarchy` and `scene_get_selection` carry `scene_file_path`, the `res://` path of the scene open in the editor, or `null` with `scene_is_unsaved: true` for one that has never been saved. A scene node 404 says which scene it searched. `scene_create` opens the scene it writes, so from that call on every later `scene_*` call answers about a different file; it now reports `edited_scene_changed` and `previous_scene_file_path` so that switch is visible rather than something a caller has to infer from nodes going missing.
+
 ### `scene_get_property` — Live
 
 Returns one existing scalar property. Metadata and export hints are not returned.
