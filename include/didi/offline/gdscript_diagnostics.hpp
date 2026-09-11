@@ -39,6 +39,9 @@ struct GDScriptDeclaration {
     std::string kind;
     std::string source;
     bool exported{false};
+    // Byte offset of `name` within `source`, so a caller can read the rest of
+    // the declaration without matching the name a second time.
+    size_t name_offset{0};
 };
 
 class GDScriptDiagnostics {

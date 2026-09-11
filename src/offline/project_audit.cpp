@@ -81,9 +81,36 @@ struct SignalDeclaration {
     int line{0};
 };
 
+// GDScript identifiers may hold Unicode letters (UAX#31), and source is read as
+// UTF-8, so a name class that stops at ASCII captures a truncated name and the
+// audit then reports a signal that does not exist. Every byte outside ASCII is
+// part of the name.
+//
+// Three things about the shape of this pattern, each of which cost a CI run:
+//
+// One character class, not an alternation. std::regex backtracks through
+// (?:a|b)* at every byte, and MSVC gave up on a long .tscn line rather than
+// finish.
+//
+// A bounded repeat, not a star. libstdc++ recurses once per repetition, so an
+// unbounded run over a packed metadata string of 300k characters overflowed
+// the stack. No signal is named in a kilobyte, and a run longer than that is
+// not an identifier, so refusing to consider it costs nothing real.
+constexpr int kMaxIdentifierBytes = 1024;
+const std::string kIdentifierPattern =
+    R"re([A-Za-z_\x80-\xFF][A-Za-z0-9_\x80-\xFF]{0,)re" +
+    std::to_string(kMaxIdentifierBytes - 1) + "}";
+// And a left boundary, because \b is ASCII-only and fails in front of a name
+// that starts with a Unicode letter. It has to be replaced rather than
+// dropped: without one the engine starts a fresh name run at every byte of a
+// line, which is quadratic, and the same packed line spun for minutes. This
+// consumes the byte in front of the name, which is fine for a scan that only
+// collects the names it sees.
+const std::string kNameLeftBoundary = R"re((?:^|[^A-Za-z0-9_\x80-\xFF]))re";
+
 std::vector<SignalDeclaration> signalsDeclaredIn(const std::string& path,
                                                  const std::string& text) {
-    static const std::regex signal_regex(R"re(^\s*signal\s+([A-Za-z_][A-Za-z0-9_]*))re");
+    static const std::regex signal_regex(R"re(^\s*signal\s+()re" + kIdentifierPattern + R"re())re");
     std::vector<SignalDeclaration> declarations;
     std::istringstream lines(text);
     std::string line;
@@ -112,11 +139,12 @@ std::unordered_set<std::string> usedSignalNames(
     // is_connected is named on its own because `connect` inside it is not
     // followed by an open bracket, so the shorter alternative does not cover it.
     static const std::regex quoted_call(
-        R"re((?:emit_signal|is_connected|connect)\s*\(\s*"([A-Za-z_][A-Za-z0-9_]*)")re");
+        R"re((?:emit_signal|is_connected|connect)\s*\(\s*"()re" + kIdentifierPattern + R"re()")re");
     static const std::regex member_call(
-        R"re(\b([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*(?:emit|connect)\s*\()re");
+        kNameLeftBoundary + "(" + kIdentifierPattern +
+        R"re()\s*\.\s*(?:emit|connect)\s*\()re");
     static const std::regex scene_wired(
-        R"re(\[connection[^\]]*signal="([A-Za-z_][A-Za-z0-9_]*)")re");
+        R"re(\[connection[^\]]*signal="()re" + kIdentifierPattern + R"re()")re");
 
     std::unordered_set<std::string> used;
     const auto collect = [&used](const std::string& text, const std::regex& pattern) {

@@ -516,6 +516,51 @@ static void test_gdscript_extract_symbols_constants_and_container_types() {
     ASSERT_EQ(symbols["functions"][0]["return_type"], "Array[String]");
 }
 
+static void test_gdscript_extract_symbols_keeps_unicode_identifiers() {
+    // Break caught: a name was cut at its first non-ASCII byte, so CafeMenu with
+    // an accent came back as "Caf" and a name that started with one was dropped
+    // altogether. GDScript identifiers follow UAX#31, so the bytes above 0x7F
+    // belong to the name.
+    std::string source =
+        "extends Node\n"
+        "class_name Caf\xc3\xa9Menu\n"
+        "signal pr\xc3\xaat\n"
+        "var \xc3\xa9tat: int = 0\n"
+        "const \xd0\x9c\xd0\x90\xd0\x9a\xd0\xa1: int = 4\n"
+        "enum \xc3\x89tat { A, B }\n"
+        "func d\xc3\xa9marrer(vitesse: float) -> Array[String]:\n"
+        "\tpass\n"
+        "func \xd0\xb1\xd0\xb5\xd0\xb3():\n"
+        "\tpass\n";
+
+    const auto symbols = didi::offline::GDScriptDiagnostics::extractSymbols(source);
+
+    ASSERT_EQ(symbols["classes"].size(), 1u);
+    ASSERT_EQ(symbols["classes"][0]["name"], "Caf\xc3\xa9Menu");
+
+    ASSERT_EQ(symbols["signals"].size(), 1u);
+    ASSERT_EQ(symbols["signals"][0]["name"], "pr\xc3\xaat");
+
+    ASSERT_EQ(symbols["variables"].size(), 1u);
+    ASSERT_EQ(symbols["variables"][0]["name"], "\xc3\xa9tat");
+    ASSERT_EQ(symbols["variables"][0]["type"], "int");
+
+    ASSERT_EQ(symbols["constants"].size(), 1u);
+    ASSERT_EQ(symbols["constants"][0]["name"], "\xd0\x9c\xd0\x90\xd0\x9a\xd0\xa1");
+
+    ASSERT_EQ(symbols["enums"].size(), 1u);
+    ASSERT_EQ(symbols["enums"][0]["name"], "\xc3\x89tat");
+
+    // The tail of each declaration still parses: a Unicode name must not cost
+    // the parameters or the return type beside it.
+    ASSERT_EQ(symbols["functions"].size(), 2u);
+    ASSERT_EQ(symbols["functions"][0]["name"], "d\xc3\xa9marrer");
+    ASSERT_EQ(symbols["functions"][0]["parameters"], "vitesse: float");
+    ASSERT_EQ(symbols["functions"][0]["return_type"], "Array[String]");
+    ASSERT_EQ(symbols["functions"][1]["name"], "\xd0\xb1\xd0\xb5\xd0\xb3");
+    ASSERT_EQ(symbols["functions"][1]["line"], 9);
+}
+
 static void test_gdscript_colon_rule_allows_continuations_and_open_braces() {
     // Break caught: missing_colon fired on block headers continued with a
     // trailing backslash or still inside a dictionary literal.
@@ -602,6 +647,7 @@ struct RegisterScriptPatchTests {
         registerTest("GDScript.PatchParameterizedAnnotation", test_gdscript_symbol_patch_parameterized_annotation);
         registerTest("GDScript.PatchKeepsAnnotatedNeighbour", test_gdscript_symbol_patch_keeps_annotated_neighbour);
         registerTest("GDScript.ExtractConstantsAndContainerTypes", test_gdscript_extract_symbols_constants_and_container_types);
+        registerTest("GDScript.ExtractKeepsUnicodeIdentifiers", test_gdscript_extract_symbols_keeps_unicode_identifiers);
         registerTest("GDScript.ColonRuleAllowsContinuationsAndBraces", test_gdscript_colon_rule_allows_continuations_and_open_braces);
         registerTest("GDScript.ReflectClassUsesShippedApiReference",
                      test_reflect_class_answers_from_the_shipped_api_reference);

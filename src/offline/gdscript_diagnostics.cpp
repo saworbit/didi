@@ -311,8 +311,7 @@ std::optional<GDScriptDeclaration> GDScriptDiagnostics::parseDeclaration(
         const auto name_source = code_line.substr(prefix.size());
         size_t name_length = 0;
         while (name_length < name_source.size() &&
-               (std::isalnum(static_cast<unsigned char>(name_source[name_length])) ||
-                name_source[name_length] == '_')) {
+               strings::isIdentifierByte(name_source[name_length])) {
             ++name_length;
         }
         if (name_length == 0) return std::nullopt;
@@ -320,7 +319,8 @@ std::optional<GDScriptDeclaration> GDScriptDiagnostics::parseDeclaration(
             std::string(name_source.substr(0, name_length)),
             kind,
             std::string(code_line),
-            exported
+            exported,
+            prefix.size()
         };
     }
     return std::nullopt;
@@ -801,6 +801,37 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
     return result.str();
 }
 
+namespace {
+
+// Reads a type annotation: an identifier, plus the bracketed element list that
+// Godot 4 container types carry, so Array[String] and Dictionary[int, Variant]
+// stay intact.
+std::string readTypeAnnotation(std::string_view text) {
+    const auto start = text.find_first_not_of(" \t");
+    if (start == std::string_view::npos) return {};
+    size_t end = start;
+    while (end < text.size() && strings::isIdentifierByte(text[end])) ++end;
+    if (end == start) return {};
+    const auto bracket = text.find_first_not_of(" \t", end);
+    if (bracket != std::string_view::npos && text[bracket] == '[') {
+        const auto close = text.find(']', bracket);
+        if (close != std::string_view::npos) end = close + 1;
+    }
+    return strings::trim(text.substr(start, end - start));
+}
+
+// Reads the ": Type" that may follow a var or const name. A colon after an "="
+// belongs to a default value, not to the declaration.
+std::string readColonType(std::string_view tail) {
+    const auto colon = tail.find(':');
+    if (colon == std::string_view::npos) return {};
+    const auto assign = tail.find('=');
+    if (assign != std::string_view::npos && assign < colon) return {};
+    return readTypeAnnotation(tail.substr(colon + 1));
+}
+
+} // namespace
+
 json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
     std::vector<std::string> lines = strings::split(source_text, '\n');
     json functions = json::array();
@@ -810,13 +841,6 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
     json enums = json::array();
     json classes = json::array();
 
-    // Godot 4 container types carry their element type in brackets, so the type
-    // capture has to keep Array[String] and Dictionary[int, Variant] intact.
-    static const std::regex func_regex(R"re(^(?:static\s+)?func\s+([a-zA-Z0-9_]+)\s*\((.*)\)(?:\s*->\s*([a-zA-Z0-9_]+(?:\s*\[[^\]]*\])?))?)re");
-    static const std::regex var_regex(R"re(^var\s+([a-zA-Z0-9_]+)(?:\s*:\s*([a-zA-Z0-9_]+(?:\s*\[[^\]]*\])?))?)re");
-    static const std::regex const_regex(R"re(^const\s+([a-zA-Z0-9_]+)(?:\s*:\s*([a-zA-Z0-9_]+(?:\s*\[[^\]]*\])?))?(?:\s*=\s*(.*))?)re");
-    static const std::regex sig_regex(R"re(^signal\s+([a-zA-Z0-9_]+)(?:\((.*)\))?)re");
-    static const std::regex enum_regex(R"re(^enum\s+([a-zA-Z0-9_]+))re");
     std::string multiline_delimiter;
     bool pending_export = false;
 
@@ -836,37 +860,64 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
         const std::string& line = declaration->source;
         const bool exported = declaration->exported || pending_export;
         pending_export = false;
-        std::smatch match;
-        if (declaration->kind == "function" && std::regex_search(line, match, func_regex)) {
+        // parseDeclaration already read the name with the Unicode-aware rule, so
+        // everything below reads the tail that follows it instead of matching the
+        // name a second time against an ASCII-only pattern.
+        const std::string_view tail =
+            std::string_view(line).substr(declaration->name_offset + declaration->name.size());
+        if (declaration->kind == "function") {
+            const auto open_paren = tail.find('(');
+            const auto close_paren = tail.rfind(')');
+            if (open_paren == std::string_view::npos ||
+                close_paren == std::string_view::npos || close_paren < open_paren) {
+                continue;
+            }
+            const auto after_params = tail.substr(close_paren + 1);
+            const auto arrow = after_params.find("->");
             functions.push_back({
-                {"name", match[1].str()},
-                {"parameters", match[2].str()},
-                {"return_type", match[3].matched ? strings::trim(match[3].str()) : "void"},
+                {"name", declaration->name},
+                {"parameters", std::string(tail.substr(open_paren + 1, close_paren - open_paren - 1))},
+                {"return_type", arrow == std::string_view::npos
+                                    ? std::string("void")
+                                    : readTypeAnnotation(after_params.substr(arrow + 2))},
                 {"line", i + 1}
             });
-        } else if (declaration->kind == "variable" && std::regex_search(line, match, var_regex)) {
+        } else if (declaration->kind == "variable") {
+            const auto type = readColonType(tail);
             variables.push_back({
-                {"name", match[1].str()},
+                {"name", declaration->name},
                 {"exported", exported},
-                {"type", match[2].matched ? strings::trim(match[2].str()) : "Variant"},
+                {"type", type.empty() ? std::string("Variant") : type},
                 {"line", i + 1}
             });
-        } else if (declaration->kind == "constant" && std::regex_search(line, match, const_regex)) {
+        } else if (declaration->kind == "constant") {
+            const auto type = readColonType(tail);
+            const auto assign = tail.find('=');
             constants.push_back({
-                {"name", match[1].str()},
-                {"type", match[2].matched ? strings::trim(match[2].str()) : "Variant"},
-                {"value", match[3].matched ? strings::trim(match[3].str()) : ""},
+                {"name", declaration->name},
+                {"type", type.empty() ? std::string("Variant") : type},
+                {"value", assign == std::string_view::npos
+                              ? std::string()
+                              : strings::trim(tail.substr(assign + 1))},
                 {"line", i + 1}
             });
-        } else if (declaration->kind == "signal" && std::regex_search(line, match, sig_regex)) {
+        } else if (declaration->kind == "signal") {
+            const auto open_paren = tail.find('(');
+            const auto close_paren = tail.rfind(')');
+            const bool has_arguments = open_paren != std::string_view::npos &&
+                                       close_paren != std::string_view::npos &&
+                                       close_paren > open_paren;
             signals.push_back({
-                {"name", match[1].str()},
-                {"arguments", match[2].matched ? match[2].str() : ""},
+                {"name", declaration->name},
+                {"arguments", has_arguments
+                                  ? std::string(tail.substr(open_paren + 1,
+                                                            close_paren - open_paren - 1))
+                                  : std::string()},
                 {"line", i + 1}
             });
-        } else if (declaration->kind == "enum" && std::regex_search(line, match, enum_regex)) {
+        } else if (declaration->kind == "enum") {
             enums.push_back({
-                {"name", match[1].str()},
+                {"name", declaration->name},
                 {"line", i + 1}
             });
         } else if (declaration->kind == "class") {

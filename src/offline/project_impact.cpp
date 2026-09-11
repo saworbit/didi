@@ -144,11 +144,18 @@ bool looksLikeNodePath(const std::string& target) {
            subname != std::string::npos;
 }
 
+// GDScript identifiers may hold Unicode letters (UAX#31) and source is UTF-8, so
+// every byte outside ASCII belongs to a name. These two classes stand in for
+// \w and \b, which are ASCII-only and would cut a name at its first accent.
+const std::string kIdentifierByteClass = R"re([A-Za-z0-9_\x80-\xFF])re";
+const std::string kNotIdentifierByteClass = R"re([^A-Za-z0-9_\x80-\xFF])re";
+
 // Godot identifiers, which is what a symbol or signal target has to be. A
 // target that is neither a path nor an identifier is a question this cannot
 // answer, and saying so beats returning an empty report.
 bool looksLikeIdentifier(const std::string& target) {
-    static const std::regex identifier(R"re(^[A-Za-z_][A-Za-z0-9_]*$)re");
+    static const std::regex identifier(
+        R"re(^[A-Za-z_\x80-\xFF])re" + kIdentifierByteClass + R"re(*$)re");
     return std::regex_match(target, identifier);
 }
 
@@ -250,10 +257,15 @@ struct SerializedNameForms {
 
 SerializedNameForms serializedNameForms(const std::string& target) {
     return {
-        std::regex(R"re(\b)re" + target + R"re(\b)re"),
+        // std::regex has no lookbehind, so the left boundary consumes a byte.
+        // That is safe here: whole_word only ever answers "does this line
+        // mention the name". The rewrites below use the anchored forms.
+        std::regex("(?:^|" + kNotIdentifierByteClass + ")" + target +
+                   "(?!" + kIdentifierByteClass + ")"),
         std::regex(R"re((\[connection[^\]]*signal="))re" + target + R"re(("))re"),
         std::regex(R"re((\[connection[^\]]*method="))re" + target + R"re(("))re"),
-        std::regex(R"re((NodePath\("[^"]*:))re" + target + R"re(((?::[A-Za-z0-9_]+)?"\)))re"),
+        std::regex(R"re((NodePath\("[^"]*:))re" + target + R"re(((?::)re" +
+                   kIdentifierByteClass + R"re(+)?"\)))re"),
     };
 }
 
@@ -553,7 +565,7 @@ void collectNodePathImpacts(const ProjectTextScan& scan, const std::string& targ
 std::vector<Impact> declarationsOf(const ProjectTextScan& scan, const std::string& target) {
     const std::regex declaration(
         R"re(^\s*(?:@\w+(?:\([^)]*\))?\s+)*(signal|func|var|const|class_name|enum|static\s+func)\s+)re" +
-        target + R"re(\b)re");
+        target + "(?!" + kIdentifierByteClass + ")");
     std::vector<Impact> declarations;
     for (const auto& source : scan.sources) {
         if (source.contents.find(target) == std::string::npos) continue;
