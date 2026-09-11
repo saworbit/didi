@@ -990,9 +990,14 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
         std::filesystem::current_path(project_error), project_error);
     safety_context.project_root = paths::projectPathToUtf8(
         project_error ? std::filesystem::current_path() : project_root);
-    safety_context.execution_mode = supports_live && lease.has_value()
-                                        ? "live"
-                                        : (supports_offline ? "offline_fallback" : "unavailable");
+    // Same rule as the attribution below, because a gated mutation answers
+    // through here and never reaches it. script_patch_method rewrites a .gd
+    // file and blackboard_clear removes a subtree of a file Didi owns; neither
+    // has an engine path to fall back from (#419).
+    safety_context.execution_mode =
+        supports_live && lease.has_value()
+            ? "live"
+            : (supports_offline ? (supports_live ? "offline_fallback" : "local") : "unavailable");
     if (lease.has_value()) {
         safety_context.route_generation = lease->generation;
         if (lease->descriptor.has_value()) safety_context.session_id = lease->descriptor->session_id;
@@ -1065,7 +1070,25 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
         }
 
         const bool live = supports_live && lease.has_value();
-        const std::string execution_mode = live ? "live" : (supports_offline ? "offline_fallback" : "");
+        // "offline_fallback" is what this server says when you did not get the
+        // good answer and should attach an editor and ask again. A tool with no
+        // live path has nothing to fall back from: the blackboard is a file on
+        // disk, project_search_text walks the project tree, script_patch_method
+        // rewrites a .gd file. Labelling those a fallback told a caller reading
+        // the field as a quality signal that reattaching would improve an
+        // answer that is already authoritative, and buried the genuine signal
+        // from viewport_capture_frame, which really does synthesize a preview
+        // because there is no live frame (#419).
+        //
+        // The registration keeps its "offline_fallback" capability mode. This
+        // is the payload's own vocabulary, where "local_status" and
+        // "local_session_management" already say the same thing for work that
+        // was never engine work.
+        const char* const kLocalWork = "local";
+        const std::string execution_mode =
+            live ? "live"
+                 : (supports_live ? (supports_offline ? "offline_fallback" : "")
+                                  : (supports_offline ? kLocalWork : ""));
         const int transport_repeats = dispatcher ? dispatcher->transportRepeats() : 0;
 
         if (!execution_mode.empty()) {
@@ -1075,7 +1098,15 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
                 try {
                     auto payload = json::parse(item.text);
                     if (!payload.is_object()) continue;
-                    if (!payload.contains("execution_mode")) payload["execution_mode"] = execution_mode;
+                    if (!payload.contains("execution_mode")) {
+                        payload["execution_mode"] = execution_mode;
+                    } else if (!supports_live &&
+                               payload.value("execution_mode", "") == "offline_fallback") {
+                        // Sixteen handlers stamp the label themselves. Correcting
+                        // it here rather than at each of them means a tool added
+                        // later is right on arrival instead of by remembering.
+                        payload["execution_mode"] = kLocalWork;
+                    }
                     if (live && payload.value("execution_mode", "") == "live" &&
                         lease->descriptor.has_value() && !payload.contains("session")) {
                         payload["session"] = lease->descriptor->toJson();

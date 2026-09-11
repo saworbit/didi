@@ -953,6 +953,49 @@ static void test_audit_does_not_call_third_party_addon_files_orphans() {
                 with_addons["orphan_bytes"].get<uint64_t>());
 }
 
+static void test_local_work_is_not_reported_as_a_fallback() {
+    // Break caught: 26 tools reported execution_mode offline_fallback with a
+    // healthy editor attached. offline_fallback is what this server says when
+    // you did not get the good answer and should attach an editor and ask
+    // again, so a caller branching on it, or an agent reading it as a quality
+    // signal, concluded that reattaching would improve an answer that is
+    // already authoritative. It also buried the genuine signal, because
+    // viewport_capture_frame really does synthesize a preview when there is no
+    // live frame and meant something different by the same word (#419).
+    ScopedToolProject project("execution-mode-label");
+    writeAuditFile("project.godot",
+                   "config_version=5\n\n[application]\nrun/main_scene=\"res://main.tscn\"\n");
+    writeAuditFile("player.gd", "extends Node\n");
+    writeAuditFile("main.tscn",
+                   "[gd_scene format=3]\n\n[node name=\"Main\" type=\"Node2D\"]\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto mode_of = [&](const std::string& tool, const didi::json& arguments) {
+        const auto result = registry.callTool(tool, arguments);
+        const auto parsed = didi::json::parse(result.content[0].text, nullptr, false);
+        if (parsed.is_discarded() || !parsed.is_object()) return std::string("<not json>");
+        return parsed.value("execution_mode", "<absent>");
+    };
+
+    // Nothing to fall back from: the board is a file, the search walks the
+    // project tree, the reflection reads shipped API data.
+    ASSERT_EQ(mode_of("blackboard_list_keys", didi::json::object()), "local");
+    ASSERT_EQ(mode_of("project_search_text", didi::json{{"query", "extends"}}), "local");
+    ASSERT_EQ(mode_of("project_list_resources", didi::json::object()), "local");
+    ASSERT_EQ(mode_of("script_reflect_class", didi::json{{"class_name", "Node"}}), "local");
+
+    // A tool that does have a live path keeps the word, because for it the
+    // answer really is the lesser one.
+    ASSERT_EQ(mode_of("scene_get_hierarchy", didi::json::object()), "offline_fallback");
+
+    // The labels that were already honest are untouched.
+    ASSERT_EQ(mode_of("didi_control_room", didi::json::object()), "local_status");
+    ASSERT_EQ(mode_of("runtime_list_sessions", didi::json::object()),
+              "local_session_management");
+}
+
 static void test_project_audit_survives_a_very_long_line() {
     // Break caught twice, from the same edit. Widening the signal scan's name
     // pattern to accept Unicode bytes first turned it into an alternation,
@@ -2727,7 +2770,9 @@ static void test_tool_capture_viewport_with_ipc() {
     ASSERT_TRUE(!reflected.isError);
     auto reflected_json = didi::json::parse(reflected.content[0].text);
     ASSERT_EQ(reflected_json["class_name"], "CharacterBody3D");
-    ASSERT_EQ(reflected_json["execution_mode"], "offline_fallback");
+    // Not a fallback: this tool has no live path to fall back from, and says so
+    // whether or not an editor is attached (#419).
+    ASSERT_EQ(reflected_json["execution_mode"], "local");
 
     auto& resources = didi::mcp::ResourceRegistry::instance();
     resources.registerAllDefaultResources();
@@ -2909,7 +2954,7 @@ static void test_class_reflection() {
     ASSERT_TRUE(!res.content.empty());
     didi::json parsed = didi::json::parse(res.content[0].text);
     ASSERT_EQ(parsed["class_name"], "CharacterBody3D");
-    ASSERT_EQ(parsed["execution_mode"], "offline_fallback");
+    ASSERT_EQ(parsed["execution_mode"], "local");
     ASSERT_EQ(parsed["inherits"], "PhysicsBody3D");
     ASSERT_TRUE(parsed["methods"].contains("move_and_slide"));
 }
@@ -3861,6 +3906,8 @@ struct RegisterToolTests {
                      test_resource_inspect_tells_a_directory_from_an_absent_path);
         registerTest("Tools.AuditSkipsAddonOrphans",
                      test_audit_does_not_call_third_party_addon_files_orphans);
+        registerTest("Tools.LocalWorkIsNotAFallback",
+                     test_local_work_is_not_reported_as_a_fallback);
         registerTest("Tools.ProjectAuditLongLine",
                      test_project_audit_survives_a_very_long_line);
         registerTest("Tools.ProjectImpactFindings",

@@ -99,7 +99,8 @@ it means in `_meta["didi"]["runtime_session_id"]`. Discover the ids with
 
 A modern request is only ever served on the session it named. Naming nothing
 gets no live route at all: a tool that can answer offline does and says
-`offline_fallback`, and a live-only tool is refused with `400` naming the field
+`offline_fallback` when it had a live path to fall back from and `local` when
+it never did, and a live-only tool is refused with `400` naming the field
 to set. Availability follows the same rule, so `tools/list` will not report a
 tool live because an unrelated request opened a route to an editor.
 
