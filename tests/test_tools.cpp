@@ -738,6 +738,105 @@ static void test_overwrite_token_survives_a_target_that_disappears() {
     ASSERT_TRUE(!result.isError);
 }
 
+static void test_impact_reads_every_project_setting_that_holds_a_path() {
+    // Break caught: the scan read project.godot for [autoload] and skipped
+    // run/main_scene, which is the most load-bearing path a project has and
+    // exactly the one an impact analysis is run before moving. The answer was
+    // impact_count: 0 with target_exists: true, which this tool uses to mean
+    // "nothing depends on this" (#421).
+    ScopedToolProject project("impact-project-settings");
+    writeAuditFile("project.godot",
+        "config_version=5\n"
+        "\n"
+        "[application]\n"
+        "run/main_scene=\"res://main.tscn\"\n"
+        "config/icon=\"res://icon.svg\"\n"
+        "\n"
+        "[autoload]\n"
+        "GameState=\"*res://scripts/game_state.gd\"\n"
+        "\n"
+        "[editor_plugins]\n"
+        "enabled=PackedStringArray(\"res://addons/thing/plugin.cfg\")\n");
+    writeAuditFile("main.tscn", "[gd_scene format=3]\n");
+    writeAuditFile("icon.svg", "<svg/>\n");
+    writeAuditFile("scripts/game_state.gd", "extends Node\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto main_scene = didi::json::parse(
+        registry.callTool("project_analyze_impact",
+                          didi::json{{"target", "res://main.tscn"}}).content[0].text);
+    ASSERT_EQ(main_scene["counts_by_kind"]["project_setting"], 1);
+    ASSERT_EQ(main_scene["impacts"][0]["path"], "res://project.godot");
+    ASSERT_TRUE(main_scene["impacts"][0]["detail"].get<std::string>().find("run/main_scene") !=
+                std::string::npos);
+
+    // Not a hand-kept list of keys: anything in the file whose value names the
+    // target counts, so the icon and the editor plugin entry come too.
+    const auto icon = didi::json::parse(
+        registry.callTool("project_analyze_impact",
+                          didi::json{{"target", "res://icon.svg"}}).content[0].text);
+    ASSERT_EQ(icon["counts_by_kind"]["project_setting"], 1);
+
+    const auto plugin = didi::json::parse(
+        registry.callTool("project_analyze_impact",
+                          didi::json{{"target", "res://addons/thing/plugin.cfg"}}).content[0].text);
+    ASSERT_EQ(plugin["counts_by_kind"]["project_setting"], 1);
+
+    // The autoload keeps its own kind rather than being folded into the new
+    // one, because a rename has to treat it differently.
+    const auto autoload = didi::json::parse(
+        registry.callTool("project_analyze_impact",
+                          didi::json{{"target", "res://scripts/game_state.gd"}}).content[0].text);
+    ASSERT_EQ(autoload["counts_by_kind"]["autoload"], 1);
+    ASSERT_TRUE(!autoload["counts_by_kind"].contains("project_setting"));
+}
+
+static void test_search_reads_project_text_and_counts_what_it_cannot() {
+    // Break caught: the search read four extensions, and a match in any other
+    // file came back as an empty result with skipped_files: 0, truncated:
+    // false and diagnostics: [] -- every honesty field saying nothing was left
+    // out, while three sibling tools read the same files (#422).
+    ScopedToolProject project("search-extension-coverage");
+    writeAuditFile("project.godot", "config_version=5\nrun/main_scene=\"res://main.tscn\"\n");
+    writeAuditFile("fx.gdshader", "shader_type canvas_item;\nuniform float UNIQUEMARKER = 1.0;\n");
+    writeAuditFile("data.json", "{\"UNIQUEMARKER\": 1}\n");
+    writeAuditFile("scripts/player.gd", "extends Node\n");
+    writeAuditFile("art/logo.svg", "<svg>UNIQUEMARKER</svg>\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto found = didi::json::parse(
+        registry.callTool("project_search_text",
+                          didi::json{{"query", "UNIQUEMARKER"}}).content[0].text);
+    ASSERT_EQ(found["matches"].size(), 2u);
+
+    // The one file it still cannot read is counted and named, so the caller can
+    // tell an empty result from an unasked question.
+    ASSERT_EQ(found["unsearchable_files"], 1);
+    ASSERT_EQ(found["unsearchable_extensions"].size(), 1u);
+    ASSERT_EQ(found["unsearchable_extensions"][0], ".svg");
+
+    // A setting key is findable, which is the fallback #421 wanted when the
+    // impact list looks thin.
+    const auto setting = didi::json::parse(
+        registry.callTool("project_search_text",
+                          didi::json{{"query", "run/main_scene"}}).content[0].text);
+    ASSERT_EQ(setting["matches"].size(), 1u);
+    ASSERT_EQ(setting["matches"][0]["path"], "res://project.godot");
+
+    // Narrowing still narrows, and the narrowing is visible rather than silent.
+    const auto narrowed = didi::json::parse(
+        registry.callTool("project_search_text",
+                          didi::json{{"query", "UNIQUEMARKER"},
+                                     {"extensions", didi::json::array({".gdshader"})}})
+            .content[0].text);
+    ASSERT_EQ(narrowed["matches"].size(), 1u);
+    ASSERT_TRUE(narrowed["unsearchable_files"].get<size_t>() > 0);
+}
+
 static void test_project_audit_survives_a_very_long_line() {
     // Break caught twice, from the same edit. Widening the signal scan's name
     // pattern to accept Unicode bytes first turned it into an alternation,
@@ -3636,6 +3735,10 @@ struct RegisterToolTests {
                      test_overwrite_gate_arms_on_the_target_not_the_flag);
         registerTest("Tools.OverwriteTokenSurvivesVanishedTarget",
                      test_overwrite_token_survives_a_target_that_disappears);
+        registerTest("Tools.ImpactReadsProjectSettings",
+                     test_impact_reads_every_project_setting_that_holds_a_path);
+        registerTest("Tools.SearchCountsUnsearchableFiles",
+                     test_search_reads_project_text_and_counts_what_it_cannot);
         registerTest("Tools.ProjectAuditLongLine",
                      test_project_audit_survives_a_very_long_line);
         registerTest("Tools.ProjectImpactFindings",

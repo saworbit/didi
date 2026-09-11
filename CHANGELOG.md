@@ -68,6 +68,31 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `project_analyze_impact` reads every `project.godot` setting that holds a
+  path, not only `[autoload]` (#421). `run/main_scene` is the most load-bearing
+  path a Godot project has and is exactly what someone runs an impact analysis
+  before moving, and it came back `impact_count: 0` with `target_exists: true`,
+  which this tool uses to mean nothing depends on the target. The rule is any
+  line in the file whose value names the target rather than a list of keys that
+  goes stale as Godot adds settings, so `config/icon`,
+  `application/boot_splash/image`, `default_environment` and the `res://`
+  entries under `[editor_plugins]` are covered by the same change. The new kind
+  is `project_setting`; `autoload` keeps its own, because a rename treats it
+  differently.
+
+- `project_search_text` reads the text formats a project keeps references in,
+  and counts what it did not read (#422). It read four extensions, so a shader
+  uniform, an input action, a setting key or an `.import` flag returned an empty
+  result with `skipped_files: 0`, `truncated: false` and `diagnostics: []`, every
+  honesty field saying nothing was left out, while `project_list_resources`,
+  `project_audit_assets` and `project_analyze_impact` all read those same files.
+  `.gdshader`, `.gdshaderinc`, `.godot`, `.cfg`, `.json` and `.import` are read
+  now, and the result reports `unsearchable_files` and
+  `unsearchable_extensions` for whatever was never a candidate, so an empty
+  result can be told apart from a string the project does not contain.
+  `project_search_symbols` keeps the narrower set, because a declaration does
+  not live in a shader or a `.json`.
+
 - A tool's arguments are closed by default, so a typo'd property name is
   refused rather than ignored (#418). Rejecting an unknown argument depended on
   the schema remembering to publish `additionalProperties: false`, which 50 of
