@@ -7297,6 +7297,27 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         if (remove && !exists.value()) return errorJson(404, "Project setting not found: " + setting);
 
+        // Godot does support custom project settings, so writing a name the
+        // engine does not define is a legitimate mode. It is also
+        // indistinguishable from the overwhelmingly more common case, a typo in
+        // a real setting name, and the two were answered identically: status
+        // success, persisted true, and a key nothing in the engine will ever
+        // read. project_get_setting then returned it happily, so reading back
+        // did not catch it either (#464).
+        //
+        // has_setting is the same question project_get_setting already answers
+        // with a clean 404. The setter has it available and did not use it.
+        const bool create = params.value("create", false);
+        if (!remove && !exists.value() && !create) {
+            return errorJson(
+                404,
+                "Project setting not found: " + setting +
+                    ". The engine does not define this name, so writing it would add a key "
+                    "nothing reads and report it as persisted. Check the spelling against "
+                    "project_get_setting. To add a custom setting on purpose, pass "
+                    "create: true.");
+        }
+
         VariantValue default_value;
         auto previous = exists.value()
             ? callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
@@ -7325,7 +7346,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
             return errorJson(500, "ProjectSettings.save failed; mutation was rolled back (" + detail + ")");
         }
         return liveResult({{"status", "success"}, {"setting", setting}, {"persisted", true},
-                           {"removed", remove}});
+                           {"removed", remove},
+                           // Whether the engine knew this name before the write. A
+                           // caller that passed create: true gets to see which of the
+                           // two things it did.
+                           {"defined_by_engine", static_cast<bool>(exists.value())}});
     }
 
     if (method == "project.listAutoloads" || method == "project.setAutoload" ||

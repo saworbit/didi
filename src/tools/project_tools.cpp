@@ -140,6 +140,13 @@ CallToolResult handleProjectSetSetting(const json& args, std::shared_ptr<ipc::II
         {"key", report.key},
         {"section_created", report.section_created},
         {"replaced_existing", report.existed},
+        // The live path answers this with ProjectSettings.has_setting and
+        // refuses an unknown name unless create says otherwise. There is no
+        // engine here, and the shipped class reference publishes no
+        // ProjectSettings property list, so a misspelled built-in name is
+        // genuinely unanswerable offline. Unknown is reported as unknown
+        // rather than as a pass (#464).
+        {"defined_by_engine", json(nullptr)},
         // Say what went into the file. An offline write has no engine to
         // confirm it against, so the literal is the evidence that the value
         // arrived as the caller meant it, not as a string that looks like it.
@@ -151,7 +158,11 @@ CallToolResult handleProjectSetSetting(const json& args, std::shared_ptr<ipc::II
          "project.godot was written directly because no editor session is attached. "
          "Nothing has loaded the new value yet; it takes effect the next time Godot "
          "starts. If a Godot editor is running on this project without the Didi addon, "
-         "close it before writing, because saving its own settings would overwrite this."}
+         "close it before writing, because saving its own settings would overwrite this. "
+         "The setting name was not checked against the engine, because there is no engine "
+         "attached to ask, so defined_by_engine is null: a misspelled built-in name is "
+         "written here exactly as a deliberate custom setting would be. Attach an editor "
+         "to have the name checked."}
     };
     if (report.existed) payload["previous_value"] = report.previous_literal;
     return CallToolResult::successJson(std::move(payload));

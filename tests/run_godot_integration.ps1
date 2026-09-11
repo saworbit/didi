@@ -1553,13 +1553,16 @@ try {
         (Tool-Request 41 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/Container"; new_parent_path = "/root/SmokeRoot/Container/SpawnedCopy" }),
         (Tool-Request 42 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/Subject"; new_parent_path = "/root/SmokeRoot/Subject" }),
         (Tool-Request 43 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 3 }),
-        (Tool-Request 44 "project_set_setting" @{ setting = "didi_phase2/nested"; value = @{ enabled = $true; count = 3; names = @("alpha", "beta"); nested = @{ ratio = 0.5 } } }),
+        (Tool-Request 44 "project_set_setting" @{ setting = "didi_phase2/nested"; create = $true; value = @{ enabled = $true; count = 3; names = @("alpha", "beta"); nested = @{ ratio = 0.5 } } }),
         (Tool-Request 45 "project_get_setting" @{ setting = "didi_phase2/nested" }),
         (Tool-Request 46 "project_set_setting" @{ setting = "didi_phase2/nested"; remove = $true }),
         (Tool-Request 47 "project_get_setting" @{ setting = "didi_phase2/nested" }),
         (Tool-Request 48 "project_set_setting" @{ setting = "autoload/Blocked"; value = "res://blocked.gd" }),
         (Tool-Request 49 "project_set_setting" @{ setting = "input/blocked"; value = @{ deadzone = 0.2; events = @() } }),
-        (Tool-Request 50 "project_set_setting" @{ setting = "didi_phase2/too_deep"; value = $tooDeep }),
+        (Tool-Request 50 "project_set_setting" @{ setting = "didi_phase2/too_deep"; create = $true; value = $tooDeep }),
+        (Tool-Request 422 "project_set_setting" @{ setting = "display/window/size/viewport_widht"; value = 1280 }),
+        (Tool-Request 423 "project_get_setting" @{ setting = "display/window/size/viewport_widht" }),
+        (Tool-Request 424 "project_set_setting" @{ setting = "display/window/size/viewport_width"; value = 1280 }),
         (Tool-Request 51 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/Subject"; script_path = "res://subject.gd" }),
         (Tool-Request 52 "script_detach_from_node" @{ target_node = "/root/SmokeRoot/Subject" }),
         (Tool-Request 53 "editor_undo" @{}),
@@ -2796,6 +2799,17 @@ try {
     Assert-True $byId[49].result.isError "Generic project settings tool wrote into the InputMap namespace."
     Assert-True $byId[50].result.isError "Excessively nested project setting was accepted."
 
+    # A misspelled built-in name was persisted and reported as success, and
+    # project_get_setting then returned it happily, so reading back did not
+    # catch it either (#464).
+    Assert-True $byId[422].result.isError "A setting name the engine does not define was persisted."
+    Assert-True ($byId[422].result.content[0].text -match "create") "The refusal did not name the way through."
+    Assert-True $byId[423].result.isError "The refused setting name reached project.godot anyway."
+    $realSetting = Tool-Payload $byId[424]
+    Assert-True ($realSetting.persisted -eq $true) "A real setting name was refused."
+    Assert-True ($realSetting.defined_by_engine -eq $true) "A real setting name was not reported as engine-defined."
+    Assert-True ((Tool-Payload $byId[44]).defined_by_engine -eq $false) "A custom setting was reported as engine-defined."
+
     Assert-True ((Tool-Payload $byId[51]).undo_redo_registered) "Script attachment bypassed UndoRedo."
     Assert-True ((Tool-Payload $byId[52]).detached -eq $true) "Script detachment was not observed."
     Assert-True (-not $byId[53].result.isError) "Script detach could not be undone."
@@ -3163,7 +3177,7 @@ try {
         $failureRequests = @(
             (@{ jsonrpc = "2.0"; id = 200; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
             (Tool-Request 199 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
-            (Tool-Request 201 "project_set_setting" @{ setting = "didi_phase2/rollback_probe"; value = @{ changed = $true } }),
+            (Tool-Request 201 "project_set_setting" @{ setting = "didi_phase2/rollback_probe"; create = $true; value = @{ changed = $true } }),
             (Tool-Request 202 "project_get_setting" @{ setting = "didi_phase2/rollback_probe" }),
             (Tool-Request 203 "project_set_autoload" @{ name = "RollbackProbe"; path = "res://subject.gd" }),
             (Tool-Request 204 "project_list_autoloads" @{}),
