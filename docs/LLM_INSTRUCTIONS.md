@@ -152,8 +152,8 @@ For API details outside that limited map, inspect the project or use official Go
 - `blackboard_task_create` refuses a dependency that does not exist yet, so create prerequisites before the work that waits on them.
 
 - `project_audit_assets` reports unreferenced assets, references that resolve to nothing, signals nothing uses, and existing `.import` metadata with malformed/unsafe paths, missing sources/outputs, or sources newer than outputs. Treat every finding as evidence to check, not as a delete/reimport command: timestamp evidence is not Godot's checksum or importer-version verdict. Read `reference_verification` before acting on a broken-reference finding: with an editor attached the engine has already checked both `unresolved_uid` and `missing_file`, and `confirmed_by_engine` means the engine agrees it is broken. Findings the engine disproved move to `engine_only_references` instead, which means the reference works here and may break on a fresh checkout.
-- `resource_inspect` returns indexed metadata and dependencies, not arbitrary inner Resource properties.
-- `resource_create` writes textual `.tres` content and does not validate arbitrary Resource classes in Godot. It preserves an existing target unless destructive replacement is explicitly authorized with `overwrite: true`.
+- `resource_inspect` returns indexed metadata and dependencies, not arbitrary inner Resource properties. For a `.tres` or `.res` it also reports `resource_type`, read from the file's own header.
+- `resource_create` writes textual `.tres` content and does not instantiate the Resource class in Godot. It does refuse a `resource_type` the pinned class reference does not list, because Godot cannot load such a file at all; pass `allow_unknown_type: true` for a class_name script or a GDExtension type. It preserves an existing target unless destructive replacement is explicitly authorized with `overwrite: true`.
 - `viewport_create_test_lab` writes a basic sandbox `.tscn` and preserves an existing sandbox unless `overwrite: true` is explicit; open or run it explicitly before visual conclusions.
 
 ### Run a scene or test

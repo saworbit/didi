@@ -18,11 +18,17 @@ struct ResourceInfo {
     std::string filename;    // "player.tscn"
     std::string type;        // "PackedScene", "GDScript", "Texture2D", "Mesh", etc.
     std::string uid;         // "uid://..." if found
+    // What a .tres or .res declares in its [gd_resource] header. `type` is
+    // derived from the extension, so it can never be more specific than
+    // "Resource" for one of these, and a CanvasItemMaterial read the same as a
+    // file Godot cannot load at all (#467). Empty for anything that is not a
+    // text resource, and for one whose header could not be read.
+    std::string declared_type;
     uintmax_t file_size{0};
     std::vector<std::string> dependencies;
 
     json toJson() const {
-        return {
+        json record = {
             {"path", path},
             {"filename", filename},
             {"type", type},
@@ -30,6 +36,14 @@ struct ResourceInfo {
             {"file_size", file_size},
             {"dependencies", dependencies}
         };
+        // Only where the question has an answer. Reporting it for a .png would
+        // be a field that is always null, and leaving it off a .tres whose
+        // header could not be read would make absence mean two things.
+        if (type == "Resource") {
+            record["resource_type"] =
+                declared_type.empty() ? json(nullptr) : json(declared_type);
+        }
+        return record;
     }
 };
 
