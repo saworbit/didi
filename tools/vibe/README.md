@@ -24,9 +24,13 @@ twice.
 | `report.py` | Files a directory of finding bodies as issues in one pass. |
 
 The probe files are kept after their findings are fixed, and are worth re-running
-for exactly that reason: `schema_enforcement.json` was a list of twelve things
-the server got wrong and is now mostly a list of twelve things it gets right. A
-probe that starts failing again is a regression nobody wrote a test for.
+for exactly that reason. Re-run against `abd8911`, every one of them now shows
+the fixed behaviour: `schema_enforcement.json` was a list of twelve things the
+server got wrong and is now twelve argument errors that name the property;
+`offline_paths.json` gets a sentence explaining why a node path cannot be read
+without an editor, plus `requested_root_path` on the fallback and
+`target_exists` on an impact query. A probe that starts failing again is a
+regression nobody wrote a test for.
 
 ## A session
 
@@ -96,7 +100,7 @@ next is not a test of the gate, it is a test of process lifetime.
 
 | Date | Scope | Server | Findings |
 | :--- | :--- | :--- | :--- |
-| 2026-09-11 | Offline surface, then a live 4.5.1 editor: protocol edges, argument validation, the confirmation gate, offline path resolution, honesty of empty results. | `1.8.0+11aa42d92371` | #396–#408. #396, #397, #398, #399, #400, #402, #406 and #407 were fixed the same day. |
+| 2026-09-11 | Offline surface, then a live 4.5.1 editor: protocol edges, argument validation, the confirmation gate, offline path resolution, honesty of empty results. | `1.8.0+11aa42d92371` | #396–#408, thirteen findings. All thirteen were fixed the same day, in PRs #409–#414. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log
