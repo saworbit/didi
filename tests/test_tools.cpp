@@ -668,30 +668,48 @@ static void test_project_audit_dead_signal_cost_does_not_follow_signal_count() {
 }
 
 static void test_project_audit_survives_a_very_long_line() {
-    // Break caught: the signal scan's name pattern was written as an
-    // alternation so it could accept Unicode bytes, and std::regex backtracks
-    // through (?:a|b)* at every byte. A single long line, which any packed
-    // .tscn has, overran the match stack and the whole tool answered with a
-    // regex_error. A plain character class does the same job in one step.
+    // Break caught twice, from the same edit. Widening the signal scan's name
+    // pattern to accept Unicode bytes first turned it into an alternation,
+    // which std::regex backtracks through at every byte until the match stack
+    // overran and the tool answered regex_error. Fixing that dropped the \b in
+    // front of the name, and without a left boundary the engine starts a fresh
+    // greedy name run at every byte of a line, which is quadratic: one packed
+    // .tscn line spun for minutes.
+    //
+    // Both show up on a single long line, which any .tscn full of packed
+    // arrays has. The time bound is loose on purpose; it separates linear from
+    // quadratic, not a fast machine from a slow one.
     ScopedToolProject project("project-audit-long-line");
     writeAuditFile("project.godot", "config_version=5\n");
-    std::string packed = "[node name=\"Root\" type=\"Node2D\"]\nmetadata = \"";
-    packed.append(20000, 'a');
+    // One unbroken run of name bytes, which is what a packed metadata string in
+    // a .tscn is, and what the harness project holds. A run broken up by
+    // separators stays linear either way and proves nothing.
+    std::string packed = "[node name=\"Root\" type=\"Node2D\"]\nmetadata/huge = \"";
+    packed.append(200000, 'x');
     packed += "\"\n";
     writeAuditFile("packed.tscn", packed);
     writeAuditFile("scripts/unit.gd",
                    "extends Node\n"
-                   "signal never_used\n");
+                   "signal never_used\n"
+                   "signal live_one\n"
+                   "func _ready():\n"
+                   "    live_one.emit()\n");
 
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
+    const auto started = std::chrono::steady_clock::now();
     const auto result = registry.callTool(
         "project_audit_assets",
         didi::json{{"include_orphans", false}, {"include_broken_references", false}});
+    const auto elapsed = std::chrono::steady_clock::now() - started;
     ASSERT_TRUE(!result.isError);
+
+    // The answer still has to be right, not only prompt: the emitted signal is
+    // live and the other is not.
     const auto report = didi::json::parse(result.content[0].text);
     ASSERT_EQ(report["dead_signals"].size(), 1u);
     ASSERT_EQ(report["dead_signals"][0]["signal"], "never_used");
+    ASSERT_TRUE(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() < 20);
 }
 
 static void test_project_impact_finds_scene_and_animation_references_a_search_cannot_explain() {

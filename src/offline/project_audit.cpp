@@ -88,6 +88,13 @@ struct SignalDeclaration {
 // One character class, not an alternation. std::regex backtracks through
 // (?:a|b)* at every byte, and a long line in a .tscn overran the match stack.
 const std::string kIdentifierPattern = R"re([A-Za-z_\x80-\xFF][A-Za-z0-9_\x80-\xFF]*)re";
+// \b is ASCII-only, so it fails in front of a name that starts with a Unicode
+// letter. It still has to be replaced by something, not dropped: without a
+// left boundary the engine starts a fresh greedy name run at every byte of a
+// long line, which is quadratic, and one packed .tscn line spun for minutes.
+// This consumes the byte in front of the name, which is fine for a scan that
+// only collects the names it sees.
+const std::string kNameLeftBoundary = R"re((?:^|[^A-Za-z0-9_\x80-\xFF]))re";
 
 std::vector<SignalDeclaration> signalsDeclaredIn(const std::string& path,
                                                  const std::string& text) {
@@ -122,7 +129,8 @@ std::unordered_set<std::string> usedSignalNames(
     static const std::regex quoted_call(
         R"re((?:emit_signal|is_connected|connect)\s*\(\s*"()re" + kIdentifierPattern + R"re()")re");
     static const std::regex member_call(
-        R"re(()re" + kIdentifierPattern + R"re()\s*\.\s*(?:emit|connect)\s*\()re");
+        kNameLeftBoundary + "(" + kIdentifierPattern +
+        R"re()\s*\.\s*(?:emit|connect)\s*\()re");
     static const std::regex scene_wired(
         R"re(\[connection[^\]]*signal="()re" + kIdentifierPattern + R"re()")re");
 
