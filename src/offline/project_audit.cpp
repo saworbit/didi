@@ -85,8 +85,9 @@ struct SignalDeclaration {
 // UTF-8, so a name class that stops at ASCII captures a truncated name and the
 // audit then reports a signal that does not exist. Every byte outside ASCII is
 // part of the name.
-const std::string kIdentifierPattern =
-    R"re((?:[A-Za-z_]|[^\x00-\x7F])(?:[A-Za-z0-9_]|[^\x00-\x7F])*)re";
+// One character class, not an alternation. std::regex backtracks through
+// (?:a|b)* at every byte, and a long line in a .tscn overran the match stack.
+const std::string kIdentifierPattern = R"re([A-Za-z_\x80-\xFF][A-Za-z0-9_\x80-\xFF]*)re";
 
 std::vector<SignalDeclaration> signalsDeclaredIn(const std::string& path,
                                                  const std::string& text) {

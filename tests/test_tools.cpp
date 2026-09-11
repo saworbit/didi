@@ -667,6 +667,33 @@ static void test_project_audit_dead_signal_cost_does_not_follow_signal_count() {
     ASSERT_TRUE(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() < 20);
 }
 
+static void test_project_audit_survives_a_very_long_line() {
+    // Break caught: the signal scan's name pattern was written as an
+    // alternation so it could accept Unicode bytes, and std::regex backtracks
+    // through (?:a|b)* at every byte. A single long line, which any packed
+    // .tscn has, overran the match stack and the whole tool answered with a
+    // regex_error. A plain character class does the same job in one step.
+    ScopedToolProject project("project-audit-long-line");
+    writeAuditFile("project.godot", "config_version=5\n");
+    std::string packed = "[node name=\"Root\" type=\"Node2D\"]\nmetadata = \"";
+    packed.append(20000, 'a');
+    packed += "\"\n";
+    writeAuditFile("packed.tscn", packed);
+    writeAuditFile("scripts/unit.gd",
+                   "extends Node\n"
+                   "signal never_used\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto result = registry.callTool(
+        "project_audit_assets",
+        didi::json{{"include_orphans", false}, {"include_broken_references", false}});
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(report["dead_signals"].size(), 1u);
+    ASSERT_EQ(report["dead_signals"][0]["signal"], "never_used");
+}
+
 static void test_project_impact_finds_scene_and_animation_references_a_search_cannot_explain() {
     ScopedToolProject project("project-impact");
     writeImpactFixture();
@@ -3516,6 +3543,8 @@ struct RegisterToolTests {
                      test_audio_list_buses_follows_a_relocated_layout_setting);
         registerTest("Tools.ProjectAuditSignalScale",
                      test_project_audit_dead_signal_cost_does_not_follow_signal_count);
+        registerTest("Tools.ProjectAuditLongLine",
+                     test_project_audit_survives_a_very_long_line);
         registerTest("Tools.ProjectImpactFindings",
                      test_project_impact_finds_scene_and_animation_references_a_search_cannot_explain);
         registerTest("Tools.ProjectImpactFileTarget",
