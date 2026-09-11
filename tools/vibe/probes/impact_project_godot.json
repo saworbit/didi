@@ -1,0 +1,5 @@
+[
+  ["project_analyze_impact", {"target": "res://main.tscn"}],
+  ["project_analyze_impact", {"target": "res://player.gd"}],
+  ["project_search_text", {"query": "main.tscn"}]
+]

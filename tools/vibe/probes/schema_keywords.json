@@ -1,0 +1,10 @@
+[
+  ["runtime_attach_session", {"session_id": "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"}],
+  ["runtime_attach_session", {"session_id": "short"}],
+  ["script_create", {"script_path": "res://kk.gd", "source_text": "extends Node\n", "confirmation_token": "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"}],
+  ["project_search_text", {"query": "extends", "extensions": [".gd", ".gd"]}],
+  ["project_search_text", {"query": "extends", "extensions": []}],
+  ["project_search_text", {"query": "extends", "extensions": [".txt"]}],
+  ["project_search_symbols", {"query": "P", "kinds": ["class", "class"]}],
+  ["viewport_capture_passes", {"passes": ["color", "color"]}]
+]

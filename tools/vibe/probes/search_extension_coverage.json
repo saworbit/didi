@@ -1,0 +1,6 @@
+[
+  ["project_search_text", {"query": "UNIQUEMARKER"}],
+  ["project_search_text", {"query": "config_version"}],
+  ["project_list_resources", {}],
+  ["project_audit_assets", {}]
+]
