@@ -6,6 +6,7 @@
 #include "didi/offline/project_audit.hpp"
 #include "didi/offline/project_impact.hpp"
 #include "didi/offline/audio_bus_layout.hpp"
+#include "didi/offline/class_reference.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/atomic_write.hpp"
 #include <algorithm>
@@ -474,6 +475,85 @@ Result<std::vector<std::pair<std::string, json>>> orderedProperties(const json& 
 // is load-bearing. Godot resolves a SubResource against the blocks it has
 // already read, so the one that is referenced has to be written first, and a
 // JSON object cannot carry that.
+// Every property name the pinned API declares for a type, walking up its
+// ancestors. Empty and `false` when the reference does not carry the type,
+// which is the case for a script class, a type from another extension, or a
+// reference file that is not installed. Those cannot be checked and must not be
+// refused.
+bool declaredPropertyNames(const std::string& resource_type, std::set<std::string>& names) {
+    const auto& reference = offline::ClassReference::instance();
+    std::string current = resource_type;
+    std::set<std::string> visited;
+    const json* record = reference.find(current);
+    if (!record) return false;
+    while (record) {
+        if (record->contains("properties") && (*record)["properties"].is_object()) {
+            for (auto it = (*record)["properties"].begin();
+                 it != (*record)["properties"].end(); ++it) {
+                names.insert(it.key());
+            }
+        }
+        const std::string parent = record->value("inherits", std::string());
+        if (parent.empty() || !visited.insert(parent).second) break;
+        current = parent;
+        record = reference.find(current);
+    }
+    return true;
+}
+
+// A name Godot stores but does not declare as a property. The API dump lists
+// only the inspector-visible set, so `_data` on a Curve, `sources/0` on a
+// TileSet and `tracks/0/type` on an Animation are all legitimate and all
+// absent from it. Those are reported rather than refused; a plain identifier
+// has no such excuse.
+bool isStorageOnlyPropertyName(const std::string& name) {
+    return name.empty() || name.front() == '_' || name.find('/') != std::string::npos;
+}
+
+// Refuses property names the type does not have. Godot drops them silently on
+// load, so the file was well formed, the caller was told they were written, and
+// nothing in the surface would ever show the loss.
+Result<json> checkPropertiesAgainstType(
+    const std::string& resource_type,
+    const std::vector<std::pair<std::string, json>>& properties,
+    const std::string& where) {
+    std::set<std::string> declared;
+    if (!declaredPropertyNames(resource_type, declared)) {
+        return json{{"checked", false}, {"reason", "type_not_in_api_reference"}};
+    }
+    std::vector<std::string> unknown;
+    json unverified = json::array();
+    for (const auto& [name, value] : properties) {
+        (void)value;
+        // `script` is how a resource gets properties of its own, and it is the
+        // one case where names the type does not declare are expected. The API
+        // dump does not list it as a property of Object, so it is named here.
+        if (name == "script") continue;
+        if (declared.count(name)) continue;
+        if (isStorageOnlyPropertyName(name)) {
+            unverified.push_back(name);
+            continue;
+        }
+        unknown.push_back(name);
+    }
+    if (!unknown.empty()) {
+        std::string names;
+        for (size_t i = 0; i < unknown.size(); ++i) {
+            if (i > 0) names += ", ";
+            names += "'" + unknown[i] + "'";
+        }
+        return Error::invalidArgument(
+            where + ": " + resource_type + " does not declare " + names +
+            ". Godot drops a property the type does not have when it loads the file, so "
+            "writing it would report work that did not happen. Use script_reflect_class to "
+            "see what " + resource_type + " declares.");
+    }
+    json report = {{"checked", true},
+                   {"api_version", offline::ClassReference::instance().apiVersion()}};
+    if (!unverified.empty()) report["not_declared_but_written"] = std::move(unverified);
+    return report;
+}
+
 struct SubResourceSpec {
     std::string id;
     std::string resource_type;
@@ -551,6 +631,23 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     auto sub_parsed = parseSubResources(args);
     if (sub_parsed.isErr()) return CallToolResult::fromError(sub_parsed.error());
     const auto& sub_resources = sub_parsed.value();
+
+    // Before anything is rendered or written. A property the type does not
+    // declare used to be written into [resource], reported in
+    // properties_written, and then dropped by Godot on load with nothing in the
+    // surface able to show the loss: resource_inspect reports type, size, uid
+    // and dependencies, and no properties.
+    auto property_check = checkPropertiesAgainstType(resource_type, ordered.value(),
+                                                     "Argument 'properties'");
+    if (property_check.isErr()) return CallToolResult::fromError(property_check.error());
+    json sub_property_checks = json::object();
+    for (const auto& sub : sub_resources) {
+        auto sub_check = checkPropertiesAgainstType(
+            sub.resource_type, sub.properties,
+            "Sub-resource '" + sub.id + "' properties");
+        if (sub_check.isErr()) return CallToolResult::fromError(sub_check.error());
+        sub_property_checks[sub.id] = sub_check.value();
+    }
 
     // The body written below is Godot text-resource markup and nothing else.
     // Writing it to any path the caller names produced a .gd file full of
@@ -680,7 +777,11 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         {"properties_written", std::move(written_order)},
         {"sub_resources_written", std::move(sub_written)},
         {"external_references", std::move(externals_written)},
-        {"load_steps", load_steps}
+        {"load_steps", load_steps},
+        // Says whether the names were checked at all, so "written" is not read
+        // as "the type has these" when the reference could not answer.
+        {"property_check", property_check.value()},
+        {"sub_resource_property_checks", std::move(sub_property_checks)}
     });
 }
 

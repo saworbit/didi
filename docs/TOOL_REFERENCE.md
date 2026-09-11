@@ -490,7 +490,15 @@ A property can point at another resource, which is what every composite Godot re
 - Only an id declared **above** the point that names it can be used. Godot resolves a `SubResource` against the blocks it has already read, so a reference to one declared further down loads as null rather than failing, and the writer refuses it instead.
 - `load_steps` is computed from the external references, the sub-resources and the resource itself. Do not pass it.
 
-The result adds `external_references` (path, resource type, id and uid for each header entry), `sub_resources_written` (id, type and the properties each got, in file order) and `load_steps`.
+#### Property names are checked against the type
+
+Every property name is checked against what the pinned API dump declares for `resource_type` and its ancestors, before anything is rendered or written. A name the type does not declare is refused naming it, because Godot drops such a property when it loads the file and nothing in the surface would show the loss: `resource_inspect` reports type, size, uid and dependencies, and no properties.
+
+Three things are not refused. `script`, which is how a resource gets properties of its own and is the case where undeclared names are expected. A name beginning with `_` or containing `/`, because the API dump lists only the inspector-visible set and Godot stores more than that: `_data` on a Curve, `sources/0` on a TileSet, `tracks/0/type` on an Animation. And every name on a type the reference does not carry, such as a script class or a type from another extension, because there is nothing to check against.
+
+The result carries `property_check` with `checked` (whether the check ran at all), `api_version`, and `not_declared_but_written` listing the storage-only names that were written unverified. `sub_resource_property_checks` carries the same per sub-resource id. Use `script_reflect_class` to see what a type declares.
+
+The result adds `external_references` (path, resource type, id and uid for each header entry), `sub_resources_written` (id, type and the properties each got, in file order) and `load_steps`. 
 
 ```json
 {
