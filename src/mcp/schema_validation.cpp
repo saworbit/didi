@@ -1,6 +1,7 @@
 #include "didi/mcp/schema_validation.hpp"
 
 #include <algorithm>
+#include <regex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -97,6 +98,20 @@ std::optional<std::string> checkBounds(const json& schema, const json& value,
             return where + " must be at most " + schema["maxLength"].dump() +
                    " characters long.";
         }
+        // JSON Schema patterns are ECMA-262, which is what std::regex parses by
+        // default, and they are unanchored. A pattern this cannot compile is a
+        // fault in the published schema, not in the call, so it is ignored
+        // rather than turned into a refusal the caller cannot act on.
+        if (schema.contains("pattern") && schema["pattern"].is_string()) {
+            const auto& pattern = schema["pattern"].get_ref<const std::string&>();
+            try {
+                const std::regex expression(pattern, std::regex::ECMAScript);
+                if (!std::regex_search(value.get_ref<const std::string&>(), expression)) {
+                    return where + " must match the pattern " + pattern + ".";
+                }
+            } catch (const std::regex_error&) {
+            }
+        }
     }
     if (value.is_number()) {
         const double number = value.get<double>();
@@ -118,6 +133,16 @@ std::optional<std::string> checkBounds(const json& schema, const json& value,
             value.size() > schema["maxItems"].get<size_t>()) {
             return where + " must have at most " + schema["maxItems"].dump() + " entries.";
         }
+        if (schema.contains("uniqueItems") && schema["uniqueItems"].is_boolean() &&
+            schema["uniqueItems"].get<bool>()) {
+            for (size_t i = 1; i < value.size(); ++i) {
+                for (size_t j = 0; j < i; ++j) {
+                    if (value[i] != value[j]) continue;
+                    return where + " must not repeat an entry, and " + value[i].dump() +
+                           " appears more than once.";
+                }
+            }
+        }
     }
     return std::nullopt;
 }
@@ -138,15 +163,30 @@ std::optional<std::string> checkObject(const json& schema, const json& value,
         }
     }
 
+    // A tool's arguments are closed unless it says otherwise. Rejecting an
+    // unknown argument used to depend on the schema remembering to publish
+    // additionalProperties: false, which 50 of 126 tools did, so a typo'd
+    // property name was silently ignored by the rest: asking
+    // project_search_text for `path` rather than `search_path` searched the
+    // whole project and reported success. Nested objects keep the old rule,
+    // because several of them are deliberately free-form maps.
     const auto additional = schema.find("additionalProperties");
-    const bool closed = additional != schema.end() && additional->is_boolean() &&
-                        !additional->get<bool>();
-    if (closed && has_properties) {
+    const bool says_open = additional != schema.end() && additional->is_boolean() &&
+                           additional->get<bool>();
+    const bool says_closed = additional != schema.end() && additional->is_boolean() &&
+                             !additional->get<bool>();
+    const bool schema_valued_additional =
+        additional != schema.end() && !additional->is_boolean();
+    const bool closed = says_closed ||
+                        (!named && !says_open && !schema_valued_additional);
+    if (closed) {
         for (auto it = value.begin(); it != value.end(); ++it) {
-            if (properties->contains(it.key())) continue;
+            if (has_properties && properties->contains(it.key())) continue;
             std::vector<std::string> accepted;
-            for (auto known = properties->begin(); known != properties->end(); ++known) {
-                accepted.push_back(known.key());
+            if (has_properties) {
+                for (auto known = properties->begin(); known != properties->end(); ++known) {
+                    accepted.push_back(known.key());
+                }
             }
             std::sort(accepted.begin(), accepted.end());
             const std::string list = accepted.empty()

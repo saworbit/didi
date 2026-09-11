@@ -84,17 +84,19 @@ such node" (#401). Neither state is a crash, so nothing else catches them.
 **Read the schema before believing a result.** Several tools take a parameter
 whose name is not the obvious guess: `target_node` not `node_path`, `setting`
 not `setting_path`, `scene_path` not `output_path`, `source_text` not `content`,
-`new_definition` not `new_body`. #397 made the server reject an unknown property
-by name, which makes the mistake cheap — but only on 50 of the 126 tools (#418).
-On the other 76 a guessed name is still accepted and ignored: `search_path`
-typo'd as `path` returns the whole project and calls it a success.
+`new_definition` not `new_body`. The server rejects an unknown property by name
+and lists what the tool does take, which makes the mistake cheap. That covered
+50 of 126 tools until #418; arguments are closed by default now, so every
+implemented tool answers the same way and a new tool is covered on arrival.
 `probe.py --schema` is still faster than a round trip.
 
 **Count it before you call it a bug.** Three of this session's findings only
-became findings once every tool was asked the same question: 50 of 126 reject an
-unknown argument, 26 report `offline_fallback` with an editor attached, 18
+became findings once every tool was asked the same question: 50 of 126 rejected
+an unknown argument, 26 report `offline_fallback` with an editor attached, 18
 answer with a bare string. Each looked like one tool misbehaving until the
-census showed a missing default. `probes/surface_census.py` runs all three in
+census showed a missing default. The first is now 121 of 126, and the five that
+are left are the unimplemented registrations, which refuse the whole call
+before any argument is read. `probes/surface_census.py` runs all three in
 about a minute each; the numbers are in the session log and are worth diffing.
 
 **Narrow before you file, especially when two things changed.** This session

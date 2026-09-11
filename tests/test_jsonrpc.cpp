@@ -1114,6 +1114,53 @@ static void test_tools_call_enforces_the_published_input_schema() {
     const auto segmentation = call("viewport_capture_passes",
                                    {{"passes", didi::json::array({"segmentation"})}});
     ASSERT_TRUE(segmentation.result.dump().find("invalid_arguments") == std::string::npos);
+
+    // Break caught: the rejection above depended on the schema remembering to
+    // publish additionalProperties: false, and 76 of 126 tools did not. The
+    // sharp case is a plausible guess at a parameter name. project_search_text
+    // takes search_path; `path` was accepted, ignored, and the unscoped search
+    // it ran was reported as a success (#418).
+    const auto guessed = call("project_search_text",
+                              {{"query", "extends"}, {"path", "res://addons"}});
+    ASSERT_TRUE(guessed.result["isError"].get<bool>());
+    ASSERT_TRUE(errorText(guessed).find("'path'") != std::string::npos);
+    ASSERT_TRUE(errorText(guessed).find("search_path") != std::string::npos);
+
+    // A tool that publishes no properties takes no arguments, and says so.
+    const auto no_arguments = call("runtime_list_sessions", {{"bogus", 1}});
+    ASSERT_TRUE(no_arguments.result["isError"].get<bool>());
+    ASSERT_TRUE(errorText(no_arguments).find("bogus") != std::string::npos);
+
+    // The same call without the typo still works, which is the half that
+    // matters: closing the schema must not close the tool.
+    const auto scoped = call("project_search_text",
+                             {{"query", "extends"}, {"search_path", "res://addons"}});
+    ASSERT_TRUE(!scoped.result["isError"].get<bool>());
+
+    // pattern was published at 17 sites and enforced at none, so a token of the
+    // right length and the wrong alphabet passed validation and was looked up
+    // as if it were real (#423).
+    const auto bad_charset =
+        call("runtime_attach_session", {{"session_id", std::string(32, '!')}});
+    ASSERT_TRUE(bad_charset.result["isError"].get<bool>());
+    ASSERT_TRUE(errorText(bad_charset).find("pattern") != std::string::npos);
+    ASSERT_TRUE(errorText(bad_charset).find("Runtime session not found") == std::string::npos);
+
+    // A value that satisfies the pattern still gets past validation and fails
+    // for the real reason, which is that no such session exists.
+    const auto good_charset =
+        call("runtime_attach_session", {{"session_id", std::string(32, 'a')}});
+    ASSERT_TRUE(errorText(good_charset).find("pattern") == std::string::npos);
+
+    // uniqueItems sat between minItems, maxItems and enum, all three of which
+    // were enforced on the same property (#423).
+    const auto repeated =
+        call("project_search_text",
+             {{"query", "extends"},
+              {"extensions", didi::json::array({".gd", ".gd"})}});
+    ASSERT_TRUE(repeated.result["isError"].get<bool>());
+    ASSERT_TRUE(errorText(repeated).find("extensions") != std::string::npos);
+    ASSERT_TRUE(errorText(repeated).find(".gd") != std::string::npos);
 }
 
 // prompts/list says which arguments are required, so prompts/get means it

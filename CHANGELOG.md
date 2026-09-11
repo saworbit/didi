@@ -68,6 +68,27 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- A tool's arguments are closed by default, so a typo'd property name is
+  refused rather than ignored (#418). Rejecting an unknown argument depended on
+  the schema remembering to publish `additionalProperties: false`, which 50 of
+  126 tools did. The sharp case is a plausible guess: `project_search_text`
+  takes `search_path`, `path` is the obvious guess, and it was accepted,
+  ignored, and the unscoped search it ran was reported as a success with
+  nothing in the response to tell the two apart. Every implemented tool answers
+  the same way now, and a new tool is covered on arrival rather than by
+  remembering. Nested objects keep the old rule, because several of them are
+  deliberately free-form maps. A tool that really does take arguments it does
+  not publish can say `additionalProperties: true`.
+
+- `pattern` and `uniqueItems` are enforced, having been published at 22 sites
+  and checked at none (#423). A confirmation token or session id of the right
+  length and the wrong alphabet passed validation and was looked up as if it
+  were real, while `minLength` and `maxLength` beside it were enforced. A
+  duplicate array entry passed while `minItems`, `maxItems` and `enum` on the
+  same property were enforced. `viewport_capture_passes` now declares the
+  uniqueness its own description promises, so a repeated pass is refused
+  offline the way the engine refuses it live.
+
 - Symbol scanning keeps a name that is not spelled in ASCII (#416). GDScript
   identifiers may hold Unicode letters, and the scanners classified every byte
   above ASCII as the end of a name, so `CaféMenu` came back as `Caf` and a name

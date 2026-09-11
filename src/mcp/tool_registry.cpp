@@ -2037,6 +2037,9 @@ void ToolRegistry::registerAllDefaultTools() {
             {"properties", {
                 {"passes", {
                     {"type", "array"}, {"minItems", 1}, {"maxItems", 4},
+                    // Declared, not only described: the engine refuses a repeat,
+                    // and a caller offline deserves the same answer.
+                    {"uniqueItems", true},
                     {"description", "Which pictures to take, returned as one image each in this order. A pass named twice is refused."},
                     {"items", {{"type", "string"},
                                {"enum", json::array({"color", "depth", "normal", "segmentation"})}}}
