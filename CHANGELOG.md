@@ -68,6 +68,24 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- The schema layer enforces the shapes it publishes, so `tilemap_set_cells`
+  names the field the way `gridmap_set_cells` always has (#442). The validator
+  resolved no `$ref`, read no `prefixItems`, no `oneOf` and no `const`. The
+  Phase 7 schemas are generated with their shared shapes under `$defs`, so
+  `tilemap_set_cells` publishing `coords` as a two-element array through
+  `$defs/vector2i` meant that shape was enforced nowhere: sending the
+  `{"x": .., "y": ..}` object form, which most of the rest of the surface takes,
+  went straight past validation and came back from the handler as a 404 carrying
+  `invalid_tilemap_set_cells_request`, the identifier #406 was closed for.
+  `gridmap_set_cells` is the same shape of tool with the same shape of mistake
+  and answered `Argument 'cells' entry 0.position must be an array, not an
+  object.`, because its schema inlines what tilemap's references. Now both do.
+  A wrong-shaped argument is a 400 from the schema, before the handler, with the
+  field named. `oneOf` reports against the one branch whose required properties
+  are all present, which is the shape the caller was reaching for; when no
+  single branch stands out it lists what each shape demands. Only same-document
+  `$ref`s are followed.
+
 - Three request edges below `tools/call` answer the way the specification says
   (#445, #446, #447). A request with an explicit `id: null` was parsed as an
   ordinary request and answered with a result. MCP narrows JSON-RPC here: the id

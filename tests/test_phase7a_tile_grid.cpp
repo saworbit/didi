@@ -174,8 +174,76 @@ void test_phase7_tile_grid_methods_are_editor_only_but_reach_the_bridge() {
     didi::godot::EditorHookTestAccess::setSessionKind(hook, std::nullopt);
 }
 
+// Break caught: tilemap_set_cells publishes `coords` as a two-element array
+// through $defs/vector2i, and the schema layer resolved no $ref, read no
+// prefixItems and read no oneOf, so none of that was enforced. The handler was
+// the only check and answered a wrong-shaped argument with the tool name
+// wrapped in a token. gridmap_set_cells, whose schema inlines the same shape,
+// named the field all along (#442).
+static void test_the_published_cell_shape_is_enforced_by_the_schema() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto message = [&](const char* tool, const didi::json& arguments) {
+        const auto result = registry.callTool(tool, arguments);
+        ASSERT_TRUE(result.isError);
+        return result.content.empty() ? std::string() : result.content[0].text;
+    };
+
+    // The object form most of the rest of the surface takes is a violation
+    // here, and it is now named rather than tokenised.
+    const auto tilemap = message("tilemap_set_cells",
+        didi::json{{"tilemap_path", "/root/Main/Branch"},
+                   {"cells", didi::json::array({{{"coords", {{"x", 0}, {"y", 0}}},
+                                                 {"source_id", 0},
+                                                 {"atlas_coords", {{"x", 0}, {"y", 0}}}}})}});
+    ASSERT_TRUE(tilemap.find("must be an array, not an object") != std::string::npos);
+    ASSERT_TRUE(tilemap.find("\"code\":400") != std::string::npos);
+    ASSERT_TRUE(tilemap.find("invalid_tilemap_set_cells_request") == std::string::npos);
+
+    // Which is what the same mistake has always got from gridmap_set_cells.
+    const auto gridmap = message("gridmap_set_cells",
+        didi::json{{"gridmap_path", "/root/Main/Branch"},
+                   {"cells", didi::json::array({{{"position", {{"x", 0}, {"y", 0}, {"z", 0}}},
+                                                 {"item", 0}}})}});
+    ASSERT_TRUE(gridmap.find("must be an array, not an object") != std::string::npos);
+
+    // prefixItems is what says a coordinate is a pair, and const is what tells
+    // the erase shape from the placement shape.
+    ASSERT_TRUE(message("tilemap_set_cells",
+        didi::json{{"tilemap_path", "/root/Main/Branch"},
+                   {"cells", didi::json::array({{{"coords", didi::json::array({0, 0, 0})},
+                                                 {"source_id", 0},
+                                                 {"atlas_coords", didi::json::array({0, 0})}}})}})
+        .find("at most 2 entries") != std::string::npos);
+    ASSERT_TRUE(message("tilemap_set_cells",
+        didi::json{{"tilemap_path", "/root/Main/Branch"},
+                   {"cells", didi::json::array({{{"coords", didi::json::array({0, 0})},
+                                                 {"erase", false}}})}})
+        .find("must be true") != std::string::npos);
+
+    // Both published shapes still reach dispatch. Without an editor that is a
+    // 503 about the route, which is a different failure from a rejected
+    // argument and is the proof the schema did not eat a legal call.
+    for (const didi::json& cell : {didi::json{{"coords", didi::json::array({0, 0})},
+                                              {"source_id", 0},
+                                              {"atlas_coords", didi::json::array({0, 0})}},
+                                   didi::json{{"coords", didi::json::array({0, 0})},
+                                              {"erase", true}}}) {
+        const auto accepted = registry.callTool(
+            "tilemap_set_cells", didi::json{{"tilemap_path", "/root/Main/Branch"},
+                                            {"cells", didi::json::array({cell})}});
+        const auto text = accepted.content.empty() ? std::string() : accepted.content[0].text;
+        ASSERT_TRUE(text.find("invalid_tilemap_set_cells_request") == std::string::npos);
+        ASSERT_TRUE(text.find("does not match any accepted shape") == std::string::npos);
+        ASSERT_TRUE(text.find("must be an array") == std::string::npos);
+    }
+}
+
 struct RegisterPhase7TileGridBehavior {
     RegisterPhase7TileGridBehavior() {
+        registerTest("Phase7TileGrid.PublishedCellShapeIsEnforced",
+                     test_the_published_cell_shape_is_enforced_by_the_schema);
         registerTest("Phase7TileGrid.StrictBatchValidation", test_phase7_tile_grid_handlers_reject_invalid_batches_before_dispatch);
         registerTest("Phase7TileGrid.ExactForwarding", test_phase7_tile_grid_handlers_forward_exact_requests_once);
         registerTest("Phase7TileGrid.EditorOnlyAdmission", test_phase7_tile_grid_methods_are_editor_only_but_reach_the_bridge);
