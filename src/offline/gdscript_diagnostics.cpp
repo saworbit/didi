@@ -1257,9 +1257,15 @@ json GDScriptDiagnostics::reflectClass(const std::string& class_name) {
             {"is_known_class", true},
             {"source", "extension_api"},
             {"api_version", reference.apiVersion()},
+            // This tool has no live mode, so telling the caller to attach an
+            // editor was advice they could follow and get the same answer
+            // back. It says what the pinned dump covers instead (#405).
             {"description", "Godot engine class " + class_name +
-                            " reflected offline from " + reference.apiVersion() +
-                            ". Attach a live editor for the running engine's own state."},
+                            " read from the class reference pinned to " +
+                            reference.apiVersion() +
+                            ". This is a shipped dump of the engine API, not the running "
+                            "engine, so it cannot see script classes or anything a "
+                            "different engine version changed."},
             {"properties", entry->value("properties", json::object())},
             {"methods", entry->value("methods", json::object())},
             {"signals", entry->value("signals", json::array())}
@@ -1294,8 +1300,8 @@ json GDScriptDiagnostics::reflectClass(const std::string& class_name) {
         unknown["source"] = "extension_api";
         unknown["api_version"] = reference.apiVersion();
         unknown["description"] = class_name + " is not a class in " + reference.apiVersion() +
-                                 ". Check the spelling, or attach a live editor if it is a "
-                                 "script class rather than an engine class.";
+                                 ". Check the spelling. A script class is not in this dump "
+                                 "either way; read it with script_get_symbols.";
     } else {
         unknown["source"] = "builtin_snapshot";
         unknown["description"] = "Godot 4 class: " + class_name +

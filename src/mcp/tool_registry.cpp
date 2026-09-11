@@ -1644,7 +1644,11 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"class_name"}}
         };
-        t.handler = [this](const json& args) { return handleScriptReflectClass(args, m_ipcClient); };
+        // The source client, not the lease dispatch wrapper. This tool never
+        // sends a request; it reads the selected session descriptor to say
+        // whether the pinned class reference matches the attached engine, and
+        // the wrapper is not a session client.
+        t.handler = [this](const json& args) { return handleScriptReflectClass(args, m_sourceIpcClient); };
         registerTool(std::move(t));
     }
     {

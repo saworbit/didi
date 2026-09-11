@@ -133,6 +133,11 @@ struct SessionDescriptor {
     // it means the bridge is older than this server, so it is reported rather
     // than passed over.
     std::string build_id;
+    // Which Godot the extension is running in, as the engine reports it, for
+    // example "Godot v4.5.1.stable.official". Optional and empty for the same
+    // reason build_id is: an extension built before the field existed publishes
+    // a descriptor without it. Empty means unknown, never a match.
+    std::string engine_version;
 
     json toJson(bool include_token = false) const;
     // Which session something happened on, without the address to reach it.

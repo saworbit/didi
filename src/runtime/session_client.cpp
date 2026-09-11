@@ -210,7 +210,7 @@ bool hasOnlyDescriptorFields(const json& value) {
         "schema_version", "session_id", "token", "pid", "kind", "project_path",
         "endpoint", "started_at_ms", "protocol_version"
     };
-    static const std::set<std::string> optional = {"build_id"};
+    static const std::set<std::string> optional = {"build_id", "engine_version"};
     for (auto it = value.begin(); it != value.end(); ++it) {
         if (!required.count(it.key()) && !optional.count(it.key())) return false;
     }
@@ -227,6 +227,18 @@ bool validBuildId(const std::string& value) {
     return std::all_of(value.begin(), value.end(), [](unsigned char c) {
         return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
                (c >= 'A' && c <= 'Z') || c == '.' || c == '+' || c == '-' || c == '_';
+    });
+}
+
+// The engine's own version string, printed on a dashboard and compared against
+// the pinned class reference, so it is bounded and kept to characters that
+// cannot break either. Godot writes it as "Godot v4.5.1.stable.official".
+bool validEngineVersion(const std::string& value) {
+    if (value.empty() || value.size() > 128) return false;
+    return std::all_of(value.begin(), value.end(), [](unsigned char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
+               (c >= 'A' && c <= 'Z') || c == '.' || c == '+' || c == '-' || c == '_' ||
+               c == ' ';
     });
 }
 
@@ -1637,6 +1649,7 @@ json SessionDescriptor::toJson(bool include_token) const {
         {"started_at_ms", started_at_ms}, {"protocol_version", protocol_version}
     };
     if (!build_id.empty()) value["build_id"] = build_id;
+    if (!engine_version.empty()) value["engine_version"] = engine_version;
     if (include_token) value["token"] = token;
     return value;
 }
@@ -1663,6 +1676,11 @@ Result<SessionDescriptor> SessionDescriptor::fromJson(const json& value) {
              !validBuildId(value.at("build_id").get<std::string>()))) {
             return Error::invalidArgument("Invalid session descriptor values");
         }
+        if (value.contains("engine_version") &&
+            (!value.at("engine_version").is_string() ||
+             !validEngineVersion(value.at("engine_version").get<std::string>()))) {
+            return Error::invalidArgument("Invalid session descriptor values");
+        }
         SessionDescriptor descriptor;
         descriptor.schema_version = value.at("schema_version").get<int>();
         descriptor.session_id = value.at("session_id").get<std::string>();
@@ -1675,6 +1693,9 @@ Result<SessionDescriptor> SessionDescriptor::fromJson(const json& value) {
         descriptor.protocol_version = value.at("protocol_version").get<std::string>();
         if (value.contains("build_id")) {
             descriptor.build_id = value.at("build_id").get<std::string>();
+        }
+        if (value.contains("engine_version")) {
+            descriptor.engine_version = value.at("engine_version").get<std::string>();
         }
         return descriptor;
     } catch (const std::exception&) {

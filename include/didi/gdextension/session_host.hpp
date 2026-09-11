@@ -16,7 +16,8 @@ namespace didi::godot {
 // does not touch the filesystem; publication is delayed until the IPC endpoint is bound.
 class SessionHost {
 public:
-    Result<void> prepare(const std::string& kind, const std::string& project_path);
+    Result<void> prepare(const std::string& kind, const std::string& project_path,
+                         const std::string& engine_version = {});
     Result<void> startServer(ipc::IIpcServer& server);
     Result<void> publish();
     std::optional<runtime::SessionDescriptor> descriptor() const;
