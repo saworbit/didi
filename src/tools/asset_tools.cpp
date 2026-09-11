@@ -9,6 +9,8 @@
 #include "didi/offline/class_reference.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/atomic_write.hpp"
+#include "didi/common/engine_version.hpp"
+#include "didi/runtime/session_client.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
@@ -516,10 +518,28 @@ bool isStorageOnlyPropertyName(const std::string& name) {
 Result<json> checkPropertiesAgainstType(
     const std::string& resource_type,
     const std::vector<std::pair<std::string, json>>& properties,
-    const std::string& where) {
+    const std::string& where,
+    bool allow_unknown_type) {
     std::set<std::string> declared;
     if (!declaredPropertyNames(resource_type, declared)) {
-        return json{{"checked", false}, {"reason", "type_not_in_api_reference"}};
+        // Godot does not drop one property for a type it does not have; it
+        // fails to instantiate the resource at all, so the file this would
+        // write cannot be loaded. Refusing it is the same rule the property
+        // check already applies, applied to the type (#465). The escape hatch
+        // is real -- a class_name script or a GDExtension type is not in the
+        // dump either -- so it is named rather than removed.
+        if (!allow_unknown_type) {
+            return Error::invalidArgument(
+                where + ": " + resource_type +
+                " is not a class in " + offline::ClassReference::instance().apiVersion() +
+                ". Godot cannot load a resource whose type it does not know, so writing "
+                "the file would report a resource that does not exist. Check the spelling "
+                "with script_reflect_class. If the type comes from a GDExtension or a "
+                "class_name script, which the shipped class reference cannot see, pass "
+                "allow_unknown_type: true.");
+        }
+        return json{{"checked", false}, {"reason", "type_not_in_api_reference"},
+                    {"allowed_by", "allow_unknown_type"}};
     }
     std::vector<std::string> unknown;
     json unverified = json::array();
@@ -617,9 +637,13 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     std::string save_path = args.value("save_path", "");
     json properties = args.value("properties", json::object());
     if (args.contains("overwrite") && !args["overwrite"].is_boolean()) {
-        return CallToolResult::error("Parameter 'overwrite' must be a boolean.");
+        return CallToolResult::errorJson(400, "Parameter 'overwrite' must be a boolean.");
     }
     const bool overwrite = args.value("overwrite", false);
+    if (args.contains("allow_unknown_type") && !args["allow_unknown_type"].is_boolean()) {
+        return CallToolResult::errorJson(400, "Parameter 'allow_unknown_type' must be a boolean.");
+    }
+    const bool allow_unknown_type = args.value("allow_unknown_type", false);
 
     if (save_path.empty()) {
         return CallToolResult::error("Parameter 'save_path' is required (e.g. res://materials/wood.tres).");
@@ -638,14 +662,33 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     // surface able to show the loss: resource_inspect reports type, size, uid
     // and dependencies, and no properties.
     auto property_check = checkPropertiesAgainstType(resource_type, ordered.value(),
-                                                     "Argument 'properties'");
+                                                     "Argument 'properties'",
+                                                     allow_unknown_type);
     if (property_check.isErr()) return CallToolResult::fromError(property_check.error());
+
+    // `checked: true` reads as "verified against your engine", and it was
+    // verified against whichever engine the shipped dump was taken from. A
+    // property added in 4.7 passes the check and is then dropped by a 4.5.1
+    // engine, which is the exact failure the check exists to prevent. The
+    // caller gets what script_reflect_class already gives them, so they can
+    // weigh the verdict (#466).
+    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
+    const auto attached = sessions ? sessions->activeSession()
+                                   : std::optional<runtime::SessionDescriptor>{};
+    const auto note_engine = [&](json& check) {
+        if (!attached.has_value() || !check.value("checked", false)) return;
+        versions::annotateApiVersion(check, check.value("api_version", std::string()),
+                                     attached->engine_version);
+    };
+    note_engine(property_check.value());
+
     json sub_property_checks = json::object();
     for (const auto& sub : sub_resources) {
         auto sub_check = checkPropertiesAgainstType(
             sub.resource_type, sub.properties,
-            "Sub-resource '" + sub.id + "' properties");
+            "Sub-resource '" + sub.id + "' properties", allow_unknown_type);
         if (sub_check.isErr()) return CallToolResult::fromError(sub_check.error());
+        note_engine(sub_check.value());
         sub_property_checks[sub.id] = sub_check.value();
     }
 
@@ -690,7 +733,7 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     // disagreeing. This one was the disagreement.
     auto resolved = paths::resolveProjectFileForWrite(save_path);
     if (resolved.isErr()) {
-        return CallToolResult::error("Invalid save_path: " + resolved.error().message);
+        return CallToolResult::fromError(resolved.error(), "Invalid save_path: ");
     }
     const fs::path target_p = resolved.value();
 

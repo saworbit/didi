@@ -508,9 +508,11 @@ A property can point at another resource, which is what every composite Godot re
 
 Every property name is checked against what the pinned API dump declares for `resource_type` and its ancestors, before anything is rendered or written. A name the type does not declare is refused naming it, because Godot drops such a property when it loads the file and nothing in the surface would show the loss: `resource_inspect` reports type, size, uid and dependencies, and no properties.
 
-Three things are not refused. `script`, which is how a resource gets properties of its own and is the case where undeclared names are expected. A name beginning with `_` or containing `/`, because the API dump lists only the inspector-visible set and Godot stores more than that: `_data` on a Curve, `sources/0` on a TileSet, `tracks/0/type` on an Animation. And every name on a type the reference does not carry, such as a script class or a type from another extension, because there is nothing to check against.
+Two things are not refused. `script`, which is how a resource gets properties of its own and is the case where undeclared names are expected. And a name beginning with `_` or containing `/`, because the API dump lists only the inspector-visible set and Godot stores more than that: `_data` on a Curve, `sources/0` on a TileSet, `tracks/0/type` on an Animation.
 
-The result carries `property_check` with `checked` (whether the check ran at all), `api_version`, and `not_declared_but_written` listing the storage-only names that were written unverified. `sub_resource_property_checks` carries the same per sub-resource id. Use `script_reflect_class` to see what a type declares.
+A `resource_type` the reference does not carry is refused, not skipped. Godot does not drop one property for a type it does not know; it fails to instantiate the resource at all, so the file would not load. A script class or a type from another extension is not in the dump either, so `allow_unknown_type: true` writes it anyway and the result reports `property_check.checked: false` with `allowed_by: "allow_unknown_type"`, because there is nothing to check the names against.
+
+The result carries `property_check` with `checked` (whether the check ran at all), `api_version`, and `not_declared_but_written` listing the storage-only names that were written unverified. With an editor attached it also carries `attached_engine_version` and `api_version_matches_attached_engine`: the dump is pinned to one engine line and CI covers three, so `checked: true` means verified against the dump rather than against the engine in front of you. `sub_resource_property_checks` carries the same per sub-resource id. Use `script_reflect_class` to see what a type declares.
 
 The result adds `external_references` (path, resource type, id and uid for each header entry), `sub_resources_written` (id, type and the properties each got, in file order) and `load_steps`. 
 
@@ -532,7 +534,7 @@ The result adds `external_references` (path, resource type, id and uid for each 
 }
 ```
 
-Didi does not instantiate or validate the requested Resource class in Godot.
+Didi does not instantiate the requested Resource class in Godot. It does check the class name against the pinned class reference, and refuses one that is not there unless `allow_unknown_type: true` says so.
 
 `save_path` must end in `.tres` or `.res`. The body is Godot text-resource markup and nothing else, so any other target is refused rather than written; use `script_create` for a `.gd` file.
 
@@ -540,10 +542,13 @@ Didi does not instantiate or validate the requested Resource class in Godot.
 - `save_path` (`string`, required).
 - `properties` (`object` or `array` of `{name, value}`, optional). The array form is written in the order given.
 - `overwrite` (`boolean`, default `false`); an existing target is preserved unless explicitly set to `true`.
+- `allow_unknown_type` (`boolean`, default `false`); write a `resource_type` the pinned class reference does not list.
 
 ### `resource_inspect` — Offline
 
-Returns indexed file metadata, detected type, UID, and parsed dependencies for a matching project resource. It does not expose arbitrary inner Godot Resource properties.
+Returns indexed file metadata, UID, and parsed dependencies for a matching project resource. It does not expose arbitrary inner Godot Resource properties.
+
+`type` is the class the extension implies, which for a `.tres` or `.res` is never more specific than `Resource`. For those, `resource_type` carries the type the file declares in its `[gd_resource]` header, or `null` when the header could not be read. Anything that is not a text resource has no such field. `project_list_resources` reports the same pair per entry.
 
 - `resource_path` (`string`, required).
 

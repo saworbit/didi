@@ -68,6 +68,42 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `resource_create` refuses a `resource_type` Godot does not know (#465). It
+  wrote `[gd_resource type="NoSuchResourceType"]`, reported
+  `status: "created_offline"`, and left a file the engine cannot load. The
+  tool already refused the lesser version of the same mistake, one property the
+  type does not declare, and the reason it skipped the larger one came back as
+  `property_check.reason: "type_not_in_api_reference"` on a success nothing
+  forces a caller to read. An unknown type is now a 400 naming the spelling
+  check. The escape hatch stays open, because a `class_name` script or a
+  GDExtension type is not in the shipped reference either: pass
+  `allow_unknown_type: true` and the result reports `checked: false` with
+  `allowed_by`. Sub-resource types are held to the same rule.
+
+- `resource_create`'s `property_check` says which engine it checked against
+  (#466). The check reads a shipped API dump pinned to one engine line, and CI
+  covers three, so a gap between the dump and the attached engine is the normal
+  case. `checked: true` read as "verified against your engine": a property
+  added in 4.7 passed the check and was then dropped by the 4.5.1 engine that
+  loaded the file, which is the failure the check exists to prevent. With an
+  editor attached, `property_check` now carries `attached_engine_version` and
+  `api_version_matches_attached_engine`, the two fields `script_reflect_class`
+  already carried. Both read one helper now, so the two cannot drift.
+
+- `resource_inspect` reads the type out of the file (#467). `type` is derived
+  from the extension, so every `.tres` came back as `Resource`: a valid
+  `CanvasItemMaterial` and a file Godot cannot load at all were reported
+  identically, differing only in byte count, on the tool named inspect. The
+  `[gd_resource]` header is the first line of a file the indexer already opens
+  for its dependencies, so `resource_type` now carries what the file declares,
+  or `null` where the header could not be read. `type` is unchanged, because
+  `project_list_resources` filters on it. Anything that is not a text resource
+  has no such field.
+
+- `resource_create` answers a bad `save_path` with the error envelope, the same
+  defect as #460 in a tool the path probe could not reach behind the
+  confirmation gate.
+
 - Eight tools answer a path-validation failure with the error envelope
   (#460). The argument checks already answered with `error.code`, so the census
   in `probes/surface_census.py` reported no bare-string errors on this build:

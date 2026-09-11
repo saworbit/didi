@@ -117,8 +117,36 @@ std::vector<std::string> extractDependenciesFromPath(const fs::path& file_path) 
 // a mutation is never followed by a memo hit on the file it just wrote.
 namespace {
 
+// The type a .tres or .res actually declares, read from the header Godot reads
+// it from. The extension only ever says "Resource", so a CanvasItemMaterial and
+// a file whose type is not a Godot class at all were reported identically, and
+// the tool named inspect could not answer what the resource is (#467).
+std::string extractDeclaredTypeFromPath(const fs::path& file_path) {
+    std::ifstream file(file_path, std::ios::binary);
+    if (!file.is_open()) return {};
+    // A bounded read rather than getline. A .res is the binary spelling of the
+    // same extension and may carry no newline at all, and reading one into a
+    // string to look at its first line is a file-sized allocation for a header
+    // that is never longer than this.
+    char buffer[512];
+    file.read(buffer, sizeof(buffer));
+    std::string line(buffer, static_cast<size_t>(file.gcount()));
+    const auto newline = line.find('\n');
+    if (newline != std::string::npos) line.resize(newline);
+    static const std::regex type_regex(R"re(^\[gd_resource[^\]]*type="([^"]+)")re");
+    std::smatch match;
+    if (std::regex_search(line, match, type_regex) && match.size() > 1) {
+        const auto declared = match[1].str();
+        // A header long enough to be a payload rather than a class name is not
+        // one, and this value is echoed back to a caller.
+        if (!declared.empty() && declared.size() <= 128) return declared;
+    }
+    return {};
+}
+
 struct FileFacts {
     std::string uid;
+    std::string declared_type;
     std::vector<std::string> dependencies;
 };
 
@@ -269,6 +297,12 @@ void ResourceIndexer::scan(const std::string& root_dir) {
                         if (type == "PackedScene" || type == "Resource") {
                             facts.dependencies = extractDependenciesFromPath(entry.path());
                         }
+                        // The file is already being read for its dependencies,
+                        // so the type on its first line costs nothing more and
+                        // is memoized with the rest.
+                        if (type == "Resource") {
+                            facts.declared_type = extractDeclaredTypeFromPath(entry.path());
+                        }
                     } else if (ext != ".uid" && ext != ".import") {
                         facts.uid = extractUidSidecar(entry.path());
                         if (facts.uid.empty()) {
@@ -285,6 +319,7 @@ void ResourceIndexer::scan(const std::string& root_dir) {
                 info.filename = filename;
                 info.type = type;
                 info.uid = uid;
+                info.declared_type = facts.declared_type;
                 info.file_size = file_size;
                 info.dependencies = std::move(deps);
 

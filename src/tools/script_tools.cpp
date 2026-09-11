@@ -2,6 +2,7 @@
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/common/engine_version.hpp"
 #include "didi/offline/gdscript_diagnostics.hpp"
 #include "didi/offline/resource_indexer.hpp"
 #include "didi/runtime/session_client.hpp"
@@ -139,24 +140,6 @@ CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcCli
     });
 }
 
-namespace {
-
-// "Godot Engine v4.7.stable.official" and "Godot v4.5.1.stable.official" are
-// the two spellings in play, one from the shipped dump's header and one from
-// the engine itself. Only the major and minor decide whether the API a caller
-// is reading matches the engine in front of them, so only those are compared;
-// a patch difference is not a mismatch worth shouting about.
-std::string majorMinorOf(const std::string& version) {
-    const auto v = version.find_first_of("0123456789");
-    if (v == std::string::npos) return {};
-    const auto dot = version.find('.', v);
-    if (dot == std::string::npos) return {};
-    const auto end = version.find_first_not_of("0123456789", dot + 1);
-    return version.substr(v, (end == std::string::npos ? version.size() : end) - v);
-}
-
-} // namespace
-
 CallToolResult handleScriptReflectClass(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     std::string class_name = args.value("class_name", "");
     if (class_name.empty()) {
@@ -174,17 +157,10 @@ CallToolResult handleScriptReflectClass(const json& args, std::shared_ptr<ipc::I
     const auto attached = sessions ? sessions->activeSession()
                                    : std::optional<runtime::SessionDescriptor>{};
     if (attached.has_value() && doc.contains("api_version") && doc["api_version"].is_string()) {
-        const auto& engine = attached->engine_version;
-        const auto pinned_line = majorMinorOf(doc["api_version"].get<std::string>());
-        const auto engine_line = majorMinorOf(engine);
-        doc["attached_engine_version"] = engine.empty() ? json(nullptr) : json(engine);
-        if (engine_line.empty() || pinned_line.empty()) {
-            // An extension older than the field publishes no version. Unknown
-            // is not a match, and saying nothing would read as one.
-            doc["api_version_matches_attached_engine"] = nullptr;
-        } else {
-            doc["api_version_matches_attached_engine"] = pinned_line == engine_line;
-        }
+        // An extension older than the field publishes no version, which the
+        // shared helper reports as unknown rather than as a match.
+        versions::annotateApiVersion(doc, doc["api_version"].get<std::string>(),
+                                     attached->engine_version);
     }
     return CallToolResult::successJson(doc);
 }

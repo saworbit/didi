@@ -1,3 +1,4 @@
+#include "didi/common/engine_version.hpp"
 #include <algorithm>
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
@@ -957,6 +958,70 @@ static void test_resource_inspect_tells_a_directory_from_an_absent_path() {
 
     // The two answers are different, which is the whole point.
     ASSERT_TRUE(directory_text != absent.content[0].text);
+}
+
+static void test_resource_inspect_reads_the_type_out_of_the_file() {
+    // Break caught: `type` came from the extension, so every .tres read back as
+    // "Resource". A valid CanvasItemMaterial and a file whose type is not a
+    // Godot class at all were reported identically, differing only in byte
+    // count, on the tool named inspect (#467).
+    ScopedToolProject project("resource-inspect-type");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("mat.tres",
+                   "[gd_resource type=\"CanvasItemMaterial\" format=3]\n"
+                   "\n[resource]\n");
+    writeAuditFile("art/logo.svg", "<svg/>\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto inspected = didi::json::parse(
+        registry.callTool("resource_inspect",
+                          didi::json{{"resource_path", "res://mat.tres"}})
+            .content[0].text);
+    ASSERT_EQ(inspected["resource_type"], "CanvasItemMaterial");
+
+    // The extension-derived class stays where it was, because project_list_resources
+    // filters on it and a caller asking for every Resource still means every .tres.
+    ASSERT_EQ(inspected["type"], "Resource");
+
+    // A file that is not a text resource has no such question to answer, so the
+    // field is not there at all rather than always null.
+    const auto image = didi::json::parse(
+        registry.callTool("resource_inspect",
+                          didi::json{{"resource_path", "res://art/logo.svg"}})
+            .content[0].text);
+    ASSERT_TRUE(!image.contains("resource_type"));
+}
+
+static void test_api_version_note_compares_the_engine_line() {
+    // Break caught: resource_create's property_check reported
+    // `checked: true` with the dump's api_version and nothing about the engine
+    // actually attached. A property added in 4.7 passed the check and was then
+    // dropped by the 4.5.1 engine that loaded the file, which is the exact
+    // failure the check exists to prevent. script_reflect_class already
+    // answered this; both now read the same helper (#466).
+    const auto note = [](const char* api, const char* engine) {
+        didi::json target = didi::json::object();
+        didi::versions::annotateApiVersion(target, api, engine);
+        return target;
+    };
+
+    const auto gap = note("Godot Engine v4.7.stable.official",
+                          "Godot Engine v4.5.1.stable.official");
+    ASSERT_EQ(gap["api_version_matches_attached_engine"], false);
+    ASSERT_EQ(gap["attached_engine_version"], "Godot Engine v4.5.1.stable.official");
+
+    // A patch difference is not a mismatch worth shouting about, and the two
+    // spellings in play differ.
+    ASSERT_EQ(note("Godot Engine v4.5.stable.official",
+                   "Godot v4.5.1.stable.official")["api_version_matches_attached_engine"],
+              true);
+
+    // An extension older than the field publishes no version. Unknown is not a
+    // match, and saying nothing would read as one.
+    ASSERT_TRUE(note("Godot Engine v4.7.stable.official", "")
+                    ["api_version_matches_attached_engine"].is_null());
 }
 
 static void test_audit_does_not_call_third_party_addon_files_orphans() {
@@ -2025,11 +2090,13 @@ static void test_resource_create_serializes_colors_quaternions_and_dictionaries(
 
     // A type the pinned API reference does not carry, because this is about how
     // values are rendered rather than about which names a type declares, and
-    // the name check has nothing to compare a script class against. The
-    // declared-name check itself is covered in test_resource_references.cpp.
+    // the name check has nothing to compare a script class against. That is the
+    // escape hatch allow_unknown_type exists for, so it is named here (#465).
+    // The declared-name check itself is covered in test_resource_references.cpp.
     const didi::json args = {
         {"save_path", "res://materials/typed.tres"},
         {"resource_type", "DidiLiteralFixtureResource"},
+        {"allow_unknown_type", true},
         {"properties", {
             {"albedo_color", {{"r", 0.25}, {"g", 0.5}, {"b", 0.75}, {"a", 1.0}}},
             {"spin", {{"type", "Quaternion"}, {"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"w", 1.0}}},
@@ -2187,6 +2254,7 @@ static void test_resource_create_refuses_what_it_cannot_write() {
     const auto dictionary = registry.callTool("resource_create", didi::json{
         {"save_path", "res://meta/notes.tres"},
         {"resource_type", "DidiLiteralFixtureResource"},
+        {"allow_unknown_type", true},
         {"properties", {{"notes", {{"type", "material"}, {"revision", 3}}}}}
     });
     ASSERT_TRUE(!dictionary.isError);
@@ -4114,6 +4182,10 @@ struct RegisterToolTests {
                      test_path_validation_failures_carry_a_code_too);
         registerTest("Tools.ResourceInspectDirectoryVersusAbsent",
                      test_resource_inspect_tells_a_directory_from_an_absent_path);
+        registerTest("Tools.ResourceInspectReadsDeclaredType",
+                     test_resource_inspect_reads_the_type_out_of_the_file);
+        registerTest("Tools.ApiVersionNoteComparesEngineLine",
+                     test_api_version_note_compares_the_engine_line);
         registerTest("Tools.AuditSkipsAddonOrphans",
                      test_audit_does_not_call_third_party_addon_files_orphans);
         registerTest("Tools.LocalWorkIsNotAFallback",

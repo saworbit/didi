@@ -338,7 +338,7 @@ void refuses_properties_the_type_does_not_declare() {
 // without declaring -- sources/0 on a TileSet, _data on a Curve -- have to keep
 // working. They are reported rather than refused, and a type the reference does
 // not carry at all is not checked rather than refused.
-void writes_storage_only_and_unknown_types_without_refusing() {
+void writes_storage_only_names_and_gates_an_unknown_type() {
     ProjectFixture project("storage-only");
     const auto stored = create({
         {"save_path", "res://art/curve.tres"},
@@ -354,13 +354,32 @@ void writes_storage_only_and_unknown_types_without_refusing() {
     ASSERT_EQ(payload["property_check"]["not_declared_but_written"].size(), size_t(1));
     ASSERT_EQ(payload["property_check"]["not_declared_but_written"][0], "_data");
 
-    const auto unknown_type = create({
+    // Break caught: a type Godot does not know was written and reported as
+    // created, and the file could not be loaded at all. The check that refuses
+    // one undeclared property was skipped entirely for the larger mistake, and
+    // the reason it was skipped came back as a nested field on a success
+    // nothing forces a caller to read (#465).
+    const json unknown_args = {
         {"save_path", "res://art/custom.tres"},
         {"resource_type", "MyCustomResourceClass"},
         {"properties", json::array({{{"name", "whatever"}, {"value", 1}}})}
-    });
-    ASSERT_TRUE(!unknown_type.isError);
-    ASSERT_EQ(payloadOf(unknown_type)["property_check"]["checked"], false);
+    };
+    const auto refused = create(unknown_args);
+    ASSERT_TRUE(refused.isError);
+    const auto envelope = json::parse(refused.content[0].text);
+    ASSERT_EQ(envelope["error"]["code"], 400);
+    ASSERT_TRUE(envelope["error"]["message"].get<std::string>().find("allow_unknown_type") !=
+                std::string::npos);
+    ASSERT_TRUE(!std::filesystem::exists("art/custom.tres"));
+
+    // The escape hatch stays open, because a class_name script or a GDExtension
+    // type is not in the shipped reference either.
+    json allowed_args = unknown_args;
+    allowed_args["allow_unknown_type"] = true;
+    const auto allowed = create(allowed_args);
+    ASSERT_TRUE(!allowed.isError);
+    ASSERT_EQ(payloadOf(allowed)["property_check"]["checked"], false);
+    ASSERT_EQ(payloadOf(allowed)["property_check"]["allowed_by"], "allow_unknown_type");
 }
 
 struct Register {
@@ -368,7 +387,7 @@ struct Register {
         registerTest("resource_references.refuses_undeclared_properties",
                      refuses_properties_the_type_does_not_declare);
         registerTest("resource_references.storage_only_names_still_write",
-                     writes_storage_only_and_unknown_types_without_refusing);
+                     writes_storage_only_names_and_gates_an_unknown_type);
         registerTest("resource_references.tileset_with_atlas_and_texture",
                      writes_a_tileset_with_an_atlas_source_and_a_texture);
         registerTest("resource_references.shared_path_gets_one_entry",
