@@ -68,6 +68,27 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `res://.didi/` is not listed or searched as project content (#468). Didi
+  keeps its blackboard and crash state there, and `query_project_resources`
+  reported those files as project resources while `project_search_text`
+  returned hits inside them. An agent auditing a project saw two files nobody
+  created, and a search over a project that uses the blackboard came back with
+  values the agent itself had written earlier in the session, as evidence about
+  the project. Didi's own lock file also surfaced in
+  `unsearchable_extensions`. Godot's resource filesystem ignores
+  dot-directories; the index and both searches now skip this one, and
+  `project_audit_assets` inherits it through the shared index.
+
+- `project_search_symbols` counts a file it reached and could not read symbols
+  from (#469). A `.tres` in the search path was neither scanned, nor skipped,
+  nor unsearchable, and its bytes were counted anyway, so the response read
+  `scanned_files: 0` with `scanned_bytes: 76`. Those counters are the only
+  thing separating "I searched and there was nothing" from "I searched
+  nothing", and a caller reading that one correctly concludes the path was
+  empty. A file with no symbol extractor now lands in `unsearchable_files`
+  with its extension, the way the text search already handles one it cannot
+  read, and contributes no bytes.
+
 - `resource_create` refuses a `resource_type` Godot does not know (#465). It
   wrote `[gd_resource type="NoSuchResourceType"]`, reported
   `status: "created_offline"`, and left a file the engine cannot load. The

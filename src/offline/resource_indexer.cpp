@@ -252,9 +252,12 @@ void ResourceIndexer::scan(const std::string& root_dir) {
                 // pushed real project files out of the index entirely. Prefix,
                 // for the same reason project_search uses one.
                 const auto name_text = paths::projectPathToUtf8(name);
+                // .didi is this server's own blackboard and crash state. An agent
+                // auditing a project saw two files it did not create and the user
+                // did not either (#468).
                 if (name == ".godot" || name == ".git" || name == "build" || name == ".gemini" ||
                     name == ".vs" || name == "out" || name == "bin" || name == ".worktrees" ||
-                    strings::startsWith(name_text, "build-")) {
+                    name == ".didi" || strings::startsWith(name_text, "build-")) {
                     it.disable_recursion_pending();
                 }
                 continue;

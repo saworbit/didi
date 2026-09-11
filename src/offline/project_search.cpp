@@ -32,7 +32,13 @@ std::string allowedExtensionList() {
     return list;
 }
 const std::set<std::string> kSkippedDirectories = {
-    ".git", ".godot", ".gemini", ".worktrees", "build", "out", "bin", ".vs"
+    // res://.didi/ is this server's own blackboard and crash state, not the
+    // user's work. Searching it returned values the agent itself wrote earlier
+    // in the session as evidence about the project, which is a feedback loop
+    // rather than noise, and put didi's .lock file in unsearchable_extensions
+    // as a fact about the project (#468). Godot's own resource filesystem
+    // ignores dot-directories for the same reason.
+    ".git", ".godot", ".gemini", ".worktrees", ".didi", "build", "out", "bin", ".vs"
 };
 
 // Out of source build trees sit beside build/ and are named after the generator
@@ -624,7 +630,27 @@ Result<SearchResponse> ProjectSearch::searchSymbols(const SymbolSearchOptions& o
     for (const auto& file : files.value()) {
         const bool gdscript = strings::endsWith(file.resource_path, ".gd");
         const bool csharp = strings::endsWith(file.resource_path, ".cs");
-        if (!gdscript && !csharp) continue;
+        if (!gdscript && !csharp) {
+            // Not scanned, not skipped, not unsearchable, and yet counted in
+            // scanned_bytes: an empty result then read as "the path was empty"
+            // when a file had been reached and simply had no symbol extractor
+            // (#469). The text search already classifies this way; the symbol
+            // search collects the same files and then drops these on the floor.
+            ++response.unsearchable_files;
+            const auto dot = file.resource_path.find_last_of('.');
+            const auto slash = file.resource_path.find_last_of('/');
+            const std::string extension =
+                (dot == std::string::npos || (slash != std::string::npos && dot < slash))
+                    ? std::string()
+                    : asciiFold(file.resource_path.substr(dot));
+            if (response.unsearchable_extensions.size() < kMaxReportedUnsearchableExtensions) {
+                response.unsearchable_extensions.insert(extension.empty() ? "(none)" : extension);
+            }
+            // The bytes were counted when the file was collected, and nothing
+            // read them. Leaving them in reported a scan that did not happen.
+            response.scanned_bytes -= std::min(response.scanned_bytes, file.size);
+            continue;
+        }
         const auto contents = readTextFile(file);
         if (contents.isErr()) {
             ++response.skipped_files;

@@ -401,6 +401,69 @@ void test_out_of_source_build_trees_are_not_searched() {
     ASSERT_TRUE(found.count("res://buildings/tower.gd") == 1u);
 }
 
+void test_didi_state_is_not_project_content() {
+    // Break caught: res://.didi/ is this server's own blackboard and crash
+    // state. project_search_text returned values the agent itself had written
+    // earlier in the session as evidence about the user's project, and didi's
+    // own .lock file came back in unsearchable_extensions (#468).
+    SearchFixture fixture;
+    fixture.write("scripts/player.gd", "func updated_at_ms():\n\tpass\n");
+    fixture.write(".didi/blackboard/default.json", "{\"updated_at_ms\": 1}\n");
+    fixture.write(".didi/session.lock", "pid\n");
+
+    didi::offline::ProjectSearch search(fixture.root());
+    didi::offline::SearchOptions options;
+    options.query = "updated_at_ms";
+    const auto text = search.searchText(options);
+    ASSERT_TRUE(text.isOk());
+
+    for (const auto& match : text.value().matches) {
+        ASSERT_TRUE(match.path.find(".didi") == std::string::npos);
+    }
+    ASSERT_EQ(text.value().matches.size(), 1u);
+    ASSERT_EQ(text.value().matches[0].path, "res://scripts/player.gd");
+
+    // The lock file was reported as a fact about the project. Nothing under
+    // .didi is walked now, so it is not unsearchable either; it is not there.
+    ASSERT_TRUE(text.value().unsearchable_extensions.count(".lock") == 0u);
+}
+
+void test_symbol_search_counts_a_file_it_cannot_read_symbols_from() {
+    // Break caught: a file with no symbol extractor was neither scanned, nor
+    // skipped, nor unsearchable, and its bytes were counted anyway. An empty
+    // matches with scanned_files: 0 and unsearchable_files: 0 describes a
+    // search that did not happen, so a caller correctly concludes the path was
+    // empty when in fact a file was reached (#469).
+    SearchFixture fixture;
+    fixture.write("probe_dir/only.tres", "[gd_resource type=\"Resource\" format=3]\n");
+
+    didi::offline::ProjectSearch search(fixture.root());
+    didi::offline::SymbolSearchOptions options;
+    options.query = "x";
+    options.search_path = "res://probe_dir";
+    const auto symbols = search.searchSymbols(options);
+    ASSERT_TRUE(symbols.isOk());
+
+    ASSERT_EQ(symbols.value().matches.size(), 0u);
+    ASSERT_EQ(symbols.value().scanned_files, 0u);
+    ASSERT_EQ(symbols.value().unsearchable_files, 1u);
+    ASSERT_TRUE(symbols.value().unsearchable_extensions.count(".tres") == 1u);
+
+    // Nothing read the file, so the arithmetic must not claim it did.
+    ASSERT_EQ(symbols.value().scanned_bytes, uintmax_t(0));
+
+    // The text search reaches the same file and does count it as scanned. The
+    // two siblings classified the same file differently, and neither total
+    // reconciled against the other.
+    didi::offline::SearchOptions text_options;
+    text_options.query = "x";
+    text_options.search_path = "res://probe_dir";
+    const auto text = search.searchText(text_options);
+    ASSERT_TRUE(text.isOk());
+    ASSERT_EQ(text.value().scanned_files, 1u);
+    ASSERT_TRUE(text.value().scanned_bytes > 0u);
+}
+
 struct RegisterProjectSearchTests {
     RegisterProjectSearchTests() {
         registerTest("ProjectSearch.TextAndGdscriptSymbols", test_text_and_gdscript_symbols);
@@ -418,6 +481,10 @@ struct RegisterProjectSearchTests {
                      test_paths_outside_the_active_code_page_survive);
         registerTest("ProjectSearch.OutOfSourceBuildTreesAreNotSearched",
                      test_out_of_source_build_trees_are_not_searched);
+        registerTest("ProjectSearch.DidiStateIsNotProjectContent",
+                     test_didi_state_is_not_project_content);
+        registerTest("ProjectSearch.SymbolSearchCountsUnreadableFiles",
+                     test_symbol_search_counts_a_file_it_cannot_read_symbols_from);
     }
 } g_register_project_search_tests;
 
