@@ -8,6 +8,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <future>
 #include <iostream>
 #include <mutex>
@@ -164,6 +166,22 @@ static void test_mcp_phase7_parent_gate_and_alias_identity() {
         ASSERT_TRUE(response.result["content"][0]["text"].get<std::string>().find(name) !=
                     std::string::npos);
     }
+
+    // A preview resolves its target now, so a dry run against a script that is
+    // not there is the 404 the real call would be (#417). This test is about
+    // alias identity in the preview, so it needs a real script to preview.
+    const auto original_directory = std::filesystem::current_path();
+    const auto scratch = original_directory / "build" / "test-projects" / "phase7-alias-preview";
+    std::filesystem::create_directories(scratch);
+    std::filesystem::current_path(scratch);
+    std::ofstream(scratch / "player.gd") << "extends Node\nfunc tick():\n\tpass\n";
+    struct RestoreDirectory {
+        std::filesystem::path directory;
+        ~RestoreDirectory() {
+            std::error_code error;
+            std::filesystem::current_path(directory, error);
+        }
+    } restore{original_directory};
 
     const auto dry_run = [&server](const char* name, int id) {
         didi::mcp::JsonRpcRequest call;

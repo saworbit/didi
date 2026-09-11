@@ -5,6 +5,7 @@
 #include "didi/runtime/session_lock.hpp"
 
 #include <filesystem>
+#include <algorithm>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -63,11 +64,14 @@ public:
     bool connect(const std::string&, int) override { return true; }
     void disconnect() override {}
     bool isConnected() const override { return true; }
-    didi::Result<didi::json> sendRequest(const std::string&, const didi::json&, int) override {
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json&,
+                                         int) override {
         ++requests;
+        methods.push_back(method);
         return didi::json::object();
     }
     int requests{0};
+    std::vector<std::string> methods;
 };
 
 class ScopedPhase6Directory {
@@ -388,7 +392,16 @@ TEST(Phase6, RegistryDryRunNeverDispatchesMutationHandler) {
         {{"target_node", "/root/Player"}, {"property_name", "visible"},
          {"value", false}, {"dry_run", true}});
     ASSERT_FALSE(result.isError);
-    ASSERT_EQ(client->requests, 0);
+
+    // A preview reads its target now, so it is no longer true that a dry run
+    // sends nothing (#417). What has to stay true is that it changes nothing:
+    // the only thing it may send is the read-only probe, and never the
+    // mutation.
+    for (const auto& method : client->methods) {
+        ASSERT_TRUE(method == "scene.getProperty");
+    }
+    ASSERT_TRUE(std::find(client->methods.begin(), client->methods.end(),
+                          "scene.setProperty") == client->methods.end());
     registry.setIpcClient(nullptr);
 }
 
@@ -488,10 +501,16 @@ TEST(Phase6, PreviewSaysItOnlyBindsArguments) {
         safety, "script_patch_method", dryRun(arguments), context);
     ASSERT_FALSE(preview.is_error);
     const auto& mutation_preview = preview.payload["mutation_preview"];
+    // Evaluated with no probe, which is the case where argument binding really
+    // is all the gate can offer. It says so at the top level rather than only
+    // in a nested placeholder string, and does not call the entry a planned
+    // mutation when nothing was planned (#417).
     ASSERT_EQ(mutation_preview["preview_kind"], "argument_binding");
+    ASSERT_EQ(mutation_preview["target_read"], false);
+    ASSERT_EQ(mutation_preview["changes"][0]["kind"], "unverified_mutation");
     const auto before =
         mutation_preview["changes"][0]["before"].get<std::string>();
-    ASSERT_TRUE(before.find("does not show what would change") != std::string::npos);
+    ASSERT_TRUE(before.find("without opening the target") != std::string::npos);
 
     // And the refusal that demands it no longer calls it exact.
     const auto ungated = evaluateBinding(safety, "script_patch_method", arguments, context);
@@ -499,7 +518,8 @@ TEST(Phase6, PreviewSaysItOnlyBindsArguments) {
     ASSERT_EQ(ungated.payload["error"]["code"], 428);
     const auto message = ungated.payload["error"]["message"].get<std::string>();
     ASSERT_TRUE(message.find("exact") == std::string::npos);
-    ASSERT_TRUE(message.find("does not read the target") != std::string::npos);
+    ASSERT_TRUE(message.find("reads the target") != std::string::npos);
+    ASSERT_TRUE(message.find("target_read") != std::string::npos);
 }
 
 TEST(Phase6, RuntimeInputAliasDryRunKeepsInvokedIdentity) {

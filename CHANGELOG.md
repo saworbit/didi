@@ -68,6 +68,21 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- A dry run reads its target, so a preview of a mutation that cannot succeed is
+  no longer shaped like a preview of one that will (#417). Every preview was an
+  echo of the arguments: `scene_remove_node` previewed against a node that does
+  not exist came back byte-identical in shape to one that does, differing only
+  in the path and its hash, and the real call was a 404. An agent using
+  `dry_run` as its safety check before a batch got a clean preview for a typo'd
+  target and found out mid-batch. A preview now resolves a file target on disk,
+  a node target through one read-only property read on the attached engine, and
+  a setting against `project.godot`, and fails the way the real call would
+  rather than minting a token for it. `changes[].before` holds what is actually
+  there: the file's size, the property's current value, the setting's current
+  literal. `target_read` and `preview_kind: "target_state"` say when that
+  happened, and a preview that could not read its target reports
+  `unverified_mutation` rather than calling itself a planned one.
+
 - Work that was never engine work is no longer reported as a fallback (#419).
   26 tools reported `execution_mode: "offline_fallback"` with a healthy editor
   attached. That is the label this server uses to mean you did not get the good

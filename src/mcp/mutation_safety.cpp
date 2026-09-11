@@ -298,7 +298,8 @@ MutationDecision MutationSafety::authorize(const ResolvedToolBinding& binding,
 
 MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
                                           const json& arguments,
-                                          const MutationContext& context) {
+                                          const MutationContext& context,
+                                          const TargetProbe& probe) {
     if (!arguments.is_object()) {
         return errorDecision(binding, 400, "Tool arguments must be an object", context);
     }
@@ -336,6 +337,32 @@ MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
             return errorDecision(binding, 400,
                                  "dry_run and confirmation_token cannot be combined", context);
         }
+        // Read the target before describing it. A preview of a mutation that
+        // cannot succeed now fails the way the real call would, rather than
+        // coming back shaped like one that will (#417).
+        json before;
+        bool target_read = false;
+        if (probe) {
+            if (auto problem = probe(sanitized, before)) {
+                return errorDecision(binding, problem->code, problem->message, context);
+            }
+            target_read = !before.is_null();
+        }
+
+        json change = {{"target", previewArguments(sanitized)}};
+        if (target_read) {
+            change["kind"] = "planned_mutation";
+            change["before"] = std::move(before);
+        } else {
+            // Not "planned_mutation": nothing was planned, the arguments were
+            // hashed. A caller has to be able to branch on that at the top
+            // level rather than by reading a nested placeholder string.
+            change["kind"] = "unverified_mutation";
+            change["before"] =
+                "not read: this tool has no preview probe, so the arguments were bound to a "
+                "token without opening the target";
+        }
+
         json preview_payload = {
             {"tool", binding.invoked_name}, {"project_root", context.project_root},
             {"execution_mode", context.execution_mode},
@@ -343,13 +370,9 @@ MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
             {"route_generation", context.route_generation},
             {"arguments", previewArguments(sanitized)},
             {"binding_hash", bindingHash(binding, sanitized, context)},
-            // The preview binds arguments to a token. It does not open the
-            // target, so it cannot say what would change, and it says that
-            // plainly rather than calling itself exact (#407).
-            {"preview_kind", "argument_binding"},
-            {"changes", json::array({{{"kind", "planned_mutation"},
-                                       {"target", previewArguments(sanitized)},
-                                       {"before", "not read: this preview binds arguments to a token and does not show what would change"}}})},
+            {"preview_kind", target_read ? "target_state" : "argument_binding"},
+            {"target_read", target_read},
+            {"changes", json::array({std::move(change)})},
             {"requires_confirmation", requires_confirmation}
         };
         if (requires_confirmation) {
@@ -395,8 +418,8 @@ MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
     if (confirmation_token.empty()) {
         return errorDecision(binding, 428,
                              "This mutation requires a dry-run preview and the confirmation token "
-                             "it returns, spent on the same arguments. The preview binds those "
-                             "arguments; it does not read the target or show what would change.",
+                             "it returns, spent on the same arguments. The preview reads the "
+                             "target where it can, and says so with target_read when it could not.",
                              context);
     }
 

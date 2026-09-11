@@ -19,6 +19,22 @@ struct MutationContext {
     uint64_t route_generation{0};
 };
 
+// Reads the target a preview is about to describe, without changing it.
+//
+// A dry run exists to answer "will this work, and what will it change". Binding
+// the arguments to a token answers neither: a preview of a mutation that cannot
+// possibly succeed was shaped exactly like a preview of one that will, so an
+// agent using dry_run as its safety check got a clean preview for a typo'd
+// target and discovered it mid-batch (#417).
+//
+// Returning an Error means the real call would fail that way, and the preview
+// fails the same way rather than minting a token for it. Returning nothing
+// having filled `before` means the target was read and the preview can say what
+// is there now. Returning nothing without filling `before` means this tool has
+// no probe, and the preview says so instead of claiming to have planned
+// something.
+using TargetProbe = std::function<std::optional<Error>(const json& arguments, json& before)>;
+
 struct MutationDecision {
     bool execute{true};
     bool is_error{false};
@@ -55,7 +71,8 @@ public:
     MutationDecision authorize(const ResolvedToolBinding& binding, const json& arguments,
                                const MutationContext& context);
     MutationDecision evaluate(const ResolvedToolBinding& binding, const json& arguments,
-                              const MutationContext& context);
+                              const MutationContext& context,
+                              const TargetProbe& probe = {});
 
     static bool isMutation(const ResolvedToolBinding& binding);
     static bool canRequireConfirmation(const ResolvedToolBinding& binding);

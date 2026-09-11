@@ -34,6 +34,22 @@ struct ProjectSettingWrite {
 // depends on which mode ran.
 Result<std::string> settingLiteral(const json& value, int depth = 0);
 
+// What project.godot holds for one setting right now, without writing.
+//
+// writeProjectSetting reports previous_literal, but only by writing. A dry-run
+// preview has to answer "what is there now" without changing anything, which is
+// the difference between a preview that shows the change and one that echoes
+// the arguments back (#417). An absent setting is not an error: not being there
+// is a real answer, reported as existed = false.
+struct ProjectSettingRead {
+    std::string setting;
+    std::string literal;
+    bool existed{false};
+};
+
+Result<ProjectSettingRead> readProjectSetting(const std::filesystem::path& project_root,
+                                              const std::string& setting);
+
 // Persists or removes one setting in project.godot with no engine running.
 //
 // project.godot is a Godot ConfigFile: the first segment of a ProjectSettings
