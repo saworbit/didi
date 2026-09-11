@@ -179,11 +179,21 @@ std::string readFile(const std::filesystem::path& path) {
     return contents.str();
 }
 
-// project.godot is not a resource the indexer returns, so autoloads have to be
-// read directly. An autoload is the one reference that can make a script
+// project.godot is not a resource the indexer returns, so it has to be read
+// directly. An autoload is the one reference that can make a script
 // project-wide, which is exactly the kind a rename must not miss.
-void collectAutoloadImpacts(const std::filesystem::path& root, const std::string& target,
-                            bool file_target, std::vector<Impact>& out) {
+//
+// It is not the only one. run/main_scene is the most load-bearing path in a
+// Godot project, and it was skipped while the autoload three sections below it
+// was reported, so moving the main scene came back impact_count: 0 with
+// target_exists: true -- the answer this tool uses to mean "safe to move"
+// (#421). Rather than keep a list of the keys that hold a path, which goes
+// stale as Godot adds settings, any line in the file whose value names the
+// target counts: boot_splash/image, config/icon, mouse_cursor/custom_image,
+// default_environment and the res:// entries under [editor_plugins] are all
+// covered by the same rule.
+void collectProjectSettingImpacts(const std::filesystem::path& root, const std::string& target,
+                                  bool file_target, std::vector<Impact>& out) {
     const auto text = readFile(root / "project.godot");
     if (text.empty()) return;
 
@@ -194,11 +204,24 @@ void collectAutoloadImpacts(const std::filesystem::path& root, const std::string
             in_autoload = trimmed == "[autoload]";
             return;
         }
-        if (!in_autoload || trimmed.empty()) return;
-        const bool names_target =
-            file_target ? trimmed.find(target) != std::string::npos
-                        : trimmed.find(target + "=") == 0;
-        if (names_target) out.push_back({"res://project.godot", "autoload", number, detailFrom(line)});
+        if (trimmed.empty() || trimmed.front() == ';' || trimmed.front() == '#') return;
+        if (in_autoload) {
+            const bool names_target =
+                file_target ? trimmed.find(target) != std::string::npos
+                            : trimmed.find(target + "=") == 0;
+            if (names_target) {
+                out.push_back({"res://project.godot", "autoload", number, detailFrom(line)});
+            }
+            return;
+        }
+        // Only a path target outside [autoload]. A bare identifier would match
+        // setting keys that have nothing to do with the symbol, and a false
+        // impact is worse here than a missing one is elsewhere.
+        if (!file_target) return;
+        const auto equals = trimmed.find('=');
+        if (equals == std::string::npos) return;
+        if (trimmed.find(target, equals + 1) == std::string::npos) return;
+        out.push_back({"res://project.godot", "project_setting", number, detailFrom(line)});
     });
 }
 
@@ -839,7 +862,7 @@ Result<json> analyzeImpact(const std::string& root_dir, const ProjectImpactOptio
     } else {
         collectNameTargetImpacts(scan, target, impacts);
     }
-    if (!node_path_target) collectAutoloadImpacts(root, target, file_target, impacts);
+    if (!node_path_target) collectProjectSettingImpacts(root, target, file_target, impacts);
 
     std::sort(impacts.begin(), impacts.end(), [](const Impact& left, const Impact& right) {
         return std::tie(left.path, left.line, left.kind, left.detail) <

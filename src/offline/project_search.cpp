@@ -13,7 +13,24 @@ namespace didi::offline {
 namespace fs = std::filesystem;
 namespace {
 
-const std::set<std::string> kAllowedExtensions = {".gd", ".cs", ".tscn", ".tres"};
+// Every plain-text file format a Godot project holds references in. It was the
+// four script and scene formats, so a shader uniform, an input action, a
+// setting key or an import flag returned a confident empty result and three
+// sibling tools could read files this one reported on as if they did not
+// exist (#422).
+const std::set<std::string> kAllowedExtensions = {
+    ".gd", ".cs", ".tscn", ".tres", ".gdshader", ".gdshaderinc", ".godot", ".cfg",
+    ".json", ".import"
+};
+
+std::string allowedExtensionList() {
+    std::string list;
+    for (const auto& extension : kAllowedExtensions) {
+        if (!list.empty()) list += ", ";
+        list += extension;
+    }
+    return list;
+}
 const std::set<std::string> kSkippedDirectories = {
     ".git", ".godot", ".gemini", ".worktrees", "build", "out", "bin", ".vs"
 };
@@ -62,7 +79,8 @@ Result<std::set<std::string>> validateExtensions(const std::vector<std::string>&
             return static_cast<char>(std::tolower(c));
         });
         if (!kAllowedExtensions.count(extension)) {
-            return Error::invalidArgument("extensions may contain only .gd, .cs, .tscn, and .tres");
+            return Error::invalidArgument("extensions may contain only " +
+                                          allowedExtensionList());
         }
         selected.insert(std::move(extension));
     }
@@ -192,7 +210,17 @@ Result<std::vector<FileRecord>> collectFiles(const fs::path& root,
             break;
         }
         auto extension = asciiFold(paths::nativePathToUtf8(iterator->path().extension()));
-        if (!extensions.count(extension)) continue;
+        if (!extensions.count(extension)) {
+            // Counted, not silently passed over. A caller who narrowed the
+            // search deliberately sees their own narrowing here; a caller whose
+            // match is in a format this cannot read at all sees that too, and
+            // either way the empty result is answerable.
+            ++response.unsearchable_files;
+            if (response.unsearchable_extensions.size() < kMaxReportedUnsearchableExtensions) {
+                response.unsearchable_extensions.insert(extension.empty() ? "(none)" : extension);
+            }
+            continue;
+        }
         const auto size = iterator->file_size(ec);
         if (ec || size > kSearchMaxFileBytes || response.scanned_bytes + size > kSearchMaxTotalBytes) {
             ++response.skipped_files;
@@ -516,6 +544,8 @@ json SearchResponse::toJson() const {
     for (const auto& diagnostic : diagnostics) diagnostic_values.push_back(diagnostic.toJson());
     return {{"matches", std::move(match_values)}, {"diagnostics", std::move(diagnostic_values)},
             {"scanned_files", scanned_files}, {"skipped_files", skipped_files},
+            {"unsearchable_files", unsearchable_files},
+            {"unsearchable_extensions", unsearchable_extensions},
             {"scanned_bytes", scanned_bytes}, {"truncated", truncated},
             {"project_root", project_root}, {"search_kind", search_kind},
             {"lexical", lexical}, {"execution_mode", "offline_fallback"}};

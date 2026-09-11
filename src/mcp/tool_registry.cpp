@@ -1369,12 +1369,15 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "project_search_text";
-        t.description = "Searches literal text in bounded project-owned .gd, .cs, .tscn, and .tres files without opening a Godot session.";
+        t.description = "Searches literal text in the bounded project-owned text files a Godot project keeps references in: .gd, .cs, .tscn, .tres, .gdshader, .gdshaderinc, .godot, .cfg, .json and .import, without opening a Godot session. The result reports how many files were not candidates and which extensions they had, so an empty result can be told apart from a string the project does not contain.";
         t.inputSchema = {{"type", "object"}, {"properties", {
             {"query", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256}}},
             {"search_path", {{"type", "string"}, {"default", "res://"}, {"minLength", 6}, {"maxLength", 1024}}},
-            {"extensions", {{"type", "array"}, {"minItems", 1}, {"maxItems", 4}, {"uniqueItems", true},
-                            {"items", {{"type", "string"}, {"enum", {".gd", ".cs", ".tscn", ".tres"}}}}}},
+            {"extensions", {{"type", "array"}, {"minItems", 1}, {"maxItems", 10}, {"uniqueItems", true},
+                            {"items", {{"type", "string"},
+                                       {"enum", {".gd", ".cs", ".tscn", ".tres", ".gdshader",
+                                                 ".gdshaderinc", ".godot", ".cfg", ".json",
+                                                 ".import"}}}}}},
             {"case_sensitive", {{"type", "boolean"}, {"default", true}}},
             {"whole_word", {{"type", "boolean"}, {"default", false}}},
             {"max_results", {{"type", "integer"}, {"default", 100}, {"minimum", 1}, {"maximum", 500}}}

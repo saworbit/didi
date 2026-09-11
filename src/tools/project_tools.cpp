@@ -160,6 +160,11 @@ CallToolResult handleProjectSetSetting(const json& args, std::shared_ptr<ipc::II
 CallToolResult handleProjectSearchText(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     (void)ipc;
     auto options = parseSearchOptions(args);
+    // A reference lives in more formats than a declaration does, so text search
+    // reads every project text format unless the caller narrows it.
+    if (options.isOk() && !args.contains("extensions")) {
+        options.value().extensions = offline::defaultTextSearchExtensions();
+    }
     if (options.isErr()) return searchError(options.error());
     offline::ProjectSearch search(std::filesystem::current_path());
     auto result = search.searchText(options.value());
