@@ -252,6 +252,7 @@ json SpeculativeVerifyResult::toJson() const {
         scripts_json.push_back(std::move(entry));
     }
     json payload = {{"execution_mode", "offline"},
+                    {"repository_root", repository_root},
                     {"base_commit", base_commit},
                     {"carried_uncommitted", carried_uncommitted},
                     {"untracked_excluded", untracked_excluded},
@@ -400,19 +401,51 @@ Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRe
                           "build an isolated copy of it to check against");
     }
     const fs::path repository = paths::projectPathFromUtf8(trimmed(toplevel.value().output));
-
-    auto head = runGit(repository, {"rev-parse", "HEAD"}, 30);
-    if (head.isErr() || head.value().exit_code != 0) {
-        return Error(409, "The repository has no commit to build an isolated copy from");
-    }
-
-    SpeculativeVerifyResult result;
-    result.base_commit = trimmed(head.value().output);
+    const auto repository_name = paths::projectPathToUtf8(repository);
 
     // Where the project sits inside the repository, so the copy can be pointed
     // at the same place rather than at the repository root.
     const auto project_within_repository = fs::relative(project_root, repository, error);
     if (error) return Error::internal("The project is not inside the repository it reports");
+    const auto relative_name = paths::projectPathToUtf8(project_within_repository);
+    const bool project_is_the_repository = project_within_repository == fs::path(".");
+
+    // Whichever work tree encloses the project was adopted, however far above it
+    // sat and without ever saying which one it was. A stray `git init` in a home
+    // directory made that directory "the repository": the next step would have
+    // been a worktree of it plus a copy of its uncommitted state, reported as
+    // `all_ok`. A repository that tracks nothing under the project is not the
+    // project's repository, it merely encloses it, and that is far more likely
+    // to be an accident than an instruction.
+    if (!project_is_the_repository) {
+        auto tracked = runGit(repository, {"ls-files", "--", relative_name}, 30);
+        const bool knows_the_project =
+            tracked.isOk() && tracked.value().exit_code == 0 &&
+            !trimmed(tracked.value().output).empty();
+        if (!knows_the_project) {
+            return Error(409,
+                         "The git work tree above this project is " + repository_name +
+                             ", and it tracks nothing under " + relative_name +
+                             ". That repository encloses the project rather than holding it, so "
+                             "building an isolated copy would copy an unrelated tree. Put the "
+                             "project in a repository of its own, or commit it into this one.",
+                         json{{"repository_root", repository_name},
+                              {"project_within_repository", relative_name},
+                              {"retryable", false}});
+        }
+    }
+
+    auto head = runGit(repository, {"rev-parse", "HEAD"}, 30);
+    if (head.isErr() || head.value().exit_code != 0) {
+        return Error(409,
+                     "The repository at " + repository_name +
+                         " has no commit to build an isolated copy from",
+                     json{{"repository_root", repository_name}, {"retryable", false}});
+    }
+
+    SpeculativeVerifyResult result;
+    result.base_commit = trimmed(head.value().output);
+    result.repository_root = repository_name;
 
     const auto sandbox_root = fs::temp_directory_path(error) / makeSandboxName();
     if (error) return Error::internal("No temporary directory is available for the sandbox");
