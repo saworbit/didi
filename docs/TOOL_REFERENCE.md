@@ -83,6 +83,10 @@ The accepted JSON for each Godot type:
 
 An object with a member the target type does not have is refused rather than dropped, because a `z` written to a `Vector2` is a position nobody asked for. Every write is reread, so `value` is what the property now holds and `applied` says whether it changed.
 
+A Godot `float` property is `real_t`, which is 32 bits in a standard build, and `Vector2`, `Vector3` and `Color` are made of the same. A number whose magnitude is above about 3.4e38 becomes `inf` the moment it lands there, so it is refused naming the property, the component when there is one, and the bound. The old behaviour was to write it: the scene file ended up holding `Vector2(inf, 5)`, `inf` propagated through the transform to every child on the next frame, and the value reported back was JSON `null`.
+
+Non-finite numbers read back as the strings `"inf"`, `"-inf"` and `"nan"` rather than as JSON `null`. JSON has no spelling for them, and `null` is what a caller reads as unset, so a property holding `inf` and one that could not be read looked identical. Nothing this tool accepts can produce one any more; a scene written by hand still can.
+
 - `target_node` (`string`, required).
 - `property_name` (`string`, required).
 - `value` (required): JSON null, boolean, signed integer, real, or string compatible with the existing Godot property type.
