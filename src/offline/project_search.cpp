@@ -88,8 +88,7 @@ std::string asciiFold(std::string value) {
 }
 
 bool isWordByte(char value) {
-    const auto c = static_cast<unsigned char>(value);
-    return std::isalnum(c) != 0 || value == '_';
+    return strings::isIdentifierByte(value);
 }
 
 std::string previewOf(std::string_view line) {
@@ -398,13 +397,12 @@ struct IdentifierToken {
 std::vector<IdentifierToken> identifiers(std::string_view line) {
     std::vector<IdentifierToken> tokens;
     for (size_t i = 0; i < line.size();) {
-        if (!(std::isalpha(static_cast<unsigned char>(line[i])) || line[i] == '_')) {
+        if (!strings::isIdentifierStartByte(line[i])) {
             ++i;
             continue;
         }
         const size_t start = i++;
-        while (i < line.size() &&
-               (std::isalnum(static_cast<unsigned char>(line[i])) || line[i] == '_')) ++i;
+        while (i < line.size() && strings::isIdentifierByte(line[i])) ++i;
         tokens.push_back({std::string(line.substr(start, i - start)), start});
     }
     return tokens;

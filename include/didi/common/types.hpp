@@ -9,6 +9,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cstdint>
+#include <cctype>
 #include <memory>
 #include "json.hpp"
 
@@ -185,6 +186,23 @@ namespace strings {
         return result;
     }
 
+    // GDScript and C# both allow Unicode letters in identifiers (GDScript follows
+    // UAX#31). Source is read as UTF-8 bytes, so every byte of a non-ASCII letter
+    // is >= 0x80 and has to count as part of the name. Classifying those bytes as
+    // separators truncates a name to its ASCII prefix, which is worse than
+    // dropping it: the fragment looks like a real identifier.
+    inline bool isIdentifierByte(char value) {
+        const auto byte = static_cast<unsigned char>(value);
+        if (byte >= 0x80) return true;
+        return std::isalnum(byte) != 0 || byte == '_';
+    }
+
+    inline bool isIdentifierStartByte(char value) {
+        const auto byte = static_cast<unsigned char>(value);
+        if (byte >= 0x80) return true;
+        return std::isalpha(byte) != 0 || byte == '_';
+    }
+
     inline std::string replaceAll(std::string str, const std::string& from, const std::string& to) {
         if (from.empty()) return str;
         size_t start_pos = 0;
@@ -197,3 +215,5 @@ namespace strings {
 }
 
 } // namespace didi
+
+

@@ -205,7 +205,7 @@ If the reference file is not installed next to the binary, `source` is `builtin_
 
 ### `script_get_symbols` — Offline
 
-Extracts functions, variables, signals, enums, and inner classes from GDScript text using the same comment/string-aware declaration scanner as project search. Inline or preceding-line annotations such as `@export_range`, `@onready`, and `@rpc`, plus `static func`, are recognized. File reads, including UTF-8 paths on Windows, are confined to the project root.
+Extracts functions, variables, signals, enums, and inner classes from GDScript text using the same comment/string-aware declaration scanner as project search. Inline or preceding-line annotations such as `@export_range`, `@onready`, and `@rpc`, plus `static func`, are recognized. Identifier names may hold the Unicode letters GDScript permits, and are reported whole. File reads, including UTF-8 paths on Windows, are confined to the project root.
 
 - `file_path` (`string`, optional).
 - `source_text` (`string`, optional).

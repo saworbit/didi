@@ -81,9 +81,16 @@ struct SignalDeclaration {
     int line{0};
 };
 
+// GDScript identifiers may hold Unicode letters (UAX#31), and source is read as
+// UTF-8, so a name class that stops at ASCII captures a truncated name and the
+// audit then reports a signal that does not exist. Every byte outside ASCII is
+// part of the name.
+const std::string kIdentifierPattern =
+    R"re((?:[A-Za-z_]|[^\x00-\x7F])(?:[A-Za-z0-9_]|[^\x00-\x7F])*)re";
+
 std::vector<SignalDeclaration> signalsDeclaredIn(const std::string& path,
                                                  const std::string& text) {
-    static const std::regex signal_regex(R"re(^\s*signal\s+([A-Za-z_][A-Za-z0-9_]*))re");
+    static const std::regex signal_regex(R"re(^\s*signal\s+()re" + kIdentifierPattern + R"re())re");
     std::vector<SignalDeclaration> declarations;
     std::istringstream lines(text);
     std::string line;
@@ -112,11 +119,11 @@ std::unordered_set<std::string> usedSignalNames(
     // is_connected is named on its own because `connect` inside it is not
     // followed by an open bracket, so the shorter alternative does not cover it.
     static const std::regex quoted_call(
-        R"re((?:emit_signal|is_connected|connect)\s*\(\s*"([A-Za-z_][A-Za-z0-9_]*)")re");
+        R"re((?:emit_signal|is_connected|connect)\s*\(\s*"()re" + kIdentifierPattern + R"re()")re");
     static const std::regex member_call(
-        R"re(\b([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*(?:emit|connect)\s*\()re");
+        R"re(()re" + kIdentifierPattern + R"re()\s*\.\s*(?:emit|connect)\s*\()re");
     static const std::regex scene_wired(
-        R"re(\[connection[^\]]*signal="([A-Za-z_][A-Za-z0-9_]*)")re");
+        R"re(\[connection[^\]]*signal="()re" + kIdentifierPattern + R"re()")re");
 
     std::unordered_set<std::string> used;
     const auto collect = [&used](const std::string& text, const std::regex& pattern) {
