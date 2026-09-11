@@ -2418,6 +2418,8 @@ void ToolRegistry::registerAllDefaultTools() {
                                           {"description", "Signals declared in GDScript that no file emits, connects to, or wires in a scene."}}},
                 {"include_import_health", {{"type", "boolean"}, {"default", true},
                                            {"description", "Existing Godot .import metadata with missing sources or outputs, malformed/unsafe paths, or source files newer than their outputs."}}},
+                {"include_addon_orphans", {{"type", "boolean"}, {"default", false},
+                                           {"description", "Count files under res://addons/ as orphans. Off by default: addons are third-party code a developer did not write and is not responsible for tidying. excluded_addon_orphans reports how many were left out."}}},
                 {"max_findings", {{"type", "integer"}, {"minimum", 1}, {"maximum", 5000}, {"default", 500}}}
             }},
             {"additionalProperties", false}

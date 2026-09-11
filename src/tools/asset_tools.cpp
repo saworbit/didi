@@ -863,7 +863,8 @@ CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::I
     for (const auto& [key, target] : {std::pair<const char*, bool*>{"include_orphans", &options.include_orphans},
                                       {"include_broken_references", &options.include_broken_references},
                                       {"include_dead_signals", &options.include_dead_signals},
-                                      {"include_import_health", &options.include_import_health}}) {
+                                      {"include_import_health", &options.include_import_health},
+                                      {"include_addon_orphans", &options.include_addon_orphans}}) {
         if (!args.contains(key)) continue;
         if (!args[key].is_boolean()) {
             return CallToolResult::error(std::string("Invalid audit request: ") + key +

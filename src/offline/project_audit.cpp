@@ -230,10 +230,19 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
 
     json orphans = json::array();
     uint64_t orphan_bytes = 0;
+    size_t excluded_addon_orphans = 0;
     if (options.include_orphans) {
         for (const auto& resource : resources) {
             if (!isOrphanCandidate(resource)) continue;
             if (referenced_paths.count(resource.path) != 0) continue;
+            if (!options.include_addon_orphans &&
+                strings::startsWith(resource.path, "res://addons/")) {
+                // Counted rather than dropped, so the number is explainable and
+                // a caller who does want them knows there is something to ask
+                // for.
+                ++excluded_addon_orphans;
+                continue;
+            }
             orphan_bytes += resource.file_size;
             if (orphans.size() < options.max_findings) {
                 orphans.push_back({{"path", resource.path},
@@ -272,6 +281,8 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         {"scanned_text_files", sources.size()},
         {"orphans", orphans},
         {"orphan_bytes", orphan_bytes},
+        {"excluded_addon_orphans", excluded_addon_orphans},
+        {"addon_orphans_included", options.include_addon_orphans},
         {"broken_references", broken},
         {"dead_signals", dead_signals},
         {"max_findings", options.max_findings},
@@ -289,6 +300,9 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
     result["limitations"] = json::array({
         "A path a script builds at runtime cannot be followed, so an asset in "
         "use may still be listed as an orphan.",
+        "Files under res://addons/ are third-party and are not counted as "
+        "orphans by default. excluded_addon_orphans says how many were left "
+        "out; pass include_addon_orphans to see them.",
         "A signal is reported as dead only when no file emits it, connects to "
         "it, or wires it in a scene. A connection made through a variable name "
         "cannot be seen.",

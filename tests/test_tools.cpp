@@ -904,6 +904,55 @@ static void test_resource_inspect_tells_a_directory_from_an_absent_path() {
     ASSERT_TRUE(directory_text != absent.content[0].text);
 }
 
+static void test_audit_does_not_call_third_party_addon_files_orphans() {
+    // Break caught: the audit's output is advice to delete files, and in a
+    // fresh project most of that advice was about Didi's own brand assets --
+    // 96% of the reported orphan bytes. res://addons/ is a conventional Godot
+    // boundary holding code a developer did not write and is not responsible
+    // for tidying, and the noise is worst in an empty project, which is when
+    // someone is most likely to run an audit for the first time (#427).
+    ScopedToolProject project("audit-addon-orphans");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("addons/didi/didi_mark.svg", "<svg/>\n");
+    writeAuditFile("addons/other/thing.png", "not really a png\n");
+    writeAuditFile("fx.gdshader", "shader_type canvas_item;\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto report = didi::json::parse(
+        registry.callTool("project_audit_assets",
+                          didi::json{{"include_broken_references", false},
+                                     {"include_dead_signals", false},
+                                     {"include_import_health", false}})
+            .content[0].text);
+
+    // The one real orphan is the whole list, not one line in four.
+    ASSERT_EQ(report["orphans"].size(), 1u);
+    ASSERT_EQ(report["orphans"][0]["path"], "res://fx.gdshader");
+
+    // Counted, not silently dropped, so the number is explainable.
+    ASSERT_EQ(report["excluded_addon_orphans"], 2);
+    ASSERT_EQ(report["addon_orphans_included"], false);
+
+    // And a caller who does want them can still ask.
+    const auto with_addons = didi::json::parse(
+        registry.callTool("project_audit_assets",
+                          didi::json{{"include_broken_references", false},
+                                     {"include_dead_signals", false},
+                                     {"include_import_health", false},
+                                     {"include_addon_orphans", true}})
+            .content[0].text);
+    ASSERT_EQ(with_addons["orphans"].size(), 3u);
+    ASSERT_EQ(with_addons["excluded_addon_orphans"], 0);
+    ASSERT_EQ(with_addons["addon_orphans_included"], true);
+
+    // orphan_bytes has to follow the list rather than keep counting what was
+    // excluded, or the headline number stays wrong.
+    ASSERT_TRUE(report["orphan_bytes"].get<uint64_t>() <
+                with_addons["orphan_bytes"].get<uint64_t>());
+}
+
 static void test_project_audit_survives_a_very_long_line() {
     // Break caught twice, from the same edit. Widening the signal scan's name
     // pattern to accept Unicode bytes first turned it into an alternation,
@@ -3810,6 +3859,8 @@ struct RegisterToolTests {
                      test_semantic_failures_carry_a_code_a_client_can_branch_on);
         registerTest("Tools.ResourceInspectDirectoryVersusAbsent",
                      test_resource_inspect_tells_a_directory_from_an_absent_path);
+        registerTest("Tools.AuditSkipsAddonOrphans",
+                     test_audit_does_not_call_third_party_addon_files_orphans);
         registerTest("Tools.ProjectAuditLongLine",
                      test_project_audit_survives_a_very_long_line);
         registerTest("Tools.ProjectImpactFindings",

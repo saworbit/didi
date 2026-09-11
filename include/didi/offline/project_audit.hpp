@@ -29,6 +29,12 @@ struct ProjectAuditOptions {
     // nothing references is usually a level you open by hand, not rubbish, and
     // reporting it as an orphan would train people to ignore the tool.
     bool include_orphans{true};
+    // res:// addons/ is a conventional boundary in Godot: it holds third-party
+    // code a developer did not write and is not responsible for tidying. Didi's
+    // own brand assets were 96% of the reported orphan bytes in a fresh
+    // project, which is exactly when someone is most likely to run an audit for
+    // the first time, and the tool's output is advice to delete files (#427).
+    bool include_addon_orphans{false};
     bool include_broken_references{true};
     bool include_dead_signals{true};
     bool include_import_health{true};
