@@ -685,7 +685,7 @@ static void test_project_audit_survives_a_very_long_line() {
     // a .tscn is, and what the harness project holds. A run broken up by
     // separators stays linear either way and proves nothing.
     std::string packed = "[node name=\"Root\" type=\"Node2D\"]\nmetadata/huge = \"";
-    packed.append(200000, 'x');
+    packed.append(300000, 'x');
     packed += "\"\n";
     writeAuditFile("packed.tscn", packed);
     writeAuditFile("scripts/unit.gd",

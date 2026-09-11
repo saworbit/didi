@@ -78,7 +78,10 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   file. The identifier rule now lives in one place and is shared by
   `script_get_symbols`, `project_search_symbols`, `project_search_text`
   whole-word matching, the audit's signal scan, and the impact and rename
-  scanners, which had also been refusing such a name as not an identifier.
+  scanners, which had also been refusing such a name as not an identifier. The
+  audit's patterns are a bounded character class behind a left boundary: an
+  alternation, an unbounded repeat and a missing boundary each turned a single
+  packed line in a .tscn into a refusal or a scan that ran for minutes.
 
 - Offline `scene_get_hierarchy` no longer answers a different question than the
   one asked (#401). Any `root_path` that did not end in `.tscn` was replaced by
