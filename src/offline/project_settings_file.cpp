@@ -125,6 +125,37 @@ Result<std::string> settingLiteral(const json& value, int depth) {
     return Error::invalidArgument("JSON value cannot be converted to a supported Godot Variant");
 }
 
+Result<ProjectSettingRead> readProjectSetting(const std::filesystem::path& project_root,
+                                              const std::string& setting) {
+    if (setting.empty() || setting.find('/') == std::string::npos) {
+        return Error::invalidArgument("setting must be a slash-delimited ProjectSettings name");
+    }
+    const auto slash = setting.find('/');
+    const auto section = setting.substr(0, slash);
+    const auto key = setting.substr(slash + 1);
+
+    auto contents = readWholeFile(project_root / "project.godot");
+    if (contents.isErr()) return contents.error();
+
+    ProjectSettingRead report;
+    report.setting = setting;
+    std::string current_section;
+    std::istringstream stream(contents.value());
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (isSectionHeader(line)) {
+            current_section = sectionNameOf(line);
+            continue;
+        }
+        if (current_section != section) continue;
+        if (!assignsKey(line, key)) continue;
+        report.existed = true;
+        report.literal = valueTextOf(line);
+    }
+    return report;
+}
+
 Result<ProjectSettingWrite> writeProjectSetting(const std::filesystem::path& project_root,
                                                 const std::string& setting,
                                                 const json& value,

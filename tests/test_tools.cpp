@@ -996,6 +996,66 @@ static void test_local_work_is_not_reported_as_a_fallback() {
               "local_session_management");
 }
 
+static void test_dry_run_reads_its_target_before_describing_it() {
+    // Break caught: every preview was an echo of the arguments, so a preview of
+    // a mutation that cannot possibly succeed was shaped exactly like a preview
+    // of one that will. An agent using dry_run as its safety check before a
+    // batch got a clean preview for a typo'd target and found out mid-batch
+    // (#417).
+    ScopedToolProject project("dry-run-reads-target");
+    writeAuditFile("project.godot",
+                   "config_version=5\n\n[application]\nconfig/name=\"Probe\"\n");
+    writeAuditFile("player.gd", "extends Node\nfunc tick():\n\tpass\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto preview = [&](const didi::json& arguments) {
+        auto call = arguments;
+        call["dry_run"] = true;
+        const auto result = registry.callTool("script_patch_method", call);
+        return std::pair<bool, didi::json>{
+            result.isError, didi::json::parse(result.content[0].text, nullptr, false)};
+    };
+
+    // A target that is there previews, and says what is there now rather than
+    // echoing the path back.
+    const auto [real_error, real] = preview(
+        didi::json{{"file_path", "res://player.gd"},
+                   {"method_name", "tick"},
+                   {"new_definition", "func tick():\n\tpass\n"}});
+    ASSERT_TRUE(!real_error);
+    ASSERT_EQ(real["mutation_preview"]["target_read"], true);
+    ASSERT_EQ(real["mutation_preview"]["preview_kind"], "target_state");
+    ASSERT_EQ(real["mutation_preview"]["changes"][0]["kind"], "planned_mutation");
+    ASSERT_EQ(real["mutation_preview"]["changes"][0]["before"]["exists"], true);
+
+    // A target that is not there fails the way the real call would, rather than
+    // coming back as a success with the typo echoed inside it.
+    const auto [missing_error, missing] = preview(
+        didi::json{{"file_path", "res://no_such_script.gd"},
+                   {"method_name", "tick"},
+                   {"new_definition", "func tick():\n\tpass\n"}});
+    ASSERT_TRUE(missing_error);
+    ASSERT_EQ(missing["error"]["code"], 404);
+
+    // And no token is minted for a call that cannot run.
+    ASSERT_TRUE(missing.dump().find("confirmation_token") == std::string::npos);
+
+    // A setting preview reads the literal project.godot holds, which is the
+    // before half of a before/after that used to be a placeholder string.
+    auto setting_call = didi::json{{"setting", "application/config/name"},
+                                   {"value", "Renamed"},
+                                   {"dry_run", true}};
+    const auto setting = didi::json::parse(
+        registry.callTool("project_set_setting", setting_call).content[0].text);
+    ASSERT_EQ(setting["mutation_preview"]["target_read"], true);
+    ASSERT_EQ(setting["mutation_preview"]["changes"][0]["before"]["exists"], true);
+    ASSERT_TRUE(setting["mutation_preview"]["changes"][0]["before"]["literal"]
+                    .get<std::string>()
+                    .find("Probe") != std::string::npos);
+}
+
 static void test_project_audit_survives_a_very_long_line() {
     // Break caught twice, from the same edit. Widening the signal scan's name
     // pattern to accept Unicode bytes first turned it into an alternation,
@@ -3908,6 +3968,8 @@ struct RegisterToolTests {
                      test_audit_does_not_call_third_party_addon_files_orphans);
         registerTest("Tools.LocalWorkIsNotAFallback",
                      test_local_work_is_not_reported_as_a_fallback);
+        registerTest("Tools.DryRunReadsItsTarget",
+                     test_dry_run_reads_its_target_before_describing_it);
         registerTest("Tools.ProjectAuditLongLine",
                      test_project_audit_survives_a_very_long_line);
         registerTest("Tools.ProjectImpactFindings",

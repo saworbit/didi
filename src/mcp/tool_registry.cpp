@@ -7,9 +7,11 @@
 #include "didi/tools/resolved_tool_binding.hpp"
 #include "didi/mcp/phase7_schemas.hpp"
 #include "didi/mcp/schema_validation.hpp"
+#include "didi/offline/project_settings_file.hpp"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -884,6 +886,123 @@ std::optional<CallToolResult> ToolRegistry::selectNamedRuntimeRoute(
     return std::nullopt;
 }
 
+// What a dry run reads before it describes a mutation.
+//
+// Three kinds of target cover the gated surface. A file the tool writes or
+// rewrites, which the filesystem answers for. A node the tool changes, which
+// only the engine can answer for, and only when a route is held. A project
+// setting, whose current literal project.godot holds. Anything else has no
+// probe and the preview says so rather than claiming to have planned something
+// (#417).
+namespace {
+
+struct FileTarget {
+    std::string_view argument;
+    // Whether the call needs the file to be there already. script_patch_method
+    // rewrites a method in an existing script; script_create writes a new one.
+    bool must_exist;
+};
+
+const std::unordered_map<std::string_view, FileTarget>& fileTargets() {
+    static const std::unordered_map<std::string_view, FileTarget> targets = {
+        {"script_patch_method", {"file_path", true}},
+        {"patch_script_symbols", {"file_path", true}},
+        {"script_create", {"script_path", false}},
+        {"resource_create", {"save_path", false}},
+        {"scene_pack_branch", {"scene_path", false}},
+        {"gridmap_export_mesh_library", {"source_scene", true}},
+    };
+    return targets;
+}
+
+// Every gated tool whose target is a node in the edited scene, and the
+// argument that names it.
+const std::unordered_map<std::string_view, std::string_view>& nodeTargets() {
+    static const std::unordered_map<std::string_view, std::string_view> targets = {
+        {"scene_remove_node", "target_node"},
+        {"scene_set_property", "target_node"},
+        {"scene_add_to_group", "target_node"},
+        {"scene_remove_from_group", "target_node"},
+        {"scene_duplicate_node", "target_node"},
+        {"scene_reparent_node", "target_node"},
+        {"script_attach_to_node", "target_node"},
+        {"script_detach_from_node", "target_node"},
+        {"scene_call_method", "target_node"},
+        {"signal_emit", "target_node"},
+        {"signal_connect", "emitter_node"},
+        {"signal_disconnect", "emitter_node"},
+    };
+    return targets;
+}
+
+std::optional<Error> probeFileTarget(const FileTarget& target, const json& arguments,
+                                     json& before) {
+    if (!arguments.is_object() || !arguments.contains(std::string(target.argument)) ||
+        !arguments[std::string(target.argument)].is_string()) {
+        return std::nullopt;
+    }
+    const auto path = arguments[std::string(target.argument)].get<std::string>();
+    auto resolved = paths::resolveProjectFileForWrite(path);
+    if (resolved.isErr()) return resolved.error();
+
+    std::error_code error;
+    const bool exists = std::filesystem::is_regular_file(resolved.value(), error) && !error;
+    if (target.must_exist && !exists) {
+        return Error::notFound("file does not exist beneath the project root: " + path);
+    }
+    if (!exists) {
+        before = {{"exists", false}, {"path", path}};
+        return std::nullopt;
+    }
+    const auto size = std::filesystem::file_size(resolved.value(), error);
+    before = {{"exists", true}, {"path", path},
+              {"size_bytes", error ? 0 : static_cast<uint64_t>(size)}};
+    return std::nullopt;
+}
+
+std::optional<Error> probeNodeTarget(const std::string& argument, const json& arguments,
+                                     const std::shared_ptr<ipc::IIpcClient>& client,
+                                     json& before) {
+    if (!client || !arguments.is_object() || !arguments.contains(argument) ||
+        !arguments[argument].is_string()) {
+        return std::nullopt;
+    }
+    // scene.getProperty resolves the node and reads one value, changing
+    // nothing. Asked for the property this call is about to set, the answer is
+    // the before state; otherwise `name` stands in for "this node is there".
+    const std::string property = arguments.value("property_name", std::string("name"));
+    auto response = client->sendRequest(
+        "scene.getProperty",
+        {{"target_node", arguments[argument]}, {"property_name", property}}, 5000);
+    if (response.isErr()) {
+        // A node that is not there is the failure the real call would hit, and
+        // it is the whole point of reading the target. Anything else means the
+        // probe could not reach the engine, which is not evidence the mutation
+        // would fail, so the preview goes on unverified rather than refusing a
+        // call that might be fine.
+        if (response.error().code == 404) return response.error();
+        return std::nullopt;
+    }
+    const auto& payload = response.value();
+    if (payload.is_object() && payload.contains("error")) {
+        const auto& error = payload["error"];
+        const auto code = error.value("code", 500);
+        // A node that is not there is the failure the real call would hit. A
+        // property that is not there is too, when the call names one.
+        if (code == 404) {
+            return Error(404, error.value("message", std::string("Scene node not found")));
+        }
+        return std::nullopt;
+    }
+    if (payload.is_object() && payload.contains("value")) {
+        before = {{"target_node", arguments[argument]}, {"property_name", property},
+                  {"value", payload["value"]}};
+    }
+    return std::nullopt;
+}
+
+}  // namespace
+
 // The shape the rest of the surface already uses for a caller mistake: a
 // sentence a person or an agent can act on, plus a stable machine code beside
 // it rather than instead of it (#406).
@@ -1002,7 +1121,33 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
         safety_context.route_generation = lease->generation;
         if (lease->descriptor.has_value()) safety_context.session_id = lease->descriptor->session_id;
     }
-    auto safety = m_mutationSafety.evaluate(binding, arguments, safety_context);
+    TargetProbe target_probe;
+    if (const auto file = fileTargets().find(binding.policy_source); file != fileTargets().end()) {
+        target_probe = [target = file->second](const json& call_arguments, json& before) {
+            return probeFileTarget(target, call_arguments, before);
+        };
+    } else if (const auto node = nodeTargets().find(binding.policy_source);
+               node != nodeTargets().end() && lease.has_value()) {
+        target_probe = [argument = std::string(node->second),
+                        client = m_sourceIpcClient](const json& call_arguments, json& before) {
+            return probeNodeTarget(argument, call_arguments, client, before);
+        };
+    } else if (binding.policy_source == "project_set_setting") {
+        target_probe = [](const json& call_arguments, json& before) -> std::optional<Error> {
+            if (!call_arguments.is_object() || !call_arguments.contains("setting") ||
+                !call_arguments["setting"].is_string()) {
+                return std::nullopt;
+            }
+            auto read = offline::readProjectSetting(
+                std::filesystem::current_path(), call_arguments["setting"].get<std::string>());
+            if (read.isErr()) return std::nullopt;
+            before = {{"setting", read.value().setting},
+                      {"exists", read.value().existed},
+                      {"literal", read.value().literal}};
+            return std::nullopt;
+        };
+    }
+    auto safety = m_mutationSafety.evaluate(binding, arguments, safety_context, target_probe);
     if (!safety.execute) {
         auto response = CallToolResult::successJson(std::move(safety.payload));
         response.isError = safety.is_error;
