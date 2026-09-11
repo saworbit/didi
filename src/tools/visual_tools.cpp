@@ -2,6 +2,7 @@
 #include "didi/common/atomic_write.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/tools/phase7_live_forward.hpp"
+#include "didi/tools/visual_test_lab_path.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/offline/resource_indexer.hpp"
@@ -318,8 +319,8 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
     const bool overwrite = args.value("overwrite", false);
 
     // Offline generator: Create an isolated visual testbed scene (.tscn) on disk!
-    std::string lab_scene_path = "res://addons/didi/test_lab_sandbox.tscn";
-    std::string disk_path = "addons/didi/test_lab_sandbox.tscn";
+    std::string lab_scene_path{tools::kVisualTestLabScenePath};
+    std::string disk_path{tools::kVisualTestLabDiskPath};
 
     if (std::filesystem::exists(disk_path) && !overwrite) {
         return CallToolResult::error(

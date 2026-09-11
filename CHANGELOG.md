@@ -89,6 +89,19 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   uniqueness its own description promises, so a repeated pass is refused
   offline the way the engine refuses it live.
 
+- The overwrite gate arms on the target, not on the flag (#425). `overwrite:
+  true` demanded a dry-run preview and the confirmation token it returns even
+  when nothing was behind the path, so a generator or a repeatable setup step
+  paid two extra round trips for every file, including the files that were new.
+  Writing a new file with the flag and writing one without it have identical
+  effects on disk, and only one of them was gated. A path with a file behind it
+  is still gated, because that call destroys something. A token minted while the
+  target existed stays spendable if the target goes before it is spent, which
+  arming on state would otherwise have turned into a refusal for offering the
+  confirmation the caller was told to get. `viewport_create_test_lab` and
+  `create_visual_test_lab` write one fixed path rather than the path their
+  `target_resource_path` names, and are gated on that.
+
 - Symbol scanning keeps a name that is not spelled in ASCII (#416). GDScript
   identifiers may hold Unicode letters, and the scanners classified every byte
   above ASCII as the end of a name, so `CaféMenu` came back as `Caf` and a name
