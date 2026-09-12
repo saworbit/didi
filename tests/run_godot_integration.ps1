@@ -1563,6 +1563,10 @@ try {
         (Tool-Request 422 "project_set_setting" @{ setting = "display/window/size/viewport_widht"; value = 1280 }),
         (Tool-Request 423 "project_get_setting" @{ setting = "display/window/size/viewport_widht" }),
         (Tool-Request 424 "project_set_setting" @{ setting = "display/window/size/viewport_width"; value = 1280 }),
+        (Tool-Request 470 "project_set_setting" @{ setting = "display/window/size/viewport_width"; value = "wide" }),
+        (Tool-Request 471 "project_set_setting" @{ setting = "application/config/name"; value = 42 }),
+        (Tool-Request 472 "project_set_setting" @{ setting = "application/run/main_scene"; value = "res://nope.tscn" }),
+        (Tool-Request 473 "project_get_setting" @{ setting = "application/run/main_scene" }),
         (Tool-Request 51 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/Subject"; script_path = "res://subject.gd" }),
         (Tool-Request 52 "script_detach_from_node" @{ target_node = "/root/SmokeRoot/Subject" }),
         (Tool-Request 53 "editor_undo" @{}),
@@ -1604,6 +1608,8 @@ try {
         (Tool-Request 83 "project_set_input_action" @{ action = "bad_event"; events = @(@{ type = "touch" }) }),
         (Tool-Request 84 "project_set_input_action" @{ action = "bad_deadzone"; deadzone = 1.5; events = @() }),
         (Tool-Request 85 "project_set_input_action" @{ action = "empty_key"; events = @(@{ type = "key" }) }),
+        (Tool-Request 474 "project_remove_input_action" @{ action = "ui_accept" }),
+        (Tool-Request 475 "project_list_input_actions" @{}),
         (Tool-Request 86 "scene_close" @{}),
         (Tool-Request 87 "scene_pack_branch" @{ target_node = "/root/SmokeRoot/Container"; scene_path = "res://packed_branch.tscn" }),
         (Tool-Request 88 "scene_pack_branch" @{ target_node = "/root/SmokeRoot/Container"; scene_path = "res://packed_branch.tscn" }),
@@ -2875,6 +2881,20 @@ try {
     Assert-True ($realSetting.defined_by_engine -eq $true) "A real setting name was not reported as engine-defined."
     Assert-True ((Tool-Payload $byId[44]).defined_by_engine -eq $false) "A custom setting was reported as engine-defined."
 
+    # Having established that the engine defines the setting, the tool wrote
+    # whatever it was handed. A String into an int setting and an int into the
+    # project name were both persisted and reported as success, and a res://
+    # value was never checked against the filesystem at all, so run/main_scene
+    # could be pointed at a file that is not there (#490).
+    Assert-True $byId[470].result.isError "A String was written into an integer project setting."
+    Assert-True ($byId[470].result.content[0].text -match "Project setting type mismatch") "The refusal was not the type check."
+    Assert-True ($byId[470].result.content[0].text -match "expected_type") "The type refusal did not name the type the setting holds."
+    Assert-True $byId[471].result.isError "An integer was written into the project name."
+    Assert-True $byId[472].result.isError "A main scene that is not on disk was persisted."
+    Assert-True ($byId[472].result.content[0].text -match "nope.tscn") "The missing-resource refusal did not name the path."
+    Assert-True (-not $byId[473].result.isError) "The refused main scene write damaged the setting anyway."
+    Assert-True ((Tool-Payload $byId[473]).value -ne "res://nope.tscn") "The refused main scene value reached project.godot."
+
     Assert-True ((Tool-Payload $byId[51]).undo_redo_registered) "Script attachment bypassed UndoRedo."
     Assert-True ((Tool-Payload $byId[52]).detached -eq $true) "Script detachment was not observed."
     Assert-True (-not $byId[53].result.isError) "Script detach could not be undone."
@@ -2925,10 +2945,20 @@ try {
     $replacedInputAction = @((Tool-Payload $byId[80]).actions | Where-Object action -eq "phase_two_jump")[0]
     Assert-True (@($replacedInputAction.events).Count -eq 0) "Explicit input action replacement did not persist."
     Assert-True ((Tool-Payload $byId[81]).removed -eq $true) "Input action removal did not report success."
+    # The remove path reported the defaults rather than what the action had.
+    Assert-True ((Tool-Payload $byId[81]).deadzone -eq 0.1) "Input action removal echoed a default deadzone rather than the action's."
     Assert-True (-not (@((Tool-Payload $byId[82]).actions.action) -contains "phase_two_jump")) "Removed input action remained persisted."
     Assert-True $byId[83].result.isError "Unknown input event type was accepted."
     Assert-True $byId[84].result.isError "Out-of-range InputMap deadzone was accepted."
     Assert-True $byId[85].result.isError "Empty key event was accepted."
+
+    # has_setting says yes for ui_accept because the engine registers the
+    # built-in map as settings. Removing one wrote nothing to project.godot,
+    # left the live InputMap without the action, and said persisted: true, so
+    # the editor lost UI navigation until the next load put it back (#485).
+    Assert-True $byId[474].result.isError "An engine default input action was removed from the live InputMap."
+    Assert-True ($byId[474].result.content[0].text -match "engine default") "The refusal did not say the action is an engine default."
+    Assert-True (@((Tool-Payload $byId[475]).actions.action) -contains "ui_accept") "ui_accept went missing from the live InputMap."
 
     Assert-True $byId[86].result.isError "Scene close discarded unsaved edits without explicit permission."
     Assert-True ((Tool-Payload $byId[87]).saved -eq $true) "Packed branch did not report a saved PackedScene."
