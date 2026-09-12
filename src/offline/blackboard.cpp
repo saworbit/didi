@@ -456,6 +456,8 @@ Result<std::vector<std::string>> blackboardSplitPath(const std::string& path) {
     return segments;
 }
 
+bool isLegalBlackboardBoardName(const std::string& board) { return isLegalBoardName(board); }
+
 Result<std::filesystem::path> blackboardBoardPath(const std::string& board) {
     if (!isLegalBoardName(board)) {
         return Error::invalidArgument("board name is not legal");
@@ -1193,6 +1195,17 @@ Result<json> blackboardReadResource(const std::string& board, const std::string&
     if (kind != "state" && kind != "tasks") {
         return Error::invalidArgument("blackboard resource kind must be state or tasks");
     }
+    // Asked before the read, because the read is what would create the file.
+    //
+    // A board nobody has ever written answered exactly like a board that exists
+    // and is empty, so an agent checking whether a coordination board is there
+    // before joining it could not tell "empty, go ahead" from "you have the name
+    // wrong and are about to start a second, private board nobody is reading".
+    // Finding each other is the one question the blackboard has to be able to
+    // answer (#514). Not a 404: boards are created on demand by the write tools,
+    // so reading one that does not exist yet is a legitimate thing to do and the
+    // answer is "it is not there", not "you may not ask".
+    const bool board_exists = blackboardFileStamp(board).has_value();
     return withBoardLock(board, [&](const std::filesystem::path& file) -> Result<json> {
         auto loaded = loadBoard(file);
         if (loaded.isErr()) return loaded.error();
@@ -1204,11 +1217,13 @@ Result<json> blackboardReadResource(const std::string& board, const std::string&
             if (saved.isErr()) return saved.error();
         }
         if (kind == "state") {
-            return json{{"board", board}, {"state", board_data.state}, {"meta", board_data.meta}};
+            return json{{"board", board}, {"exists", board_exists},
+                        {"state", board_data.state}, {"meta", board_data.meta}};
         }
         json tasks = json::array();
         for (const auto& entry : board_data.tasks.items()) tasks.push_back(entry.value());
-        return json{{"board", board}, {"tasks", tasks}, {"count", tasks.size()}};
+        return json{{"board", board}, {"exists", board_exists},
+                    {"tasks", tasks}, {"count", tasks.size()}};
     });
 }
 

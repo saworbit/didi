@@ -17,6 +17,15 @@ public:
     void registerResource(ResourceDefinition res);
     const ResourceDefinition* getResource(const std::string& uri) const;
     std::vector<ResourceDefinition> listResources() const;
+
+    // The parameterised URI shapes this server serves but cannot enumerate.
+    // Boards are created on demand, so the set of blackboard URIs is not
+    // knowable in advance and only `default` can appear in listResources().
+    std::vector<ResourceTemplate> listResourceTemplates() const;
+
+    // The mime type for a URI this registry can serve, whether or not that
+    // exact URI is registered.
+    std::string mimeTypeFor(const std::string& uri) const;
     // The scope says which era asked and which runtime session it named, and
     // reaches the read handler through a thread local because the handler
     // signature is nullary. Defaults to a legacy read, which inherits the

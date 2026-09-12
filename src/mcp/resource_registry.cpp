@@ -174,9 +174,26 @@ namespace {
 // blackboard://<board>/<state|tasks>. Boards are created on demand, so the set of
 // URIs is not knowable in advance; the default board is registered so it appears
 // in resources/list, and anything else resolves here.
+// Every malformed blackboard URI used to come back with the kind error, which
+// named the one segment that was fine in two of the three shapes: a query string
+// on a correct kind, and a traversal in the board name, were both told to fix a
+// kind that was already `state`. The refusals were right; only the diagnosis was
+// wrong (#515). Each part is checked in the order it appears, and each names
+// itself.
 Result<std::string> readBlackboardUri(const std::string& uri) {
     constexpr const char* kScheme = "blackboard://";
     const std::string rest = uri.substr(std::string(kScheme).size());
+
+    // Before the split, because a query or fragment belongs to the URI rather
+    // than to either segment, and splitting first attributes it to the kind.
+    const auto query = rest.find_first_of("?#");
+    if (query != std::string::npos) {
+        const std::string what = rest[query] == '?' ? "query string" : "fragment";
+        return Error::invalidArgument(
+            "blackboard resource URI takes no " + what + ": remove '" +
+            rest.substr(query) + "' and read blackboard://<board>/state or /tasks");
+    }
+
     const auto slash = rest.find('/');
     if (slash == std::string::npos || slash == 0 || slash + 1 >= rest.size()) {
         return Error::invalidArgument(
@@ -184,6 +201,19 @@ Result<std::string> readBlackboardUri(const std::string& uri) {
     }
     const std::string board = rest.substr(0, slash);
     const std::string kind = rest.substr(slash + 1);
+
+    // The board, before the kind. A name carrying a separator splits in a place
+    // nobody meant, so the kind derived from it is not worth reporting on.
+    if (!offline::isLegalBlackboardBoardName(board)) {
+        return Error::invalidArgument(
+            "blackboard board name '" + board +
+            "' is not a legal board name: letters, digits, underscore and hyphen only, "
+            "and no path separators");
+    }
+    if (kind != "state" && kind != "tasks") {
+        return Error::invalidArgument("blackboard resource kind must be state or tasks");
+    }
+
     auto payload = offline::blackboardReadResource(board, kind);
     if (payload.isErr()) return payload.error();
     json document = payload.value();
@@ -191,11 +221,64 @@ Result<std::string> readBlackboardUri(const std::string& uri) {
     return document.dump();
 }
 
+// A well-formed blackboard URI, whether or not the exact one is registered.
+// Only `default` is registered, so the mime type used to be taken from the
+// registry and fell through to text/plain for every other board -- the same JSON
+// document, labelled two ways, so a client branching on mime parsed one board
+// and rendered the other as a wall of text (#513).
+bool blackboardUriIsWellFormed(const std::string& uri) {
+    constexpr const char* kScheme = "blackboard://";
+    const std::string rest = uri.substr(std::string(kScheme).size());
+    if (rest.find_first_of("?#") != std::string::npos) return false;
+    const auto slash = rest.find('/');
+    if (slash == std::string::npos || slash == 0 || slash + 1 >= rest.size()) return false;
+    const std::string kind = rest.substr(slash + 1);
+    return offline::isLegalBlackboardBoardName(rest.substr(0, slash)) &&
+           (kind == "state" || kind == "tasks");
+}
+
 bool isBlackboardUri(const std::string& uri) {
     return uri.rfind("blackboard://", 0) == 0;
 }
 
 } // namespace
+
+// Boards are created on demand by the write tools, so the set of blackboard
+// URIs is not knowable in advance: resources/list publishes the two on
+// `default` and nothing else. A board other than default could therefore be
+// read only by a client that already knew its name, and there was no way to
+// learn one (#514). The parameterised shape is what a caller needs, and the
+// specification has a method for exactly this.
+std::vector<ResourceTemplate> ResourceRegistry::listResourceTemplates() const {
+    return {
+        ResourceTemplate{"blackboard://{board}/state", "Blackboard board state",
+                         "Blackboard state",
+                         "Shared key/value state for one coordination board. Any board name "
+                         "is readable; a board no agent has written yet answers with "
+                         "exists: false rather than looking like an empty one. Boards are "
+                         "created by the blackboard write tools, so they cannot be listed "
+                         "in advance.",
+                         "application/json"},
+        ResourceTemplate{"blackboard://{board}/tasks", "Blackboard board tasks",
+                         "Blackboard tasks",
+                         "The task queue for one coordination board, with the same board "
+                         "naming and the same exists flag as the state resource.",
+                         "application/json"}};
+}
+
+// The mime type for a URI this registry can serve, registered or not.
+//
+// Taking it from the registry alone meant only `default` was labelled
+// application/json: every other board read fine, produced the same JSON
+// document, and was labelled text/plain, so a client branching on mime parsed
+// one board and rendered the next as a wall of text (#513). text/plain stays the
+// answer for a scheme this server does not serve, which is what that fallback is
+// for.
+std::string ResourceRegistry::mimeTypeFor(const std::string& uri) const {
+    if (const auto* registered = getResource(uri)) return registered->mimeType;
+    if (isBlackboardUri(uri) && blackboardUriIsWellFormed(uri)) return "application/json";
+    return "text/plain";
+}
 
 Result<std::string> ResourceRegistry::readResource(const std::string& uri,
                                                   const RequestScope& scope) {

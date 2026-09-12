@@ -196,6 +196,7 @@ Every result carries `resultType`. Cacheable operations also carry `ttlMs` and
 | :--- | :--- | :--- | :--- |
 | `server/discover` | 3600000 | `public` | Supported versions, capabilities and identity are compile-time constants |
 | `prompts/list` | 3600000 | `public` | Prompt definitions carry no session state |
+| `resources/templates/list` | 3600000 | `public` | A URI shape does not depend on the attached session or on which boards exist |
 | `tools/list` | 0 | `private` | Embeds live availability, which flips when an editor starts or stops |
 | `resources/list` | 0 | `private` | Same live availability metadata |
 | `resources/read` | 0 | `private` | Live project and editor state |
@@ -215,6 +216,7 @@ ightarrow$ Server | Reports supported protocol versions, capabilities, and serve
 | `tools/list` | Client $\rightarrow$ Server | Lists all registered tools with JSON input schemas and Didi capability metadata |
 | `tools/call` | Client $\rightarrow$ Server | Executes a tool by name with arguments |
 | `resources/list` | Client $\rightarrow$ Server | Lists all available static and dynamic resources |
+| `resources/templates/list` | Client $\rightarrow$ Server | Lists the parameterised resource shapes, currently `blackboard://{board}/state` and `blackboard://{board}/tasks` |
 | `resources/read` | Client $\rightarrow$ Server | Retrieves contents of a specific resource URI (`godot://...`) |
 | `prompts/list` | Client $\rightarrow$ Server | Lists all registered prompt templates |
 | `prompts/get` | Client $\rightarrow$ Server | Evaluates a prompt template with provided arguments |

@@ -761,6 +761,37 @@ jobs:
           assert hierarchy['scene_tree']['path'].startswith('/root/')
           assert len(hierarchy['scene_tree']['children']) >= 1
 
+          # Boards are created on demand, so resources/list can only publish the
+          # two on `default`. The parameterised shape is what lets a client find
+          # any other board, and an unwritten board must not read like an empty
+          # one (#514). Every board is application/json, not just the registered
+          # one (#513).
+          templates = req('resources/templates/list', {}, 6)['result']
+          template_uris = [t['uriTemplate'] for t in templates['resourceTemplates']]
+          assert template_uris == ['blackboard://{board}/state', 'blackboard://{board}/tasks'], template_uris
+          assert templates['cacheScope'] == 'public' and templates['ttlMs'] > 0
+          for board_uri in ('blackboard://default/state', 'blackboard://other/state',
+                            'blackboard://other/tasks'):
+              entry = req('resources/read', {'uri': board_uri}, 7)['result']['contents'][0]
+              assert entry['mimeType'] == 'application/json', (board_uri, entry['mimeType'])
+              assert json.loads(entry['text'])['board'] == board_uri.split('/')[2], board_uri
+          unwritten = json.loads(req('resources/read', {
+              'uri': 'blackboard://never-created-at-all/state'
+          }, 8)['result']['contents'][0]['text'])
+          assert unwritten['exists'] is False, unwritten
+
+          # Each malformed shape names the part that was actually wrong, rather
+          # than blaming the one segment that was fine (#515).
+          bad_uris = {
+              'blackboard://default/nope': 'kind',
+              'blackboard://default/state?x=1': 'query string',
+              'blackboard://../../etc/state': 'board name',
+          }
+          for bad_uri, expected in bad_uris.items():
+              failed = req('resources/read', {'uri': bad_uri}, 9)
+              assert 'error' in failed, (bad_uri, failed)
+              assert expected in failed['error']['message'], (bad_uri, failed['error']['message'])
+
           logs = json.loads(req('resources/read', {'uri': 'godot://runtime/logs'}, 5)['result']['contents'][0]['text'])
           assert logs['execution_mode'] == 'offline_fallback'
           assert isinstance(logs['records'], list)

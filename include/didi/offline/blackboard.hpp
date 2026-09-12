@@ -147,6 +147,11 @@ Result<json> blackboardTaskList(const BlackboardTaskListRequest& request, Blackb
 Result<std::vector<std::string>> blackboardSplitPath(const std::string& path);
 
 // The directory a board lives in, resolved under the current project root.
+// Whether a string may name a board: letters, digits, underscore and hyphen,
+// within the length cap. Published so the resource URI parser can tell a bad
+// board name from a bad kind rather than reporting one as the other (#515).
+bool isLegalBlackboardBoardName(const std::string& board);
+
 Result<std::filesystem::path> blackboardBoardPath(const std::string& board);
 
 // Reads a whole board as one document, for the `blackboard://` resources. Kind is

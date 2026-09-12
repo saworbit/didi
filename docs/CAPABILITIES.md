@@ -128,8 +128,8 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 | `godot://project/tree` | `offline_fallback` | Filesystem/resource-index snapshot rooted at the explicit canonical Godot project. |
 | `godot://editor/state` | `live`, `offline_fallback` | Live mode reports connection status and active edited-scene root; offline mode reports that no editor is connected. |
 | `godot://runtime/logs` | `live`, `offline_fallback` | Returns Didi's cursor-shaped extension ring when attached, or a schema-compatible server-status record offline. It does not capture arbitrary Godot/external `print()` output. |
-| `blackboard://<board>/state` | `offline_fallback` | Shared state on a board, with the author, reason and expiry recorded per path. The default board is listed; any other resolves on demand. Subscribable. |
-| `blackboard://<board>/tasks` | `offline_fallback` | Tasks on a board with status, lease and dependencies. Lapsed leases are reclaimed before the answer is built. Subscribable. |
+| `blackboard://<board>/state` | `offline_fallback` | Shared state on a board, with the author, reason and expiry recorded per path. The default board is listed and `resources/templates/list` publishes the parameterised shape; any other board resolves on demand and carries `exists` so an unwritten board is distinguishable from an empty one. Served as `application/json` whichever board it is. Subscribable. |
+| `blackboard://<board>/tasks` | `offline_fallback` | Tasks on a board with status, lease and dependencies. Lapsed leases are reclaimed before the answer is built. Carries `exists` and the same parameterised shape as the state resource. Subscribable. |
 
 ## Current limits and safety rules
 

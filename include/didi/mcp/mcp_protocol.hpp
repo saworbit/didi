@@ -393,6 +393,24 @@ struct ToolDefinition {
     }
 };
 
+// A parameterised resource shape, for URIs this server serves but cannot list.
+// RFC 6570 template syntax, which is what the specification asks for.
+struct ResourceTemplate {
+    std::string uriTemplate;
+    std::string name;
+    std::string title;
+    std::string description;
+    std::string mimeType;
+
+    json toJson() const {
+        return {{"uriTemplate", uriTemplate},
+                {"name", name},
+                {"title", title},
+                {"description", description},
+                {"mimeType", mimeType}};
+    }
+};
+
 struct ResourceDefinition {
     std::string uri;
     std::string name;

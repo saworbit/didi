@@ -93,6 +93,136 @@ void test_resources_read_state_and_tasks() {
     ASSERT_TRUE(ResourceRegistry::instance().readResource("blackboard://").isErr());
 }
 
+// Break caught: only blackboard://default/* is a registered resource, so the
+// mime type came from the registry and fell through to text/plain for every
+// other board. The same JSON document was labelled two ways, and a client
+// branching on mime parsed one board and rendered the next as a wall of text
+// (#513).
+void test_every_board_is_served_as_json() {
+    ProjectFixture fixture("mime");
+    ResourceRegistry::instance().registerAllDefaultResources();
+
+    for (const char* uri : {"blackboard://default/state", "blackboard://default/tasks",
+                            "blackboard://other/state", "blackboard://other/tasks"}) {
+        ASSERT_TRUE(ResourceRegistry::instance().readResource(uri).isOk());
+        ASSERT_EQ(ResourceRegistry::instance().mimeTypeFor(uri), std::string("application/json"));
+    }
+    // text/plain stays the answer for a scheme this server does not serve,
+    // which is what that fallback is for.
+    ASSERT_EQ(ResourceRegistry::instance().mimeTypeFor("nonsense://whatever"),
+              std::string("text/plain"));
+    // And for a blackboard URI it would refuse: labelling a refusal
+    // application/json would promise a document there is none of.
+    ASSERT_EQ(ResourceRegistry::instance().mimeTypeFor("blackboard://default/notes"),
+              std::string("text/plain"));
+}
+
+// Break caught: a board nobody had ever written answered exactly like a board
+// that exists and is empty, so an agent checking whether a coordination board
+// is there before joining it could not tell "empty, go ahead" from "you have
+// the name wrong and are about to start a second, private board nobody is
+// reading" (#514).
+void test_a_board_says_whether_it_exists() {
+    ProjectFixture fixture("exists");
+    ResourceRegistry::instance().registerAllDefaultResources();
+
+    auto never = ResourceRegistry::instance().readResource("blackboard://never-written/state");
+    ASSERT_TRUE(never.isOk());
+    const auto never_payload = json::parse(never.value());
+    ASSERT_EQ(never_payload["exists"].get<bool>(), false);
+    ASSERT_TRUE(never_payload["state"].empty());
+
+    // A board that exists and is empty is the other half of the distinction,
+    // and it is the half that was indistinguishable. Written and then cleared,
+    // so the file is real and the state is not.
+    offline::BlackboardWriteRequest request;
+    request.board = "realboard";
+    request.path = "seed";
+    request.value = 1;
+    ASSERT_TRUE(offline::blackboardWrite(request).isOk());
+
+    auto written = ResourceRegistry::instance().readResource("blackboard://realboard/state");
+    ASSERT_TRUE(written.isOk());
+    ASSERT_EQ(json::parse(written.value())["exists"].get<bool>(), true);
+
+    // Tasks carry it too, and reading a board never creates one.
+    auto tasks = ResourceRegistry::instance().readResource("blackboard://still-never/tasks");
+    ASSERT_TRUE(tasks.isOk());
+    ASSERT_EQ(json::parse(tasks.value())["exists"].get<bool>(), false);
+    auto again = ResourceRegistry::instance().readResource("blackboard://still-never/state");
+    ASSERT_TRUE(again.isOk());
+    ASSERT_EQ(json::parse(again.value())["exists"].get<bool>(), false);
+}
+
+// Break caught: three differently malformed URIs came back with the same
+// message, and it named the one segment that was fine in two of the three. The
+// refusals were all correct; only the diagnosis was wrong (#515).
+void test_a_bad_board_uri_names_the_part_that_is_wrong() {
+    ProjectFixture fixture("uri-errors");
+    ResourceRegistry::instance().registerAllDefaultResources();
+
+    const auto messageFor = [](const char* uri) {
+        auto result = ResourceRegistry::instance().readResource(uri);
+        ASSERT_TRUE(result.isErr());
+        return result.error().message;
+    };
+
+    // The kind really is the problem here, and still says so.
+    ASSERT_TRUE(messageFor("blackboard://default/nope").find("kind") != std::string::npos);
+
+    // A query string on a correct kind. Used to be blamed on the kind.
+    const auto query = messageFor("blackboard://default/state?x=1");
+    ASSERT_TRUE(query.find("query string") != std::string::npos);
+    ASSERT_TRUE(query.find("?x=1") != std::string::npos);
+    ASSERT_TRUE(query.find("kind") == std::string::npos);
+
+    // A fragment is the same mistake and says which one it is.
+    ASSERT_TRUE(messageFor("blackboard://default/state#f").find("fragment") != std::string::npos);
+
+    // A traversal in the board name. Used to be blamed on the kind, so a caller
+    // could not tell that the board name was the problem, or that it was
+    // refused on purpose.
+    const auto traversal = messageFor("blackboard://../../etc/state");
+    ASSERT_TRUE(traversal.find("board name") != std::string::npos);
+    ASSERT_TRUE(traversal.find("kind") == std::string::npos);
+
+    // No kind at all is its own shape and keeps the shape message.
+    ASSERT_TRUE(messageFor("blackboard://onlyboard").find("must be") != std::string::npos);
+}
+
+// Break caught: resources/templates/list was -32601, and resources/list can
+// only ever publish the two URIs on `default`, because boards are created on
+// demand. A board other than default was readable only by a client that already
+// knew its name, with no way to learn one (#514).
+void test_the_parameterised_board_shape_is_discoverable() {
+    ProjectFixture fixture("templates");
+    ResourceRegistry::instance().registerAllDefaultResources();
+
+    const auto templates = ResourceRegistry::instance().listResourceTemplates();
+    ASSERT_EQ(templates.size(), size_t{2});
+    std::vector<std::string> uris;
+    for (const auto& entry : templates) {
+        uris.push_back(entry.uriTemplate);
+        // A template nobody can read the purpose of is not discovery.
+        ASSERT_TRUE(!entry.name.empty());
+        ASSERT_TRUE(!entry.description.empty());
+        ASSERT_EQ(entry.mimeType, std::string("application/json"));
+    }
+    ASSERT_EQ(uris[0], std::string("blackboard://{board}/state"));
+    ASSERT_EQ(uris[1], std::string("blackboard://{board}/tasks"));
+
+    // Substituting the parameter yields a URI this server actually serves,
+    // which is the only thing that makes the template worth publishing.
+    for (const auto& entry : templates) {
+        std::string concrete = entry.uriTemplate;
+        const auto open = concrete.find("{board}");
+        concrete.replace(open, std::string("{board}").size(), "substituted");
+        ASSERT_TRUE(ResourceRegistry::instance().readResource(concrete).isOk());
+        ASSERT_EQ(ResourceRegistry::instance().mimeTypeFor(concrete),
+                  std::string("application/json"));
+    }
+}
+
 void test_resources_subscription_lifecycle() {
     ProjectFixture fixture("lifecycle");
     McpServer server;
@@ -237,6 +367,13 @@ void test_resources_serialises_concurrent_writes() {
 struct Register {
     Register() {
         registerTest("BlackboardResources.ReadsStateAndTasks", test_resources_read_state_and_tasks);
+        registerTest("BlackboardResources.EveryBoardIsJson", test_every_board_is_served_as_json);
+        registerTest("BlackboardResources.BoardSaysWhetherItExists",
+                     test_a_board_says_whether_it_exists);
+        registerTest("BlackboardResources.UriErrorNamesTheWrongPart",
+                     test_a_bad_board_uri_names_the_part_that_is_wrong);
+        registerTest("BlackboardResources.ParameterisedShapeIsDiscoverable",
+                     test_the_parameterised_board_shape_is_discoverable);
         registerTest("BlackboardResources.SubscriptionLifecycle",
                      test_resources_subscription_lifecycle);
         registerTest("BlackboardResources.NotifiesOnExternalChange",
