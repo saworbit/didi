@@ -82,6 +82,45 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- A path holding a NUL is refused rather than written somewhere else (#525).
+  `script_create` and `resource_create` checked the extension against the string
+  they were handed, and a NUL truncates that string at the filesystem boundary,
+  so `res://n1\0x.gd` passed the `.gd` check and thirteen bytes landed in a file
+  called `n1` with no extension. The call reported `created_offline` and echoed
+  back the path it had not written to. The shared write resolver now refuses any
+  control character in a path, by the same rule `blackboard_write` already
+  applies to a board key, so every writer in the server agrees about what a path
+  may hold.
+
+- `script_create` answers a bad path with a code (#526). Four failures behind
+  well-formed arguments came back as a bare JSON string with nothing to branch
+  on: a name too long for the filesystem, a `user://` target, a path not ending
+  in `.gd`, and a directory component too long. `scene_create` and
+  `resource_create` already returned the error envelope for the same shapes.
+  All four now carry a code, `retryable` and the tool name. A failed write
+  reports the reason the filesystem gave and the status that reason deserves,
+  so a path the filesystem will not take is a 400 rather than a 500 that says
+  the server broke. `resource_create` picked up the same envelope on the three
+  answers it still gave in prose.
+
+- `res://nested/../ok2.gd` is accepted, because it lands inside the project
+  (#534). Containment was decided by looking for `..` in the string, which
+  refused a normalised path inside the root while accepting `res://./ok.gd`
+  through the same root, and the resolve-and-compare check behind it never ran.
+  Composing a path from a directory and a relative name is the ordinary way to
+  build one. The three copies of the substring rule are gone and the resolve is
+  the check; what actually lands outside the root is still refused, with the
+  message that already said so.
+
+- A Godot `Error` reaches the caller with its name (#535). `scene_create` gave a
+  300-character filename to `ResourceSaver` and answered `500 internal_error`
+  with "failed with Error 19": the server had not broken, the argument was bad,
+  and the number had no name attached. The engine's file-and-path errors now
+  answer `400 invalid_arguments` and say what to do about it, and every place
+  the bridge printed a raw enum value now prints `ERR_CANT_OPEN (19)`. The table
+  is Godot's own `Error` enum from `extension_api.json`.
+
+
 - `runtime_detach_session` reports `server_build_id` again. Naming the echoed
   descriptor `detached_session` left the bridge-build check looking for a
   `session` key that is no longer there, so the one answer that reports on a
