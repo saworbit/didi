@@ -92,19 +92,13 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "The group to list members of. The answer also carries known_groups, the names any "
          "node in the edited scene is actually in, so a mistyped name is recoverable."},
         {"scene_get_hierarchy.include_properties",
-         "Include each node's exported property values. Off by default, because it is the "
-         "bulk of the response."},
-        {"scene_get_hierarchy.include_scripts",
-         "Include the script attached to each node."},
-        {"scene_get_hierarchy.include_signals",
-         "Include each node's signal connections."},
+         "Include each node's property values when reading a .tscn file. The live editor "
+         "route never returns bulk properties, so this has no effect there and "
+         "bulk_properties is always named in omitted_fields."},
         {"get_scene_hierarchy.include_properties",
-         "Include each node's exported property values. Off by default, because it is the "
-         "bulk of the response."},
-        {"get_scene_hierarchy.include_scripts",
-         "Include the script attached to each node."},
-        {"get_scene_hierarchy.include_signals",
-         "Include each node's signal connections."},
+         "Include each node's property values when reading a .tscn file. The live editor "
+         "route never returns bulk properties, so this has no effect there and "
+         "bulk_properties is always named in omitted_fields."},
         {"mutate_scene_tree.action",
          "Which mutation to perform. Prefer the focused scene_* tools; this legacy name "
          "dispatches to them."},

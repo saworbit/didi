@@ -30,6 +30,10 @@ namespace mcp {
 // Defined in src/tools/asset_tools.cpp. Called directly so the live
 // verification pass can be driven by a stub route rather than an engine.
 CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+// Defined in src/tools/scene_tools.cpp. Called directly so the routing decision
+// between the live bridge and the .tscn parser can be observed with a stub
+// route rather than an editor.
+CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 } // namespace mcp
 } // namespace didi
 
@@ -2565,6 +2569,115 @@ static void test_offline_hierarchy_applies_the_view_options() {
         {{"root_path", "res://levels/forest.tscn"}, {"max_nodes", 0}}).isError);
 }
 
+// Break caught: root_path is documented as "node path or .tscn file path", and
+// with an editor attached a .tscn path went to the live bridge, which resolves
+// node paths only. The answer was a 404 naming the file it had just been handed
+// (#483). The file is readable in either mode, so the file answers.
+class ConnectedHierarchyRoute final : public didi::ipc::IIpcClient {
+public:
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override {}
+    bool isConnected() const override { return true; }
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json&,
+                                         int) override {
+        ++requests;
+        last_method = method;
+        return didi::json{{"status", "ok"}, {"source", "live_scene_tree"}};
+    }
+    int requests{0};
+    std::string last_method;
+};
+
+static void test_tscn_root_path_reads_the_file_with_an_editor_attached() {
+    ScopedToolProject project("hierarchy-tscn-with-editor");
+    std::filesystem::create_directories("levels");
+    std::ofstream("levels/forest.tscn")
+        << "[gd_scene format=3]\n\n"
+        << "[node name=\"Forest\" type=\"Node3D\"]\n"
+        << "[node name=\"Cam\" type=\"Camera3D\" parent=\".\"]\n";
+
+    auto route = std::make_shared<ConnectedHierarchyRoute>();
+    const auto from_file = didi::mcp::handleGetSceneHierarchy(
+        didi::json{{"root_path", "res://levels/forest.tscn"}}, route);
+    ASSERT_TRUE(!from_file.isError);
+    ASSERT_EQ(route->requests, 0);
+    const auto payload = didi::json::parse(from_file.content[0].text);
+    ASSERT_EQ(payload["source"], "parsed_tscn_file");
+    ASSERT_EQ(payload["scene_tree"]["children"][0]["name"], "Cam");
+
+    // A node path still goes to the editor, which is the only thing that has one.
+    const auto from_editor = didi::mcp::handleGetSceneHierarchy(
+        didi::json{{"root_path", "/root/Forest"}}, route);
+    ASSERT_TRUE(!from_editor.isError);
+    ASSERT_EQ(route->requests, 1);
+    ASSERT_EQ(route->last_method, std::string("scene.getHierarchy"));
+}
+
+// Break caught: a branch cut by max_depth was byte for byte a leaf, so the
+// answer to "what is under Main" was "nothing" rather than "not reported"
+// (#484). max_depth defaults to 10, so this is the cut most callers hit.
+static void test_depth_cut_reports_what_it_stopped_on() {
+    ScopedToolProject project("hierarchy-depth-cut");
+    std::filesystem::create_directories("levels");
+    std::ofstream("levels/deep.tscn")
+        << "[gd_scene format=3]\n\n"
+        << "[node name=\"Root\" type=\"Node2D\"]\n"
+        << "[node name=\"Mid\" type=\"Node2D\" parent=\".\"]\n"
+        << "[node name=\"Leaf1\" type=\"Sprite2D\" parent=\"Mid\"]\n"
+        << "[node name=\"Leaf2\" type=\"Sprite2D\" parent=\"Mid\"]\n";
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+
+    const auto cut = registry.callTool("scene_get_hierarchy",
+        {{"root_path", "res://levels/deep.tscn"}, {"max_depth", 1}});
+    ASSERT_TRUE(!cut.isError);
+    const auto payload = didi::json::parse(cut.content[0].text);
+    ASSERT_EQ(payload["truncated"], true);
+    const auto& mid = payload["scene_tree"]["children"][0];
+    ASSERT_EQ(mid["name"], "Mid");
+    ASSERT_EQ(mid["children"].size(), 0u);
+    ASSERT_EQ(mid["children_omitted"], 2u);
+    ASSERT_EQ(mid["children_summary"]["Sprite2D"], 2u);
+
+    // The whole subtree is counted, the same as a max_nodes cut.
+    const auto at_root = registry.callTool("scene_get_hierarchy",
+        {{"root_path", "res://levels/deep.tscn"}, {"max_depth", 0}});
+    const auto root_payload = didi::json::parse(at_root.content[0].text);
+    ASSERT_EQ(root_payload["scene_tree"]["children_omitted"], 3u);
+    ASSERT_EQ(root_payload["scene_tree"]["children_summary"]["Node2D"], 1u);
+    ASSERT_EQ(root_payload["scene_tree"]["children_summary"]["Sprite2D"], 2u);
+
+    // Nothing cut, nothing claimed.
+    const auto whole = registry.callTool("scene_get_hierarchy",
+        {{"root_path", "res://levels/deep.tscn"}});
+    const auto whole_payload = didi::json::parse(whole.content[0].text);
+    ASSERT_TRUE(!whole_payload.contains("truncated"));
+    ASSERT_TRUE(!whole_payload["scene_tree"]["children"][0].contains("children_omitted"));
+}
+
+// Break caught: max_depth was the only limit on the surface with no bounds, so
+// a negative value was accepted and silently clamped to 0 (#484). And
+// include_signals and include_scripts were advertised with a default of true
+// while doing nothing on either route (#482).
+static void test_hierarchy_schema_bounds_its_depth_and_drops_inert_flags() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    for (const auto& name : {"scene_get_hierarchy", "get_scene_hierarchy"}) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        const auto properties = tool->toJson()["inputSchema"]["properties"];
+        ASSERT_EQ(properties["max_depth"]["minimum"], 0);
+        ASSERT_EQ(properties["max_depth"]["maximum"], 64);
+        ASSERT_TRUE(!properties.contains("include_signals"));
+        ASSERT_TRUE(!properties.contains("include_scripts"));
+        ASSERT_TRUE(properties.contains("include_properties"));
+    }
+    ASSERT_TRUE(registry.callTool("scene_get_hierarchy", {{"max_depth", -5}}).isError);
+    ASSERT_TRUE(registry.callTool("scene_get_hierarchy", {{"max_depth", 65}}).isError);
+}
+
 static void test_project_search_public_validation_and_schema() {
     // Break caught: public search accepts coercible/unbounded inputs or advertises a live route.
     auto& reg = didi::mcp::ToolRegistry::instance();
@@ -4208,6 +4321,12 @@ struct RegisterToolTests {
                      test_hierarchy_view_options_reject_malformed_requests);
         registerTest("Hierarchy.OfflineAppliesViewOptions",
                      test_offline_hierarchy_applies_the_view_options);
+        registerTest("Hierarchy.TscnPathReadsTheFileWithAnEditorAttached",
+                     test_tscn_root_path_reads_the_file_with_an_editor_attached);
+        registerTest("Hierarchy.DepthCutReportsWhatItStoppedOn",
+                     test_depth_cut_reports_what_it_stopped_on);
+        registerTest("Hierarchy.SchemaBoundsDepthAndDropsInertFlags",
+                     test_hierarchy_schema_bounds_its_depth_and_drops_inert_flags);
         registerTest("Tools.ProjectSearchPublicValidationAndSchema", test_project_search_public_validation_and_schema);
         registerTest("Tools.AssetReimportPublicValidationAndSchema", test_asset_reimport_public_validation_and_schema);
         registerTest("Tools.ViewportDiffPublicValidationAndSchema", test_viewport_diff_public_validation_and_schema);

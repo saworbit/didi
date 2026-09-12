@@ -30,15 +30,18 @@ Returns a recursive hierarchy. Live results contain node name, class, logical pa
 
 Offline there is no scene tree, so a `root_path` that is not a `.tscn` is refused rather than answered from a different file. A node path scopes the result only with an editor attached. Omitting `root_path`, or passing `/root` or `.`, still reads the main scene, and the response then carries `requested_root_path` and `substituted_main_scene: true` so it cannot be read as a scoped answer.
 
-- `root_path` (`string`, default `"/root"`): Live logical node path, or an in-project `.tscn` path offline.
-- `max_depth` (`integer`, default `10`, live maximum `64`).
-- `include_properties` (`boolean`, default `true`): Honored by the offline parser; live bulk properties are omitted.
-- `include_signals` and `include_scripts` (`boolean`, default `true`): Currently reported as omitted in live mode.
+A `.tscn` `root_path` is read from the file in either mode. It used to be handed to the live bridge when an editor was attached, and the bridge resolves node paths only, so the documented argument came back as a 404 naming the file it had just been given.
+
+- `root_path` (`string`, default `"/root"`): A node path in the edited scene, or an in-project `.tscn` path. A `.tscn` path is read from the file whether or not an editor is attached, and the response then carries `file_path` and `source: "parsed_tscn_file"`.
+- `max_depth` (`integer`, default `10`, `0` to `64`): Stop descending below this depth. A branch that was stopped carries `children_omitted` and `children_summary`, the same count by type a `max_nodes` cut reports, and the response carries `truncated: true`. The count covers the whole subtree below the cut, not just its direct children.
+- `include_properties` (`boolean`, default `true`): Applies to the `.tscn` parse. The live route never returns bulk properties, so it has no effect there and `bulk_properties` is always named in `omitted_fields`.
 - `max_nodes` (`integer`, 1 to 100000): Stop after this many nodes, depth first, so what comes back is a coherent path from the root rather than an arbitrary slice. A branch that was cut carries `children_omitted` and `children_summary`, a count by type of what went, and the response carries `truncated: true`.
 - `class_filter` (`array` of type names, 1 to 64): Keep only nodes of these types and the ancestors leading to them; matches carry `matched: true` and the response carries `matched_nodes`. Branches with no match anywhere beneath them are dropped whole.
 - `summary` (`boolean`, default `false`): Return `node_count`, `counts_by_type`, and one level of `branches` each with their own counts, and no properties or nested children. Cannot be combined with `max_nodes` or `class_filter`, which shape a tree rather than replace it.
 - All three apply to live and offline results alike. Without them the response is unchanged.
 - Legacy alias: `get_scene_hierarchy`.
+
+`include_signals` and `include_scripts` are gone. They were advertised with a default of `true` and did nothing on either route, and the live route derived `omitted_fields` from them, so asking for properties added `bulk_properties` to the list of things omitted and declining them took it off while the properties stayed empty. `omitted_fields` on the live route is now the fixed list the walk actually produces: `bulk_properties`, `signals`, `scripts`. Passing either removed name is refused as an unknown argument rather than ignored.
 
 The live walk is separately capped at 100000 nodes and 8 MiB so a large edited scene cannot exceed the IPC frame before any of this is applied. That is a safety bound, not a context budget; `max_nodes` and `summary` are the levers for token cost.
 
