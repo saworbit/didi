@@ -1135,7 +1135,7 @@ Traverses the selected process's running `SceneTree`, not necessarily the editor
 Evaluates one strict, read-only Godot `Expression` with `const_calls_only=true` in the selected editor or game. This is not arbitrary GDScript and not a general sandbox.
 
 - `expression`: required, 1–2048 bytes of valid UTF-8 without NUL.
-- `context_node`: optional canonical absolute NodePath, at most 1,024 bytes, confined to the active edited-scene subtree for an editor or the running SceneTree for a game. Parent traversal is rejected.
+- `context_node`: optional canonical absolute NodePath, at most 1,024 bytes, confined to the active edited-scene subtree for an editor or the running SceneTree for a game. Parent traversal is rejected. This is the node the expression's `node` is bound to, and `node.get("position")` is how its properties are read; `node.position` is refused because reading through an object can run a script getter, and `self` is not bound at all because there is no script instance for it to be. Both refusals name `node.get(...)` now, rather than stating the rule and leaving the way through to be guessed.
 - `timeout_ms`: default `1000`, range `1..5000`.
 
 Accepted forms are literals; arrays and string-keyed dictionaries made only from source-local scalar/container literals; arithmetic, comparison, and boolean operators; a direct in-subtree `node` summary; and this receiver-aware call surface. `tree` is present as an internal Expression input but direct return is an unsupported non-Node Object and no `tree` methods are allowlisted.

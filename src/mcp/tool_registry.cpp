@@ -1690,7 +1690,7 @@ void ToolRegistry::registerAllDefaultTools() {
     register_live_runtime("eval_gdscript", "Evaluates a bounded read-only GDScript expression in the active runtime session.",
         {{"type", "object"}, {"properties", {
             {"expression", {{"type", "string"}, {"description", "Read-only expression; server enforces a 2048-byte UTF-8 cap"}, {"minLength", 1}, {"maxLength", 2048}}},
-            {"context_node", {{"type", "string"}, {"description", "Optional in-subtree canonical NodePath; server enforces a 1024-byte UTF-8 cap"}, {"minLength", 1}, {"maxLength", 1024}}},
+            {"context_node", {{"type", "string"}, {"description", "The node the expression's `node` is bound to. Read a native property of it with node.get(\"position\"); reading through an object with node.position is refused, because that can run a script getter. Defaults to the edited-scene root for an editor and the running scene root for a game. Optional in-subtree canonical NodePath; server enforces a 1024-byte UTF-8 cap"}, {"minLength", 1}, {"maxLength", 1024}}},
             {"timeout_ms", {{"type", "integer"}, {"default", 1000}, {"minimum", 1}, {"maximum", 5000}}}
         }}, {"required", {"expression"}}}, handleEvalGdscript);
     {

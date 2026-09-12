@@ -40,6 +40,36 @@ void test_expression_policy_accepts_only_the_documented_read_only_vocabulary() {
     }
 }
 
+// Break caught: the sandbox stated its rule and not the way through, so the
+// natural next call after a refusal was another refusal. `self` was worse: it
+// parsed, reached Godot, and came back as "self can't be used because instance
+// is null", which reads like a fault in the caller's expression rather than a
+// fact about the sandbox, and buries the name that is actually bound (#488).
+void test_a_refused_read_names_the_read_that_works() {
+    const auto refusal = [](const char* source) {
+        const auto result = didi::godot::ExpressionPolicy::validate(source);
+        ASSERT_TRUE(result.isErr());
+        return result.error().message;
+    };
+
+    for (const auto* source : {"node.position", "node.name", "node.get_child_count.x"}) {
+        const auto message = refusal(source);
+        ASSERT_TRUE(message.find("node.get(\"position\")") != std::string::npos);
+        ASSERT_TRUE(message.find("scene_get_property") != std::string::npos);
+    }
+
+    // `self` is refused here rather than by the engine, and the message is
+    // about the sandbox.
+    for (const auto* source : {"self", "self.name", "self.get('name')"}) {
+        const auto message = refusal(source);
+        ASSERT_TRUE(message.find("self is not bound") != std::string::npos);
+        ASSERT_TRUE(message.find("node") != std::string::npos);
+    }
+
+    // The read the messages point at is the one that works.
+    ASSERT_TRUE(didi::godot::ExpressionPolicy::validate("node.get('position')").isOk());
+}
+
 // A probe has to be able to read a number off a property.
 //
 // Field trial 03 ran runtime_explore_scene for twelve seconds and measured
@@ -170,6 +200,8 @@ struct RegisterExpressionSandboxTests {
                      test_expression_policy_allows_math_on_source_local_vectors_and_colors);
         registerTest("ExpressionSandbox.DocumentedVocabulary",
                      test_expression_policy_accepts_only_the_documented_read_only_vocabulary);
+        registerTest("ExpressionSandbox.RefusedReadNamesTheReadThatWorks",
+                     test_a_refused_read_names_the_read_that_works);
         registerTest("ExpressionSandbox.PropertyComponentReads",
                      test_expression_policy_allows_a_component_of_a_property_read);
         registerTest("ExpressionSandbox.StringAndEscapeScanning",

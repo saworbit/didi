@@ -68,6 +68,16 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- The expression sandbox names the read that works (#488). A refused object read
+  stated the rule and not the way through, so the natural next call after being
+  refused was another refusal. `self` was worse: it parsed, reached Godot, and
+  came back as "self can't be used because instance is null", which reads like a
+  fault in the caller's expression rather than a fact about the sandbox. Both
+  refusals now name `node.get("position")`, which is the supported read and has
+  been all along, and `self` is refused by the sandbox rather than by the
+  engine. `eval_gdscript.context_node` says in its own description that it is
+  what `node` is bound to.
+
 - `tools/list` says which names are legacy (#493). Ten of the 126 registrations
   are legacy names for a tool that is also listed under its own name, with an
   identical schema, an identical description and identical `_meta`, so nothing
