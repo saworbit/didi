@@ -1206,6 +1206,85 @@ static void test_prompts_get_requires_the_arguments_it_publishes() {
                     .find("res://models/hero.glb") != std::string::npos);
 }
 
+// Break caught: #397 and #418 closed unknown arguments on tools/call and
+// prompts/get kept the pre-#397 behaviour on a different method. An argument
+// outside the prompt's declared list was accepted silently and dropped, so a
+// caller who misremembered a name got a prompt rendered from defaults and no
+// signal that what they passed went nowhere (#511).
+static void test_prompts_get_refuses_an_argument_it_does_not_declare() {
+    didi::mcp::McpServer server;
+    initializeServer(server);
+
+    didi::mcp::JsonRpcRequest request;
+    request.id = 2;
+    request.method = "prompts/get";
+    request.params = {{"name", "godot_debug_visual_anomaly"},
+                      {"arguments", {{"target_resource_path", "res://models/hero.glb"},
+                                     {"bogus", "1"}}}};
+    const auto refused = server.handleRequest(request);
+    ASSERT_TRUE(refused.error.has_value());
+    ASSERT_EQ(refused.error->code, didi::mcp::JsonRpcErrorCode::InvalidParams);
+    // Names the property, and lists what the prompt takes, the way the tool
+    // surface does.
+    ASSERT_TRUE(refused.error->message.find("bogus") != std::string::npos);
+    ASSERT_TRUE(refused.error->message.find("target_resource_path") != std::string::npos);
+    ASSERT_EQ(refused.error->data["argument"], "bogus");
+    ASSERT_EQ(refused.error->data["prompt"], "godot_debug_visual_anomaly");
+    ASSERT_EQ(refused.error->data["accepted"],
+              didi::json::array({"symptom_description", "target_resource_path"}));
+
+    // The declared optional argument is still accepted.
+    request.params = {{"name", "godot_debug_visual_anomaly"},
+                      {"arguments", {{"target_resource_path", "res://models/hero.glb"},
+                                     {"symptom_description", "seams"}}}};
+    const auto rendered = server.handleRequest(request);
+    ASSERT_TRUE(!rendered.error.has_value());
+    ASSERT_TRUE(rendered.result["messages"][0]["content"]["text"]
+                    .get<std::string>()
+                    .find("seams") != std::string::npos);
+}
+
+// Break caught: each prompt carried one description in the catalogue and a
+// different one in the rendered result, so a host that listed prompts and then
+// fetched one showed a person two sentences for the same thing. prompts/list is
+// served cacheable for an hour, so the first one stayed on screen (#512).
+static void test_a_prompt_has_one_description() {
+    didi::mcp::McpServer server;
+    initializeServer(server);
+
+    didi::mcp::JsonRpcRequest list;
+    list.id = 1;
+    list.method = "prompts/list";
+    list.params = didi::json::object();
+    const auto listed = server.handleRequest(list);
+    ASSERT_TRUE(!listed.error.has_value());
+
+    const std::vector<std::pair<std::string, didi::json>> calls = {
+        {"godot_debug_visual_anomaly", {{"target_resource_path", "res://models/hero.glb"}}},
+        {"godot_generate_gameplay_slice",
+         {{"feature_name", "PlayerController"}, {"requirements", "walk and jump"}}}};
+
+    size_t checked = 0;
+    for (const auto& prompt : listed.result["prompts"]) {
+        const auto name = prompt["name"].get<std::string>();
+        const auto catalogue = prompt["description"].get<std::string>();
+        ASSERT_TRUE(!catalogue.empty());
+        for (const auto& call : calls) {
+            if (call.first != name) continue;
+            didi::mcp::JsonRpcRequest get;
+            get.id = 2;
+            get.method = "prompts/get";
+            get.params = {{"name", name}, {"arguments", call.second}};
+            const auto got = server.handleRequest(get);
+            ASSERT_TRUE(!got.error.has_value());
+            ASSERT_EQ(got.result["description"], catalogue);
+            ++checked;
+        }
+    }
+    // Both prompts, not just whichever one iterated first.
+    ASSERT_EQ(checked, calls.size());
+}
+
 static void test_mcp_refuses_a_null_request_id_on_the_wire() {
     // Break caught: a request with an explicit null id was parsed as an
     // ordinary request and answered with a result, so a response went out that
@@ -1294,6 +1373,10 @@ struct RegisterJsonRpcTests {
                      test_tools_call_enforces_the_published_input_schema);
         registerTest("McpServer.PromptsGetRequiresPublishedArguments",
                      test_prompts_get_requires_the_arguments_it_publishes);
+        registerTest("McpServer.PromptsGetRefusesUndeclaredArguments",
+                     test_prompts_get_refuses_an_argument_it_does_not_declare);
+        registerTest("McpServer.PromptHasOneDescription",
+                     test_a_prompt_has_one_description);
         registerTest("McpServer.RejectsWrongParameterTypes", test_mcp_rejects_wrong_parameter_types);
         registerTest("McpServer.RejectsNonObjectArguments", test_mcp_rejects_non_object_arguments);
         registerTest("McpServer.RequestNotificationDoesNotExecuteTool",

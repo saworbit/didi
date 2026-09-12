@@ -916,6 +916,28 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         if (name.empty()) {
             return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams, "Prompt name is required");
         }
+        // Refused the way an unknown tool argument is, naming the property and
+        // listing what the prompt declares. Before the missing check, because a
+        // caller who typed one name wrong has usually not also omitted a
+        // required one, and the misspelling is the more useful thing to be told
+        // (#511).
+        if (auto unknown = PromptRegistry::instance().unknownArgument(name, args)) {
+            const auto& declared = unknown->second;
+            std::string accepted;
+            for (size_t index = 0; index < declared.size(); ++index) {
+                if (index) accepted += index + 1 == declared.size() ? " and " : ", ";
+                accepted += declared[index];
+            }
+            const std::string list = declared.empty()
+                                         ? "It takes no arguments."
+                                         : "This prompt accepts: " + accepted + ".";
+            return JsonRpcResponse::makeError(
+                req.id, JsonRpcErrorCode::InvalidParams,
+                "Unknown argument '" + unknown->first + "'. " + list,
+                json{{"prompt", name},
+                     {"argument", unknown->first},
+                     {"accepted", declared}});
+        }
         if (auto missing = PromptRegistry::instance().missingRequiredArgument(name, args)) {
             return JsonRpcResponse::makeError(
                 req.id, JsonRpcErrorCode::InvalidParams,
@@ -926,7 +948,18 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         if (p_res.isErr()) {
             return makeApplicationError(req.id, p_res.error());
         }
-        return JsonRpcResponse::makeSuccess(req.id, complete(p_res.value()));
+        // One description per prompt, from the registration. Each handler used
+        // to write a second one, so a host that listed prompts and then fetched
+        // one showed a person two different sentences for the same thing -- and
+        // the catalogue is served cacheable, so it kept showing the first for an
+        // hour (#512). The catalogue wording is the one that survived: it says
+        // which tool families the workflow is built from, where the handler's
+        // pinned a Godot version that is now the floor rather than the target.
+        auto prompt_result = p_res.value();
+        if (const auto* definition = PromptRegistry::instance().getPrompt(name)) {
+            prompt_result["description"] = definition->description;
+        }
+        return JsonRpcResponse::makeSuccess(req.id, complete(prompt_result));
     }
 
     return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::MethodNotFound, "Method not found: " + req.method);

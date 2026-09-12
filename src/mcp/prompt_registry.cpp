@@ -1,5 +1,7 @@
 #include "didi/mcp/prompt_registry.hpp"
 
+#include <algorithm>
+
 namespace didi {
 namespace mcp {
 
@@ -48,6 +50,25 @@ std::optional<std::string> PromptRegistry::missingRequiredArgument(
     return std::nullopt;
 }
 
+// The mirror of the check above. prompts/list publishes what a prompt takes, so
+// an argument outside that list is a caller mistake in exactly the way a missing
+// one is, and gets the same treatment rather than being dropped in silence
+// (#511).
+std::optional<std::pair<std::string, std::vector<std::string>>>
+PromptRegistry::unknownArgument(const std::string& name, const json& args) const {
+    const auto* prompt = getPrompt(name);
+    if (!prompt || !args.is_object()) return std::nullopt;
+    std::vector<std::string> declared;
+    declared.reserve(prompt->arguments.size());
+    for (const auto& argument : prompt->arguments) declared.push_back(argument.name);
+    for (auto it = args.begin(); it != args.end(); ++it) {
+        if (std::find(declared.begin(), declared.end(), it.key()) != declared.end()) continue;
+        std::sort(declared.begin(), declared.end());
+        return std::make_pair(it.key(), declared);
+    }
+    return std::nullopt;
+}
+
 Result<json> PromptRegistry::getPromptResult(const std::string& name, const json& args) {
     auto prompt = getPrompt(name);
     if (!prompt) {
@@ -80,8 +101,10 @@ void PromptRegistry::registerAllDefaultPrompts() {
             "5. Use editor-only `viewport_set_camera_transform` or collision/navigation `viewport_toggle_debug_draw` when useful, then restore temporary state and verify it.\n"
             "6. Apply only supported focused `scene_*` scalar/node changes or `script_patch_method`, re-read the affected state, and report unsupported shader or composite-property steps honestly.";
 
+        // No description here. prompts/get fills it from this prompt's
+        // registration, so the catalogue and the rendered result cannot say two
+        // different things about the same prompt (#512).
         json result = {
-            {"description", "Capability-aware visual anomaly workflow for Godot 4.5+"},
             {"messages", json::array({
                 {
                     {"role", "user"},
@@ -119,8 +142,8 @@ void PromptRegistry::registerAllDefaultPrompts() {
             "8. Use game-only `runtime_inject_input`, live physics/navigation queries, animation inspection/playback, and bounded `runtime_read_profiler` sampling only when their session policy fits.\n"
             "9. Explicitly report only `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack` as unimplemented instead of claiming those steps succeeded.";
 
+        // Filled in by prompts/get from the registration, as above.
         json result = {
-            {"description", "Capability-aware gameplay slice workflow for Godot 4.5+"},
             {"messages", json::array({
                 {
                     {"role", "user"},
