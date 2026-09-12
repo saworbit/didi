@@ -43,6 +43,16 @@ OFFLINE_CALLS = {
         "resolution": {"width": 8, "height": 8},
     },
     "get_scene_hierarchy": {},
+    # Local tools whose answers a real binary can produce with nothing attached,
+    # which is what makes publishing a schema for them defensible (#509).
+    "blackboard_list_keys": {},
+    "blackboard_read": {},
+    "blackboard_task_list": {},
+    "didi_control_room": {},
+    "project_list_export_presets": {},
+    "resource_inspect": {"resource_path": "res://main.tscn"},
+    "script_get_symbols": {"file_path": "res://subject.gd"},
+    "script_reflect_class": {"class_name": "Node2D"},
 }
 
 
@@ -104,6 +114,12 @@ class ToolOutputSchemaContractTests(unittest.TestCase):
         self.assertTrue(declared)
         for name in declared:
             with self.subTest(tool=name):
+                # This assertion is the publication rule, and it is the reason
+                # most tools have no outputSchema: a tool publishes one when
+                # something checks it against a real answer, and a tool whose
+                # answer needs an engine or an attached session has nothing
+                # offline that can. Absence therefore means unspecified,
+                # uniformly, rather than "this tool is special" (#509).
                 self.assertIn(
                     name,
                     OFFLINE_CALLS,
