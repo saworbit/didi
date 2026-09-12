@@ -5,6 +5,7 @@
 
 #include <optional>
 #include <string>
+#include <filesystem>
 #include <vector>
 
 namespace didi::offline {
@@ -120,6 +121,24 @@ struct SpeculativeApplyResult {
 // Rejects anything the sandbox could not honestly check: a path outside the
 // project, a traversal, an empty set, or a file this cannot parse.
 Result<SpeculativeVerifyRequest> parseSpeculativeVerifyRequest(const json& params);
+
+// Where an isolated copy would be built from, and whether one can be.
+struct SandboxRepository {
+    std::filesystem::path project_root;
+    std::filesystem::path repository;
+    std::string repository_name;
+    std::filesystem::path project_within_repository;
+    std::string base_commit;
+};
+
+// The precondition both speculative tools share: the project sits inside a git
+// work tree that actually holds it, and that work tree has a commit to copy
+// from. It changes nothing and touches no file, which is what lets the dry-run
+// preview run it. project_apply_changes used to hand out a confirmation token
+// without asking, so a caller following the documented dry-run then confirm
+// path spent two calls and a token to learn what the first call could have said
+// (#491).
+Result<SandboxRepository> resolveSandboxRepository();
 
 // Requires the project to sit inside a git work tree, because that is what
 // makes an isolated copy cheap enough to build per call. Refuses rather than

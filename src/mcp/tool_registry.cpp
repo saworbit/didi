@@ -10,6 +10,7 @@
 #include "didi/mcp/phase7_schemas.hpp"
 #include "didi/mcp/schema_validation.hpp"
 #include "didi/offline/project_settings_file.hpp"
+#include "didi/offline/speculative_verify.hpp"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -1246,6 +1247,24 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         target_probe = [argument = std::string(node->second),
                         client = m_sourceIpcClient](const json& call_arguments, json& before) {
             return probeNodeTarget(argument, call_arguments, client, before);
+        };
+    } else if (binding.policy_source == "project_apply_changes") {
+        // This tool has no target to read, so its preview bound the arguments
+        // to a token and said so honestly. What it did not do was check the
+        // precondition its sibling checks before doing anything at all:
+        // project_verify_changes refuses a project that no git work tree holds,
+        // with no mutation and no token. The preview issued a token for exactly
+        // that call, and spending it returned the same 409 (#491).
+        //
+        // It reports the refusal and nothing else. Filling `before` with the
+        // repository would flip target_read to true, and the target here is the
+        // files this call will overwrite, which the preview still has not read.
+        target_probe = [](const json& call_arguments, json& before) -> std::optional<Error> {
+            (void)call_arguments;
+            (void)before;
+            auto resolved = offline::resolveSandboxRepository();
+            if (resolved.isErr()) return resolved.error();
+            return std::nullopt;
         };
     } else if (binding.policy_source == "project_set_setting") {
         target_probe = [](const json& call_arguments, json& before) -> std::optional<Error> {

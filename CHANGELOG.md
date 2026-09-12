@@ -68,6 +68,18 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `project_apply_changes` stops issuing a token for a call it cannot apply
+  (#491). The tool needs an isolated copy of the project, which needs a git work
+  tree that holds it. `project_verify_changes` checks that before doing
+  anything and refuses with a clear `409`. The apply tool's preview has no
+  target to read, and it did not check the precondition either, so it bound the
+  arguments to a confirmation token and spending that token returned the same
+  `409` the sibling had returned before any of it started: two calls and a token
+  to learn what the first could have said. The preview runs the same check now.
+  It still reports `target_read: false`, because the files the call would
+  overwrite have not been opened, and that is the honest half of what the old
+  preview said.
+
 - A `oneOf` branch behind a `$ref` says what it needs (#489). The required
   properties for a branch were read straight off the branch object, and a
   `$ref` object carries none of its own, so `physics_raycast_query.from` and
