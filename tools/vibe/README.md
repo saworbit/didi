@@ -27,6 +27,12 @@ twice.
 | `probes/error_data_census.py` | What each error's `data` lets a caller branch on. `path_errors.py` asks whether a failure is an envelope; this one opens it. |
 | `probes/schema_descriptions.py` | How many parameters a caller has to guess at: counts `description` across the whole surface. Zero since #462, and a contract test keeps it there. |
 | `probes/advertised_vs_reported_mode.py` | What `tools/list` says a tool's mode is, against what the tool then says. The two are built by different code and nothing compared them. |
+| `probes/rpc_methods.py` | The methods a host sends *around* `tools/call`: `initialize` and its version negotiation, `ping`, subscriptions, a batch array, a cancellation, a progress token. |
+| `probes/content_vs_structured.py` | The two copies of every payload -- `content[0].text` against `structuredContent` -- compared. Green; kept as the regression probe. |
+| `probes/path_confinement.py` | Whether a write can leave the project, and whether the path the validator accepted is the path that got written. |
+| `probes/bridge_exclusivity.py` | Two servers, one editor. What the second one is told, against what a server with no editor is told. |
+| `probes/blackboard_rules.py` | The blackboard's own parameter descriptions, tested against the handler behind them. |
+| `probes/engine_crash.py` | The editor killed mid-session: what the first call after it says, and what every call after that says instead. |
 | `probes/surface_census.py` | The same question asked of all 126 tools: who rejects an unknown argument, what `execution_mode` each reports, who answers with a bare string. |
 | `report.py` | Files a directory of finding bodies as issues in one pass. |
 
@@ -218,6 +224,36 @@ because only `default` is a registered URI (#513). `probes/protocol_edges.py`
 covers the JSON-RPC frame. The methods between the frame and `tools/call` --
 `resources/*`, `prompts/*` -- had never been swept.
 
+**One client is not the product.** Every session until the seventh drove a
+single server against a single editor, which is the one configuration where the
+coordination story cannot go wrong. Start a second server on the same project
+and it cannot reach the editor at all -- reasonable -- and it is told so with
+the same 503, word for word, that a server gets when Godot is not running, while
+`didi_control_room` says `Route: detached` in both cases (#527). The blackboard
+exists *because* two agents are expected, so the second client is the supported
+path, not an edge case. Anything with a notion of ownership deserves a probe
+that runs two of the thing.
+
+**A path the validator accepted is not always the path that gets written.**
+`script_create` enforces a `.gd` extension, and `res://n1<NUL>x.gd` satisfies it,
+because the string ends in `.gd`. The write then truncates at the NUL and lands
+a file called `n1`, and the tool reports success with the path it did not use
+(#525). The check and the write were looking at different strings. The same
+project already refuses a control character in a blackboard path, by name -- so
+the rule exists, it just is not applied to file paths. When a validator and an
+effect are separated by a conversion, probe the conversion.
+
+**Ask what happens when the thing you are attached to goes away.** Killing the
+editor mid-session costs one `taskkill` and reaches code no scripted suite runs.
+Didi handles it well -- the first call afterwards returns the best error payload
+on the surface, with `incident: engine_crashed` and a recovery sentence -- and
+then says it exactly once (#536). Two calls later the fallback is answering
+happily from the `.tscn` file and nothing anywhere records that an engine died.
+Probe the recovery *and* the second call; the difference between them is the
+finding. This is also where narrowing earned its keep twice in one session: the
+first run made it look like the offline fallback had been suppressed until an
+explicit detach, and a loop of four calls showed it recovering on the second.
+
 **Offline and live are different products.** The same argument can mean
 different things depending on whether an editor is attached, and the offline
 answer is the one nobody checks. Run the interesting probes twice.
@@ -240,6 +276,8 @@ next is not a test of the gate, it is a test of process lifetime.
 | 2026-09-12 | Limit and truncation disclosure, schema flags against what the handler does, project settings and input actions written without checking, the error envelope's contents, and the legacy aliases. | `1.8.0+941db00ef6c6` | #482-#493, twelve findings. |
 
 | 2026-09-12 | The discovery surface rather than the answers: advertised versus reported execution mode, tool annotations against what the tool does, published schemas against what the handler enforces, and the `resources/*` and `prompts/*` methods, swept for the first time. | `1.8.0+95ff4b9c9ebc` | #502-#515, fourteen findings. |
+
+| 2026-09-12 | The methods around `tools/call` rather than through it, two servers against one editor, the blackboard's own stated rules, path confinement and what the write actually does with the path, and the editor killed mid-session. | `1.8.0+3a528c10387d` | #525-#537, thirteen findings. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log
