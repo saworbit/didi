@@ -86,7 +86,7 @@ static void test_mcp_tool_list_reports_current_availability() {
     didi::mcp::JsonRpcRequest initialize;
     initialize.id = 1;
     initialize.method = "initialize";
-    initialize.params = didi::json::object();
+    initialize.params = {{"protocolVersion", didi::mcp::kProtocolVersion}};
     server.handleRequest(initialize);
 
     didi::mcp::JsonRpcRequest list;
@@ -240,11 +240,121 @@ private:
     std::filesystem::path m_root;
 };
 
+static void test_initialize_reads_the_protocol_version_it_is_sent() {
+    // Break caught: every protocolVersion got the same answer. A version this
+    // server serves, one it does not, an empty string, a bare JSON number and a
+    // missing key all came back "2024-11-05", so a malformed InitializeRequest
+    // was accepted in silence and a client could not tell a version it had been
+    // granted from one it had been refused (#531).
+    //
+    // The 2024-11-05 lifecycle is explicit on both halves: the field is a
+    // required string, and a server that supports the requested version MUST
+    // answer with the same one and otherwise MUST answer with one it does
+    // support. -32602 is the code the specification's own example carries.
+    const auto handshake = [](didi::json params) {
+        didi::mcp::McpServer server;
+        server.setIpcClient(nullptr);
+        didi::mcp::JsonRpcRequest initialize;
+        initialize.id = 1;
+        initialize.method = "initialize";
+        initialize.params = std::move(params);
+        return server.handleRequest(initialize);
+    };
+
+    // A revision this server serves is answered with itself.
+    for (const auto& served : {"2024-11-05", "2026-07-28"}) {
+        const auto accepted = handshake({{"protocolVersion", served}});
+        ASSERT_TRUE(!accepted.error.has_value());
+        ASSERT_EQ(accepted.result["protocolVersion"].get<std::string>(), std::string(served));
+    }
+
+    // One it does not serve is answered with one it does, which is what tells
+    // the client it was not given what it asked for.
+    const auto downgraded = handshake({{"protocolVersion", "1999-01-01"}});
+    ASSERT_TRUE(!downgraded.error.has_value());
+    ASSERT_EQ(downgraded.result["protocolVersion"].get<std::string>(),
+              std::string(didi::mcp::kProtocolVersion));
+
+    // Malformed is refused rather than accepted in silence. An empty string is
+    // a string, so it is a version nobody serves and takes the branch above;
+    // a number and a missing key are not requests this schema allows at all.
+    for (const auto& malformed : {didi::json(5), didi::json(nullptr),
+                                  didi::json(didi::json::array())}) {
+        const auto refused = handshake({{"protocolVersion", malformed}});
+        ASSERT_TRUE(refused.error.has_value());
+        ASSERT_EQ(refused.error->code, didi::mcp::JsonRpcErrorCode::InvalidParams);
+        ASSERT_TRUE(refused.error->data["supported"].is_array());
+    }
+    const auto absent = handshake(didi::json::object());
+    ASSERT_TRUE(absent.error.has_value());
+    ASSERT_EQ(absent.error->code, didi::mcp::JsonRpcErrorCode::InvalidParams);
+    ASSERT_TRUE(absent.error->data["requested"].is_null());
+
+    const auto empty = handshake({{"protocolVersion", ""}});
+    ASSERT_TRUE(!empty.error.has_value());
+    ASSERT_EQ(empty.result["protocolVersion"].get<std::string>(),
+              std::string(didi::mcp::kProtocolVersion));
+}
+
+static void test_subscribe_refuses_with_a_reason_that_is_true() {
+    // Break caught: the refusal said nothing but a blackboard changes without a
+    // tool call from this client, and gave that as the reason for refusing the
+    // three godot:// resources. It is false of all three. runtime/logs is
+    // described in its own listing entry as incremental engine-side records,
+    // and editor state and the project tree change whenever the user edits
+    // (#532). The refusal stands; the reason for it does not.
+    didi::mcp::McpServer server;
+    initializeServer(server);
+
+    const auto subscribe = [&server](const char* uri, int id) {
+        didi::mcp::JsonRpcRequest request;
+        request.id = id;
+        request.method = "resources/subscribe";
+        request.params = {{"uri", uri}};
+        return server.handleRequest(request);
+    };
+
+    for (const auto& engine_side : {"godot://runtime/logs", "godot://editor/state",
+                                    "godot://project/tree"}) {
+        const auto refused = subscribe(engine_side, 2);
+        ASSERT_TRUE(refused.error.has_value());
+        const auto message = refused.error->message;
+        // The claim that made the old message wrong is gone, and what replaced
+        // it is about Didi rather than about the resource.
+        ASSERT_TRUE(message.find("nothing else changes") == std::string::npos);
+        ASSERT_TRUE(message.find("does not publish change notifications") != std::string::npos);
+        ASSERT_TRUE(message.find(engine_side) != std::string::npos);
+    }
+
+    // A board still subscribes, which is the half that must not break.
+    const auto accepted = subscribe("blackboard://default/state", 3);
+    ASSERT_TRUE(!accepted.error.has_value());
+    ASSERT_TRUE(accepted.result["subscribed"].get<bool>());
+
+    // And a host can tell before it asks, rather than by asking and being
+    // refused. initialize advertises resources.subscribe unconditionally, which
+    // describes only part of the surface.
+    didi::mcp::JsonRpcRequest list;
+    list.id = 4;
+    list.method = "resources/list";
+    list.params = didi::json::object();
+    const auto listed = server.handleRequest(list);
+    ASSERT_TRUE(!listed.error.has_value());
+    int checked = 0;
+    for (const auto& entry : listed.result["resources"]) {
+        const auto uri = entry["uri"].get<std::string>();
+        const bool subscribable = entry["_meta"]["didi"]["subscribable"].get<bool>();
+        ASSERT_EQ(subscribable, uri.rfind("blackboard://", 0) == 0);
+        ++checked;
+    }
+    ASSERT_TRUE(checked > 0);
+}
+
 static void initializeServer(didi::mcp::McpServer& server) {
     didi::mcp::JsonRpcRequest initialize;
     initialize.id = 1;
     initialize.method = "initialize";
-    initialize.params = didi::json::object();
+    initialize.params = {{"protocolVersion", didi::mcp::kProtocolVersion}};
     server.handleRequest(initialize);
 }
 
@@ -523,7 +633,7 @@ static void test_mcp_handles_jsonrpc_batches() {
         "[]\n"
         "[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"},"
         "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"},"
-        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\",\"params\":{}},"
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\"}},"
         "{\"id\":3,\"method\":\"ping\"}]\n"
         "[{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}]\n"
         "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"ping\"}\n");
@@ -568,7 +678,7 @@ static void test_mcp_distinguishes_parse_errors_from_invalid_requests() {
         "{\"jsonrpc\":\"2.0\",\"id\":9}\n"
         "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"ping\",\"params\":42}\n"
         "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"ping\",\"params\":null}\n"
-        "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"initialize\",\"params\":{}}\n");
+        "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\"}}\n");
 
     std::istringstream lines(output);
     std::vector<didi::json> responses;
@@ -626,7 +736,7 @@ static void test_mcp_request_notification_does_not_execute_tool() {
     registerCountingResourceCreate(call_count);
     const auto output = runStdioWithInput(
         server,
-        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n"
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\"}}\n"
         "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"resource_create\",\"arguments\":{}}}\n");
     server.initializeRegistries();
 
@@ -642,7 +752,7 @@ static void test_mcp_content_length_header_cannot_smuggle_request() {
     const auto output = runStdioWithInput(
         server,
         "Content-Length: invalid\n\n"
-        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n"
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\"}}\n"
         "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"resource_create\",\"arguments\":{}}}\n");
     server.initializeRegistries();
 
@@ -655,7 +765,7 @@ static void test_mcp_output_logging_never_copies_response_bodies() {
     // Break caught: the standalone MCP logger copies a tool result/source secret to its sink or stderr.
     constexpr const char* secret = "didi_secret_mcp_result_91";
     std::istringstream input(
-        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n"
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\"}}\n"
         "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"resources/read\",\"params\":{\"uri\":\"didi_secret_mcp_result_91\"}}\n");
     std::ostringstream output;
     std::ostringstream diagnostics;
@@ -800,7 +910,7 @@ static void test_mcp_legacy_handshake_is_unaffected_by_discovery() {
     didi::mcp::JsonRpcRequest initialize;
     initialize.id = 1;
     initialize.method = "initialize";
-    initialize.params = didi::json::object();
+    initialize.params = {{"protocolVersion", didi::mcp::kProtocolVersion}};
     const auto handshake = server.handleRequest(initialize);
     ASSERT_TRUE(!handshake.error.has_value());
     ASSERT_EQ(handshake.result["protocolVersion"].get<std::string>(),
@@ -1035,7 +1145,8 @@ static void test_mcp_legacy_ui_declaration_does_not_reach_a_modern_request() {
     didi::mcp::JsonRpcRequest initialize;
     initialize.id = 1;
     initialize.method = "initialize";
-    initialize.params = {{"capabilities", uiCapabilities()}};
+    initialize.params = {{"protocolVersion", didi::mcp::kProtocolVersion},
+                         {"capabilities", uiCapabilities()}};
     ASSERT_TRUE(!server.handleRequest(initialize).error.has_value());
 
     // The legacy client keeps what it negotiated.
@@ -1059,7 +1170,8 @@ static void test_mcp_modern_ui_visibility_does_not_bleed_in_either_direction() {
     didi::mcp::JsonRpcRequest initialize;
     initialize.id = 1;
     initialize.method = "initialize";
-    initialize.params = {{"capabilities", uiCapabilities()}};
+    initialize.params = {{"protocolVersion", didi::mcp::kProtocolVersion},
+                         {"capabilities", uiCapabilities()}};
     ASSERT_TRUE(!server.handleRequest(initialize).error.has_value());
 
     const auto with_ui = modernMeta("2026-07-28", uiCapabilities());
@@ -1412,6 +1524,10 @@ struct RegisterJsonRpcTests {
         registerTest("JsonRpc.ResponseSerialization", test_jsonrpc_response_serialization);
         registerTest("JsonRpc.NullResultSerialization", test_jsonrpc_null_result_serialization);
         registerTest("McpServer.Initialize", test_mcp_initialize);
+        registerTest("McpServer.InitializeReadsTheProtocolVersion",
+                     test_initialize_reads_the_protocol_version_it_is_sent);
+        registerTest("McpServer.SubscribeRefusalIsTrue",
+                     test_subscribe_refuses_with_a_reason_that_is_true);
         registerTest("McpServer.ToolAvailability", test_mcp_tool_list_reports_current_availability);
         registerTest("McpServer.Phase7ParentGateAndAliasIdentity",
                      test_mcp_phase7_parent_gate_and_alias_identity);

@@ -82,6 +82,45 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `initialize` reads the `protocolVersion` it is sent (#531). Every value got
+  the same answer: a revision this server serves, one it does not, an empty
+  string, a bare JSON number and a missing key all came back `2024-11-05`, so a
+  malformed `InitializeRequest` was accepted in silence and a client could not
+  tell a version it had been granted from one it had been refused. #312
+  validated the `tools/call` envelope; `initialize` sits in front of it and was
+  not covered. The field is a required string, so a missing key or a non-string
+  is refused with `-32602` carrying `supported` and `requested`, the shape the
+  2024-11-05 lifecycle's own example uses. A revision this server serves is
+  answered with itself, and any other string with `2024-11-05`, which is what
+  that specification requires of both cases.
+
+- `resources/subscribe` refuses with a reason that is true (#532). Subscribing
+  to any of the three `godot://` resources was refused because "nothing else
+  changes without a tool call from this client", which is false of all three:
+  `godot://runtime/logs` is described in its own listing entry as incremental
+  engine-side records, and editor state and the project tree change whenever the
+  user edits. The message stated as a fact the very thing that makes a
+  subscription worth having. The refusal stands, because accepting one would
+  promise updates that never arrive, but it now says what is actually so: Didi
+  does not yet publish change notifications for engine-side resources. And
+  because `initialize` advertises `resources.subscribe` for the server as a
+  whole, every `resources/list` entry now carries `_meta.didi.subscribable`, so
+  a host can tell before it asks rather than by asking and being refused.
+
+- Resources with no live path say what they are, not what they fell back from
+  (#533). #419 removed `offline_fallback` from the tools that never had a live
+  path; the `_meta.didi` block on resources and their own answers were not part
+  of that sweep, which the code said outright was still owed. A board is a file
+  in `.didi/blackboard/` and the project tree is a filesystem index, so
+  `offline_fallback` named a fallback from a route neither ever had, and a host
+  that dims or warns on that flag -- which is what the flag is for -- dimmed the
+  resources that are always fully available, with an editor attached and
+  healthy. `blackboard://<board>/state`, `blackboard://<board>/tasks` and
+  `godot://project/tree` report `local` now, and `ui://didi/control-room`
+  reports `local_status`, matching the tool that serves the same dashboard.
+  `godot://editor/state` and `godot://runtime/logs` keep `offline_fallback`,
+  because those really do fall back. The advertisement and the answer come from
+  the registration, so they cannot drift apart.
 - A second MCP server on a held editor is told so (#527). Only one server can
   hold the editor bridge, which is a reasonable design; what a second server was
   *told* was not. Its auto-attach was refused with `423`, the reason was dropped

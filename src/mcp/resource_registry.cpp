@@ -147,7 +147,7 @@ void ResourceRegistry::registerResource(ResourceDefinition res) {
     } else if (res.uri == "godot://editor/state" || res.uri == "godot://runtime/logs") {
         res.capability = {{"live", "offline_fallback"}, true, {}};
     } else if (res.uri == "godot://project/tree") {
-        res.capability = {{"offline_fallback"}, true, {}};
+        res.capability = {{"offline_fallback"}, true, {}, "local"};
     }
     m_resources[res.uri] = std::move(res);
 }
@@ -217,7 +217,15 @@ Result<std::string> readBlackboardUri(const std::string& uri) {
     auto payload = offline::blackboardReadResource(board, kind);
     if (payload.isErr()) return payload.error();
     json document = payload.value();
-    document["execution_mode"] = "offline_fallback";
+    // The board is server-side state in .didi/blackboard/. It has no engine
+    // path, so "offline_fallback" named a fallback from a route this resource
+    // never had, and a host that dims or warns on that flag -- which is what
+    // the flag is for -- dimmed the two resources that are always fully
+    // available (#533). The vocabulary is the one #419 settled on for tools
+    // with no live path. Set here rather than left to the registry stamp
+    // because a board other than `default` is resolved dynamically and has no
+    // registration to read a capability from.
+    document["execution_mode"] = "local";
     return document.dump();
 }
 
@@ -300,7 +308,12 @@ Result<std::string> ResourceRegistry::readResource(const std::string& uri,
             // that named no session is offline even on a connected process.
             const bool live = supports_live && m_ipcClient && m_ipcClient->isConnected() &&
                               scopedRouteLease(m_ipcClient).has_value();
-            payload["execution_mode"] = live ? "live" : "offline_fallback";
+            // The registration's own word for its non-engine work, exactly as
+            // the tool registry stamps capability.localMode(). A resource that
+            // declares live still says "offline_fallback" when it did not get
+            // there, because that one really is a fallback (#533).
+            payload["execution_mode"] = live ? std::string("live")
+                                             : res->capability.localMode();
             return payload.dump();
         }
     } catch (const json::exception&) {
@@ -331,7 +344,10 @@ void ResourceRegistry::registerAllDefaultResources() {
             "this server's own log. Rendered by the host, not read as text.";
         app.mimeType = kUiAppMimeType;
         app.uiMeta = {{"prefersBorder", true}};
-        app.capability = {{"offline_fallback"}, true, {}};
+        // The control room's tool sibling has published "local_status" since
+        // #419; the resource serving the same dashboard said it had fallen back
+        // from an engine route it never had (#533).
+        app.capability = {{"offline_fallback"}, true, {}, "local_status"};
         app.readHandler = []() -> Result<std::string> { return controlRoomHtml(); };
         registerResource(std::move(app));
     }
@@ -355,6 +371,7 @@ void ResourceRegistry::registerAllDefaultResources() {
         };
         board.capability.modes = {"offline_fallback"};
         board.capability.implemented = true;
+        board.capability.local_mode = "local";
         registerResource(std::move(board));
     }
 
@@ -367,7 +384,10 @@ void ResourceRegistry::registerAllDefaultResources() {
     proj_tree.readHandler = [this]() -> Result<std::string> {
         offline::ResourceIndexer indexer;
         auto tree = indexer.buildProjectTree(".");
-        tree["execution_mode"] = "offline_fallback";
+        // A filesystem index of the project, with no engine path declared and
+        // none to fall back from. project_list_resources, which answers the
+        // same question as a tool, has said "local" since #419.
+        tree["execution_mode"] = "local";
         return tree.dump();
     };
     registerResource(std::move(proj_tree));

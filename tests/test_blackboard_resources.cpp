@@ -72,7 +72,11 @@ void test_resources_read_state_and_tasks() {
     ASSERT_TRUE(state.isOk());
     const auto state_payload = json::parse(state.value());
     ASSERT_EQ(state_payload["state"]["design"]["max_jumps"].get<int>(), 2);
-    ASSERT_EQ(state_payload["execution_mode"].get<std::string>(), std::string("offline_fallback"));
+    // The board is a file in .didi/blackboard/. It has no engine path, so there
+    // is nothing for it to have fallen back from, and a host that dims on
+    // offline_fallback was dimming a resource that is always fully available
+    // (#533).
+    ASSERT_EQ(state_payload["execution_mode"].get<std::string>(), std::string("local"));
 
     auto tasks = ResourceRegistry::instance().readResource("blackboard://default/tasks");
     ASSERT_TRUE(tasks.isOk());

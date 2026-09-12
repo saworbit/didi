@@ -40,7 +40,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `InvariantWatch` | 4 |
 | `JsonRpc` | 4 |
 | `ManagedProcess` | 6 |
-| `McpServer` | 37 |
+| `McpServer` | 39 |
 | `Phase5` | 16 |
 | `Phase6` | 16 |
 | `Phase7Contract` | 9 |
