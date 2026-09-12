@@ -646,7 +646,8 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     const bool allow_unknown_type = args.value("allow_unknown_type", false);
 
     if (save_path.empty()) {
-        return CallToolResult::error("Parameter 'save_path' is required (e.g. res://materials/wood.tres).");
+        return CallToolResult::errorJson(
+            400, "Parameter 'save_path' is required (e.g. res://materials/wood.tres).");
     }
 
     auto ordered = orderedProperties(properties);
@@ -740,14 +741,14 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     try {
         std::error_code probe_error;
         if (fs::exists(target_p, probe_error) && !probe_error && !overwrite) {
-            return CallToolResult::error(
-                "Resource already exists; pass overwrite: true to replace it: " + save_path);
+            return CallToolResult::errorJson(
+                409, "Resource already exists; pass overwrite: true to replace it: " + save_path);
         }
         if (target_p.has_parent_path()) {
             fs::create_directories(target_p.parent_path());
         }
     } catch (const std::exception& e) {
-        return CallToolResult::error(std::string("Path resolution error: ") + e.what());
+        return CallToolResult::errorJson(400, std::string("Path resolution error: ") + e.what());
     }
 
     // Everything is rendered before anything is written, so a property this

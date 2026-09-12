@@ -96,8 +96,26 @@ inline std::string projectEndpointKey(const std::filesystem::path& project_root)
 // already there. A tool that creates a file has to check the path before it
 // exists, and repeating the traversal, UTF-8 and containment rules per writer
 // is how two of them end up disagreeing.
+//
+// Containment is decided by resolving the path and comparing it against the
+// project root, not by looking for ".." in the string. A substring test refused
+// res://nested/../ok2.gd, which lands inside the root, while accepting
+// res://./ok.gd through the same root, and the resolve-and-compare check behind
+// it never ran (#534). Composing a path from a directory and a relative name is
+// the ordinary way to build one.
 inline Result<std::filesystem::path> resolveProjectFileForWrite(const std::string& file_path) {
     if (file_path.empty()) return Error::invalidArgument("file path is empty");
+    // A NUL truncates the path at the filesystem boundary, so a name whose
+    // string ends in .gd writes a file with no extension at a name the caller
+    // never asked for, and every check upstream ran against the longer string.
+    // The other control characters are refused with it: blackboard_write
+    // already refuses them by name, and there is no reason for two writers in
+    // the same server to disagree about what a path may hold.
+    for (const unsigned char character : file_path) {
+        if (character < 0x20 || character == 0x7F) {
+            return Error::invalidArgument("file path cannot contain control characters");
+        }
+    }
     std::string relative_value = file_path;
     if (strings::startsWith(relative_value, "res://")) relative_value.erase(0, 6);
     std::filesystem::path relative;
@@ -108,11 +126,6 @@ inline Result<std::filesystem::path> resolveProjectFileForWrite(const std::strin
     }
     if (relative.is_absolute() || relative.has_root_name()) {
         return Error::invalidArgument("file path must be relative to the project root");
-    }
-    for (const auto& component : relative) {
-        if (component == "..") {
-            return Error::invalidArgument("file path cannot contain parent traversal");
-        }
     }
 
     std::error_code error;

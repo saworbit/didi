@@ -9,6 +9,7 @@
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/gdextension_interface.h"
 #include "didi/common/project_path.hpp"
+#include "didi/common/godot_error.hpp"
 #include "didi/common/atomic_write.hpp"
 #include "didi/tools/hierarchy_view.hpp"
 #include "didi/mcp/error_data.hpp"
@@ -1097,10 +1098,16 @@ static void test_path_validation_failures_carry_a_code_too() {
     ASSERT_EQ(code_of("analyze_script_diagnostics", absent), 404);
     ASSERT_EQ(code_of("script_get_symbols", absent), 404);
 
-    // Parent traversal is a bad argument, not a missing file.
+    // A path that leaves the project root is a bad argument, not a missing
+    // file. A dot-dot segment that lands back inside it is neither: it is an
+    // ordinary path, and it is checked by resolving rather than by looking for
+    // ".." in the string (#534).
+    ASSERT_EQ(code_of("script_create",
+                      didi::json{{"script_path", "res://sub/../../a.gd"},
+                                 {"source_text", "extends Node\n"}}), 400);
     ASSERT_EQ(code_of("script_create",
                       didi::json{{"script_path", "res://sub/../a.gd"},
-                                 {"source_text", "extends Node\n"}}), 400);
+                                 {"source_text", "extends Node\n"}}), 0);
 
     // Both test lab tools share one handler and one target_resource_path check.
     const didi::json lab{{"target_resource_path", "res://no_such.tscn"}};
@@ -1114,7 +1121,7 @@ static void test_path_validation_failures_carry_a_code_too() {
     ASSERT_EQ(code_of("project_search_symbols",
                       didi::json{{"query", "x"}, {"search_path", "res://no_such_dir"}}), 404);
     ASSERT_EQ(code_of("project_search_text",
-                      didi::json{{"query", "x"}, {"search_path", "res://sub/.."}}), 400);
+                      didi::json{{"query", "x"}, {"search_path", "res://sub/../.."}}), 400);
 
     // The sentence the tool put in front of the validator's message is still
     // there. The envelope is the only thing that is new.
@@ -4164,6 +4171,107 @@ static void test_property_contract_takes_vectors_colors_and_resource_paths() {
     ASSERT_TRUE(resource_message.find("res://") != std::string::npos);
 }
 
+static void test_writing_tools_answer_a_bad_path_with_a_code() {
+    // Break caught: script_create answered four failure classes with a bare
+    // JSON string while scene_create and resource_create returned the error
+    // envelope, so a caller could not branch on any of them (#526). Alongside
+    // it, a path holding a NUL passed the .gd check and wrote a file named
+    // after the truncation (#525), and a path with a dot-dot segment that
+    // lands inside the project root was refused by a substring test (#534).
+    ScopedToolProject project("writer-path-rules");
+    writeAuditFile("project.godot", "config_version=5\n");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+
+    const auto code_of = [&](const std::string& tool, const didi::json& arguments) {
+        const auto result = registry.callTool(tool, arguments);
+        if (!result.isError) return 0;
+        const auto parsed = didi::json::parse(result.content[0].text, nullptr, false);
+        if (parsed.is_discarded() || !parsed.is_object() || !parsed.contains("error")) return -1;
+        return parsed["error"].value("code", -1);
+    };
+
+    // Each of these used to come back as prose with nothing to switch on.
+    // -1 is what the helper reports for a bare string, so the assertion fails
+    // for the old answer rather than passing on a message that happens to
+    // contain the right words.
+    ASSERT_EQ(code_of("script_create", didi::json{{"source_text", "extends Node\n"}}), 400);
+    ASSERT_EQ(code_of("script_create", didi::json{{"script_path", "res://a.gd"}}), 400);
+    ASSERT_EQ(code_of("script_create",
+                      didi::json{{"script_path", "res://notascript.txt"},
+                                 {"source_text", "extends Node\n"}}), 400);
+    ASSERT_EQ(code_of("script_create",
+                      didi::json{{"script_path", "res://" + std::string(300, 'y') + ".gd"},
+                                 {"source_text", "x"}}), 400);
+    ASSERT_EQ(code_of("script_create",
+                      didi::json{{"script_path", "res://" + std::string(300, 'd') + "/a.gd"},
+                                 {"source_text", "x"}}), 400);
+    ASSERT_EQ(code_of("resource_create", didi::json{{"resource_type", "Resource"}}), 400);
+
+    // A NUL truncates the path at the filesystem boundary. The extension check
+    // ran against the longer string, so a path whose string ends in .gd passed
+    // it and 13 bytes landed in a file called "n1" with no extension, reported
+    // as created at a path that was never written.
+    const std::string nul_script = std::string("res://n1") + '\0' + "x.gd";
+    const auto nul_result = registry.callTool("script_create", didi::json{
+        {"script_path", nul_script}, {"source_text", "extends Node\n"}});
+    ASSERT_TRUE(nul_result.isError);
+    ASSERT_TRUE(!std::filesystem::exists("n1"));
+
+    const std::string nul_resource = std::string("res://r1") + '\0' + "x.tres";
+    const auto nul_tres = registry.callTool("resource_create", didi::json{
+        {"save_path", nul_resource}, {"resource_type", "Resource"}});
+    ASSERT_TRUE(nul_tres.isError);
+    ASSERT_TRUE(!std::filesystem::exists("r1"));
+
+    // A dot-dot segment that resolves back inside the project root is a path
+    // inside the project. Composing one from a directory and a relative name
+    // is the ordinary way to build a path, and the substring test refused it
+    // while accepting res://./ok.gd through the same root.
+    const auto dot = registry.callTool("script_create", didi::json{
+        {"script_path", "res://./ok.gd"}, {"source_text", "extends Node\n"}});
+    ASSERT_TRUE(!dot.isError);
+    const auto traversed = registry.callTool("script_create", didi::json{
+        {"script_path", "res://nested/../ok2.gd"}, {"source_text", "extends Node\n"}});
+    ASSERT_TRUE(!traversed.isError);
+    ASSERT_EQ(readToolTestFile("ok2.gd"), "extends Node\n");
+
+    // Confinement still holds. The resolve-and-compare check is the one doing
+    // the work now, and it refuses what actually lands outside.
+    ASSERT_EQ(code_of("script_create",
+                      didi::json{{"script_path", "res://../escaped.gd"},
+                                 {"source_text", "extends Node\n"}}), 400);
+    ASSERT_TRUE(!std::filesystem::exists(
+        std::filesystem::current_path().parent_path() / "escaped.gd"));
+    ASSERT_EQ(code_of("script_create",
+                      didi::json{{"script_path", "res://nested/../../escaped.gd"},
+                                 {"source_text", "extends Node\n"}}), 400);
+}
+
+static void test_godot_error_values_are_named_not_printed() {
+    // Break caught: scene_create handed ResourceSaver's return code to the
+    // caller as "failed with Error 19" inside a 500 internal_error, so a bad
+    // path read as a broken server and the number had no name (#535). The
+    // table is Godot's own Error enum from extension_api.json.
+    ASSERT_EQ(didi::godot::godotErrorName(19), "ERR_CANT_OPEN");
+    ASSERT_EQ(didi::godot::godotErrorName(0), "OK");
+    ASSERT_EQ(didi::godot::godotErrorName(48), "ERR_PRINTER_ON_FIRE");
+    ASSERT_EQ(didi::godot::describeGodotError(19), "ERR_CANT_OPEN (19)");
+    // An enum value this build does not know falls through to the number
+    // rather than to a guess.
+    ASSERT_EQ(didi::godot::godotErrorName(4096), "Error 4096");
+    ASSERT_EQ(didi::godot::describeGodotError(4096), "Error 4096");
+
+    // The file-and-path family is the caller's argument to fix, so it answers
+    // 400. Everything else stays a 500.
+    ASSERT_TRUE(didi::godot::isGodotPathError(19));
+    ASSERT_TRUE(didi::godot::isGodotPathError(20));
+    ASSERT_TRUE(didi::godot::isGodotPathError(13));
+    ASSERT_TRUE(!didi::godot::isGodotPathError(1));
+    ASSERT_TRUE(!didi::godot::isGodotPathError(6));
+}
+
 static void test_script_create_writes_a_gdscript_and_reports_its_diagnostics() {
     // Break caught: nothing in the surface created a .gd file, so the first
     // step of the documented workflow was the one step that had to happen
@@ -4775,6 +4883,10 @@ struct RegisterToolTests {
                      test_property_admission_reads_the_number_not_its_json_spelling);
         registerTest("Tools.ScriptCreate",
                      test_script_create_writes_a_gdscript_and_reports_its_diagnostics);
+        registerTest("Tools.WriterPathRules",
+                     test_writing_tools_answer_a_bad_path_with_a_code);
+        registerTest("Tools.GodotErrorNames",
+                     test_godot_error_values_are_named_not_printed);
         registerTest("Tools.WritersDropTheSharedIndex",
                      test_writers_drop_the_shared_index_so_the_next_read_sees_them);
         registerTest("Tools.ResourceCreatePathGuard",

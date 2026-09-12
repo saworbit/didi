@@ -63,9 +63,9 @@ Result<fs::path> resolveSearchRoot(const fs::path& project_root, const std::stri
     if (relative.is_absolute() || relative.has_root_name()) {
         return Error::invalidArgument("search_path must remain beneath res://");
     }
-    for (const auto& part : relative) {
-        if (part == "..") return Error::invalidArgument("search_path cannot contain parent traversal");
-    }
+    // Resolve, then compare against the project root. A substring test refused
+    // res://sub/.., which is the project root, while accepting res://./sub
+    // through the same root (#534). The check below is the one doing the work.
     std::error_code ec;
     const auto target = fs::weakly_canonical(project_root / relative, ec);
     if (ec || !paths::isWithinProject(project_root, target)) {

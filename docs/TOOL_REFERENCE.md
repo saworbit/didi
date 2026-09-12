@@ -262,7 +262,7 @@ Extracts functions, variables, signals, enums, and inner classes from GDScript t
 
 Writes a new GDScript file under the project root and runs the same diagnostics `script_patch_method` runs afterwards, so a bad script is visible at creation rather than at attach time. Nothing else in the surface creates a `.gd` file.
 
-- `script_path` (`string`, required); must end in `.gd` and resolve inside the project root.
+- `script_path` (`string`, required); must end in `.gd`, hold no control characters, and resolve inside the project root. Containment is decided by resolving the path, so `res://nested/../ok.gd` is the project-root file it names rather than a refusal.
 - `source_text` (`string`, required); written verbatim.
 - `overwrite` (`boolean`, default `false`); an existing script is preserved unless explicitly set to `true`. The confirmation token is required when a file is actually there to be replaced, so writing a new file with the flag costs no more than writing one without it.
 
