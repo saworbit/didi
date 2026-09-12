@@ -68,6 +68,40 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `signal_list_connections` marks the editor's own listeners (#461). A freshly
+  created `Sprite2D` with no user connections at all reported five, all of them
+  the scene dock's `SceneTreeEditor` callbacks. None exist in the saved
+  `.tscn` and none exist at runtime; they are alive only while the editor has
+  the scene open. An agent asking what is wired to a node got five false
+  positives to one true one, at a ratio that gets worse the emptier the scene,
+  and the only tells were a null `target_node` and a `Class::_method` spelling
+  that a caller has to already know to look for. Every connection now carries
+  `origin`, `scene` or `editor`, and the response carries `editor_connections`.
+  Marked rather than filtered, because a caller debugging the editor itself has
+  no other way to see them.
+
+- `ui_list_controls` and `ui_hit_test` name the subtree they actually covered
+  (#470). `root_path` is an input to both, and neither echoed back something
+  that could be sent anywhere: one answered `"<edited scene root>"`, a
+  placeholder no tool accepts, and the other echoed the literal default
+  `"/root"` while traversing from the edited scene root. The two reported
+  different subtrees for the same two nodes, and a caller comparing them had no
+  way to tell which spelling was real. Both now resolve the path the same way
+  every control and hit in their own answers is already named.
+
+- `scene_get_group_members` returns the group names a scene actually uses
+  (#472). A group nobody has ever used answered exactly as one that had just
+  been emptied, field for field, and nothing enumerated a scene's groups:
+  `scene_list_groups` requires a `target_node` and answers for that one node.
+  An agent that asked for `enemys` instead of `enemies` got a successful empty
+  answer and no second question available to ask. In Godot a group is only its
+  members, so there is no emptied group to go and find, which is exactly what
+  made the typo unrecoverable. The walk that collects members now also collects
+  the names in use, so `known_groups` comes back beside the empty list, with
+  `group_exists` for the name that was asked about. Capped at 128 names with
+  `known_groups_truncated`, and Godot's own underscore-prefixed internal groups
+  are left out.
+
 - `project_set_setting` checks the setting name against the engine (#464). It
   accepted any name, `display/window/size/viewport_widht` included, wrote it
   into `project.godot` and reported `status: "success"` with

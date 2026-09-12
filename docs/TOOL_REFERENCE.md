@@ -151,6 +151,17 @@ per signal; when a cap is reached the payload sets `truncated` and names the cap
 in `truncated_at`. A node whose signal or connection count exceeds the response
 budget returns `413` rather than a partial answer that looks complete.
 
+Each connection carries `origin`. `scene` means the receiver is a node inside
+the edited scene, which is a connection the caller can act on and the only
+kind `signal_connect` makes. `editor` means the receiver is not, and in an open
+editor that is almost always the scene dock's own `SceneTreeEditor` listeners:
+they are alive only while the editor has this scene open, appear in no saved
+`.tscn`, and exist at runtime not at all. A freshly created node with no user
+connections reports five of them. `editor_connections` counts them at the top
+level so an answer that is entirely editor-owned can be recognised without
+walking the list. They are marked rather than filtered, because a caller
+debugging the editor itself has no other way to see them.
+
 ### `signal_connect` and `signal_disconnect` — Live
 
 Mutations. Both require `emitter_node`, `signal_name`, `target_node` and
@@ -961,7 +972,7 @@ Copy the built `addons/didi` folder into the project first; that copy is a files
 - `scene_list_groups`: requires `target_node` and returns sorted group names.
 - `scene_add_to_group`: requires `target_node` and `group`; `persistent` defaults to `true`. Duplicate membership is an error.
 - `scene_remove_from_group`: requires existing membership.
-- `scene_get_group_members`: requires `group` and returns canonical node paths confined to the active edited scene.
+- `scene_get_group_members`: requires `group` and returns canonical node paths confined to the active edited scene. It also returns `known_groups`, the group names any node in the edited scene is currently in, and `group_exists` for the name that was asked about. Nothing else enumerates a scene's groups: `scene_list_groups` requires a `target_node` and answers for that one node. In Godot a group is only its members, so removing the last one is the same state as a name never used, and an empty `members` alone cannot tell a caller they mistyped `enemies`. `known_groups` is capped at 128 names, with `known_groups_truncated` when it fills, and omits Godot's own underscore-prefixed internal groups.
 
 Group mutations use UndoRedo.
 
@@ -1200,7 +1211,11 @@ This is the tool that makes a control addressable: `ui_hit_test` answers what
 sits under a point, which is only useful once you already have a point.
 
 - `root_path` (`string`, optional, at most 1024 bytes): where to start. Defaults
-  to the edited scene root in an editor and `/root` in a game.
+  to the edited scene root in an editor and `/root` in a game. The answer
+  echoes the subtree it actually covered as a node path that can be sent
+  straight back to this tool, to `ui_hit_test`, or to `scene_get_hierarchy`.
+  `ui_hit_test` reports the same resolved path for the same default, so the
+  two are comparable.
 - `max_results` (`integer`, optional, default `64`, range `1..256`).
 - `visible_only` (`boolean`, optional, default `true`): skip Controls that are
   not visible in the tree, and everything beneath them, because a hidden Control
