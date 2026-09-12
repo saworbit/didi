@@ -97,9 +97,13 @@ private:
     static std::string bindingHash(const ResolvedToolBinding& binding,
                                    const json& arguments,
                                    const MutationContext& context);
+    // `data` is what this call site knows beyond the floor. Everything the
+    // floor fills -- code, tool, canonical_tool, retryable -- is added after,
+    // and never over the top of a key given here.
     MutationDecision errorDecision(const ResolvedToolBinding& binding, int code,
                                    const std::string& message,
-                                   const MutationContext& context) const;
+                                   const MutationContext& context,
+                                   json data = json::object()) const;
     void prune(int64_t now);
 
     Clock m_clock;

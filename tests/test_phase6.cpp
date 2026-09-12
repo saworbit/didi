@@ -273,6 +273,18 @@ TEST(Phase6, MutationPreviewIsNonExecutingAndBindsSingleUseConfirmation) {
     ASSERT_TRUE(missing.is_error);
     ASSERT_EQ(missing.payload["error"]["code"], 428);
 
+    // The 428 is the error a caller is most likely to branch on, because the
+    // right response to it is mechanical: dry-run the same arguments, take the
+    // token, call again. It used to carry no data at all, so "this needs a
+    // token" was recoverable only from the prose (#487).
+    const auto& gate_data = missing.payload["error"]["data"];
+    ASSERT_EQ(gate_data["code"], "confirmation_required");
+    ASSERT_EQ(gate_data["tool"], "editor_reload_project");
+    ASSERT_EQ(gate_data["canonical_tool"], "editor_reload_project");
+    ASSERT_EQ(gate_data["retryable"], true);
+    ASSERT_EQ(gate_data["dry_run_argument"], "dry_run");
+    ASSERT_EQ(gate_data["confirmation_argument"], "confirmation_token");
+
     auto confirmed = evaluateBinding(safety,
         "editor_reload_project", {{"confirmation_token", token}}, context);
     ASSERT_TRUE(confirmed.execute);

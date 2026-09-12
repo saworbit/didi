@@ -1,4 +1,5 @@
 #include "didi/mcp/tool_registry.hpp"
+#include "didi/mcp/error_data.hpp"
 #include "didi/mcp/parameter_descriptions.hpp"
 #include "didi/mcp/control_room.hpp"
 #include "didi/mcp/project_tools.hpp"
@@ -1059,6 +1060,47 @@ std::optional<Error> probeNodeTarget(const std::string& argument, const json& ar
 
 }  // namespace
 
+// Every error leaving this registry answers the same three questions in the
+// same place: what kind of failure this is, who answered, and whether retrying
+// could help. It used to be answered at each call site, so on 35 well-formed,
+// wrong calls only 14 carried a data.code and twelve carried nothing at all
+// (#486). Filling it here rather than at each site is what makes it a floor: a
+// site that knows more still says more, and anything already set is left alone.
+//
+// A result whose text is not an error envelope is passed through untouched.
+// Wrapping a bare sentence would be a different change, and the five bare ones
+// that remain are not semantic failures.
+static CallToolResult withErrorDataFloor(CallToolResult result,
+                                         const ResolvedToolBinding& binding) {
+    // The envelope is the envelope whether or not isError is set on the result
+    // around it. A live handler answers a bridge refusal with the payload the
+    // bridge sent and no flag, so gating this on isError would miss exactly the
+    // twelve tools the census found carrying an empty data.
+    //
+    // An `error` that is an object with a numeric `code` is the envelope. A
+    // result that merely has a key called error, a list of import errors say,
+    // is not, and is left alone.
+    bool structured_retaken = false;
+    for (auto& item : result.content) {
+        if (item.type != "text") continue;
+        auto payload = json::parse(item.text, nullptr, false);
+        if (payload.is_discarded() || !payload.is_object()) continue;
+        const auto error = payload.find("error");
+        if (error == payload.end() || !error->is_object() ||
+            !error->value("code", json()).is_number_integer()) {
+            continue;
+        }
+        applyErrorDataFloor(*error, std::string(binding.invoked_name),
+                            std::string(binding.canonical_name));
+        item.text = payload.dump();
+        if (!structured_retaken && result.structuredContent.has_value()) {
+            result.structuredContent = std::move(payload);
+            structured_retaken = true;
+        }
+    }
+    return result;
+}
+
 // The shape the rest of the surface already uses for a caller mistake: a
 // sentence a person or an agent can act on, plus a stable machine code beside
 // it rather than instead of it (#406).
@@ -1076,6 +1118,12 @@ static CallToolResult invalidArgumentsError(const ResolvedToolBinding& binding,
 CallToolResult ToolRegistry::callTool(const std::string& name, const json& arguments,
                                       const RequestScope& scope) {
     const auto binding = resolveAliasBinding(name, arguments);
+    return withErrorDataFloor(dispatchTool(name, arguments, scope), binding);
+}
+
+CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& arguments,
+                                          const RequestScope& scope) {
+    const auto binding = resolveAliasBinding(name, arguments);
     const auto* tool = getTool(name);
     if (!tool) {
         return CallToolResult::error("Tool not found: " + name);
@@ -1084,7 +1132,14 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
         return CallToolResult::error("Tool handler not set for: " + name);
     }
     if (!tool->capability.implemented) {
-        return CallToolResult::error("Tool '" + name + "' is unimplemented: " + tool->capability.reason);
+        // Registered for protocol compatibility and refused before any handler
+        // runs, which is why the sweep that gave every semantic failure an
+        // envelope could not reach these five. The bare sentence buried the one
+        // thing a caller needs: this failure is permanent (#492). The data
+        // floor below fills code, tool and retryable.
+        return CallToolResult::error(json{{"error", {
+            {"code", 501},
+            {"message", "Tool '" + name + "' is unimplemented: " + tool->capability.reason}}}}.dump());
     }
     // The schema this tool publishes is what the caller was told it accepts, so
     // it is checked here, once, before anything dispatches. Every route into a

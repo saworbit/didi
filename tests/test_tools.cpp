@@ -11,6 +11,7 @@
 #include "didi/common/project_path.hpp"
 #include "didi/common/atomic_write.hpp"
 #include "didi/tools/hierarchy_view.hpp"
+#include "didi/mcp/error_data.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -2678,6 +2679,124 @@ static void test_hierarchy_schema_bounds_its_depth_and_drops_inert_flags() {
     ASSERT_TRUE(registry.callTool("scene_get_hierarchy", {{"max_depth", 65}}).isError);
 }
 
+// Break caught: `error.data` is the part a caller branches on without parsing
+// prose, and on 35 well-formed, wrong calls only 14 carried a data.code. Twelve
+// carried an empty object, four carried retryable and nothing else, and one
+// carried everything but the code (#486). The fix is a floor filled in one
+// place, so the assertion is that the floor holds and that it never overwrites
+// a call site that knew better.
+static void test_error_data_floor_fills_code_tool_and_retryable() {
+    // The status a transport uses and the string a caller branches on are not
+    // the same thing, which is why both are carried.
+    ASSERT_EQ(didi::mcp::errorCodeForStatus(404), std::string("not_found"));
+    ASSERT_EQ(didi::mcp::errorCodeForStatus(428), std::string("confirmation_required"));
+    ASSERT_EQ(didi::mcp::errorCodeForStatus(501), std::string("unimplemented"));
+    ASSERT_EQ(didi::mcp::errorCodeForStatus(500), std::string("internal_error"));
+    ASSERT_EQ(didi::mcp::errorCodeForStatus(418), std::string("request_failed"));
+
+    // Retryable means the same call could succeed later with nothing about the
+    // request changed.
+    ASSERT_TRUE(didi::mcp::retryableForStatus(428));
+    ASSERT_TRUE(didi::mcp::retryableForStatus(503));
+    ASSERT_TRUE(!didi::mcp::retryableForStatus(404));
+
+    // The empty-data shape the live bridge produced for twelve tools.
+    didi::json error = {{"code", 404},
+                        {"message", "Scene node not found: /root/NoSuchNode"},
+                        {"data", didi::json::object()}};
+    didi::mcp::applyErrorDataFloor(error, "get_scene_hierarchy", "scene_get_hierarchy");
+    ASSERT_EQ(error["data"]["code"], "not_found");
+    ASSERT_EQ(error["data"]["tool"], "get_scene_hierarchy");
+    ASSERT_EQ(error["data"]["canonical_tool"], "scene_get_hierarchy");
+    ASSERT_EQ(error["data"]["retryable"], false);
+
+    // A site that already said something keeps every word of it.
+    didi::json known = {{"code", 409},
+                        {"message", "The git work tree above this project tracks nothing here."},
+                        {"data", {{"code", "repository_mismatch"}, {"retryable", true},
+                                  {"repository_root", "C:/Users/User"}}}};
+    didi::mcp::applyErrorDataFloor(known, "project_verify_changes", "project_verify_changes");
+    ASSERT_EQ(known["data"]["code"], "repository_mismatch");
+    ASSERT_EQ(known["data"]["retryable"], true);
+    ASSERT_EQ(known["data"]["repository_root"], "C:/Users/User");
+    ASSERT_EQ(known["data"]["tool"], "project_verify_changes");
+
+    // A data that is not a map said something too. It is moved, not dropped.
+    didi::json bare = {{"code", 500}, {"message", "x"}, {"data", "some detail"}};
+    didi::mcp::applyErrorDataFloor(bare, "t", "t");
+    ASSERT_EQ(bare["data"]["details"], "some detail");
+    ASSERT_EQ(bare["data"]["code"], "internal_error");
+}
+
+// A live handler answers a bridge refusal with the payload the bridge sent and
+// no isError flag around it, which is why the floor looks at the envelope
+// rather than at the flag. These twelve 404s were the whole empty-data bucket.
+class BridgeRefusalClient final : public didi::ipc::IIpcClient {
+public:
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override {}
+    bool isConnected() const override { return true; }
+    didi::Result<didi::json> sendRequest(const std::string&, const didi::json&, int) override {
+        return didi::json{{"error", {{"code", 404},
+                                     {"message", "Scene node not found: /root/NoSuchNode"},
+                                     {"data", didi::json::object()}}}};
+    }
+};
+
+static void test_a_bridge_refusal_arrives_with_the_floor_filled() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(std::make_shared<BridgeRefusalClient>());
+
+    const auto result = registry.callTool("scene_get_property",
+        {{"target_node", "/root/NoSuchNode"}, {"property_name", "name"}});
+    const auto payload = didi::json::parse(result.content[0].text, nullptr, false);
+    registry.setIpcClient(nullptr);
+
+    ASSERT_TRUE(!payload.is_discarded());
+    const auto& data = payload["error"]["data"];
+    ASSERT_EQ(data["code"], "not_found");
+    ASSERT_EQ(data["tool"], "scene_get_property");
+    ASSERT_EQ(data["canonical_tool"], "scene_get_property");
+    ASSERT_EQ(data["retryable"], false);
+    // The message the bridge wrote is left exactly as it wrote it.
+    ASSERT_EQ(payload["error"]["message"], "Scene node not found: /root/NoSuchNode");
+}
+
+// Break caught: the five unimplemented registrations answered with a bare
+// string rather than the envelope, because they refuse the call before any
+// handler runs and so sat in front of the sweep that fixed everything else
+// (#492). The thing the sentence buried is that this failure is permanent.
+static void test_unimplemented_tools_answer_with_the_envelope() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    for (const auto& name : {"nav_bake_mesh", "physics_simulate_step", "instantiate_asset",
+                             "mutate_scene_tree", "runtime_get_call_stack"}) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        if (tool->capability.implemented) continue;
+        const auto result = registry.callTool(name, didi::json::object());
+        ASSERT_TRUE(result.isError);
+        const auto payload = didi::json::parse(result.content[0].text, nullptr, false);
+        ASSERT_TRUE(!payload.is_discarded());
+        ASSERT_EQ(payload["error"]["code"], 501);
+        ASSERT_EQ(payload["error"]["data"]["code"], "unimplemented");
+        ASSERT_EQ(payload["error"]["data"]["tool"], name);
+        ASSERT_EQ(payload["error"]["data"]["retryable"], false);
+        ASSERT_TRUE(payload["error"]["message"].get<std::string>().find("unimplemented") !=
+                    std::string::npos);
+    }
+
+    // An argument error still carries the code its own call site chose, which
+    // is the point of a floor rather than a rewrite.
+    const auto invalid = registry.callTool("scene_get_property", didi::json::object());
+    ASSERT_TRUE(invalid.isError);
+    const auto invalid_payload = didi::json::parse(invalid.content[0].text, nullptr, false);
+    ASSERT_TRUE(!invalid_payload.is_discarded());
+    ASSERT_EQ(invalid_payload["error"]["data"]["code"], "invalid_arguments");
+    ASSERT_EQ(invalid_payload["error"]["data"]["canonical_tool"], "scene_get_property");
+}
+
 static void test_project_search_public_validation_and_schema() {
     // Break caught: public search accepts coercible/unbounded inputs or advertises a live route.
     auto& reg = didi::mcp::ToolRegistry::instance();
@@ -4327,6 +4446,12 @@ struct RegisterToolTests {
                      test_depth_cut_reports_what_it_stopped_on);
         registerTest("Hierarchy.SchemaBoundsDepthAndDropsInertFlags",
                      test_hierarchy_schema_bounds_its_depth_and_drops_inert_flags);
+        registerTest("ErrorData.FloorFillsCodeToolAndRetryable",
+                     test_error_data_floor_fills_code_tool_and_retryable);
+        registerTest("ErrorData.BridgeRefusalArrivesWithTheFloorFilled",
+                     test_a_bridge_refusal_arrives_with_the_floor_filled);
+        registerTest("ErrorData.UnimplementedToolsAnswerWithTheEnvelope",
+                     test_unimplemented_tools_answer_with_the_envelope);
         registerTest("Tools.ProjectSearchPublicValidationAndSchema", test_project_search_public_validation_and_schema);
         registerTest("Tools.AssetReimportPublicValidationAndSchema", test_asset_reimport_public_validation_and_schema);
         registerTest("Tools.ViewportDiffPublicValidationAndSchema", test_viewport_diff_public_validation_and_schema);

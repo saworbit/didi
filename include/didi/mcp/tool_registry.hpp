@@ -45,6 +45,7 @@ public:
     // The scope says which era asked and which runtime session it named. It
     // defaults to a legacy request, so a caller that does not care about
     // request scoping keeps the inherited-route behaviour it had.
+    // Every error it returns carries the data floor: see applyErrorDataFloor.
     CallToolResult callTool(const std::string& name, const json& arguments,
                             const RequestScope& scope = RequestScope::legacy());
 
@@ -73,6 +74,11 @@ private:
     std::optional<CallToolResult> selectNamedRuntimeRoute(
         const std::string& tool_name, const RequestScope& scope,
         std::optional<runtime::RuntimeRouteLease>& lease);
+
+    // The call itself. callTool wraps this so that every way out of it, of
+    // which there are many, passes the same error data floor on the way (#486).
+    CallToolResult dispatchTool(const std::string& name, const json& arguments,
+                                const RequestScope& scope);
 
     std::unordered_map<std::string, ToolDefinition> m_tools;
     std::shared_ptr<ipc::IIpcClient> m_sourceIpcClient;
