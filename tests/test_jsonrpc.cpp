@@ -206,6 +206,40 @@ static void test_mcp_phase7_parent_gate_and_alias_identity() {
               "patch_script_symbols");
 }
 
+// A project of the test's own to run in.
+//
+// Break caught: test_tools_call_enforces_the_published_input_schema read
+// res://addons and asserted the search succeeded, with no fixture anywhere in
+// it. The only thing that made that true was the process happening to be
+// started from the repository root, which has an addons/ directory. Run the
+// binary from anywhere else -- a scratch directory, a different working
+// directory in CI -- and the assertion that closing a schema must not close the
+// tool failed for a missing directory instead.
+class ScopedScratchProject final {
+public:
+    explicit ScopedScratchProject(const std::string& suffix)
+        : m_original(std::filesystem::current_path()),
+          m_root(m_original / "build" / "test-projects" /
+                 ("didi-jsonrpc-" + suffix + "-" +
+                  std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()))) {
+        std::filesystem::create_directories(m_root);
+        std::filesystem::current_path(m_root);
+    }
+
+    ~ScopedScratchProject() {
+        std::error_code error;
+        std::filesystem::current_path(m_original, error);
+        std::filesystem::remove_all(m_root, error);
+    }
+
+    ScopedScratchProject(const ScopedScratchProject&) = delete;
+    ScopedScratchProject& operator=(const ScopedScratchProject&) = delete;
+
+private:
+    std::filesystem::path m_original;
+    std::filesystem::path m_root;
+};
+
 static void initializeServer(didi::mcp::McpServer& server) {
     didi::mcp::JsonRpcRequest initialize;
     initialize.id = 1;
@@ -1067,6 +1101,14 @@ static void test_mcp_control_room_still_answers_without_the_ui_extension() {
 // The schema a tool publishes is the contract, and tools/call now holds the
 // server to it before anything dispatches (#397, #396, #400, #399).
 static void test_tools_call_enforces_the_published_input_schema() {
+    // The search assertions below read the project this test is standing in, so
+    // it brings its own rather than borrowing whichever directory the binary
+    // was launched from.
+    ScopedScratchProject project("schema-enforcement");
+    std::ofstream("project.godot") << "config_version=5\n";
+    std::filesystem::create_directories("addons/example");
+    std::ofstream("addons/example/plugin.gd") << "extends EditorPlugin\n";
+
     didi::mcp::McpServer server;
     initializeServer(server);
     didi::mcp::ToolRegistry::instance().registerAllDefaultTools();
@@ -1150,10 +1192,14 @@ static void test_tools_call_enforces_the_published_input_schema() {
     ASSERT_TRUE(errorText(no_arguments).find("bogus") != std::string::npos);
 
     // The same call without the typo still works, which is the half that
-    // matters: closing the schema must not close the tool.
+    // matters: closing the schema must not close the tool. res://addons is a
+    // directory this test created, so the assertion is about the schema and not
+    // about what happens to be on disk beside the binary.
     const auto scoped = call("project_search_text",
                              {{"query", "extends"}, {"search_path", "res://addons"}});
     ASSERT_TRUE(!scoped.result["isError"].get<bool>());
+    ASSERT_TRUE(!didi::json::parse(scoped.result["content"][0]["text"].get<std::string>())
+                     ["matches"].empty());
 
     // pattern was published at 17 sites and enforced at none, so a token of the
     // right length and the wrong alphabet passed validation and was looked up
