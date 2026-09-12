@@ -984,6 +984,14 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   block keywords, `else` carries no trailing space, and the check for what
   follows it never confirmed the line started with `else` at all.
 
+- The schema-enforcement test brings its own project. It searched `res://addons`
+  and asserted the search succeeded, with no fixture anywhere in it, so the only
+  thing making that true was the binary happening to be started from the
+  repository root. Run from anywhere else, the assertion that closing a schema
+  must not close the tool failed for a missing directory. It now creates the
+  project it stands in, and asserts the search found something rather than only
+  that it did not error.
+
 ---
 
 ## [1.8.0] - 2026-09-10
