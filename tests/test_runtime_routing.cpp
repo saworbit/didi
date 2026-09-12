@@ -45,6 +45,7 @@ namespace didi::mcp {
 CallToolResult handleRuntimeReadLogs(const json&, std::shared_ptr<ipc::IIpcClient>);
 CallToolResult handleRuntimeGetSession(const json&, std::shared_ptr<runtime::IRuntimeSessionClient>,
                                        std::vector<std::string> available_without_engine = {});
+CallToolResult handleRuntimeDetachSession(const json&, std::shared_ptr<runtime::IRuntimeSessionClient>);
 CallToolResult handleRuntimeSetPaused(const json&, std::shared_ptr<ipc::IIpcClient>);
 CallToolResult handleRuntimeStep(const json&, std::shared_ptr<ipc::IIpcClient>);
 CallToolResult handleRuntimeStop(const json&, std::shared_ptr<ipc::IIpcClient>);
@@ -2049,6 +2050,34 @@ void test_get_session_performs_bounded_fresh_handshake_and_quarantines_identity_
     ASSERT_FALSE(client->activeSession().has_value());
 }
 
+// Break caught: a successful detach answered with the full descriptor of the
+// session it had just disconnected, in the same `session` field a connected
+// answer uses, and with no `connected` key at all. The only difference between
+// an attached answer and a detached one was an absence, which is not a
+// statement a caller or a log reader can act on (#506).
+void test_detach_answers_with_the_state_it_left_behind() {
+    SessionDirectoryFixture fixture;
+    const auto selected = fixture.add("dddddddddddddddddddddddddddddddd", "editor");
+    auto client = fixture.client();
+    ASSERT_TRUE(client->isConnected());
+
+    const auto before = payload(didi::mcp::handleRuntimeGetSession(didi::json::object(), client));
+    ASSERT_EQ(before["connected"], true);
+    ASSERT_EQ(before["session"]["session_id"], selected.session_id);
+
+    const auto detached_result = didi::mcp::handleRuntimeDetachSession(didi::json::object(), client);
+    ASSERT_FALSE(detached_result.isError);
+    const auto after = payload(detached_result);
+    ASSERT_EQ(after["execution_mode"], "local_session_management");
+    // The state, stated.
+    ASSERT_EQ(after["connected"], false);
+    // The descriptor is named for what it is, and no longer occupies the field
+    // a connected answer puts the live session in.
+    ASSERT_FALSE(after.contains("session"));
+    ASSERT_EQ(after["detached_session"]["session_id"], selected.session_id);
+    ASSERT_FALSE(client->isConnected());
+}
+
 void test_get_session_quarantines_a_disconnected_selected_route() {
     // Break caught: a dead active transport returns a cached session instead of clearing the route.
     SessionDirectoryFixture fixture;
@@ -2734,6 +2763,8 @@ struct RegisterRuntimeRoutingTests {
                      test_local_session_validation_errors_are_structured);
         registerTest("RuntimeRouting.FreshSessionHandshake",
                      test_get_session_performs_bounded_fresh_handshake_and_quarantines_identity_change);
+        registerTest("RuntimeRouting.DetachAnswersWithTheStateItLeftBehind",
+                     test_detach_answers_with_the_state_it_left_behind);
         registerTest("RuntimeRouting.FreshSessionDeadRouteQuarantine",
                      test_get_session_quarantines_a_disconnected_selected_route);
         registerTest("RuntimeRouting.HandshakeComparesEveryIdentityField",

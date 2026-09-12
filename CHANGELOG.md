@@ -68,6 +68,25 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- Tool annotations are decided per tool instead of being four names for one bit
+  (#505, #507). `readOnlyHint`, `destructiveHint` and `idempotentHint` were all
+  derived from the mutation classification, so across all 126 tools the four
+  hints took exactly four shapes and the last two carried nothing a client could
+  act on. `runtime_attach_session` and `runtime_detach_session` sat in the
+  read-only bucket while picking and severing the attachment every later live
+  call routes through, which is the one thing a host auto-approving read-only
+  tools must not be told it can do unasked. Both are now `readOnlyHint: false`.
+  `destructiveHint` is false for the writers that can only add, and stays true
+  for anything taking an `overwrite` flag. `idempotentHint` is true for the
+  writers that land in the same state when called twice, so a client can retry a
+  call that timed out.
+
+- `runtime_detach_session` says what it did (#506). A successful detach answered
+  with the full descriptor of the session it had just disconnected, in the same
+  `session` field a connected answer uses, and the only thing separating the two
+  payloads was a missing `connected` key. The descriptor is now
+  `detached_session` and the answer carries `connected: false`.
+
 - The expression sandbox names the read that works (#488). A refused object read
   stated the rule and not the way through, so the natural next call after being
   refused was another refusal. `self` was worse: it parsed, reached Godot, and

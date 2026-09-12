@@ -46,6 +46,22 @@ struct MutationDecision {
 // code that ends up running is chosen by the project rather than by Didi.
 bool toolRunsProjectControlledCode(const ResolvedToolBinding& binding);
 
+// True when this tool changes state the server holds rather than anything in
+// the project. Not a mutation, so there is no preview and no confirmation, but
+// not read-only either: the attachment every later live call routes through is
+// picked and severed here.
+bool toolWritesServerState(const ResolvedToolBinding& binding);
+
+// True when this tool can only add. Used for destructiveHint, which exists to
+// separate a writer that may destroy something from one that cannot. A tool
+// that takes an overwrite flag is not additive-only.
+bool toolIsAdditiveOnly(const ResolvedToolBinding& binding);
+
+// True when making the same call twice lands in the same state. Used for
+// idempotentHint, which is what a host reads to decide whether a call that
+// timed out can safely be sent again.
+bool toolIsIdempotentWriter(const ResolvedToolBinding& binding);
+
 // True when making this exact call a second time cannot change anything the
 // first attempt may already have done.
 //

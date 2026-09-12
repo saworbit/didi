@@ -264,7 +264,19 @@ CallToolResult handleRuntimeAttachSession(const json& args, std::shared_ptr<runt
 CallToolResult handleRuntimeDetachSession(const json&, std::shared_ptr<runtime::IRuntimeSessionClient> sessions) {
     if (!sessions) return sessionError(Error::notConnected("Runtime session management is unavailable"), sessions);
     auto result = sessions->detachSession();
-    return result.isOk() ? localSessionSuccess(result.value()) : sessionError(result.error(), sessions);
+    if (result.isErr()) return sessionError(result.error(), sessions);
+    // Say what happened. The descriptor coming back is the editor this call has
+    // just disconnected, and it used to sit in the same `session` field a
+    // connected answer uses, with no `connected` key at all -- so a detached
+    // answer and an attached one were told apart by an absence, which is not a
+    // statement (#506). Named for what it is, and the state stated outright.
+    json payload = result.value();
+    if (payload.contains("session")) {
+        payload["detached_session"] = payload["session"];
+        payload.erase("session");
+    }
+    payload["connected"] = false;
+    return localSessionSuccess(std::move(payload));
 }
 
 CallToolResult handleRuntimeGetSession(const json&,
