@@ -22,6 +22,32 @@ Phase 7 is `PARTIAL_DELIVERY`. The implementation is 113/116 canonical tools, an
 | Offline | Operates on project files or launches a separate Godot process. |
 | Unimplemented | Schema reserved for compatibility; calls are rejected. |
 
+## What every error carries
+
+A failure comes back as an envelope, and `error.data` is the part a caller
+branches on without reading the prose. Four keys are always there, filled in one
+place rather than at each call site:
+
+- `code`: a stable string for the kind of failure. `invalid_arguments`,
+  `not_found`, `forbidden`, `conflict`, `gone`, `response_too_large`,
+  `unprocessable`, `confirmation_required`, `rate_limited`, `unimplemented`,
+  `not_connected`, `timeout`, `internal_error`, `request_failed`. Branch on this
+  rather than on the number beside it, which is a transport convention.
+- `tool`: the name that was called, alias included.
+- `canonical_tool`: the name it resolves to. The same as `tool` unless a legacy
+  alias was used.
+- `retryable`: whether the same call could succeed later with nothing about the
+  request changed. True for `confirmation_required`, `rate_limited`,
+  `not_connected` and `timeout`; false otherwise.
+
+A tool that knows more says more, and nothing it already set is overwritten. The
+confirmation gate's `428` adds `dry_run_argument` and `confirmation_argument`, so
+the recovery path is a field rather than a sentence. Phase 7 live failures add
+`outcome` and `route_quarantine`.
+
+An unimplemented registration answers `501` with `code: "unimplemented"`. The
+failure is permanent: there is nothing to retry and nothing to fix in the call.
+
 ## 1. Scene Tree and nodes
 
 ### `scene_get_hierarchy` — Live + offline

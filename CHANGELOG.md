@@ -68,6 +68,26 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- Every error says what kind of failure it is, in the same place (#486, #487,
+  #492). `error.data` is the part a caller can branch on without parsing prose,
+  and on 35 well-formed, wrong calls only 14 carried a `data.code`. Twelve
+  carried an empty object, four carried `retryable` and nothing else, one
+  carried everything but the code, and the confirmation gate's `428` carried no
+  `data` at all. Each was a call site that filled it by hand or did not.
+
+  There is now a floor, filled once on the way out of the registry rather than
+  at each site: `code`, `tool`, `canonical_tool` and `retryable`, and a site
+  that knows more still says more with nothing it set overwritten. `code` is a
+  stable string rather than the status number beside it. The confirmation gate
+  carries its own copy, because it answers before the registry does, and its
+  `428` now names the argument to set to get a token.
+
+  The five unimplemented registrations answered with a bare string rather than
+  an envelope, because they refuse the call before any handler runs and so sat
+  in front of the sweep that fixed everything else. They answer `501` with
+  `code: "unimplemented"` now, which is the thing the sentence buried: this
+  failure is permanent.
+
 - `scene_get_hierarchy` answers the question it was asked (#482, #483, #484).
   Three things it got wrong, all of them in the shape of an answer that reads
   as a fact and is not one.

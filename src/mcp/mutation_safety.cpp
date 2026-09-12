@@ -1,4 +1,5 @@
 #include "didi/mcp/mutation_safety.hpp"
+#include "didi/mcp/error_data.hpp"
 
 #include "didi/common/secure_random.hpp"
 
@@ -252,14 +253,23 @@ std::string MutationSafety::bindingHash(const ResolvedToolBinding& binding,
 
 MutationDecision MutationSafety::errorDecision(const ResolvedToolBinding& binding, int code,
                                                const std::string& message,
-                                               const MutationContext& context) const {
+                                               const MutationContext& context,
+                                               json data) const {
     MutationDecision decision;
     decision.execute = false;
     decision.is_error = true;
+    json error = {{"code", code}, {"message", message}};
+    if (data.is_object() && !data.empty()) error["data"] = std::move(data);
+    // The gate answers before the registry does, so it carries its own copy of
+    // the floor rather than inheriting one. Its 428 is the error on the surface
+    // a caller is most likely to branch on, because the right response to it is
+    // mechanical, and it used to arrive with no data at all (#487).
+    applyErrorDataFloor(error, std::string(binding.invoked_name),
+                        std::string(binding.canonical_name));
     decision.payload = {
         {"execution_mode", context.execution_mode},
         {"tool", binding.invoked_name},
-        {"error", {{"code", code}, {"message", message}}}
+        {"error", std::move(error)}
     };
     return decision;
 }
@@ -416,11 +426,15 @@ MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
         }
     }
     if (confirmation_token.empty()) {
+        // The gate knows which argument the caller has to set to get a token.
+        // Saying so is the difference between a caller that recovers in one
+        // call and one that reads the prose to find out.
         return errorDecision(binding, 428,
                              "This mutation requires a dry-run preview and the confirmation token "
                              "it returns, spent on the same arguments. The preview reads the "
                              "target where it can, and says so with target_read when it could not.",
-                             context);
+                             context, {{"dry_run_argument", "dry_run"},
+                                       {"confirmation_argument", "confirmation_token"}});
     }
 
     // A token is spent when it is spent, not when it is offered. Erasing on the
