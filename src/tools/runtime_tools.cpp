@@ -111,6 +111,10 @@ CallToolResult sessionError(const Error& error,
     // said less than a tool error would send a caller looking in two places.
     Error annotated = error;
     runtime::annotateEngineState(annotated, active);
+    // With no session left to classify, annotateEngineState says nothing. The
+    // remembered obstruction is the only thing that can, and runtime_get_session
+    // is the tool a caller reaches for once the engine has gone (#527, #536).
+    runtime::annotateRouteObstruction(annotated);
     json data = annotated.data.is_object() ? annotated.data : json::object();
     if (!annotated.data.is_null() && !annotated.data.is_object()) data["details"] = annotated.data;
     json envelope = {{"execution_mode", "local_session_management"},
@@ -183,8 +187,9 @@ CallToolResult forwardLiveRuntime(const char* tool, const std::string& method, c
                                   const std::shared_ptr<ipc::IIpcClient>& ipc) {
     const auto lease = runtime::acquireRuntimeRouteLease(ipc);
     if (!lease.has_value()) {
-        return liveError(Error::notConnected("No runtime session is attached"),
-                         activeSessionFor(ipc));
+        auto error = Error::notConnected("No runtime session is attached");
+        runtime::annotateRouteObstruction(error);
+        return liveError(error, activeSessionFor(ipc));
     }
     const auto session = lease->descriptor;
     if ((method == "runtime.setPaused" || method == "runtime.step" || method == "runtime.stop") &&
@@ -282,6 +287,9 @@ CallToolResult handleRuntimeDetachSession(const json&, std::shared_ptr<runtime::
         payload["detached_session"] = payload["session"];
         payload.erase("session");
     }
+    // Whether this call is the one that released something, or found the work
+    // already done. Both are the cleanup succeeding (#537).
+    if (!payload.contains("detached")) payload["detached"] = false;
     payload["connected"] = false;
     return localSessionSuccess(std::move(payload));
 }

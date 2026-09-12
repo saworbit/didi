@@ -365,6 +365,21 @@ json buildControlRoomModel(const ControlRoomInputs& in,
                                       ? ("connected " + in.session_kind.value_or("unknown"))
                                       : (in.managed_unavailable ? "selected, unreachable"
                                                                 : "detached")));
+    // Detached is the same word for "no editor was ever started", "the editor
+    // crashed thirty seconds ago" and "another MCP client holds this editor".
+    // They lead to different next moves, so the one that applies is named.
+    if (!in.connected && in.route_obstruction.has_value()) {
+        const auto& obstruction = *in.route_obstruction;
+        std::ostringstream why;
+        why << obstruction.kind;
+        if (obstruction.pid != 0) why << " (pid " << obstruction.pid << ")";
+        if (!obstruction.cause.empty()) why << ": " << obstruction.cause;
+        facts.push_back(fact("Route obstruction", clip(why.str(), kControlRoomMaxFactChars)));
+        if (!obstruction.recovery.empty()) {
+            facts.push_back(
+                fact("Recovery", clip(obstruction.recovery, kControlRoomMaxFactChars)));
+        }
+    }
     facts.push_back(fact("Confirmations", in.skip_confirmations ? "skipped" : "enforced"));
     facts.push_back(fact("Managed recovery", in.managed_recovery_armed ? "armed" : "off"));
     {

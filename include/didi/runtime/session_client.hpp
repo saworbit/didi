@@ -113,6 +113,43 @@ EngineIncident classifyEngineIncident(ProcessInstanceState state, const EngineCr
 // Silent when there is no session or no pid: an absent fact is reported by
 // being absent, not by a default.
 void annotateEngineState(Error& error, const std::optional<SessionDescriptor>& session);
+
+// Why this server has no live route, remembered past the call that found out.
+//
+// An engine crash is reported perfectly once, to whichever call happened to be
+// next, and then forgotten: every later call answered the generic 503 and
+// didi_control_room -- the one tool whose job is to say what state the bridge
+// is in -- said "detached", which is also what it says when no editor was ever
+// started (#536). A bridge held by a second MCP server is worse, because the
+// answer a second agent gets is byte for byte the answer it would get with no
+// Godot running at all, and the sensible next move from there is to edit files
+// underneath the agent that does hold it (#527).
+//
+// One record, process wide, because there is one bridge. It is set when a route
+// is refused or lost and cleared when one is opened, so it always describes the
+// current absence rather than an old one.
+struct RouteObstruction {
+    // engine_crashed, engine_unreachable, engine_hung, session_lost or
+    // bridge_held. The first four are EngineIncidentKind names, so a caller
+    // that already branches on `incident` reads the same vocabulary.
+    std::string kind;
+    std::string cause;
+    std::string recovery;
+    uint64_t pid{0};
+    std::string session_id;
+    int64_t at_ms{0};
+
+    json toJson() const;
+};
+
+void recordRouteObstruction(RouteObstruction obstruction);
+void clearRouteObstruction();
+std::optional<RouteObstruction> lastRouteObstruction();
+
+// Merges the remembered obstruction into an error that is about to say only
+// that nothing is attached. Does nothing when there is none, so a server that
+// has simply never attached still answers exactly as it did.
+void annotateRouteObstruction(Error& error);
 Result<std::filesystem::path> resolveSessionDescriptorDirectory();
 
 using DescriptorOpenedHook = std::function<void(const std::filesystem::path&)>;

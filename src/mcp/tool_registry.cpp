@@ -737,6 +737,9 @@ static json outputSchemaForTool(const std::string& name) {
     if (name == "viewport_capture_frame") {
         return object_schema(
             {{"execution_mode", string_type},
+             // Why this is the offline answer, when something is known. See
+             // scene_get_hierarchy for the full note (#536).
+             {"offline_reason", {{"type", "object"}}},
              {"is_live_frame", boolean_type},
              {"camera_identifier", string_type},
              {"source", string_type},
@@ -829,11 +832,28 @@ static json outputSchemaForTool(const std::string& name) {
                               {"signals", {{"type", "array"}}}},
                              {"execution_mode", "class_name"});
     }
-    // runtime_get_session and runtime_detach_session deliberately publish no
-    // outputSchema. Both need an attached session to produce a success payload
-    // at all, so nothing driving the real binary offline can check one, and an
-    // unchecked schema is the defect #510 was about. runtime_list_sessions does
-    // publish one: it scans descriptors and answers with no attachment.
+    // runtime_detach_session answers with no session attached, because detach
+    // is a cleanup and a cleanup reports the state rather than failing on it
+    // (#537). That makes its success payload producible offline, which is what
+    // the rule asks for before a schema is published: an unchecked schema is
+    // the defect #510 was about.
+    if (name == "runtime_detach_session") {
+        return object_schema({{"detached", {{"type", "boolean"}}},
+                              {"connected", {{"type", "boolean"}}},
+                              // Only when this call is the one that released
+                              // something, which is the point of the field.
+                              {"detached_session", {{"type", "object"}}},
+                              {"handshake", {{"type", "object"}}},
+                              {"server_build_id", string_type},
+                              {"bridge_build_matches", {{"type", "boolean"}}},
+                              {"bridge_build_note", string_type},
+                              {"execution_mode", string_type}},
+                             {"execution_mode", "detached", "connected"});
+    }
+    // runtime_get_session deliberately publishes no outputSchema. It needs an
+    // attached session to produce a success payload at all, so nothing driving
+    // the real binary offline can check one. runtime_list_sessions does publish
+    // one: it scans descriptors and answers with no attachment.
     if (name == "didi_control_room") {
         return object_schema({{"captured_at", string_type},
                               {"server", {{"type", "object"}}},
@@ -868,6 +888,13 @@ static json outputSchemaForTool(const std::string& name) {
         // arrives depends on `source`, so both are declared and neither is
         // required.
         return object_schema({{"execution_mode", string_type},
+                              // Why this answer is the offline one, when
+                              // something is known: the engine crashed, or
+                              // another MCP client holds the bridge. Absent
+                              // when the answer is live and when nothing was
+                              // ever attached, because an absent fact is
+                              // reported by being absent (#536).
+                              {"offline_reason", {{"type", "object"}}},
                               {"source", string_type},
                               {"scene_tree", {{"type", "object"}}},
                               {"node_count", integer_type},
@@ -1418,9 +1445,13 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
             }
         }
         if (managed_route && !lease.has_value() && !supports_offline) {
-            return structuredLiveToolError(
-                Error::notConnected("No atomic runtime route is available for live dispatch"),
-                std::nullopt);
+            // This is the answer #527 and #536 are about. A live-only tool with
+            // no route said the same sentence whether the editor had never
+            // started, had crashed, or was up and held by another MCP client.
+            auto error = Error::notConnected("No atomic runtime route is available for live "
+                                             "dispatch");
+            runtime::annotateRouteObstruction(error);
+            return structuredLiveToolError(error, std::nullopt);
         }
     }
     MutationContext safety_context;
@@ -1606,6 +1637,19 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                     // connection on the way rather than having it hidden.
                     if (transport_repeats > 0 && !payload.contains("transport")) {
                         payload["transport"] = {{"repeats", transport_repeats}};
+                    }
+                    // A fallback answer says what it is falling back from. The
+                    // call that met the dead engine got the whole story and
+                    // every call after it got a bare "offline_fallback", which
+                    // reads exactly like a session that was never attached
+                    // (#536). Only for a tool that has a live path, because
+                    // only those have something to fall back from.
+                    if (execution_mode == "offline_fallback" &&
+                        !payload.contains("offline_reason")) {
+                        if (const auto obstruction = runtime::lastRouteObstruction();
+                            obstruction.has_value()) {
+                            payload["offline_reason"] = obstruction->toJson();
+                        }
                     }
                     item.text = payload.dump();
                     // Attribution is added to the text here, so structuredContent

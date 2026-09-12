@@ -204,6 +204,9 @@ static void test_output_schemas_declare_what_the_handlers_return() {
         {"project_list_resources", didi::json::object()},
         {"query_project_resources", didi::json::object()},
         {"runtime_list_sessions", didi::json::object()},
+        // Answers with nothing attached now, which is what made a schema
+        // publishable for it in the first place (#537).
+        {"runtime_detach_session", didi::json::object()},
         {"scene_get_hierarchy", {{"root_path", "res://main.tscn"}}},
         {"get_scene_hierarchy", {{"root_path", "res://main.tscn"}}},
         {"viewport_capture_frame", didi::json::object()},

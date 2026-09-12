@@ -125,6 +125,12 @@ struct ControlRoomInputs {
     bool connected{false};
     std::optional<std::string> session_kind;
     bool managed_unavailable{false};
+    // Why there is no route, when something is known. "Route: detached" is also
+    // what this said thirty seconds after the editor crashed, and what a second
+    // server on a held editor was told, so the one tool whose job is to say what
+    // state the bridge is in could not tell those from a session that was never
+    // started (#527, #536).
+    std::optional<runtime::RouteObstruction> route_obstruction;
     // Whether the extension published any descriptor at all, which is what
     // separates "no editor running" from "editor running, not attached".
     bool descriptors_present{false};
