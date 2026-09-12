@@ -66,7 +66,27 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   AnimationLibrary, SpriteFrames, Theme and ShaderMaterial no longer have to be
   written by hand outside the tool surface.
 
+### Added
+
+- Nine more tools publish an `outputSchema`, and the rule for which do is
+  written down (#509). `blackboard_list_keys`, `blackboard_read`,
+  `blackboard_task_list`, `didi_control_room`, `project_list_export_presets`,
+  `resource_inspect`, `script_get_symbols` and `script_reflect_class` join the
+  eleven that already did. The rule is that a tool publishes a schema when
+  something checks it against a real answer, so a tool with no schema is
+  unspecified rather than special. It was already enforced and never stated: the
+  contract test fails a declared schema that nothing exercises. A live-only tool
+  now fails the suite if it acquires one, because nothing offline could check
+  it, and writing schemas for those 67 would be 67 unverified claims of exactly
+  the kind that made `scene_get_hierarchy` wrong.
+
 ### Fixed
+
+- `runtime_detach_session` reports `server_build_id` again. Naming the echoed
+  descriptor `detached_session` left the bridge-build check looking for a
+  `session` key that is no longer there, so the one answer that reports on a
+  bridge the caller has just stopped talking to silently lost the field. It
+  reads either name now.
 
 - `godot://editor/state` names a scene root the scene tools accept (#502). It is
   the resource a client reads to find out which scene is being edited, and it

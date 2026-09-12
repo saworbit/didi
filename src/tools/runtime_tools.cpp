@@ -153,7 +153,14 @@ CallToolResult liveValidationError(const std::string& message,
 // while nothing else in the response looks unusual. Absent build_id means the
 // extension predates the field, which is a mismatch and reported as one.
 void noteBridgeBuild(json& payload) {
-    const auto session = payload.find("session");
+    // Either field. A detach answer names the session it disconnected
+    // `detached_session` (#506), and looking only for `session` silently
+    // dropped server_build_id from the one answer that reports on a bridge the
+    // caller has just stopped talking to.
+    auto session = payload.find("session");
+    if (session == payload.end() || !session->is_object()) {
+        session = payload.find("detached_session");
+    }
     if (session == payload.end() || !session->is_object()) return;
     const std::string bridge = session->value("build_id", std::string());
     payload["server_build_id"] = kBuildId;

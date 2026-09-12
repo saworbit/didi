@@ -747,6 +747,114 @@ static json outputSchemaForTool(const std::string& name) {
                                           {"width", "height"})}},
             {"execution_mode", "is_live_frame"});
     }
+    if (name == "blackboard_list_keys") {
+        return object_schema({{"board", string_type},
+                              {"prefix", string_type},
+                              {"keys", array_of(string_type)},
+                              {"total", integer_type},
+                              {"returned", integer_type},
+                              {"truncated", boolean_type}},
+                             {"execution_mode", "keys"});
+    }
+    if (name == "blackboard_read") {
+        return object_schema({{"board", string_type},
+                              {"path", string_type},
+                              {"deep", boolean_type},
+                              // A path with nothing at it is `found: false`
+                              // rather than an error, so the flag is the
+                              // answer and `value` may be anything or absent.
+                              {"found", boolean_type},
+                              {"value", json::object()}},
+                             {"execution_mode", "found"});
+    }
+    if (name == "blackboard_task_list") {
+        return object_schema({{"board", string_type},
+                              {"tasks", {{"type", "array"}}},
+                              {"total", integer_type},
+                              {"returned", integer_type},
+                              {"truncated", boolean_type}},
+                             {"execution_mode", "tasks"});
+    }
+    if (name == "project_list_export_presets") {
+        return object_schema({{"presets", {{"type", "array"}}},
+                              {"preset_count", integer_type},
+                              {"presets_file_exists", boolean_type},
+                              // Named rather than silently dropped: a caller
+                              // has to know the answer is not the whole file.
+                              {"sensitive_options_omitted", boolean_type}},
+                             {"execution_mode", "presets"});
+    }
+    if (name == "resource_inspect") {
+        return object_schema({{"path", string_type},
+                              {"filename", string_type},
+                              {"type", string_type},
+                              {"uid", string_type},
+                              {"file_size", integer_type},
+                              {"dependencies", {{"type", "array"}}}},
+                             {"execution_mode", "path"});
+    }
+    if (name == "script_get_symbols") {
+        return object_schema({{"file_path", string_type},
+                              {"classes", {{"type", "array"}}},
+                              {"functions", {{"type", "array"}}},
+                              {"variables", {{"type", "array"}}},
+                              {"constants", {{"type", "array"}}},
+                              {"enums", {{"type", "array"}}},
+                              {"signals", {{"type", "array"}}}},
+                             {"execution_mode", "file_path"});
+    }
+    if (name == "script_reflect_class") {
+        return object_schema({{"class_name", string_type},
+                              {"inherits", string_type},
+                              {"description", string_type},
+                              {"api_version", string_type},
+                              {"source", string_type},
+                              // False is a real answer, not an error: a name
+                              // the shipped reference does not carry is
+                              // reported rather than refused.
+                              {"is_known_class", boolean_type},
+                              {"is_instantiable", boolean_type},
+                              // Both added together by annotateApiVersion, and
+                              // only when a session is attached. Both are
+                              // nullable: an engine version it cannot read is
+                              // null rather than absent, because saying nothing
+                              // would read as a match (#466).
+                              {"attached_engine_version", {{"type", {"string", "null"}}}},
+                              {"api_version_matches_attached_engine",
+                               {{"type", {"boolean", "null"}}}},
+                              // Maps keyed by name, not arrays. Only signals
+                              // is a list.
+                              {"methods", {{"type", "object"}}},
+                              {"properties", {{"type", "object"}}},
+                              {"signals", {{"type", "array"}}}},
+                             {"execution_mode", "class_name"});
+    }
+    // runtime_get_session and runtime_detach_session deliberately publish no
+    // outputSchema. Both need an attached session to produce a success payload
+    // at all, so nothing driving the real binary offline can check one, and an
+    // unchecked schema is the defect #510 was about. runtime_list_sessions does
+    // publish one: it scans descriptors and answers with no attachment.
+    if (name == "didi_control_room") {
+        return object_schema({{"captured_at", string_type},
+                              {"server", {{"type", "object"}}},
+                              {"project", {{"type", "object"}}},
+                              {"surface", {{"type", "object"}}},
+                              {"lights", {{"type", "array"}}},
+                              {"facts", {{"type", "array"}}},
+                              {"tools", {{"type", "array"}}},
+                              {"sessions", {{"type", "array"}}},
+                              // Only when a route is selected, which is the
+                              // point of the field.
+                              {"selected_session", string_type},
+                              {"session_note", string_type},
+                              {"log", {{"type", "array"}}},
+                              // A count of what the ring holds, not a flag.
+                              {"log_available", integer_type},
+                              {"log_note", string_type},
+                              {"log_returned", integer_type},
+                              {"log_truncated", boolean_type}},
+                             {"execution_mode", "lights"});
+    }
     if (name == "scene_get_hierarchy") {
         // The union of what the two paths return, not the shape of one of them.
         // This declared `file_path` and three others and stayed silent about

@@ -110,9 +110,19 @@ public:
     didi::Result<didi::json> attachSession(const std::string&) override {
         return didi::Error::notConnected();
     }
-    didi::Result<didi::json> detachSession() override { return didi::json::object(); }
+    didi::Result<didi::json> detachSession() override {
+        return didi::json{{"session", activeSession()->toJson()}};
+    }
+    didi::Result<didi::json> refreshSession() override {
+        const auto session = activeSession()->toJson();
+        auto handshake = session;
+        handshake["status"] = "ok";
+        return didi::json{{"session", session}, {"handshake", handshake}, {"connected", true}};
+    }
     std::optional<didi::runtime::SessionDescriptor> activeSession() const override {
-        return std::nullopt;
+        return didi::runtime::SessionDescriptor{
+            1, "cafecafecafecafecafecafecafecafe", std::string(64, 'c'), 7,
+            "editor", "C:/project", "\\\\.\\pipe\\godot_didi_7", 1, "1.3"};
     }
 };
 
@@ -197,6 +207,14 @@ static void test_output_schemas_declare_what_the_handlers_return() {
         {"get_scene_hierarchy", {{"root_path", "res://main.tscn"}}},
         {"viewport_capture_frame", didi::json::object()},
         {"capture_viewport", didi::json::object()},
+        {"blackboard_list_keys", didi::json::object()},
+        {"blackboard_read", didi::json::object()},
+        {"blackboard_task_list", didi::json::object()},
+        {"project_list_export_presets", didi::json::object()},
+        {"resource_inspect", {{"resource_path", "res://main.tscn"}}},
+        {"script_get_symbols", {{"file_path", "res://main.gd"}}},
+        {"script_reflect_class", {{"class_name", "Node2D"}}},
+        {"didi_control_room", didi::json::object()},
     };
 
     std::set<std::string> publishing;
@@ -205,7 +223,17 @@ static void test_output_schemas_declare_what_the_handlers_return() {
     }
     std::set<std::string> called;
     for (const auto& entry : calls) called.insert(entry.first);
-    ASSERT_EQ(publishing, called);
+    if (publishing != called) {
+        std::string message = "outputSchema set does not match the calls: publishing-not-called ";
+        for (const auto& name : publishing) {
+            if (!called.count(name)) message += name + " ";
+        }
+        message += "| called-not-publishing ";
+        for (const auto& name : called) {
+            if (!publishing.count(name)) message += name + " ";
+        }
+        throw std::runtime_error(message);
+    }
 
     for (const auto& entry : calls) {
         const auto* tool = registry.getTool(entry.first);
@@ -241,6 +269,33 @@ static void test_output_schemas_declare_what_the_handlers_return() {
                                              field.get<std::string>() + "'");
                 }
             }
+        }
+    }
+
+    // The rule that makes the absence of a schema mean something.
+    //
+    // 115 of 126 tools published no outputSchema and eleven did, so a client
+    // could not tell whether a missing one meant "unspecified" or "this tool is
+    // special" (#509). The rule is that a tool publishes an outputSchema when
+    // something checks it against a real answer -- this test for the tools
+    // reachable without an engine, and the Godot harness for the live shape of
+    // scene_get_hierarchy. Absence means no checked schema, uniformly.
+    //
+    // Writing schemas for the 67 live-only tools would not be more of the same:
+    // nothing offline can produce their answers, so each would be exactly the
+    // unverified claim #510 was about, 67 times over.
+    //
+    // The `publishing == called` assertion above is the enforcement. This is the
+    // half that keeps a live-only tool from acquiring one, which would put a
+    // claim on the wire that nothing can check.
+    for (const auto& tool : registry.listTools()) {
+        if (!tool.toJson().contains("outputSchema")) continue;
+        const auto& modes = tool.capability.modes;
+        const bool live_only = modes.size() == 1 && modes.front() == "live";
+        if (live_only) {
+            throw std::runtime_error(tool.name +
+                                     " publishes an outputSchema but has no offline path, so "
+                                     "nothing here can check it against a real answer");
         }
     }
 
