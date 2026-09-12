@@ -68,6 +68,23 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `prompts/get` refuses an argument the prompt does not declare (#511). #397 and
+  #418 closed unknown arguments on `tools/call`; `prompts/get` kept the old
+  behaviour on a different method, accepting the argument silently and dropping
+  it, so a caller who misremembered a name was handed a prompt rendered from
+  defaults and no signal that what they passed went nowhere. The refusal names
+  the property and lists what the prompt accepts, and `data` carries `argument`,
+  `prompt` and `accepted`.
+
+- A prompt has one description (#512). Each handler wrote a second one, so
+  `prompts/list` and `prompts/get` described the same prompt differently and a
+  host that listed prompts and then fetched one showed a person two sentences
+  for the same thing. `prompts/list` is served with an hour of cacheability, so
+  the first one stayed on screen. The description now comes from the
+  registration, which is the wording that says which tool families the workflow
+  is built from; the handler's pinned a Godot version that is the floor rather
+  than the target.
+
 - Every published `inputSchema` carries the `additionalProperties: false` the
   server enforces (#508). #418 closed arguments by default and the schemas did
   not follow, so 73 of 126 accepted anything by JSON Schema while the server

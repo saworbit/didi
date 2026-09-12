@@ -100,6 +100,16 @@ The page holds no data of its own. It renders whatever the host pushes from a
 host, which applies its own consent policy. It is not subscribable: like every
 `godot://` resource, it changes only when this server is rebuilt.
 
+Both prompts take exactly the arguments `prompts/list` publishes for them. A
+required one left out is `-32602` naming it, and one the prompt does not declare
+is `-32602` naming the property and listing what the prompt accepts, the way
+`tools/call` refuses an unknown tool argument. Neither is dropped in silence.
+
+A prompt has one description, which comes from its registration. `prompts/list`
+and `prompts/get` return the same sentence, so a host that lists prompts and
+then fetches one does not show a person two different descriptions of the same
+thing.
+
 ## `godot_debug_visual_anomaly`
 
 Arguments:

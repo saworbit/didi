@@ -563,6 +563,33 @@ jobs:
               assert live['ttlMs'] == 0 and live['cacheScope'] == 'private', (method, live)
           static_list = req('prompts/list', modern, 904)['result']
           assert static_list['ttlMs'] > 0 and static_list['cacheScope'] == 'public'
+          # The catalogue is cacheable for an hour, so a description that
+          # disagrees with the rendered result stays on a person's screen that
+          # long (#512). One description per prompt, from one place.
+          prompt_args = {
+              'godot_debug_visual_anomaly': {'target_resource_path': 'res://x'},
+              'godot_generate_gameplay_slice': {'feature_name': 'F', 'requirements': 'R'},
+          }
+          for listed_prompt in static_list['prompts']:
+              prompt_name = listed_prompt['name']
+              assert prompt_name in prompt_args, prompt_name
+              # Modern metadata, because this block runs before the legacy
+              # initialize handshake below.
+              fetched = req('prompts/get', dict(
+                  modern, name=prompt_name, arguments=prompt_args[prompt_name]
+              ), 905)
+              assert 'error' not in fetched, fetched
+              assert fetched['result']['description'] == listed_prompt['description'], prompt_name
+          # An unknown prompt argument is refused the way an unknown tool
+          # argument is, rather than accepted and dropped (#511).
+          bad_prompt = req('prompts/get', dict(
+              modern,
+              name='godot_debug_visual_anomaly',
+              arguments={'target_resource_path': 'res://x', 'bogus': '1'},
+          ), 908)
+          assert bad_prompt['error']['code'] == -32602, bad_prompt
+          assert 'bogus' in bad_prompt['error']['message']
+          assert bad_prompt['error']['data']['argument'] == 'bogus'
 
           assert req('initialize', {'protocolVersion': '2024-11-05'}, 1)['result']['serverInfo']['name'] == 'didi'
           tools = req('tools/list', {}, 2)['result']['tools']

@@ -219,7 +219,7 @@ ightarrow$ Server | Reports supported protocol versions, capabilities, and serve
 | `prompts/list` | Client $\rightarrow$ Server | Lists all registered prompt templates |
 | `prompts/get` | Client $\rightarrow$ Server | Evaluates a prompt template with provided arguments |
 
-Only `notifications/*` methods may omit `id`. Request-only methods such as `tools/call`, `resources/read`, and `prompts/get` are ignored when sent as notifications and cannot execute mutations. For calls and prompt retrievals, `name`/`uri` must be strings and an `arguments` member, when present, must be an object; violations return `-32602` without terminating the server.
+Only `notifications/*` methods may omit `id`. Request-only methods such as `tools/call`, `resources/read`, and `prompts/get` are ignored when sent as notifications and cannot execute mutations. For calls and prompt retrievals, `name`/`uri` must be strings and an `arguments` member, when present, must be an object; violations return `-32602` without terminating the server. `prompts/get` arguments are closed the way tool arguments are: an argument the prompt does not declare returns `-32602` naming the property, with `argument`, `prompt` and the accepted names in `data`. The `description` on a `prompts/get` result is the same one `prompts/list` publishes for that prompt.
 
 A `tools/call` naming a tool no registration carries returns `-32602` with the name, which the specification calls a protocol error rather than a tool result. `tools/list`, `resources/list` and `prompts/list` each answer in one page and return no `nextCursor`, so this server issues no cursor; a `cursor` sent to any of them is refused with `-32602`.
 
