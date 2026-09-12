@@ -24,6 +24,7 @@ twice.
 | `probes/write_then_read_back.py` | Three mutations that report success, read back against the file they wrote. |
 | `probes/protocol_edges.py` | The wire below `tools/call`: stale cursors, a null id, an unknown tool, `arguments` that is not an object. |
 | `probes/path_errors.py` | The same nonexistent path asked of every tool that takes one; finds the failures that live *behind* valid arguments. |
+| `probes/error_data_census.py` | What each error's `data` lets a caller branch on. `path_errors.py` asks whether a failure is an envelope; this one opens it. |
 | `probes/schema_descriptions.py` | How many parameters a caller has to guess at: counts `description` across the whole surface. Zero since #462, and a contract test keeps it there. |
 | `probes/surface_census.py` | The same question asked of all 126 tools: who rejects an unknown argument, what `execution_mode` each reports, who answers with a bare string. |
 | `report.py` | Files a directory of finding bodies as issues in one pass. |
@@ -117,6 +118,37 @@ validator is only reachable with arguments that are well-formed and wrong
 (#460). Those eight carry the envelope now; the probe stays, because the next
 validator to be wrapped by hand will land in the same blind spot.
 
+**A census that passes has only proved its own question.** The error-envelope
+census reports zero bare strings, and `path_errors.py` reports zero too. Both
+ask whether a failure is shaped like an error. Neither opens it.
+`probes/error_data_census.py` asks the next question -- what is in `data`, which
+is the part a caller can branch on -- and 20 of 35 semantic failures answer with
+an empty object, a lone `retryable`, or no `data` at all (#486, #487). The same
+move found the five unimplemented registrations still answering with a bare
+string (#492), because they refuse before the argument check and so sit in
+*front* of the census rather than behind it. When a census goes green, ask what
+it was actually counting.
+
+**A schema is a claim about the handler, and nothing checks it.** Three of this
+session's findings are a declared parameter the code does not honour:
+`include_properties` on the live hierarchy only decides whether the field is
+named in `omitted_fields`, so passing `false` claims properties were included
+and returns none (#482); `context_node` on `eval_gdscript` is validated against
+the live tree, echoed in every response, and unreachable from any expression the
+sandbox permits (#488); `max_depth` has no `minimum` where every other limit on
+the surface has one, so -5 is accepted and clamped (#484). Read the handler
+beside the schema. `grep` for the parameter name is usually the whole
+investigation.
+
+**Compare a tool against its sibling, not only against itself.** Several
+findings are one tool doing a check that a tool doing the same job does not.
+`project_set_autoload` refuses a script that is not on disk; `project_set_setting`
+writes `run/main_scene` pointing at nothing and reports success (#490).
+`project_verify_changes` refuses at once when the project has no repository of
+its own; `project_apply_changes` previews the same arguments and hands out a
+confirmation token for a call that cannot succeed (#491). Neither pair is
+inconsistent in a way either half can see on its own.
+
 **Narrow before you file, especially when two things changed.** This session
 nearly filed "`editor_undo` reports success without undoing anything" — the
 group list really was unchanged after an undo. The undo had reverted a node
@@ -167,6 +199,8 @@ next is not a test of the gate, it is a test of process lifetime.
 | 2026-09-11 | Mutation honesty (write, then read back from the file and the engine), scene identity across a scene switch, semantic failures behind valid arguments, and the JSON-RPC layer below `tools/call`. | `1.8.0+5c34220b7d42` | #437-#450, fourteen findings. |
 
 | 2026-09-12 | Inverse pairs and duplicates, path forms, property coercion, the confirmation preview, resource honesty, and two new whole-surface censuses. | `1.8.0+8fd6409268ac` | #460-#472, thirteen findings. |
+
+| 2026-09-12 | Limit and truncation disclosure, schema flags against what the handler does, project settings and input actions written without checking, the error envelope's contents, and the legacy aliases. | `1.8.0+941db00ef6c6` | #482-#493, twelve findings. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log
