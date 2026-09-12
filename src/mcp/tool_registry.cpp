@@ -927,7 +927,6 @@ const std::unordered_map<std::string_view, std::string_view>& nodeTargets() {
         {"scene_reparent_node", "target_node"},
         {"script_attach_to_node", "target_node"},
         {"script_detach_from_node", "target_node"},
-        {"scene_call_method", "target_node"},
         {"signal_emit", "target_node"},
         {"signal_connect", "emitter_node"},
         {"signal_disconnect", "emitter_node"},
@@ -957,6 +956,56 @@ std::optional<Error> probeFileTarget(const FileTarget& target, const json& argum
     const auto size = std::filesystem::file_size(resolved.value(), error);
     before = {{"exists", true}, {"path", path},
               {"size_bytes", error ? 0 : static_cast<uint64_t>(size)}};
+    return std::nullopt;
+}
+
+// scene_call_method asks a different question, and the generic node probe
+// answered the wrong one. That probe reads `name` when the call names no
+// property, so every preview of every method on a node came back with the
+// same constant `before` block, and a token was minted for a call the
+// surface already had the evidence to refuse. Whether the method is
+// declared, and whether the script is a @tool script -- the single fact that
+// decides the outcome -- are both properties of the node the preview has
+// just resolved. The bridge checks both before it runs anything, so the
+// preview asks it to stop there and report what it found (#463).
+std::optional<Error> probeCallMethodTarget(const json& arguments,
+                                           const std::shared_ptr<ipc::IIpcClient>& client,
+                                           json& before) {
+    if (!client || !arguments.is_object() || !arguments.contains("target_node") ||
+        !arguments["target_node"].is_string()) {
+        return std::nullopt;
+    }
+    json request = arguments;
+    request["preview"] = true;
+    auto response = client->sendRequest("scene.callMethod", request, 5000);
+
+    // A refusal the real call would hit is the whole point of reading the
+    // target. Anything else means the probe could not reach the engine, which
+    // is not evidence the call would fail, so the preview goes on unverified
+    // rather than refusing a call that might be fine.
+    const auto is_real_refusal = [](int code) {
+        return code == 403 || code == 404 || code == 409 || code == 422;
+    };
+    if (response.isErr()) {
+        if (is_real_refusal(response.error().code)) return response.error();
+        return std::nullopt;
+    }
+    const auto& payload = response.value();
+    if (payload.is_object() && payload.contains("error")) {
+        const auto& error = payload["error"];
+        const auto code = error.value("code", 500);
+        if (is_real_refusal(code)) {
+            return Error(code, error.value("message", std::string("The call cannot run")));
+        }
+        return std::nullopt;
+    }
+    if (payload.is_object() && payload.value("preview", false)) {
+        before = {{"target_node", payload.value("target_node", json(nullptr))},
+                  {"method_name", payload.value("method_name", json(nullptr))},
+                  {"method_exists", payload.value("method_exists", false)},
+                  {"script_is_tool", payload.value("script_is_tool", false)},
+                  {"signature", payload.value("signature", json(nullptr))}};
+    }
     return std::nullopt;
 }
 
@@ -1125,6 +1174,10 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
     if (const auto file = fileTargets().find(binding.policy_source); file != fileTargets().end()) {
         target_probe = [target = file->second](const json& call_arguments, json& before) {
             return probeFileTarget(target, call_arguments, before);
+        };
+    } else if (binding.policy_source == "scene_call_method" && lease.has_value()) {
+        target_probe = [client = m_sourceIpcClient](const json& call_arguments, json& before) {
+            return probeCallMethodTarget(call_arguments, client, before);
         };
     } else if (const auto node = nodeTargets().find(binding.policy_source);
                node != nodeTargets().end() && lease.has_value()) {

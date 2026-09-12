@@ -121,6 +121,8 @@ Calls a method the target node's own script declares, and returns what it return
 
 **Safety.** A mutation, and always confirmed: preview with `dry_run: true`, then repeat the exact call with the `confirmation_token` it returns. The tool cannot read the method body, so the caller confirming they meant this method on this node is the only honest gate. Live only, editor sessions; there is no offline meaning to running project code.
 
+**What the dry run reads.** The preview resolves the node and runs every check that decides whether the call can happen at all, stopping immediately before the method would run. `changes[0].before` carries `method_name`, `method_exists`, `script_is_tool` and the declared `signature`. A call that cannot succeed is refused at preview with the code the real call would have returned, and no token is issued: a method the script does not declare is `404`, a script that is not a `@tool` script is `422`, a node with no script is `422`, and a wrong argument count or type is `409`. Previously the preview reported the node's `name` property, which is unrelated to the call and identical for every method and every argument list, and then handed out a token for calls it already had the evidence to refuse.
+
 Results carry `target_node`, `method_name`, `awaited`, and `returned`.
 
 ### `scene_duplicate_node` — Live

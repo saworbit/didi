@@ -2389,8 +2389,18 @@ try {
     $callGateRequests = @(
         (@{ jsonrpc = "2.0"; id = 2420; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
         (Tool-Request 2421 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
-        (Tool-Request 2422 "scene_call_method" @{ target_node = "/root/SmokeRoot"; method_name = "add_numbers"; arguments = @(2, 3) }),
-        (Tool-Request 2423 "scene_call_method" @{ target_node = "/root/SmokeRoot"; method_name = "add_numbers"; arguments = @(2, 3); dry_run = $true })
+        # The preview reads the target now, so it needs one that can actually
+        # run the method. /root/SmokeRoot has no script, and a dry run against
+        # it is refused rather than issuing a token for a call that cannot
+        # work, which requests 2426 and 2427 below assert (#463).
+        (Tool-Request 2424 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/SmokeRoot"; name = "GateProbe" }),
+        (Tool-Request 2425 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/GateProbe"; script_path = "res://call_probe.gd" }),
+        (Tool-Request 2422 "scene_call_method" @{ target_node = "/root/SmokeRoot/GateProbe"; method_name = "add_numbers"; arguments = @(2, 3) }),
+        (Tool-Request 2423 "scene_call_method" @{ target_node = "/root/SmokeRoot/GateProbe"; method_name = "add_numbers"; arguments = @(2, 3); dry_run = $true }),
+        # A method the script does not declare, and a node whose script is not
+        # a @tool script. Both were previewed clean and handed a token.
+        (Tool-Request 2426 "scene_call_method" @{ target_node = "/root/SmokeRoot/GateProbe"; method_name = "no_such_method"; arguments = @(); dry_run = $true }),
+        (Tool-Request 2427 "scene_call_method" @{ target_node = "/root/SmokeRoot"; method_name = "add_numbers"; arguments = @(2, 3); dry_run = $true })
     )
     $rawCallGate = $callGateRequests | & $didiExecutable --project $fixtureRoot
     $callGate = @($rawCallGate | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
@@ -2410,6 +2420,26 @@ try {
     Assert-True ($gated.mutation_preview.requires_confirmation -eq $true) "scene_call_method did not require confirmation."
     Assert-True ($gated.mutation_preview.confirmation_token -match '^[0-9a-f]{64}$') "scene_call_method did not issue a confirmation token."
     Assert-True ($null -eq $gated.returned) "A scene_call_method dry run reported a return value, so it ran the method."
+
+    # The preview claimed preview_kind target_state and then reported the
+    # node's `name` property, a constant that came back for every method name
+    # and every argument list. It has to answer about the call (#463).
+    Assert-True ($gated.mutation_preview.preview_kind -eq "target_state") "A scene_call_method preview did not read the target."
+    $gatedBefore = $gated.mutation_preview.changes[0].before
+    Assert-True ($null -eq $gatedBefore.property_name) "A scene_call_method preview still answered about a property."
+    Assert-True ($gatedBefore.method_name -eq "add_numbers") "A scene_call_method preview did not name the method."
+    Assert-True ($gatedBefore.method_exists -eq $true) "A scene_call_method preview did not report that the method exists."
+    Assert-True ($gatedBefore.script_is_tool -eq $true) "A scene_call_method preview did not report the @tool state."
+
+    # A token was minted for a method the node does not have, and for a script
+    # the editor never instantiated. Both are knowable at preview time, and
+    # both used to cost a round trip and a consumed token to discover.
+    Assert-True $callGateById[2426].result.isError "A dry run issued a token for a method the script does not declare."
+    $missingMethodText = ($callGateById[2426].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+    Assert-True ($missingMethodText -notmatch "confirmation_token") "A refused preview handed back a token anyway."
+    Assert-True $callGateById[2427].result.isError "A dry run issued a token for a node with no script to run."
+    $noScriptText = ($callGateById[2427].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+    Assert-True ($noScriptText -match "no script") "The refused preview did not say why the call cannot run: $noScriptText"
     $refused = $applyById[642].result.content[0].text | ConvertFrom-Json
     Assert-True ($refused.applied -eq $false) "A proposal whose scene run failed was written into the project anyway."
     Assert-True ($refused.scene_run.ok -eq $false) "The refused apply did not say the scene run is what stopped it."

@@ -2377,6 +2377,28 @@ json GodotBridge::callScriptMethod(const json& params,
         }
     }
 
+    // Everything that decides whether this call can run has now been read off
+    // the target: the node resolved, it carries a script, the script is a
+    // @tool script so the editor has an instance of it, the method is one the
+    // script declares, and the arguments fit what it declares. A preview stops
+    // here and reports those facts.
+    //
+    // The dry run used to report the node's `name` property, a constant that
+    // came back for every method name and every argument list, and then minted
+    // a token for a call it had all the evidence to know would 422. The gate's
+    // own 428 promises the preview reads the target where it can; it claimed
+    // target_state and answered about something else (#463).
+    if (params.value("preview", false)) {
+        return json{{"preview", true},
+                    {"target_node", params["target_node"]},
+                    {"method_name", method_name},
+                    {"method_exists", true},
+                    {"script_is_tool", true},
+                    {"declared_argument_count", declared_arguments.size()},
+                    {"signature", *chosen},
+                    {"would_run", true}};
+    }
+
     json argument_array = arguments;
     auto godot_arguments = makeJsonVariant(argument_array);
     if (godot_arguments.isErr()) return fail(400, godot_arguments.error().message);

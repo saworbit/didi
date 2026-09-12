@@ -68,6 +68,23 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `scene_call_method`'s dry run reads the call instead of a property (#463).
+  The preview reported the node's `name`, a constant that came back for a
+  method the script declares, for one it does not, and for every argument
+  list, because the shared node probe reads `name` when the call names no
+  property. It then minted a confirmation token for a call it already had the
+  evidence to refuse, and spending that token returned a 422 the preview never
+  mentioned: the script is not a `@tool` script, so the editor never made an
+  instance of it and there was nothing to run. Two round trips and a consumed
+  token to learn something the first one knew. The gate's own 428 promises the
+  preview reads the target where it can, and this one claimed
+  `preview_kind: "target_state"` while answering a different question.
+  `scene_call_method` now has its own probe: the bridge runs every check that
+  decides the outcome and stops before the method would run, so `before`
+  carries `method_name`, `method_exists`, `script_is_tool` and the declared
+  signature, and a call that cannot succeed is refused at preview with the
+  code the real call would have returned, issuing no token.
+
 - `signal_list_connections` marks the editor's own listeners (#461). A freshly
   created `Sprite2D` with no user connections at all reported five, all of them
   the scene dock's `SceneTreeEditor` callbacks. None exist in the saved
