@@ -750,7 +750,10 @@ jobs:
               assert meta['executionModes'] == [meta['currentMode']], (name, meta)
 
           project = json.loads(req('resources/read', {'uri': 'godot://project/tree'}, 3)['result']['contents'][0]['text'])
-          assert project['execution_mode'] == 'offline_fallback'
+          # A filesystem index with no live path, so there is nothing for it
+          # to have fallen back from. The resources were swept into the
+          # vocabulary #419 settled on for the tools (#533).
+          assert project['execution_mode'] == 'local'
           assert project['total_resources'] > 0
 
           hierarchy = json.loads(req('tools/call', {
