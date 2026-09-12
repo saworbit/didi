@@ -28,6 +28,10 @@ OFFLINE_CALLS = {
     "project_search_symbols": {"query": "_ready", "max_results": 2},
     "project_list_resources": {},
     "runtime_list_sessions": {},
+    # Detach answers with nothing attached, which is what made a schema
+    # publishable for it at all (#537). Against a server with no session
+    # this is the detached: false branch.
+    "runtime_detach_session": {},
     "viewport_capture_frame": {
         "camera_identifier": "active_editor_view",
         "resolution": {"width": 8, "height": 8},

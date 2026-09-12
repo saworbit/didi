@@ -82,6 +82,41 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- A second MCP server on a held editor is told so (#527). Only one server can
+  hold the editor bridge, which is a reasonable design; what a second server was
+  *told* was not. Its auto-attach was refused with `423`, the reason was dropped
+  on the floor, and every call afterwards answered the `503 not_connected` that a
+  server with no Godot running at all receives, byte for byte. The blackboard
+  exists because more than one agent is expected to work on a project at once, so
+  this is the multi-agent path rather than an edge case, and the second agent's
+  sensible next move from "nothing is running" is offline file edits over the
+  first agent's live work. The refusal is remembered now and reported as
+  `bridge_held`, with `bridge_held_by_another_client: true` in the error's `data`
+  and a control-room fact saying the editor is up and owned.
+
+- An engine crash survives the call that discovered it (#536). The first live
+  call after the editor died got a complete account: the incident, the cause, and
+  what to do. Every call after that reverted to the generic `503`, offline
+  answers resumed with nothing saying why, and `didi_control_room` -- the one
+  tool whose job is to say what state the bridge is in -- reported `Route:
+  detached`, which is also what it reports when no editor was ever started. The
+  incident is kept until a route opens again: the control room names it and when
+  it happened, and an `offline_fallback` answer carries `offline_reason` saying
+  the fallback follows a crashed engine rather than a session that never
+  attached. `runtime_detach_session` clears it, because letting go deliberately
+  is not an obstruction.
+
+- `runtime_detach_session` is idempotent (#537). Detaching with nothing attached
+  answered `503 not_connected` with `retryable: true`, advising a retry that
+  would never attach anything. Detach is a cleanup, and the session is torn down
+  implicitly when the editor goes, so a caller doing the tidy-up it is told to do
+  got an error for it. It answers `detached: false` now, the shape
+  `resources/unsubscribe` already uses two layers down for the same question, and
+  `detached: true` when it is the call that released something. Answering with
+  nothing attached is also what makes its success payload producible offline, so
+  it publishes an `outputSchema` now.
+
+
 - `blackboard_task_update` says what it takes for `progress` (#528). The
   published description read "0 to 1" while the handler required an integer
   percentage, so the documented range was not even representable and `0.5` was

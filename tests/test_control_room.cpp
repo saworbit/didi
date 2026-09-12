@@ -175,6 +175,65 @@ void test_listed_sessions_parse_without_a_token() {
     ASSERT_TRUE(model.dump().find("pipe") == std::string::npos);
 }
 
+void test_detached_says_which_kind_of_detached() {
+    // Break caught: "Route: detached" was the answer thirty seconds after the
+    // editor crashed, the answer when a second MCP client held the bridge, and
+    // the answer when no editor was ever started. Three states, three different
+    // next moves, one word (#527, #536).
+    {
+        ControlRoomInputs in;
+        in.connected = false;
+        const auto model = buildControlRoomModel(in, {});
+        // Nothing known is still nothing said. A server that has simply never
+        // attached reads exactly as it did.
+        ASSERT_TRUE(model.dump().find("Route obstruction") == std::string::npos);
+    }
+
+    {
+        ControlRoomInputs in;
+        in.connected = false;
+        didi::runtime::RouteObstruction crashed;
+        crashed.kind = "engine_crashed";
+        crashed.cause = "The engine process is gone and left no crash report.";
+        crashed.recovery = "Ask the user to restart the Godot editor.";
+        crashed.pid = 4242;
+        crashed.at_ms = 1'700'000'000'000;
+        in.route_obstruction = crashed;
+        const auto model = buildControlRoomModel(in, {});
+        const auto rendered = model["facts"].dump();
+        ASSERT_TRUE(rendered.find("Route obstruction") != std::string::npos);
+        ASSERT_TRUE(rendered.find("engine_crashed") != std::string::npos);
+        ASSERT_TRUE(rendered.find("4242") != std::string::npos);
+        ASSERT_TRUE(rendered.find("Recovery") != std::string::npos);
+    }
+
+    {
+        ControlRoomInputs in;
+        in.connected = false;
+        didi::runtime::RouteObstruction held;
+        held.kind = "bridge_held";
+        held.cause = "Another MCP client holds the bridge to this editor.";
+        held.at_ms = 1'700'000'000'000;
+        in.route_obstruction = held;
+        const auto model = buildControlRoomModel(in, {});
+        ASSERT_TRUE(model["facts"].dump().find("bridge_held") != std::string::npos);
+    }
+
+    {
+        // A connected route has no absence to explain, so the fact stays away
+        // even when an older obstruction is still on record.
+        ControlRoomInputs in;
+        in.connected = true;
+        in.session_kind = "editor";
+        didi::runtime::RouteObstruction stale;
+        stale.kind = "engine_crashed";
+        stale.at_ms = 1'700'000'000'000;
+        in.route_obstruction = stale;
+        const auto model = buildControlRoomModel(in, {});
+        ASSERT_TRUE(model["facts"].dump().find("Route obstruction") == std::string::npos);
+    }
+}
+
 void test_unknown_liveness_is_omitted_not_guessed() {
     const json payload = {{"sessions", json::array({
         {{"session_id", "aaaa"}, {"kind", "editor"}, {"pid", 7}},
@@ -704,6 +763,8 @@ struct Register {
                      test_listed_sessions_parse_without_a_token);
         registerTest("ControlRoom.UnknownLivenessIsOmitted",
                      test_unknown_liveness_is_omitted_not_guessed);
+        registerTest("ControlRoom.DetachedSaysWhichKind",
+                     test_detached_says_which_kind_of_detached);
         registerTest("ControlRoom.MalformedSessionEntriesSkipped",
                      test_malformed_session_entries_are_skipped_not_fatal);
         registerTest("ControlRoom.PayloadIsBounded", test_the_payload_is_bounded);

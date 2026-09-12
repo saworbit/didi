@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **964** |
+| Automated tests | **966** |
 | Live-harness assertions | 876 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**616 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**618 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -27,7 +27,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `BlackboardTasks` | 8 |
 | `CaptureCache` | 3 |
 | `Checkpoints` | 12 |
-| `ControlRoom` | 21 |
+| `ControlRoom` | 22 |
 | `CrashCapture` | 3 |
 | `EditorHook` | 5 |
 | `ErrorData` | 3 |
@@ -58,7 +58,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `RuntimeLaunch` | 9 |
 | `RuntimeLogs` | 9 |
 | `RuntimeOutput` | 5 |
-| `RuntimeRouting` | 59 |
+| `RuntimeRouting` | 60 |
 | `RuntimeSessions` | 26 |
 | `RuntimeTree` | 1 |
 | `SceneCallMethod` | 6 |
