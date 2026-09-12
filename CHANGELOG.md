@@ -68,6 +68,17 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- A `oneOf` branch behind a `$ref` says what it needs (#489). The required
+  properties for a branch were read straight off the branch object, and a
+  `$ref` object carries none of its own, so `physics_raycast_query.from` and
+  `nav_query_path.start_point` both rendered as "One of these is needed: no
+  required properties; or no required properties", which tells a caller nothing
+  at all. The reference is resolved first now, and the message reads "x, y; or
+  x, y, z". A branch that spells its own `required` out beside the `$ref` keeps
+  it, because that is the narrower statement of the two. Three tools on the
+  surface use `$ref` under `oneOf`; a contract test pins the rendered text for
+  all three, the inline `tilemap_set_cells` case included.
+
 - The project writers check what they are about to write (#485, #490).
 
   `project_set_setting` refuses a name the engine does not define and then

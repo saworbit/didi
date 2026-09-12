@@ -2797,6 +2797,41 @@ static void test_unimplemented_tools_answer_with_the_envelope() {
     ASSERT_EQ(invalid_payload["error"]["data"]["canonical_tool"], "scene_get_property");
 }
 
+// Break caught: the required-property list for a oneOf branch was read straight
+// off the branch object, and a $ref object carries no `required` of its own, so
+// both branches reported as empty and the message read "no required properties;
+// or no required properties" (#489). That is the one place on this surface that
+// said nothing, and it is the place a caller reaches after guessing wrong.
+static void test_oneof_branches_behind_a_ref_say_what_they_need() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto messageFor = [&](const char* tool, const didi::json& arguments) {
+        const auto result = registry.callTool(tool, arguments);
+        ASSERT_TRUE(result.isError);
+        const auto payload = didi::json::parse(result.content[0].text, nullptr, false);
+        ASSERT_TRUE(!payload.is_discarded());
+        return payload["error"]["message"].get<std::string>();
+    };
+
+    // Both of these declare their endpoints as oneOf of two $defs vectors.
+    const auto ray = messageFor("physics_raycast_query",
+        {{"from", didi::json::array({0, 0, 0})}, {"to", didi::json::array({0, 0, 10})}});
+    ASSERT_TRUE(ray.find("x, y; or x, y, z") != std::string::npos);
+    ASSERT_TRUE(ray.find("no required properties") == std::string::npos);
+
+    const auto nav = messageFor("nav_query_path",
+        {{"start_point", didi::json::array({0, 0, 0})},
+         {"end_point", didi::json::array({1, 1, 1})}});
+    ASSERT_TRUE(nav.find("x, y; or x, y, z") != std::string::npos);
+
+    // The inline case was always right and has to stay right.
+    const auto cells = messageFor("tilemap_set_cells",
+        {{"tilemap_path", "/root/Main/TileMap"},
+         {"cells", didi::json::array({didi::json{{"nonsense", 1}}})}});
+    ASSERT_TRUE(cells.find("coords") != std::string::npos);
+}
+
 static void test_project_search_public_validation_and_schema() {
     // Break caught: public search accepts coercible/unbounded inputs or advertises a live route.
     auto& reg = didi::mcp::ToolRegistry::instance();
@@ -4446,6 +4481,8 @@ struct RegisterToolTests {
                      test_depth_cut_reports_what_it_stopped_on);
         registerTest("Hierarchy.SchemaBoundsDepthAndDropsInertFlags",
                      test_hierarchy_schema_bounds_its_depth_and_drops_inert_flags);
+        registerTest("Schema.OneOfBranchesBehindARefSayWhatTheyNeed",
+                     test_oneof_branches_behind_a_ref_say_what_they_need);
         registerTest("ErrorData.FloorFillsCodeToolAndRetryable",
                      test_error_data_floor_fills_code_tool_and_retryable);
         registerTest("ErrorData.BridgeRefusalArrivesWithTheFloorFilled",

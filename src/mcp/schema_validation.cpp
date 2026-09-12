@@ -198,13 +198,25 @@ std::optional<std::string> checkOneOf(const json& schema, const json& value,
         if (!branch.is_object()) continue;
         if (!checkValue(branch, value, where, depth + 1, root)) return std::nullopt;
 
+        // What the branch demands is behind the $ref when the branch is one.
+        // A $ref object carries no `required` of its own, so both branches of
+        // physics_raycast_query.from reported as empty and the message read
+        // "no required properties; or no required properties", which is the
+        // one place on that surface that said nothing (#489). A branch that
+        // spells its own `required` out beside the $ref keeps it, because that
+        // is the narrower statement of the two.
+        const json* demanded = &branch;
+        if (branch.find("required") == branch.end()) {
+            if (const json* referenced = resolveLocalRef(branch, root)) demanded = referenced;
+        }
+
         // Which branch was being aimed at. A branch whose required properties
         // are all there is a shape the caller meant; one missing a required
         // property is not.
         bool required_present = true;
         std::vector<std::string> names;
-        const auto required = branch.find("required");
-        if (required != branch.end() && required->is_array()) {
+        const auto required = demanded->find("required");
+        if (required != demanded->end() && required->is_array()) {
             for (const auto& field : *required) {
                 if (!field.is_string()) continue;
                 const auto name = field.get<std::string>();
