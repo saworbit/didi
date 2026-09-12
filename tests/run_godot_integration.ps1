@@ -1007,7 +1007,9 @@ try {
     Assert-True $runtimeById[2365].result.isError "A stuck window longer than the run was accepted, and nothing could ever have reported it."
 
     Assert-True ($null -eq $selectedGame.session.PSObject.Properties["token"]) "Runtime get-session leaked the game token."
-    Assert-True ((Tool-Payload $runtimeById[377]).session.session_id -eq $gameSession.session_id) "Runtime detach did not report the route it released."
+    Assert-True ((Tool-Payload $runtimeById[377]).detached_session.session_id -eq $gameSession.session_id) "Runtime detach did not report the route it released."
+    Assert-True ((Tool-Payload $runtimeById[377]).connected -eq $false) "Runtime detach did not say the attachment was gone."
+    Assert-True ($null -eq (Tool-Payload $runtimeById[377]).PSObject.Properties["session"]) "Runtime detach still answers in the field a connected answer uses."
     Assert-True ((Tool-Payload $runtimeById[378]).handshake.status -eq "ok") "Runtime reattach did not restore the authenticated game route."
 
     # Engine output capture: the fixture printed and warned in _ready, so both
