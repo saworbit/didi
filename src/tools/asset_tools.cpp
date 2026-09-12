@@ -1171,6 +1171,16 @@ CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::I
             }
         }
     }
+    // "not_needed" means the scan produced nothing an engine could verify, so
+    // there was no live work to do and nothing to fall back from. Calling that
+    // an offline fallback with an editor attached told a caller to reattach and
+    // ask again for an answer reattaching cannot improve (#504). "unavailable"
+    // is the genuine fallback: there were findings to check and no engine to
+    // check them against.
+    if (report.value("execution_mode", std::string{}) != "live" &&
+        verification.value("mode", std::string{}) == "not_needed") {
+        report["execution_mode"] = "local";
+    }
     report["reference_verification"] = std::move(verification);
     return CallToolResult::successJson(std::move(report));
 }
@@ -1258,7 +1268,14 @@ CallToolResult handleProjectGetUidMap(const json& args, std::shared_ptr<ipc::IIp
     };
 
     if (queries.empty()) {
-        payload["execution_mode"] = "offline_fallback";
+        // Not a fallback. ResourceUID exposes no enumeration through
+        // GDExtension, so the map is a file scan whether or not an editor is
+        // attached, and there is nothing an engine could add to this call.
+        // Saying "offline_fallback" with an editor attached told a caller
+        // reading the field as a quality signal to reattach and ask again, for
+        // an answer reattaching cannot improve (#504). uid_map_source already
+        // says why.
+        payload["execution_mode"] = "local";
         payload["is_live_engine"] = false;
         return CallToolResult::successJson(std::move(payload));
     }
@@ -1310,6 +1327,8 @@ CallToolResult handleProjectGetUidMap(const json& args, std::shared_ptr<ipc::IIp
         }
         resolved.push_back(std::move(entry));
     }
+    // A fallback for real: the caller asked for resolutions, the engine is the
+    // table that resolves them, and attaching one would improve this answer.
     payload["execution_mode"] = "offline_fallback";
     payload["is_live_engine"] = false;
     payload["resolved"] = std::move(resolved);

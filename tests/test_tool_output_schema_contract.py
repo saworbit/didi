@@ -153,11 +153,20 @@ class OfflineDispatchContractTests(unittest.TestCase):
     """
 
     # Tools with a complete offline path, and arguments that exercise it.
+    # Arguments, and the mode the answer must carry with no session attached.
+    #
+    # "offline_fallback" means the caller did not get the good answer and should
+    # attach an editor and ask again. That is true of three of these. It is not
+    # true of an argument-free project_get_uid_map: ResourceUID exposes no
+    # enumeration through GDExtension, so the map is a file scan whatever is
+    # attached and there is nothing an engine could add (#504). Asked to resolve
+    # something, the same tool does have an engine path and does say fallback.
     OFFLINE_CAPABLE = {
-        "scene_get_hierarchy": {},
-        "audio_list_buses": {},
-        "project_get_uid_map": {},
-        "project_audit_assets": {"max_findings": 5},
+        "scene_get_hierarchy": ({}, "offline_fallback"),
+        "audio_list_buses": ({}, "offline_fallback"),
+        "project_get_uid_map": ({}, "local"),
+        "project_get_uid_map_resolve": ({"resolve": ["res://project.godot"]}, "offline_fallback"),
+        "project_audit_assets": ({"max_findings": 5}, "offline_fallback"),
     }
 
     @classmethod
@@ -200,9 +209,13 @@ class OfflineDispatchContractTests(unittest.TestCase):
                 return payload
 
     def test_offline_capable_tools_answer_with_no_session_attached(self):
-        for index, (name, arguments) in enumerate(self.OFFLINE_CAPABLE.items()):
-            with self.subTest(tool=name):
+        for index, (key, (arguments, expected)) in enumerate(self.OFFLINE_CAPABLE.items()):
+            name = key.split("_resolve")[0] if key.endswith("_resolve") else key
+            with self.subTest(tool=key):
                 modes = self.tools[name]["_meta"]["didi"]["executionModes"]
+                # Every one of these has a live path, so the fallback word is
+                # theirs to use. Whether a given call uses it is the next
+                # assertion.
                 self.assertIn("offline_fallback", modes)
                 response = self._request(
                     "tools/call", {"name": name, "arguments": arguments}, 300 + index
@@ -213,7 +226,8 @@ class OfflineDispatchContractTests(unittest.TestCase):
                     f"{name} refused an offline call: {result['content'][0]['text']}",
                 )
                 payload = json.loads(result["content"][0]["text"])
-                self.assertEqual(payload["execution_mode"], "offline_fallback")
+                self.assertNotEqual(payload["execution_mode"], "live")
+                self.assertEqual(payload["execution_mode"], expected)
 
 
 if __name__ == "__main__":

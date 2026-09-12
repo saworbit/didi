@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <optional>
 #include <string>
@@ -239,10 +240,47 @@ struct ExecutionCapability {
     std::vector<std::string> modes{"unimplemented"};
     bool implemented{false};
     std::string reason;
+    // What this registration calls its own non-engine work on the wire.
+    // "offline_fallback" is the routing vocabulary and stays in `modes`, because
+    // the registry uses it to decide whether a call can run with no session
+    // attached. It is the wrong word to publish for something with no live path:
+    // there is nothing to fall back from, and a caller reading it as a quality
+    // signal is told to reattach an editor that would change nothing (#419,
+    // #503). Tools set this in capabilityForTool -- most say "local", while the
+    // session tools and the control room already say something more specific in
+    // their own answers, and this is where those names live so the answer and
+    // the advertisement come from one place.
+    //
+    // The default is the old word rather than "local" because resources still
+    // report "offline_fallback" from their own read handlers. Their
+    // advertisement and their answers agree today, and defaulting to "local"
+    // here would have moved one without the other. Sweeping the resource half
+    // is its own change.
+    std::string local_mode{"offline_fallback"};
+
+    // The mode a tool reports when it is not running live.
+    const std::string& localMode() const { return local_mode; }
+
+    // True when an engine can contribute to this tool at all.
+    bool supportsLive() const {
+        return std::find(modes.begin(), modes.end(), "live") != modes.end();
+    }
+
+    // executionModes as published, rather than as routed. A tool with no live
+    // path advertises the name it will actually answer with.
+    std::vector<std::string> publishedModes() const {
+        if (supportsLive()) return modes;
+        std::vector<std::string> published;
+        published.reserve(modes.size());
+        for (const auto& mode : modes) {
+            published.push_back(mode == "offline_fallback" ? local_mode : mode);
+        }
+        return published;
+    }
 
     json toJson() const {
         json data = {
-            {"executionModes", modes},
+            {"executionModes", publishedModes()},
             {"implemented", implemented}
         };
         if (!reason.empty()) {

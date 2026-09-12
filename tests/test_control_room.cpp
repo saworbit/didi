@@ -27,12 +27,13 @@ using namespace didi;
 using namespace didi::mcp;
 
 ToolDefinition makeTool(const std::string& name, bool implemented, bool read_only,
-                        std::vector<std::string> modes) {
+                        std::vector<std::string> modes,
+                        std::string local_mode = "local") {
     ToolDefinition tool;
     tool.name = name;
     tool.description = "test";
     tool.inputSchema = {{"type", "object"}};
-    tool.capability = {std::move(modes), implemented, {}};
+    tool.capability = {std::move(modes), implemented, {}, std::move(local_mode)};
     tool.annotations.read_only = read_only;
     tool.annotations.destructive = !read_only;
     return tool;
@@ -528,7 +529,7 @@ void test_tool_modes_match_discovery() {
     // An editor route is an authoritative selection, so a game-only tool is
     // unavailable rather than quietly falling back.
     ASSERT_EQ(mode_of("runtime_step"), "unavailable");
-    ASSERT_EQ(mode_of("project_search_text"), "offline_fallback");
+    ASSERT_EQ(mode_of("project_search_text"), "local");
     ASSERT_EQ(mode_of("nav_bake_mesh"), "unimplemented");
     ASSERT_EQ(model["surface"]["live_now"], 1);
     ASSERT_EQ(model["surface"]["implemented"], 3);
