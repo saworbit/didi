@@ -591,8 +591,25 @@ jobs:
                   assert isinstance(annotations[hint], bool), (name, hint)
               if 'dry_run' in tool['inputSchema'].get('properties', {}):
                   assert annotations['readOnlyHint'] is False, name
-                  assert annotations['destructiveHint'] is True, name
           assert any(t['annotations']['readOnlyHint'] for t in by_name.values())
+          # The two tools that change the attachment every later live call
+          # routes through are not reads, whatever else they are (#505).
+          for name in ('runtime_attach_session', 'runtime_detach_session'):
+              assert by_name[name]['annotations']['readOnlyHint'] is False, name
+          # destructiveHint and idempotentHint used to be derived from the same
+          # bit as readOnlyHint, so across the whole surface the four hints took
+          # exactly four shapes and the last two said nothing (#507). Assert the
+          # census, not a list: the list changes, the rule does not.
+          shapes = {json.dumps(t['annotations'], sort_keys=True) for t in by_name.values()}
+          assert len(shapes) > 4, sorted(shapes)
+          for name in ('scene_set_property', 'project_set_setting', 'blackboard_write'):
+              assert by_name[name]['annotations']['idempotentHint'] is True, name
+          for name in ('scene_instantiate_node', 'blackboard_task_create'):
+              assert by_name[name]['annotations']['destructiveHint'] is False, name
+          # A writer taking an overwrite flag can replace a file, so it stays
+          # destructive however additive its name reads.
+          for name in ('script_create', 'scene_create', 'resource_create'):
+              assert by_name[name]['annotations']['destructiveHint'] is True, name
 
           # openWorldHint is per tool, not a blanket false. A tool that starts
           # Godot or dotnet against the project runs code the project chose, so
