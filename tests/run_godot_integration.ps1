@@ -1354,6 +1354,7 @@ try {
         (Tool-Request 155 "eval_gdscript" @{ expression = "node.get('process_physics_priority')"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
         (Tool-Request 2 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 2 }),
         (@{ jsonrpc = "2.0"; id = 2002; method = "tools/list"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 2003; method = "resources/read"; params = @{ uri = "godot://editor/state" } } | ConvertTo-Json -Compress),
         (Tool-Request 3 "scene_get_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "process_priority" }),
         (Tool-Request 4 "scene_set_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "process_priority"; value = 12 }),
         (Tool-Request 5 "scene_get_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "process_priority" }),
@@ -1735,6 +1736,21 @@ try {
     Assert-True ($hierarchy.execution_mode -eq "live") "Hierarchy was not attributed to live execution."
     Assert-True ($hierarchy.scene_tree.path -eq "/root/SmokeRoot") "Hierarchy root path is not editor-independent: $($hierarchy.scene_tree.path)"
     Assert-True ($hierarchy.scene_tree.children[0].path -eq "/root/SmokeRoot/Subject") "Hierarchy child path is not editor-independent: $($hierarchy.scene_tree.children[0].path)"
+
+    # godot://editor/state is the resource a client reads to find out which
+    # scene is being edited, and it answered with the node's internal editor
+    # path: 364 characters of @EditorNode@.../@SubViewport@.../Main that every
+    # scene_* tool refuses. A caller doing the obvious thing got a 404 blaming
+    # the node (#502). The resource and the tools have to describe the same tree
+    # in the same vocabulary, so this compares them rather than pinning either.
+    $editorState = $byId[2003].result.contents[0].text | ConvertFrom-Json
+    Assert-True ($editorState.editor_connected -eq $true) "godot://editor/state did not report a connected editor."
+    Assert-True ($editorState.active_scene_root -eq $hierarchy.scene_tree.path) "godot://editor/state names a root the scene tools do not use: '$($editorState.active_scene_root)' against '$($hierarchy.scene_tree.path)'."
+    # The shape of the old value, named so a regression is recognisable rather
+    # than just unequal.
+    Assert-True ($editorState.active_scene_root -notmatch "@") "godot://editor/state is publishing the editor's own viewport chain again."
+    Assert-True ($editorState.active_scene_root.Length -lt 120) "godot://editor/state returned an implausibly long root path: $($editorState.active_scene_root.Length) characters."
+
 
     # An outputSchema is a claim about the handler, and the live half of that
     # claim can only be checked here. scene_get_hierarchy declared file_path,

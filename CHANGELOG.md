@@ -68,6 +68,16 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `godot://editor/state` names a scene root the scene tools accept (#502). It is
+  the resource a client reads to find out which scene is being edited, and it
+  answered with `Node.get_path()`: 364 characters of the editor's own viewport
+  chain, down through `@EditorNode@`, a `@SubViewport@` and the rest of where
+  Godot parents an edited scene. Every `scene_*` tool refuses that, so a caller
+  that read `active_scene_root` and passed it on got a 404 blaming the node.
+  `active_scene_root` is now built by the same function every scene answer
+  builds its paths with, so the resource and the tools describe the same tree in
+  the same vocabulary.
+
 - Every blackboard board is served as `application/json` (#513). Only
   `blackboard://default/*` is a registered resource, so the mime type came from
   the registry and fell through to `text/plain` for every other board. The same

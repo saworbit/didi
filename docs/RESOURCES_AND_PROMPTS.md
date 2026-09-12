@@ -38,6 +38,7 @@ Example shape:
 - Modes: `live`, `offline_fallback`.
 - MIME type: `application/json`.
 - Live mode currently reports `status`, `editor_connected`, `execution_mode`, `is_live_engine`, and `active_scene_root`.
+- `active_scene_root` is the path the `scene_*` tools accept, such as `/root/Main`, built by the same function every scene answer builds its paths with. It is not `Node.get_path()`: the editor parents an edited scene deep inside its own viewport chain, and that path is an implementation detail of the editor that no tool accepts.
 - Offline mode reports that no editor extension is connected.
 - Selection, camera transforms, scene filename, and UndoRedo depth are not currently exposed.
 

@@ -8950,7 +8950,22 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (root_result.isErr()) return errorJson(root_result.error().code, root_result.error().message);
         auto root = root_result.value();
         if (method == "editor.getState") {
-            auto root_path = nodeString(root, "get_path", 4075236667LL);
+            // The path the rest of the surface speaks, not Node.get_path().
+            //
+            // This is the resource a client reads to find out which scene is
+            // being edited, and it answered with the node's internal editor
+            // path: 364 characters of @EditorNode@20438/@Panel@14/... down to
+            // the SubViewport the editor parents an edited scene under. Every
+            // scene_* tool refuses that, so a caller that did the obvious thing
+            // and passed it on got a 404 blaming the node. Where Godot parents
+            // an edited scene is an implementation detail of the editor, and
+            // publishing it both leaked that and handed back a value that
+            // cannot be used (#502).
+            //
+            // logicalPathFromEditedRoot is the same function every scene answer
+            // already builds its paths with, so the resource and the tools now
+            // describe the same tree in the same vocabulary.
+            auto root_path = logicalPathFromEditedRoot(root, root);
             if (root_path.isErr()) return errorJson(root_path.error().code, root_path.error().message);
             return liveResult({{"status", "online"}, {"editor_connected", true},
                                {"active_scene_root", root_path.value()}});
