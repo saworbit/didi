@@ -635,8 +635,8 @@ jobs:
           for name in ('tilemap_set_cells', 'tilemap_get_used_rect', 'gridmap_set_cells'):
               assert by_name[name]['_meta']['didi']['implemented'] is True
               assert by_name[name]['_meta']['didi']['executionModes'] == ['live']
-          assert by_name['runtime_list_sessions']['_meta']['didi']['executionModes'] == ['offline_fallback']
-          assert by_name['runtime_get_session']['_meta']['didi']['executionModes'] == ['offline_fallback']
+          assert by_name['runtime_list_sessions']['_meta']['didi']['executionModes'] == ['local_session_management']
+          assert by_name['runtime_get_session']['_meta']['didi']['executionModes'] == ['local_session_management']
           assert by_name['runtime_read_logs']['_meta']['didi']['executionModes'] == ['live']
           assert by_name['runtime_read_logs']['inputSchema']['properties']['cursor']['default'] == 0
           assert by_name['runtime_read_logs']['inputSchema']['properties']['cursor']['minimum'] == 0
@@ -647,9 +647,9 @@ jobs:
           assert by_name['eval_gdscript']['inputSchema']['properties']['expression']['maxLength'] == 2048
           assert by_name['eval_gdscript']['inputSchema']['properties']['context_node']['maxLength'] == 1024
           assert by_name['eval_gdscript']['inputSchema']['properties']['timeout_ms']['maximum'] == 5000
-          assert by_name['project_search_text']['_meta']['didi']['executionModes'] == ['offline_fallback']
+          assert by_name['project_search_text']['_meta']['didi']['executionModes'] == ['local']
           assert by_name['project_search_text']['inputSchema']['properties']['max_results']['maximum'] == 500
-          assert by_name['project_search_symbols']['_meta']['didi']['executionModes'] == ['offline_fallback']
+          assert by_name['project_search_symbols']['_meta']['didi']['executionModes'] == ['local']
           assert by_name['asset_reimport']['_meta']['didi']['executionModes'] == ['live']
           assert by_name['asset_reimport']['inputSchema']['properties']['paths']['maxItems'] == 256
           assert by_name['viewport_diff_capture']['_meta']['didi']['executionModes'] == ['live']
@@ -660,7 +660,7 @@ jobs:
               'project_export', 'gridmap_export_mesh_library'
           ):
               assert by_name[name]['_meta']['didi']['implemented'] is True
-              assert by_name[name]['_meta']['didi']['executionModes'] == ['offline_fallback']
+              assert by_name[name]['_meta']['didi']['executionModes'] == ['local']
           assert by_name['csharp_check_build']['inputSchema']['properties']['timeout_seconds']['maximum'] == 300
           assert by_name['shader_check_compile']['inputSchema']['required'] == ['shader_path']
           assert by_name['project_list_export_presets']['inputSchema']['properties'] == {}
@@ -678,6 +678,18 @@ jobs:
                        'physics_raycast_query', 'nav_query_path', 'anim_list_tracks', 'anim_play_track'):
               assert by_name[name]['_meta']['didi']['implemented'] is True
               assert by_name[name]['_meta']['didi']['executionModes'] == ['live']
+
+          # A tool with no live path has nothing to fall back from, so neither
+          # the entry a host reads nor the answer it gets may say fallback. #419
+          # fixed the answers and the entry kept the old word, which is how
+          # eleven tools came to advertise one mode and report another (#503).
+          for name, tool in by_name.items():
+              meta = tool['_meta']['didi']
+              if not meta['implemented'] or 'live' in meta['executionModes']:
+                  continue
+              assert 'offline_fallback' not in meta['executionModes'], (name, meta)
+              assert meta['currentMode'] != 'offline_fallback', (name, meta)
+              assert meta['executionModes'] == [meta['currentMode']], (name, meta)
 
           project = json.loads(req('resources/read', {'uri': 'godot://project/tree'}, 3)['result']['contents'][0]['text'])
           assert project['execution_mode'] == 'offline_fallback'

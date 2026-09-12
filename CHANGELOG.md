@@ -68,6 +68,25 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `tools/list` says the mode a tool actually answers with (#503). #419 gave the
+  answers an honest name for work that was never engine work, and never reached
+  the discovery entry, which is the copy a host reads before it ever makes a
+  call. Eleven tools advertised `offline_fallback` and answered `local`,
+  `local_status` or `local_session_management`, so the entry said a tool was
+  running in fallback when there was nothing to fall back from. The name a tool
+  reports is now declared once, beside its execution modes, and both the entry
+  and the answer are taken from it. A tool with a live path keeps
+  `offline_fallback`, because for it the word is true.
+
+- `project_get_uid_map` and `project_audit_assets` stop calling an authoritative
+  answer a fallback (#504). Both have a live path and take it when there is live
+  work: the uid map when `resolve` names something for `ResourceUID` to answer,
+  the audit when the scan found references an engine can verify. With nothing
+  for the engine to do they still reported `offline_fallback`, which tells a
+  caller to attach an editor and ask again, including when one was already
+  attached and could have added nothing. That case now reports `local`.
+  `uid_map_source` and `reference_verification.mode` already said why.
+
 - Tool annotations are decided per tool instead of being four names for one bit
   (#505, #507). `readOnlyHint`, `destructiveHint` and `idempotentHint` were all
   derived from the mutation classification, so across all 126 tools the four
