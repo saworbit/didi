@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **950** |
+| Automated tests | **953** |
 | Live-harness assertions | 864 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**602 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**605 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -58,7 +58,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `RuntimeLaunch` | 9 |
 | `RuntimeLogs` | 9 |
 | `RuntimeOutput` | 5 |
-| `RuntimeRouting` | 58 |
+| `RuntimeRouting` | 59 |
 | `RuntimeSessions` | 26 |
 | `RuntimeTree` | 1 |
 | `SceneCallMethod` | 6 |
@@ -80,7 +80,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `phase7c_profiler` | 10 |
 | `project_settings_file` | 7 |
 | `resource_references` | 11 |
-| `tool_annotations` | 8 |
+| `tool_annotations` | 10 |
 | `tool_input_schema` | 6 |
 | `tool_manifest` | 7 |
 | `tool_output_schema` | 3 |

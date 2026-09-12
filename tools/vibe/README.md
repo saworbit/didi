@@ -198,10 +198,11 @@ called, not only what it says afterwards.
 
 **Annotations are the part of the surface nobody is calling.** `readOnlyHint`
 and friends are never exercised by a probe, because a probe just calls the
-tool -- so they drifted until all four are a function of one read/write bit
-(#507), and two of the tools sitting in the read-only bucket are not read-only.
-`runtime_detach_session` is annotated read-only, non-destructive and idempotent,
-and severs the bridge (#505). That one is not a paper cut: it silently wrecked
+tool -- so they drifted until all four were a function of one read/write bit
+(#507), and two of the tools sitting in the read-only bucket were not read-only.
+`runtime_detach_session` was annotated read-only, non-destructive and
+idempotent, and severs the bridge (#505). That one was not a paper cut: it
+silently wrecked
 the first run of this session's own census, which had filtered to read-only
 tools and called it in alphabetical order ahead of every `scene_*` and
 `viewport_*` tool. Four tools were reported as falling back to offline; every

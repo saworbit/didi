@@ -15,11 +15,12 @@ Read-only tools only, on purpose. A census that calls all 126 is a batch of
 mutations wearing a survey's clothes -- see #471, and the note about diffing
 the tree in the README.
 
-`runtime_detach_session` is skipped even though it is annotated read-only,
-because it is not: it severs the bridge, and the first run of this probe called
-it alphabetically ahead of every `scene_*` and `viewport_*` tool and then
-reported four of them as falling back to offline. Every row after the detach was
-an artifact. The annotation is wrong, and until it is, this list is the guard.
+`runtime_detach_session` is skipped because it severs the bridge. The first
+run of this probe called it alphabetically ahead of every `scene_*` and
+`viewport_*` tool and then reported four of them as falling back to offline.
+Every row after the detach was an artifact. It is no longer annotated read-only
+(#505), so a read-only filter now excludes it on its own, and this list is the
+belt to that pair of braces.
 
     python tools/vibe/probes/advertised_vs_reported_mode.py -p SANDBOX
 """
@@ -36,8 +37,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mcp_client import Session  # noqa: E402
 
-# Annotated read-only, and not. Calling either one mid-census makes every later
-# row an answer about a detached server.
+# Calling either one mid-census makes every later row an answer about a
+# detached server. No longer annotated read-only, so the read-only filter above
+# already excludes them; kept named here because the cost of being wrong is a
+# whole census.
 SEVERS_THE_BRIDGE = {"runtime_detach_session"}
 
 
