@@ -1626,6 +1626,46 @@ struct HierarchyBudget {
     bool truncated{false};
 };
 
+// Counts everything beneath a node by class, so a branch the depth limit cut
+// can report what went rather than looking like a leaf. The walk reads classes
+// and nothing else, so it costs no JSON, and it carries its own stack rather
+// than the call stack: max_depth bounds how deep buildHierarchy recurses, and
+// this runs past that bound by definition.
+Result<void> countDescendantsByType(GDExtensionObjectPtr root, std::map<std::string, size_t>& counts,
+                                    size_t& total) {
+    std::vector<GDExtensionObjectPtr> pending{root};
+    bool at_root = true;
+    while (!pending.empty()) {
+        GDExtensionObjectPtr node = pending.back();
+        pending.pop_back();
+        if (!at_root) {
+            auto type = nodeString(node, "get_class", 201670096LL);
+            if (type.isErr()) return type.error();
+            ++total;
+            ++counts[type.value()];
+        }
+        at_root = false;
+        auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+        if (include_internal.isErr()) return include_internal.error();
+        auto children = callObject(node, "Node", "get_children", 873284517LL, {&include_internal.value()});
+        if (children.isErr()) return children.error();
+        auto size_result = callVariant(children.value(), "size");
+        if (size_result.isErr()) return size_result.error();
+        auto size = scalarFromVariant<int64_t>(size_result.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (size.isErr()) return size.error();
+        for (int64_t i = 0; i < size.value(); ++i) {
+            auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+            if (index.isErr()) return index.error();
+            auto child_variant = callVariant(children.value(), "get", {&index.value()});
+            if (child_variant.isErr()) return child_variant.error();
+            auto child = objectFromVariant(child_variant.value());
+            if (child.isErr() || !child.value()) return Error::internal("Godot returned an invalid child node");
+            pending.push_back(child.value());
+        }
+    }
+    return Result<void>::ok();
+}
+
 Result<json> buildHierarchy(GDExtensionObjectPtr node, int depth, int max_depth,
                             const std::string& logical_path,
                             HierarchyBudget& budget) {
@@ -1651,9 +1691,25 @@ Result<json> buildHierarchy(GDExtensionObjectPtr node, int depth, int max_depth,
     budget.estimated_bytes += node_bytes;
     ++budget.node_count;
 
-    if (depth >= max_depth) return result;
     auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
     if (include_internal.isErr()) return include_internal.error();
+    if (depth >= max_depth) {
+        // A branch cut by depth used to be byte for byte a leaf, so "no
+        // children" and "children not reported" read the same. It now says what
+        // it stopped on, the way a branch cut by max_nodes does.
+        std::map<std::string, size_t> omitted_counts;
+        size_t omitted_total = 0;
+        auto counted = countDescendantsByType(node, omitted_counts, omitted_total);
+        if (counted.isErr()) return counted.error();
+        if (omitted_total > 0) {
+            json summary = json::object();
+            for (const auto& entry : omitted_counts) summary[entry.first] = entry.second;
+            result["children_omitted"] = omitted_total;
+            result["children_summary"] = summary;
+            budget.truncated = true;
+        }
+        return result;
+    }
     auto children = callObject(node, "Node", "get_children", 873284517LL, {&include_internal.value()});
     if (children.isErr()) return children.error();
     auto size_result = callVariant(children.value(), "size");
@@ -8678,10 +8734,12 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (hierarchy.value().is_null()) {
             return errorJson(413, "The edited scene root alone exceeds the hierarchy response budget");
         }
-        json omitted = json::array();
-        if (params.value("include_properties", true)) omitted.push_back("bulk_properties");
-        if (params.value("include_signals", true)) omitted.push_back("signals");
-        if (params.value("include_scripts", true)) omitted.push_back("scripts");
+        // The live walk reads names, classes and paths and nothing else, so the
+        // list of what it left out is the same on every call. It used to be
+        // derived from include_properties and friends, which meant asking for
+        // properties added "bulk_properties" to the list of things omitted, and
+        // declining them took it off while the properties stayed empty (#482).
+        json omitted = json::array({"bulk_properties", "signals", "scripts"});
         json hierarchy_result = {{"root_path", params.value("root_path", "/root")},
                                  {"source", "live_scene_tree"}, {"scene_tree", hierarchy.value()},
                                  {"omitted_fields", omitted},

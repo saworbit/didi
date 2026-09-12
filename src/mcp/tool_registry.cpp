@@ -1398,11 +1398,10 @@ void ToolRegistry::registerAllDefaultTools() {
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
-                {"root_path", {{"type", "string"}, {"default", "/root"}, {"description", "Node path or .tscn file path"}}},
-                {"max_depth", {{"type", "integer"}, {"default", 10}, {"description", "Max tree depth"}}},
+                {"root_path", {{"type", "string"}, {"default", "/root"}, {"description", "Node path in the edited scene, or an in-project .tscn file path. A .tscn path is read from the file whether or not an editor is attached."}}},
+                {"max_depth", {{"type", "integer"}, {"default", 10}, {"minimum", 0}, {"maximum", 64},
+                               {"description", "Stop descending below this depth. Branches that were cut report children_omitted and children_summary, and the response carries truncated."}}},
                 {"include_properties", {{"type", "boolean"}, {"default", true}}},
-                {"include_signals", {{"type", "boolean"}, {"default", true}}},
-                {"include_scripts", {{"type", "boolean"}, {"default", true}}},
                 {"max_nodes", {{"type", "integer"}, {"minimum", 1}, {"maximum", 100000},
                                {"description", "Stop after this many nodes, depth first. Branches that were cut report children_omitted and children_summary."}}},
                 {"class_filter", {{"type", "array"}, {"items", {{"type", "string"}}},

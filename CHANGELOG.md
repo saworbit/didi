@@ -68,6 +68,36 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `scene_get_hierarchy` answers the question it was asked (#482, #483, #484).
+  Three things it got wrong, all of them in the shape of an answer that reads
+  as a fact and is not one.
+
+  A branch stopped by `max_depth` was byte for byte a leaf: empty `children`,
+  no flag, nothing on the response. `max_depth` defaults to 10, so that is the
+  cut most callers actually hit, and the answer to "what is under this node"
+  was "nothing" rather than "not reported". A depth cut now reports itself the
+  way a `max_nodes` cut always has, with `children_omitted` and
+  `children_summary` on the node that stopped and `truncated: true` on the
+  response. The tally covers the whole subtree below the cut, which is what
+  `children_omitted` means everywhere else. `max_depth` also gained
+  `minimum: 0` and `maximum: 64`, so a negative value is refused rather than
+  silently clamped; it was the only bounded limit on the surface with no
+  bounds published.
+
+  `root_path` is documented as a node path or a `.tscn` file path, and with an
+  editor attached a `.tscn` path went to the live bridge, which resolves node
+  paths only. The result was a 404 saying it searched for the file and did not
+  find the file. A `.tscn` path is now read from the file in either mode.
+
+  `include_signals` and `include_scripts` are removed. They were advertised
+  with a default of `true` and did nothing on either route, and the live route
+  built `omitted_fields` out of them, so asking for properties added
+  `bulk_properties` to the list of fields omitted and declining them took it
+  off while the properties stayed empty either way. `omitted_fields` is now
+  the fixed list the live walk actually produces. `include_properties` stays,
+  because the `.tscn` parser honours it, and its description now says that the
+  live route never returns bulk properties.
+
 - Every tool parameter says what it is (#462). 217 of 381 carried no
   `description`, and 52 tools documented none of theirs. Every tool had a
   top-level description; the parameters inside it mostly did not, and the names

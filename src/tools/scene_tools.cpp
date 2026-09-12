@@ -6,6 +6,8 @@
 #include <fstream>
 #include <regex>
 #include <filesystem>
+#include <functional>
+#include <map>
 
 namespace didi {
 namespace mcp {
@@ -59,7 +61,15 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
         return CallToolResult::error("Invalid scene hierarchy request: " + view.error().message);
     }
 
-    if (ipc && ipc->isConnected()) {
+    // A .tscn root_path is a question about a file, and the file is readable
+    // whether or not an editor is attached. It used to go to the live bridge,
+    // which resolves node paths only, so the documented "node path or .tscn
+    // file path" came back as a 404 naming the file it had just been handed
+    // (#483).
+    const std::string requested = args.value("root_path", "");
+    const bool file_request = strings::endsWith(requested, ".tscn");
+
+    if (ipc && ipc->isConnected() && !file_request) {
         auto res = ipc->sendRequest("scene.getHierarchy", args, ::didi::ipc::kWaitForDefinitiveResponse);
         if (res.isOk()) {
             return shapedHierarchyResult(res.value(), view.value());
@@ -73,7 +83,6 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
     // does not exist, a res://project.godot, or a binary .scn all came back as
     // the whole main scene with nothing saying the question had been replaced
     // (#401).
-    const std::string requested = args.value("root_path", "");
     const bool substituted = requested.empty() || requested == "/root" || requested == ".";
     std::string root = requested;
     if (substituted) {
@@ -251,6 +260,24 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
     }
 
         int max_depth = args.value("max_depth", 10);
+        bool depth_truncated = false;
+
+        // What a depth cut removed, counted by type, so a stopped branch reads
+        // as stopped rather than as a leaf (#484). The tally covers the whole
+        // subtree, which is what children_omitted means for a max_nodes cut.
+        auto countSubtree = [&](int idx, std::map<std::string, size_t>& counts, size_t& total) {
+            std::vector<int> pending{idx};
+            while (!pending.empty()) {
+                const int current = pending.back();
+                pending.pop_back();
+                ++total;
+                ++counts[nodes[current].type];
+                const auto found = children_by_index.find(current);
+                if (found == children_by_index.end()) continue;
+                for (int child_idx : found->second) pending.push_back(child_idx);
+            }
+        };
+
         std::function<json(int, int)> buildNode = [&](int idx, int depth) -> json {
             const auto& ne = nodes[idx];
             json n = {
@@ -266,9 +293,24 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
             if (!ne.transform.empty()) {
                 n["transform"] = ne.transform;
             }
-            if (depth < max_depth && children_by_index.count(idx)) {
-                for (int child_idx : children_by_index[idx]) {
-                    n["children"].push_back(buildNode(child_idx, depth + 1));
+            if (children_by_index.count(idx)) {
+                if (depth < max_depth) {
+                    for (int child_idx : children_by_index[idx]) {
+                        n["children"].push_back(buildNode(child_idx, depth + 1));
+                    }
+                } else {
+                    std::map<std::string, size_t> omitted_counts;
+                    size_t omitted_total = 0;
+                    for (int child_idx : children_by_index[idx]) {
+                        countSubtree(child_idx, omitted_counts, omitted_total);
+                    }
+                    if (omitted_total > 0) {
+                        json summary = json::object();
+                        for (const auto& entry : omitted_counts) summary[entry.first] = entry.second;
+                        n["children_omitted"] = omitted_total;
+                        n["children_summary"] = std::move(summary);
+                        depth_truncated = true;
+                    }
                 }
             }
             return n;
@@ -280,6 +322,7 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
             {"file_path", root},
             {"scene_tree", std::move(tree)}
         };
+        if (depth_truncated) tree_res["truncated"] = true;
         // The caller asked for the main scene without naming it. Say which file
         // answered, so the reply cannot be read as a scoped one.
         if (substituted) {
