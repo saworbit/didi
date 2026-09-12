@@ -68,6 +68,31 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- The project writers check what they are about to write (#485, #490).
+
+  `project_set_setting` refuses a name the engine does not define and then
+  wrote whatever value it was handed. `application/config/name` took `42` and
+  the project name became an integer; `application/run/main_scene` took
+  `res://nope.tscn` and the project stopped running. Both reported
+  `persisted: true`. The lookup that answers `defined_by_engine` is holding the
+  engine's own value, so its type was available at exactly the point where the
+  check belongs. A type mismatch is now a `409` naming `expected_type` and
+  `given_type`, and the conversions the engine does anyway are still allowed: an
+  integer into a float setting, a whole number into an int setting, a string
+  into a `StringName` or `NodePath`, a JSON array into any of the packed arrays.
+  A `res://` value is checked against the filesystem the way
+  `project_set_autoload` has always checked a script.
+
+  `project_remove_input_action` would remove an engine default such as
+  `ui_accept`, leave the running editor's InputMap without it, write nothing to
+  `project.godot`, and report `persisted: true`. `has_setting` answers true for
+  a built-in because the engine registers the built-in map as settings, which is
+  the right answer to "does this exist" and the wrong answer to "did this
+  project define it". The second question is answered by `project.godot` itself
+  now, and an action the file does not contain is refused with a `409` carrying
+  `engine_default: true`. A removal that does go ahead reports the deadzone and
+  event count the action had, rather than the defaults it used to echo.
+
 - Every error says what kind of failure it is, in the same place (#486, #487,
   #492). `error.data` is the part a caller can branch on without parsing prose,
   and on 35 well-formed, wrong calls only 14 carried a `data.code`. Twelve

@@ -19,6 +19,7 @@
 #include <functional>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <unordered_map>
 #include <map>
@@ -5330,6 +5331,139 @@ json ghostPreviewClear(const json& params) {
                        {"scene_modified", false}});
 }
 
+// The project directory on disk. project.godot is the only record of what this
+// project defines rather than what the engine defaults to, and two checks below
+// need to read it.
+Result<std::string> projectDirectoryOnDisk() {
+    auto settings = singleton("ProjectSettings");
+    if (settings.isErr()) return settings.error();
+    auto resource_root = makeString("res://");
+    if (resource_root.isErr()) return resource_root.error();
+    auto globalized = callObject(settings.value(), "ProjectSettings", "globalize_path", 3135753539LL,
+                                 {&resource_root.value()});
+    if (globalized.isErr()) return globalized.error();
+    return stringFromVariant(globalized.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+}
+
+// Whether project.godot itself declares this input action.
+//
+// ProjectSettings.has_setting answers true for an engine default such as
+// ui_accept, because the engine registers the built-in map as settings. That is
+// the right answer to "does this action exist" and the wrong answer to "did
+// this project define it", and removal needs the second one: an action the file
+// does not contain cannot be removed by writing the file (#485).
+Result<bool> projectFileDefinesInputAction(const std::string& action) {
+    auto directory = projectDirectoryOnDisk();
+    if (directory.isErr()) return directory.error();
+    std::ifstream file(std::filesystem::path(directory.value()) / "project.godot");
+    if (!file.is_open()) return false;
+
+    bool in_input_section = false;
+    std::string line;
+    while (std::getline(file, line)) {
+        const auto trimmed = strings::trim(line);
+        if (trimmed.empty() || trimmed[0] == ';') continue;
+        if (trimmed.front() == '[' && trimmed.back() == ']') {
+            in_input_section = trimmed == "[input]";
+            continue;
+        }
+        if (!in_input_section) continue;
+        // Godot writes the action name bare, or quoted when it needs escaping.
+        const auto equals = trimmed.find('=');
+        if (equals == std::string::npos) continue;
+        auto key = strings::trim(trimmed.substr(0, equals));
+        if (key.size() >= 2 && key.front() == '"' && key.back() == '"') {
+            key = key.substr(1, key.size() - 2);
+        }
+        if (key == action) return true;
+    }
+    return false;
+}
+
+const char* variantTypeName(GDExtensionVariantType type) {
+    switch (type) {
+        case GDEXTENSION_VARIANT_TYPE_NIL: return "null";
+        case GDEXTENSION_VARIANT_TYPE_BOOL: return "bool";
+        case GDEXTENSION_VARIANT_TYPE_INT: return "int";
+        case GDEXTENSION_VARIANT_TYPE_FLOAT: return "float";
+        case GDEXTENSION_VARIANT_TYPE_STRING: return "String";
+        case GDEXTENSION_VARIANT_TYPE_STRING_NAME: return "StringName";
+        case GDEXTENSION_VARIANT_TYPE_NODE_PATH: return "NodePath";
+        case GDEXTENSION_VARIANT_TYPE_ARRAY: return "Array";
+        case GDEXTENSION_VARIANT_TYPE_DICTIONARY: return "Dictionary";
+        case GDEXTENSION_VARIANT_TYPE_COLOR: return "Color";
+        case GDEXTENSION_VARIANT_TYPE_VECTOR2: return "Vector2";
+        case GDEXTENSION_VARIANT_TYPE_VECTOR2I: return "Vector2i";
+        case GDEXTENSION_VARIANT_TYPE_VECTOR3: return "Vector3";
+        case GDEXTENSION_VARIANT_TYPE_VECTOR3I: return "Vector3i";
+        case GDEXTENSION_VARIANT_TYPE_PACKED_STRING_ARRAY: return "PackedStringArray";
+        case GDEXTENSION_VARIANT_TYPE_PACKED_INT32_ARRAY: return "PackedInt32Array";
+        case GDEXTENSION_VARIANT_TYPE_PACKED_INT64_ARRAY: return "PackedInt64Array";
+        case GDEXTENSION_VARIANT_TYPE_PACKED_FLOAT32_ARRAY: return "PackedFloat32Array";
+        case GDEXTENSION_VARIANT_TYPE_PACKED_FLOAT64_ARRAY: return "PackedFloat64Array";
+        default: break;
+    }
+    return "another type";
+}
+
+// Whether a value the caller sent can stand in for the type a setting holds.
+//
+// JSON carries fewer types than Variant does, so the conversions the engine
+// does anyway are allowed: an integer into a float setting, a whole number into
+// an int setting, a string into a StringName or a NodePath, a list into any of
+// the packed arrays. Everything else is a different setting wearing the same
+// name, which is what made the project name an integer (#490).
+bool incomingTypeFitsSetting(GDExtensionVariantType current, GDExtensionVariantType incoming,
+                             bool incoming_is_whole_number) {
+    if (current == incoming) return true;
+    // Nothing is known about a setting the engine holds as null, so nothing is
+    // refused on its account.
+    if (current == GDEXTENSION_VARIANT_TYPE_NIL) return true;
+    if (current == GDEXTENSION_VARIANT_TYPE_FLOAT &&
+        incoming == GDEXTENSION_VARIANT_TYPE_INT) {
+        return true;
+    }
+    if (current == GDEXTENSION_VARIANT_TYPE_INT &&
+        incoming == GDEXTENSION_VARIANT_TYPE_FLOAT) {
+        return incoming_is_whole_number;
+    }
+    if ((current == GDEXTENSION_VARIANT_TYPE_STRING_NAME ||
+         current == GDEXTENSION_VARIANT_TYPE_NODE_PATH) &&
+        incoming == GDEXTENSION_VARIANT_TYPE_STRING) {
+        return true;
+    }
+    if (incoming == GDEXTENSION_VARIANT_TYPE_ARRAY) {
+        switch (current) {
+            case GDEXTENSION_VARIANT_TYPE_PACKED_BYTE_ARRAY:
+            case GDEXTENSION_VARIANT_TYPE_PACKED_INT32_ARRAY:
+            case GDEXTENSION_VARIANT_TYPE_PACKED_INT64_ARRAY:
+            case GDEXTENSION_VARIANT_TYPE_PACKED_FLOAT32_ARRAY:
+            case GDEXTENSION_VARIANT_TYPE_PACKED_FLOAT64_ARRAY:
+            case GDEXTENSION_VARIANT_TYPE_PACKED_STRING_ARRAY:
+            case GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR2_ARRAY:
+            case GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR3_ARRAY:
+            case GDEXTENSION_VARIANT_TYPE_PACKED_COLOR_ARRAY:
+                return true;
+            default: break;
+        }
+    }
+    return false;
+}
+
+// Whether a res:// path the caller gave points at something that is there.
+// project_set_autoload already refuses a script that is not on disk; a setting
+// that names a scene had no such check, so run/main_scene could be pointed at a
+// file that does not exist and the project stopped running (#490).
+Result<bool> resourcePathExistsOnDisk(const std::string& resource_path) {
+    auto directory = projectDirectoryOnDisk();
+    if (directory.isErr()) return directory.error();
+    const std::string relative = resource_path.substr(6);
+    std::error_code error;
+    const auto target = std::filesystem::path(directory.value()) /
+                        std::filesystem::path(paths::projectPathFromUtf8(relative));
+    return std::filesystem::exists(target, error) && !error;
+}
+
 } // namespace
 
 json GodotBridge::execute(const std::string& method, const json& params,
@@ -7452,6 +7586,52 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto replacement = remove ? Result<VariantValue>(VariantValue{}) : makeJsonVariant(params["value"]);
         if (replacement.isErr()) return errorJson(replacement.error().code, replacement.error().message);
 
+        // Having established that the engine defines this setting, the tool
+        // used to write whatever it was handed. The lookup that answered
+        // defined_by_engine is holding the engine's own value, so its type is
+        // available at exactly the point where the check belongs (#490).
+        if (!remove && exists.value()) {
+            const auto current_type = GodotApi::instance().variant_get_type(previous.value().ptr());
+            const auto incoming_type = GodotApi::instance().variant_get_type(replacement.value().ptr());
+            const bool whole_number = params["value"].is_number_float() &&
+                                      params["value"].get<double>() ==
+                                          std::floor(params["value"].get<double>());
+            if (!incomingTypeFitsSetting(current_type, incoming_type, whole_number)) {
+                return errorJson(
+                    409,
+                    std::string("Project setting type mismatch: ") + setting + " holds a " +
+                        variantTypeName(current_type) + " and the value given is a " +
+                        variantTypeName(incoming_type) +
+                        ". Writing it would persist a value the engine cannot read back as the "
+                        "setting it names.",
+                    {{"setting", setting},
+                     {"expected_type", variantTypeName(current_type)},
+                     {"given_type", variantTypeName(incoming_type)},
+                     {"retryable", false}});
+            }
+        }
+
+        // A res:// value names a file, and a setting pointed at a file that is
+        // not there is a project that no longer runs. project_set_autoload has
+        // refused this since it was written; this tool did not (#490).
+        if (!remove && params["value"].is_string()) {
+            const auto text = params["value"].get<std::string>();
+            if (strings::startsWith(text, "res://")) {
+                auto present = resourcePathExistsOnDisk(text);
+                if (present.isErr()) return errorJson(present.error().code, present.error().message);
+                if (!present.value()) {
+                    return errorJson(404,
+                                     "Project setting resource not found: " + text +
+                                         ". Nothing is at that path, so " + setting +
+                                         " would name a file the project cannot load.",
+                                     {{"setting", setting},
+                                      {"resource_path", text},
+                                      {"resource_exists", false},
+                                      {"retryable", false}});
+                }
+            }
+        }
+
         auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
                                   {&name.value(), &replacement.value()});
         if (applied.isErr()) return errorJson(applied.error().code, applied.error().message);
@@ -7687,6 +7867,31 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (exists.isErr()) return errorJson(exists.error().code, exists.error().message);
         const bool removing = method == "project.removeInputAction";
         if (removing && !exists.value()) return errorJson(404, "Input action not found: " + action);
+        if (removing) {
+            // has_setting says yes for ui_accept because the engine registers
+            // the built-in map as settings. Removing one wrote nothing to
+            // project.godot, left the running editor's InputMap without the
+            // action, and reported persisted: true, which is the opposite of
+            // what persisted promises: the removal is gone on the next load
+            // (#485).
+            auto defined = projectFileDefinesInputAction(action);
+            if (defined.isErr()) return errorJson(defined.error().code, defined.error().message);
+            if (!defined.value()) {
+                return errorJson(
+                    409,
+                    "Input action '" + action +
+                        "' is an engine default rather than something this project defines. "
+                        "It is not in project.godot, so there is nothing to remove there: the "
+                        "removal would exist only in this editor session and be gone on the "
+                        "next load, while UI navigation broke in anything run from it. Use "
+                        "project_set_input_action to give the project its own events for this "
+                        "name.",
+                    {{"action", action},
+                     {"engine_default", true},
+                     {"defined_by_project", false},
+                     {"retryable", false}});
+            }
+        }
         if (!removing && exists.value() && !params.value("replace", false)) {
             return errorJson(409, "Input action already exists; pass replace: true to update it");
         }
@@ -7753,6 +7958,34 @@ json GodotBridge::execute(const std::string& method, const json& params,
         // concluded the write had failed. The durable fact is that it persisted.
         // Report that, and report separately that the live InputMap did not
         // pick it up.
+        if (removing) {
+            // The remove path never filled these in, so it echoed the defaults
+            // rather than what the action had. Read them off the value that was
+            // there a moment ago.
+            auto deadzone_key = makeString("deadzone");
+            auto events_key = makeString("events");
+            if (deadzone_key.isOk() && events_key.isOk() &&
+                GodotApi::instance().variant_get_type(previous.value().ptr()) ==
+                    GDEXTENSION_VARIANT_TYPE_DICTIONARY) {
+                auto had_deadzone = callVariant(previous.value(), "get", {&deadzone_key.value()});
+                if (had_deadzone.isOk()) {
+                    auto value = scalarFromVariant<double>(had_deadzone.value(),
+                                                           GDEXTENSION_VARIANT_TYPE_FLOAT);
+                    if (value.isOk()) deadzone = value.value();
+                }
+                auto had_events = callVariant(previous.value(), "get", {&events_key.value()});
+                if (had_events.isOk()) {
+                    auto count = callVariant(had_events.value(), "size");
+                    if (count.isOk()) {
+                        auto size = scalarFromVariant<int64_t>(count.value(),
+                                                               GDEXTENSION_VARIANT_TYPE_INT);
+                        if (size.isOk() && size.value() >= 0) {
+                            event_count = static_cast<size_t>(size.value());
+                        }
+                    }
+                }
+            }
+        }
         json result = {{"status", "success"}, {"action", action}, {"deadzone", deadzone},
                        {"event_count", event_count}, {"removed", removing}, {"persisted", true},
                        {"runtime_reloaded", reloaded.isOk()}};
