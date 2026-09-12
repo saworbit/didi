@@ -498,8 +498,17 @@ Result<void> validateTokens(const std::vector<Token>& tokens) {
                 isPreboundComponent(tokens[index + 1].text) &&
                 isPreboundPropertyRead(tokens, index - 1);
             if (!method_call && !component_read && !prebound_component_read) {
+                // The rule was stated and the way through was not, so the
+                // natural next call after being refused was another refusal
+                // (#488). A property read through an object can run a script
+                // getter, which is project code; node.get(...) cannot, because
+                // the value is prebound from the native getter before the
+                // expression is parsed.
                 return Error::invalidArgument(
-                    "Object member/property reads are forbidden in read-only expressions");
+                    "Object member/property reads are forbidden in read-only expressions, "
+                    "because reading through an object can run a script getter. Read a "
+                    "native property of the context node with node.get(\"position\"), or "
+                    "use scene_get_property.");
             }
         }
         if (token.text == "[" && index > 0) {
@@ -515,6 +524,16 @@ Result<void> validateTokens(const std::vector<Token>& tokens) {
                 return Error::invalidArgument(
                     "Dynamic indexed reads are forbidden in read-only expressions");
             }
+        }
+        // `self` parsed and reached Godot, which answered "self can't be used
+        // because instance is null". That reads like a fault in the caller's
+        // expression rather than a fact about the sandbox, and it buried the
+        // name that is bound (#488).
+        if (token.kind == TokenKind::Identifier && token.text == "self") {
+            return Error::invalidArgument(
+                "self is not bound in a read-only expression: there is no script instance "
+                "for it to be. The context node is bound as node, so read a native property "
+                "with node.get(\"position\") or call one of the allowed node methods.");
         }
         if (token.kind == TokenKind::Identifier && forbiddenIdentifiers().count(token.text) != 0) {
             return Error::invalidArgument("Expression contains a forbidden identifier");
