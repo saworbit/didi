@@ -265,14 +265,9 @@ std::optional<std::string> checkObject(const json& schema, const json& value,
     // whole project and reported success. Nested objects keep the old rule,
     // because several of them are deliberately free-form maps.
     const auto additional = schema.find("additionalProperties");
-    const bool says_open = additional != schema.end() && additional->is_boolean() &&
-                           additional->get<bool>();
     const bool says_closed = additional != schema.end() && additional->is_boolean() &&
                              !additional->get<bool>();
-    const bool schema_valued_additional =
-        additional != schema.end() && !additional->is_boolean();
-    const bool closed = says_closed ||
-                        (!named && !says_open && !schema_valued_additional);
+    const bool closed = says_closed || (!named && topLevelArgumentsAreClosed(schema));
     if (closed) {
         for (auto it = value.begin(); it != value.end(); ++it) {
             if (has_properties && properties->contains(it.key())) continue;
@@ -369,6 +364,16 @@ std::optional<std::string> checkValue(const json& schema, const json& value,
 }
 
 } // namespace
+
+bool topLevelArgumentsAreClosed(const json& schema) {
+    if (!schema.is_object()) return false;
+    const auto additional = schema.find("additionalProperties");
+    if (additional == schema.end()) return true;
+    // A schema-valued additionalProperties describes what an extra property
+    // must look like, which is a deliberate opening, not an omission.
+    if (!additional->is_boolean()) return false;
+    return !additional->get<bool>();
+}
 
 std::optional<std::string> validateAgainstSchema(const json& schema, const json& arguments) {
     if (!schema.is_object() || !arguments.is_object()) return std::nullopt;

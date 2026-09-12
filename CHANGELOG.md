@@ -68,6 +68,27 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- Every published `inputSchema` carries the `additionalProperties: false` the
+  server enforces (#508). #418 closed arguments by default and the schemas did
+  not follow, so 73 of 126 accepted anything by JSON Schema while the server
+  refused the same call. A client validating locally before sending passed the
+  call and then lost a round trip to a 400. The flag is now stamped from the
+  validator's own predicate, so the published schema and the check cannot
+  disagree; a schema that deliberately opens its arguments still says so.
+
+- `scene_get_hierarchy` declares the fields it returns (#510). Its
+  `outputSchema` named `file_path` and three others and stayed silent about
+  everything else, including `node_count` and `omitted_fields`, which are the
+  two a caller has to read to know whether the tree it got back is complete.
+  `file_path` was not a stale rename: the offline path parses a `.tscn` and
+  names the file it read, while a live answer carries `scene_file_path` from the
+  edited scene's own identity. Both are declared now, and neither is required,
+  because which one arrives depends on `source`. `project_search_text` and
+  `project_search_symbols` were missing `unsearchable_files` and
+  `unsearchable_extensions` the same way. The envelope the registry and the live
+  bridge stamp on the way out, `execution_mode`, `is_live_engine`, `session` and
+  `session_kind`, is declared from the place that stamps it.
+
 - `tools/list` says the mode a tool actually answers with (#503). #419 gave the
   answers an honest name for work that was never engine work, and never reached
   the discovery entry, which is the copy a host reads before it ever makes a
