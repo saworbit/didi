@@ -591,7 +591,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     // that kept a cursor across a restart, and it can loop. The specification
     // asks for -32602 for a cursor the server did not issue.
     if (req.method == "tools/list" || req.method == "resources/list" ||
-        req.method == "prompts/list") {
+        req.method == "resources/templates/list" || req.method == "prompts/list") {
         if (req.params.is_object() && req.params.contains("cursor") &&
             !req.params["cursor"].is_null()) {
             return JsonRpcResponse::makeError(
@@ -809,6 +809,22 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             req.id, cacheable({{"resources", res_list}}, kSessionDependentTtlMs, "private"));
     }
 
+    // The shapes this server serves and cannot enumerate. A board is created on
+    // demand, so resources/list can only ever publish the two on `default`, and
+    // without this a board other than default was readable only by a client that
+    // already knew its name, with no way to learn one (#514).
+    //
+    // Public and cacheable, unlike resources/list: a template does not depend on
+    // which session is attached, or on which boards happen to exist.
+    if (req.method == "resources/templates/list") {
+        json templates = json::array();
+        for (const auto& entry : ResourceRegistry::instance().listResourceTemplates()) {
+            templates.push_back(entry.toJson());
+        }
+        return JsonRpcResponse::makeSuccess(
+            req.id, cacheable({{"resourceTemplates", templates}}, kStaticTtlMs, "public"));
+    }
+
     if (req.method == "resources/subscribe" || req.method == "resources/unsubscribe") {
         if (!req.params.is_object() || !req.params.contains("uri") ||
             !req.params["uri"].is_string()) {
@@ -869,7 +885,11 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             return makeApplicationError(req.id, read_res.error());
         }
         auto r_def = ResourceRegistry::instance().getResource(uri);
-        std::string mime = r_def ? r_def->mimeType : "text/plain";
+        // From what was served, not from whether this exact URI happens to be
+        // registered. Only blackboard://default/* is registered, so every other
+        // board was labelled text/plain while carrying the same JSON the default
+        // board carries (#513).
+        const std::string mime = ResourceRegistry::instance().mimeTypeFor(uri);
         json entry = {
             {"uri", uri},
             {"mimeType", mime},

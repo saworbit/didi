@@ -49,8 +49,23 @@ more usefully, be told when it changes.
 `blackboard://default/state` and `blackboard://default/tasks` are listed in
 `resources/list`. Boards are created on demand, so any other board resolves
 without being registered: `blackboard://experiment/state` works as soon as
-something writes to that board, and reads as an empty board before then. A URI
-that is neither shape is refused rather than answered with an empty board.
+something writes to that board, and reads before then as a board that is not
+there. `resources/templates/list` publishes the two parameterised shapes,
+`blackboard://{board}/state` and `blackboard://{board}/tasks`, so a client can
+learn the form without being told a board name.
+
+Every board is served as `application/json`, including the ones that are not
+registered. A URI that is neither shape is refused rather than answered with an
+empty board, and the refusal names the part that was wrong: an unsupported query
+string or fragment says so, a board name carrying path separators is refused as
+a board name, and only an unrecognised kind is reported as a kind.
+
+Both payloads carry `exists`. A board no agent has ever written reads as
+`exists: false` with empty state, which a board that exists and is empty does
+not. Reading a board never creates one. This is the question an agent has to be
+able to answer before joining a board: without it, "this board is empty, go
+ahead" and "you have the name wrong and are about to start a second, private
+board nobody is reading" were the same answer.
 
 Both are subscribable, and they are the only subscribable resources. Nothing
 else changes without a call from the same client, so a subscription to

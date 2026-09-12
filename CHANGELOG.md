@@ -68,6 +68,30 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- Every blackboard board is served as `application/json` (#513). Only
+  `blackboard://default/*` is a registered resource, so the mime type came from
+  the registry and fell through to `text/plain` for every other board. The same
+  JSON document was labelled two ways, and a client branching on mime parsed one
+  board and rendered the next as a wall of text. The type now comes from the
+  scheme and kind the read handler has already parsed; `text/plain` remains the
+  answer for a scheme this server does not serve.
+
+- A blackboard board says whether it exists, and the parameterised shape is
+  discoverable (#514). A board nobody had written answered exactly like a board
+  that exists and is empty, so an agent could not tell "empty, go ahead" from
+  "you have the name wrong and are about to start a second, private board nobody
+  is reading". Both payloads now carry `exists`, and reading a board still never
+  creates one. `resources/templates/list` is implemented and publishes
+  `blackboard://{board}/state` and `blackboard://{board}/tasks`, so a board other
+  than `default` can be found by a client that was never told its name.
+
+- A malformed blackboard URI names the part that was wrong (#515). Three
+  different shapes came back with the kind error, which named the one segment
+  that was fine in two of them: a query string on a correct kind, and a
+  traversal in the board name, were both told to fix a kind that was already
+  `state`. Each part is now checked in the order it appears and each names
+  itself. The refusals themselves are unchanged.
+
 - `prompts/get` refuses an argument the prompt does not declare (#511). #397 and
   #418 closed unknown arguments on `tools/call`; `prompts/get` kept the old
   behaviour on a different method, accepting the argument silently and dropping
