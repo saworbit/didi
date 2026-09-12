@@ -1353,6 +1353,7 @@ try {
         (Tool-Request 170 "eval_gdscript" @{ expression = "node.get_node('..').get_path()"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
         (Tool-Request 155 "eval_gdscript" @{ expression = "node.get('process_physics_priority')"; context_node = "/root/SmokeRoot/Container/MaliciousSubject" }),
         (Tool-Request 2 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 2 }),
+        (@{ jsonrpc = "2.0"; id = 2002; method = "tools/list"; params = @{} } | ConvertTo-Json -Compress),
         (Tool-Request 3 "scene_get_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "process_priority" }),
         (Tool-Request 4 "scene_set_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "process_priority"; value = 12 }),
         (Tool-Request 5 "scene_get_property" @{ target_node = "/root/SmokeRoot/Subject"; property_name = "process_priority" }),
@@ -1734,6 +1735,29 @@ try {
     Assert-True ($hierarchy.execution_mode -eq "live") "Hierarchy was not attributed to live execution."
     Assert-True ($hierarchy.scene_tree.path -eq "/root/SmokeRoot") "Hierarchy root path is not editor-independent: $($hierarchy.scene_tree.path)"
     Assert-True ($hierarchy.scene_tree.children[0].path -eq "/root/SmokeRoot/Subject") "Hierarchy child path is not editor-independent: $($hierarchy.scene_tree.children[0].path)"
+
+    # An outputSchema is a claim about the handler, and the live half of that
+    # claim can only be checked here. scene_get_hierarchy declared file_path,
+    # which only the offline path returns, and said nothing about the nine
+    # fields a live answer carries -- including node_count and omitted_fields,
+    # the two a caller reads to know whether the tree is complete (#510). The
+    # native suite compares the two for an offline call; this is the same
+    # comparison against a real editor.
+    $listedTools = @{}
+    foreach ($listed in $byId[2002].result.tools) { $listedTools[$listed.name] = $listed }
+    $hierarchySchema = $listedTools["scene_get_hierarchy"].outputSchema
+    Assert-True ($null -ne $hierarchySchema) "scene_get_hierarchy published no outputSchema."
+    $declared = @($hierarchySchema.properties.PSObject.Properties.Name)
+    foreach ($returned in $hierarchy.PSObject.Properties.Name) {
+        Assert-True ($declared -contains $returned) "A live scene_get_hierarchy answer returned '$returned', which its outputSchema does not declare."
+    }
+    foreach ($requiredField in @($hierarchySchema.required)) {
+        Assert-True ($hierarchy.PSObject.Properties.Name -contains $requiredField) "A live scene_get_hierarchy answer omits the required field '$requiredField'."
+    }
+    # The live path names the edited scene, and that name is in the contract.
+    Assert-True ($declared -contains "scene_file_path") "The hierarchy contract does not declare the edited scene identity a live answer carries."
+    Assert-True ($hierarchy.PSObject.Properties.Name -contains "node_count") "A live hierarchy answer did not report node_count."
+
 
     Assert-True ((Tool-Payload $byId[3]).value -eq 7) "Fixture property did not start at 7; actual=$((Tool-Payload $byId[3]).value)."
     Assert-True ((Tool-Payload $byId[4]).undo_redo_registered) "Property mutation did not report a real UndoRedo transaction."

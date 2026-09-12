@@ -17,7 +17,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <sstream>
+#include <stdexcept>
 #include <tuple>
 #include <unordered_set>
 
@@ -92,6 +94,28 @@ public:
     }
 };
 
+// Answers listSessions with the shape the real scan answers with, so a schema
+// checked against it is checked against a payload rather than an empty object.
+class ListingSessionClient final : public didi::runtime::IRuntimeSessionClient {
+public:
+    bool connect(const std::string&, int) override { return false; }
+    void disconnect() override {}
+    bool isConnected() const override { return false; }
+    didi::Result<didi::json> sendRequest(const std::string&, const didi::json&, int) override {
+        return didi::Error::notConnected("No live route in this test");
+    }
+    didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
+        return didi::json{{"sessions", didi::json::array()}, {"diagnostics", didi::json::array()}};
+    }
+    didi::Result<didi::json> attachSession(const std::string&) override {
+        return didi::Error::notConnected();
+    }
+    didi::Result<didi::json> detachSession() override { return didi::json::object(); }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override {
+        return std::nullopt;
+    }
+};
+
 class AttachedDisconnectedRuntimeClient final : public didi::runtime::IRuntimeSessionClient {
 public:
     bool connect(const std::string&, int) override { return false; }
@@ -130,6 +154,113 @@ private:
     std::filesystem::path m_original;
     std::filesystem::path m_root;
 };
+
+// Break caught: scene_get_hierarchy published an outputSchema naming a field it
+// never returns and staying silent about nine it does, including node_count and
+// omitted_fields -- the two a caller has to read to know whether the tree it got
+// back is complete. A schema is a claim about the handler, and nothing compared
+// the two (#510).
+//
+// The comparison is the test, and it runs against real calls rather than a
+// written list of fields. Every key a call actually returns must be declared.
+// The reverse is not asserted: these schemas describe both execution paths and
+// several conditional fields, so a declared key that a given call does not
+// produce is the schema doing its job, which is why none of them is required.
+static void test_output_schemas_declare_what_the_handlers_return() {
+    ScopedToolProject project("output-schema-contract");
+    std::ofstream("project.godot") << "[application]\n";
+    std::ofstream("main.gd") << "extends Node\n\nfunc _ready():\n\tpass\n";
+    std::ofstream("main.tscn")
+        << "[gd_scene load_steps=1 format=3]\n\n[node name=\"Main\" type=\"Node2D\"]\n";
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    // runtime_list_sessions answers from the session client, and with none set
+    // it refuses with 503 before it can produce a payload to check. The fake
+    // returns the shape the real scan returns, because the point here is the
+    // handler's own answer against its own schema.
+    auto sessions = std::make_shared<ListingSessionClient>();
+    registry.setRuntimeSessionClient(sessions);
+    registry.registerAllDefaultTools();
+
+    // One call per tool that publishes an outputSchema. A tool added to that
+    // set without a call here fails the count assertion below rather than
+    // silently going unchecked.
+    const std::vector<std::pair<std::string, didi::json>> calls = {
+        {"script_check_syntax", {{"file_path", "res://main.gd"}}},
+        {"analyze_script_diagnostics", {{"file_path", "res://main.gd"}}},
+        {"project_search_text", {{"query", "extends"}}},
+        {"project_search_symbols", {{"query", "Main"}}},
+        {"project_list_resources", didi::json::object()},
+        {"query_project_resources", didi::json::object()},
+        {"runtime_list_sessions", didi::json::object()},
+        {"scene_get_hierarchy", {{"root_path", "res://main.tscn"}}},
+        {"get_scene_hierarchy", {{"root_path", "res://main.tscn"}}},
+        {"viewport_capture_frame", didi::json::object()},
+        {"capture_viewport", didi::json::object()},
+    };
+
+    std::set<std::string> publishing;
+    for (const auto& tool : registry.listTools()) {
+        if (tool.toJson().contains("outputSchema")) publishing.insert(tool.name);
+    }
+    std::set<std::string> called;
+    for (const auto& entry : calls) called.insert(entry.first);
+    ASSERT_EQ(publishing, called);
+
+    for (const auto& entry : calls) {
+        const auto* tool = registry.getTool(entry.first);
+        ASSERT_TRUE(tool != nullptr);
+        const auto schema = tool->toJson()["outputSchema"];
+        ASSERT_TRUE(schema.contains("properties"));
+
+        const auto result = registry.callTool(entry.first, entry.second);
+        if (result.isError) {
+            throw std::runtime_error(entry.first + " refused the contract call: " +
+                                     (result.content.empty() ? std::string("no content")
+                                                             : result.content[0].text));
+        }
+        ASSERT_TRUE(result.structuredContent.has_value());
+        const auto& payload = result.structuredContent.value();
+        ASSERT_TRUE(payload.is_object());
+
+        for (auto it = payload.begin(); it != payload.end(); ++it) {
+            // Reads as: tool X returned key K and its outputSchema does not
+            // mention it.
+            const bool declared = schema["properties"].contains(it.key());
+            if (!declared) {
+                throw std::runtime_error(entry.first + " returned undeclared key '" +
+                                         it.key() + "'");
+            }
+        }
+        // Anything the schema marks required must actually be there, or the
+        // claim is worse than no claim.
+        if (schema.contains("required")) {
+            for (const auto& field : schema["required"]) {
+                if (!payload.contains(field.get<std::string>())) {
+                    throw std::runtime_error(entry.first + " omits required key '" +
+                                             field.get<std::string>() + "'");
+                }
+            }
+        }
+    }
+
+    // The fields the registry and the live bridge stamp, which no handler puts
+    // there and no per-tool schema used to declare.
+    const auto* hierarchy = registry.getTool("scene_get_hierarchy");
+    ASSERT_TRUE(hierarchy != nullptr);
+    const auto properties = hierarchy->toJson()["outputSchema"]["properties"];
+    for (const char* field : {"execution_mode", "is_live_engine", "session", "session_kind"}) {
+        ASSERT_TRUE(properties.contains(field));
+    }
+    // The live path's own identity for the edited scene, alongside the offline
+    // path's name for the file it parsed. Both are real; which arrives depends
+    // on source.
+    for (const char* field : {"file_path", "scene_file_path", "node_count", "omitted_fields",
+                              "max_nodes", "max_response_bytes"}) {
+        ASSERT_TRUE(properties.contains(field));
+    }
+    registry.setRuntimeSessionClient(nullptr);
+}
 
 // A bad argument is refused either by the published schema, which is checked
 // once before dispatch, or by the handler's own check when the schema does not
@@ -4505,6 +4636,8 @@ struct RegisterToolTests {
         registerTest("Tools.RuntimeReadLogsInputValidation", test_runtime_read_logs_rejects_invalid_cursor_limit_and_level);
         registerTest("Resources.SelectedDisconnectedRuntime", test_runtime_log_resource_reports_selected_disconnected_session_as_live_error);
         registerTest("Tools.HonestCapabilities", test_tool_capabilities_are_honest);
+        registerTest("Tools.OutputSchemasDeclareWhatHandlersReturn",
+                     test_output_schemas_declare_what_the_handlers_return);
         registerTest("Tools.CaptureViewportWithIpc", test_tool_capture_viewport_with_ipc);
         registerTest("Tools.CaptureViewportOfflineAttribution", test_tool_capture_viewport_offline_is_attributed);
         registerTest("Tools.VisualLiveResponseCompleteness", test_visual_tools_reject_incomplete_live_success);

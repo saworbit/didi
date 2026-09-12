@@ -28,5 +28,16 @@ namespace mcp {
 [[nodiscard]] std::optional<std::string> validateAgainstSchema(const json& schema,
                                                                const json& arguments);
 
+// Whether the check above will refuse an argument this schema does not declare.
+//
+// The rule and its publication are the same fact, and they were written twice:
+// the server closed arguments by default in #418 and 73 of 126 published
+// schemas carried no additionalProperties, so by JSON Schema they accepted
+// anything. A client validating locally before sending passed a call the server
+// then refused, which is the direction that turns a clean local check into a
+// failed round trip (#508). registerTool stamps what this returns, so the
+// schema cannot say one thing while the validator does another.
+[[nodiscard]] bool topLevelArgumentsAreClosed(const json& schema);
+
 } // namespace mcp
 } // namespace didi

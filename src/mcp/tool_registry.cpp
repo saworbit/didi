@@ -707,6 +707,11 @@ static json outputSchemaForTool(const std::string& name) {
              {"scanned_files", integer_type},
              {"scanned_bytes", integer_type},
              {"skipped_files", integer_type},
+             // Returned on every call and declared on none, which is the same
+             // defect as #510 one tool over: a caller cannot see from the
+             // contract that the search told it what it could not read.
+             {"unsearchable_files", integer_type},
+             {"unsearchable_extensions", array_of(string_type)},
              {"diagnostics", {{"type", "array"}}}},
             {"execution_mode", "matches"});
     }
@@ -743,10 +748,36 @@ static json outputSchemaForTool(const std::string& name) {
             {"execution_mode", "is_live_frame"});
     }
     if (name == "scene_get_hierarchy") {
+        // The union of what the two paths return, not the shape of one of them.
+        // This declared `file_path` and three others and stayed silent about
+        // everything else, including `node_count` and `omitted_fields`, which
+        // are the two fields a caller has to read to know whether the tree it
+        // got back is complete (#510).
+        //
+        // `file_path` is not a stale rename: the offline path parses a .tscn and
+        // names the file it read, while a live answer carries `scene_file_path`
+        // from the edited scene's own identity. Both are real and which one
+        // arrives depends on `source`, so both are declared and neither is
+        // required.
         return object_schema({{"execution_mode", string_type},
-                              {"scene_tree", {{"type", "object"}}},
                               {"source", string_type},
-                              {"file_path", string_type}},
+                              {"scene_tree", {{"type", "object"}}},
+                              {"node_count", integer_type},
+                              // Offline: the .tscn that was parsed, and what was
+                              // asked for when the main scene stood in for it.
+                              {"file_path", string_type},
+                              {"requested_root_path", string_type},
+                              {"substituted_main_scene", boolean_type},
+                              // Live: the edited scene's identity, the traversal
+                              // budget, and what the walk did not read.
+                              {"root_path", string_type},
+                              {"scene_file_path", {{"type", {"string", "null"}}}},
+                              {"scene_is_unsaved", boolean_type},
+                              {"omitted_fields", array_of(string_type)},
+                              {"max_nodes", integer_type},
+                              {"max_response_bytes", integer_type},
+                              {"truncated", boolean_type},
+                              {"message", string_type}},
                              {"execution_mode", "scene_tree"});
     }
     return json();
@@ -786,8 +817,44 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
     // and an alias should document its parameters identically to the tool it
     // resolves to. Prose written inline in a schema is left alone (#462).
     applyParameterDescriptions(std::string(binding.schema_source), tool.inputSchema);
+    // Publish the closure the validator performs. #418 closed arguments by
+    // default and the schemas did not follow, so 73 of them accepted anything
+    // by JSON Schema while the server refused the same call: a client
+    // validating locally before sending passed, and then lost a round trip
+    // (#508). Stamped from the validator's own predicate rather than written
+    // per tool, and only where nothing has already said otherwise -- a schema
+    // that deliberately opens its arguments keeps saying so.
+    if (tool.inputSchema.is_object() && !tool.inputSchema.contains("additionalProperties") &&
+        topLevelArgumentsAreClosed(tool.inputSchema)) {
+        tool.inputSchema["additionalProperties"] = false;
+    }
     // Declared from the canonical name, so an alias promises the same shape.
     tool.outputSchema = outputSchemaForTool(std::string(binding.schema_source));
+    // The fields nothing in outputSchemaForTool puts there, because nothing in
+    // the handler puts them there either: the registry stamps execution_mode
+    // and session on the way out, and the live bridge stamps is_live_engine on
+    // every live answer. Declared here for the same reason
+    // additionalProperties is stamped above -- from the place that does it,
+    // rather than remembered eleven times (#510).
+    if (tool.outputSchema.is_object() && tool.outputSchema.contains("properties") &&
+        tool.outputSchema["properties"].is_object()) {
+        auto& properties = tool.outputSchema["properties"];
+        if (!properties.contains("execution_mode")) {
+            properties["execution_mode"] = json{{"type", "string"}};
+        }
+        const auto& modes = tool.capability.modes;
+        if (std::find(modes.begin(), modes.end(), "live") != modes.end()) {
+            if (!properties.contains("is_live_engine")) {
+                properties["is_live_engine"] = json{{"type", "boolean"}};
+            }
+            if (!properties.contains("session")) {
+                properties["session"] = json{{"type", "object"}};
+            }
+            if (!properties.contains("session_kind")) {
+                properties["session_kind"] = json{{"type", "string"}};
+            }
+        }
+    }
     if (!tool.capability.implemented) {
         tool.description = "UNIMPLEMENTED: Reserved schema; calls are rejected. Intended contract: " +
                            tool.description;
