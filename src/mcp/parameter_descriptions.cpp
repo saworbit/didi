@@ -531,7 +531,8 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "The task to update. Requires the live lease, except when reopening a needs_review "
          "or failed task, which is by definition somebody else's call."},
         {"blackboard_task_update.progress",
-         "How far along the task is, 0 to 1."},
+         "How far along the task is, as a whole percentage from 0 to 100. A completed task "
+         "reports 100."},
         {"blackboard_task_complete.task_id",
          "The task to complete. Only the lease holder may, because completing someone else's "
          "releases its dependents on work that is still half done."},
