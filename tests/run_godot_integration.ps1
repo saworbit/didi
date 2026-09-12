@@ -3069,8 +3069,11 @@ try {
 
     # A connected editor does not make the map live: ResourceUID cannot be
     # enumerated through GDExtension, so the scan is still a scan and says so.
+    # "local" and not "offline_fallback", because there is nothing to fall back
+    # from. Saying fallback here told a caller with this very editor attached to
+    # attach one and ask again (#504).
     $uidPlain = Tool-Payload $byId[119]
-    Assert-True ($uidPlain.execution_mode -eq "offline_fallback") "The scanned UID map claimed to be live."
+    Assert-True ($uidPlain.execution_mode -eq "local") "The scanned UID map claimed to be live, or called itself a fallback with an editor attached."
     Assert-True ($uidPlain.uid_map_source -eq "project_files") "The scanned UID map misreported its source."
     Assert-True (-not $uidPlain.PSObject.Properties.Match("resolved").Count) "The UID map returned resolutions nobody asked for."
     Assert-True ($uidPlain.uid_map.$smokePluginUid -eq "res://addons/didi/smoke_plugin.gd") "The scanned UID map lost the addon sidecar entry."

@@ -48,7 +48,17 @@ std::string currentModeFor(const ExecutionCapability& capability, const std::str
     // A connected route of the wrong kind is an authoritative live selection, not an invitation
     // to silently run an offline fallback. This applies equally to tools and resources.
     if ((connected || managed_unavailable) && has_mode("live")) return "unavailable";
-    if (has_mode("offline_fallback")) return "offline_fallback";
+    if (has_mode("offline_fallback")) {
+        // The same rule the answers got in #419, which never reached the entry a
+        // host reads before it ever makes a call. "offline_fallback" means you
+        // did not get the good answer and should attach an editor and ask again.
+        // A tool with no live path has nothing to fall back from -- the
+        // blackboard is a file on disk, project_search_text walks the project
+        // tree -- so the entry said a tool was running in fallback with an editor
+        // attached and nothing to fall back to, which is exactly the reading #419
+        // removed from the answers (#503).
+        return has_mode("live") ? std::string("offline_fallback") : capability.localMode();
+    }
     return "unavailable";
 }
 

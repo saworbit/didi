@@ -1780,7 +1780,11 @@ static void test_uid_map_resolves_offline_and_says_which_source_answered() {
     ASSERT_TRUE(!plain.isError);
     const auto plain_report = didi::json::parse(plain.content[0].text);
     ASSERT_EQ(plain_report["uid_map_source"], "project_files");
-    ASSERT_EQ(plain_report["execution_mode"], "offline_fallback");
+    // "local", not "offline_fallback". ResourceUID exposes no enumeration
+    // through GDExtension, so no engine can add anything to this call and there
+    // is nothing to fall back from. Calling it a fallback told a caller with an
+    // editor already attached to reattach and ask again (#504).
+    ASSERT_EQ(plain_report["execution_mode"], "local");
     ASSERT_EQ(plain_report["is_live_engine"], false);
     ASSERT_TRUE(!plain_report.contains("resolved"));
     ASSERT_EQ(plain_report["uid_map"]["uid://bybyby"], "res://art/by_uid.png");
@@ -2847,8 +2851,11 @@ static void test_project_search_public_validation_and_schema() {
     ASSERT_EQ(text_json["inputSchema"]["properties"]["max_results"]["maximum"], 500);
     ASSERT_EQ(symbols_json["inputSchema"]["properties"]["match"]["enum"],
               didi::json::array({"exact", "prefix", "contains"}));
+    // "local", not "offline_fallback": this search walks the project tree and
+    // has no live path, so there is nothing an attached editor would improve
+    // (#503). The answer has said so since #419; this is the advertisement.
     ASSERT_EQ(text_json["_meta"]["didi"]["executionModes"],
-              didi::json::array({"offline_fallback"}));
+              didi::json::array({"local"}));
 
     for (const auto& args : {
         didi::json::object(), didi::json{{"query", ""}}, didi::json{{"query", 7}},
@@ -3004,15 +3011,15 @@ static void test_tool_capabilities_are_honest() {
     ASSERT_TRUE(reg.getTool("physics_simulate_step")->toJson()["description"]
                     .get<std::string>().rfind("UNIMPLEMENTED:", 0) == 0);
     ASSERT_EQ(syntax_json["_meta"]["didi"]["executionModes"],
-              didi::json::array({"offline_fallback"}));
+              didi::json::array({"local"}));
     ASSERT_EQ(attach_script_json["_meta"]["didi"]["executionModes"],
               didi::json::array({"live"}));
     ASSERT_EQ(attach_script_json["_meta"]["didi"]["implemented"], true);
     ASSERT_EQ(list_sessions_json["_meta"]["didi"]["executionModes"],
-              didi::json::array({"offline_fallback"}));
+              didi::json::array({"local_session_management"}));
     ASSERT_EQ(list_sessions_json["_meta"]["didi"]["implemented"], true);
     ASSERT_EQ(get_session_json["_meta"]["didi"]["executionModes"],
-              didi::json::array({"offline_fallback"}));
+              didi::json::array({"local_session_management"}));
     const auto get_session_description = get_session_json["description"].get<std::string>();
     ASSERT_TRUE(get_session_description.find("fresh authenticated handshake") != std::string::npos);
     ASSERT_TRUE(get_session_description.find("token-free authoritative session identity") !=

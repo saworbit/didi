@@ -1136,7 +1136,10 @@ void test_availability_is_selected_session_kind_aware_for_tools_and_resources() 
     ASSERT_EQ(editor_tools["runtime_read_logs"]["currentMode"], "live");
     ASSERT_EQ(editor_tools["runtime_read_logs"]["sessionKind"], "editor");
     ASSERT_EQ(editor_tools["runtime_read_logs"]["editorConnected"], true);
-    ASSERT_EQ(editor_tools["runtime_list_sessions"]["currentMode"], "offline_fallback");
+    // Not "offline_fallback" with an editor attached: session management has no
+    // live path, so there is nothing to fall back from, and the entry now says
+    // the word the tool's own answer says (#503).
+    ASSERT_EQ(editor_tools["runtime_list_sessions"]["currentMode"], "local_session_management");
 
     auto game = std::make_shared<RoutedFake>("game");
     const auto game_tools = byToolName(inspect(game, "tools/list"));

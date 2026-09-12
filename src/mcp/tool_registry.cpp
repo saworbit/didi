@@ -134,14 +134,30 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "project_export", "gridmap_export_mesh_library"
     };
 
+    // What a tool with no live path calls its own work, in its own answers.
+    // Sixteen handlers stamp a mode themselves and three vocabularies are in
+    // use; naming them here is what lets tools/list and the answer come from
+    // one place instead of drifting the way they did after #419 (#503).
+    static const std::unordered_map<std::string, std::string> local_vocabulary = {
+        {"runtime_list_sessions", "local_session_management"},
+        {"runtime_attach_session", "local_session_management"},
+        {"runtime_detach_session", "local_session_management"},
+        {"runtime_get_session", "local_session_management"},
+        {"didi_control_room", "local_status"}
+    };
+    const auto local_name = [&]() -> std::string {
+        const auto found = local_vocabulary.find(name);
+        return found == local_vocabulary.end() ? std::string{"local"} : found->second;
+    };
+
     if (live_and_offline.count(name)) {
-        return {{"live", "offline_fallback"}, true, {}};
+        return {{"live", "offline_fallback"}, true, {}, local_name()};
     }
     if (live.count(name)) {
-        return {{"live"}, true, {}};
+        return {{"live"}, true, {}, local_name()};
     }
     if (offline.count(name)) {
-        return {{"offline_fallback"}, true, {}};
+        return {{"offline_fallback"}, true, {}, local_name()};
     }
     return {{"unimplemented"}, false,
             "Registered for protocol compatibility; no trustworthy execution path is available yet."};
@@ -1376,11 +1392,13 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         // from viewport_capture_frame, which really does synthesize a preview
         // because there is no live frame (#419).
         //
-        // The registration keeps its "offline_fallback" capability mode. This
-        // is the payload's own vocabulary, where "local_status" and
-        // "local_session_management" already say the same thing for work that
-        // was never engine work.
-        const char* const kLocalWork = "local";
+        // The registration keeps its "offline_fallback" routing mode, because
+        // that is what decides whether a call can run with no session attached.
+        // The name below is the payload's own vocabulary, where "local_status"
+        // and "local_session_management" already say the same thing for work
+        // that was never engine work. It comes from the capability so that
+        // tools/list advertises the same word this stamps (#503).
+        const std::string kLocalWork = tool->capability.localMode();
         const std::string execution_mode =
             live ? "live"
                  : (supports_live ? (supports_offline ? "offline_fallback" : "")

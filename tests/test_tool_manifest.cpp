@@ -8,10 +8,12 @@
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/mcp/mutation_safety.hpp"
+#include "didi/mcp/tool_availability.hpp"
 #include "didi/tools/resolved_tool_binding.hpp"
 
 #include <algorithm>
 #include <functional>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -189,6 +191,70 @@ static void test_mutating_tools_are_not_annotated_read_only() {
     const auto annotations = tool->toJson()["annotations"];
     ASSERT_EQ(annotations["readOnlyHint"].get<bool>(), false);
     ASSERT_EQ(annotations["destructiveHint"].get<bool>(), true);
+}
+
+// Break caught: #419 gave the answers an honest name for work that was never
+// engine work, and the tools/list entry kept saying "offline_fallback" -- so
+// eleven tools advertised one mode and answered with another, and the copy a
+// host reads before it ever makes a call was the wrong one (#503). Nothing
+// compared the two, which is why half the surface could be fixed and look
+// finished.
+//
+// The comparison is the test. Every tool that declares no live path must
+// advertise the same word its own handler stamps.
+static void test_advertised_mode_matches_the_answer_for_local_tools() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    size_t checked = 0;
+    for (const auto& tool : registry.listTools()) {
+        if (!tool.capability.implemented) continue;
+        if (tool.capability.supportsLive()) continue;
+        const auto definition = tool.toJson();
+        const auto& meta = definition["_meta"]["didi"];
+        // currentMode is stamped by addCurrentAvailability rather than by
+        // ToolDefinition::toJson, so ask the function the server asks. Both
+        // connection states, because the whole point is that an attached editor
+        // changes nothing for a tool with no live path.
+        for (const bool connected : {false, true}) {
+            const auto mode = didi::mcp::currentModeFor(
+                tool.capability, tool.name, false, connected,
+                connected ? std::optional<std::string>("editor") : std::nullopt, false);
+            ASSERT_TRUE(mode != "offline_fallback");
+            ASSERT_EQ(mode, tool.capability.localMode());
+        }
+        // Nothing with no live path may publish the fallback vocabulary.
+        for (const auto& mode : meta["executionModes"]) {
+            ASSERT_TRUE(mode != "offline_fallback");
+        }
+        ASSERT_EQ(meta["executionModes"],
+                  didi::json::array({tool.capability.localMode()}));
+        ++checked;
+    }
+    ASSERT_TRUE(checked > 0);
+
+    // The three vocabularies in use, named so a fourth cannot arrive silently.
+    for (const char* name : {"blackboard_read", "project_search_text",
+                             "project_list_export_presets"}) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        ASSERT_EQ(tool->capability.localMode(), "local");
+    }
+    for (const char* name : {"runtime_get_session", "runtime_list_sessions",
+                             "runtime_attach_session", "runtime_detach_session"}) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        ASSERT_EQ(tool->capability.localMode(), "local_session_management");
+    }
+    const auto* control_room = registry.getTool("didi_control_room");
+    ASSERT_TRUE(control_room != nullptr);
+    ASSERT_EQ(control_room->capability.localMode(), "local_status");
+
+    // A tool that does have a live path keeps the fallback vocabulary, because
+    // for it the word is true: attaching an editor improves the answer.
+    const auto* hierarchy = registry.getTool("scene_get_hierarchy");
+    ASSERT_TRUE(hierarchy != nullptr);
+    ASSERT_EQ(hierarchy->toJson()["_meta"]["didi"]["executionModes"],
+              didi::json::array({"live", "offline_fallback"}));
 }
 
 static void test_every_registered_tool_carries_annotations() {
@@ -620,6 +686,8 @@ struct RegisterToolManifestTests {
                      test_tools_that_run_project_code_are_open_world);
         registerTest("tool_annotations.mutations_not_read_only",
                      test_mutating_tools_are_not_annotated_read_only);
+        registerTest("tool_modes.advertised_matches_answer",
+                     test_advertised_mode_matches_the_answer_for_local_tools);
         registerTest("tool_annotations.every_tool_annotated",
                      test_every_registered_tool_carries_annotations);
         registerTest("tool_annotations.no_mutation_claims_read_only",

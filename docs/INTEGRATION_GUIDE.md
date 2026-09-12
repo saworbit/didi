@@ -180,7 +180,7 @@ declares no content-security-policy domains and the host's default `default-src
 ## 4. Troubleshooting & FAQ
 
 ### Q: Does Didi require Godot Editor to be open at all times?
-**A:** No. File-based tools such as `script_check_syntax`, `project_list_resources`, project search, and `runtime_launch` remain available in `offline_fallback` mode. Scene mutations, project wiring, reimport, isolation, diffing, and editor lifecycle tools require a live editor; Phase 3 runtime tools require an authenticated auto-selected or explicitly attached editor/game session.
+**A:** No. File-based tools such as `script_check_syntax`, `project_list_resources`, project search, and `runtime_launch` remain available and report `local`, because they read files rather than fall back from an engine path. Scene mutations, project wiring, reimport, isolation, diffing, and editor lifecycle tools require a live editor; Phase 3 runtime tools require an authenticated auto-selected or explicitly attached editor/game session.
 
 ### Q: Why does `scene_close` still ask for `discard_unsaved: true` on a scene I believe is clean?
 **A:** Because the engine you are on cannot confirm it. Godot 4.5 and 4.6 expose only the write side of active-scene dirty state through GDExtension. Godot 4.7 adds the read side, `EditorInterface.get_unsaved_scenes()`, and Didi consults it: there, a scene the engine omits from that list closes with no flag and the result says `dirty_state: "clean"`. The flag is still required wherever the engine cannot answer, which is the pre-4.7 builds and a scene that has never been saved, and a scene the engine names as unsaved is refused everywhere. The result field `dirty_state_readable` tells you which case you are in. Pass `discard_unsaved: true` only when closing without a save prompt is intentional.
@@ -231,7 +231,7 @@ coordination tools are for.
 
 ## 5. Phase 3 client integration sequence
 
-`tools/list` returns 116 canonical tools and 10 legacy registrations, 126 in total. In ordinary attachment mode, integrators should treat the four session-management tools as local operations even though their discovery metadata uses the existing `offline_fallback` capability label:
+`tools/list` returns 116 canonical tools and 10 legacy registrations, 126 in total. In ordinary attachment mode, integrators should treat the four session-management tools as local operations, which is what their discovery metadata now says as well as their answers:
 
 1. Start Didi with `--project <canonical-project-root>` (or `DIDI_PROJECT_ROOT`). Phase 6 rejects startup if the explicit directory is missing or does not contain `project.godot`.
 2. Didi may auto-attach on first availability when there is one live project match, or one matching editor among games. Multiple editors or multiple games without an editor stay detached.
