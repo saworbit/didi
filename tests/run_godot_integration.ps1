@@ -262,6 +262,31 @@ function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
+# Sends a batch of JSON-RPC lines to Didi and returns its stdout lines.
+#
+# Every exchange goes through here so that none of them depends on how this
+# script was invoked. Didi logs INFO to stderr on startup, and under Windows
+# PowerShell 5.1 a native command's stderr becomes ErrorRecords as soon as
+# anything redirects it -- running this script as `... 2>&1 | Select-Object` is
+# enough. With $ErrorActionPreference = "Stop" the first of those is terminating,
+# so the run died at the first exchange having asserted nothing, and printed
+# `didi.exe : [INFO ] Set working directory ...` with a line number, which reads
+# like Didi crashed on startup rather than like a redirection artefact. Under
+# pwsh 7, which is what CI uses, the same run is fine.
+#
+# Native stderr is not a failure signal here: the exit code and the responses
+# are, and both are checked at every call site. So the preference is relaxed for
+# the duration of the call. The assignment is function-scoped, so "Stop" is
+# still in force everywhere else.
+function Invoke-Didi {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Requests,
+        [string[]]$Arguments = @()
+    )
+    $ErrorActionPreference = "Continue"
+    $Requests | & $didiExecutable @Arguments
+}
+
 function Tool-Request([int]$Id, [string]$Name, [hashtable]$Arguments) {
     return @{
         jsonrpc = "2.0"
@@ -425,7 +450,7 @@ $prelaunchRequests = @(
     (@{ jsonrpc = "2.0"; id = 880; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
     (Tool-Request 881 "runtime_list_sessions" @{ project_path = $fixtureRoot })
 )
-$rawPrelaunchResponses = $prelaunchRequests | & $didiExecutable --project $fixtureRoot
+$rawPrelaunchResponses = Invoke-Didi -Requests $prelaunchRequests -Arguments @("--project", $fixtureRoot)
 $prelaunchResponses = @($rawPrelaunchResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
 Assert-True ($LASTEXITCODE -eq 0) "Didi prelaunch discovery process exited with $LASTEXITCODE."
 $prelaunchById = @{}
@@ -476,7 +501,7 @@ try {
         (@{ jsonrpc = "2.0"; id = 901; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
         (Tool-Request 902 "runtime_list_sessions" @{ project_path = $fixtureRoot })
     )
-    $rawDiscoveryResponses = $discoveryRequests | & $didiExecutable --project $fixtureRoot
+    $rawDiscoveryResponses = Invoke-Didi -Requests $discoveryRequests -Arguments @("--project", $fixtureRoot)
     $discoveryResponses = @($rawDiscoveryResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
     Assert-True ($LASTEXITCODE -eq 0) "Didi discovery process exited with $LASTEXITCODE."
     $discoveryById = @{}
@@ -509,7 +534,7 @@ try {
             (Tool-Request 911 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
             (Tool-Request 912 "scene_open" @{ scene_path = "res://main.tscn" })
         )
-        $rawSceneReadyResponses = $sceneReadyRequests | & $didiExecutable --project $fixtureRoot
+        $rawSceneReadyResponses = Invoke-Didi -Requests $sceneReadyRequests -Arguments @("--project", $fixtureRoot)
         $sceneReadyTranscript += @($rawSceneReadyResponses)
         $sceneReadyResponses = @($rawSceneReadyResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
         if ($LASTEXITCODE -eq 0 -and $sceneReadyResponses.Count -eq $sceneReadyRequests.Count) {
@@ -559,7 +584,7 @@ try {
         (Tool-Request 929 "scene_remove_node" @{ target_node = "/root/PostInitLabel" }),
         (Tool-Request 930 "scene_remove_node" @{ target_node = "/root/PostInitButton" })
     )
-    $rawPostInitResponses = $postInitRequests | & $didiExecutable --project $fixtureRoot
+    $rawPostInitResponses = Invoke-Didi -Requests $postInitRequests -Arguments @("--project", $fixtureRoot)
     $postInitResponses = @($rawPostInitResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
     Assert-True ($postInitResponses.Count -eq $postInitRequests.Count) "Themed Control construction returned an incomplete transcript; the editor route did not survive."
     $postInitById = @{}
@@ -602,7 +627,7 @@ try {
             (@{ jsonrpc = "2.0"; id = 291; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
             (Tool-Request 292 "runtime_list_sessions" @{ project_path = $fixtureRoot })
         )
-        $rawGameDiscovery = $gameDiscoveryRequests | & $didiExecutable --project $fixtureRoot
+        $rawGameDiscovery = Invoke-Didi -Requests $gameDiscoveryRequests -Arguments @("--project", $fixtureRoot)
         $gameDiscoveryResponses = @($rawGameDiscovery | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
         if ($LASTEXITCODE -eq 0) {
             $gameDiscoveryById = @{}
@@ -904,7 +929,7 @@ try {
         (Tool-Request 2326 "viewport_capture_passes" @{ passes = @("color") }),
         (Tool-Request 2327 "viewport_capture_passes" @{ passes = @("color"); camera_identifier = "active_editor_view" })
     )
-    $rawRuntimeResponses = $runtimeRequests | & $didiExecutable --project $fixtureRoot
+    $rawRuntimeResponses = Invoke-Didi -Requests $runtimeRequests -Arguments @("--project", $fixtureRoot)
     $runtimeResponses = @($rawRuntimeResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
     Assert-True ($LASTEXITCODE -eq 0) "Didi runtime-control process exited with $LASTEXITCODE."
     Assert-True ($runtimeResponses.Count -eq $runtimeRequests.Count) "Runtime-control response count mismatch."
@@ -1690,7 +1715,7 @@ try {
         (Tool-Request 113 "runtime_read_logs" @{ cursor = 0; limit = 500; minimum_level = "debug" })
     )
 
-    $rawResponses = $requests | & $didiExecutable --project $fixtureRoot
+    $rawResponses = Invoke-Didi -Requests $requests -Arguments @("--project", $fixtureRoot)
     $responses = @($rawResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
     Assert-True ($LASTEXITCODE -eq 0) "Didi MCP process exited with $LASTEXITCODE."
     Assert-True ($responses.Count -eq $requests.Count) "Expected $($requests.Count) JSON-RPC responses, received $($responses.Count)."
@@ -1700,6 +1725,19 @@ try {
     $attached = Tool-Payload $byId[900]
     Assert-True ($attached.handshake.status -eq "ok") "Runtime attach did not complete the authenticated handshake."
     Assert-True ($attached.session.session_id -eq $editorSession.session_id) "Runtime attach selected the wrong editor session."
+
+    # Fail here, on the first attach, rather than several minutes later on an
+    # assertion about behaviour the editor does not have yet.
+    #
+    # The addon is a separate build target from the server, so `ninja didi
+    # didi_tests` leaves the extension in the fixture at whatever build it was
+    # last copied from. A bridge change then looks absent: the editor answers
+    # with the contract it was built with while everything else looks normal,
+    # and the first assertion to notice is whichever one covers the change,
+    # which reads exactly like the change not working. Didi already detects this
+    # and says so in every session payload; the harness was the one place not
+    # listening.
+    Assert-True ($attached.bridge_build_matches -ne $false) ("The editor is running a different build of the addon than this server. " + $attached.bridge_build_note + " Build every target, not just didi and didi_tests.")
 
     $scalarEval = Tool-Payload $byId[130]
     Assert-True ($scalarEval.value -eq 7 -and $scalarEval.value_type -eq "int") "Editor scalar expression was incorrect."
@@ -2004,7 +2042,7 @@ try {
         (Tool-Request 404 "project_search_text" @{ query = "DIDI_PHASE4_SEARCH_PROBE"; search_path = "res://"; extensions = @(".gd"); max_results = 10 }),
         (Tool-Request 405 "project_search_symbols" @{ query = "phase_four_probe"; search_path = "res://"; extensions = @(".gd"); match = "exact"; kinds = @("function"); max_results = 10 })
     )
-    $rawPhase4BaselineResponses = $phase4BaselineRequests | & $didiExecutable --project $fixtureRoot
+    $rawPhase4BaselineResponses = Invoke-Didi -Requests $phase4BaselineRequests -Arguments @("--project", $fixtureRoot)
     $phase4BaselineResponses = @($rawPhase4BaselineResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
     Assert-True ($LASTEXITCODE -eq 0) "Phase 4 baseline MCP process exited with $LASTEXITCODE."
     $phase4BaselineById = @{}
@@ -2049,7 +2087,7 @@ try {
         (Tool-Request 2259 "viewport_capture_frame" @{ camera_identifier = "canvas_item" }),
         (Tool-Request 2261 "viewport_capture_frame" @{ camera_identifier = "not_a_viewport" })
     )
-    $rawPhase4Responses = $phase4Requests | & $didiExecutable --project $fixtureRoot
+    $rawPhase4Responses = Invoke-Didi -Requests $phase4Requests -Arguments @("--project", $fixtureRoot)
     $phase4Responses = @($rawPhase4Responses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
     Assert-True ($LASTEXITCODE -eq 0) "Phase 4 verification MCP process exited with $LASTEXITCODE."
     $phase4ById = @{}
@@ -2232,7 +2270,7 @@ try {
         $env:GODOT_BIN = $GodotExecutable
         Push-Location $fixtureRoot
         try {
-            $rawVerifyResponses = $verifyRequests | & $didiExecutable --project $fixtureRoot
+            $rawVerifyResponses = Invoke-Didi -Requests $verifyRequests -Arguments @("--project", $fixtureRoot)
         } finally {
             Pop-Location
         }
@@ -2291,7 +2329,7 @@ try {
         $env:GODOT_BIN = $GodotExecutable
         Push-Location $fixtureRoot
         try {
-            $rawRunResponses = $runRequests | & $didiExecutable --project $fixtureRoot
+            $rawRunResponses = Invoke-Didi -Requests $runRequests -Arguments @("--project", $fixtureRoot)
         } finally {
             Pop-Location
         }
@@ -2341,7 +2379,7 @@ try {
         $env:GODOT_BIN = $GodotExecutable
         Push-Location $fixtureRoot
         try {
-            $rawApplyResponses = $applyRequests | & $didiExecutable --project $fixtureRoot --yolo
+            $rawApplyResponses = Invoke-Didi -Requests $applyRequests -Arguments @("--project", $fixtureRoot, "--yolo")
         } finally {
             Pop-Location
         }
@@ -2401,7 +2439,7 @@ try {
         (Tool-Request 2417 "scene_remove_node" @{ target_node = "/root/SmokeRoot/CallProbe" }),
         (Tool-Request 2418 "scene_remove_node" @{ target_node = "/root/SmokeRoot/PlainProbe" })
     )
-    $rawCallResponses = $callRequests | & $didiExecutable --project $fixtureRoot --yolo
+    $rawCallResponses = Invoke-Didi -Requests $callRequests -Arguments @("--project", $fixtureRoot, "--yolo")
     $callResponses = @($rawCallResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
     Assert-True ($callResponses.Count -eq $callRequests.Count) "Expected $($callRequests.Count) scene_call_method responses, received $($callResponses.Count)."
     $callById = @{}
@@ -2450,7 +2488,7 @@ try {
         (Tool-Request 2426 "scene_call_method" @{ target_node = "/root/SmokeRoot/GateProbe"; method_name = "no_such_method"; arguments = @(); dry_run = $true }),
         (Tool-Request 2427 "scene_call_method" @{ target_node = "/root/SmokeRoot"; method_name = "add_numbers"; arguments = @(2, 3); dry_run = $true })
     )
-    $rawCallGate = $callGateRequests | & $didiExecutable --project $fixtureRoot
+    $rawCallGate = Invoke-Didi -Requests $callGateRequests -Arguments @("--project", $fixtureRoot)
     $callGate = @($rawCallGate | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
     $callGateById = @{}
     foreach ($response in $callGate) { $callGateById[[int]$response.id] = $response }
@@ -2500,7 +2538,7 @@ try {
         $env:GODOT_BIN = $GodotExecutable
         Push-Location $fixtureRoot
         try {
-            $rawPhase5Responses = $phase5Requests | & $didiExecutable --project $fixtureRoot
+            $rawPhase5Responses = Invoke-Didi -Requests $phase5Requests -Arguments @("--project", $fixtureRoot)
         }
         finally {
             Pop-Location
@@ -3154,7 +3192,7 @@ try {
         (Tool-Request 121 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 122 "runtime_read_logs" @{ cursor = [uint64]$firstLogPage.next_cursor; limit = 5; minimum_level = "debug" })
     )
-    $rawNextLogResponses = $nextLogRequests | & $didiExecutable --project $fixtureRoot
+    $rawNextLogResponses = Invoke-Didi -Requests $nextLogRequests -Arguments @("--project", $fixtureRoot)
     $nextLogResponses = @($rawNextLogResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
     Assert-True ($LASTEXITCODE -eq 0) "Sequential log MCP process exited with $LASTEXITCODE."
     $nextLogById = @{}
@@ -3187,7 +3225,7 @@ try {
         '{"jsonrpc":"2.0","id":350,"method":"tools/call","params":{"name":"scene_set_property","arguments":{"target_node":"/root/SmokeRoot/AnchorProbe","property_name":"anchor_left","value":1}}}',
         (Tool-Request 351 "scene_get_property" @{ target_node = "/root/SmokeRoot/AnchorProbe"; property_name = "anchor_left" })
     )
-    $rawWholeNumberResponses = $wholeNumberRequests | & $didiExecutable --project $fixtureRoot
+    $rawWholeNumberResponses = Invoke-Didi -Requests $wholeNumberRequests -Arguments @("--project", $fixtureRoot)
     $wholeNumberResponses = @($rawWholeNumberResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
     Assert-True ($LASTEXITCODE -eq 0) "Whole-number property MCP process exited with $LASTEXITCODE."
     $wholeNumberById = @{}
@@ -3206,7 +3244,7 @@ try {
         (Tool-Request 331 "runtime_attach_session" @{ session_id = $gameSession.session_id }),
         (Tool-Request 332 "runtime_stop" @{ exit_code = 0 })
     )
-    $rawStopResponses = $stopRequests | & $didiExecutable --project $fixtureRoot
+    $rawStopResponses = Invoke-Didi -Requests $stopRequests -Arguments @("--project", $fixtureRoot)
     $stopResponses = @($rawStopResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
     Assert-True ($LASTEXITCODE -eq 0) "Didi runtime-stop process exited with $LASTEXITCODE."
     $stopById = @{}
@@ -3221,7 +3259,7 @@ try {
         (@{ jsonrpc = "2.0"; id = 340; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
         (Tool-Request 341 "runtime_list_sessions" @{ project_path = $fixtureRoot })
     )
-    $rawCleanupResponses = $cleanupRequests | & $didiExecutable --project $fixtureRoot
+    $rawCleanupResponses = Invoke-Didi -Requests $cleanupRequests -Arguments @("--project", $fixtureRoot)
     $cleanupResponses = @($rawCleanupResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
     $cleanupById = @{}
     foreach ($response in $cleanupResponses) { $cleanupById[[int]$response.id] = $response }
@@ -3247,7 +3285,7 @@ try {
             (@{ jsonrpc = "2.0"; id = 420; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
             (Tool-Request 421 "runtime_list_sessions" @{ project_path = $fixtureRoot })
         )
-        $shutdownDiscoveryResponses = @($shutdownDiscoveryRequests | & $didiExecutable --project $fixtureRoot |
+        $shutdownDiscoveryResponses = @(Invoke-Didi -Requests $shutdownDiscoveryRequests -Arguments @("--project", $fixtureRoot) |
             Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
         if ($LASTEXITCODE -eq 0) {
             $shutdownDiscoveryById = @{}
@@ -3275,7 +3313,7 @@ try {
         (Tool-Request 431 "runtime_attach_session" @{ session_id = $shutdownSession.session_id }),
         (Tool-Request 432 "runtime_set_paused" @{ paused = $true })
     )
-    $pauseForShutdownResponses = @($pauseForShutdownRequests | & $didiExecutable --project $fixtureRoot |
+    $pauseForShutdownResponses = @(Invoke-Didi -Requests $pauseForShutdownRequests -Arguments @("--project", $fixtureRoot) |
         Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
     $pauseForShutdownById = @{}
     foreach ($response in $pauseForShutdownResponses) { $pauseForShutdownById[[int]$response.id] = $response }
@@ -3286,7 +3324,7 @@ try {
         (Tool-Request 441 "runtime_attach_session" @{ session_id = $shutdownSession.session_id }),
         (Tool-Request 442 "runtime_step" @{ frames = 60 })
     )
-    $shutdownStepResponses = @($shutdownStepRequests | & $didiExecutable --project $fixtureRoot |
+    $shutdownStepResponses = @(Invoke-Didi -Requests $shutdownStepRequests -Arguments @("--project", $fixtureRoot) |
         Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
     $shutdownStepById = @{}
     foreach ($response in $shutdownStepResponses) { $shutdownStepById[[int]$response.id] = $response }
@@ -3340,7 +3378,7 @@ try {
             (Tool-Request 205 "project_set_input_action" @{ action = "rollback_probe"; events = @() }),
             (Tool-Request 206 "project_list_input_actions" @{})
         )
-        $rawFailureResponses = $failureRequests | & $didiExecutable --project $fixtureRoot
+        $rawFailureResponses = Invoke-Didi -Requests $failureRequests -Arguments @("--project", $fixtureRoot)
         $failureResponses = @($rawFailureResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
         Assert-True ($LASTEXITCODE -eq 0) "Didi rollback MCP process exited with $LASTEXITCODE."
         Assert-True ($failureResponses.Count -eq $failureRequests.Count) "Rollback batch response count mismatch."
@@ -3373,7 +3411,7 @@ try {
         (Tool-Request 211 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 212 "scene_close" @{ discard_unsaved = $true })
     )
-    $rawEditorCloseResponses = $editorCloseRequests | & $didiExecutable --project $fixtureRoot
+    $rawEditorCloseResponses = Invoke-Didi -Requests $editorCloseRequests -Arguments @("--project", $fixtureRoot)
     $editorCloseResponses = @($rawEditorCloseResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
     Assert-True ($LASTEXITCODE -eq 0) "Didi editor-close process exited with $LASTEXITCODE."
     Assert-True ($editorCloseResponses.Count -eq $editorCloseRequests.Count) "Editor-close batch response count mismatch."

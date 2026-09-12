@@ -227,6 +227,26 @@ cmake --build build --config Release
 .\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe
 ```
 
+Two things catch people out running the harness by hand on Windows.
+
+**Build every target, not just `didi` and `didi_tests`.** The addon is its own
+target, and the editor the harness starts loads whatever build of it was last
+staged. A bridge change then looks absent rather than stale: the editor answers
+with the contract it was built with, everything else looks normal, and the first
+assertion to notice is whichever one covers your change, which reads exactly
+like the change not working. The harness now fails on the first attach instead,
+with the mismatch note Didi already reports in every session payload.
+
+**Run it on its own rather than piping it.** Under Windows PowerShell 5.1,
+redirecting a native command's stderr turns each line into an error record, and
+Didi logs to stderr on startup, so `.\tests\run_godot_integration.ps1 ... 2>&1 |
+Select-Object -Last 40` used to kill the run at its first exchange and report it
+as `didi.exe : [INFO ] Set working directory ...`, which reads like Didi failed
+to start. Every exchange now goes through one helper that relaxes the preference
+for the duration of the call, so the run survives either way, but the output is
+still easier to read unpiped. CI uses pwsh 7, where the redirection was always
+harmless.
+
 The native runner accepts `--list` to print every registered case and
 `--filter=<substring>` to run a subset:
 
