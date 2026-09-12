@@ -156,6 +156,28 @@ class YoloModeTests(unittest.TestCase):
         finally:
             server.close()
 
+    def test_yolo_reports_the_previews_own_refusal(self):
+        # And it must say why in the preview's own words. YOLO mints the token
+        # by running the dry run itself, so a preview that refuses leaves no
+        # token to mint. Falling through from there answered a refused call
+        # with the generic "this mutation requires a dry-run preview", which is
+        # advice the caller has already taken and which hides the actual
+        # reason. Caught by the live harness on #463, when scene_call_method's
+        # preview became able to refuse.
+        server = _Server("--yolo")
+        try:
+            # resource_create's preview resolves the save_path, and a path with
+            # parent traversal is refused there.
+            result = server.call("resource_create",
+                                 {"save_path": "res://sub/../probe.tres",
+                                  "resource_type": "Resource", "overwrite": True})
+            self.assertTrue(result.get("isError"), result)
+            text = result["content"][0]["text"]
+            self.assertNotIn("requires a dry-run preview", text)
+            self.assertIn("traversal", text)
+        finally:
+            server.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -317,21 +317,43 @@ std::string describeMutationTarget(const json& arguments) {
 // way to satisfy MutationSafety -- there stays exactly one notion of what a
 // confirmed mutation is. Returns an empty token when the preview itself fails,
 // because a call that cannot run has nothing to confirm.
-std::pair<std::string, json> mintConfirmationToken(const std::string& name,
-                                                   const json& arguments,
-                                                   const RequestScope& scope) {
+// A preview can fail for two different reasons, and they need different
+// answers. The tool may not produce a preview shape at all, which leaves
+// nothing to say and the ordinary path to report it. Or the preview itself
+// refused, having read the target and found the call cannot run -- and that
+// refusal is the most useful thing anyone will learn about this call, so it
+// is carried back rather than discarded. Before scene_call_method grew a
+// probe that can refuse, this rarely fired; afterwards a YOLO caller asking
+// for a leading-underscore method was told it needed a dry run it had just
+// been given, instead of being told the name is refused (#463).
+struct MintedConfirmation {
+    std::string token;
+    json preview = json::object();
+    std::optional<CallToolResult> refusal;
+};
+
+MintedConfirmation mintConfirmationToken(const std::string& name,
+                                         const json& arguments,
+                                         const RequestScope& scope) {
     json preview_arguments = arguments;
     preview_arguments["dry_run"] = true;
-    const auto preview = ToolRegistry::instance().callTool(name, preview_arguments, scope);
+    auto preview = ToolRegistry::instance().callTool(name, preview_arguments, scope);
     const auto preview_json = preview.toJson();
-    if (preview.isError || !preview_json.contains("structuredContent")) return {"", json::object()};
+    if (preview.isError) {
+        MintedConfirmation minted;
+        minted.refusal = std::move(preview);
+        return minted;
+    }
+    if (!preview_json.contains("structuredContent")) return {};
     const auto& structured = preview_json["structuredContent"];
     if (!structured.is_object() || !structured.contains("mutation_preview") ||
         !structured["mutation_preview"].is_object()) {
-        return {"", json::object()};
+        return {};
     }
-    return {structured["mutation_preview"].value("confirmation_token", ""),
-            structured["mutation_preview"]};
+    MintedConfirmation minted;
+    minted.token = structured["mutation_preview"].value("confirmation_token", "");
+    minted.preview = structured["mutation_preview"];
+    return minted;
 }
 
 std::string encodeRequestState(const std::string& tool, const std::string& token) {
@@ -688,16 +710,22 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         if (m_skipConfirmations && !already_confirmed && !previewing) {
             const auto binding = resolveAliasBinding(name, arguments);
             if (MutationSafety::requiresConfirmation(binding, arguments)) {
-                const auto [token, unused_preview] = mintConfirmationToken(name, arguments, scope);
-                if (!token.empty()) {
+                auto minted = mintConfirmationToken(name, arguments, scope);
+                if (!minted.token.empty()) {
                     json approved = arguments;
-                    approved["confirmation_token"] = token;
+                    approved["confirmation_token"] = minted.token;
                     auto result = ToolRegistry::instance().callTool(name, approved, scope);
                     return JsonRpcResponse::makeSuccess(
                         req.id, withConfirmationProvenance(complete(result.toJson()), "skipped"));
                 }
                 // Skipping confirmation is not skipping validation. A call that
-                // could not run still reports why.
+                // could not run still reports why, and the preview's own refusal
+                // is that reason. Falling through here answered a refused call
+                // with the generic "this needs a dry run" instead.
+                if (minted.refusal.has_value()) {
+                    return JsonRpcResponse::makeSuccess(
+                        req.id, complete(minted.refusal->toJson()));
+                }
             }
         }
 
@@ -705,8 +733,16 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             const auto binding = resolveAliasBinding(name, arguments);
             if (MutationSafety::requiresConfirmation(binding, arguments)) {
                 // If the preview itself failed there is nothing truthful to show
-                // a person, so fall through and let the ordinary path report why.
-                const auto [token, mutation_preview] = mintConfirmationToken(name, arguments, scope);
+                // a person. Its refusal is the reason, and the ordinary path can
+                // only offer the generic "this needs a dry run", so the refusal
+                // is answered directly.
+                auto minted = mintConfirmationToken(name, arguments, scope);
+                if (minted.refusal.has_value()) {
+                    return JsonRpcResponse::makeSuccess(
+                        req.id, complete(minted.refusal->toJson()));
+                }
+                const auto& token = minted.token;
+                const auto& mutation_preview = minted.preview;
                 if (!token.empty()) {
                     json input_request = {
                         {"method", "elicitation/create"},

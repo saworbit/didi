@@ -10,7 +10,7 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **936** |
+| Automated tests | **937** |
 | Live-harness assertions | 852 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
@@ -84,7 +84,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**347 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**348 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
@@ -105,7 +105,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_phase7_signal_admission.py` | 3 |
 | `test_test_inventory.py` | 25 |
 | `test_tool_output_schema_contract.py` | 4 |
-| `test_yolo_mode.py` | 6 |
+| `test_yolo_mode.py` | 7 |
 
 ## Live Godot harness (`tests/*.ps1`)
 

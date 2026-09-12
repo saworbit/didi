@@ -68,6 +68,15 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- A confirmation skipped by YOLO mode, or offered to a person, reports the
+  preview's own refusal (#463). Both paths mint the token by running the dry
+  run themselves, so a preview that refuses leaves no token, and both then fell
+  through to the ordinary path, which answered with the generic "this mutation
+  requires a dry-run preview". That is advice the caller had already taken, and
+  it hid the actual reason. The comment beside it promised the opposite:
+  skipping confirmation is not skipping validation. This was invisible until
+  `scene_call_method`'s preview became able to refuse.
+
 - `scene_call_method`'s dry run reads the call instead of a property (#463).
   The preview reported the node's `name`, a constant that came back for a
   method the script declares, for one it does not, and for every argument
