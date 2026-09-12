@@ -166,15 +166,18 @@ class YoloModeTests(unittest.TestCase):
         # preview became able to refuse.
         server = _Server("--yolo")
         try:
-            # resource_create's preview resolves the save_path, and a path with
-            # parent traversal is refused there.
+            # resource_create's preview resolves the save_path, and a path that
+            # lands outside the project root is refused there. It used to be
+            # res://sub/../probe.tres, which resolves back inside the root and
+            # is now written rather than refused (#534), so the probe is a path
+            # that actually leaves.
             result = server.call("resource_create",
-                                 {"save_path": "res://sub/../probe.tres",
+                                 {"save_path": "res://sub/../../probe.tres",
                                   "resource_type": "Resource", "overwrite": True})
             self.assertTrue(result.get("isError"), result)
             text = result["content"][0]["text"]
             self.assertNotIn("requires a dry-run preview", text)
-            self.assertIn("traversal", text)
+            self.assertIn("outside the project root", text)
         finally:
             server.close()
 
