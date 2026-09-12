@@ -1,4 +1,5 @@
 #include "didi/mcp/tool_registry.hpp"
+#include "didi/mcp/parameter_descriptions.hpp"
 #include "didi/mcp/control_room.hpp"
 #include "didi/mcp/project_tools.hpp"
 #include "didi/common/logger.hpp"
@@ -754,6 +755,12 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
     tool.annotations.idempotent = !is_mutation;
     tool.annotations.open_world = toolRunsProjectControlledCode(binding);
     MutationSafety::decorateSchema(binding, tool.inputSchema);
+    // Parameter prose, filled in from one table for the same reason the
+    // annotations above are derived rather than hand-set: a name that means
+    // the same thing in fifteen tools should read the same in all fifteen,
+    // and an alias should document its parameters identically to the tool it
+    // resolves to. Prose written inline in a schema is left alone (#462).
+    applyParameterDescriptions(std::string(binding.schema_source), tool.inputSchema);
     // Declared from the canonical name, so an alias promises the same shape.
     tool.outputSchema = outputSchemaForTool(std::string(binding.schema_source));
     if (!tool.capability.implemented) {

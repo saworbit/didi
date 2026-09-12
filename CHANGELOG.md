@@ -68,6 +68,27 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- Every tool parameter says what it is (#462). 217 of 381 carried no
+  `description`, and 52 tools documented none of theirs. Every tool had a
+  top-level description; the parameters inside it mostly did not, and the names
+  that cost a caller the most are the ones that are not the obvious guess:
+  `target_node` not `node_path`, `setting` not `setting_path`, `scene_path` not
+  `output_path`, `emitter_node` not `source_node`, `target_method` not
+  `method_name`. Argument errors already do this work after the mistake; a line
+  of prose does it before. `signal_connect.flags` is the case that shows what
+  was lost: `enum: [2]`, `default: 2`, no prose, so that only `CONNECT_PERSIST`
+  is accepted, and that a deferred or one-shot connection is not on offer, was
+  recoverable only by reading the enum and knowing what 2 means.
+
+  The prose lives in one table applied at registration rather than beside each
+  schema, because a name that means the same thing in fifteen tools should read
+  the same in all fifteen, and because an alias should document its parameters
+  identically to the tool it resolves to. Where a name genuinely differs, the
+  table says so: `signal_emit`'s `target_node` is the emitter and
+  `signal_connect`'s is the receiver. A description written inline in a schema
+  is left alone. A contract test asserts none are missing, rather than that few
+  are, so the next tool added cannot quietly reintroduce the gap.
+
 - A confirmation skipped by YOLO mode, or offered to a person, reports the
   preview's own refusal (#463). Both paths mint the token by running the dry
   run themselves, so a preview that refuses leaves no token, and both then fell

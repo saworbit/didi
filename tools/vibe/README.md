@@ -24,7 +24,7 @@ twice.
 | `probes/write_then_read_back.py` | Three mutations that report success, read back against the file they wrote. |
 | `probes/protocol_edges.py` | The wire below `tools/call`: stale cursors, a null id, an unknown tool, `arguments` that is not an object. |
 | `probes/path_errors.py` | The same nonexistent path asked of every tool that takes one; finds the failures that live *behind* valid arguments. |
-| `probes/schema_descriptions.py` | How many parameters a caller has to guess at: counts `description` across the whole surface. |
+| `probes/schema_descriptions.py` | How many parameters a caller has to guess at: counts `description` across the whole surface. Zero since #462, and a contract test keeps it there. |
 | `probes/surface_census.py` | The same question asked of all 126 tools: who rejects an unknown argument, what `execution_mode` each reports, who answers with a bare string. |
 | `report.py` | Files a directory of finding bodies as issues in one pass. |
 
@@ -92,7 +92,9 @@ not `setting_path`, `scene_path` not `output_path`, `source_text` not `content`,
 and lists what the tool does take, which makes the mistake cheap. That covered
 50 of 126 tools until #418; arguments are closed by default now, so every
 implemented tool answers the same way and a new tool is covered on arrival.
-`probe.py --schema` is still faster than a round trip.
+`probe.py --schema` is still faster than a round trip, and since #462 it
+answers in prose: every parameter carries a description, so the schema says
+which name a tool wants before a call has to go wrong to find out.
 
 **Count it before you call it a bug.** Three of this session's findings only
 became findings once every tool was asked the same question: 50 of 126 rejected
