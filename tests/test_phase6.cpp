@@ -522,6 +522,59 @@ TEST(Phase6, PreviewSaysItOnlyBindsArguments) {
     ASSERT_TRUE(message.find("target_read") != std::string::npos);
 }
 
+TEST(Phase6, CallMethodPreviewReadsTheCallNotTheName) {
+    // Break caught: scene_call_method's dry run reported the node's `name`
+    // property. The same before block came back for a method the script
+    // declares, for one it does not, and for every argument list, because the
+    // generic node probe reads `name` when the call names no property. A token
+    // was then minted for a call that fails with a 422 the preview had all the
+    // evidence to see: the script is not a @tool script, so the editor never
+    // made an instance of it and there is nothing to run (#463).
+    ScopedPhase6Directory directory("call-method-preview");
+    didi::mcp::MutationSafety safety;
+    auto context = offlineContext(directory.root);
+    context.execution_mode = "live";
+    context.session_id = "0123456789abcdef0123456789abcdef";
+
+    const didi::json arguments = {
+        {"target_node", "/root/Main"}, {"method_name", "take_damage"},
+        {"arguments", didi::json::array({5})}
+    };
+    const auto binding = didi::mcp::resolveAliasBinding("scene_call_method", arguments);
+
+    // What the probe now reports: facts about this call, not a constant.
+    didi::mcp::TargetProbe reading = [](const didi::json&, didi::json& before)
+        -> std::optional<didi::Error> {
+        before = {{"target_node", "/root/Main"}, {"method_name", "take_damage"},
+                  {"method_exists", true}, {"script_is_tool", true},
+                  {"signature", {{"name", "take_damage"}}}};
+        return std::nullopt;
+    };
+    const auto preview = safety.evaluate(binding, dryRun(arguments), context, reading);
+    ASSERT_FALSE(preview.is_error);
+    const auto& mutation_preview = preview.payload["mutation_preview"];
+    ASSERT_EQ(mutation_preview["preview_kind"], "target_state");
+    ASSERT_EQ(mutation_preview["target_read"], true);
+    const auto& before = mutation_preview["changes"][0]["before"];
+    ASSERT_EQ(before["method_exists"], true);
+    ASSERT_EQ(before["script_is_tool"], true);
+    ASSERT_EQ(before["method_name"], "take_damage");
+    // The field that made the old preview useless: it answered about `name`,
+    // which the call has nothing to do with.
+    ASSERT_FALSE(before.contains("property_name"));
+
+    // And a call the engine will refuse is refused at preview, rather than
+    // coming back shaped like one that will work and carrying a token.
+    didi::mcp::TargetProbe refusing = [](const didi::json&, didi::json&)
+        -> std::optional<didi::Error> {
+        return didi::Error(422, "The node's script is not a @tool script");
+    };
+    const auto refused = safety.evaluate(binding, dryRun(arguments), context, refusing);
+    ASSERT_TRUE(refused.is_error);
+    ASSERT_EQ(refused.payload["error"]["code"], 422);
+    ASSERT_FALSE(refused.payload.contains("mutation_preview"));
+}
+
 TEST(Phase6, RuntimeInputAliasDryRunKeepsInvokedIdentity) {
     ScopedPhase6Directory directory("input-alias-identity");
     didi::mcp::MutationSafety safety;
