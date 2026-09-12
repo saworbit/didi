@@ -141,6 +141,44 @@ const std::unordered_set<std::string_view> kRunsProjectCode = {
     "gridmap_export_mesh_library", "runtime_launch", "script_check_syntax"
 };
 
+// Tools that change server state without touching the project. They are not
+// mutations -- there is nothing to preview, nothing to confirm, and no undo
+// stack behind them -- but "does not modify its environment" is not a
+// defensible reading of a call that picks or severs the editor attachment every
+// later live call depends on (#505). readOnlyHint is what a host uses to decide
+// what may run without asking a person, so it has to be false here.
+const std::unordered_set<std::string_view> kServerStateWriters = {
+    "runtime_attach_session", "runtime_detach_session"
+};
+
+// Writers that only add. destructiveHint separates "may destroy something" from
+// "adds something", and a surface where every writer is destructive has thrown
+// that distinction away (#507). A tool belongs here only when it cannot replace
+// anything: the create tools that take an overwrite flag can, so they are not
+// here.
+const std::unordered_set<std::string_view> kAdditiveOnly = {
+    "scene_instantiate_node", "scene_duplicate_node", "scene_add_to_group",
+    "signal_connect", "blackboard_task_create", "runtime_checkpoint",
+    "instantiate_asset", "mutate_scene_tree"
+};
+
+// Writers that land in the same state when the same call is made twice. This is
+// the hint a host reads to decide whether a call that timed out can be retried,
+// and saying false on a tool that writes a named value to a named place costs a
+// caller the one recovery that was always safe (#507).
+const std::unordered_set<std::string_view> kIdempotentWriters = {
+    "scene_set_property", "scene_add_to_group", "scene_remove_from_group",
+    "scene_open", "project_set_setting", "project_set_input_action",
+    "project_remove_input_action", "project_set_autoload",
+    "project_remove_autoload", "input_map_set_action", "shader_set_uniform",
+    "audio_configure_bus", "runtime_set_paused",
+    "blackboard_write", "blackboard_patch", "blackboard_clear",
+    // Detaching twice lands detached, and attaching to the same session twice
+    // lands on that session. Both are in kServerStateWriters, so neither is
+    // read-only, and the hint is read rather than ignored.
+    "runtime_attach_session", "runtime_detach_session"
+};
+
 int64_t currentTimeMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::system_clock::now().time_since_epoch()).count();
@@ -161,6 +199,18 @@ bool MutationSafety::isMutation(const ResolvedToolBinding& binding) {
 
 bool toolRunsProjectControlledCode(const ResolvedToolBinding& binding) {
     return kRunsProjectCode.count(binding.canonical_name) != 0;
+}
+
+bool toolWritesServerState(const ResolvedToolBinding& binding) {
+    return kServerStateWriters.count(binding.policy_source) != 0;
+}
+
+bool toolIsAdditiveOnly(const ResolvedToolBinding& binding) {
+    return kAdditiveOnly.count(binding.policy_source) != 0;
+}
+
+bool toolIsIdempotentWriter(const ResolvedToolBinding& binding) {
+    return kIdempotentWriters.count(binding.policy_source) != 0;
 }
 
 bool liveCallIsRepeatable(const ResolvedToolBinding& binding, const json& arguments) {

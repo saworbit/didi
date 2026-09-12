@@ -747,15 +747,21 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
         phase7_names.end()) {
         tool.inputSchema = phase7::standaloneRequestSchema(binding.schema_source);
     }
-    // Derived, never hand-set: a tool that can change the project is never
-    // advertised as read-only, and every mutation is treated as potentially
-    // destructive rather than asserting it is merely additive. Classified from
-    // the resolved binding so an alias cannot be annotated differently from the
-    // canonical tool it resolves to.
+    // Derived, never hand-set, but from four classifications rather than one:
+    // every hint used to be a function of the mutation bit, which made
+    // destructiveHint and idempotentHint restatements of readOnlyHint and worth
+    // nothing to a host reading them (#507). Classified from the resolved
+    // binding so an alias cannot be annotated differently from the canonical
+    // tool it resolves to.
     const bool is_mutation = MutationSafety::isMutation(binding);
-    tool.annotations.read_only = !is_mutation;
-    tool.annotations.destructive = is_mutation;
-    tool.annotations.idempotent = !is_mutation;
+    const bool writes_server_state = toolWritesServerState(binding);
+    tool.annotations.read_only = !is_mutation && !writes_server_state;
+    // Meaningful only when readOnlyHint is false, per the specification, so the
+    // read-only branch is the spec's own default rather than a claim.
+    tool.annotations.destructive =
+        !tool.annotations.read_only && !toolIsAdditiveOnly(binding);
+    tool.annotations.idempotent =
+        tool.annotations.read_only || toolIsIdempotentWriter(binding);
     tool.annotations.open_world = toolRunsProjectControlledCode(binding);
     MutationSafety::decorateSchema(binding, tool.inputSchema);
     // Parameter prose, filled in from one table for the same reason the

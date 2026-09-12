@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
@@ -206,6 +207,7 @@ static void test_every_registered_tool_carries_annotations() {
 
 // The safety-critical invariant: a tool that can change the project must never
 // be advertised as read-only, because clients use that hint to auto-approve.
+// A tool that changes server state is held to the same rule (#505).
 static void test_no_mutation_is_ever_advertised_as_read_only() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
@@ -213,11 +215,85 @@ static void test_no_mutation_is_ever_advertised_as_read_only() {
         // Classify through the resolved binding, the same way registerTool
         // does, so an alias is judged as the canonical tool it resolves to.
         const auto binding = didi::mcp::resolveAliasBinding(tool.name, didi::json::object());
-        const bool is_mutation = didi::mcp::MutationSafety::isMutation(binding);
+        const bool writes = didi::mcp::MutationSafety::isMutation(binding) ||
+                            didi::mcp::toolWritesServerState(binding);
         const bool claims_read_only = tool.toJson()["annotations"]["readOnlyHint"].get<bool>();
-        ASSERT_TRUE(!(is_mutation && claims_read_only));
-        ASSERT_EQ(claims_read_only, !is_mutation);
+        ASSERT_TRUE(!(writes && claims_read_only));
+        ASSERT_EQ(claims_read_only, !writes);
     }
+}
+
+// Break caught: runtime_detach_session advertised readOnlyHint true,
+// destructiveHint false. Calling it severs the editor attachment and the next
+// live call is a 503, so a host that auto-approves read-only tools would let a
+// model disconnect the editor with no prompt (#505). runtime_attach_session
+// had the same annotation and the same problem in the other direction.
+static void test_session_attachment_tools_are_not_read_only() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    for (const char* name : {"runtime_attach_session", "runtime_detach_session"}) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        const auto annotations = tool->toJson()["annotations"];
+        ASSERT_EQ(annotations["readOnlyHint"].get<bool>(), false);
+        ASSERT_EQ(annotations["destructiveHint"].get<bool>(), true);
+        // Attaching to the same session twice, or detaching twice, lands in the
+        // same place.
+        ASSERT_EQ(annotations["idempotentHint"].get<bool>(), true);
+    }
+    // The tools that only report session state stay read-only.
+    for (const char* name : {"runtime_get_session", "runtime_list_sessions"}) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        ASSERT_EQ(tool->toJson()["annotations"]["readOnlyHint"].get<bool>(), true);
+    }
+}
+
+// Break caught: destructiveHint and idempotentHint were perfectly
+// anti-correlated with readOnlyHint across all 126 tools, so neither carried
+// any information a host could act on (#507). No mutating tool was idempotent,
+// including the five that write a named value to a named place, and every
+// mutating tool was destructive, including the ones that can only add.
+static void test_write_hints_are_decided_per_tool() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    // Writers that land in the same state when called twice.
+    for (const char* name : {"scene_set_property", "project_set_setting", "blackboard_write",
+                             "scene_add_to_group", "project_set_input_action"}) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        const auto annotations = tool->toJson()["annotations"];
+        ASSERT_EQ(annotations["readOnlyHint"].get<bool>(), false);
+        ASSERT_EQ(annotations["idempotentHint"].get<bool>(), true);
+    }
+
+    // Writers that only add.
+    for (const char* name : {"scene_instantiate_node", "scene_duplicate_node",
+                             "blackboard_task_create", "signal_connect"}) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        const auto annotations = tool->toJson()["annotations"];
+        ASSERT_EQ(annotations["readOnlyHint"].get<bool>(), false);
+        ASSERT_EQ(annotations["destructiveHint"].get<bool>(), false);
+    }
+
+    // A writer that takes an overwrite flag can replace a file, so it stays
+    // destructive however additive its name reads.
+    for (const char* name : {"script_create", "scene_create", "resource_create",
+                             "viewport_create_test_lab"}) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        ASSERT_EQ(tool->toJson()["annotations"]["destructiveHint"].get<bool>(), true);
+    }
+
+    // The census that found this: the four hints must take more than four
+    // distinct combinations, or they are one bit wearing four names.
+    std::set<std::string> shapes;
+    for (const auto& tool : registry.listTools()) {
+        shapes.insert(tool.toJson()["annotations"].dump());
+    }
+    ASSERT_TRUE(shapes.size() > 4);
 }
 
 // A dry-run capable tool is by definition a mutation, so the two contracts must
@@ -548,6 +624,10 @@ struct RegisterToolManifestTests {
                      test_every_registered_tool_carries_annotations);
         registerTest("tool_annotations.no_mutation_claims_read_only",
                      test_no_mutation_is_ever_advertised_as_read_only);
+        registerTest("tool_annotations.session_attachment_not_read_only",
+                     test_session_attachment_tools_are_not_read_only);
+        registerTest("tool_annotations.write_hints_per_tool",
+                     test_write_hints_are_decided_per_tool);
         registerTest("tool_annotations.agree_with_dry_run",
                      test_annotations_agree_with_the_dry_run_contract);
         registerTest("tool_annotations.structured_content",
