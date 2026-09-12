@@ -16,6 +16,7 @@
 #include <string>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
 #define ASSERT_EQ(a, b) ASSERT_TRUE((a) == (b))
@@ -380,6 +381,97 @@ static void test_unimplemented_tools_declare_no_output_schema() {
     }
 }
 
+// Break caught: 217 of 381 parameters carried no description, and 52 tools
+// documented none of theirs. Every tool had a top-level description; the
+// parameters inside it mostly did not, and the names that cost the most are the
+// ones that are not the obvious guess -- target_node not node_path, setting not
+// setting_path, source_text not content. Argument errors do this work after the
+// mistake; a line of prose does it before (#462).
+//
+// The count is the wrong thing to assert. A census that says "no more than N
+// gaps" is satisfied by the gap moving. This asserts none, so the next tool
+// added cannot quietly reintroduce one.
+static void test_every_parameter_says_what_it_is() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    std::vector<std::string> undocumented;
+    for (const auto& tool : registry.listTools()) {
+        const auto schema = tool.toJson().value("inputSchema", didi::json::object());
+        if (!schema.is_object() || !schema.contains("properties")) continue;
+        const auto& properties = schema["properties"];
+        if (!properties.is_object()) continue;
+        for (auto it = properties.begin(); it != properties.end(); ++it) {
+            if (!it.value().is_object()) continue;
+            const auto description = it.value().value("description", std::string());
+            if (description.empty()) undocumented.push_back(tool.name + "." + it.key());
+        }
+    }
+    if (!undocumented.empty()) {
+        std::string report;
+        for (size_t i = 0; i < undocumented.size() && i < 20; ++i) {
+            if (i > 0) report += ", ";
+            report += undocumented[i];
+        }
+        throw std::runtime_error(
+            std::to_string(undocumented.size()) +
+            " tool parameter(s) carry no description. Add them to "
+            "src/mcp/parameter_descriptions.cpp, or write one in the schema: " + report);
+    }
+}
+
+// An alias resolves to the same handler, so it must not describe its arguments
+// differently. query_project_resources and project_list_resources are the same
+// tool under two names, and a caller reading one and calling the other should
+// not find the prose disagreeing.
+static void test_an_alias_documents_its_parameters_like_the_tool_it_resolves_to() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    for (const auto& pair : {std::make_pair("query_project_resources", "project_list_resources"),
+                             std::make_pair("get_scene_hierarchy", "scene_get_hierarchy"),
+                             std::make_pair("capture_viewport", "viewport_capture_frame")}) {
+        const auto* alias = registry.getTool(pair.first);
+        const auto* canonical = registry.getTool(pair.second);
+        ASSERT_TRUE(alias != nullptr);
+        ASSERT_TRUE(canonical != nullptr);
+        const auto& alias_properties = alias->inputSchema.at("properties");
+        const auto& canonical_properties = canonical->inputSchema.at("properties");
+        for (auto it = alias_properties.begin(); it != alias_properties.end(); ++it) {
+            if (!it.value().is_object() || !canonical_properties.contains(it.key())) continue;
+            const auto& twin = canonical_properties.at(it.key());
+            if (!twin.is_object()) continue;
+            ASSERT_EQ(it.value().value("description", std::string()),
+                      twin.value("description", std::string()));
+        }
+    }
+}
+
+// The example the census singled out. signal_connect.flags is enum [2] with no
+// prose, and that only CONNECT_PERSIST is accepted -- so that a deferred or
+// one-shot connection is not on offer -- was recoverable only by reading the
+// enum and knowing what 2 means.
+static void test_the_names_that_are_not_the_obvious_guess_are_spelled_out() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto* connect = registry.getTool("signal_connect");
+    ASSERT_TRUE(connect != nullptr);
+    const auto flags = connect->inputSchema.at("properties").at("flags")
+                           .value("description", std::string());
+    ASSERT_TRUE(flags.find("CONNECT_PERSIST") != std::string::npos);
+
+    // signal_emit's target_node is the emitter and signal_connect's is the
+    // receiver. One sentence cannot serve both, and the shared table must not
+    // have flattened them into one.
+    const auto* emit = registry.getTool("signal_emit");
+    ASSERT_TRUE(emit != nullptr);
+    const auto emitter = emit->inputSchema.at("properties").at("target_node")
+                             .value("description", std::string());
+    const auto receiver = connect->inputSchema.at("properties").at("target_node")
+                              .value("description", std::string());
+    ASSERT_TRUE(emitter != receiver);
+    ASSERT_TRUE(emitter.find("emit") != std::string::npos);
+}
+
 struct RegisterToolManifestTests {
     RegisterToolManifestTests() {
         registerTest("tool_manifest.declared_legacy_marked",
@@ -422,6 +514,12 @@ struct RegisterToolManifestTests {
                      test_scalar_property_value_declares_its_accepted_json_types);
         registerTest("tool_input_schema.instantiate_property_values_typed",
                      test_instantiate_node_property_values_are_described);
+        registerTest("tool_input_schema.every_parameter_described",
+                     test_every_parameter_says_what_it_is);
+        registerTest("tool_input_schema.alias_matches_canonical_prose",
+                     test_an_alias_documents_its_parameters_like_the_tool_it_resolves_to);
+        registerTest("tool_input_schema.awkward_names_spelled_out",
+                     test_the_names_that_are_not_the_obvious_guess_are_spelled_out);
         registerTest("tool_input_schema.free_form_values_untyped",
                      test_free_form_values_stay_untyped);
     }

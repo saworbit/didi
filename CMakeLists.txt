@@ -142,6 +142,7 @@ set(CORE_SOURCES
     src/mcp/jsonrpc.cpp
     src/mcp/mcp_server.cpp
     src/mcp/tool_registry.cpp
+    src/mcp/parameter_descriptions.cpp
     src/mcp/resource_registry.cpp
     src/mcp/prompt_registry.cpp
     src/runtime/session_client.cpp
