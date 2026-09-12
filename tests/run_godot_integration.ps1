@@ -1575,6 +1575,7 @@ try {
         (Tool-Request 60 "scene_get_group_members" @{ group = "phase_two" }),
         (Tool-Request 61 "editor_undo" @{}),
         (Tool-Request 62 "scene_get_group_members" @{ group = "phase_two" }),
+        (Tool-Request 425 "scene_get_group_members" @{ group = "nope_no_such_group" }),
         (Tool-Request 63 "scene_add_to_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two"; persistent = $true }),
         (Tool-Request 64 "project_list_autoloads" @{}),
         (Tool-Request 65 "project_set_autoload" @{ name = "PhaseTwo"; path = "res://subject.gd"; singleton = $true }),
@@ -2119,6 +2120,10 @@ try {
         (Tool-Request 512 "ui_list_controls" @{ root_path = "/root/Phase5Ui"; max_results = 32 }),
         (Tool-Request 513 "ui_list_controls" @{ root_path = "/root/Phase5Ui"; visible_only = $false; max_results = 32 }),
         (Tool-Request 514 "ui_list_controls" @{ root_path = "/root/Phase5Ui"; class_filter = @("Label"); max_results = 32 }),
+        # With no root_path the answer used to name its subject "<edited scene
+        # root>", which cannot be sent to anything. 516 feeds 515's answer back in.
+        (Tool-Request 515 "ui_list_controls" @{ max_results = 32 }),
+        (Tool-Request 516 "ui_hit_test" @{ point = @{ x = 32; y = 32 }; max_results = 16 }),
         # The 2D half of the preview, which needs a scene whose root is a
         # CanvasItem. main.tscn is a Node3D, so this is the only place in the
         # run where a canvas exists to draw into.
@@ -2471,6 +2476,18 @@ try {
     # MOUSE_FILTER_IGNORE hides a Control from hit-testing, not from existing.
     Assert-True (@($listedPaths -match "/IgnoredControl$").Count -eq 1) "ui_list_controls dropped a Control that only ignores the mouse."
 
+    # root_path is an input to this tool, so the value it echoes back has to be
+    # one. "<edited scene root>" could not be sent to this tool, to
+    # scene_get_hierarchy, or to ui_hit_test, and the sibling reported /root
+    # for the same subtree (#470).
+    $uiDefaultRoot = Tool-Payload $phase5ById[515]
+    Assert-True ($uiDefaultRoot.root_path -notmatch "^<") "ui_list_controls answered with a placeholder instead of a path."
+    Assert-True ($uiDefaultRoot.root_path -match "^/root") "ui_list_controls root_path is not an absolute node path."
+    # The two siblings disagreed about which subtree the default is while
+    # reporting the same traversed_nodes. Only one spelling can be right.
+    $uiHitDefault = Tool-Payload $phase5ById[516]
+    Assert-True ($uiHitDefault.root_path -eq $uiDefaultRoot.root_path) "ui_hit_test and ui_list_controls still name different default subtrees."
+
     $label = $uiList.controls | Where-Object { $_.node_path -match "/LabelControl$" } | Select-Object -First 1
     Assert-True ($null -ne $label) "ui_list_controls omitted the Label."
     Assert-True ($label.text -eq "phase5 label") "ui_list_controls did not read the Label text."
@@ -2521,6 +2538,24 @@ try {
     Assert-True ((& $connectionCount $afterConnect) -eq 1) "signal_list_connections did not observe the new connection."
     Assert-True (-not $byId[912].result.isError) "signal_disconnect failed against a live editor session."
     Assert-True ((& $connectionCount $afterDisconnect) -eq 0) "signal_disconnect left the connection in place."
+
+    # The scene dock's own listeners were reported as scene connections, with
+    # nothing in the response saying so. They are alive only while the editor
+    # has this scene open, and appear in no saved .tscn (#461).
+    $allConnections = @($afterConnect.signals | ForEach-Object { $_.connections } | Where-Object { $null -ne $_ })
+    Assert-True ($allConnections.Count -gt 0) "The live editor reported no connections at all."
+    foreach ($connection in $allConnections) {
+        Assert-True (($connection.origin -eq "scene") -or ($connection.origin -eq "editor")) "A connection carried no origin."
+        if ($null -eq $connection.target_node) {
+            Assert-True ($connection.origin -eq "editor") "A connection with no resolvable target was called a scene connection."
+        } else {
+            Assert-True ($connection.origin -eq "scene") "A connection inside the edited scene was called an editor connection."
+        }
+    }
+    $editorOwned = @($allConnections | Where-Object { $_.origin -eq "editor" }).Count
+    Assert-True ($afterConnect.editor_connections -eq $editorOwned) "editor_connections did not match the marked entries."
+    $sceneOwned = @($allConnections | Where-Object { $_.origin -eq "scene" -and $_.target_method -eq "notify_property_list_changed" })
+    Assert-True ($sceneOwned.Count -eq 1) "The one real connection was not marked as a scene connection."
     # A reserved name must still fail honestly.
     # The live half of audio_list_buses. The offline read parses a file and
     # says so; only a running engine reports the effect chain and anything a
@@ -2819,7 +2854,23 @@ try {
     Assert-True ((Tool-Payload $byId[56]).undo_redo_registered) "Group addition bypassed UndoRedo."
     Assert-True (@((Tool-Payload $byId[57]).groups) -contains "phase_two") "Added group was not listed."
     Assert-True (@((Tool-Payload $byId[58]).members) -contains "/root/SmokeRoot/Subject") "Group member query missed the edited-scene node."
-    Assert-True (@((Tool-Payload $byId[60]).members).Count -eq 0) "Removed group membership remained visible."
+    $emptiedGroup = Tool-Payload $byId[60]
+    Assert-True (@($emptiedGroup.members).Count -eq 0) "Removed group membership remained visible."
+    # A name nobody has ever used answered exactly as an emptied group did,
+    # and nothing enumerated the groups a scene has, so an agent that typed
+    # "enemys" had no second question available to ask (#472). Godot has no
+    # empty group to find -- membership lives on the nodes -- so the answer is
+    # the list of names actually in use, returned beside the empty result.
+    $populatedGroup = Tool-Payload $byId[58]
+    Assert-True ($populatedGroup.group_exists -eq $true) "A group with a member was not reported as existing."
+    Assert-True (@($populatedGroup.known_groups) -contains "phase_two") "known_groups omitted a group in use."
+    $unusedGroup = Tool-Payload $byId[425]
+    Assert-True (@($unusedGroup.members).Count -eq 0) "An unused group name returned members."
+    Assert-True ($unusedGroup.group_exists -eq $false) "A group name used nowhere was reported as existing."
+    Assert-True (-not (@($unusedGroup.known_groups) -contains "nope_no_such_group")) "An unused name appeared in known_groups."
+    # The restored membership is what makes known_groups answerable again, and
+    # it is the field a mistyped name is recovered from.
+    Assert-True (@((Tool-Payload $byId[62]).known_groups) -contains "phase_two") "known_groups lost a group that undo restored."
     Assert-True (@((Tool-Payload $byId[62]).members) -contains "/root/SmokeRoot/Subject") "Group removal undo did not restore membership."
     Assert-True $byId[63].result.isError "Duplicate group membership returned fake success."
 

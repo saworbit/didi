@@ -4623,9 +4623,25 @@ json uiListControls(const json& params, const std::string& session_kind) {
     auto visited = visit(traversal_root, 0);
     if (visited.isErr()) return errorJson(visited.error().code, visited.error().message);
 
+    // root_path is an input to this tool, and the value echoed back could not
+    // be sent to anything: not to this tool on the next call, not to
+    // scene_get_hierarchy, not to ui_hit_test. The one field saying which
+    // subtree the answer covers was the one field that was not a path, and
+    // the sibling reported /root for the same two nodes, so a caller
+    // comparing the two had no way to tell which spelling was real (#470).
+    //
+    // The resolved path is right there. logicalPathFromEditedRoot is what
+    // every control in this same answer is already named with.
+    std::string resolved_root = requested_root;
+    if (resolved_root.empty()) {
+        auto root_name = editor ? logicalPathFromEditedRoot(root.value(), traversal_root)
+                                : nodeString(traversal_root, "get_path", 4075236667LL);
+        if (root_name.isErr()) return errorJson(root_name.error().code, root_name.error().message);
+        resolved_root = boundUtf8(root_name.value(), 1024).value;
+    }
+
     return liveResult({
-        {"root_path", requested_root.empty() ? std::string(editor ? "<edited scene root>" : "/root")
-                                             : requested_root},
+        {"root_path", resolved_root},
         {"controls", controls},
         {"returned_count", controls.size()},
         {"match_count_total", matched},
@@ -6246,6 +6262,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
 
             bool truncated = false;
             json truncated_at = nullptr;
+            // How many of the reported connections belong to the editor rather
+            // than to the scene, so a caller can tell an empty answer from one
+            // that is entirely the scene dock without walking the list (#461).
+            size_t editor_connection_count = 0;
             auto mark_truncated = [&](const std::string& location) {
                 truncated = true;
                 if (truncated_at.is_null()) truncated_at = location;
@@ -6405,15 +6425,31 @@ json GodotBridge::execute(const std::string& method, const json& params,
                         }
                         target_path = bounded_path.value();
                     }
+                    // A freshly created Sprite2D with no user connections at all
+                    // reported five: the scene dock's own listeners, alive only
+                    // while the editor has this scene open, in none of the saved
+                    // .tscn and in nothing at runtime. An agent asking what is
+                    // wired to this node got five false positives and one true
+                    // one, at a ratio that gets worse the emptier the scene.
+                    //
+                    // The surface already knew the difference and did not say it.
+                    // A connection the caller can act on has a receiver inside the
+                    // edited scene, so its path resolved; the editor's do not.
+                    // Marked rather than filtered, because a caller debugging the
+                    // editor itself has no other way to see them (#461).
+                    const bool from_scene = record.target_node.has_value();
                     connections.push_back({{"target_node", std::move(target_path)},
                                            {"target_method", bounded_method.value()},
-                                           {"flags", record.flags}});
+                                           {"flags", record.flags},
+                                           {"origin", from_scene ? "scene" : "editor"}});
+                    if (!from_scene) ++editor_connection_count;
                 }
                 json signal = {{"name", name.value()}, {"arguments", std::move(arguments)},
                                {"connections", std::move(connections)}};
                 output_signals.push_back(std::move(signal));
                 json candidate = {{"target_node", params["target_node"]},
                                   {"signals", output_signals},
+                                  {"editor_connections", editor_connection_count},
                                   {"truncated", truncated},
                                   {"truncated_at", truncated_at}};
                 if (liveResult(candidate).dump().size() > 63u * 1024u) {
@@ -6424,6 +6460,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             json response = {{"target_node", params["target_node"]},
                              {"signals", std::move(output_signals)},
+                             {"editor_connections", editor_connection_count},
                              {"truncated", truncated},
                              {"truncated_at", truncated_at}};
             auto live = liveResult(response);
@@ -7129,8 +7166,18 @@ json GodotBridge::execute(const std::string& method, const json& params,
             output_hits.push_back(hits[i].value);
         }
         json topmost = output_hits.empty() ? json(nullptr) : output_hits.front();
+        auto hit_root_path = logicalPathFromEditedRoot(edited_root.value(), traversal_root.value());
+        if (hit_root_path.isErr()) {
+            return errorJson(hit_root_path.error().code, hit_root_path.error().message);
+        }
+        const std::string resolved_hit_root = boundUtf8(hit_root_path.value(), 1024).value;
         return liveResult({
-            {"point", {{"x", x}, {"y", y}}}, {"root_path", requested_root},
+            // The sibling of the same defect. This echoed the literal default
+            // "/root" while actually traversing from the edited scene root, so
+            // the two tools reported different subtrees for the same two nodes
+            // and a caller comparing them could not tell which was real (#470).
+            // Named the way every hit in this same answer is named.
+            {"point", {{"x", x}, {"y", y}}}, {"root_path", resolved_hit_root},
             {"hits", output_hits}, {"topmost", topmost}, {"hit_count_total", total_hits},
             {"returned_count", output_hits.size()}, {"traversed_nodes", traversed},
             {"truncated", total_hits > output_hits.size()},
@@ -7988,6 +8035,22 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto group_name = makeStringName(group);
             if (group_name.isErr()) return errorJson(group_name.error().code, group_name.error().message);
             json members = json::array();
+            // A group name nobody has ever used and one that was just emptied
+            // were answered identically, field for field, and scene_list_groups
+            // requires a target_node so nothing enumerated the groups a scene
+            // has. An agent asking for "enemys" instead of "enemies" got a
+            // successful empty answer and no second question available to ask
+            // (#472).
+            //
+            // Godot has no empty group to find: membership lives on the nodes,
+            // so removing the last member is the same thing as the name never
+            // having been used. That is what makes the typo unanswerable, and
+            // it is why the fix is the list rather than a flag. The walk
+            // already visits every node, so the names in use cost one more
+            // call per node, and "enemys" comes back beside "enemies".
+            std::set<std::string> known_groups;
+            bool known_groups_truncated = false;
+            constexpr size_t kMaxReportedGroups = 128;
             std::function<Result<void>(GDExtensionObjectPtr)> visit = [&](GDExtensionObjectPtr current) -> Result<void> {
                 auto member_value = callObject(current, "Node", "is_in_group", 2619796661LL, {&group_name.value()});
                 if (member_value.isErr()) return member_value.error();
@@ -7997,6 +8060,31 @@ json GodotBridge::execute(const std::string& method, const json& params,
                     auto path = logicalPathFromEditedRoot(root.value(), current);
                     if (path.isErr()) return path.error();
                     members.push_back(path.value());
+                }
+
+                auto groups_value = callObject(current, "Node", "get_groups", 3995934104LL);
+                if (groups_value.isErr()) return groups_value.error();
+                auto group_count_value = callVariant(groups_value.value(), "size");
+                if (group_count_value.isErr()) return group_count_value.error();
+                auto group_count = scalarFromVariant<int64_t>(group_count_value.value(),
+                                                              GDEXTENSION_VARIANT_TYPE_INT);
+                if (group_count.isErr()) return group_count.error();
+                for (int64_t g = 0; g < group_count.value(); ++g) {
+                    auto group_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, g);
+                    if (group_index.isErr()) return group_index.error();
+                    auto item = callVariant(groups_value.value(), "get", {&group_index.value()});
+                    if (item.isErr()) return item.error();
+                    const auto item_type = GodotApi::instance().variant_get_type(item.value().ptr());
+                    auto text = stringFromVariant(item.value(), item_type);
+                    if (text.isErr()) continue;
+                    // A group name starting with _ is Godot's own internal
+                    // bookkeeping and is not a name a caller would have meant.
+                    if (text.value().empty() || text.value().front() == '_') continue;
+                    if (known_groups.size() >= kMaxReportedGroups) {
+                        known_groups_truncated = true;
+                        break;
+                    }
+                    known_groups.insert(boundUtf8(text.value(), 128).value);
                 }
                 auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
                 if (include_internal.isErr()) return include_internal.error();
@@ -8021,7 +8109,17 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto visited = visit(root.value());
             if (visited.isErr()) return errorJson(visited.error().code, visited.error().message);
             std::sort(members.begin(), members.end());
-            return liveResult({{"status", "success"}, {"group", group}, {"members", members}});
+            json names = json::array();
+            for (const auto& name : known_groups) names.push_back(name);
+            return liveResult({{"status", "success"}, {"group", group}, {"members", members},
+                               // Whether any node in the edited scene is in this
+                               // group. It tracks members exactly, because in
+                               // Godot that is all a group is; it is here so a
+                               // caller can branch without counting an array.
+                               // known_groups is the field that answers the typo.
+                               {"group_exists", known_groups.count(group) != 0},
+                               {"known_groups", std::move(names)},
+                               {"known_groups_truncated", known_groups_truncated}});
         }
 
         auto node = resolveNode(root.value(), params.value("target_node", ""));
