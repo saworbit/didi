@@ -82,6 +82,34 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `blackboard_task_update` says what it takes for `progress` (#528). The
+  published description read "0 to 1" while the handler required an integer
+  percentage, so the documented range was not even representable and `0.5` was
+  refused as "must be an integer, not a number". A completed task has always
+  reported `progress: 100`, which is the real scale. The description says that
+  now, and the schema already did.
+
+- `blackboard_task_claim` answers a conflict like its siblings (#529). Three
+  tools on one board met the same state and answered in two shapes: a claim of a
+  task somebody else holds came back with `isError` false, `claimed: false` and
+  an English sentence, so a caller branching on `isError` read a lost race as a
+  win. Contention is what the board is for, so this was the most travelled path
+  on it. Naming a `task_id` that cannot be claimed now answers `404` when the
+  task does not exist and `409` when its state is what stands in the way, with
+  `data.reason_code` saying which: `already_leased`, `blocked_by_dependency`,
+  `tag_mismatch` or `not_pending`. Asking for whatever is ready and being told
+  nothing is stays a success, and carries a `reason_code` of `no_tasks`,
+  `all_leased`, `all_blocked` or `no_ready_task`, so the three cases can be told
+  apart without reading prose.
+
+- Completing an already-completed task is `409 conflict` (#530). It answered
+  `400 invalid_arguments`, which tells an agent to fix its arguments when there
+  is nothing to fix: the task exists, the lease was held, the id is well formed,
+  and the work is done. A retried completion after a dropped response is the
+  ordinary way to reach this state. `blackboard_task_update` answers the same
+  state the same way.
+
+
 - A path holding a NUL is refused rather than written somewhere else (#525).
   `script_create` and `resource_create` checked the extension against the string
   they were handed, and a NUL truncates that string at the filesystem boundary,
