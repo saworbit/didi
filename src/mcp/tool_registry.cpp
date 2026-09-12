@@ -740,6 +740,7 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
     std::string name = tool.name;
     tool.legacy = isLegacyToolName(name);
     const auto binding = resolveAliasBinding(name, json::object());
+    tool.canonical_name = std::string(binding.canonical_name);
     tool.capability = capabilityForTool(std::string(binding.capability_source));
     const auto phase7_names = phase7::canonicalNames();
     if (std::find(phase7_names.begin(), phase7_names.end(), binding.schema_source) !=
@@ -768,6 +769,16 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
     if (!tool.capability.implemented) {
         tool.description = "UNIMPLEMENTED: Reserved schema; calls are rejected. Intended contract: " +
                            tool.description;
+    }
+    // Last, so it reads as a closing note rather than interrupting the contract,
+    // and so it survives the UNIMPLEMENTED prefix above. Only the seven aliases
+    // that resolve to a differently named tool get a sentence; the three legacy
+    // names that resolve to themselves have no other name to point at, and say
+    // so through _meta.didi.legacy alone.
+    if (tool.legacy && tool.canonical_name != name) {
+        tool.description += " Legacy name for " + tool.canonical_name +
+                            ", which is listed separately and is the same tool. Prefer the "
+                            "canonical name: it is what error data reports as canonical_tool.";
     }
     m_tools[name] = std::move(tool);
     DIDI_LOG_DEBUG("TOOL_REG", "Registered tool: ", name);

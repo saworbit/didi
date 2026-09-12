@@ -419,6 +419,56 @@ static void test_every_parameter_says_what_it_is() {
     }
 }
 
+// Break caught: ten of the 126 registrations are legacy names for a tool that is
+// also listed under its own name, and tools/list said so nowhere. Identical
+// schema, identical description, identical _meta, so which of the two an agent
+// picked was a coin flip, error data named a canonical_tool the caller had never
+// heard of, and any inventory of the surface double-counted seven capabilities.
+// didi_control_room reported `legacy` for all ten the whole time (#493).
+static void test_tools_list_says_which_names_are_legacy() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto manifest = registry.buildManifest();
+    ASSERT_TRUE(!manifest.legacy.empty());
+
+    std::size_t named_a_canonical = 0;
+    for (const auto& tool : registry.listTools()) {
+        const auto definition = tool.toJson();
+        const auto& meta = definition["_meta"]["didi"];
+        const bool listed_legacy =
+            std::find(manifest.legacy.begin(), manifest.legacy.end(), tool.name) !=
+            manifest.legacy.end();
+
+        // Stated on every tool, so "this is not an alias" is readable rather
+        // than inferred from a missing key.
+        ASSERT_TRUE(meta.contains("legacy"));
+        ASSERT_EQ(meta["legacy"].get<bool>(), listed_legacy);
+
+        if (!listed_legacy) {
+            ASSERT_TRUE(!meta.contains("canonical"));
+            continue;
+        }
+        if (!meta.contains("canonical")) continue;
+        ++named_a_canonical;
+        const auto canonical = meta["canonical"].get<std::string>();
+        ASSERT_TRUE(canonical != tool.name);
+        // The name it points at is on the surface, or the pointer is useless.
+        ASSERT_TRUE(registry.getTool(canonical) != nullptr);
+        // And the description says it too, because a client that renders only
+        // names and descriptions still has to be able to tell.
+        ASSERT_TRUE(definition["description"].get<std::string>().find(canonical) !=
+                    std::string::npos);
+    }
+    // Eight of the ten resolve to a differently named tool. instantiate_asset
+    // and mutate_scene_tree resolve to themselves and have no other name to
+    // point at, so they carry the flag and no canonical.
+    ASSERT_EQ(named_a_canonical, 8u);
+
+    const auto* alias = registry.getTool("get_scene_hierarchy");
+    ASSERT_TRUE(alias != nullptr);
+    ASSERT_EQ(alias->toJson()["_meta"]["didi"]["canonical"], "scene_get_hierarchy");
+}
+
 // An alias resolves to the same handler, so it must not describe its arguments
 // differently. query_project_resources and project_list_resources are the same
 // tool under two names, and a caller reading one and calling the other should
@@ -516,6 +566,8 @@ struct RegisterToolManifestTests {
                      test_instantiate_node_property_values_are_described);
         registerTest("tool_input_schema.every_parameter_described",
                      test_every_parameter_says_what_it_is);
+        registerTest("ToolManifest.ToolsListSaysWhichNamesAreLegacy",
+                     test_tools_list_says_which_names_are_legacy);
         registerTest("tool_input_schema.alias_matches_canonical_prose",
                      test_an_alias_documents_its_parameters_like_the_tool_it_resolves_to);
         registerTest("tool_input_schema.awkward_names_spelled_out",

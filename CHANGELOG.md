@@ -68,6 +68,19 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `tools/list` says which names are legacy (#493). Ten of the 126 registrations
+  are legacy names for a tool that is also listed under its own name, with an
+  identical schema, an identical description and identical `_meta`, so nothing
+  an MCP client reads said they were duplicates. Which of the two an agent
+  picked was a coin flip, error data named a `canonical_tool` the caller had
+  never heard of, and any inventory of the surface double-counted eight
+  capabilities. `didi_control_room` has reported `legacy` for all ten the whole
+  time; this carries the same fact one layer further out. `_meta.didi.legacy` is
+  now on every tool, true or false, because "this is not an alias" is a fact a
+  client should be able to read rather than infer from a missing key, and the
+  eight aliases that resolve to a differently named tool also carry
+  `_meta.didi.canonical` and name it in a closing sentence of their description.
+
 - `project_apply_changes` stops issuing a token for a call it cannot apply
   (#491). The tool needs an isolated copy of the project, which needs a git work
   tree that holds it. `project_verify_changes` checks that before doing

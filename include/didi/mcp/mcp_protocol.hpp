@@ -315,6 +315,9 @@ struct ToolDefinition {
     ExecutionCapability capability;
     // Set by ToolRegistry::registerTool from kLegacyToolNames. Never set by hand.
     bool legacy{false};
+    // The name this one resolves to. The same as `name` for the 116 canonical
+    // registrations. Set by ToolRegistry::registerTool. Never set by hand.
+    std::string canonical_name;
     // Set by ToolRegistry::registerTool from MutationSafety. Never set by hand.
     ToolAnnotations annotations;
     // Optional. Declared only for tools whose real result shape is known; see
@@ -322,12 +325,28 @@ struct ToolDefinition {
     json outputSchema;
 
     json toJson() const {
+        // Ten of the 126 registrations are legacy names for a tool that is also
+        // listed under its own. They published identical schemas, identical
+        // descriptions and identical metadata, so nothing an MCP client reads
+        // said they were duplicates: which of the two an agent picked was a coin
+        // flip, error data named a `canonical_tool` the caller had never heard
+        // of, and any inventory of the surface double-counted seven
+        // capabilities. didi_control_room knew all along (#493).
+        //
+        // `legacy` is stated on every tool rather than only on the ten, because
+        // "this is not an alias" is a fact a client should be able to read
+        // rather than infer from a missing key.
+        json meta = capability.toJson();
+        meta["legacy"] = legacy;
+        if (!canonical_name.empty() && canonical_name != name) {
+            meta["canonical"] = canonical_name;
+        }
         json definition = {
             {"name", name},
             {"description", description},
             {"inputSchema", inputSchema},
             {"annotations", annotations.toJson()},
-            {"_meta", {{"didi", capability.toJson()}}}
+            {"_meta", {{"didi", std::move(meta)}}}
         };
         if (outputSchema.is_object() && !outputSchema.empty()) {
             definition["outputSchema"] = outputSchema;
