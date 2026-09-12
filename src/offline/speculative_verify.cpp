@@ -386,7 +386,7 @@ Result<SpeculativeVerifyRequest> parseSpeculativeVerifyRequest(const json& param
     return request;
 }
 
-Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRequest& request) {
+Result<SandboxRepository> resolveSandboxRepository() {
     std::error_code error;
     const auto project_root = fs::weakly_canonical(fs::current_path(), error);
     if (error) return Error::internal("The project root cannot be resolved");
@@ -443,8 +443,26 @@ Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRe
                      json{{"repository_root", repository_name}, {"retryable", false}});
     }
 
+    SandboxRepository resolved;
+    resolved.project_root = project_root;
+    resolved.repository = repository;
+    resolved.repository_name = repository_name;
+    resolved.project_within_repository = project_within_repository;
+    resolved.base_commit = trimmed(head.value().output);
+    return resolved;
+}
+
+Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRequest& request) {
+    std::error_code error;
+    auto resolved = resolveSandboxRepository();
+    if (resolved.isErr()) return resolved.error();
+    const auto project_root = resolved.value().project_root;
+    const auto repository = resolved.value().repository;
+    const auto repository_name = resolved.value().repository_name;
+    const auto project_within_repository = resolved.value().project_within_repository;
+
     SpeculativeVerifyResult result;
-    result.base_commit = trimmed(head.value().output);
+    result.base_commit = resolved.value().base_commit;
     result.repository_root = repository_name;
 
     const auto sandbox_root = fs::temp_directory_path(error) / makeSandboxName();

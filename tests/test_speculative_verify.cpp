@@ -308,6 +308,44 @@ void test_apply_and_verify_fail_in_the_same_shape() {
     }
 }
 
+// Break caught: the preview had no target to read, so it bound the arguments to
+// a token and said so honestly. What it never did was check the precondition its
+// sibling checks before doing anything at all. project_verify_changes refuses a
+// project no git work tree holds, with no mutation and no token; the preview
+// issued a token for exactly that call, and spending it returned the same 409.
+// A caller following the documented dry-run then confirm path spent two calls
+// and a token to learn what the first could have said (#491).
+void test_the_apply_preview_runs_the_check_its_sibling_runs() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const json arguments = {{"changes", json::array({change("res://v1.gd", "extends Node\n")})},
+                            {"dry_run", true}};
+
+    ScopedGitProject project("preview-precondition", false);
+    if (!project.usable()) return;
+
+    const auto refused = registry.callTool("project_apply_changes", arguments);
+    ASSERT_TRUE(refused.isError);
+    ASSERT_TRUE(!refused.content.empty());
+    const auto payload = json::parse(refused.content[0].text, nullptr, false);
+    ASSERT_TRUE(!payload.is_discarded());
+    ASSERT_EQ(payload["error"]["code"], 409);
+    ASSERT_TRUE(payload["error"]["message"].get<std::string>().find("tracks nothing under") !=
+                std::string::npos);
+
+    // The whole point: no token was minted for a call that cannot be applied.
+    ASSERT_TRUE(refused.content[0].text.find("confirmation_token") == std::string::npos);
+
+    // The sibling refuses the same thing for the same reason, which is what
+    // makes the preview's silence a defect rather than a difference.
+    const auto verified = registry.callTool("project_verify_changes",
+                                            json{{"changes", arguments["changes"]}});
+    ASSERT_TRUE(verified.isError);
+    const auto verify_payload = json::parse(verified.content[0].text, nullptr, false);
+    ASSERT_EQ(verify_payload["error"]["code"], 409);
+}
+
 struct RegisterSpeculativeVerify {
     RegisterSpeculativeVerify() {
         registerTest("SpeculativeVerify.RequestDescribesAProposal",
@@ -324,6 +362,8 @@ struct RegisterSpeculativeVerify {
                      test_an_enclosing_repository_is_refused_and_named);
         registerTest("SpeculativeVerify.ApplyAndVerifyFailAlike",
                      test_apply_and_verify_fail_in_the_same_shape);
+        registerTest("SpeculativeVerify.ApplyPreviewRunsTheRepositoryCheck",
+                     test_the_apply_preview_runs_the_check_its_sibling_runs);
     }
 } g_registerSpeculativeVerify;
 
