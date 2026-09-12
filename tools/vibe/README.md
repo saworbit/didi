@@ -26,6 +26,7 @@ twice.
 | `probes/path_errors.py` | The same nonexistent path asked of every tool that takes one; finds the failures that live *behind* valid arguments. |
 | `probes/error_data_census.py` | What each error's `data` lets a caller branch on. `path_errors.py` asks whether a failure is an envelope; this one opens it. |
 | `probes/schema_descriptions.py` | How many parameters a caller has to guess at: counts `description` across the whole surface. Zero since #462, and a contract test keeps it there. |
+| `probes/advertised_vs_reported_mode.py` | What `tools/list` says a tool's mode is, against what the tool then says. The two are built by different code and nothing compared them. |
 | `probes/surface_census.py` | The same question asked of all 126 tools: who rejects an unknown argument, what `execution_mode` each reports, who answers with a bare string. |
 | `report.py` | Files a directory of finding bodies as issues in one pass. |
 
@@ -181,6 +182,41 @@ returns a correct tree and never names the scene it came from, so after
 different question (#448). The same shape as #401. When a tool has an implicit
 subject, ask whether the response identifies it.
 
+**Discovery is a surface too, and it is published twice.** Every claim a tool
+makes about itself exists in two places: `_meta.didi.currentMode` on the
+`tools/list` entry, which a host reads to decide whether to offer the tool, and
+the `execution_mode` in the answer, which only a caller sees. Five sessions of
+censuses asked the second and never the first, so #419 could land on the
+responses, leave the discovery metadata untouched, and look finished --
+`probes/advertised_vs_reported_mode.py` puts them side by side and eleven tools
+disagree (#503, #504). The same split runs through the schemas: arguments are
+closed by the handler and open in 73 published `inputSchema`s (#508),
+`structuredContent` comes back from all 126 tools and 11 publish an
+`outputSchema` for it (#509), and the one that is published names a field the
+handler does not return (#510). Ask what a tool says about itself before it is
+called, not only what it says afterwards.
+
+**Annotations are the part of the surface nobody is calling.** `readOnlyHint`
+and friends are never exercised by a probe, because a probe just calls the
+tool -- so they drifted until all four are a function of one read/write bit
+(#507), and two of the tools sitting in the read-only bucket are not read-only.
+`runtime_detach_session` is annotated read-only, non-destructive and idempotent,
+and severs the bridge (#505). That one is not a paper cut: it silently wrecked
+the first run of this session's own census, which had filtered to read-only
+tools and called it in alphabetical order ahead of every `scene_*` and
+`viewport_*` tool. Four tools were reported as falling back to offline; every
+row after the detach was an answer about a detached server. A census is only as
+trustworthy as the metadata it filtered on.
+
+**The layers below `tools/call` have their own conventions, and they are not
+the tool surface's.** `prompts/get` still accepts and drops an unknown argument
+(#511), which is the pre-#397 behaviour living on a method nobody re-checked;
+`prompts/list` and `prompts/get` describe the same prompt differently (#512);
+and `resources/read` serves a non-default blackboard board as `text/plain`
+because only `default` is a registered URI (#513). `probes/protocol_edges.py`
+covers the JSON-RPC frame. The methods between the frame and `tools/call` --
+`resources/*`, `prompts/*` -- had never been swept.
+
 **Offline and live are different products.** The same argument can mean
 different things depending on whether an editor is attached, and the offline
 answer is the one nobody checks. Run the interesting probes twice.
@@ -201,6 +237,8 @@ next is not a test of the gate, it is a test of process lifetime.
 | 2026-09-12 | Inverse pairs and duplicates, path forms, property coercion, the confirmation preview, resource honesty, and two new whole-surface censuses. | `1.8.0+8fd6409268ac` | #460-#472, thirteen findings. |
 
 | 2026-09-12 | Limit and truncation disclosure, schema flags against what the handler does, project settings and input actions written without checking, the error envelope's contents, and the legacy aliases. | `1.8.0+941db00ef6c6` | #482-#493, twelve findings. |
+
+| 2026-09-12 | The discovery surface rather than the answers: advertised versus reported execution mode, tool annotations against what the tool does, published schemas against what the handler enforces, and the `resources/*` and `prompts/*` methods, swept for the first time. | `1.8.0+95ff4b9c9ebc` | #502-#515, fourteen findings. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log
