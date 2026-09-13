@@ -210,11 +210,19 @@ jobs:
           exe=./build/didi
           [ -x "$exe" ] || exe=./build/Release/didi.exe
           {
-            echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+            # protocolVersion is a required string in InitializeRequest and is
+            # refused when it is missing (#531). This smoke sent no params at
+            # all, which was accepted until 2.0.0 and then failed the whole
+            # release on a handshake the server was right to reject.
+            echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}'
             echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
           } | "$exe" --project tests/godot_smoke > smoke.out
           grep -q '"serverInfo"' smoke.out
           grep -q '"tools"' smoke.out
+          # The handshake has to be answered, not merely survived. Without this
+          # the grep above passes on the tools/list line alone, so a refused
+          # initialize would package a release that no client can open.
+          grep -q '"protocolVersion":"2024-11-05"' smoke.out
           echo "Packaging smoke passed"
 
       - name: Package Binary & Addons (Windows)
