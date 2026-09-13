@@ -126,6 +126,24 @@ CallToolResult handleControlRoom(const json& args, const std::shared_ptr<ipc::II
         // The route actually being dispatched on, not a listed session, because
         // that is the extension answering the calls.
         inputs.bridge_build_id = lease->descriptor->build_id;
+        // The one thing this dashboard asks the engine: which open scenes hold
+        // unsaved changes. Everything else here is a stat or a descriptor, and
+        // stays so; this is bounded, read-only, and a failure to answer is
+        // reported as unknown rather than as clean (#557).
+        if (lease->descriptor->kind == "editor") {
+            auto state = lease->sendRequest("editor.getState", json::object(), 3000);
+            if (state.isOk() && state.value().is_object()) {
+                const auto& answer = state.value();
+                inputs.unsaved_scenes_asked = true;
+                inputs.unsaved_scenes_readable = answer.value("unsaved_scenes_readable", false);
+                const auto listed = answer.find("unsaved_scenes");
+                if (inputs.unsaved_scenes_readable && listed != answer.end() && listed->is_array()) {
+                    for (const auto& scene : *listed) {
+                        if (scene.is_string()) inputs.unsaved_scenes.push_back(scene.get<std::string>());
+                    }
+                }
+            }
+        }
     } else if (sessions) {
         const auto active = sessions->activeSession();
         if (active.has_value()) inputs.selected_session_id = active->session_id;

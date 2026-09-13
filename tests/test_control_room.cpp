@@ -490,6 +490,67 @@ void test_bridge_build_mismatch_is_amber() {
     }
 }
 
+// Break caught: a live scene mutation changed the editor's open scene and
+// nothing on disk, and the Project light read "Ready" over it, so an agent
+// that mutated, read back, and handed off left a scene one "don't save" away
+// from never having happened (#557). The light goes amber only when the
+// engine can say so; an engine that cannot is a fact, never a green.
+void test_project_light_reports_unsaved_scenes() {
+    const auto attached_project = [] {
+        ControlRoomInputs in;
+        in.addon_present = true;
+        in.addon_enabled = true;
+        in.connected = true;
+        in.session_kind = "editor";
+        return in;
+    };
+    {
+        auto in = attached_project();
+        in.unsaved_scenes_asked = true;
+        in.unsaved_scenes_readable = true;
+        in.unsaved_scenes = {"res://main.tscn", ""};
+        const auto model = buildControlRoomModel(in, {});
+        ASSERT_EQ(lightState(model, "Project"), "warn");
+        ASSERT_TRUE(lightReason(model, "Project").find("editor_save_scene") != std::string::npos);
+        const auto summary = factValue(model, "Unsaved scenes");
+        ASSERT_TRUE(summary.find("res://main.tscn") != std::string::npos);
+        ASSERT_TRUE(summary.find("never been saved") != std::string::npos);
+    }
+    {
+        auto in = attached_project();
+        in.unsaved_scenes_asked = true;
+        in.unsaved_scenes_readable = true;
+        const auto model = buildControlRoomModel(in, {});
+        ASSERT_EQ(lightState(model, "Project"), "ok");
+        ASSERT_EQ(factValue(model, "Unsaved scenes"), "none");
+    }
+    // Godot 4.5 and 4.6 cannot report dirty state. That is unknown, not clean,
+    // and the light stays green because nothing says otherwise.
+    {
+        auto in = attached_project();
+        in.unsaved_scenes_asked = true;
+        in.unsaved_scenes_readable = false;
+        const auto model = buildControlRoomModel(in, {});
+        ASSERT_EQ(lightState(model, "Project"), "ok");
+        ASSERT_TRUE(factValue(model, "Unsaved scenes").find("4.7") != std::string::npos);
+    }
+    {
+        auto in = attached_project();
+        const auto model = buildControlRoomModel(in, {});
+        ASSERT_EQ(lightState(model, "Project"), "ok");
+        ASSERT_TRUE(factValue(model, "Unsaved scenes").find("unknown") != std::string::npos);
+    }
+    // Nothing attached: the question is not asked and the fact is absent.
+    {
+        ControlRoomInputs in;
+        in.addon_present = true;
+        in.addon_enabled = true;
+        const auto model = buildControlRoomModel(in, {});
+        ASSERT_EQ(lightState(model, "Project"), "ok");
+        ASSERT_EQ(factValue(model, "Unsaved scenes"), "<missing>");
+    }
+}
+
 void test_safety_and_project_and_work_lights() {
     {
         ControlRoomInputs in;
@@ -794,6 +855,8 @@ struct Register {
         registerTest("ControlRoom.ModelShapeIsComplete",
                      test_model_shape_is_complete_with_no_inputs);
         registerTest("ControlRoom.DroppedRecordsAreDisclosed", test_dropped_records_are_disclosed);
+        registerTest("ControlRoom.ProjectLightReportsUnsavedScenes",
+                     test_project_light_reports_unsaved_scenes);
     }
 } g_registerControlRoomTests;
 

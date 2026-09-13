@@ -132,6 +132,17 @@ json safetyLight(const ControlRoomInputs& in) {
     return light("Safety", "ok", "Confirmations enforced", "", "");
 }
 
+// What the editor said about unsaved scenes, in one line. A scene that has
+// never been saved has no path for the engine to name, so it is named here.
+std::string unsavedScenesSummary(const ControlRoomInputs& in) {
+    std::string summary;
+    for (const auto& scene : in.unsaved_scenes) {
+        if (!summary.empty()) summary += ", ";
+        summary += scene.empty() ? std::string("a scene that has never been saved") : scene;
+    }
+    return summary;
+}
+
 // The project light. Selected is not the same as ready.
 //
 // A project that has never had the addon installed read as green, so the one
@@ -154,6 +165,17 @@ json projectLight(const ControlRoomInputs& in) {
                      "addons/didi is present but project.godot does not list it under "
                      "editor_plugins/enabled. Enable it in Project Settings, or call "
                      "project_set_setting with editor_plugins/enabled.");
+    }
+    // An edited scene with unsaved changes is precisely the amber this light
+    // exists to show: every live mutation is one "don't save" away from never
+    // having happened, and "Ready" over an unsaved scene read as a project in
+    // good order (#557). Only when the engine can say so; an engine that
+    // cannot is reported in the facts, not guessed here.
+    if (in.unsaved_scenes_asked && in.unsaved_scenes_readable && !in.unsaved_scenes.empty()) {
+        return light("Project", "warn", "Unsaved scene changes", unsavedScenesSummary(in),
+                     "The editor's open scene holds changes that are not on disk. Call "
+                     "editor_save_scene to persist them; closing the editor without saving "
+                     "discards them.");
     }
     return light("Project", "ok", "Ready", in.project_root, "");
 }
@@ -361,6 +383,22 @@ json buildControlRoomModel(const ControlRoomInputs& in,
         facts.push_back(fact("MCP revisions", versions.str()));
     }
     facts.push_back(fact("Project root", in.project_root));
+    // Only while an editor is attached, because the question is only
+    // answerable then. Unknown and unreadable are each their own word rather
+    // than "none", since "none" is the answer a caller acts on.
+    if (in.connected && in.session_kind.value_or("") == "editor") {
+        std::string unsaved;
+        if (!in.unsaved_scenes_asked) {
+            unsaved = "unknown; the editor did not answer";
+        } else if (!in.unsaved_scenes_readable) {
+            unsaved = "not reported before Godot 4.7";
+        } else if (in.unsaved_scenes.empty()) {
+            unsaved = "none";
+        } else {
+            unsaved = unsavedScenesSummary(in);
+        }
+        facts.push_back(fact("Unsaved scenes", unsaved));
+    }
     facts.push_back(fact("Route", in.connected
                                       ? ("connected " + in.session_kind.value_or("unknown"))
                                       : (in.managed_unavailable ? "selected, unreachable"
