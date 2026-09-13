@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cctype>
 #include <string>
 #include "didi/common/types.hpp"
 
@@ -36,6 +37,43 @@ inline void annotateApiVersion(json& target,
         target["api_version_matches_attached_engine"] = nullptr;
     } else {
         target["api_version_matches_attached_engine"] = pinned_line == engine_line;
+    }
+}
+
+// The engine line a project declares for itself. project.godot carries
+// config/features=PackedStringArray("4.5", "Forward Plus"), written by the
+// editor that last saved the project, and the first quoted entry that reads as
+// a version is that line. Empty when the literal has no such entry.
+inline std::string featuresVersionOf(const std::string& features_literal) {
+    size_t open = features_literal.find('"');
+    while (open != std::string::npos) {
+        const auto close = features_literal.find('"', open + 1);
+        if (close == std::string::npos) break;
+        const auto entry = features_literal.substr(open + 1, close - open - 1);
+        if (!entry.empty() && std::isdigit(static_cast<unsigned char>(entry.front())) &&
+            !majorMinorOf(entry).empty()) {
+            return majorMinorOf(entry);
+        }
+        open = features_literal.find('"', close + 1);
+    }
+    return {};
+}
+
+// The offline half of annotateApiVersion. With no session selected there is
+// no engine to compare the pinned dump against, but the project still says
+// which line it was saved by, and a 4.5 project read against a 4.7 dump is
+// the same skew whether or not an editor happens to be attached (#555).
+inline void annotateProjectFeatures(json& target,
+                                    const std::string& api_version,
+                                    const std::string& features_literal) {
+    const auto project_line = featuresVersionOf(features_literal);
+    target["project_features_version"] =
+        project_line.empty() ? json(nullptr) : json(project_line);
+    const auto pinned_line = majorMinorOf(api_version);
+    if (pinned_line.empty() || project_line.empty()) {
+        target["api_version_matches_project_features"] = nullptr;
+    } else {
+        target["api_version_matches_project_features"] = pinned_line == project_line;
     }
 }
 

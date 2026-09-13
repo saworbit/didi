@@ -90,6 +90,13 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   which pointed past the match in any editor on a line with a non-ASCII
   character before it. It is the 1-based column in Unicode code points now,
   and the published `outputSchema` describes both `line` and `column` (#556).
+- **`script_reflect_class` compares the pinned dump to the project when no
+  session is selected.** It answered from the 4.7 dump and compared it to
+  nothing unless an earlier call had happened to select a session, so a 4.5
+  project asking first was told about 4.7 without a word. With no session the
+  response now carries `project_features_version` from `config/features` and
+  `api_version_matches_project_features`, and an unknown name is described as
+  absent from the pinned reference rather than from Godot (#555).
 - **`project_set_setting`'s descriptions say where the `create` guard runs.**
   The name check needs an attached editor; offline the name is written whether
   `create` is set or not, and the result's `limitation` already said so. The
