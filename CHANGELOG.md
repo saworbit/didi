@@ -66,6 +66,20 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   message no longer names an internal phase, an empty `class_name` is `400`,
   and `viewport_capture_passes` offline is `503 not_connected` with
   `retryable: true` like every other live-only tool (#548).
+- **Writers report the path they resolved, not the argument.** `script_create`,
+  `resource_create` and `script_patch_method` echoed the argument as the path
+  they wrote, so `res://d1/../reported.gd` was reported through a directory
+  that never existed while every reader named the file `res://reported.gd`.
+  On Windows the same seam let `res://PLAYER.gd` replace `res://player.gd`
+  while the preview's `before.path`, the result and the 409 conflict all named
+  a file that was never on disk. All of them now carry the resolved `res://`
+  path, in the on-disk case when a file is already there (#546, #551).
+- **`script_patch_method` keeps the file's line endings.** The file was read in
+  text mode, so on Windows a CRLF file came back LF on every line while the
+  result reported a single-method change. CRLF stays CRLF, a BOM stays, a
+  file with no trailing newline does not gain one, and a replacement spelled
+  with CRLF joins the file in the file's convention. `patch_script_symbols` is
+  the same handler (#550).
 - **`project_set_setting`'s descriptions say where the `create` guard runs.**
   The name check needs an attached editor; offline the name is written whether
   `create` is set or not, and the result's `limitation` already said so. The

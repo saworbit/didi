@@ -268,6 +268,8 @@ Writes a new GDScript file under the project root and runs the same diagnostics 
 
 `status` is `created_offline` or `replaced_offline`. Diagnostics are computed against the file after it is written, so they include the Godot compiler check when a Godot binary is discoverable.
 
+`script_path` in the result is the resolved path in the spelling every reader uses, not the argument: `res://d1/../reported.gd` is reported as `res://reported.gd`. When a file is already there it is reported in its on-disk case, so on a case-insensitive filesystem a call naming `res://PLAYER.gd` reports `res://player.gd`, which is the file `overwrite` replaces. The confirmation preview's `before.path` and the 409 conflict name the same file the same way.
+
 ### `script_patch_method` — Offline
 
 Rewrites a matching GDScript symbol in a project-root-confined file, then runs the available diagnostics.
@@ -281,6 +283,8 @@ Rewrites a matching GDScript symbol in a project-root-confined file, then runs t
 The replacement is read before it is spliced. A `new_definition` that declares nothing, declares a different name, or declares a different kind of symbol is refused with a 400 and no write, because the old behaviour was to splice it anyway: a mistyped name deleted the target and still reported the method patched.
 
 The indentation of the declaration being replaced is preserved, so a method declared inside a nested `class` stays inside it.
+
+The file's own conventions are preserved too. A CRLF file stays CRLF on every line, a byte order mark stays, and a file that ended without a newline does not gain one; `new_definition` may be spelled with either line ending and joins the file in the file's convention. `file_path` in the result is the resolved path in the readers' spelling, the way `script_create` reports `script_path`.
 
 A `method_name` declared more than once as a member of the script, once at the top level and again inside a nested `class`, is refused with the scopes and line numbers rather than patched at the first match. A local variable inside a function body that happens to share the name is not a second declaration and does not trigger this.
 
@@ -536,6 +540,8 @@ Writes a textual `.tres` file under the project root. Strings, booleans, numbers
 Give an object a `"type"` to choose the literal yourself, which is the only way to say what the JSON cannot: `Vector2i`, `Vector3i`, `Vector4i`, `Quaternion` and `Color` take their components, `NodePath` and `StringName` take their text under `"value"`, and the packed arrays take their elements under `"values"`. A capitalised type this writer does not know is refused. Nothing falls through to JSON: a value that cannot be written refuses the call naming the property, because a resource reported as created with a field thrown away costs more than a refusal does.
 
 Order is the caller's to set. Godot applies indexed sub-properties in file order and `tracks/0/type` is what creates track 0, so pass `properties` as an array of `{name, value}` entries when that matters; a JSON object cannot carry an order and its keys are written sorted. The result lists `properties_written` in file order.
+
+`save_path` in the result is the resolved path in the readers' spelling, and in the on-disk case when a file is already there, the way `script_create` reports `script_path`. A 409 conflict names the file that exists, so on a case-insensitive filesystem a call naming `res://RES.tres` is told about `res://res.tres`.
 
 #### References to other resources
 
