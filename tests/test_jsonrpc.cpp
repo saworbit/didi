@@ -62,6 +62,58 @@ static void test_jsonrpc_null_result_serialization() {
     ASSERT_TRUE(serialized_json["result"].is_null());
 }
 
+// Break caught: a second initialize on an initialized session was accepted,
+// from any clientInfo, and answered as though it were the first, with nothing
+// in the session reset. The confirmation tokens minted for the previous
+// client stayed spendable by whoever sent it (#552). The lifecycle makes
+// initialization the first interaction, so a second one is refused with
+// -32600 and the session goes on serving the client that opened it.
+static void test_mcp_refuses_a_second_initialize() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+
+    didi::mcp::JsonRpcRequest first;
+    first.id = 1;
+    first.method = "initialize";
+    first.params = {{"protocolVersion", "2024-11-05"},
+                    {"capabilities", didi::json::object()},
+                    {"clientInfo", {{"name", "first-client"}, {"version", "1"}}}};
+    const auto opened = server.handleRequest(first);
+    ASSERT_TRUE(!opened.error.has_value());
+
+    didi::mcp::JsonRpcRequest again;
+    again.id = 2;
+    again.method = "initialize";
+    again.params = {{"protocolVersion", "2024-11-05"},
+                    {"capabilities", didi::json::object()},
+                    {"clientInfo", {{"name", "a-different-client"}, {"version", "9"}}}};
+    const auto refused = server.handleRequest(again);
+    ASSERT_TRUE(refused.error.has_value());
+    ASSERT_EQ(refused.error->code, -32600);
+    ASSERT_TRUE(refused.error->message.find("already initialized") != std::string::npos);
+    ASSERT_EQ(refused.error->data["initialized"], true);
+
+    // Refused, not reset: the session still serves the client that opened it.
+    didi::mcp::JsonRpcRequest list;
+    list.id = 3;
+    list.method = "tools/list";
+    list.params = didi::json::object();
+    const auto listed = server.handleRequest(list);
+    ASSERT_TRUE(!listed.error.has_value());
+    ASSERT_TRUE(!listed.result["tools"].empty());
+
+    // And the refusal is about state, not about the arguments: the same
+    // malformed handshake that is -32602 on a fresh session is -32600 here,
+    // because the session question comes first.
+    didi::mcp::JsonRpcRequest malformed;
+    malformed.id = 4;
+    malformed.method = "initialize";
+    malformed.params = didi::json::object();
+    const auto still_refused = server.handleRequest(malformed);
+    ASSERT_TRUE(still_refused.error.has_value());
+    ASSERT_EQ(still_refused.error->code, -32600);
+}
+
 static void test_mcp_initialize() {
     didi::mcp::McpServer server;
     didi::mcp::JsonRpcRequest req;
@@ -1594,5 +1646,6 @@ struct RegisterJsonRpcTests {
                      test_mcp_modern_ui_visibility_does_not_bleed_in_either_direction);
         registerTest("McpServer.ControlRoomAnswersWithoutUi",
                      test_mcp_control_room_still_answers_without_the_ui_extension);
+        registerTest("McpServer.RefusesASecondInitialize", test_mcp_refuses_a_second_initialize);
     }
 } g_registerJsonRpcTests;
