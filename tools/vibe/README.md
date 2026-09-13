@@ -34,6 +34,12 @@ twice.
 | `probes/blackboard_rules.py` | The blackboard's own parameter descriptions, tested against the handler behind them. |
 | `probes/engine_crash.py` | The editor killed mid-session: what the first call after it says, and what every call after that says instead. |
 | `probes/surface_census.py` | The same question asked of all 126 tools: who rejects an unknown argument, what `execution_mode` each reports, who answers with a bare string. |
+| `probes/handler_error_census.py` | The failures *behind* the argument check: arguments built from each tool's own schema, naming something absent, plus the calls that must be meaningful-and-wrong to reach a handler at all. |
+| `probes/empty_string_census.py` | `""` sent to every required string parameter, sorted by whether the schema carries `minLength` -- the string half of the question #484 asked about numbers. |
+| `probes/windows_path_forms.py` | What a case-insensitive filesystem, a device name and a dot segment do to a `res://` path the validator already accepted. Destroys files; throwaway sandbox only. |
+| `probes/line_endings.py` | A CRLF file, a BOM, a missing final newline -- patched one method at a time, byte-counted before and after. |
+| `probes/position_offsets.py` | The line and column every reader reports, asked of a file with multi-byte characters and four different framings. |
+| `probes/session_lifecycle.py` | The handshake once it is past: a call before `initialize`, a second `initialize`, a missing or doubled `initialized`, a reused id, and a confirmation token carried across a client change. |
 | `report.py` | Files a directory of finding bodies as issues in one pass. |
 
 The probe files are kept after their findings are fixed, and are worth re-running
@@ -279,6 +285,57 @@ explicit detach, and a loop of four calls showed it recovering on the second.
 different things depending on whether an editor is attached, and the offline
 answer is the one nobody checks. Run the interesting probes twice.
 
+**The host operating system is part of the surface.** Seven sessions treated a
+`res://` path as a string the server validates, and it is also a string Windows
+resolves. The filesystem is case-insensitive, so `res://PLAYER.gd` and
+`res://player.gd` are one file to an `exists()` check and two paths to
+everything that reports: `script_create` with `overwrite` replaces
+`res://player.gd`, reports `res://PLAYER.gd`, and the dry-run preview says
+`before.path: "res://PLAYER.gd"` about a file that does not exist (#546).
+`resource_create` refuses the same collision and names the path that is not
+there. That is #525's seam -- a validator and an effect separated by a
+conversion -- except the conversion is the OS and no amount of string checking
+finds it. `probes/windows_path_forms.py` walks the whole family. **Ask what the
+platform does to the argument after the server is finished with it.**
+
+**A file the tool did not author is a different file.** Every probe until now
+created its fixtures with `script_create`, which writes LF and no BOM, so every
+mutation tool has only ever been tested against its own output.
+`script_patch_method` on a CRLF file converts the whole file to LF and reports a
+one-method change (#550); the preview shows `before.size_bytes` and nothing that
+would make a whole-file rewrite visible. A BOM survives, a missing final newline
+does not. Write the fixture with something that is not the tool under test, and
+read it back as bytes rather than through the tool that wrote it.
+
+**Two censuses of the same property can both be green and both be wrong.**
+`path_errors.py` and `error_data_census.py` both report zero bare strings, and
+four semantic failures still answer with prose (#548). They are reachable only
+with arguments that are *meaningful and wrong* rather than merely well formed --
+`remove` of a setting that is not there, a value nested past the cap, an
+offline-only capability refusal -- so they sit behind both censuses.
+`handler_error_census.py` lists those calls explicitly beside a sibling call on
+the same tool that answers correctly, because a census that can only generate
+its own inputs can only find what its generator reaches.
+
+**A guard that was added to close a finding may have been added to one mode.**
+#464 closed "`project_set_setting` persists a misspelled setting name"; the
+check it added runs on the live path only, and the exact call from #464 still
+writes the typo offline and reports success (#547). Offline is the mode where
+the guard is worth more, because there is no Project Settings dialog to notice
+the stray key in. When a fix lands, re-run its own repro in the other mode. The
+README has said "offline and live are different products" since the third
+session; this is what it costs when a fix forgets it.
+
+**A pinned snapshot is a version claim, and the server can check it.**
+`script_reflect_class` answers from `resources/didi_class_reference.json`, pinned
+at 4.7, while attached to a 4.5.1 editor whose session descriptor is sitting in
+the same response (#555). `api_version` discloses which dump was read, which is
+honest and is not the same as telling the caller the two disagree -- `build_id`
+and `bridge_build_matches` (#326) exist because a mismatch a caller has to
+notice is a mismatch nobody notices. When a tool answers from something that was
+frozen at build time, ask what it would take to compare that against what is
+running.
+
 **One process or two changes the answer.** Confirmation tokens live in the
 server's memory. A dry run in one `probe.py` invocation and a confirm in the
 next is not a test of the gate, it is a test of process lifetime.
@@ -299,6 +356,8 @@ next is not a test of the gate, it is a test of process lifetime.
 | 2026-09-12 | The discovery surface rather than the answers: advertised versus reported execution mode, tool annotations against what the tool does, published schemas against what the handler enforces, and the `resources/*` and `prompts/*` methods, swept for the first time. | `1.8.0+95ff4b9c9ebc` | #502-#515, fourteen findings. |
 
 | 2026-09-12 | The methods around `tools/call` rather than through it, two servers against one editor, the blackboard's own stated rules, path confinement and what the write actually does with the path, and the editor killed mid-session. | `1.8.0+3a528c10387d` | #525-#537, thirteen findings. |
+
+| 2026-09-14 | What the host operating system does to an argument the server already accepted: a case-insensitive filesystem, device names, dot segments. Then files this harness did not author -- CRLF, a BOM, a missing final newline -- the empty string sent to every required string parameter, and the handshake once it is past. | `2.0.0+39daaad58e9d` | #546-#557, twelve findings. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log
