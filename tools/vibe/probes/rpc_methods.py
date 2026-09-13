@@ -7,12 +7,18 @@ tool, `arguments` that is not an object. Session six swept `resources/read` and
 batch array, a cancellation, a progress token, and the capability-gated methods
 a host probes before it knows what the server supports.
 
-Two of this session's findings are here. `initialize` returns the same result
+Two of this session's findings are here. `initialize` returned the same result
 for `"2025-06-18"`, an empty string, a missing key and the integer `5`, so a
-client cannot tell a negotiated version from an ignored one (#531). And
-`resources/subscribe` refuses every `godot://` resource because "nothing else
+client could not tell a negotiated version from an ignored one (#531). And
+`resources/subscribe` refused every `godot://` resource because "nothing else
 changes without a tool call from this client", which is the opposite of true for
 the runtime log stream and the editor state (#532).
+
+Both are fixed as of 2.0.0, and this file is the regression probe for them.
+Re-run it: a served revision comes back as itself, an unserved one comes back as
+`2024-11-05`, a missing or non-string one is refused with `-32602` carrying
+`supported` and `requested`, and the subscribe refusal names what Didi does not
+publish rather than asserting the resource does not change.
 
 Usage::
 
@@ -34,7 +40,13 @@ from mcp_client import CLIENT_INFO, INITIALIZE, Session, resolve_binary  # noqa:
 
 # Every one of these is a malformed or unsupported `protocolVersion`, and the
 # point of the list is that the answer never varies.
-VERSIONS = ["2025-06-18", "2025-03-26", "1999-01-01", "", None, 5]
+# "2026-07-28" and "2024-11-05" are served, so they must come back as
+# themselves; everything else must come back as something else or be
+# refused. Without a served revision in this list the probe could only ever
+# show one half of the answer, which is how #531 read as "they are all the
+# same" rather than "none of these is negotiated".
+VERSIONS = ["2026-07-28", "2024-11-05", "2025-06-18", "2025-03-26",
+            "1999-01-01", "", None, 5]
 
 
 def show(label: str, value: object, limit: int = 600) -> None:
@@ -144,8 +156,10 @@ def main() -> int:
         if isinstance(answer, dict):
             negotiated = answer.get("result", {}).get("protocolVersion", answer.get("error"))
         print(f"  sent {version!r:14} -> {json.dumps(negotiated, ensure_ascii=False)}")
-    print("\nEvery row answering the same thing is #531: a client cannot tell a")
-    print("negotiated version from an ignored one, and `5` is not a version.")
+    print("\nA served revision must answer with itself and an unserved one must")
+    print("answer with something else, or a client cannot tell a negotiated")
+    print("version from an ignored one. Every row answering the same string was")
+    print("#531; a non-string is not a version and is now refused with -32602.")
     return 0
 
 

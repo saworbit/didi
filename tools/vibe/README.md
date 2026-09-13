@@ -45,6 +45,27 @@ without an editor, plus `requested_root_path` on the fallback and
 `target_exists` on an impact query. A probe that starts failing again is a
 regression nobody wrote a test for.
 
+The seventh session's six went the same way against 2.0.0, and re-running them
+is how two defects in the probes themselves came out. `blackboard_rules.py`
+wrote to a board called `leases`; a board is a file that outlives the process,
+so the second run met the first run's completed task and reported its own
+leftovers as conflicts. It takes a board per run now and reads the task id from
+the create call rather than assuming `TASK-1`. And both live probes filtered the
+control room down to a handful of labels, neither of which was the one their own
+finding asked for -- so `bridge_exclusivity.py` and `engine_crash.py` would have
+gone on printing `Route: detached` for a held bridge and a dead engine long
+after #527 and #536 closed. A probe that cannot show the fix is not a regression
+probe.
+
+**A probe is only a regression probe if it can print the difference.** Writing
+one while a finding is open makes it easy to show only the broken half: the
+version rows in `rpc_methods.py` were four unserved revisions and two malformed
+values, all answering `2024-11-05`, which reads as "they are all the same" and
+cannot tell you when that stops being true. It sends a served revision now, so
+the row that must echo itself sits beside the rows that must not. When the fix
+lands, re-run the probe and ask what it would print if the fix were reverted. If
+the answer is "the same thing", the probe is a record, not a guard.
+
 ## A session
 
 ```powershell

@@ -5,12 +5,18 @@ once, so a second server is the multi-agent path rather than an edge case. No
 session had run one.
 
 Only one server holds the editor bridge, which is a reasonable design. What the
-second is told is the finding: the 503 it gets for every live tool is the same
+second was told was the finding: the 503 it got for every live tool was the same
 response, byte for byte, that a server pointed at a project with **no editor at
-all** returns, and `didi_control_room` says `Route: detached` in both cases
-(#527). A second agent is told nothing is running, and its sensible next move --
+all** returns, and `didi_control_room` said `Route: detached` in both cases
+(#527). A second agent was told nothing is running, and its sensible next move --
 ask the user to start Godot, or fall back to editing files -- is wrong in a way
 that can stomp the first agent's live work.
+
+Fixed as of 2.0.0. Re-run it and the two blocks no longer match: the held
+client's error carries `bridge_held_by_another_client: true` and a
+`route_obstruction`, and the control room names the obstruction and a recovery
+that says in as many words not to fall back to offline edits on this project.
+The no-editor block is unchanged, which is the half that has to stay true.
 
 The exclusion releases on exit: a third client started after both are gone
 attaches normally, which is what the last stage checks.
@@ -50,7 +56,12 @@ def interrogate(label: str, session: Session) -> None:
         payload, is_error = session.call(name, arguments)
         if name == "didi_control_room" and isinstance(payload, dict):
             facts = {fact["label"]: fact["value"] for fact in payload.get("facts", [])}
-            interesting = {key: facts[key] for key in ("Route", "Bridge build", "Surface")
+            # "Route obstruction" and "Recovery" are the two that answer this
+            # probe's question. Without them the dashboard reads "detached" for
+            # a held editor whether or not anything has been fixed, which is
+            # how this file would have gone on reporting #527 after it closed.
+            interesting = {key: facts[key] for key in
+                           ("Route", "Route obstruction", "Recovery", "Bridge build", "Surface")
                            if key in facts}
             print(f"  {name:22} {json.dumps(interesting, ensure_ascii=False)}")
             continue
@@ -80,8 +91,10 @@ def main() -> int:
         quiet = Session(project=args.quiet)
         interrogate("a project with no editor at all", quiet)
         quiet.close()
-        print("\nCompare the second block against the last one. They match, and that")
-        print("is #527: a held editor and no editor are the same answer.")
+        print("\nCompare the second block against the last one. They matched, and")
+        print("that was #527. They must not match now: the held one names the")
+        print("obstruction and the holder, the empty one says only that nothing")
+        print("is attached. If they ever agree again, #527 is back.")
     else:
         print("\nRe-run with a second, editor-less project to see the comparison.")
     return 0

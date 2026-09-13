@@ -7,11 +7,19 @@ exercise.
 The recovery itself is good, and the first call after the crash returns one of
 the best error payloads on the surface -- `incident: engine_crashed`,
 `engine: gone`, and a `recovery` sentence naming the tool to call. The finding
-is that it is said exactly once (#536). Every later call reverts to the generic
-`503 not_connected`, `scene_get_hierarchy` resumes answering from the `.tscn`
-file without saying why it is offline now, and `didi_control_room` -- whose only
-job is to say what state the bridge is in -- reports `Route: detached` with no
-mention of the crash.
+was that it was said exactly once (#536). Every later call reverted to the
+generic `503 not_connected`, `scene_get_hierarchy` resumed answering from the
+`.tscn` file without saying why it was offline now, and `didi_control_room` --
+whose only job is to say what state the bridge is in -- reported
+`Route: detached` with no mention of the crash. Detaching afterwards, which is
+the tidy-up a caller is told to do, answered `503` for having nothing to detach
+(#537).
+
+Both are fixed as of 2.0.0, and this file is their regression probe. Re-run it:
+every offline answer after the kill carries `offline_reason` naming the crash,
+the live-only tool carries `route_obstruction`, the control room names the
+obstruction and the recovery, and the detach at the end is a success carrying
+`detached: false`.
 
 This probe nearly produced a second, wrong finding. One call after the kill
 looks like the offline fallback has been suppressed; a second call falls back
@@ -50,7 +58,12 @@ def route(session: Session) -> str:
     if not isinstance(payload, dict):
         return "<no facts>"
     facts = {fact["label"]: fact["value"] for fact in payload.get("facts", [])}
-    return json.dumps({key: facts.get(key) for key in ("Route", "Bridge build")})
+    # "Route obstruction" is the one this probe exists to look for. Printing
+    # only Route and Bridge build meant the dashboard read "detached" after a
+    # crash whether or not anything had been fixed.
+    return json.dumps({key: facts[key] for key in
+                       ("Route", "Route obstruction", "Recovery", "Bridge build")
+                       if key in facts})
 
 
 def main() -> int:
@@ -83,8 +96,11 @@ def main() -> int:
          session.call("runtime_detach_session", {}))
 
     session.close()
-    print("\nAttempt 1 carries the incident. Nothing after it does, and the control")
-    print("room never did -- that is #536.")
+    print()
+    print("Attempt 1 carries the incident, and so does everything after it:")
+    print("the offline answers name it, the live-only tool names it, and the")
+    print("control room names it. An offline answer with no offline_reason, or")
+    print("a control room saying only \"detached\", is #536 coming back.")
     return 0
 
 

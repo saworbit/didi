@@ -28,14 +28,25 @@ Usage::
 
     python tools/vibe/probes/blackboard_rules.py SANDBOX
 
-Writes to a board named `leases`. No editor needed -- the blackboard is
-server-side state in `.didi/blackboard/`.
+Writes to a board named `leases-<epoch>`. A board is a file under
+`.didi/blackboard/` and it outlives the process, so a fixed name meant the
+second run of this probe met the first run's completed task and reported its
+own leftovers as conflicts. One board per run, and the task id comes from the
+create call rather than being assumed to be `TASK-1`. No editor needed.
+
+All three findings are fixed as of 2.0.0, and the probe is kept for the reason
+every probe here is kept: re-run it and the claim conflict is a `409` carrying
+`reason_code: already_leased`, the second completion is a `409` carrying
+`already_completed`, and `progress` is a whole percentage on the way in and on
+the way out. A probe that starts showing the old answers again is a regression
+nobody wrote a test for.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import secrets
 import sys
 from pathlib import Path
 
@@ -43,7 +54,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mcp_client import Session  # noqa: E402
 
-BOARD = "leases"
+# One per run: see the module docstring. A fixed name makes the second run
+# report the first run's leftovers as findings. Random rather than a clock,
+# because two runs inside the same second collided on an epoch suffix.
+BOARD = f"leases-{secrets.token_hex(4)}"
 
 # Board names. The rule is letters, digits, underscore, hyphen, 1 to 64 chars;
 # boards are files under .didi/blackboard, so anything that reaches the
@@ -67,33 +81,37 @@ def main() -> int:
     session = Session(project=args.project)
 
     print("--- the lease rules the schema states")
-    show("create", session.call("blackboard_task_create",
-                                {"board": BOARD, "title": "t1", "description": "d"}))
+    created = session.call("blackboard_task_create",
+                           {"board": BOARD, "title": "t1", "description": "d"})
+    show("create", created)
+    # Whatever the board called it. Assuming TASK-1 is what made a re-run read
+    # the previous run's task.
+    task_id = created[0]["task"]["task_id"]
     show("alice claims", session.call("blackboard_task_claim",
                                       {"board": BOARD, "agent_id": "alice"}))
     # The same conflict, asked of three tools. Two answer 409; one answers 200.
     show("bob claims the same task (#529)",
          session.call("blackboard_task_claim",
-                      {"board": BOARD, "agent_id": "bob", "task_id": "TASK-1"}))
+                      {"board": BOARD, "agent_id": "bob", "task_id": task_id}))
     show("bob completes alice's task",
          session.call("blackboard_task_complete",
-                      {"board": BOARD, "agent_id": "bob", "task_id": "TASK-1"}))
+                      {"board": BOARD, "agent_id": "bob", "task_id": task_id}))
     show("bob updates alice's task",
          session.call("blackboard_task_update",
-                      {"board": BOARD, "agent_id": "bob", "task_id": "TASK-1", "note": "hi"}))
+                      {"board": BOARD, "agent_id": "bob", "task_id": task_id, "note": "hi"}))
 
     print("\n\n--- progress: the schema says 0 to 1 (#528)")
     for value in (0.5, 5.0, -3, 100):
         show(f"progress={value!r}",
              session.call("blackboard_task_update",
-                          {"board": BOARD, "agent_id": "alice", "task_id": "TASK-1",
+                          {"board": BOARD, "agent_id": "alice", "task_id": task_id,
                            "progress": value}), limit=200)
     show("alice completes -- note the progress it reports",
          session.call("blackboard_task_complete",
-                      {"board": BOARD, "agent_id": "alice", "task_id": "TASK-1"}))
+                      {"board": BOARD, "agent_id": "alice", "task_id": task_id}))
     show("alice completes again (#530)",
          session.call("blackboard_task_complete",
-                      {"board": BOARD, "agent_id": "alice", "task_id": "TASK-1"}), limit=240)
+                      {"board": BOARD, "agent_id": "alice", "task_id": task_id}), limit=240)
 
     print("\n\n--- lease bounds")
     show("create t2", session.call("blackboard_task_create",

@@ -20,6 +20,15 @@ to keep true. Three things behind it did not:
   traversal, because the check is a substring test that fires in front of the
   resolve-and-compare the handler already has (#534).
 
+Confinement held and still holds: nothing this probe sends leaves `res://`.
+What it found sat behind that check -- a path the validator accepted was not
+the path that got written (#525), a bad path answered in prose rather than an
+envelope (#526), and a dot-dot segment resolving back inside the root was
+refused (#534). All three are fixed as of 2.0.0. Re-run it: the control
+characters are refused by name, `ok2.gd` appears in the root because
+`res://nested/../ok2.gd` is a path inside the project, and no file named `n1`
+or `r1` is anywhere.
+
 The probe writes files. Give it a sandbox, not a project you care about. The
 two scene_create rows need a live editor; without one they answer 503 and the
 comparison against script_create is the only part that reads.
