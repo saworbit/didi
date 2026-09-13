@@ -952,6 +952,11 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
     // and an alias should document its parameters identically to the tool it
     // resolves to. Prose written inline in a schema is left alone (#462).
     applyParameterDescriptions(std::string(binding.schema_source), tool.inputSchema);
+    // A required string that names something is never meant to be empty, and
+    // 41 schemas said nothing about it, so "" fell through to handlers that
+    // each answered differently (#553, #554). One stamp, same as the closure
+    // below, so the argument check answers before any handler can.
+    requireNonEmptyRequiredStrings(binding.schema_source, tool.inputSchema);
     // Publish the closure the validator performs. #418 closed arguments by
     // default and the schemas did not follow, so 73 of them accepted anything
     // by JSON Schema while the server refused the same call: a client
@@ -3562,7 +3567,7 @@ void ToolRegistry::registerAllDefaultTools() {
         {{"type", "object"}, {"properties", {{"setting", {{"type", "string"}}}}}, {"required", {"setting"}}},
         [this](const json& args) { return handleProjectGetSetting(args, m_ipcClient); });
     register_phase_two(
-        "project_set_setting", "Persists or explicitly removes a ProjectSettings value. A name the engine does not define is refused unless create says otherwise, because a typo and a deliberate custom setting were written identically.",
+        "project_set_setting", "Persists or explicitly removes a ProjectSettings value. With an editor attached, a name the engine does not define is refused unless create says otherwise, because a typo and a deliberate custom setting were written identically. Offline there is no engine to ask, so the name is written unchecked and the result says so in limitation.",
         {{"type", "object"}, {"properties", {
             {"setting", {{"type", "string"},
                          {"description", "Slash-delimited ProjectSettings name, such as display/window/size/viewport_width. Use the typed autoload and InputMap tools for those namespaces."}}},
@@ -3570,7 +3575,7 @@ void ToolRegistry::registerAllDefaultTools() {
             {"remove", {{"type", "boolean"}, {"default", false},
                         {"description", "Remove the setting instead of writing a value. Pass this or value, not both."}}},
             {"create", {{"type", "boolean"}, {"default", false},
-                        {"description", "Write a setting name the engine does not already define. Off by default, because a misspelled built-in name is indistinguishable from a deliberate custom one and costs a key nothing reads. With an editor attached the result reports defined_by_engine; offline it is null, because there is no engine to ask."}}}
+                        {"description", "Write a setting name the engine does not already define. Off by default, because a misspelled built-in name is indistinguishable from a deliberate custom one and costs a key nothing reads. Only an attached editor can check the name, and the result then reports defined_by_engine. Offline the check cannot run: the name is written whether create is set or not, defined_by_engine is null, and limitation says so. Attach an editor to have the name checked."}}}
         }}, {"required", {"setting"}}},
         [this](const json& args) { return handleProjectSetSetting(args, m_ipcClient); });
 

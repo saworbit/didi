@@ -375,6 +375,30 @@ bool topLevelArgumentsAreClosed(const json& schema) {
     return !additional->get<bool>();
 }
 
+void requireNonEmptyRequiredStrings(std::string_view schema_source, json& schema) {
+    if (!schema.is_object() || !schema.contains("properties") || !schema.contains("required")) {
+        return;
+    }
+    auto& properties = schema["properties"];
+    const auto& required = schema["required"];
+    if (!properties.is_object() || !required.is_array()) return;
+    for (const auto& name : required) {
+        if (!name.is_string()) continue;
+        const auto key = name.get<std::string>();
+        // File contents are the one required string an empty value is a real
+        // answer for: an empty script file is a file.
+        if (schema_source == "script_create" && key == "source_text") continue;
+        auto found = properties.find(key);
+        if (found == properties.end() || !found->is_object()) continue;
+        const auto type = found->find("type");
+        if (type == found->end() || !type->is_string() || type->get<std::string>() != "string") {
+            continue;
+        }
+        if (found->contains("minLength")) continue;
+        (*found)["minLength"] = 1;
+    }
+}
+
 std::optional<std::string> validateAgainstSchema(const json& schema, const json& arguments) {
     if (!schema.is_object() || !arguments.is_object()) return std::nullopt;
     return checkObject(schema, arguments, "", 0, schema);

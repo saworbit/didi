@@ -100,9 +100,14 @@ CallToolResult handleEditorClearGhostPreviews(const ResolvedToolBinding& binding
 
 CallToolResult handleViewportCapturePasses(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!ipc || !ipc->isConnected()) {
-        return CallToolResult::error(
+        // The same 503 not_connected every other live-only tool answers
+        // offline with, so a client's reattach-and-retry rule reaches this
+        // tool too (#548).
+        return CallToolResult::errorJson(
+            503,
             "Rendering the scene again with replacement materials needs a live Godot session; there "
-            "is no offline frame to draw passes from.");
+            "is no offline frame to draw passes from.",
+            {{"retryable", true}});
     }
     auto res = ipc->sendRequest("vision.capturePasses", args, ::didi::ipc::kWaitForDefinitiveResponse);
     if (res.isErr()) {
@@ -354,10 +359,12 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
     }
 
     // The target has to be a real resource beneath the project root before it
-    // can be referenced from the generated scene.
+    // can be referenced from the generated scene. The empty string is checked
+    // like every other value: it used to skip this block and write a lab with
+    // no target in it, answered with the same success as a lab with one (#554).
     std::string target_resource;
     std::string target_type;
-    if (!target_path.empty()) {
+    {
         auto resolved = paths::resolveProjectFile(target_path);
         if (resolved.isErr()) {
             return CallToolResult::fromError(resolved.error(),

@@ -124,7 +124,11 @@ CallToolResult handleProjectSetSetting(const json& args, std::shared_ptr<ipc::II
     auto written = offline::writeProjectSetting(
         root, setting, remove ? json() : args["value"], remove);
     if (written.isErr()) {
-        return CallToolResult::error("Failed to persist a project setting: " + written.error().message);
+        // The writer already says which kind of failure this is -- 404 for a
+        // removal of a setting that is not there, 400 for a value it cannot
+        // render -- and answering with only its message threw that away (#548).
+        return CallToolResult::fromError(written.error(),
+                                         "Failed to persist a project setting: ");
     }
 
     const auto& report = written.value();

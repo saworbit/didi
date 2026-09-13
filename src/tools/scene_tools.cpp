@@ -397,7 +397,7 @@ CallToolResult handleSceneReparentNode(const json& args, std::shared_ptr<ipc::II
     (void)keep_global;
 
     if (target_node.empty() || new_parent.empty()) {
-        return CallToolResult::error("Parameters 'target_node' and 'new_parent_path' are required.");
+        return CallToolResult::errorJson(400, "Parameters 'target_node' and 'new_parent_path' are required and must not be empty.");
     }
 
     if (ipc && ipc->isConnected()) {
@@ -472,7 +472,7 @@ CallToolResult handleSceneSetProperty(const json& args, std::shared_ptr<ipc::IIp
     std::string property_name = args.value("property_name", "");
 
     if (target_node.empty() || property_name.empty() || !args.contains("value")) {
-        return CallToolResult::error("Parameters 'target_node', 'property_name', and 'value' are required.");
+        return CallToolResult::errorJson(400, "Parameters 'target_node', 'property_name', and 'value' are required, and the names must not be empty.");
     }
 
     if (ipc && ipc->isConnected()) {
@@ -491,7 +491,7 @@ CallToolResult handleSceneGetProperty(const json& args, std::shared_ptr<ipc::IIp
     std::string property_name = args.value("property_name", "");
 
     if (target_node.empty() || property_name.empty()) {
-        return CallToolResult::error("Parameters 'target_node' and 'property_name' are required.");
+        return CallToolResult::errorJson(400, "Parameters 'target_node' and 'property_name' are required and must not be empty.");
     }
 
     if (ipc && ipc->isConnected()) {

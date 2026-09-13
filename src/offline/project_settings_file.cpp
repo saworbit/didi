@@ -71,7 +71,7 @@ Result<std::string> readWholeFile(const std::filesystem::path& path) {
 
 Result<std::string> settingLiteral(const json& value, int depth) {
     if (depth > 16) {
-        return Error::invalidArgument("JSON nesting exceeds the Phase 2 limit of 16 levels");
+        return Error::invalidArgument("JSON value is nested more than 16 levels deep");
     }
     if (value.is_null()) return std::string("null");
     if (value.is_boolean()) return std::string(value.get<bool>() ? "true" : "false");

@@ -148,7 +148,8 @@ CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcCli
 CallToolResult handleScriptReflectClass(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     std::string class_name = args.value("class_name", "");
     if (class_name.empty()) {
-        return CallToolResult::error("Parameter 'class_name' is required.");
+        return CallToolResult::errorJson(
+            400, "Parameter 'class_name' is required and must not be empty.");
     }
 
     // Run offline class reflection

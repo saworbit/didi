@@ -375,7 +375,7 @@ Result<VariantValue> makeObject(GDExtensionObjectPtr object) {
 }
 
 Result<VariantValue> makeJsonVariant(const json& value, int depth = 0) {
-    if (depth > 16) return Error::invalidArgument("JSON nesting exceeds the Phase 2 limit of 16 levels");
+    if (depth > 16) return Error::invalidArgument("JSON value is nested more than 16 levels deep");
     if (value.is_null()) return VariantValue{};
     if (value.is_boolean()) return makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(value.get<bool>()));
     if (value.is_number_integer()) return makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(value.get<int64_t>()));
@@ -917,7 +917,7 @@ Result<json> colorToJson(VariantValue& value);
 Result<json> resourcePathToJson(VariantValue& value);
 
 Result<json> variantToJson(VariantValue& value, int depth = 0, bool lenient = false) {
-    if (depth > 16) return Error::invalidArgument("Godot Variant nesting exceeds the Phase 2 limit of 16 levels");
+    if (depth > 16) return Error::invalidArgument("Godot Variant is nested more than 16 levels deep");
     auto& api = GodotApi::instance();
     auto type = api.variant_get_type(value.ptr());
     switch (type) {
