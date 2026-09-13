@@ -88,6 +88,12 @@ string, so a missing key or a non-string is refused with `-32602`, carrying
 answered with itself; any other string is answered with `2024-11-05`, which is
 how a client tells a version it was granted from one it was refused.
 
+`initialize` is accepted once. A second `initialize` on an initialized session
+is refused with `-32600` and `error.data.initialized: true`, whatever
+`clientInfo` it carries, and the session goes on serving the client that
+opened it: nothing is renegotiated and no confirmation token is dropped. A
+client that wants a fresh session starts a fresh server process.
+
 A modern request must carry `_meta["io.modelcontextprotocol/clientCapabilities"]`
 as well as the version, and its `id` must be a string or an integer. A request
 that declares a version and leaves out the capabilities, or sends a null or

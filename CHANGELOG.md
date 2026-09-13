@@ -97,6 +97,13 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   response now carries `project_features_version` from `config/features` and
   `api_version_matches_project_features`, and an unknown name is described as
   absent from the pinned reference rather than from Godot (#555).
+- **A second `initialize` is refused.** The lifecycle makes initialization the
+  first interaction, and the server accepted another at any point, from any
+  `clientInfo`, answering it as though it were the first while resetting
+  nothing, so the confirmation tokens minted for the previous client stayed
+  spendable by whoever sent it. It now answers `-32600` with
+  `error.data.initialized: true`, and the session goes on serving the client
+  that opened it (#552).
 - **`project_set_setting`'s descriptions say where the `create` guard runs.**
   The name check needs an attached editor; offline the name is written whether
   `create` is set or not, and the result's `limitation` already said so. The
