@@ -7,9 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Historical entries describe the surface advertised by those releases. For the executable status of each current registration, use [docs/CAPABILITIES.md](docs/CAPABILITIES.md) or runtime `tools/list` metadata.
 
+## Stability
+
+Didi follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html), and a
+major number is a statement about compatibility rather than about maturity. The
+two are worth separating, because this project is further along on the first
+than on the second.
+
+**What a version number promises.** The tool names, their arguments, and the
+shape of a successful answer are the public surface. A change that breaks one of
+them bumps the major, which is what 2.0.0 is: the release corrects error codes,
+handshake validation and schema strictness across the surface, and a client
+written against 1.8.0 can break on any of them.
+
+**What it does not promise.** Didi is not finished. Its own status block says
+`PARTIAL_DELIVERY`, three canonical tools are registered and unimplemented, and
+[the roadmap](docs/ROADMAP.md) has Phase 12, the phase that owns reproducible
+artifacts, supported platform matrices and compatibility guarantees across
+versions, still unstarted. Until it lands there is no upgrade or rollback
+guarantee beyond the changelog, and no commitment to a support window for an
+older minor line.
+
+Read the version for what changed. Read this section and the roadmap for how
+much of the thing exists.
+
 ---
 
 ## [Unreleased]
+
 
 The status block below states the current surface rather than anything this
 release changed, which is why it lives here and not in a version section.
@@ -23,6 +48,69 @@ release changed, which is why it lives here and not in a version section.
 
 Discovery now exposes 116 canonical tools plus 10 legacy registrations (126 total). 113 canonical tools are implemented and 3 remain unimplemented.
 The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
+
+## [2.0.0] - 2026-09-13
+
+A major because the surface changed, not because the project grew up. See
+[Stability](#stability) for what the number does and does not promise.
+
+Almost all of this release is correctness work on answers that were already
+wrong. The reason it is a major rather than a patch is that a client written
+against 1.8.0 branched on those wrong answers, and several of them are now
+different. Read the list below before upgrading.
+
+### Breaking
+
+- **`initialize` requires `protocolVersion`.** It is a required string in the
+  MCP schema and every value was previously accepted, including a missing key.
+  A client that omitted it now fails the handshake with `-32602` rather than
+  connecting. This is the one change that can break a whole client rather than
+  one call (#531).
+
+- **Every published `inputSchema` is closed.** `additionalProperties: false` is
+  enforced, so an argument a tool does not declare is refused instead of being
+  accepted and ignored. A call that carried a misspelled parameter used to
+  succeed while doing something other than what was asked (#418, #397).
+
+- **`prompts/get` refuses an argument the prompt does not declare**, for the
+  same reason (#511).
+
+- **`blackboard_task_claim` answers a lost race with `409`.** Naming a
+  `task_id` that cannot be claimed returns `404` when the task does not exist
+  and `409` when its state stands in the way. It used to return `isError:
+  false` with `claimed: false`, so a caller branching on `isError` read a lost
+  race as a win. An unnamed claim finding nothing is still a success (#529).
+
+- **`blackboard_task_complete` and `blackboard_task_update` answer an
+  already-completed task with `409`, not `400`** (#530).
+
+- **`execution_mode` changed value on the definitions with no live path.**
+  `blackboard://<board>/state`, `blackboard://<board>/tasks` and
+  `godot://project/tree` report `local`; `ui://didi/control-room` reports
+  `local_status`; and `tools/list` advertises the word each tool actually
+  answers with. Anything branching on `offline_fallback` for these sees a
+  different string (#503, #533).
+
+- **Tool annotations are decided per tool.** `destructiveHint`,
+  `idempotentHint` and `openWorldHint` were four names for one bit and now
+  carry their own values, which changes what a client may auto-approve. In
+  particular `runtime_attach_session` and `runtime_detach_session` are no
+  longer read-only (#505, #507).
+
+- **`runtime_detach_session` succeeds when nothing is attached**, answering
+  `detached: false` instead of `503`. A caller treating any error as fatal saw
+  a failure where there was none; a caller asserting on the error now sees a
+  success (#537).
+
+- **Error payloads carry `data.code`, `data.tool` and `data.retryable`
+  everywhere**, and roughly seventy call sites that answered with a bare JSON
+  string now answer with the envelope. Substring-matching the old prose no
+  longer works (#420, #460, #486, #487, #492, #526).
+
+- **Paths are validated by resolving them.** `res://nested/../ok.gd` is now
+  written rather than refused, because it lands inside the project root, and a
+  path holding a NUL or any other control character is refused rather than
+  written somewhere else (#525, #534).
 
 ### Added
 
@@ -66,7 +154,6 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   AnimationLibrary, SpriteFrames, Theme and ShaderMaterial no longer have to be
   written by hand outside the tool surface.
 
-### Added
 
 - Nine more tools publish an `outputSchema`, and the rule for which do is
   written down (#509). `blackboard_list_keys`, `blackboard_read`,
