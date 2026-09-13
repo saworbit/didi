@@ -559,6 +559,22 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     }
 
     if (req.method == "initialize") {
+        // Once per session. The lifecycle makes initialization the first
+        // interaction, and this server accepted a second initialize at any
+        // point, from any clientInfo, and answered it as though it were the
+        // first while resetting nothing: the confirmation tokens minted for
+        // whoever was there before stayed spendable by whoever sent it (#552).
+        // Refusing is one branch beside the -32002 that already guards the
+        // other direction, and it keeps the handshake a place nothing can be
+        // silently renegotiated from. A client that wants a fresh session
+        // starts a fresh server process.
+        if (m_initialized) {
+            return JsonRpcResponse::makeError(
+                req.id, JsonRpcErrorCode::InvalidRequest,
+                "Session is already initialized. initialize is sent once per session; start a "
+                "new server process for a new client.",
+                json{{"initialized", true}});
+        }
         // `protocolVersion` is a required string in InitializeRequest, and every
         // value reached the same answer: a missing key, an empty string and a
         // bare JSON number were all accepted in silence, and a version this
