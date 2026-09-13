@@ -113,6 +113,20 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   open scenes hold unsaved changes: on Godot 4.7 and later the Project light
   goes amber and names them; on 4.5 and 4.6 the engine cannot say, and the
   `Unsaved scenes` fact reports that rather than reading as clean (#557).
+- **`viewport_create_test_lab` checks the target first and writes the lab
+  where the audit can see it.** The handler created `addons/didi` before it
+  resolved the target, so a refused target left the project with a folder it
+  did not have, and it wrote the lab inside the addon's own folder, which
+  `project_audit_assets` excludes from orphan checks. The target is now
+  resolved before anything is touched, the lab is written to
+  `res://didi_test_lab.tscn`, and the result reports `target_resource_path`
+  resolved. A client that read the old path from the result sees the new one
+  there (#564).
+- **`viewport_create_test_lab` says whether it instanced the target.** The
+  description said it did not instance the target resource while every
+  PackedScene target was instanced as `TargetInstance`. The description, the
+  docs and a new `target_instanced` field now say which of the two scenes was
+  written (#565).
 - **`project_set_setting`'s descriptions say where the `create` guard runs.**
   The name check needs an attached editor; offline the name is written whether
   `create` is set or not, and the result's `limitation` already said so. The

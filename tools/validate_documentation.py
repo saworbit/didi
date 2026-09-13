@@ -65,6 +65,10 @@ VERSION_SOURCES = (
 # Files inside addons/didi that the demo copy is not expected to carry.
 # viewport_create_test_lab writes its sandbox scene into whichever project it is
 # run against, so the canonical directory can hold one that the demo does not.
+# Builds before #564 wrote the visual test lab into the addon folder of
+# whatever project the tool ran against, this repository included, and the
+# file is gitignored rather than removed. A stale copy in a checkout is not
+# part of what the addon ships.
 ADDON_PARITY_EXEMPT = frozenset({"test_lab_sandbox.tscn"})
 
 TRACKED_ONLY_ARTIFACT_PATHS = (".superpowers",)

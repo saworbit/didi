@@ -23,8 +23,11 @@ ROOT = Path(__file__).resolve().parents[1]
 ADDON = ROOT / "addons" / "didi"
 DEMO_ADDON = ROOT / "demo" / "addons" / "didi"
 
-# Generated into whichever project a tool is run against, so it is not part of
-# what the addon ships. tools/validate_documentation.py exempts the same name.
+# Builds before #564 wrote the visual test lab into the addon folder of
+# whatever project the tool ran against, this repository included, and the
+# file is gitignored rather than removed. A stale copy in a checkout is not
+# part of what the addon ships. tools/validate_documentation.py exempts the
+# same name.
 GENERATED_IN_PLACE = {"test_lab_sandbox.tscn"}
 
 

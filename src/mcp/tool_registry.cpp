@@ -2368,7 +2368,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "viewport_create_test_lab";
-        t.description = "Writes a basic offline sandbox .tscn with lighting, a ground box, and three cameras; it does not instance the target resource.";
+        t.description = "Writes a basic offline sandbox .tscn at res://didi_test_lab.tscn with lighting, a ground box, and three cameras. A PackedScene target is instanced under the lab as TargetInstance; any other resource is attached to a TargetInstance holder as metadata/didi_target, and the result says which with target_instanced.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
