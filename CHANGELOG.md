@@ -80,6 +80,16 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   file with no trailing newline does not gain one, and a replacement spelled
   with CRLF joins the file in the file's convention. `patch_script_symbols` is
   the same handler (#550).
+- **`project_search_symbols` reads a `.GD` script.** The collector folded the
+  extension to admit the file and the symbol path then tested the suffix
+  case-sensitively, so `res://Upper.GD` was collected, dropped as having no
+  symbol extractor, and `.gd` was reported as an unsearchable extension for
+  the whole run. Both tests fold the same way now (#549).
+- **Search columns count code points.** `column` in `project_search_text` and
+  `project_search_symbols` was the byte offset plus one, and nothing said so,
+  which pointed past the match in any editor on a line with a non-ASCII
+  character before it. It is the 1-based column in Unicode code points now,
+  and the published `outputSchema` describes both `line` and `column` (#556).
 - **`project_set_setting`'s descriptions say where the `create` guard runs.**
   The name check needs an attached editor; offline the name is written whether
   `create` is set or not, and the result's `limitation` already said so. The

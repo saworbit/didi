@@ -1,6 +1,7 @@
 #include "didi/offline/project_search.hpp"
 #include "didi/common/project_path.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -42,6 +43,78 @@ public:
 private:
     std::filesystem::path m_root;
 };
+
+void test_symbol_search_folds_the_extension_case() {
+    // Break caught: collectFiles folded the extension to decide a file was
+    // searchable, and the symbol path then tested the suffix case-sensitively,
+    // so res://Upper.GD was collected, dropped as having no symbol extractor,
+    // and .gd, the folded extension, was reported as unsearchable for every
+    // file that shares it (#549).
+    SearchFixture fixture;
+    fixture.write("Upper.GD",
+                  "extends Node\nclass_name UpperMarker\nfunc vibe_marker() -> void:\n\tpass\n");
+    fixture.write("lower.gd", "extends Node\nfunc other() -> void:\n\tpass\n");
+    fixture.write("main.tscn", "[gd_scene format=3]\n");
+
+    didi::offline::ProjectSearch search(fixture.root());
+    didi::offline::SymbolSearchOptions options;
+    options.query = "vibe_marker";
+    const auto result = search.searchSymbols(options);
+    ASSERT_TRUE(result.isOk());
+    const auto& response = result.value();
+    ASSERT_EQ(response.matches.size(), 1u);
+    ASSERT_EQ(response.matches[0].path, "res://Upper.GD");
+    ASSERT_EQ(response.matches[0].language, "gdscript");
+    ASSERT_EQ(response.scanned_files, 2u);
+    // The scene is the only file with no extractor, and .gd is not in the
+    // list of what could not be read.
+    ASSERT_EQ(response.unsearchable_files, 1u);
+    ASSERT_TRUE(std::find(response.unsearchable_extensions.begin(),
+                          response.unsearchable_extensions.end(),
+                          ".gd") == response.unsearchable_extensions.end());
+    ASSERT_TRUE(std::find(response.unsearchable_extensions.begin(),
+                          response.unsearchable_extensions.end(),
+                          ".tscn") != response.unsearchable_extensions.end());
+}
+
+void test_columns_count_code_points() {
+    // Break caught: column was the byte offset of the match plus one, so on a
+    // line with a non-ASCII character before the match it pointed past the
+    // match in any editor, since goto line:col counts characters (#556).
+    SearchFixture fixture;
+    // Line 2 is `var éééé := "VIBE_NEEDLE"`: 13 characters before the match,
+    // 17 bytes.
+    fixture.write("cols.gd",
+                  "extends Node\n"
+                  "var \xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9 := \"VIBE_NEEDLE\"\n"
+                  "func \xC3\xA9tat_marker() -> void:\n\tpass\n");
+
+    didi::offline::ProjectSearch search(fixture.root());
+    didi::offline::SearchOptions text;
+    text.query = "VIBE_NEEDLE";
+    const auto found = search.searchText(text);
+    ASSERT_TRUE(found.isOk());
+    ASSERT_EQ(found.value().matches.size(), 1u);
+    ASSERT_EQ(found.value().matches[0].line, 2u);
+    ASSERT_EQ(found.value().matches[0].column, 14u);
+
+    // An ASCII prefix still counts the same way it always did.
+    didi::offline::SearchOptions ascii;
+    ascii.query = "Node";
+    const auto plain = search.searchText(ascii);
+    ASSERT_TRUE(plain.isOk());
+    ASSERT_EQ(plain.value().matches.size(), 1u);
+    ASSERT_EQ(plain.value().matches[0].column, 9u);
+
+    didi::offline::SymbolSearchOptions symbols;
+    symbols.query = "\xC3\xA9tat_marker";
+    symbols.match = didi::offline::SymbolMatch::Exact;
+    const auto declared = search.searchSymbols(symbols);
+    ASSERT_TRUE(declared.isOk());
+    ASSERT_EQ(declared.value().matches.size(), 1u);
+    ASSERT_EQ(declared.value().matches[0].line, 3u);
+    ASSERT_EQ(declared.value().matches[0].column, 6u);
+}
 
 void test_text_and_gdscript_symbols() {
     // Break caught: project search misses real declarations or reports declarations from comments.
@@ -485,6 +558,9 @@ struct RegisterProjectSearchTests {
                      test_didi_state_is_not_project_content);
         registerTest("ProjectSearch.SymbolSearchCountsUnreadableFiles",
                      test_symbol_search_counts_a_file_it_cannot_read_symbols_from);
+        registerTest("ProjectSearch.SymbolSearchFoldsExtensionCase",
+                     test_symbol_search_folds_the_extension_case);
+        registerTest("ProjectSearch.ColumnsCountCodePoints", test_columns_count_code_points);
     }
 } g_register_project_search_tests;
 

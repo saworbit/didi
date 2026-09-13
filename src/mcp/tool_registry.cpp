@@ -688,10 +688,18 @@ static json outputSchemaForTool(const std::string& name) {
                              {"execution_mode", "has_errors"});
     }
     if (name == "project_search_text" || name == "project_search_symbols") {
-        json match_properties = {{"path", string_type},
-                                 {"line", integer_type},
-                                 {"column", integer_type},
-                                 {"preview", string_type}};
+        // The two positions carry prose because the guess is load-bearing:
+        // column was a byte offset and nothing said so, which is wrong for
+        // the one use a column has on any line with a non-ASCII character
+        // before the match (#556).
+        json match_properties = {
+            {"path", string_type},
+            {"line", {{"type", "integer"}, {"description", "1-based line of the match."}}},
+            {"column", {{"type", "integer"},
+                        {"description", "1-based column of the match in Unicode code points, "
+                                        "the way an editor's goto line:col counts. Not a byte "
+                                        "offset."}}},
+            {"preview", string_type}};
         if (name == "project_search_symbols") {
             match_properties["name"] = string_type;
             match_properties["kind"] = string_type;
