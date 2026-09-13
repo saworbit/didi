@@ -3343,8 +3343,11 @@ static void test_resource_registry() {
 
     const auto project_tree = reg.getResource("godot://project/tree")->toJson();
     const auto editor_state = reg.getResource("godot://editor/state")->toJson();
+    // A filesystem index with no engine path declared. "offline_fallback"
+    // named a fallback from a route it never had, which is what #419 removed
+    // from the tools and #533 removes from the resources.
     ASSERT_EQ(project_tree["_meta"]["didi"]["executionModes"],
-              didi::json::array({"offline_fallback"}));
+              didi::json::array({"local"}));
     ASSERT_EQ(editor_state["_meta"]["didi"]["executionModes"],
               didi::json::array({"live", "offline_fallback"}));
 
@@ -3353,7 +3356,11 @@ static void test_resource_registry() {
         auto payload = reg.readResource(uri);
         ASSERT_TRUE(payload.isOk());
         auto parsed = didi::json::parse(payload.value());
-        ASSERT_EQ(parsed["execution_mode"], "offline_fallback");
+        // The advertisement and the answer come from one place, so they say the
+        // same word: "local" for the project tree, which has no live path, and
+        // "offline_fallback" for the two that do and did not reach it.
+        ASSERT_EQ(parsed["execution_mode"],
+                  std::string(uri) == "godot://project/tree" ? "local" : "offline_fallback");
         if (std::string(uri) == "godot://runtime/logs") {
             // Break caught: offline records drift from the live structured-log schema.
             ASSERT_EQ(parsed["records"].size(), 1u);
@@ -3549,7 +3556,11 @@ static void test_tool_capture_viewport_with_ipc() {
     }
     ASSERT_TRUE(project_tree.isOk());
     auto project_tree_json = didi::json::parse(project_tree.value());
-    ASSERT_EQ(project_tree_json["execution_mode"], "offline_fallback");
+    // With a connected client, which is the case #533 is about: a resource with
+    // no live path reported that it had fallen back from a route it never had,
+    // while an editor was attached and healthy. The tool that answers the same
+    // question has said "local" since #419.
+    ASSERT_EQ(project_tree_json["execution_mode"], "local");
     ASSERT_TRUE(project_tree_json.contains("total_resources"));
 
     auto runtime_logs = resources.readResource("godot://runtime/logs");
@@ -3565,7 +3576,7 @@ static void test_tool_capture_viewport_with_ipc() {
     didi::mcp::JsonRpcRequest initialize_request;
     initialize_request.id = 6;
     initialize_request.method = "initialize";
-    initialize_request.params = didi::json::object();
+    initialize_request.params = {{"protocolVersion", didi::mcp::kProtocolVersion}};
     ASSERT_TRUE(!mcp_server.handleRequest(initialize_request).error.has_value());
     didi::mcp::JsonRpcRequest resource_request;
     resource_request.id = 7;

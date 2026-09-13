@@ -1106,7 +1106,7 @@ void test_availability_is_selected_session_kind_aware_for_tools_and_resources() 
     didi::mcp::JsonRpcRequest initialize;
     initialize.id = 1;
     initialize.method = "initialize";
-    initialize.params = didi::json::object();
+    initialize.params = {{"protocolVersion", didi::mcp::kProtocolVersion}};
     server.handleRequest(initialize);
 
     const auto inspect = [&](const std::shared_ptr<RoutedFake>& route, const std::string& method) {
@@ -1386,7 +1386,7 @@ void test_wrong_kind_connected_route_does_not_advertise_unexecutable_offline_too
     didi::mcp::JsonRpcRequest initialize;
     initialize.id = 2;
     initialize.method = "initialize";
-    initialize.params = didi::json::object();
+    initialize.params = {{"protocolVersion", didi::mcp::kProtocolVersion}};
     server.handleRequest(initialize);
     didi::mcp::JsonRpcRequest list;
     list.id = 3;
@@ -1738,7 +1738,7 @@ void test_descriptorless_provider_routes_are_unauthenticated_and_unavailable() {
     didi::mcp::JsonRpcRequest initialize;
     initialize.id = 32;
     initialize.method = "initialize";
-    initialize.params = didi::json::object();
+    initialize.params = {{"protocolVersion", didi::mcp::kProtocolVersion}};
     ASSERT_FALSE(server.handleRequest(initialize).error.has_value());
     const auto list_metadata = [&](const std::string& method, const std::string& collection,
                                    const std::string& key, const std::string& value) {
@@ -1781,7 +1781,7 @@ void test_no_selected_session_manager_keeps_offline_resource_contract() {
     didi::mcp::JsonRpcRequest initialize;
     initialize.id = 40;
     initialize.method = "initialize";
-    initialize.params = didi::json::object();
+    initialize.params = {{"protocolVersion", didi::mcp::kProtocolVersion}};
     ASSERT_FALSE(server.handleRequest(initialize).error.has_value());
 
     didi::mcp::JsonRpcRequest list;
