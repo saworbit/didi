@@ -382,7 +382,9 @@ Every diff also reports two perceptual measures, whether or not a tolerance was 
 
 ### `viewport_create_test_lab` — Offline
 
-Writes `res://addons/didi/test_lab_sandbox.tscn` with a basic light, environment node, ground box, and three cameras. The target resource is recorded but not instanced automatically.
+Writes `res://didi_test_lab.tscn` with a basic light, environment node, ground box, and three cameras. A `.tscn` or `.scn` target is instanced under the lab as `TargetInstance`; any other resource is attached to a `TargetInstance` holder node as `metadata/didi_target`, since a plain resource cannot be a node. The result says which happened with `target_instanced`, and reports `target_resource_path` resolved, the way every writer does.
+
+The lab lives at the project root, not under `addons/didi`, so `project_audit_assets` and the search tools can see it, and a project without the addon does not have the folder invented for it. The target is checked before anything is written or created: a target that does not exist is refused with `404` and the project is left exactly as it was.
 
 - `target_resource_path` (`string`, required).
 - `environment` (`string`, default `"studio_neutral"`).
