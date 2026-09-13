@@ -1651,6 +1651,11 @@ try {
         (Tool-Request 114 "scene_close" @{}),
         (Tool-Request 115 "scene_open" @{ scene_path = "res://packed_branch.tscn" }),
         (Tool-Request 116 "scene_instantiate_node" @{ node_type = "Node2D"; parent_path = "/root/Container"; name = "DirtyProbe" }),
+        # The dashboard read while the mutation above is unsaved. On 4.7 the
+        # editor can name the scene and the Project light goes amber; on 4.5
+        # and 4.6 it cannot, and the dashboard says so rather than reading green
+        # as clean (#557).
+        (Tool-Request 5570 "didi_control_room" @{}),
         (Tool-Request 117 "scene_close" @{}),
         (Tool-Request 91 "scene_close" @{ discard_unsaved = $true }),
         (Tool-Request 92 "scene_create" @{ scene_path = "res://created_phase2.tscn"; root_type = "Node2D"; root_name = "Created" }),
@@ -1815,6 +1820,7 @@ try {
 
     Assert-True ((Tool-Payload $byId[3]).value -eq 7) "Fixture property did not start at 7; actual=$((Tool-Payload $byId[3]).value)."
     Assert-True ((Tool-Payload $byId[4]).undo_redo_registered) "Property mutation did not report a real UndoRedo transaction."
+    Assert-True ((Tool-Payload $byId[4]).scene_saved -eq $false) "Property mutation did not say the change is unsaved: $((Tool-Payload $byId[4]) | ConvertTo-Json -Compress)"
     Assert-True ((Tool-Payload $byId[5]).value -eq 12) "Property mutation was not observable."
     Assert-True ((Tool-Payload $byId[7]).value -eq 7) "Undo did not restore the property."
     Assert-True ((Tool-Payload $byId[9]).value -eq 12) "Redo did not restore the changed property."
@@ -3075,6 +3081,21 @@ try {
     }
     Assert-True ((Tool-Payload $byId[115]).opened -eq $true) "The dirty-state probe could not reopen the packed scene."
     Assert-True ((Tool-Payload $byId[116]).status -eq "success") "The dirty-state probe could not modify the reopened scene."
+    $dirtyProbe = Tool-Payload $byId[116]
+    Assert-True ($dirtyProbe.scene_saved -eq $false) "A live scene mutation did not say the change is unsaved: $($dirtyProbe | ConvertTo-Json -Compress)"
+    Assert-True ($dirtyProbe.limitation -match "editor_save_scene") "A live scene mutation did not say how to persist the change: $($dirtyProbe.limitation)"
+    $roomAfterMutation = Tool-Payload $byId[5570]
+    $projectLight = @($roomAfterMutation.lights | Where-Object { $_.label -eq "Project" })[0]
+    $unsavedFact = @($roomAfterMutation.facts | Where-Object { $_.label -eq "Unsaved scenes" })[0]
+    Assert-True ($null -ne $unsavedFact) "Control room did not carry an Unsaved scenes fact with an editor attached: $($roomAfterMutation.facts | ConvertTo-Json -Compress)"
+    if ($dirtyStateReadable) {
+        Assert-True ($projectLight.state -eq "warn") "Control room Project light did not go amber over an unsaved scene on Godot $($engineVersion.Raw): $($projectLight | ConvertTo-Json -Compress)"
+        Assert-True ($projectLight.value -eq "Unsaved scene changes") "Control room Project light did not name the unsaved state: $($projectLight.value)"
+        Assert-True ($unsavedFact.value -match "packed_branch\.tscn") "Control room did not name the unsaved scene: $($unsavedFact.value)"
+    } else {
+        Assert-True ($projectLight.state -eq "ok") "Control room Project light guessed at dirty state on Godot $($engineVersion.Raw): $($projectLight | ConvertTo-Json -Compress)"
+        Assert-True ($unsavedFact.value -match "4\.7") "Control room did not say dirty state is unreadable before Godot 4.7: $($unsavedFact.value)"
+    }
     Assert-True $byId[117].result.isError "A modified scene accepted a default close."
     Assert-True ((Tool-Payload $byId[91]).closed -eq $true) "Explicit discard could not close the modified scene."
     Assert-True ((Tool-Payload $byId[91]).discarded_unsaved -eq $true) "An explicit discard did not report itself as one."

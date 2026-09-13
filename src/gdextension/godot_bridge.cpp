@@ -1894,6 +1894,59 @@ json liveResult(const json& fields) {
     return result;
 }
 
+// A committed edited-scene mutation lands in the editor's open scene and its
+// undo history, and nowhere else. Every reply reported plain success, so an
+// agent that mutated, read its change back and handed off left a scene one
+// "don't save" away from never having happened, and nothing said so;
+// undo_redo_registered: true read as reassurance that the change was real
+// rather than as the warning that it was unsaved (#557). The offline setting
+// writer set the precedent with its limitation paragraph for the mode where
+// this matters less.
+json liveSceneMutation(json fields) {
+    fields["scene_saved"] = false;
+    fields["limitation"] =
+        "This change is in the editor's open scene and its undo history, not on disk. Call "
+        "editor_save_scene to persist it; closing the editor without saving discards it.";
+    return liveResult(fields);
+}
+
+// The editor's own list of scenes with unsaved changes. The read side of dirty
+// state, EditorInterface.get_unsaved_scenes, binds from Godot 4.7; 4.5 and 4.6
+// expose only the write side, so on those engines the answer is null with
+// readable false rather than an empty list that would read as clean (#557).
+// Same probe scene.close uses, so the two cannot disagree about which engines
+// can answer.
+json unsavedScenesReport(GDExtensionObjectPtr editor) {
+    json report = {{"unsaved_scenes_readable", false}, {"unsaved_scenes", nullptr}};
+    if (!requireMethodBind("EditorInterface", "get_unsaved_scenes", 1139954409LL).isOk()) {
+        return report;
+    }
+    auto unsaved = callObject(editor, "EditorInterface", "get_unsaved_scenes", 1139954409LL);
+    if (unsaved.isErr()) return report;
+    auto unsaved_size = callVariant(unsaved.value(), "size");
+    if (unsaved_size.isErr()) return report;
+    auto unsaved_count = scalarFromVariant<int64_t>(unsaved_size.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (unsaved_count.isErr()) return report;
+    // One entry per open scene, so this bound sits far above anything an
+    // editor produces; a report that had to stop early would be a lie.
+    constexpr int64_t kMaxUnsavedScenesReported = 1024;
+    if (unsaved_count.value() > kMaxUnsavedScenesReported) return report;
+    json paths = json::array();
+    for (int64_t index = 0; index < unsaved_count.value(); ++index) {
+        auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (index_value.isErr()) return report;
+        auto entry = callVariant(unsaved.value(), "get", {&index_value.value()});
+        if (entry.isErr()) return report;
+        auto entry_path = stringFromVariant(
+            entry.value(), GodotApi::instance().variant_get_type(entry.value().ptr()));
+        if (entry_path.isErr()) return report;
+        paths.push_back(entry_path.value());
+    }
+    report["unsaved_scenes_readable"] = true;
+    report["unsaved_scenes"] = std::move(paths);
+    return report;
+}
+
 } // namespace
 
 // The admission rule the property tools apply, reading the JSON alone. It is
@@ -5756,7 +5809,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 return bridgeError(500, "tilemap_postcondition_mismatch", {{"outcome", restored.isOk() ? "rolled_back" : "unknown"}});
             }
         }
-        return liveResult({{"requested_cells", cells.size()}, {"changed_cells", changed_count},
+        return liveSceneMutation({{"requested_cells", cells.size()}, {"changed_cells", changed_count},
             {"unchanged_cells", cells.size() - changed_count}, {"undo_redo_registered", true}, {"outcome", "completed"}, {"rollback", "undo_redo"}});
     }
 
@@ -5867,7 +5920,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 return bridgeError(500, "gridmap_postcondition_mismatch", {{"outcome", restored.isOk() ? "rolled_back" : "unknown"}});
             }
         }
-        return liveResult({{"requested_cells", cells.size()}, {"changed_cells", changed_count},
+        return liveSceneMutation({{"requested_cells", cells.size()}, {"changed_cells", changed_count},
             {"unchanged_cells", cells.size() - changed_count}, {"undo_redo_registered", true}, {"outcome", "completed"}, {"rollback", "undo_redo"}});
     }
 
@@ -6043,7 +6096,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                               {"rollback", restored.isOk() ? "completed" : "failed"},
                               {"retryable", false}});
         }
-        return liveResult({
+        return liveSceneMutation({
             {"camera_path", camera_path},
             {"old", {{"position", old_position_json.value()},
                      {"rotation_degrees", old_rotation_json.value()},
@@ -7004,13 +7057,13 @@ json GodotBridge::execute(const std::string& method, const json& params,
                      {"restoration_observed", restored}});
             }
             if (is_connect) {
-                return liveResult({{"connected", true}, {"flags", 2},
-                                   {"undo_redo_registered", true},
-                                   {"outcome", "completed"}, {"rollback", "undo_redo"}});
+                return liveSceneMutation({{"connected", true}, {"flags", 2},
+                                          {"undo_redo_registered", true},
+                                          {"outcome", "completed"}, {"rollback", "undo_redo"}});
             }
-            return liveResult({{"disconnected", true}, {"flags", 2},
-                               {"undo_redo_registered", true},
-                               {"outcome", "completed"}, {"rollback", "undo_redo"}});
+            return liveSceneMutation({{"disconnected", true}, {"flags", 2},
+                                      {"undo_redo_registered", true},
+                                      {"outcome", "completed"}, {"rollback", "undo_redo"}});
         }
 
         if (!hasOnlyKeys(params, {"target_node", "signal_name", "arguments"}) ||
@@ -8106,9 +8159,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
             failure["error"]["data"] = {{"outcome", "reverted"}, {"rolled_back", true}};
             return failure;
         }
-        return liveResult({{"status", "success"}, {"target_node", params.value("target_node", "")},
-                           {"script_path", script_path}, {"attached", attaching}, {"detached", !attaching},
-                           {"undo_redo_registered", true}});
+        return liveSceneMutation({{"status", "success"}, {"target_node", params.value("target_node", "")},
+                                  {"script_path", script_path}, {"attached", attaching}, {"detached", !attaching},
+                                  {"undo_redo_registered", true}});
     }
 
     if (method == "audio.configureBus") {
@@ -8545,9 +8598,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (apply.isErr() || revert.isErr()) return errorJson(500, "Failed to register group UndoRedo transaction");
         auto committed = commitAction(manager.value());
         if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
-        return liveResult({{"status", "success"}, {"target_node", params.value("target_node", "")},
-                           {"group", group}, {"added", adding}, {"removed", !adding},
-                           {"undo_redo_registered", true}});
+        return liveSceneMutation({{"status", "success"}, {"target_node", params.value("target_node", "")},
+                                  {"group", group}, {"added", adding}, {"removed", !adding},
+                                  {"undo_redo_registered", true}});
     }
 
     if (method == "scene.create" || method == "scene.open" || method == "scene.close" ||
@@ -8987,8 +9040,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
             // describe the same tree in the same vocabulary.
             auto root_path = logicalPathFromEditedRoot(root, root);
             if (root_path.isErr()) return errorJson(root_path.error().code, root_path.error().message);
-            return liveResult({{"status", "online"}, {"editor_connected", true},
-                               {"active_scene_root", root_path.value()}});
+            // The editor's dirty state travels with its state, so the one
+            // reader that asks before deciding anything, didi_control_room,
+            // can show an amber light for a scene that is one "don't save"
+            // away from losing its changes (#557).
+            json state = {{"status", "online"}, {"editor_connected", true},
+                          {"active_scene_root", root_path.value()}};
+            state.update(unsavedScenesReport(editor));
+            return liveResult(state);
         }
         const std::string requested_root = params.value("root_path", "/root");
         auto target = resolveNode(root, requested_root);
@@ -9532,11 +9591,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (observed_json.isErr()) return errorJson(observed_json.error().code, observed_json.error().message);
         auto old_json = variantToJson(old_value.value());
         if (old_json.isErr()) return errorJson(old_json.error().code, old_json.error().message);
-        return liveResult({{"status", "success"}, {"target_node", params.value("target_node", "")},
-                           {"property_name", property}, {"value", observed_json.value()},
-                           {"requested_value", params["value"]}, {"old_value", old_json.value()},
-                           {"applied", jsonScalarsEquivalent(observed_json.value(), params["value"])},
-                           {"undo_redo_registered", true}});
+        return liveSceneMutation({{"status", "success"}, {"target_node", params.value("target_node", "")},
+                                  {"property_name", property}, {"value", observed_json.value()},
+                                  {"requested_value", params["value"]}, {"old_value", old_json.value()},
+                                  {"applied", jsonScalarsEquivalent(observed_json.value(), params["value"])},
+                                  {"undo_redo_registered", true}});
     }
 
     if (method == "scene.instantiateNode") {
@@ -9787,7 +9846,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         // one in the tree.
         if (!instance_scene_path.empty()) result["scene_path"] = instance_scene_path;
         if (actual_path.isErr()) result["node_path_verified"] = false;
-        return liveResult(result);
+        return liveSceneMutation(result);
     }
 
     if (method == "scene.removeNode" || method == "scene.duplicateNode" || method == "scene.reparentNode") {
@@ -9827,7 +9886,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             auto committed = commitAction(manager.value());
             if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
-            return liveResult({{"status", "success"}, {"action", "remove_node"}, {"undo_redo_registered", true}});
+            return liveSceneMutation({{"status", "success"}, {"action", "remove_node"}, {"undo_redo_registered", true}});
         }
 
         if (method == "scene.reparentNode") {
@@ -9873,7 +9932,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             auto committed = commitAction(manager.value());
             if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
-            return liveResult({{"status", "success"}, {"action", "reparent_node"}, {"undo_redo_registered", true}});
+            return liveSceneMutation({{"status", "success"}, {"action", "reparent_node"}, {"undo_redo_registered", true}});
         }
 
         auto flags = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(15));
@@ -9945,7 +10004,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                             : logical_parent.value() + "/" + duplicate_name.value()},
                        {"undo_redo_registered", true}};
         if (duplicate_path.isErr()) result["node_path_verified"] = false;
-        return liveResult(result);
+        return liveSceneMutation(result);
     }
 
     if (method == "editor.undo" || method == "editor.redo") {

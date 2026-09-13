@@ -122,6 +122,8 @@ Non-finite numbers read back as the strings `"inf"`, `"-inf"` and `"nan"` rather
 
 The property is read back after the commit, and the result reports what it now holds rather than what was requested. `value` is that observed state, `old_value` is what it held before, `requested_value` is the argument, and `applied` says whether the two now agree. A committed UndoRedo action is not a changed property: Godot discards some writes, such as `anchors_preset` on a Control still in `layout_mode` 0, and those return `applied: false` with `value` unchanged. Numbers are compared by value, so writing an integer to a float property is `applied: true`.
 
+Every live mutation of the edited scene, this one and `scene_instantiate_node`, `scene_remove_node`, `scene_reparent_node`, `scene_duplicate_node`, the group tools, `script_attach_to_node`, `script_detach_from_node`, `signal_connect`, `signal_disconnect`, `viewport_set_camera_transform`, `tilemap_set_cells` and `gridmap_set_cells`, carries `scene_saved: false` and a `limitation` sentence. The change is in the editor's open scene and its undo history, not on disk; `editor_save_scene` persists it, and closing the editor without saving discards it. `undo_redo_registered: true` says the change is real, not that it is saved.
+
 Every live scene answer names the scene it is about. `scene_get_hierarchy` and `scene_get_selection` carry `scene_file_path`, the `res://` path of the scene open in the editor, or `null` with `scene_is_unsaved: true` for one that has never been saved. A scene node 404 says which scene it searched. `scene_create` opens the scene it writes, so from that call on every later `scene_*` call answers about a different file; it now reports `edited_scene_changed` and `previous_scene_file_path` so that switch is visible rather than something a caller has to infer from nodes going missing.
 
 ### `scene_get_property` — Live
@@ -1302,7 +1304,9 @@ Always-confirmed tools are `runtime_restore_checkpoint`, `editor_reload_project`
 ### `didi_control_room` — Offline (local status)
 
 Reports Didi's own state rather than Godot's. Read-only, and the only tool whose
-subject is the server.
+subject is the server. With an editor route attached it asks the editor one
+bounded question, which open scenes hold unsaved changes, and nothing else;
+everything else it reports is a stat or a published descriptor.
 
 - `log_limit` (`integer`, optional, default `120`, maximum `500`): how many of
   the newest records from this server's log to return.

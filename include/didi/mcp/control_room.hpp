@@ -149,6 +149,15 @@ struct ControlRoomInputs {
     bool addon_present{false};
     bool addon_enabled{false};
 
+    // The one question the dashboard asks an attached editor: which open
+    // scenes hold unsaved changes. `asked` is false when nothing is attached,
+    // the route is a game, or the editor did not answer; `readable` is false
+    // on an engine that cannot say (get_unsaved_scenes binds from Godot 4.7).
+    // An unreadable answer is reported as unknown, never as clean (#557).
+    bool unsaved_scenes_asked{false};
+    bool unsaved_scenes_readable{false};
+    std::vector<std::string> unsaved_scenes;
+
     std::vector<ControlRoomSession> sessions;
     std::optional<std::string> selected_session_id;
 
