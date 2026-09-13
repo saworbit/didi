@@ -38,6 +38,10 @@ CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::I
 // between the live bridge and the .tscn parser can be observed with a stub
 // route rather than an editor.
 CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+// Defined in src/tools/visual_tools.cpp. Called directly because the published
+// schema now refuses the empty string before any handler runs, and the
+// handler's own refusal has to be observable on its own (#554).
+CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 } // namespace mcp
 } // namespace didi
 
@@ -4735,6 +4739,167 @@ void test_offline_capability_is_derived_not_listed() {
     }
 }
 
+// Break caught: 41 of 90 required string parameters carried no minLength, so
+// "" reached handlers written for a non-empty name and each invented its own
+// answer. Five said the argument was missing when it had been supplied, one
+// answered with a bare string, and viewport_create_test_lab wrote a lab with
+// no target in it and reported the same success as a lab with one (#553,
+// #554). The stamp lives in one place now, and this walks the published
+// surface so the next tool cannot quietly reintroduce the gap.
+static void test_required_strings_refuse_the_empty_string() {
+    ScopedToolProject project("required-strings");
+    writeAuditFile("project.godot", "config_version=5\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    size_t required_strings = 0;
+    for (const auto& tool : registry.listTools()) {
+        const auto definition = tool.toJson();
+        const auto& schema = definition["inputSchema"];
+        if (!schema.is_object() || !schema.contains("required") || !schema.contains("properties")) {
+            continue;
+        }
+        for (const auto& name : schema["required"]) {
+            const auto key = name.get<std::string>();
+            if (!schema["properties"].contains(key)) continue;
+            const auto& property = schema["properties"][key];
+            // A nullable type is an array and is not a required string.
+            if (!property.is_object() || !property.contains("type") ||
+                !property["type"].is_string() || property["type"] != "string") {
+                continue;
+            }
+            // File contents are the one required string an empty value is a
+            // real answer for: an empty script file is a file.
+            if (tool.name == "script_create" && key == "source_text") {
+                ASSERT_TRUE(!property.contains("minLength"));
+                continue;
+            }
+            ++required_strings;
+            if (!property.contains("minLength")) {
+                std::cerr << tool.name << "." << key << " carries no minLength" << std::endl;
+            }
+            ASSERT_TRUE(property.contains("minLength"));
+            ASSERT_TRUE(property["minLength"].get<int>() >= 1);
+        }
+    }
+    // The census counted 90 across the surface. A number well below that means
+    // the walk stopped reading schemas, not that the surface shrank.
+    ASSERT_TRUE(required_strings >= 80);
+
+    // The five that used to say the argument was missing, the one that used
+    // to answer with prose, and the one that used to write a lab with no
+    // target. All answer from the argument check now: the envelope, the
+    // property named, nothing written.
+    const std::vector<std::pair<std::string, didi::json>> calls = {
+        {"script_create", {{"script_path", ""}, {"source_text", "extends Node\n"}}},
+        {"resource_create", {{"save_path", ""}, {"resource_type", "Resource"}}},
+        {"resource_inspect", {{"resource_path", ""}}},
+        {"script_reflect_class", {{"class_name", ""}}},
+        {"project_set_setting", {{"setting", ""}, {"value", 1}}},
+        {"viewport_create_test_lab", {{"target_resource_path", ""}}},
+    };
+    for (const auto& [name, arguments] : calls) {
+        const auto result = registry.callTool(name, arguments);
+        ASSERT_TRUE(result.isError);
+        const auto error = didi::json::parse(result.content[0].text)["error"];
+        ASSERT_EQ(error["code"], 400);
+        ASSERT_EQ(error["data"]["code"], "invalid_arguments");
+        const auto message = error["message"].get<std::string>();
+        ASSERT_TRUE(message.find("is required") == std::string::npos);
+        ASSERT_TRUE(message.find("at least") != std::string::npos);
+    }
+    ASSERT_TRUE(!std::filesystem::exists("addons/didi/test_lab_sandbox.tscn"));
+
+    // The handler behind the schema refuses the empty target on its own, so a
+    // caller that reaches it another way cannot get the silent lab either.
+    const auto direct = didi::mcp::handleCreateVisualTestLab(
+        didi::json{{"target_resource_path", ""}}, nullptr);
+    ASSERT_TRUE(direct.isError);
+    const auto direct_error = didi::json::parse(direct.content[0].text)["error"];
+    ASSERT_EQ(direct_error["code"], 400);
+    ASSERT_TRUE(direct_error["message"].get<std::string>().find("target_resource_path") !=
+                std::string::npos);
+    ASSERT_TRUE(!std::filesystem::exists("addons/didi/test_lab_sandbox.tscn"));
+
+    // And a real target still produces a lab with that target in it.
+    writeAuditFile("subject.tres", "[gd_resource type=\"Resource\" format=3]\n\n[resource]\n");
+    const auto real = registry.callTool("viewport_create_test_lab",
+                                        didi::json{{"target_resource_path", "res://subject.tres"}});
+    ASSERT_TRUE(!real.isError);
+    const auto lab = readToolTestFile("addons/didi/test_lab_sandbox.tscn");
+    ASSERT_TRUE(lab.find("TargetInstance") != std::string::npos);
+    ASSERT_TRUE(lab.find("res://subject.tres") != std::string::npos);
+}
+
+// Break caught: four failures behind well-formed arguments still answered with
+// a bare string. Every census so far had asked from in front of the argument
+// check, and these fail after it: the settings writer, the offline capability
+// check (#548). Each is asked here at the layer that failed.
+static void test_handler_failures_carry_the_error_envelope() {
+    ScopedToolProject project("handler-envelopes");
+    writeAuditFile("project.godot", "config_version=5\n\n[application]\nconfig/name=\"x\"\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto envelope_of = [](const didi::mcp::CallToolResult& result) {
+        ASSERT_TRUE(result.isError);
+        const auto parsed = didi::json::parse(result.content[0].text);
+        ASSERT_TRUE(parsed.contains("error"));
+        return parsed["error"];
+    };
+
+    // Removing a setting that is not there is a 404 from the writer, and the
+    // handler used to keep only its sentence.
+    const auto absent = envelope_of(registry.callTool(
+        "project_set_setting",
+        didi::json{{"setting", "application/config/nope"}, {"remove", true}}));
+    ASSERT_EQ(absent["code"], 404);
+    ASSERT_EQ(absent["data"]["code"], "not_found");
+    ASSERT_TRUE(absent["message"].get<std::string>().find("application/config/nope") !=
+                std::string::npos);
+
+    // A value nested past the cap is a bad argument, and the message names
+    // the cap in the schema's words rather than an internal phase number.
+    didi::json deep = 1;
+    for (int level = 0; level < 17; ++level) deep = didi::json{{"k", deep}};
+    const auto nested = envelope_of(registry.callTool(
+        "project_set_setting",
+        didi::json{{"setting", "vibe/deep"}, {"value", deep}, {"create", true}}));
+    ASSERT_EQ(nested["code"], 400);
+    ASSERT_EQ(nested["data"]["code"], "invalid_arguments");
+    ASSERT_TRUE(nested["message"].get<std::string>().find("Phase 2") == std::string::npos);
+    ASSERT_TRUE(nested["message"].get<std::string>().find("16 levels") != std::string::npos);
+
+    // Needing a live editor is the failure every other live tool answers as
+    // 503 not_connected, retryable, so a reattach-and-retry rule reaches this
+    // tool too.
+    const auto offline = envelope_of(registry.callTool(
+        "viewport_capture_passes", didi::json{{"passes", didi::json::array({"color"})}}));
+    ASSERT_EQ(offline["code"], 503);
+    ASSERT_EQ(offline["data"]["code"], "not_connected");
+    ASSERT_EQ(offline["data"]["retryable"], true);
+}
+
+// project_set_setting's create guard runs only with an editor attached, and
+// the tool reference says so. The tool and parameter descriptions promised the
+// guard without that qualification, so a caller reading the schema expected a
+// refusal the offline path never gives (#547).
+static void test_set_setting_descriptions_say_the_guard_is_live_only() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto* tool = registry.getTool("project_set_setting");
+    ASSERT_TRUE(tool != nullptr);
+    const auto definition = tool->toJson();
+    const auto description = definition["description"].get<std::string>();
+    ASSERT_TRUE(description.find("With an editor attached") != std::string::npos);
+    ASSERT_TRUE(description.find("Offline") != std::string::npos);
+    const auto create =
+        definition["inputSchema"]["properties"]["create"]["description"].get<std::string>();
+    ASSERT_TRUE(create.find("whether create is set or not") != std::string::npos);
+}
+
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.OfflineCapabilityIsDerived",
@@ -4911,6 +5076,12 @@ struct RegisterToolTests {
                      test_rename_keeps_everything_it_is_not_renaming);
         registerTest("Tools.RenameRefusals",
                      test_rename_refuses_what_it_cannot_do_safely);
+        registerTest("Tools.RequiredStringsRefuseEmpty",
+                     test_required_strings_refuse_the_empty_string);
+        registerTest("Tools.HandlerFailuresCarryTheEnvelope",
+                     test_handler_failures_carry_the_error_envelope);
+        registerTest("Tools.SetSettingCreateGuardIsLiveOnly",
+                     test_set_setting_descriptions_say_the_guard_is_live_only);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }

@@ -49,6 +49,29 @@ release changed, which is why it lives here and not in a version section.
 Discovery now exposes 116 canonical tools plus 10 legacy registrations (126 total). 113 canonical tools are implemented and 3 remain unimplemented.
 The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
+### Fixed
+
+- **Every required string parameter carries `minLength: 1`** unless the schema
+  says otherwise, stamped where `additionalProperties` is stamped. 41 of 90
+  accepted `""`, and the handlers behind them each answered differently: five
+  said the argument was missing when it had been supplied, one answered with a
+  bare string, and `viewport_create_test_lab` wrote a lab with no target in it
+  and reported the same success as a lab with one. The argument check now
+  refuses all of them in the envelope, naming the property. `script_create`'s
+  `source_text` is the one exception, because an empty file is a file (#553,
+  #554).
+- **Four failures behind valid arguments answer with the error envelope**
+  instead of prose: removing a project setting that is not there is `404
+  not_found`, a value nested past 16 levels is `400 invalid_arguments` and the
+  message no longer names an internal phase, an empty `class_name` is `400`,
+  and `viewport_capture_passes` offline is `503 not_connected` with
+  `retryable: true` like every other live-only tool (#548).
+- **`project_set_setting`'s descriptions say where the `create` guard runs.**
+  The name check needs an attached editor; offline the name is written whether
+  `create` is set or not, and the result's `limitation` already said so. The
+  tool and parameter descriptions promised a refusal the offline path never
+  gave (#547).
+
 ## [2.0.0] - 2026-09-13
 
 A major because the surface changed, not because the project grew up. See

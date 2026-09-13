@@ -39,5 +39,23 @@ namespace mcp {
 // schema cannot say one thing while the validator does another.
 [[nodiscard]] bool topLevelArgumentsAreClosed(const json& schema);
 
+// Stamps minLength: 1 on every required string property that declares no
+// minLength of its own.
+//
+// 41 of 90 required string parameters accepted "", and each handler behind
+// one invented its own answer: "Parameter 'script_path' is required" for an
+// argument that was supplied, a bare string for class_name, and a test lab
+// with no target for target_resource_path (#553, #554). Every required
+// string on this surface names something -- a path, a node, a class, a
+// setting, a group -- so the empty string is never the value a caller meant.
+// The one exception is file contents, which an empty file legitimately has;
+// it is named here rather than left to the next author to remember.
+//
+// Stamped where additionalProperties is stamped, and for the same reason: the
+// argument check then answers all of them identically, in the envelope, naming
+// the property, and the next tool to be added cannot quietly reintroduce the
+// gap. A minLength written inline in a schema is the author's and wins.
+void requireNonEmptyRequiredStrings(std::string_view schema_source, json& schema);
+
 } // namespace mcp
 } // namespace didi
