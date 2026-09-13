@@ -245,7 +245,9 @@ Reflects a Godot engine class offline from the API dump pinned in the repository
 
 `api_version` names the Godot version the reflection describes, and `source` is `extension_api`. This is not live ClassDB reflection: it describes the pinned API, not the editor you happen to be running, and it does not know about script classes. This tool has no live mode, so attaching an editor does not change the answer; read a script class with `script_get_symbols` instead.
 
-With an editor attached, the response carries `attached_engine_version` and `api_version_matches_attached_engine`, comparing the major and minor of the pinned dump against the engine the bridge is running in. A patch difference is not a mismatch. `null` in either field means the extension is older than the descriptor's `engine_version`, so the comparison could not be made; unknown is not a match.
+With a session selected, the response carries `attached_engine_version` and `api_version_matches_attached_engine`, comparing the major and minor of the pinned dump against the engine the bridge is running in. A patch difference is not a mismatch. `null` in either field means the extension is older than the descriptor's `engine_version`, so the comparison could not be made; unknown is not a match.
+
+With no session selected, the same comparison is made against the project instead: `project_features_version` is the engine line `config/features` in `project.godot` declares, and `api_version_matches_project_features` compares it to the dump. A project on 4.5 read against the 4.7 dump answers `false` whether or not an editor happens to be open, and a project with no features line answers `null` in both. The description of a name the dump does not hold says it is absent from the pinned reference, not from Godot, because the two may differ.
 
 If the reference file is not installed next to the binary, `source` is `builtin_snapshot` and coverage falls back to a small built-in map.
 
