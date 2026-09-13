@@ -1198,12 +1198,17 @@ std::optional<Error> probeFileTarget(const FileTarget& target, const json& argum
     if (target.must_exist && !exists) {
         return Error::notFound("file does not exist beneath the project root: " + path);
     }
+    // The file the write is about, as the readers spell it. Echoing the
+    // argument put `exists: true` beside a path the caller had never written
+    // to -- res://PLAYER.gd for res://player.gd on Windows, res://d1/../x.gd
+    // for res://x.gd -- which is the one preview that misleads (#546, #551).
+    const std::string reported = paths::resourcePathOf(resolved.value());
     if (!exists) {
-        before = {{"exists", false}, {"path", path}};
+        before = {{"exists", false}, {"path", reported}};
         return std::nullopt;
     }
     const auto size = std::filesystem::file_size(resolved.value(), error);
-    before = {{"exists", true}, {"path", path},
+    before = {{"exists", true}, {"path", reported},
               {"size_bytes", error ? 0 : static_cast<uint64_t>(size)}};
     return std::nullopt;
 }
