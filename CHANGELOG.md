@@ -82,6 +82,147 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- `initialize` reads the `protocolVersion` it is sent (#531). Every value got
+  the same answer: a revision this server serves, one it does not, an empty
+  string, a bare JSON number and a missing key all came back `2024-11-05`, so a
+  malformed `InitializeRequest` was accepted in silence and a client could not
+  tell a version it had been granted from one it had been refused. #312
+  validated the `tools/call` envelope; `initialize` sits in front of it and was
+  not covered. The field is a required string, so a missing key or a non-string
+  is refused with `-32602` carrying `supported` and `requested`, the shape the
+  2024-11-05 lifecycle's own example uses. A revision this server serves is
+  answered with itself, and any other string with `2024-11-05`, which is what
+  that specification requires of both cases.
+
+- `resources/subscribe` refuses with a reason that is true (#532). Subscribing
+  to any of the three `godot://` resources was refused because "nothing else
+  changes without a tool call from this client", which is false of all three:
+  `godot://runtime/logs` is described in its own listing entry as incremental
+  engine-side records, and editor state and the project tree change whenever the
+  user edits. The message stated as a fact the very thing that makes a
+  subscription worth having. The refusal stands, because accepting one would
+  promise updates that never arrive, but it now says what is actually so: Didi
+  does not yet publish change notifications for engine-side resources. And
+  because `initialize` advertises `resources.subscribe` for the server as a
+  whole, every `resources/list` entry now carries `_meta.didi.subscribable`, so
+  a host can tell before it asks rather than by asking and being refused.
+
+- Resources with no live path say what they are, not what they fell back from
+  (#533). #419 removed `offline_fallback` from the tools that never had a live
+  path; the `_meta.didi` block on resources and their own answers were not part
+  of that sweep, which the code said outright was still owed. A board is a file
+  in `.didi/blackboard/` and the project tree is a filesystem index, so
+  `offline_fallback` named a fallback from a route neither ever had, and a host
+  that dims or warns on that flag -- which is what the flag is for -- dimmed the
+  resources that are always fully available, with an editor attached and
+  healthy. `blackboard://<board>/state`, `blackboard://<board>/tasks` and
+  `godot://project/tree` report `local` now, and `ui://didi/control-room`
+  reports `local_status`, matching the tool that serves the same dashboard.
+  `godot://editor/state` and `godot://runtime/logs` keep `offline_fallback`,
+  because those really do fall back. The advertisement and the answer come from
+  the registration, so they cannot drift apart.
+- A second MCP server on a held editor is told so (#527). Only one server can
+  hold the editor bridge, which is a reasonable design; what a second server was
+  *told* was not. Its auto-attach was refused with `423`, the reason was dropped
+  on the floor, and every call afterwards answered the `503 not_connected` that a
+  server with no Godot running at all receives, byte for byte. The blackboard
+  exists because more than one agent is expected to work on a project at once, so
+  this is the multi-agent path rather than an edge case, and the second agent's
+  sensible next move from "nothing is running" is offline file edits over the
+  first agent's live work. The refusal is remembered now and reported as
+  `bridge_held`, with `bridge_held_by_another_client: true` in the error's `data`
+  and a control-room fact saying the editor is up and owned.
+
+- An engine crash survives the call that discovered it (#536). The first live
+  call after the editor died got a complete account: the incident, the cause, and
+  what to do. Every call after that reverted to the generic `503`, offline
+  answers resumed with nothing saying why, and `didi_control_room` -- the one
+  tool whose job is to say what state the bridge is in -- reported `Route:
+  detached`, which is also what it reports when no editor was ever started. The
+  incident is kept until a route opens again: the control room names it and when
+  it happened, and an `offline_fallback` answer carries `offline_reason` saying
+  the fallback follows a crashed engine rather than a session that never
+  attached. `runtime_detach_session` clears it, because letting go deliberately
+  is not an obstruction.
+
+- `runtime_detach_session` is idempotent (#537). Detaching with nothing attached
+  answered `503 not_connected` with `retryable: true`, advising a retry that
+  would never attach anything. Detach is a cleanup, and the session is torn down
+  implicitly when the editor goes, so a caller doing the tidy-up it is told to do
+  got an error for it. It answers `detached: false` now, the shape
+  `resources/unsubscribe` already uses two layers down for the same question, and
+  `detached: true` when it is the call that released something. Answering with
+  nothing attached is also what makes its success payload producible offline, so
+  it publishes an `outputSchema` now.
+
+
+- `blackboard_task_update` says what it takes for `progress` (#528). The
+  published description read "0 to 1" while the handler required an integer
+  percentage, so the documented range was not even representable and `0.5` was
+  refused as "must be an integer, not a number". A completed task has always
+  reported `progress: 100`, which is the real scale. The description says that
+  now, and the schema already did.
+
+- `blackboard_task_claim` answers a conflict like its siblings (#529). Three
+  tools on one board met the same state and answered in two shapes: a claim of a
+  task somebody else holds came back with `isError` false, `claimed: false` and
+  an English sentence, so a caller branching on `isError` read a lost race as a
+  win. Contention is what the board is for, so this was the most travelled path
+  on it. Naming a `task_id` that cannot be claimed now answers `404` when the
+  task does not exist and `409` when its state is what stands in the way, with
+  `data.reason_code` saying which: `already_leased`, `blocked_by_dependency`,
+  `tag_mismatch` or `not_pending`. Asking for whatever is ready and being told
+  nothing is stays a success, and carries a `reason_code` of `no_tasks`,
+  `all_leased`, `all_blocked` or `no_ready_task`, so the three cases can be told
+  apart without reading prose.
+
+- Completing an already-completed task is `409 conflict` (#530). It answered
+  `400 invalid_arguments`, which tells an agent to fix its arguments when there
+  is nothing to fix: the task exists, the lease was held, the id is well formed,
+  and the work is done. A retried completion after a dropped response is the
+  ordinary way to reach this state. `blackboard_task_update` answers the same
+  state the same way.
+
+
+- A path holding a NUL is refused rather than written somewhere else (#525).
+  `script_create` and `resource_create` checked the extension against the string
+  they were handed, and a NUL truncates that string at the filesystem boundary,
+  so `res://n1\0x.gd` passed the `.gd` check and thirteen bytes landed in a file
+  called `n1` with no extension. The call reported `created_offline` and echoed
+  back the path it had not written to. The shared write resolver now refuses any
+  control character in a path, by the same rule `blackboard_write` already
+  applies to a board key, so every writer in the server agrees about what a path
+  may hold.
+
+- `script_create` answers a bad path with a code (#526). Four failures behind
+  well-formed arguments came back as a bare JSON string with nothing to branch
+  on: a name too long for the filesystem, a `user://` target, a path not ending
+  in `.gd`, and a directory component too long. `scene_create` and
+  `resource_create` already returned the error envelope for the same shapes.
+  All four now carry a code, `retryable` and the tool name. A failed write
+  reports the reason the filesystem gave and the status that reason deserves,
+  so a path the filesystem will not take is a 400 rather than a 500 that says
+  the server broke. `resource_create` picked up the same envelope on the three
+  answers it still gave in prose.
+
+- `res://nested/../ok2.gd` is accepted, because it lands inside the project
+  (#534). Containment was decided by looking for `..` in the string, which
+  refused a normalised path inside the root while accepting `res://./ok.gd`
+  through the same root, and the resolve-and-compare check behind it never ran.
+  Composing a path from a directory and a relative name is the ordinary way to
+  build one. The three copies of the substring rule are gone and the resolve is
+  the check; what actually lands outside the root is still refused, with the
+  message that already said so.
+
+- A Godot `Error` reaches the caller with its name (#535). `scene_create` gave a
+  300-character filename to `ResourceSaver` and answered `500 internal_error`
+  with "failed with Error 19": the server had not broken, the argument was bad,
+  and the number had no name attached. The engine's file-and-path errors now
+  answer `400 invalid_arguments` and say what to do about it, and every place
+  the bridge printed a raw enum value now prints `ERR_CANT_OPEN (19)`. The table
+  is Godot's own `Error` enum from `extension_api.json`.
+
+
 - `runtime_detach_session` reports `server_build_id` again. Naming the echoed
   descriptor `detached_session` left the bridge-build check looking for a
   `session` key that is no longer there, so the one answer that reports on a
@@ -983,6 +1124,14 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   reported as an `else` statement missing its colon (#371). Unlike the other
   block keywords, `else` carries no trailing space, and the check for what
   follows it never confirmed the line started with `else` at all.
+
+- The schema-enforcement test brings its own project. It searched `res://addons`
+  and asserted the search succeeded, with no fixture anywhere in it, so the only
+  thing making that true was the binary happening to be started from the
+  repository root. Run from anywhere else, the assertion that closing a schema
+  must not close the tool failed for a missing directory. It now creates the
+  project it stands in, and asserts the search found something rather than only
+  that it did not error.
 
 ---
 

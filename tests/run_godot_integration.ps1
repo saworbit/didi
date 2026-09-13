@@ -447,7 +447,7 @@ $nonFileDescriptorPath = Join-Path $sessionDirectory "not-a-file.json"
 New-Item -ItemType Directory -Path $nonFileDescriptorPath | Out-Null
 
 $prelaunchRequests = @(
-    (@{ jsonrpc = "2.0"; id = 880; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+    (@{ jsonrpc = "2.0"; id = 880; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
     (Tool-Request 881 "runtime_list_sessions" @{ project_path = $fixtureRoot })
 )
 $rawPrelaunchResponses = Invoke-Didi -Requests $prelaunchRequests -Arguments @("--project", $fixtureRoot)
@@ -498,7 +498,7 @@ try {
     }
 
     $discoveryRequests = @(
-        (@{ jsonrpc = "2.0"; id = 901; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 901; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 902 "runtime_list_sessions" @{ project_path = $fixtureRoot })
     )
     $rawDiscoveryResponses = Invoke-Didi -Requests $discoveryRequests -Arguments @("--project", $fixtureRoot)
@@ -530,7 +530,7 @@ try {
     $sceneReadyDeadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
     while ([DateTime]::UtcNow -lt $sceneReadyDeadline -and -not $godot.HasExited) {
         $sceneReadyRequests = @(
-            (@{ jsonrpc = "2.0"; id = 910; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+            (@{ jsonrpc = "2.0"; id = 910; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
             (Tool-Request 911 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
             (Tool-Request 912 "scene_open" @{ scene_path = "res://main.tscn" })
         )
@@ -565,7 +565,7 @@ try {
     # back half-built and takes the editor down with it. A truncated transcript or
     # a dead editor here means the notification stopped being sent.
     $postInitRequests = @(
-        (@{ jsonrpc = "2.0"; id = 920; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 920; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 921 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 922 "scene_instantiate_node" @{ node_type = "Label"; parent_path = "/root"; name = "PostInitLabel" }),
         (Tool-Request 923 "scene_instantiate_node" @{ node_type = "Button"; parent_path = "/root"; name = "PostInitButton" }),
@@ -624,7 +624,7 @@ try {
     $gameDeadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
     while ([DateTime]::UtcNow -lt $gameDeadline -and -not $game.HasExited) {
         $gameDiscoveryRequests = @(
-            (@{ jsonrpc = "2.0"; id = 291; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+            (@{ jsonrpc = "2.0"; id = 291; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
             (Tool-Request 292 "runtime_list_sessions" @{ project_path = $fixtureRoot })
         )
         $rawGameDiscovery = Invoke-Didi -Requests $gameDiscoveryRequests -Arguments @("--project", $fixtureRoot)
@@ -664,7 +664,7 @@ try {
     $nulExpression = "node" + [char]0 + ".get_child_count()"
 
     $runtimeRequests = @(
-        (@{ jsonrpc = "2.0"; id = 300; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 300; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 301 "runtime_attach_session" @{ session_id = $gameSession.session_id }),
         (Tool-Request 376 "runtime_get_session" @{}),
         (Tool-Request 377 "runtime_detach_session" @{}),
@@ -1334,7 +1334,7 @@ try {
     foreach ($level in 1..18) { $tooDeep = @{ nested = $tooDeep } }
 
     $requests = @(
-        (@{ jsonrpc = "2.0"; id = 1; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 1; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 900 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 130 "eval_gdscript" @{ expression = "node.get('process_priority')"; context_node = "/root/SmokeRoot/Subject" }),
         (Tool-Request 131 "eval_gdscript" @{ expression = "node.get_child_count()" }),
@@ -2035,7 +2035,7 @@ try {
     # Re-open the canonical fixture and obtain a baseline whose process-local cache ID is
     # consumed by a subsequent MCP process while the same editor extension remains alive.
     $phase4BaselineRequests = @(
-        (@{ jsonrpc = "2.0"; id = 400; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 400; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 401 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 402 "scene_open" @{ scene_path = "res://main.tscn" }),
         (Tool-Request 403 "viewport_capture_frame" @{ camera_identifier = "active_editor_view" }),
@@ -2061,7 +2061,7 @@ try {
     Assert-True ($symbolSearch.matches[0].name -eq "phase_four_probe" -and $symbolSearch.matches[0].kind -eq "function") "Symbol search returned the wrong declaration."
 
     $phase4Requests = @(
-        (@{ jsonrpc = "2.0"; id = 410; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 410; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 411 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 412 "viewport_capture_frame" @{ camera_identifier = "active_editor_view"; node_isolation_path = "/root/SmokeRoot/Subject"; isolation_background = "original" }),
         (Tool-Request 413 "scene_get_property" @{ target_node = "/root/SmokeRoot/Container"; property_name = "visible" }),
@@ -2190,7 +2190,7 @@ try {
     Assert-True ((Tool-Payload $byId[966]).changed_cells -eq 1) "GridMap clear did not remove the fixture cell."
 
     $phase5Requests = @(
-        (@{ jsonrpc = "2.0"; id = 500; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 500; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 501 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 502 "project_list_export_presets" @{}),
         (Tool-Request 503 "shader_check_compile" @{ shader_path = "res://phase5_valid.gdshader"; timeout_seconds = 30 }),
@@ -2256,7 +2256,7 @@ try {
     $siblingSource = "extends Node`nclass_name SandboxSibling`n`nstatic func greet() -> String:`n`treturn `"hi`"`n"
     $consumerSource = "extends Node`n`nconst Sibling = preload(`"res://sandbox_sibling.gd`")`n`nfunc _ready() -> void:`n`tprint(Sibling.greet())`n"
     $verifyRequests = @(
-        (@{ jsonrpc = "2.0"; id = 620; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 620; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 621 "project_verify_changes" @{ changes = @(
             @{ path = "res://sandbox_sibling.gd"; content = $siblingSource },
             @{ path = "res://sandbox_user.gd"; content = $consumerSource }) }),
@@ -2316,7 +2316,7 @@ try {
         @{ path = "res://sandbox_run.gd"; content = $script }) }
 
     $runRequests = @(
-        (@{ jsonrpc = "2.0"; id = 630; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 630; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 631 "project_verify_changes" @{ changes = (& $runProposal $goodRunScript); run_scene = "res://sandbox_run.tscn"; run_frames = 5 }),
         (Tool-Request 632 "project_verify_changes" @{ changes = (& $runProposal $brokenRunScript); run_scene = "res://sandbox_run.tscn"; run_frames = 5 }),
         (Tool-Request 633 "project_verify_changes" @{ changes = (& $runProposal $goodRunScript); run_scene = "res://not_a_scene.tscn" }),
@@ -2370,7 +2370,7 @@ try {
     # turned off for this invocation rather than round-tripped. The refusal
     # above is what proves the gate is there.
     $applyRequests = @(
-        (@{ jsonrpc = "2.0"; id = 640; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 640; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 641 "project_apply_changes" @{ changes = (& $runProposal $goodRunScript); run_scene = "res://sandbox_run.tscn"; run_frames = 5 }),
         (Tool-Request 642 "project_apply_changes" @{ changes = (& $runProposal $brokenRunScript); run_scene = "res://sandbox_run.tscn"; run_frames = 5 })
     )
@@ -2412,7 +2412,7 @@ try {
     # --yolo, so turning it off here proves the behaviour and not the absence
     # of a guard.
     $callRequests = @(
-        (@{ jsonrpc = "2.0"; id = 2400; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 2400; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 2401 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 2402 "scene_open" @{ scene_path = "res://main.tscn" }),
         (Tool-Request 2403 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/SmokeRoot"; name = "CallProbe" }),
@@ -2473,7 +2473,7 @@ try {
     # The gate, with confirmations on. An ordinary call must not execute; it
     # must come back asking to be confirmed.
     $callGateRequests = @(
-        (@{ jsonrpc = "2.0"; id = 2420; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 2420; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 2421 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         # The preview reads the target now, so it needs one that can actually
         # run the method. /root/SmokeRoot has no script, and a dry run against
@@ -3188,7 +3188,7 @@ try {
     Assert-True ($publicTranscript -notmatch [regex]::Escape($gameSessionToken)) "Game session token leaked into public responses or process logs."
 
     $nextLogRequests = @(
-        (@{ jsonrpc = "2.0"; id = 120; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 120; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 121 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 122 "runtime_read_logs" @{ cursor = [uint64]$firstLogPage.next_cursor; limit = 5; minimum_level = "debug" })
     )
@@ -3212,7 +3212,7 @@ try {
     # ConvertTo-Json renders 9.0 as 9 and 1.0 as 1, which is the opposite of
     # the case under test.
     $wholeNumberRequests = @(
-        (@{ jsonrpc = "2.0"; id = 340; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 340; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 341 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 342 "scene_open" @{ scene_path = "res://main.tscn" }),
         '{"jsonrpc":"2.0","id":343,"method":"tools/call","params":{"name":"scene_set_property","arguments":{"target_node":"/root/SmokeRoot/Subject","property_name":"process_priority","value":9.0}}}',
@@ -3240,7 +3240,7 @@ try {
     Assert-True ((Tool-Payload $wholeNumberById[351]).value -eq 1) "The integer did not reach the float property."
 
     $stopRequests = @(
-        (@{ jsonrpc = "2.0"; id = 330; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 330; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 331 "runtime_attach_session" @{ session_id = $gameSession.session_id }),
         (Tool-Request 332 "runtime_stop" @{ exit_code = 0 })
     )
@@ -3256,7 +3256,7 @@ try {
     Assert-True $game.HasExited "Runtime stop did not terminate the game process."
 
     $cleanupRequests = @(
-        (@{ jsonrpc = "2.0"; id = 340; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 340; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 341 "runtime_list_sessions" @{ project_path = $fixtureRoot })
     )
     $rawCleanupResponses = Invoke-Didi -Requests $cleanupRequests -Arguments @("--project", $fixtureRoot)
@@ -3282,7 +3282,7 @@ try {
     $shutdownDeadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
     while ([DateTime]::UtcNow -lt $shutdownDeadline -and -not $shutdownGame.HasExited) {
         $shutdownDiscoveryRequests = @(
-            (@{ jsonrpc = "2.0"; id = 420; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+            (@{ jsonrpc = "2.0"; id = 420; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
             (Tool-Request 421 "runtime_list_sessions" @{ project_path = $fixtureRoot })
         )
         $shutdownDiscoveryResponses = @(Invoke-Didi -Requests $shutdownDiscoveryRequests -Arguments @("--project", $fixtureRoot) |
@@ -3309,7 +3309,7 @@ try {
     Assert-True ($shutdownGameSessionToken -match '^[0-9a-f]{64}$') "Shutdown-game descriptor token did not meet the private protocol shape."
 
     $pauseForShutdownRequests = @(
-        (@{ jsonrpc = "2.0"; id = 430; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 430; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 431 "runtime_attach_session" @{ session_id = $shutdownSession.session_id }),
         (Tool-Request 432 "runtime_set_paused" @{ paused = $true })
     )
@@ -3320,7 +3320,7 @@ try {
     Assert-True ((Tool-Payload $pauseForShutdownById[432]).paused -eq $true) "Shutdown-cancellation fixture was not paused before stepping."
 
     $shutdownStepRequests = @(
-        (@{ jsonrpc = "2.0"; id = 440; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 440; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 441 "runtime_attach_session" @{ session_id = $shutdownSession.session_id }),
         (Tool-Request 442 "runtime_step" @{ frames = 60 })
     )
@@ -3369,7 +3369,7 @@ try {
     }
     try {
         $failureRequests = @(
-            (@{ jsonrpc = "2.0"; id = 200; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+            (@{ jsonrpc = "2.0"; id = 200; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
             (Tool-Request 199 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
             (Tool-Request 201 "project_set_setting" @{ setting = "didi_phase2/rollback_probe"; create = $true; value = @{ changed = $true } }),
             (Tool-Request 202 "project_get_setting" @{ setting = "didi_phase2/rollback_probe" }),
@@ -3407,7 +3407,7 @@ try {
     # to exit; otherwise an unsaved-state prompt can make CloseMainWindow hang
     # invisibly on CI even though every functional assertion has completed.
     $editorCloseRequests = @(
-        (@{ jsonrpc = "2.0"; id = 210; method = "initialize"; params = @{} } | ConvertTo-Json -Compress),
+        (@{ jsonrpc = "2.0"; id = 210; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 211 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 212 "scene_close" @{ discard_unsaved = $true })
     )

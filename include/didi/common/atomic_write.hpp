@@ -1,9 +1,11 @@
 #pragma once
 
 #include "didi/common/project_path.hpp"
+#include "didi/common/filesystem_status.hpp"
 #include "didi/common/secure_random.hpp"
 #include "didi/common/types.hpp"
 
+#include <cerrno>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -85,9 +87,18 @@ inline Result<StagedWrite> stageFileWrite(const std::filesystem::path& target,
 
     std::error_code error;
     {
+        errno = 0;
         std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
         if (!output.is_open()) {
-            return Error::internal("Unable to open a temporary file next to the destination");
+            // The reason matters to the caller. A path the filesystem will not
+            // take -- too long, or holding something a name may not hold -- is
+            // the caller's argument to fix, and reporting every open failure as
+            // an internal error told an agent the server had broken (#526).
+            const std::error_code open_error(errno, std::generic_category());
+            const int status = statusForFilesystemError(open_error);
+            std::string reason = "Unable to open a temporary file next to the destination";
+            if (open_error) reason += ": " + open_error.message();
+            return Error(status, std::move(reason));
         }
         output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
         output.flush();

@@ -423,6 +423,13 @@ std::string generateTaskId(const json& tasks) {
     return {};
 }
 
+bool taskCarriesTag(const json& task, const std::string& tag) {
+    const auto tags = task.value("tags", json::array());
+    return std::any_of(tags.begin(), tags.end(), [&](const json& entry) {
+        return entry.is_string() && entry.get<std::string>() == tag;
+    });
+}
+
 } // namespace
 
 Result<std::vector<std::string>> blackboardSplitPath(const std::string& path) {
@@ -893,20 +900,33 @@ Result<json> blackboardTaskClaim(const BlackboardTaskClaimRequest& request, Blac
         std::string chosen;
         int64_t best_priority = 0;
         int64_t best_created = 0;
+        // Why nothing was picked, counted while picking. A claim that finds
+        // nothing used to say so in one English sentence, which is the only
+        // place "everything is leased", "everything is blocked" and "there is
+        // no work" could be told apart (#529).
+        size_t considered = 0;
+        size_t leased_away = 0;
+        size_t blocked_count = 0;
         for (const auto& entry : board.tasks.items()) {
             const json& task = entry.value();
             if (!task.is_object()) continue;
-            if (task.value("status", "") != kStatusPending) continue;
-            if (hasLiveLease(task, now_ms)) continue;
             if (request.task_id.has_value() && entry.key() != *request.task_id) continue;
-            if (request.tag.has_value()) {
-                const auto tags = task.value("tags", json::array());
-                if (std::none_of(tags.begin(), tags.end(), [&](const json& tag) {
-                        return tag.is_string() && tag.get<std::string>() == *request.tag;
-                    })) {
-                    continue;
-                }
+            if (request.tag.has_value() && !taskCarriesTag(task, *request.tag)) continue;
+            ++considered;
+            const std::string task_status = task.value("status", std::string());
+            // A live lease is what puts a task out of reach, whatever status it
+            // is carrying. refreshTasks has already returned anything whose
+            // lease lapsed to pending, so a task still holding one is held by
+            // somebody, and an in_progress task is the ordinary shape of that.
+            if (hasLiveLease(task, now_ms)) {
+                ++leased_away;
+                continue;
             }
+            if (task_status == kStatusBlocked) {
+                ++blocked_count;
+                continue;
+            }
+            if (task_status != kStatusPending) continue;
             const int64_t priority = task.value("priority", static_cast<int64_t>(0));
             const int64_t created = task.value("created_at_ms", static_cast<int64_t>(0));
             if (chosen.empty() || priority > best_priority ||
@@ -918,25 +938,74 @@ Result<json> blackboardTaskClaim(const BlackboardTaskClaimRequest& request, Blac
         }
 
         if (chosen.empty()) {
+            // The lapsed leases this call reclaimed are worth keeping whether or
+            // not it went on to claim anything.
+            const auto persist = [&]() -> Result<void> {
+                if (request.dry_run || !refreshed) return Result<void>::ok();
+                auto saved = saveBoard(file, board);
+                if (saved.isErr()) return saved.error();
+                return Result<void>::ok();
+            };
+
+            // A claim that named a task meets the same conflict its siblings
+            // meet, and answered it with isError false and a prose reason, so a
+            // caller branching on isError read a lost race as a win (#529). A
+            // named task answers the way blackboard_task_update and
+            // blackboard_task_complete already answer: 404 when it is not
+            // there, 409 when its state is what stands in the way.
+            if (auto saved = persist(); saved.isErr()) return saved.error();
+
+            if (request.task_id.has_value()) {
+                const auto found = board.tasks.find(*request.task_id);
+                if (found == board.tasks.end()) {
+                    return Error::notFound("task '" + *request.task_id + "' does not exist");
+                }
+                const std::string task_status = found->value("status", std::string("unknown"));
+                if (hasLiveLease(*found, now_ms)) {
+                    return Error(409,
+                                 "task '" + *request.task_id + "' is leased by " +
+                                     leaseOwner(*found) + ", not " + request.agent_id,
+                                 json{{"reason_code", "already_leased"},
+                                      {"task_status", task_status},
+                                      {"leased_by", leaseOwner(*found)}});
+                }
+                if (request.tag.has_value() && !taskCarriesTag(*found, *request.tag)) {
+                    return Error(409,
+                                 "task '" + *request.task_id + "' does not carry the tag '" +
+                                     *request.tag + "'",
+                                 json{{"reason_code", "tag_mismatch"},
+                                      {"task_status", task_status}});
+                }
+                return Error(409,
+                             "task '" + *request.task_id + "' is " + task_status + ", not pending",
+                             json{{"reason_code", task_status == kStatusBlocked
+                                                      ? "blocked_by_dependency"
+                                                      : "not_pending"},
+                                  {"task_status", task_status}});
+            }
+
+            // Asking for whatever is ready and being told nothing is, is not a
+            // failure. It stays a success, and carries the code that says which
+            // kind of nothing it is.
+            const char* reason_code = "no_ready_task";
+            const char* reason = "no task is ready to claim";
+            if (considered == 0) {
+                reason_code = "no_tasks";
+                reason = "the board holds no task matching this request";
+            } else if (leased_away > 0) {
+                reason_code = "all_leased";
+                reason = "the tasks that could be claimed are leased by other agents";
+            } else if (blocked_count > 0) {
+                reason_code = "all_blocked";
+                reason = "every remaining task is blocked by a dependency";
+            }
             json empty = {
                 {"board", request.board},
                 {"claimed", false},
-                {"dry_run", request.dry_run}
+                {"dry_run", request.dry_run},
+                {"reason_code", reason_code},
+                {"reason", reason}
             };
-            if (request.task_id.has_value()) {
-                const auto found = board.tasks.find(*request.task_id);
-                empty["reason"] = found == board.tasks.end()
-                    ? std::string("no such task")
-                    : "task is " + found->value("status", std::string("unknown")) +
-                          (hasLiveLease(*found, now_ms) ? " and leased by " + leaseOwner(*found)
-                                                        : std::string());
-            } else {
-                empty["reason"] = "no task is ready to claim";
-            }
-            if (!request.dry_run && refreshed) {
-                auto saved = saveBoard(file, board);
-                if (saved.isErr()) return saved.error();
-            }
             return empty;
         }
 
@@ -1003,7 +1072,12 @@ Result<json> blackboardTaskUpdate(const BlackboardTaskUpdateRequest& request,
         json task = *found;
         const std::string status = task.value("status", std::string());
         if (status == kStatusCompleted) {
-            return Error::invalidArgument("task '" + request.task_id + "' is already completed");
+            // The arguments are fine; the task's state is what stands in the
+            // way, which is the 409 this same handler already answers the
+            // adjacent lease conflict with (#530).
+            return Error(409, "task '" + request.task_id + "' is already completed",
+                         json{{"reason_code", "already_completed"},
+                              {"task_status", kStatusCompleted}});
         }
 
         const bool reopening = request.status.has_value() && *request.status == kStatusPending;
@@ -1083,7 +1157,12 @@ Result<json> blackboardTaskComplete(const BlackboardTaskCompleteRequest& request
         }
         json task = *found;
         if (task.value("status", std::string()) == kStatusCompleted) {
-            return Error::invalidArgument("task '" + request.task_id + "' is already completed");
+            // A retried completion after a dropped response is the ordinary way
+            // to reach this state. invalid_arguments tells an agent to fix its
+            // arguments, and there is nothing to fix: the work is done (#530).
+            return Error(409, "task '" + request.task_id + "' is already completed",
+                         json{{"reason_code", "already_completed"},
+                              {"task_status", kStatusCompleted}});
         }
         // Completing someone else's task is how a dependent gets released while
         // the work behind it is still half done.

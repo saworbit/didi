@@ -4,6 +4,7 @@
 #include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/gdextension/viewport_renderer.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/godot_error.hpp"
 #include "didi/common/json_bounds.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/runtime/input_injection.hpp"
@@ -1411,7 +1412,10 @@ Result<void> restoreProjectSetting(GDExtensionObjectPtr project_settings, Varian
     if (saved.isErr()) return saved.error();
     auto code = scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT);
     if (code.isErr()) return code.error();
-    if (code.value() != 0) return Error::internal("Rollback ProjectSettings.save failed with Error " + std::to_string(code.value()));
+    if (code.value() != 0) {
+        return Error::internal("Rollback ProjectSettings.save failed with " +
+                               ::didi::godot::describeGodotError(code.value()));
+    }
     return Result<void>::ok();
 }
 
@@ -7643,7 +7647,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto rollback_save = restoreProjectSetting(project_settings.value(), name.value(), previous.value());
             const std::string detail = save_code.isErr()
                 ? save_code.error().message
-                : "Godot Error " + std::to_string(save_code.value());
+                : ::didi::godot::describeGodotError(save_code.value());
             if (rollback_save.isErr()) {
                 return errorJson(500, "ProjectSettings.save failed (" + detail + ") and rollback failed: " +
                                       rollback_save.error().message);
@@ -8609,7 +8613,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (closed.isErr()) return errorJson(closed.error().code, closed.error().message);
             auto code = scalarFromVariant<int64_t>(closed.value(), GDEXTENSION_VARIANT_TYPE_INT);
             if (code.isErr()) return errorJson(code.error().code, code.error().message);
-            if (code.value() != 0) return errorJson(500, "Godot close_scene failed with Error " + std::to_string(code.value()));
+            if (code.value() != 0) {
+                return errorJson(500, "Godot close_scene failed with " +
+                                          ::didi::godot::describeGodotError(code.value()));
+            }
             return liveResult({{"status", "success"}, {"closed", true}, {"scene_path", path.value()},
                                {"discarded_unsaved", discard_unsaved},
                                {"dirty_state_readable", dirty_state_readable},
@@ -8808,7 +8815,20 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (saved.isErr()) return errorJson(saved.error().code, saved.error().message);
         auto save_code = scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT);
         if (save_code.isErr()) return errorJson(save_code.error().code, save_code.error().message);
-        if (save_code.value() != 0) return errorJson(500, "ResourceSaver.save failed with Error " + std::to_string(save_code.value()));
+        if (save_code.value() != 0) {
+            // A 300-character filename reached ResourceSaver and came back as
+            // "Error 19": a 500 that says the server broke, with no next move
+            // and no name on the number. The engine's file-and-path errors are
+            // the caller's argument to fix, so they answer 400 (#535).
+            const auto engine_code = save_code.value();
+            const bool caller_path = ::didi::godot::isGodotPathError(engine_code);
+            return errorJson(caller_path ? 400 : 500,
+                             "ResourceSaver.save could not write " + scene_path + ": " +
+                                 ::didi::godot::describeGodotError(engine_code) +
+                                 (caller_path ? ". Check that scene_path is a writable res:// "
+                                                "path and that its name is not too long."
+                                              : ""));
+        }
 
         // The file is on disk with a uid in its header. Whether the engine
         // knows that uid is a separate question, and the answer is no whenever
@@ -9955,7 +9975,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (saved.isErr()) return errorJson(saved.error().code, saved.error().message);
         auto code = scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT);
         if (code.isErr()) return errorJson(code.error().code, code.error().message);
-        if (code.value() != 0) return errorJson(500, "Godot save_scene failed with Error " + std::to_string(code.value()));
+        if (code.value() != 0) {
+            return errorJson(::didi::godot::isGodotPathError(code.value()) ? 400 : 500,
+                             "Godot save_scene failed with " +
+                                 ::didi::godot::describeGodotError(code.value()));
+        }
         return liveResult({{"status", "saved"}});
     }
 

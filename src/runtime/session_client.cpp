@@ -842,6 +842,55 @@ void reportCrashOnce(uint64_t pid, const EngineIncident& incident, const EngineC
 
 } // namespace
 
+namespace {
+
+std::mutex g_obstruction_mutex;
+std::optional<RouteObstruction> g_obstruction;
+
+} // namespace
+
+json RouteObstruction::toJson() const {
+    json value = {{"kind", kind}, {"at_ms", at_ms}};
+    if (!cause.empty()) value["cause"] = cause;
+    if (!recovery.empty()) value["recovery"] = recovery;
+    if (pid != 0) value["pid"] = pid;
+    if (!session_id.empty()) value["session_id"] = session_id;
+    return value;
+}
+
+void recordRouteObstruction(RouteObstruction obstruction) {
+    if (obstruction.at_ms == 0) {
+        obstruction.at_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::system_clock::now().time_since_epoch())
+                                .count();
+    }
+    std::lock_guard<std::mutex> lock(g_obstruction_mutex);
+    g_obstruction = std::move(obstruction);
+}
+
+void clearRouteObstruction() {
+    std::lock_guard<std::mutex> lock(g_obstruction_mutex);
+    g_obstruction.reset();
+}
+
+std::optional<RouteObstruction> lastRouteObstruction() {
+    std::lock_guard<std::mutex> lock(g_obstruction_mutex);
+    return g_obstruction;
+}
+
+void annotateRouteObstruction(Error& error) {
+    const auto obstruction = lastRouteObstruction();
+    if (!obstruction.has_value()) return;
+    if (!error.data.is_object()) error.data = json::object();
+    // Never over a fact the call itself established. A live call that failed
+    // right now has looked at the engine; this is for the calls after it.
+    if (error.data.contains("incident")) return;
+    error.data["route_obstruction"] = obstruction->toJson();
+    if (obstruction->kind == "bridge_held") {
+        error.data["bridge_held_by_another_client"] = true;
+    }
+}
+
 void annotateEngineState(Error& error, const std::optional<SessionDescriptor>& session) {
     if (!session.has_value() || session->pid == 0) return;
     if (!error.data.is_object()) error.data = json::object();
@@ -877,6 +926,13 @@ void annotateEngineState(Error& error, const std::optional<SessionDescriptor>& s
     error.data["incident"] = engineIncidentKindName(incident.kind);
     error.data["cause"] = incident.cause;
     error.data["recovery"] = incident.recovery;
+    // The call that discovers a dead engine gets the whole story. Every call
+    // after it used to get the generic "nothing is attached", because the
+    // session was torn down and there was no descriptor left to classify. The
+    // incident outlives the call that found it now (#536).
+    recordRouteObstruction(RouteObstruction{engineIncidentKindName(incident.kind), incident.cause,
+                                            incident.recovery, session->pid, session->session_id,
+                                            0});
     reportCrashOnce(session->pid, incident, crash);
 }
 
@@ -1117,7 +1173,9 @@ public:
     Result<json> sendRequest(const std::string& method, const json& params, int timeout_ms) override {
         const auto lease = acquireRouteLease();
         if (!lease.has_value()) {
-            return Error::notConnected("No runtime session is attached");
+            auto error = Error::notConnected("No runtime session is attached");
+            annotateRouteObstruction(error);
+            return error;
         }
         return lease->sendRequest(method, params, timeout_ms);
     }
@@ -1162,12 +1220,24 @@ public:
             std::lock_guard<std::mutex> lock(m_mutex);
             m_autoAttachEnabled = false;
             if (m_selectedSessionId.empty() || !findRouteLocked(m_selectedSessionId)) {
-                return Error::notConnected("No runtime session is attached");
+                // Detach is a cleanup, and a cleanup that errors when there is
+                // nothing to clean up cannot be called safely from a finally
+                // block. The session is torn down implicitly when the editor
+                // goes, so a caller doing the tidy-up it is told to do got an
+                // error for it, with retryable: true advising a retry that
+                // would never attach anything (#537). resources/unsubscribe on
+                // a URI nobody subscribed answers {"changed": false} two layers
+                // down, and this is the same question.
+                return json{{"detached", false}};
             }
             released = takeRouteLocked(m_selectedSessionId);
         }
         if (released->client) released->client->disconnect();
-        return json{{"session", released->descriptor.toJson()}};
+        // Letting go deliberately is not an obstruction, and leaving the old one
+        // in place would have the control room reporting a crash that this
+        // server has since walked away from.
+        clearRouteObstruction();
+        return json{{"detached", true}, {"session", released->descriptor.toJson()}};
     }
 
     Result<json> closeSessionRoute(const std::string& session_id) override {
@@ -1278,7 +1348,15 @@ private:
         uint64_t generation{0};
     };
 
+    // Every successful open clears the remembered obstruction, because it is a
+    // record of the current absence and there is no longer one.
     Result<json> attachDescriptor(const SessionDescriptor& descriptor, bool make_selected) {
+        auto opened = attachDescriptorInner(descriptor, make_selected);
+        if (opened.isOk()) clearRouteObstruction();
+        return opened;
+    }
+
+    Result<json> attachDescriptorInner(const SessionDescriptor& descriptor, bool make_selected) {
         if (!m_factory) return Error::internal("Runtime IPC client factory is not configured");
         if (m_clientId.empty()) return Error::internal("Unable to establish MCP client identity");
         std::shared_ptr<RuntimeSessionLock> session_lock;
@@ -1523,7 +1601,33 @@ private:
                 }
             }
             if (selected.has_value()) {
-                attached = attachDescriptor(*selected, true).isOk();
+                auto opened = attachDescriptor(*selected, true);
+                attached = opened.isOk();
+                // The reason an auto-attach failed used to be dropped on the
+                // floor, so a second server on a held editor was told exactly
+                // what a server with no editor at all is told (#527). 423 is
+                // the session lock, which is another MCP client holding this
+                // bridge; it is a real state and a different one from absence.
+                if (!attached) {
+                    RouteObstruction obstruction;
+                    obstruction.kind = opened.error().code == 423 ? "bridge_held" : "attach_refused";
+                    obstruction.cause =
+                        opened.error().code == 423
+                            ? "Another MCP client holds the bridge to this editor. Only one "
+                              "server can drive a Godot session at a time."
+                            : opened.error().message;
+                    obstruction.recovery =
+                        opened.error().code == 423
+                            ? "The editor is running and owned. Do not fall back to offline file "
+                              "edits on this project: the client holding the bridge has live work "
+                              "in it. Wait for that client to release the session, or ask the "
+                              "user which one should drive."
+                            : "Call runtime_list_sessions to see what is live, then "
+                              "runtime_attach_session.";
+                    obstruction.pid = selected->pid;
+                    obstruction.session_id = selected->session_id;
+                    recordRouteObstruction(std::move(obstruction));
+                }
                 if (attached) {
                     DIDI_LOG_INFO("RUNTIME", "Re-attached to runtime session ",
                                   selected->session_id, " (pid ", selected->pid,

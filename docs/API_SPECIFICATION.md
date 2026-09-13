@@ -82,6 +82,12 @@ declares its version in `_meta["io.modelcontextprotocol/protocolVersion"]` on
 every request and is served statelessly. A request carrying a supported version
 is self-contained and needs no prior `initialize`.
 
+`initialize` reads the `protocolVersion` it is sent. The field is a required
+string, so a missing key or a non-string is refused with `-32602`, carrying
+`supported` and `requested` in `error.data`. A revision this server serves is
+answered with itself; any other string is answered with `2024-11-05`, which is
+how a client tells a version it was granted from one it was refused.
+
 A modern request must carry `_meta["io.modelcontextprotocol/clientCapabilities"]`
 as well as the version, and its `id` must be a string or an integer. A request
 that declares a version and leaves out the capabilities, or sends a null or
@@ -240,7 +246,7 @@ Each tool and resource definition includes a namespaced `_meta.didi` object:
 }
 ```
 
-`executionModes` and `implemented` describe the registration. `currentMode`, `liveAvailable`, `editorConnected`, and optional `sessionKind` are evaluated when the list request is handled. `sessionKind` identifies the selected `editor`/`game` route. `editorConnected` is true only for a connected editor route. `liveAvailable` additionally requires that the exact tool/resource allow the selected kind: runtime logs/tree/evaluation allow both kinds, pause/step/stop are game-only, and other live definitions are editor-only by default. A connected wrong-kind definition reports `currentMode: "unavailable"`; otherwise `currentMode` is `live`, `offline_fallback`, `local`, `local_status`, `local_session_management`, `unavailable`, or `unimplemented`. `currentMode` and `executionModes` use the tool's own answer vocabulary, so a tool with no live path advertises `local` rather than `offline_fallback`; only a tool that can go live advertises the fallback. A non-empty `reason` is included for unimplemented definitions.
+`executionModes` and `implemented` describe the registration. `currentMode`, `liveAvailable`, `editorConnected`, and optional `sessionKind` are evaluated when the list request is handled. `sessionKind` identifies the selected `editor`/`game` route. `editorConnected` is true only for a connected editor route. `liveAvailable` additionally requires that the exact tool/resource allow the selected kind: runtime logs/tree/evaluation allow both kinds, pause/step/stop are game-only, and other live definitions are editor-only by default. A connected wrong-kind definition reports `currentMode: "unavailable"`; otherwise `currentMode` is `live`, `offline_fallback`, `local`, `local_status`, `local_session_management`, `unavailable`, or `unimplemented`. `currentMode` and `executionModes` use the definition's own answer vocabulary, so a tool or resource with no live path advertises `local` (or `local_status`, or `local_session_management`) rather than `offline_fallback`; only one that can go live advertises the fallback. The same word appears in the answer, because both come from the registration. A `resources/list` entry additionally carries `subscribable`, which says whether `resources/subscribe` accepts that URI. A non-empty `reason` is included for unimplemented definitions.
 
 Tool execution failures use MCP `result.isError: true` with explanatory text. JSON-RPC top-level errors remain reserved for malformed requests, unknown JSON-RPC methods, and other protocol-level failures.
 

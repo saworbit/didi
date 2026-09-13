@@ -528,6 +528,105 @@ void test_tasks_claim_is_exclusive() {
     ASSERT_TRUE(nothing.isOk());
     ASSERT_TRUE(!nothing.value()["claimed"].get<bool>());
     ASSERT_TRUE(nothing.value().contains("reason"));
+    // Asking for whatever is ready and being told nothing is, is not a failure.
+    // It stays a success, and says which kind of nothing without prose (#529).
+    ASSERT_EQ(nothing.value()["reason_code"].get<std::string>(), std::string("all_leased"));
+}
+
+void test_task_state_conflicts_are_conflicts() {
+    // Break caught: three tools on one board met the same conflict and answered
+    // in three shapes. A claim of a leased task came back isError false with an
+    // English sentence, so a caller branching on isError read a lost race as a
+    // win (#529). A second completion came back 400 invalid_arguments, which
+    // tells an agent to fix arguments that are already correct, when the work is
+    // simply done (#530).
+    BoardFixture fixture("conflicts");
+    int64_t now_ms = 9'000'000;
+    const std::string task = createTask("flush the write path", {}, 0, {"io"}, &now_ms);
+
+    BlackboardTaskClaimRequest alice;
+    alice.agent_id = "alice";
+    alice.task_id = task;
+    alice.lease_seconds = 600;
+    auto held = blackboardTaskClaim(alice, fixedClock(&now_ms));
+    ASSERT_TRUE(held.isOk() && held.value()["claimed"].get<bool>());
+
+    // Contention on a named task is the path a multi-agent session takes most
+    // often, and it is the same 409 the siblings answer with.
+    BlackboardTaskClaimRequest bob;
+    bob.agent_id = "bob";
+    bob.task_id = task;
+    auto lost = blackboardTaskClaim(bob, fixedClock(&now_ms));
+    ASSERT_TRUE(lost.isErr());
+    ASSERT_EQ(lost.error().code, 409);
+    ASSERT_EQ(lost.error().data.value("reason_code", std::string()),
+              std::string("already_leased"));
+    ASSERT_EQ(lost.error().data.value("leased_by", std::string()), std::string("alice"));
+
+    // A task that is not there is a 404, the code its siblings already use for
+    // the same question.
+    BlackboardTaskClaimRequest absent;
+    absent.agent_id = "bob";
+    absent.task_id = "TASK-9999";
+    auto missing = blackboardTaskClaim(absent, fixedClock(&now_ms));
+    ASSERT_TRUE(missing.isErr());
+    ASSERT_EQ(missing.error().code, 404);
+
+    // A tag that does not match is about this task's state too, and says which.
+    BlackboardTaskClaimRequest wrong_tag;
+    wrong_tag.agent_id = "carol";
+    wrong_tag.task_id = task;
+    wrong_tag.tag = "render";
+    auto mismatched = blackboardTaskClaim(wrong_tag, fixedClock(&now_ms));
+    ASSERT_TRUE(mismatched.isErr());
+    ASSERT_EQ(mismatched.error().code, 409);
+
+    // Completing twice. The second is a state conflict, not a bad argument: a
+    // retried completion after a dropped response is how an agent gets here.
+    BlackboardTaskCompleteRequest done;
+    done.task_id = task;
+    done.agent_id = "alice";
+    ASSERT_TRUE(blackboardTaskComplete(done, fixedClock(&now_ms)).isOk());
+    auto again = blackboardTaskComplete(done, fixedClock(&now_ms));
+    ASSERT_TRUE(again.isErr());
+    ASSERT_EQ(again.error().code, 409);
+    ASSERT_EQ(again.error().data.value("reason_code", std::string()),
+              std::string("already_completed"));
+
+    // The update handler answers the same state the same way.
+    BlackboardTaskUpdateRequest touch;
+    touch.task_id = task;
+    touch.agent_id = "alice";
+    touch.progress = 50;
+    auto updated = blackboardTaskUpdate(touch, fixedClock(&now_ms));
+    ASSERT_TRUE(updated.isErr());
+    ASSERT_EQ(updated.error().code, 409);
+
+    // progress is a whole percentage, which is what the description says now
+    // and what a completed task reports (#528). The board carries one scale.
+    BoardFixture second("progress");
+    int64_t later_ms = 9'500'000;
+    const std::string scaled = createTask("resize the atlas", {}, 0, {}, &later_ms);
+    BlackboardTaskClaimRequest owner;
+    owner.agent_id = "alice";
+    owner.task_id = scaled;
+    owner.lease_seconds = 600;
+    ASSERT_TRUE(blackboardTaskClaim(owner, fixedClock(&later_ms)).isOk());
+
+    BlackboardTaskUpdateRequest half;
+    half.task_id = scaled;
+    half.agent_id = "alice";
+    half.progress = 50;
+    auto midway = blackboardTaskUpdate(half, fixedClock(&later_ms));
+    ASSERT_TRUE(midway.isOk());
+    ASSERT_EQ(midway.value()["task"]["progress"].get<int64_t>(), 50);
+
+    BlackboardTaskCompleteRequest finish;
+    finish.task_id = scaled;
+    finish.agent_id = "alice";
+    auto completed = blackboardTaskComplete(finish, fixedClock(&later_ms));
+    ASSERT_TRUE(completed.isOk());
+    ASSERT_EQ(completed.value()["task"]["progress"].get<int64_t>(), 100);
 }
 
 void test_tasks_lease_expiry_reclaims() {
@@ -573,12 +672,17 @@ void test_tasks_dependencies_gate_readiness() {
     ASSERT_EQ(taskStatus(player, &now_ms), std::string("blocked"));
     ASSERT_EQ(taskStatus(base, &now_ms), std::string("pending"));
 
-    // Claiming must never hand out a blocked task.
+    // Claiming must never hand out a blocked task, and naming one is the same
+    // state conflict its siblings answer with a 409 rather than a success
+    // carrying an English sentence (#529).
     BlackboardTaskClaimRequest targeted;
     targeted.agent_id = "agent-b";
     targeted.task_id = player;
     auto refused = blackboardTaskClaim(targeted, fixedClock(&now_ms));
-    ASSERT_TRUE(refused.isOk() && !refused.value()["claimed"].get<bool>());
+    ASSERT_TRUE(refused.isErr());
+    ASSERT_EQ(refused.error().code, 409);
+    ASSERT_EQ(refused.error().data.value("reason_code", std::string()),
+              std::string("blocked_by_dependency"));
 
     const auto finish = [&](const std::string& task_id, const std::string& agent) {
         BlackboardTaskClaimRequest claim;
@@ -807,6 +911,8 @@ struct Register {
         registerTest("Blackboard.WaitsOutAHeldLock", test_blackboard_waits_out_a_held_lock);
         registerTest("BlackboardTasks.ClaimIsExclusive", test_tasks_claim_is_exclusive);
         registerTest("BlackboardTasks.LeaseExpiryReclaims", test_tasks_lease_expiry_reclaims);
+        registerTest("BlackboardTasks.StateConflictsAreConflicts",
+                     test_task_state_conflicts_are_conflicts);
         registerTest("BlackboardTasks.DependenciesGateReadiness",
                      test_tasks_dependencies_gate_readiness);
         registerTest("BlackboardTasks.CycleIsRefused", test_tasks_cycle_is_refused);

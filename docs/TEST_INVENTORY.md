@@ -10,24 +10,24 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **961** |
+| Automated tests | **968** |
 | Live-harness assertions | 876 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**613 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**620 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
 | `Base64` | 1 |
 | `Blackboard` | 9 |
 | `BlackboardResources` | 8 |
-| `BlackboardTasks` | 7 |
+| `BlackboardTasks` | 8 |
 | `CaptureCache` | 3 |
 | `Checkpoints` | 12 |
-| `ControlRoom` | 21 |
+| `ControlRoom` | 22 |
 | `CrashCapture` | 3 |
 | `EditorHook` | 5 |
 | `ErrorData` | 3 |
@@ -40,7 +40,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `InvariantWatch` | 4 |
 | `JsonRpc` | 4 |
 | `ManagedProcess` | 6 |
-| `McpServer` | 37 |
+| `McpServer` | 39 |
 | `Phase5` | 16 |
 | `Phase6` | 16 |
 | `Phase7Contract` | 9 |
@@ -58,7 +58,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `RuntimeLaunch` | 9 |
 | `RuntimeLogs` | 9 |
 | `RuntimeOutput` | 5 |
-| `RuntimeRouting` | 59 |
+| `RuntimeRouting` | 60 |
 | `RuntimeSessions` | 26 |
 | `RuntimeTree` | 1 |
 | `SceneCallMethod` | 6 |
@@ -68,7 +68,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `SpeculativeVerify` | 8 |
 | `TestRunner` | 1 |
 | `ToolManifest` | 1 |
-| `Tools` | 78 |
+| `Tools` | 80 |
 | `UiListControls` | 6 |
 | `ViewportIsolation` | 2 |
 | `autoload_diagnostics` | 6 |

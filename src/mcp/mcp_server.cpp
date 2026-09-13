@@ -454,6 +454,19 @@ std::optional<McpServer::UiAppMode> McpServer::parseUiAppMode(const std::string&
     return std::nullopt;
 }
 
+namespace {
+
+// Whether Didi publishes notifications/resources/updated for a URI, which is
+// the only honest basis for accepting a subscription. Read by the listing and
+// by the subscribe handler, so the advertisement and the answer cannot drift
+// apart -- which is how the refusal came to give a reason that was untrue of
+// every resource it was given for (#532).
+bool resourceIsSubscribable(const std::string& uri) {
+    return uri.rfind("blackboard://", 0) == 0;
+}
+
+} // namespace
+
 bool McpServer::uiSurfaceVisible(ProtocolEra era, const json& params) const {
     switch (m_uiAppMode) {
         case UiAppMode::Off: return false;
@@ -546,6 +559,32 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     }
 
     if (req.method == "initialize") {
+        // `protocolVersion` is a required string in InitializeRequest, and every
+        // value reached the same answer: a missing key, an empty string and a
+        // bare JSON number were all accepted in silence, and a version this
+        // server serves was answered identically to one it does not, so a
+        // client could not tell which it had been given (#531).
+        //
+        // The specification is explicit about both halves. The client MUST send
+        // a version it supports; if the server supports that version it MUST
+        // answer with the same one, and otherwise MUST answer with one it does
+        // support. -32602 is the code the specification's own example uses for
+        // a version problem, and `data` carries what it carries there.
+        const json* requested = req.params.is_object() ? req.params.find("protocolVersion") !=
+                                                                 req.params.end()
+                                                             ? &req.params["protocolVersion"]
+                                                             : nullptr
+                                                       : nullptr;
+        if (requested == nullptr || !requested->is_string()) {
+            return JsonRpcResponse::makeError(
+                req.id, JsonRpcErrorCode::InvalidParams,
+                requested == nullptr
+                    ? "protocolVersion is required and must be a string naming an MCP revision"
+                    : "protocolVersion must be a string naming an MCP revision",
+                json{{"supported", supportedProtocolVersions()},
+                     {"requested", requested == nullptr ? json(nullptr) : *requested}});
+        }
+        const auto asked = requested->get<std::string>();
         m_initialized = true;
         // A 2024-11-05 client declares its capabilities once, here. Remember the
         // MCP Apps declaration for the rest of the session; a modern client
@@ -554,7 +593,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             m_clientDeclaredUiExtension = clientDeclaresUiExtension(req.params["capabilities"]);
         }
         json result = {
-            {"protocolVersion", kProtocolVersion},
+            {"protocolVersion", isSupportedProtocolVersion(asked) ? asked : kProtocolVersion},
             {"capabilities", {
                 {"tools", {{"listChanged", false}}},
                 {"resources", {{"subscribe", true}, {"listChanged", false}}},
@@ -803,6 +842,10 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             json definition = r.toJson();
             addCurrentAvailability(definition, r.capability, connected, session_kind, true,
                                    managed_unavailable);
+            // initialize advertises resources.subscribe unconditionally, which
+            // describes only part of the surface: three of the five resources
+            // refuse. Per entry is where a host can act on it (#532).
+            definition["_meta"]["didi"]["subscribable"] = resourceIsSubscribable(r.uri);
             res_list.push_back(std::move(definition));
         }
         return JsonRpcResponse::makeSuccess(
@@ -834,13 +877,30 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         const std::string uri = req.params["uri"].get<std::string>();
         const bool subscribing = req.method == "resources/subscribe";
 
-        // Only boards change underneath a caller. Accepting a subscription to
-        // anything else would be a promise of notifications that never arrive.
-        if (uri.rfind("blackboard://", 0) != 0) {
+        // Accepting a subscription Didi does not publish notifications for
+        // would be a promise of updates that never arrive, so the refusal
+        // stands. The reason given for it did not: it said nothing else changes
+        // without a tool call from this client, which is false of all three
+        // godot:// resources. godot://runtime/logs is described in its own
+        // listing entry as incremental engine-side records, and editor state
+        // and the project tree change whenever the user edits or another client
+        // calls a tool. What is true is narrower and is what is said now: Didi
+        // does not yet publish change notifications for engine-side resources
+        // (#532). Which resources accept a subscription is published on each
+        // listing entry, so a host can tell before it asks.
+        if (!resourceIsSubscribable(uri)) {
             return makeApplicationError(
-                req.id, Error::invalidArgument(
-                            "only blackboard:// resources can be subscribed to; nothing else "
-                            "changes without a tool call from this client"));
+                req.id,
+                Error::invalidArgument(
+                    "Didi does not publish change notifications for '" + uri + "', so it " +
+                    (subscribing ? std::string("cannot be subscribed to: a subscription would "
+                                               "promise updates that never arrive")
+                                 : std::string("was never subscribed and there is nothing to "
+                                               "unsubscribe")) +
+                    ". Only blackboard:// resources are subscribable today. The engine-side "
+                    "godot:// resources do change on their own; poll them with their own tools "
+                    "until Didi publishes notifications for them. Each resources/list entry "
+                    "carries _meta.didi.subscribable."));
         }
         if (subscribing) {
             auto exists = ResourceRegistry::instance().readResource(uri, scope);

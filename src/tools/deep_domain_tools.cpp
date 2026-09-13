@@ -54,9 +54,8 @@ Result<std::filesystem::path> resolveOutputPath(const std::filesystem::path& roo
     if (relative.empty() || relative.is_absolute() || relative.has_root_name()) {
         return Error::invalidArgument("output_path must be relative to the project root");
     }
-    for (const auto& component : relative) {
-        if (component == "..") return Error::invalidArgument("output_path cannot contain parent traversal");
-    }
+    // Resolve, then compare against the project root, the same way every other
+    // writer in the server does since #534.
     std::error_code error;
     const auto target = std::filesystem::weakly_canonical(root / relative, error);
     if (error || !paths::isWithinProject(root, target)) {

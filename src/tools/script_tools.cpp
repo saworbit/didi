@@ -1,4 +1,5 @@
 #include "didi/mcp/mcp_protocol.hpp"
+#include "didi/common/filesystem_status.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
@@ -58,14 +59,15 @@ CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcCli
     (void)ipc;
     const std::string script_path = args.value("script_path", args.value("file_path", ""));
     if (script_path.empty()) {
-        return CallToolResult::error(
-            "Parameter 'script_path' is required (e.g. res://scripts/player.gd).");
+        return CallToolResult::errorJson(
+            400, "Parameter 'script_path' is required (e.g. res://scripts/player.gd).");
     }
     if (!args.contains("source_text") || !args["source_text"].is_string()) {
-        return CallToolResult::error("Parameter 'source_text' is required and must be a string.");
+        return CallToolResult::errorJson(
+            400, "Parameter 'source_text' is required and must be a string.");
     }
     if (args.contains("overwrite") && !args["overwrite"].is_boolean()) {
-        return CallToolResult::error("Parameter 'overwrite' must be a boolean.");
+        return CallToolResult::errorJson(400, "Parameter 'overwrite' must be a boolean.");
     }
     const std::string source_text = args["source_text"].get<std::string>();
     const bool overwrite = args.value("overwrite", false);
@@ -80,9 +82,10 @@ CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcCli
         }
     }
     if (extension != ".gd") {
-        return CallToolResult::error(
+        return CallToolResult::errorJson(
+            400,
             "script_create writes GDScript, so script_path must end in .gd; received \"" +
-            script_path + "\".");
+                script_path + "\".");
     }
 
     namespace fs = std::filesystem;
@@ -102,15 +105,17 @@ CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcCli
         std::error_code directory_error;
         fs::create_directories(disk_path.parent_path(), directory_error);
         if (directory_error) {
-            return CallToolResult::error("Cannot create the directory for " + script_path + ": " +
-                                         directory_error.message());
+            return CallToolResult::errorJson(
+                files::statusForFilesystemError(directory_error),
+                "Cannot create the directory for " + script_path + ": " +
+                    directory_error.message());
         }
     }
 
     auto written = files::writeFileAtomically(disk_path, source_text);
     if (written.isErr()) {
-        return CallToolResult::error("Cannot write the script to disk: " + script_path + ": " +
-                                     written.error().message);
+        return CallToolResult::fromError(
+            written.error(), "Cannot write the script to disk: " + script_path + ": ");
     }
     offline::ResourceIndexer::invalidateSharedIndex();
 

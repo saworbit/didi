@@ -1106,7 +1106,7 @@ void test_availability_is_selected_session_kind_aware_for_tools_and_resources() 
     didi::mcp::JsonRpcRequest initialize;
     initialize.id = 1;
     initialize.method = "initialize";
-    initialize.params = didi::json::object();
+    initialize.params = {{"protocolVersion", didi::mcp::kProtocolVersion}};
     server.handleRequest(initialize);
 
     const auto inspect = [&](const std::shared_ptr<RoutedFake>& route, const std::string& method) {
@@ -1386,7 +1386,7 @@ void test_wrong_kind_connected_route_does_not_advertise_unexecutable_offline_too
     didi::mcp::JsonRpcRequest initialize;
     initialize.id = 2;
     initialize.method = "initialize";
-    initialize.params = didi::json::object();
+    initialize.params = {{"protocolVersion", didi::mcp::kProtocolVersion}};
     server.handleRequest(initialize);
     didi::mcp::JsonRpcRequest list;
     list.id = 3;
@@ -1738,7 +1738,7 @@ void test_descriptorless_provider_routes_are_unauthenticated_and_unavailable() {
     didi::mcp::JsonRpcRequest initialize;
     initialize.id = 32;
     initialize.method = "initialize";
-    initialize.params = didi::json::object();
+    initialize.params = {{"protocolVersion", didi::mcp::kProtocolVersion}};
     ASSERT_FALSE(server.handleRequest(initialize).error.has_value());
     const auto list_metadata = [&](const std::string& method, const std::string& collection,
                                    const std::string& key, const std::string& value) {
@@ -1781,7 +1781,7 @@ void test_no_selected_session_manager_keeps_offline_resource_contract() {
     didi::mcp::JsonRpcRequest initialize;
     initialize.id = 40;
     initialize.method = "initialize";
-    initialize.params = didi::json::object();
+    initialize.params = {{"protocolVersion", didi::mcp::kProtocolVersion}};
     ASSERT_FALSE(server.handleRequest(initialize).error.has_value());
 
     didi::mcp::JsonRpcRequest list;
@@ -2518,6 +2518,35 @@ void test_two_runtime_routes_are_held_and_leased_independently() {
     client->disconnect();
 }
 
+void test_detach_is_a_cleanup_not_a_failure() {
+    // Break caught: detach answered 503 not_connected when there was nothing to
+    // detach, with retryable true advising a retry that would never attach
+    // anything. The session is torn down implicitly when the editor goes, so a
+    // caller doing the tidy-up it is told to do got an error for it (#537).
+    SessionDirectoryFixture fixture;
+    const auto only = fixture.add("f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6", "editor");
+    auto client = fixture.client();
+
+    // Before anything is attached at all.
+    auto cold = client->detachSession();
+    ASSERT_TRUE(cold.isOk());
+    ASSERT_FALSE(cold.value()["detached"].get<bool>());
+
+    ASSERT_TRUE(client->attachSession(only.session_id).isOk());
+    auto released = client->detachSession();
+    ASSERT_TRUE(released.isOk());
+    ASSERT_TRUE(released.value()["detached"].get<bool>());
+    ASSERT_TRUE(released.value().contains("session"));
+
+    // And again, which is the case a finally block produces.
+    auto again = client->detachSession();
+    ASSERT_TRUE(again.isOk());
+    ASSERT_FALSE(again.value()["detached"].get<bool>());
+    ASSERT_FALSE(client->activeSession().has_value());
+
+    client->disconnect();
+}
+
 void test_detaching_the_selection_leaves_the_other_route_alone() {
     SessionDirectoryFixture fixture;
     const auto first = fixture.add("c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3", "editor");
@@ -2794,6 +2823,8 @@ struct RegisterRuntimeRoutingTests {
                      test_two_runtime_routes_are_held_and_leased_independently);
         registerTest("RuntimeRouting.DetachLeavesOtherRoute",
                      test_detaching_the_selection_leaves_the_other_route_alone);
+        registerTest("RuntimeRouting.DetachIsACleanup",
+                     test_detach_is_a_cleanup_not_a_failure);
         registerTest("RuntimeRouting.ReleasingEveryRouteFreesEveryLock",
                      test_releasing_every_route_frees_every_ownership_lock);
         registerTest("RuntimeRouting.DisconnectReleasesEveryRoute",
