@@ -94,12 +94,17 @@ CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcCli
         return CallToolResult::fromError(resolved.error(), "Invalid script file path: ");
     }
     const fs::path disk_path = resolved.value();
+    // Reported as the readers spell it, not as the argument spelled it: the
+    // resolved path, and the on-disk case when a file is already there (#546,
+    // #551). Read before the write so a replaced file is named by the name it
+    // had, which is the one the caller is about to lose.
+    const std::string reported_path = paths::resourcePathOf(disk_path);
 
     std::error_code probe_error;
     const bool already_there = fs::is_regular_file(disk_path, probe_error) && !probe_error;
     if (already_there && !overwrite) {
         return CallToolResult::errorJson(
-            409, "Script already exists; pass overwrite: true to replace it: " + script_path);
+            409, "Script already exists; pass overwrite: true to replace it: " + reported_path);
     }
     if (disk_path.has_parent_path()) {
         std::error_code directory_error;
@@ -127,7 +132,7 @@ CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcCli
     // path goes through the active code page on Windows and throws for anything
     // the code page cannot hold, and Godot reports its errors against res://,
     // which is what the location patterns here match.
-    auto diags = offline::GDScriptDiagnostics::analyze(script_path);
+    auto diags = offline::GDScriptDiagnostics::analyze(reported_path);
     json diag_arr = json::array();
     bool has_error = false;
     for (const auto& d : diags) {
@@ -137,7 +142,7 @@ CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcCli
 
     return CallToolResult::successJson({
         {"status", already_there ? "replaced_offline" : "created_offline"},
-        {"script_path", script_path},
+        {"script_path", reported_path},
         {"bytes_written", source_text.size()},
         {"diagnostics_count", diags.size()},
         {"has_errors", has_error},
@@ -228,28 +233,51 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
         return CallToolResult::fromError(resolved.error(), "Invalid script file path: ");
     }
     const fs::path disk_path = resolved.value();
+    const std::string reported_path = paths::resourcePathOf(disk_path);
 
+    // Read as bytes. A text-mode read on Windows turned every CRLF into LF
+    // before the patcher saw the file, and the atomic writer writes bytes, so
+    // a CRLF file came back LF on every line while the result reported a
+    // single-method change (#550). The patcher works in LF; the file's own
+    // convention is put back on the way out, the way the settings writer
+    // already does for project.godot.
     std::string original_content;
-    std::ifstream in_file(disk_path);
-    if (in_file.is_open()) {
+    {
+        std::ifstream in_file(disk_path, std::ios::binary);
+        if (!in_file.is_open()) {
+            return CallToolResult::errorJson(
+                500, "Cannot open file for method patching: " + reported_path);
+        }
         std::stringstream ss;
         ss << in_file.rdbuf();
         original_content = ss.str();
-        in_file.close();
-    } else {
-        return CallToolResult::error("Cannot open file for method patching: " + file_path);
     }
+    const bool crlf = original_content.find("\r\n") != std::string::npos;
+    const bool trailing_newline = !original_content.empty() && original_content.back() == '\n';
+    const std::string working_content =
+        crlf ? strings::replaceAll(original_content, "\r\n", "\n") : original_content;
+    // The replacement arrives however the caller's client spelled its line
+    // breaks; it joins the file in the file's convention either way.
+    const std::string working_definition = strings::replaceAll(new_definition, "\r\n", "\n");
 
-    auto patch_res = offline::GDScriptDiagnostics::patchSymbol(original_content, symbol_name, new_definition, symbol_type);
+    auto patch_res = offline::GDScriptDiagnostics::patchSymbol(working_content, symbol_name,
+                                                              working_definition, symbol_type);
     if (patch_res.isErr()) {
         return CallToolResult::errorJson(400, patch_res.error().message);
     }
 
     std::string patched_content = patch_res.value();
+    // A file that ended without a newline keeps ending without one. The
+    // patcher terminates what it splices in, so the one it adds at the end of
+    // the file is the only byte here that was not asked for.
+    if (!trailing_newline && !patched_content.empty() && patched_content.back() == '\n') {
+        patched_content.pop_back();
+    }
+    if (crlf) patched_content = strings::replaceAll(patched_content, "\n", "\r\n");
     auto written = files::writeFileAtomically(disk_path, patched_content);
     if (written.isErr()) {
-        return CallToolResult::error("Cannot write patched file to disk: " + file_path +
-                                     ": " + written.error().message);
+        return CallToolResult::fromError(
+            written.error(), "Cannot write patched file to disk: " + reported_path + ": ");
     }
     offline::ResourceIndexer::invalidateSharedIndex();
 
@@ -266,7 +294,7 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
     // The res:// path for the same reason script_create passes it: a narrow
     // absolute path throws on Windows for characters outside the code page, and
     // Godot's diagnostics name res:// paths.
-    auto diags = offline::GDScriptDiagnostics::analyze(file_path);
+    auto diags = offline::GDScriptDiagnostics::analyze(reported_path);
     json diag_arr = json::array();
     bool has_error = false;
     for (const auto& d : diags) {
@@ -276,7 +304,7 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
 
     json result = {
         {"status", "success"},
-        {"file_path", file_path},
+        {"file_path", reported_path},
         {"method_name", symbol_name},
         {"has_errors", has_error},
         {"diagnostics", diag_arr}

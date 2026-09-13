@@ -4900,6 +4900,187 @@ static void test_set_setting_descriptions_say_the_guard_is_live_only() {
     ASSERT_TRUE(create.find("whether create is set or not") != std::string::npos);
 }
 
+// Break caught: script_create and resource_create echoed their argument as the
+// path they wrote, and the confirmation preview echoed it as the file it would
+// replace. #534 made res://d1/../reported.gd legal because it resolves inside
+// the project, so the file landed at res://reported.gd, every reader named it
+// there, and the writer alone named it through a directory that never existed
+// (#551). On Windows the same seam let res://PLAYER.gd replace res://player.gd
+// while the preview and the result both named a file that does not exist
+// (#546). Every answer now carries the resolved path in the readers' spelling.
+static void test_writers_report_the_path_they_resolved() {
+    ScopedToolProject project("resolved-write-paths");
+    writeAuditFile("project.godot", "config_version=5\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto created = registry.callTool(
+        "script_create",
+        didi::json{{"script_path", "res://d1/../reported.gd"}, {"source_text", "extends Node\n"}});
+    ASSERT_TRUE(!created.isError);
+    ASSERT_EQ(didi::json::parse(created.content[0].text)["script_path"], "res://reported.gd");
+    ASSERT_TRUE(std::filesystem::is_regular_file("reported.gd"));
+    ASSERT_TRUE(!std::filesystem::exists("d1"));
+
+    const auto resource = registry.callTool(
+        "resource_create",
+        didi::json{{"save_path", "res://./made.tres"}, {"resource_type", "Resource"}});
+    ASSERT_TRUE(!resource.isError);
+    ASSERT_EQ(didi::json::parse(resource.content[0].text)["save_path"], "res://made.tres");
+
+    // The conflict names the file that is there, as the readers spell it.
+    const auto conflict = registry.callTool(
+        "resource_create",
+        didi::json{{"save_path", "res://d2/../made.tres"}, {"resource_type", "Resource"}});
+    ASSERT_TRUE(conflict.isError);
+    const auto conflict_error = didi::json::parse(conflict.content[0].text)["error"];
+    ASSERT_EQ(conflict_error["code"], 409);
+    ASSERT_TRUE(conflict_error["message"].get<std::string>().find("res://made.tres") !=
+                std::string::npos);
+
+    // And the preview names the file it would replace the same way.
+    const auto preview = registry.callTool(
+        "script_create",
+        didi::json{{"script_path", "res://d1/../reported.gd"},
+                   {"source_text", "extends Node2D\n"},
+                   {"overwrite", true},
+                   {"dry_run", true}});
+    ASSERT_TRUE(!preview.isError);
+    const auto preview_json = didi::json::parse(preview.content[0].text);
+    const auto& before = preview_json["mutation_preview"]["changes"][0]["before"];
+    ASSERT_EQ(before["exists"], true);
+    ASSERT_EQ(before["path"], "res://reported.gd");
+
+    // A patch reports the file it patched by the same name.
+    const auto patch_preview = registry.callTool(
+        "script_patch_method",
+        didi::json{{"file_path", "res://d1/../reported.gd"},
+                   {"method_name", "_ready"},
+                   {"new_definition", "func _ready() -> void:\n\tpass\n"},
+                   {"dry_run", true}});
+    ASSERT_TRUE(!patch_preview.isError);
+    ASSERT_EQ(didi::json::parse(patch_preview.content[0].text)["mutation_preview"]["changes"][0]
+                              ["before"]["path"],
+              "res://reported.gd");
+
+#if defined(_WIN32)
+    // A path that differs from an existing file only by case is that file on
+    // this filesystem. The preview says which file it is, and the result says
+    // which file changed, so a caller reading either sees the file it is about
+    // to lose rather than a name that was never on disk.
+    const auto cased_preview = registry.callTool(
+        "script_create",
+        didi::json{{"script_path", "res://REPORTED.gd"},
+                   {"source_text", "extends Node3D\n"},
+                   {"overwrite", true},
+                   {"dry_run", true}});
+    ASSERT_TRUE(!cased_preview.isError);
+    const auto cased_json = didi::json::parse(cased_preview.content[0].text);
+    ASSERT_EQ(cased_json["mutation_preview"]["changes"][0]["before"]["exists"], true);
+    ASSERT_EQ(cased_json["mutation_preview"]["changes"][0]["before"]["path"], "res://reported.gd");
+    const auto token = cased_json["mutation_preview"]["confirmation_token"].get<std::string>();
+    const auto replaced = registry.callTool(
+        "script_create",
+        didi::json{{"script_path", "res://REPORTED.gd"},
+                   {"source_text", "extends Node3D\n"},
+                   {"overwrite", true},
+                   {"confirmation_token", token}});
+    ASSERT_TRUE(!replaced.isError);
+    const auto replaced_json = didi::json::parse(replaced.content[0].text);
+    ASSERT_EQ(replaced_json["status"], "replaced_offline");
+    ASSERT_EQ(replaced_json["script_path"], "res://reported.gd");
+    ASSERT_TRUE(readToolTestFile("reported.gd").find("Node3D") != std::string::npos);
+
+    const auto cased_conflict = registry.callTool(
+        "resource_create",
+        didi::json{{"save_path", "res://MADE.tres"}, {"resource_type", "Resource"}});
+    ASSERT_TRUE(cased_conflict.isError);
+    ASSERT_TRUE(didi::json::parse(cased_conflict.content[0].text)["error"]["message"]
+                    .get<std::string>()
+                    .find("res://made.tres") != std::string::npos);
+#endif
+}
+
+// Break caught: script_patch_method opened the file in text mode, so on
+// Windows every CRLF reached the patcher as LF and the atomic writer, which
+// writes bytes, put LF back. A CRLF file came back LF on every line, a file
+// with no trailing newline gained one, and both the preview and the result
+// reported a single-method change (#550). patch_script_symbols is the same
+// handler.
+static void test_patch_method_keeps_the_file_line_endings() {
+    ScopedToolProject project("patch-line-endings");
+    writeAuditFile("project.godot", "config_version=5\n");
+    const std::string crlf =
+        "extends Node\r\n\r\nvar untouched := 1\r\n\r\nfunc patch_me() -> void:\r\n"
+        "\tprint(\"before\")\r\n";
+    writeAuditFile("crlf.gd", crlf);
+    writeAuditFile("bom_crlf.gd", "\xEF\xBB\xBF" + crlf);
+    writeAuditFile("no_newline.gd", "extends Node\n\nfunc patch_me() -> void:\n\tpass");
+    writeAuditFile("lf.gd", "extends Node\n\nfunc patch_me() -> void:\n\tpass\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto patch = [&](const std::string& tool, const std::string& file,
+                           const std::string& definition) {
+        const didi::json base{{"file_path", file},
+                              {"method_name", "patch_me"},
+                              {"new_definition", definition}};
+        auto preview = base;
+        preview["dry_run"] = true;
+        const auto previewed = registry.callTool(tool, preview);
+        ASSERT_TRUE(!previewed.isError);
+        const auto token = didi::json::parse(previewed.content[0].text)["mutation_preview"]
+                                            ["confirmation_token"]
+                                                .get<std::string>();
+        auto confirm = base;
+        confirm["confirmation_token"] = token;
+        const auto result = registry.callTool(tool, confirm);
+        ASSERT_TRUE(!result.isError);
+        return didi::json::parse(result.content[0].text);
+    };
+    const auto count = [](const std::string& text, const std::string& needle) {
+        size_t total = 0;
+        for (auto at = text.find(needle); at != std::string::npos;
+             at = text.find(needle, at + needle.size())) {
+            ++total;
+        }
+        return total;
+    };
+    const std::string replacement = "func patch_me() -> void:\n\tprint(\"after\")\n";
+
+    ASSERT_EQ(patch("script_patch_method", "res://crlf.gd", replacement)["file_path"],
+              "res://crlf.gd");
+    const auto patched = readToolTestFile("crlf.gd");
+    ASSERT_TRUE(patched.find("after") != std::string::npos);
+    ASSERT_TRUE(patched.find("untouched") != std::string::npos);
+    // Every line break is still CRLF: as many CRLFs as LFs, and as many as
+    // the file had.
+    ASSERT_EQ(count(patched, "\r\n"), count(patched, "\n"));
+    ASSERT_EQ(count(patched, "\r\n"), count(crlf, "\r\n"));
+
+    // A replacement spelled with CRLF by the caller's client joins the file
+    // in the file's convention, without doubling a carriage return.
+    patch("patch_script_symbols", "res://bom_crlf.gd",
+          "func patch_me() -> void:\r\n\tprint(\"after\")\r\n");
+    const auto bom = readToolTestFile("bom_crlf.gd");
+    ASSERT_TRUE(bom.rfind("\xEF\xBB\xBF", 0) == 0);
+    ASSERT_TRUE(bom.find("after") != std::string::npos);
+    ASSERT_TRUE(bom.find("\r\r") == std::string::npos);
+    ASSERT_EQ(count(bom, "\r\n"), count(bom, "\n"));
+
+    patch("script_patch_method", "res://no_newline.gd", replacement);
+    const auto bare = readToolTestFile("no_newline.gd");
+    ASSERT_TRUE(bare.find("after") != std::string::npos);
+    ASSERT_TRUE(bare.back() != '\n');
+
+    patch("script_patch_method", "res://lf.gd", replacement);
+    const auto lf = readToolTestFile("lf.gd");
+    ASSERT_TRUE(lf.find('\r') == std::string::npos);
+    ASSERT_TRUE(lf.back() == '\n');
+}
+
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.OfflineCapabilityIsDerived",
@@ -5082,6 +5263,10 @@ struct RegisterToolTests {
                      test_handler_failures_carry_the_error_envelope);
         registerTest("Tools.SetSettingCreateGuardIsLiveOnly",
                      test_set_setting_descriptions_say_the_guard_is_live_only);
+        registerTest("Tools.WritersReportTheResolvedPath",
+                     test_writers_report_the_path_they_resolved);
+        registerTest("Tools.PatchMethodKeepsLineEndings",
+                     test_patch_method_keeps_the_file_line_endings);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }

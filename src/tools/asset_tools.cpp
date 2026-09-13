@@ -737,12 +737,17 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         return CallToolResult::fromError(resolved.error(), "Invalid save_path: ");
     }
     const fs::path target_p = resolved.value();
+    // The readers' spelling of the path, and the on-disk case when a file is
+    // already there: a conflict against res://RES.tres named a file that did
+    // not exist while res://res.tres was the one overwrite would replace
+    // (#546, #551).
+    const std::string reported_path = paths::resourcePathOf(target_p);
 
     try {
         std::error_code probe_error;
         if (fs::exists(target_p, probe_error) && !probe_error && !overwrite) {
             return CallToolResult::errorJson(
-                409, "Resource already exists; pass overwrite: true to replace it: " + save_path);
+                409, "Resource already exists; pass overwrite: true to replace it: " + reported_path);
         }
         if (target_p.has_parent_path()) {
             fs::create_directories(target_p.parent_path());
@@ -814,7 +819,7 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     }
     return CallToolResult::successJson({
         {"status", "created_offline"},
-        {"save_path", save_path},
+        {"save_path", reported_path},
         {"resource_type", resource_type},
         // In file order, because that is the order Godot applies them in and
         // the caller has no other way to see what it got.

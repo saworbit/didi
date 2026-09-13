@@ -149,4 +149,27 @@ inline Result<std::filesystem::path> resolveProjectFile(const std::string& file_
     return target;
 }
 
+// The res:// spelling of a resolved path, which is the spelling every reader
+// reports. A writer that echoed its argument named res://d1/../x.gd for a file
+// that landed at res://x.gd, through a directory that was never created, and
+// on Windows named res://PLAYER.gd for a file that only ever existed as
+// res://player.gd; nothing else on the surface produces either string, so a
+// caller storing the answer stored a name no later comparison would match
+// (#546, #551). When the file is already there its on-disk spelling is used,
+// which on a case-insensitive filesystem is the one fact the argument does not
+// carry: the file the write is about to replace.
+inline std::string resourcePathOf(const std::filesystem::path& resolved) {
+    std::error_code error;
+    const auto root = std::filesystem::weakly_canonical(std::filesystem::current_path(error), error);
+    if (error) return projectPathToUtf8(resolved);
+    auto target = resolved;
+    if (std::filesystem::exists(target, error) && !error) {
+        const auto on_disk = std::filesystem::canonical(target, error);
+        if (!error) target = on_disk;
+    }
+    const auto relative = target.lexically_relative(root);
+    if (relative.empty() || *relative.begin() == "..") return projectPathToUtf8(target);
+    return "res://" + projectPathToUtf8(relative);
+}
+
 } // namespace didi::paths
