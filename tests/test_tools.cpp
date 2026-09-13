@@ -2298,7 +2298,7 @@ static void test_visual_lab_preserves_existing_file_without_overwrite() {
     didi::json args = {{"target_resource_path", "res://models/hero.glb"},
                        {"orthographic", false}};
     ASSERT_TRUE(!registry.callTool("viewport_create_test_lab", args).isError);
-    const auto path = std::filesystem::path("addons/didi/test_lab_sandbox.tscn");
+    const auto path = std::filesystem::path("didi_test_lab.tscn");
     const auto original = readToolTestFile(path);
     ASSERT_TRUE(!original.empty());
 
@@ -2338,7 +2338,7 @@ static void test_visual_lab_creates_its_directory_and_instances_the_target() {
         throw std::runtime_error("viewport_create_test_lab failed: " + result.content[0].text);
     }
 
-    const auto scene = readToolTestFile("addons/didi/test_lab_sandbox.tscn");
+    const auto scene = readToolTestFile("didi_test_lab.tscn");
     ASSERT_TRUE(scene.find("[ext_resource type=\"PackedScene\" path=\"res://scenes/player.tscn\"") !=
                 std::string::npos);
     ASSERT_TRUE(scene.find("instance=ExtResource(\"1_didi_target\")") != std::string::npos);
@@ -2356,7 +2356,7 @@ static void test_visual_lab_rejects_a_target_outside_the_project() {
         const didi::json args = {{"target_resource_path", target}};
         ASSERT_TRUE(registry.callTool("viewport_create_test_lab", args).isError);
     }
-    ASSERT_TRUE(!std::filesystem::exists("addons/didi/test_lab_sandbox.tscn"));
+    ASSERT_TRUE(!std::filesystem::exists("didi_test_lab.tscn"));
 }
 
 static void test_resource_create_serializes_colors_quaternions_and_dictionaries() {
@@ -4440,13 +4440,13 @@ static void test_writers_drop_the_shared_index_so_the_next_read_sees_them() {
     // The lab writes a scene that was not there at all, so a stale index does
     // not merely describe it wrongly, it does not know it exists.
     ASSERT_TRUE(didi::offline::ResourceIndexer::sharedIndex(".")
-                    ->findExact("res://addons/didi/test_lab_sandbox.tscn") == nullptr);
+                    ->findExact("res://didi_test_lab.tscn") == nullptr);
     const auto lab = registry.callTool("viewport_create_test_lab", didi::json{
         {"target_resource_path", "res://scripts/level.gd"},
         {"environment", "studio_neutral"}, {"orthographic", false}});
     ASSERT_TRUE(!lab.isError);
     ASSERT_TRUE(didi::offline::ResourceIndexer::sharedIndex(".")
-                    ->findExact("res://addons/didi/test_lab_sandbox.tscn") != nullptr);
+                    ->findExact("res://didi_test_lab.tscn") != nullptr);
 
     // What it tells the caller to run next has to be a name the caller can find
     // in tools/list by its canonical spelling (#408).
@@ -4809,7 +4809,7 @@ static void test_required_strings_refuse_the_empty_string() {
         ASSERT_TRUE(message.find("is required") == std::string::npos);
         ASSERT_TRUE(message.find("at least") != std::string::npos);
     }
-    ASSERT_TRUE(!std::filesystem::exists("addons/didi/test_lab_sandbox.tscn"));
+    ASSERT_TRUE(!std::filesystem::exists("didi_test_lab.tscn"));
 
     // The handler behind the schema refuses the empty target on its own, so a
     // caller that reaches it another way cannot get the silent lab either.
@@ -4820,14 +4820,14 @@ static void test_required_strings_refuse_the_empty_string() {
     ASSERT_EQ(direct_error["code"], 400);
     ASSERT_TRUE(direct_error["message"].get<std::string>().find("target_resource_path") !=
                 std::string::npos);
-    ASSERT_TRUE(!std::filesystem::exists("addons/didi/test_lab_sandbox.tscn"));
+    ASSERT_TRUE(!std::filesystem::exists("didi_test_lab.tscn"));
 
     // And a real target still produces a lab with that target in it.
     writeAuditFile("subject.tres", "[gd_resource type=\"Resource\" format=3]\n\n[resource]\n");
     const auto real = registry.callTool("viewport_create_test_lab",
                                         didi::json{{"target_resource_path", "res://subject.tres"}});
     ASSERT_TRUE(!real.isError);
-    const auto lab = readToolTestFile("addons/didi/test_lab_sandbox.tscn");
+    const auto lab = readToolTestFile("didi_test_lab.tscn");
     ASSERT_TRUE(lab.find("TargetInstance") != std::string::npos);
     ASSERT_TRUE(lab.find("res://subject.tres") != std::string::npos);
 }
@@ -5132,6 +5132,70 @@ static void test_reflect_class_compares_the_dump_to_the_project_features() {
     ASSERT_EQ(didi::versions::featuresVersionOf("PackedStringArray(\"Forward Plus\")"), "");
 }
 
+// Break caught: viewport_create_test_lab created addons/didi before it
+// resolved the target, so a refused target left the project with a folder it
+// did not have; it wrote the lab inside the addon's own folder, where
+// project_audit_assets never looks; and it said it did not instance the
+// target while instancing every PackedScene one (#564, #565).
+static void test_test_lab_checks_the_target_before_touching_the_project() {
+    ScopedToolProject project("test-lab-order");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("subject.tres", "[gd_resource type=\"Resource\" format=3]\n\n[resource]\n");
+    writeAuditFile("subject.tscn", "[gd_scene format=3]\n\n[node name=\"Subject\" type=\"Node3D\"]\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    // A target that is not there is refused before anything is written or
+    // created.
+    const auto refused = registry.callTool(
+        "viewport_create_test_lab", didi::json{{"target_resource_path", "res://missing.tres"}});
+    ASSERT_TRUE(refused.isError);
+    ASSERT_EQ(didi::json::parse(refused.content[0].text)["error"]["code"], 404);
+    ASSERT_TRUE(!std::filesystem::exists("addons"));
+    ASSERT_TRUE(!std::filesystem::exists("didi_test_lab.tscn"));
+
+    // A plain resource hangs off a holder; the result says so, names the
+    // resolved target, and the lab lands where the audit can see it.
+    const auto held = registry.callTool(
+        "viewport_create_test_lab", didi::json{{"target_resource_path", "res://d1/../subject.tres"}});
+    ASSERT_TRUE(!held.isError);
+    const auto held_json = didi::json::parse(held.content[0].text);
+    ASSERT_EQ(held_json["scene_path"], "res://didi_test_lab.tscn");
+    ASSERT_EQ(held_json["target_resource_path"], "res://subject.tres");
+    ASSERT_EQ(held_json["target_instanced"], false);
+    ASSERT_TRUE(std::filesystem::is_regular_file("didi_test_lab.tscn"));
+    ASSERT_TRUE(!std::filesystem::exists("addons"));
+    const auto held_scene = readToolTestFile("didi_test_lab.tscn");
+    ASSERT_TRUE(held_scene.find("path=\"res://subject.tres\"") != std::string::npos);
+    ASSERT_TRUE(held_scene.find("metadata/didi_target") != std::string::npos);
+    ASSERT_TRUE(held_scene.find("instance=ExtResource") == std::string::npos);
+
+    // A packed scene is instanced, and the result says that too.
+    auto preview = didi::json{{"target_resource_path", "res://subject.tscn"}, {"overwrite", true},
+                              {"dry_run", true}};
+    const auto previewed = registry.callTool("viewport_create_test_lab", preview);
+    ASSERT_TRUE(!previewed.isError);
+    const auto token = didi::json::parse(previewed.content[0].text)["mutation_preview"]
+                                        ["confirmation_token"]
+                                            .get<std::string>();
+    const auto instanced = registry.callTool(
+        "viewport_create_test_lab",
+        didi::json{{"target_resource_path", "res://subject.tscn"}, {"overwrite", true},
+                   {"confirmation_token", token}});
+    ASSERT_TRUE(!instanced.isError);
+    ASSERT_EQ(didi::json::parse(instanced.content[0].text)["target_instanced"], true);
+    const auto instanced_scene = readToolTestFile("didi_test_lab.tscn");
+    ASSERT_TRUE(instanced_scene.find("instance=ExtResource(\"1_didi_target\")") != std::string::npos);
+
+    // The description describes what the handler does.
+    const auto* tool = registry.getTool("viewport_create_test_lab");
+    ASSERT_TRUE(tool != nullptr);
+    const auto description = tool->toJson()["description"].get<std::string>();
+    ASSERT_TRUE(description.find("does not instance") == std::string::npos);
+    ASSERT_TRUE(description.find("target_instanced") != std::string::npos);
+}
+
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.OfflineCapabilityIsDerived",
@@ -5320,6 +5384,8 @@ struct RegisterToolTests {
                      test_patch_method_keeps_the_file_line_endings);
         registerTest("Tools.ReflectClassComparesProjectFeatures",
                      test_reflect_class_compares_the_dump_to_the_project_features);
+        registerTest("Tools.TestLabChecksTargetFirst",
+                     test_test_lab_checks_the_target_before_touching_the_project);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }

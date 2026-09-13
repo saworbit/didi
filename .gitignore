@@ -54,8 +54,11 @@ demo/addons/didi/bin/*
 *.translation
 *.tmp
 # Generated on demand by viewport_create_test_lab, in whichever project the
-# tool is run against. The demo project has its own addon copy, so it has its
-# own path for the same generated scene.
+# tool is run against: this repository and the demo project both have a root.
+# The addon-folder entries are where builds before #564 wrote it; a stale
+# copy in a checkout stays ignored.
+didi_test_lab.tscn
+demo/didi_test_lab.tscn
 addons/didi/test_lab_sandbox.tscn
 demo/addons/didi/test_lab_sandbox.tscn
 

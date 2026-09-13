@@ -29,7 +29,7 @@ json VisualTestLab::createLab(const json& params) {
 
     json result = {
         {"status", "created"},
-        {"test_lab_scene", "res://addons/didi/test_lab_sandbox.tscn"},
+        {"test_lab_scene", "res://didi_test_lab.tscn"},
         {"target_resource_path", target_path},
         {"environment", environment},
         {"orthographic", orthographic},

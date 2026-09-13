@@ -1,4 +1,5 @@
 #include "didi/mcp/mcp_protocol.hpp"
+#include "didi/tools/visual_test_lab_path.hpp"
 #include "didi/common/atomic_write.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/tools/phase7_live_forward.hpp"
@@ -340,28 +341,13 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
     }
     const bool overwrite = args.value("overwrite", false);
 
-    // Offline generator: Create an isolated visual testbed scene (.tscn) on disk!
-    std::string lab_scene_path = "res://addons/didi/test_lab_sandbox.tscn";
-    std::string disk_path = "addons/didi/test_lab_sandbox.tscn";
-
-    if (std::filesystem::exists(disk_path) && !overwrite) {
-        return CallToolResult::errorJson(
-            409, "Visual test lab already exists; pass overwrite: true to replace it: " +
-            lab_scene_path);
-    }
-
-    // The sandbox lives under addons/didi, which a clean project does not have.
-    std::error_code directory_error;
-    std::filesystem::create_directories("addons/didi", directory_error);
-    if (directory_error) {
-        return CallToolResult::error(
-            "Failed to create the addons/didi directory for the visual test lab.");
-    }
-
     // The target has to be a real resource beneath the project root before it
-    // can be referenced from the generated scene. The empty string is checked
-    // like every other value: it used to skip this block and write a lab with
-    // no target in it, answered with the same success as a lab with one (#554).
+    // can be referenced from the generated scene. Checked first, before the
+    // filesystem is touched: the handler used to create a directory and only
+    // then refuse a target that did not exist, leaving the project with a
+    // folder it did not have (#564). The empty string is checked like every
+    // other value: it used to skip this block and write a lab with no target
+    // in it, answered with the same success as a lab with one (#554).
     std::string target_resource;
     std::string target_type;
     {
@@ -370,11 +356,23 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
             return CallToolResult::fromError(resolved.error(),
                                              "Invalid target_resource_path: ");
         }
-        target_resource = strings::startsWith(target_path, "res://")
-                              ? target_path
-                              : "res://" + target_path;
+        // The readers' spelling of the path, the way every writer reports it
+        // now, so the ext_resource line and the result name the same file.
+        target_resource = paths::resourcePathOf(resolved.value());
         const auto extension = resolved.value().extension().string();
         target_type = extension == ".tscn" || extension == ".scn" ? "PackedScene" : "Resource";
+    }
+
+    // Offline generator: an isolated visual testbed scene on disk, at the one
+    // path the mutation gate also knows. At the project root, where the audit
+    // and the search can see it, rather than inside the addon's own folder.
+    const std::string lab_scene_path(tools::kVisualTestLabScenePath);
+    const std::string disk_path(tools::kVisualTestLabDiskPath);
+
+    if (std::filesystem::exists(disk_path) && !overwrite) {
+        return CallToolResult::errorJson(
+            409, "Visual test lab already exists; pass overwrite: true to replace it: " +
+            lab_scene_path);
     }
 
     std::ostringstream scene_file;
@@ -425,7 +423,11 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
     json res = {
         {"status", "created_offline"},
         {"scene_path", lab_scene_path},
-        {"target_resource_path", target_path},
+        {"target_resource_path", target_resource},
+        // Which of the two scenes was written. A PackedScene target is
+        // instanced under the lab; any other resource hangs off a holder node
+        // as metadata, and the description used to say neither happened (#565).
+        {"target_instanced", target_type == "PackedScene"},
         {"environment", env},
         {"camera_rig", rig},
         // runtime_launch, not the execute_test_session alias this used to name.

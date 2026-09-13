@@ -9,9 +9,13 @@ namespace didi::tools {
 // were separate string literals in separate files until the gate started
 // reading the target to decide whether an overwrite destroys anything (#425),
 // at which point a drift between them would have meant gating the wrong file.
-inline constexpr std::string_view kVisualTestLabScenePath =
-    "res://addons/didi/test_lab_sandbox.tscn";
-inline constexpr std::string_view kVisualTestLabDiskPath =
-    "addons/didi/test_lab_sandbox.tscn";
+//
+// At the project root, not under addons/didi. The addon folder is the one a
+// user's installed plugin lives in, a project without the addon had the folder
+// invented for it, and project_audit_assets excludes res://addons/ from orphan
+// checks, so a generated scene put there was a generated scene nothing would
+// ever report as unused (#564).
+inline constexpr std::string_view kVisualTestLabScenePath = "res://didi_test_lab.tscn";
+inline constexpr std::string_view kVisualTestLabDiskPath = "didi_test_lab.tscn";
 
 } // namespace didi::tools
