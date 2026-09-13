@@ -1484,9 +1484,14 @@ json GDScriptDiagnostics::reflectClass(const std::string& class_name) {
     if (reference.loaded()) {
         unknown["source"] = "extension_api";
         unknown["api_version"] = reference.apiVersion();
-        unknown["description"] = class_name + " is not a class in " + reference.apiVersion() +
-                                 ". Check the spelling. A script class is not in this dump "
-                                 "either way; read it with script_get_symbols.";
+        // "in the pinned reference", not "in Godot": the dump is one engine
+        // line and the project may be on another, which the version fields
+        // beside this say (#555).
+        unknown["description"] = class_name + " is not a class in the pinned API reference (" +
+                                 reference.apiVersion() +
+                                 "), which may not be the engine this project runs on. Check "
+                                 "the spelling. A script class is not in this dump either way; "
+                                 "read it with script_get_symbols.";
     } else {
         unknown["source"] = "builtin_snapshot";
         unknown["description"] = "Godot 4 class: " + class_name +

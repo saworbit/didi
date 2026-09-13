@@ -5,6 +5,7 @@
 #include "didi/common/project_path.hpp"
 #include "didi/common/engine_version.hpp"
 #include "didi/offline/gdscript_diagnostics.hpp"
+#include "didi/offline/project_settings_file.hpp"
 #include "didi/offline/resource_indexer.hpp"
 #include "didi/runtime/session_client.hpp"
 #include "didi/common/atomic_write.hpp"
@@ -167,11 +168,27 @@ CallToolResult handleScriptReflectClass(const json& args, std::shared_ptr<ipc::I
     const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
     const auto attached = sessions ? sessions->activeSession()
                                    : std::optional<runtime::SessionDescriptor>{};
-    if (attached.has_value() && doc.contains("api_version") && doc["api_version"].is_string()) {
-        // An extension older than the field publishes no version, which the
-        // shared helper reports as unknown rather than as a match.
-        versions::annotateApiVersion(doc, doc["api_version"].get<std::string>(),
-                                     attached->engine_version);
+    if (doc.contains("api_version") && doc["api_version"].is_string()) {
+        const auto api_version = doc["api_version"].get<std::string>();
+        if (attached.has_value()) {
+            // An extension older than the field publishes no version, which
+            // the shared helper reports as unknown rather than as a match.
+            versions::annotateApiVersion(doc, api_version, attached->engine_version);
+        } else {
+            // No session selected, so no engine to ask; the project still
+            // says which line saved it. A 4.5 project read against the 4.7
+            // dump is the same skew either way, and before this the answer
+            // depended on whether some earlier call had happened to select a
+            // session (#555).
+            std::error_code root_error;
+            const auto root = std::filesystem::current_path(root_error);
+            std::string features;
+            if (!root_error) {
+                auto setting = offline::readProjectSetting(root, "application/config/features");
+                if (setting.isOk() && setting.value().existed) features = setting.value().literal;
+            }
+            versions::annotateProjectFeatures(doc, api_version, features);
+        }
     }
     return CallToolResult::successJson(doc);
 }

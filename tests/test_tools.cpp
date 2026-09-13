@@ -5081,6 +5081,57 @@ static void test_patch_method_keeps_the_file_line_endings() {
     ASSERT_TRUE(lf.back() == '\n');
 }
 
+// Break caught: script_reflect_class answered from the pinned 4.7 dump and
+// compared it to nothing unless some earlier call had happened to select a
+// session, so a 4.5 project asking first was told about 4.7 without a word.
+// With no session the project itself still says which line saved it (#555).
+static void test_reflect_class_compares_the_dump_to_the_project_features() {
+    ScopedToolProject project("reflect-project-features");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto reflect = [&](const char* name) {
+        const auto result = registry.callTool("script_reflect_class", didi::json{{"class_name", name}});
+        ASSERT_TRUE(!result.isError);
+        return didi::json::parse(result.content[0].text);
+    };
+
+    writeAuditFile("project.godot",
+                   "config_version=5\n\n[application]\n"
+                   "config/features=PackedStringArray(\"4.5\", \"Forward Plus\")\n");
+    const auto older = reflect("Node");
+    ASSERT_TRUE(older["api_version"].is_string());
+    const auto pinned = didi::versions::majorMinorOf(older["api_version"].get<std::string>());
+    ASSERT_TRUE(!pinned.empty());
+    ASSERT_EQ(older["project_features_version"], "4.5");
+    ASSERT_EQ(older["api_version_matches_project_features"], pinned == "4.5");
+    // With no session selected, the live fields are not asserted either way.
+    ASSERT_TRUE(!older.contains("api_version_matches_attached_engine"));
+
+    // The project on the dump's own line is a match, and a name that is not
+    // in the dump is described as absent from the reference, not from Godot.
+    writeAuditFile("project.godot",
+                   "config_version=5\n\n[application]\n"
+                   "config/features=PackedStringArray(\"" + pinned + "\", \"Mobile\")\n");
+    const auto same = reflect("VibeAbsentClass");
+    ASSERT_EQ(same["project_features_version"], pinned);
+    ASSERT_EQ(same["api_version_matches_project_features"], true);
+    ASSERT_EQ(same["is_known_class"], false);
+    ASSERT_TRUE(same["description"].get<std::string>().find("pinned API reference") !=
+                std::string::npos);
+
+    // A project that declares no features line cannot be compared, and says so
+    // rather than reading as a match.
+    writeAuditFile("project.godot", "config_version=5\n");
+    const auto silent = reflect("Node");
+    ASSERT_TRUE(silent["project_features_version"].is_null());
+    ASSERT_TRUE(silent["api_version_matches_project_features"].is_null());
+
+    ASSERT_EQ(didi::versions::featuresVersionOf("PackedStringArray(\"Forward Plus\", \"4.6\")"),
+              "4.6");
+    ASSERT_EQ(didi::versions::featuresVersionOf("PackedStringArray(\"Forward Plus\")"), "");
+}
+
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.OfflineCapabilityIsDerived",
@@ -5267,6 +5318,8 @@ struct RegisterToolTests {
                      test_writers_report_the_path_they_resolved);
         registerTest("Tools.PatchMethodKeepsLineEndings",
                      test_patch_method_keeps_the_file_line_endings);
+        registerTest("Tools.ReflectClassComparesProjectFeatures",
+                     test_reflect_class_compares_the_dump_to_the_project_features);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }
