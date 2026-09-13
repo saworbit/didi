@@ -104,6 +104,15 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   spendable by whoever sent it. It now answers `-32600` with
   `error.data.initialized: true`, and the session goes on serving the client
   that opened it (#552).
+- **Live scene mutations say the change is unsaved.** Every committed
+  edited-scene mutation, from `scene_set_property` to `tilemap_set_cells`,
+  reported plain success while the change lived only in the editor's open
+  scene and its undo history, and `didi_control_room` read `Project: Ready`
+  over it. Each reply now carries `scene_saved: false` and a `limitation`
+  naming `editor_save_scene`. The dashboard asks an attached editor which
+  open scenes hold unsaved changes: on Godot 4.7 and later the Project light
+  goes amber and names them; on 4.5 and 4.6 the engine cannot say, and the
+  `Unsaved scenes` fact reports that rather than reading as clean (#557).
 - **`project_set_setting`'s descriptions say where the `create` guard runs.**
   The name check needs an attached editor; offline the name is written whether
   `create` is set or not, and the result's `limitation` already said so. The
