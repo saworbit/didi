@@ -115,6 +115,20 @@ bool isWordByte(char value) {
     return strings::isIdentifierByte(value);
 }
 
+// 1-based column in Unicode code points. Matching works on bytes, and the byte
+// offset is the wrong number for the one thing a column is for: every editor's
+// goto line:col counts characters, so on a line with a non-ASCII character
+// before the match the byte offset landed past the match (#556). Continuation
+// bytes are 10xxxxxx; every other byte starts a code point.
+size_t columnOf(std::string_view line, size_t byte_offset) {
+    size_t column = 1;
+    const auto end = std::min(byte_offset, line.size());
+    for (size_t index = 0; index < end; ++index) {
+        if ((static_cast<unsigned char>(line[index]) & 0xC0u) != 0x80u) ++column;
+    }
+    return column;
+}
+
 std::string previewOf(std::string_view line) {
     if (line.size() <= kSearchMaxPreviewBytes) return std::string(line);
     return std::string(line.substr(0, kSearchMaxPreviewBytes));
@@ -599,7 +613,8 @@ Result<SearchResponse> ProjectSearch::searchText(const SearchOptions& options) c
                 const size_t after = start + query.size();
                 const bool right_ok = !options.whole_word || after == haystack.size() || !isWordByte(haystack[after]);
                 if (left_ok && right_ok) {
-                    response.matches.push_back({file.resource_path, line_number, start + 1, previewOf(line)});
+                    response.matches.push_back(
+                        {file.resource_path, line_number, columnOf(line, start), previewOf(line)});
                     if (response.matches.size() >= options.max_results) {
                         response.truncated = true;
                         return response;
@@ -628,8 +643,13 @@ Result<SearchResponse> ProjectSearch::searchSymbols(const SymbolSearchOptions& o
     const auto files = collectFiles(m_projectRoot, search_root.value(), extensions.value(), response);
     if (files.isErr()) return files.error();
     for (const auto& file : files.value()) {
-        const bool gdscript = strings::endsWith(file.resource_path, ".gd");
-        const bool csharp = strings::endsWith(file.resource_path, ".cs");
+        // Folded the same way collectFiles folded it to admit the file. A
+        // case-sensitive test here dropped res://Upper.GD as having no symbol
+        // extractor after the collector had accepted it, and then reported
+        // .gd, the folded extension, as unsearchable for the whole run (#549).
+        const auto folded_path = asciiFold(file.resource_path);
+        const bool gdscript = strings::endsWith(folded_path, ".gd");
+        const bool csharp = strings::endsWith(folded_path, ".cs");
         if (!gdscript && !csharp) {
             // Not scanned, not skipped, not unsearchable, and yet counted in
             // scanned_bytes: an empty result then read as "the path was empty"
@@ -678,7 +698,7 @@ Result<SearchResponse> ProjectSearch::searchSymbols(const SymbolSearchOptions& o
                 !symbolMatches(declaration->first, options)) continue;
             const auto offset = line.find(declaration->first);
             response.matches.push_back({file.resource_path, line_number,
-                                        offset == std::string::npos ? 1u : offset + 1,
+                                        offset == std::string::npos ? 1u : columnOf(line, offset),
                                         previewOf(line), declaration->first,
                                         declaration->second, gdscript ? "gdscript" : "csharp", {}});
             if (response.matches.size() >= options.max_results) {
