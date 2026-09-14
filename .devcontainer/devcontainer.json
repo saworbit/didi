@@ -1,0 +1,31 @@
+{
+  "name": "didi (Linux toolchain)",
+  "build": {
+    "dockerfile": "../tools/localci/Dockerfile",
+    "context": ".."
+  },
+  // The same image the local CI lanes use, so a Codespace, a VS Code Dev
+  // Container and `tools/localci/run.sh` are one environment rather than three
+  // that drift. Codespaces are Linux only -- this gives the gcc, clang and
+  // sanitizer toolchains, and no more reaches macOS here than anywhere else.
+  "workspaceFolder": "/workspaces/didi",
+  "remoteUser": "root",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-vscode.cmake-tools",
+        "ms-python.python"
+      ],
+      "settings": {
+        "cmake.generator": "Ninja",
+        "cmake.buildDirectory": "${workspaceFolder}/build-devcontainer"
+      }
+    }
+  },
+  // Unlike the lanes, a dev container mounts the workspace read-write -- that
+  // is the point of one. Build somewhere other than `build/`, which the
+  // Windows side of this repository also uses, so a container build and a host
+  // build cannot overwrite each other's CMake cache.
+  "postCreateCommand": "cmake --version && c++ --version && clang++ --version && python3 -c 'import jsonschema; print(\"jsonschema\", jsonschema.__version__)'"
+}
