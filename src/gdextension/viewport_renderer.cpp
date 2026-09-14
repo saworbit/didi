@@ -206,8 +206,10 @@ json ViewportRenderer::capturePasses(const json& params, const std::string& sess
             return rendererError(Error::invalidArgument("Viewport pass params must be an object"));
         }
         for (auto it = params.begin(); it != params.end(); ++it) {
+            // select_main_screen is consumed by the editor hook before this
+            // runs, and arrives here with the rest of the call.
             if (it.key() != "passes" && it.key() != "camera_identifier" &&
-                it.key() != "depth_far") {
+                it.key() != "depth_far" && it.key() != "select_main_screen") {
                 return rendererError(Error::invalidArgument("Viewport pass request contains an unknown property"));
             }
         }

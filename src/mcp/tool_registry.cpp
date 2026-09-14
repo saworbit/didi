@@ -2351,8 +2351,7 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"render_debug_flags", {{"type", "array"}}},
                 {"node_isolation_path", {{"type", "string"}}},
                 {"isolation_background", {{"type", "string"}, {"enum", {"original", "transparent"}}, {"default", "original"}}},
-                {"select_main_screen", {{"type", "boolean"}, {"default", false},
-                                        {"description", "Select the editor main screen this camera_identifier belongs to before capturing, then put the previous one back. An editor viewport has no size unless its main screen is showing, so without this an unattended agent cannot capture one at all. Editor sessions only."}}}
+                {"select_main_screen", {{"type", "boolean"}, {"default", false}}}
             }}
         };
         t.handler = [this](const json& args) { return handleCaptureViewport(args, m_ipcClient); };
@@ -2379,7 +2378,8 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"min_ssim", {{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0},
                               {"description", "Structural similarity at or above which the frames count as perceptually identical. Sets perceptually_identical in the result."}}},
                 {"max_hamming_distance", {{"type", "integer"}, {"minimum", 0}, {"maximum", 64},
-                                          {"description", "Largest perceptual-hash distance that still counts as perceptually identical. Sets perceptually_identical in the result."}}}
+                                          {"description", "Largest perceptual-hash distance that still counts as perceptually identical. Sets perceptually_identical in the result."}}},
+                {"select_main_screen", {{"type", "boolean"}, {"default", false}}}
             }},
             {"required", {"baseline_capture_id"}}
         };
@@ -2678,7 +2678,8 @@ void ToolRegistry::registerAllDefaultTools() {
                 }},
                 {"camera_identifier", {{"type", "string"}, {"description", "Editor sessions only; a game has one root viewport."}}},
                 {"depth_far", {{"type", "number"}, {"exclusiveMinimum", 0}, {"maximum", 1000000},
-                               {"description", "The distance mapped to white in the depth pass. Defaults to the rendering camera's own far plane, and the value used is reported back."}}}
+                               {"description", "The distance mapped to white in the depth pass. Defaults to the rendering camera's own far plane, and the value used is reported back."}}},
+                {"select_main_screen", {{"type", "boolean"}, {"default", false}}}
             }},
             {"required", json::array({"passes"})},
             {"additionalProperties", false}
