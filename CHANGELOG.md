@@ -51,6 +51,17 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`script_get_symbols` publishes a limit and says what it left out.** It was
+  the one reader on the surface with neither: a 10 MB script with 120,000
+  declarations came back as 15 MB of JSON, `isError: false`, with no
+  `truncated`, `max_*`, `omitted_*` or count field anywhere, so a caller could
+  not tell a complete answer from a clipped one and could not ask for less.
+  `max_symbols` defaults to 2000, counted across all six kinds because the
+  response is one thing, and every result carries `symbol_count_total`,
+  `returned_count` and `truncated`. The scan still reads the whole file, so the
+  total is the real total. The same disclosure `scene_get_hierarchy`,
+  `runtime_get_tree`, `project_search_text`, `ui_list_controls` and
+  `scene_get_selection` already publish (#575).
 - **A confirmation token is bound to what the preview saw, not only to the
   call.** The preview read the target, computed `before`, signed it and never
   looked again, so a file rewritten between the preview and the confirm was

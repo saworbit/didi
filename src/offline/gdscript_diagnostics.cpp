@@ -1064,7 +1064,7 @@ std::string readColonType(std::string_view tail) {
 
 } // namespace
 
-json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
+json GDScriptDiagnostics::extractSymbols(const std::string& source_text, size_t max_symbols) {
     std::vector<std::string> lines = strings::split(source_text, '\n');
     json functions = json::array();
     json variables = json::array();
@@ -1072,6 +1072,18 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
     json signals = json::array();
     json enums = json::array();
     json classes = json::array();
+
+    // Counted across all six kinds. The scan runs to the end of the file either
+    // way, because the total is the fact that tells a caller their answer was
+    // clipped, and it costs one more pass over lines already read.
+    size_t total = 0;
+    size_t returned = 0;
+    auto room = [&]() {
+        ++total;
+        if (returned >= max_symbols) return false;
+        ++returned;
+        return true;
+    };
 
     std::string multiline_delimiter;
     bool pending_export = false;
@@ -1106,6 +1118,7 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
             }
             const auto after_params = tail.substr(close_paren + 1);
             const auto arrow = after_params.find("->");
+            if (!room()) continue;
             functions.push_back({
                 {"name", declaration->name},
                 {"parameters", std::string(tail.substr(open_paren + 1, close_paren - open_paren - 1))},
@@ -1116,6 +1129,7 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
             });
         } else if (declaration->kind == "variable") {
             const auto type = readColonType(tail);
+            if (!room()) continue;
             variables.push_back({
                 {"name", declaration->name},
                 {"exported", exported},
@@ -1125,6 +1139,7 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
         } else if (declaration->kind == "constant") {
             const auto type = readColonType(tail);
             const auto assign = tail.find('=');
+            if (!room()) continue;
             constants.push_back({
                 {"name", declaration->name},
                 {"type", type.empty() ? std::string("Variant") : type},
@@ -1139,6 +1154,7 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
             const bool has_arguments = open_paren != std::string_view::npos &&
                                        close_paren != std::string_view::npos &&
                                        close_paren > open_paren;
+            if (!room()) continue;
             signals.push_back({
                 {"name", declaration->name},
                 {"arguments", has_arguments
@@ -1148,11 +1164,13 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
                 {"line", i + 1}
             });
         } else if (declaration->kind == "enum") {
+            if (!room()) continue;
             enums.push_back({
                 {"name", declaration->name},
                 {"line", i + 1}
             });
         } else if (declaration->kind == "class") {
+            if (!room()) continue;
             classes.push_back({
                 {"name", declaration->name},
                 {"line", i + 1}
@@ -1166,7 +1184,16 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text) {
         {"constants", constants},
         {"signals", signals},
         {"enums", enums},
-        {"classes", classes}
+        {"classes", classes},
+        // The limit disclosure the rest of the surface publishes and this tool
+        // did not: scene_get_hierarchy, runtime_get_tree, project_search_text,
+        // ui_list_controls and scene_get_selection all say what they left out,
+        // and a 10 MB script came back as 15 MB of JSON here with no field a
+        // caller could read to know whether it was complete (#575).
+        {"symbol_count_total", total},
+        {"returned_count", returned},
+        {"truncated", returned < total},
+        {"max_symbols", max_symbols}
     };
 }
 

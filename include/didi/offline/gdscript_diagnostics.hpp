@@ -97,7 +97,14 @@ public:
                                           const std::vector<std::string>& autoload_names);
 
     static json reflectClass(const std::string& class_name);
-    static json extractSymbols(const std::string& source_text);
+    // `max_symbols` bounds how many declarations come back, counted across all
+    // six kinds, because the response is one thing rather than six. The result
+    // always carries symbol_count_total, returned_count and truncated, so a
+    // caller can tell a complete answer from a clipped one -- which a 15 MB
+    // reply with no limit field anywhere could not (#575).
+    static constexpr size_t kDefaultMaxSymbols = 2000;
+    static json extractSymbols(const std::string& source_text,
+                               size_t max_symbols = kDefaultMaxSymbols);
     static std::optional<GDScriptDeclaration> parseDeclaration(std::string_view code_line);
 };
 
