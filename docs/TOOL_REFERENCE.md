@@ -900,7 +900,7 @@ Each invariant takes a `kind`:
 | kind | reads | bounds |
 | --- | --- | --- |
 | `performance_between` | `metric`, a Performance monitor name such as `TIME_FPS` | `minimum`, `maximum`, at least one |
-| `expression_between` | `expression` against an optional `context_node`, evaluating to a number or a boolean | `minimum`, `maximum`, at least one |
+| `expression_between` | `expression` against an optional `context_node`, evaluating to a number or a boolean, such as `node.get("position").x`; native ClassDB properties only, a script's own variables are refused | `minimum`, `maximum`, at least one |
 | `no_engine_errors` | error-level engine output since the watch began | none; any error violates it |
 
 `outcome` is `violated`, `held`, or `inconclusive`. The third is not a failure mode of the tool: an invariant that never produced a reading, because its context node was missing or its expression failed, is reported with zero readings and makes the run inconclusive. A condition nobody could measure is not a condition that stayed true.
@@ -916,10 +916,10 @@ Drives a running game for a bounded window and reports what happened. It holds o
 This is the pairing `runtime_inject_input` and `runtime_watch_invariants` cannot make between them. Injection presses a button and returns; watching samples every frame but presses nothing. A character that walks into a wall and stops responding is only visible to something doing both at frame rate, because from outside you see a position before the press and a position after it, never the second in between where nothing happened.
 
 - `actions` (`array`, required, 1 to 8). InputMap action names. Names must not repeat, and one action is down at a time.
-- `probes` (`array`, required, 1 to 4). Each takes an `expression` against an optional `context_node`, evaluating to a number or a boolean, through the same sandbox `runtime_watch_invariants` uses. `node` is the context node and a property is read with `node.get("name")`; a component of that read is a number, as in `node.get("position").x`. A bare `position.x` reads through an object and is refused.
+- `probes` (`array`, required, 1 to 4). Each takes an `expression` against an optional `context_node`, evaluating to a number or a boolean, through the same sandbox `runtime_watch_invariants` uses. `node` is the context node and a native ClassDB property is read with `node.get("name")`; a component of that read is a number, as in `node.get("position").x`. A bare `position.x` reads through an object and is refused, and so is a script's own variable, because reading one can run its getter; script state has to be exposed through a native property to be watched.
 - `duration_ms` (`integer`, default `5000`, 250 to 60000).
 - `action_hold_ms` (`integer`, default `250`, 16 to 10000). How long one action is held before the schedule moves on.
-- `stuck_ms` (`integer`, default `3000`, 100 to 60000). How long every probe must stay still for that to be reported. Must not exceed `duration_ms`.
+- `stuck_ms` (`integer`, default `3000` or `duration_ms`, whichever is smaller; 100 to 60000). How long every probe must stay still for that to be reported. Must not exceed `duration_ms`; the default follows a short window down, so a caller who sets only `duration_ms` is not refused for a default they never chose.
 - `movement_epsilon` (`number`, default `0.001`).
 - `pause_on_stuck` (`boolean`, default `true`). Stops on the first interval and pauses the game there. `false` surveys the whole window and reports every interval, to a cap of 16.
 - `stop_on_engine_error` (`boolean`, default `true`).
@@ -1118,12 +1118,14 @@ Arguments are `cursor` (default `0`, non-negative), `limit` (default `100`, `1..
   "oldest_cursor": 40,
   "next_cursor": 43,
   "dropped_before_cursor": false,
+  "has_more": false,
+  "sequence_overflowed": false,
   "execution_mode": "live",
   "session_kind": "game"
 }
 ```
 
-The cursor is the next sequence to inspect. Cursor `0` starts at the oldest retained record. `next_cursor` advances over inspected records even if a level filter excludes them, preventing filter starvation. `dropped_before_cursor: true` means retention discarded part of the requested range.
+The cursor is the next sequence to inspect. Cursor `0` starts at the oldest retained record. `next_cursor` advances over inspected records even if a level filter excludes them, preventing filter starvation. `dropped_before_cursor: true` means retention discarded part of the requested range. `has_more: true` means the ring still holds records past this page; page with `next_cursor` until it is false. `sequence_overflowed` is the ring's own fault flag: the 64-bit sequence reached its maximum and the ring refuses new records, which no session will see. It used to be published as `exhausted`, which read as a paging flag and was false on every page.
 
 **Important:** this ring contains Didi lifecycle, handshake, command, control, and evaluation events only. For output the engine itself produced, use `runtime_read_output`. `runtime_launch` remains the bounded child-process API that captures stdout/stderr and returns it after the child exits.
 
@@ -1151,6 +1153,8 @@ Arguments and paging are identical to `runtime_read_logs`: `cursor` (default `0`
   "oldest_cursor": 1,
   "next_cursor": 4,
   "dropped_before_cursor": false,
+  "has_more": false,
+  "sequence_overflowed": false,
   "execution_mode": "live",
   "stream": "engine",
   "session_kind": "game"

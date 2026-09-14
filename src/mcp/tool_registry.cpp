@@ -2110,14 +2110,14 @@ void ToolRegistry::registerAllDefaultTools() {
         t.handler = [this, handler = std::move(handler)](const json& args) { return handler(args, m_ipcClient); };
         registerTool(std::move(t));
     };
-    register_live_runtime("runtime_read_logs", "Reads incremental structured logs from the active runtime session.",
+    register_live_runtime("runtime_read_logs", "Reads incremental structured logs from the active runtime session, paged by cursor. Page until has_more is false.",
         {{"type", "object"}, {"properties", {
             {"cursor", {{"type", "integer"}, {"default", 0}, {"minimum", 0}}},
             {"limit", {{"type", "integer"}, {"default", 100}, {"minimum", 1}, {"maximum", 500}}},
             {"minimum_level", {{"type", "string"}, {"enum", {"debug", "info", "warning", "error"}}}}
         }}}, handleRuntimeReadLogs);
     register_live_runtime("runtime_read_output",
-        "Reads output the engine itself produced -- print() from a running game and script errors with their file and line -- as an incremental cursor-paged stream, separate from Didi's own diagnostics.",
+        "Reads output the engine itself produced -- print() from a running game and script errors with their file and line -- as an incremental cursor-paged stream, separate from Didi's own diagnostics. Page until has_more is false.",
         {{"type", "object"}, {"properties", {
             {"cursor", {{"type", "integer"}, {"default", 0}, {"minimum", 0}}},
             {"limit", {{"type", "integer"}, {"default", 100}, {"minimum", 1}, {"maximum", 500}}},
@@ -3620,7 +3620,7 @@ void ToolRegistry::registerAllDefaultTools() {
                             {"kind", {{"type", "string"},
                                       {"enum", json::array({"performance_between", "expression_between", "no_engine_errors"})}}},
                             {"metric", {{"type", "string"}, {"description", "performance_between only: a Performance monitor name such as TIME_FPS."}}},
-                            {"expression", {{"type", "string"}, {"maxLength", 512}, {"description", "expression_between only: a sandbox expression evaluating to a number or a boolean, such as node.get('health')."}}},
+                            {"expression", {{"type", "string"}, {"maxLength", 512}, {"description", "expression_between only: a sandbox expression evaluating to a number or a boolean, such as node.get(\"position\").x. node.get reads native ClassDB properties only; a script's own variables are refused, because reading one can run project code."}}},
                             {"context_node", {{"type", "string"}, {"maxLength", 256}, {"description", "expression_between only: the node the expression is evaluated against."}}},
                             {"minimum", {{"type", "number"}}},
                             {"maximum", {{"type", "number"}}}
@@ -3658,7 +3658,7 @@ void ToolRegistry::registerAllDefaultTools() {
                         {"properties", {
                             {"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 64}}},
                             {"expression", {{"type", "string"}, {"minLength", 1}, {"maxLength", 512},
-                                            {"description", "A sandbox expression evaluating to a number or a boolean, such as node.get(\"position\").x. The same sandbox runtime_watch_invariants uses: node is the context node, a property is read with node.get(\"name\"), and a bare position.x is refused because it reads through an object. A probe that never returns a value is listed in unread_probes and sets measured to false."}}},
+                                            {"description", "A sandbox expression evaluating to a number or a boolean, such as node.get(\"position\").x. The same sandbox runtime_watch_invariants uses: node is the context node, a native ClassDB property is read with node.get(\"name\") and a script's own variables are refused, and a bare position.x is refused because it reads through an object. A probe that never returns a value is listed in unread_probes and sets measured to false."}}},
                             {"context_node", {{"type", "string"}, {"maxLength", 256},
                                               {"description", "The node the expression is evaluated against, and what node stands for in the expression."}}}
                         }},
@@ -3671,7 +3671,7 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"action_hold_ms", {{"type", "integer"}, {"minimum", 16}, {"maximum", 10000}, {"default", 250},
                                     {"description", "How long one action is held before the schedule moves on. One action is down at a time."}}},
                 {"stuck_ms", {{"type", "integer"}, {"minimum", 100}, {"maximum", 60000}, {"default", 3000},
-                              {"description", "How long every probe has to stay still before that is reported as a stuck interval. Must not exceed duration_ms."}}},
+                              {"description", "How long every probe has to stay still before that is reported as a stuck interval. Defaults to 3000 or duration_ms, whichever is smaller. Must not exceed duration_ms."}}},
                 {"movement_epsilon", {{"type", "number"}, {"minimum", 0}, {"default", 0.001},
                                       {"description", "What counts as a value having moved. A float position never repeats exactly, so any change at all would report a standing character as a moving one."}}},
                 {"pause_on_stuck", {{"type", "boolean"}, {"default", true},

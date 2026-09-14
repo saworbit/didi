@@ -3408,6 +3408,7 @@ try {
     Assert-True ($firstLogPage.execution_mode -eq "live") "First runtime log read was not live."
     Assert-True (@($firstLogPage.records).Count -gt 0) "First runtime log read returned no extension records."
     Assert-True ($firstLogPage.next_cursor -gt $firstLogPage.records[-1].sequence) "First runtime log cursor did not advance."
+    Assert-True ($null -ne $firstLogPage.PSObject.Properties["has_more"] -and $firstLogPage.sequence_overflowed -eq $false -and $null -eq $firstLogPage.PSObject.Properties["exhausted"]) "A runtime log page did not say whether it has more, or still carried the exhausted flag: $(($firstLogPage | ConvertTo-Json -Compress -Depth 2).Substring(0, 200))"
     Assert-True (($firstLogPage.records | ConvertTo-Json -Compress -Depth 20) -notmatch "didi_secret_expression_42") "Runtime logs exposed full expression text."
     foreach ($record in @($firstLogPage.records)) {
         Assert-True ($null -ne $record.PSObject.Properties["details"]) "Live runtime log record omitted the uniform details field."

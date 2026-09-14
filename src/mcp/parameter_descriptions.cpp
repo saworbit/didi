@@ -298,7 +298,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "not one this server can use."},
         {"runtime_read_logs.cursor",
          "Sequence number to read from. 0 starts at the oldest retained record; pass the "
-         "next_cursor from the previous answer to continue."},
+         "next_cursor from the previous answer to continue, until has_more is false."},
         {"runtime_read_logs.limit",
          "How many records to return, 1 to 500, default 100."},
         {"runtime_read_logs.minimum_level",
@@ -306,7 +306,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "advances over what the filter excludes, so a quiet level cannot starve paging."},
         {"runtime_read_output.cursor",
          "Sequence number to read from. 0 starts at the oldest retained record; pass the "
-         "next_cursor from the previous answer to continue."},
+         "next_cursor from the previous answer to continue, until has_more is false."},
         {"runtime_read_output.limit",
          "How many records to return, 1 to 500, default 100."},
         {"runtime_read_output.minimum_level",
