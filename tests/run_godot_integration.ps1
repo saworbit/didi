@@ -715,9 +715,11 @@ try {
         # game default while the policy refused the session kind, so the half
         # of the read that says what sits under a point was missing exactly
         # where a caller needs it, right before injecting a click (#592).
-        (Tool-Request 2490 "ui_list_controls" @{ max_results = 32 }),
-        (Tool-Request 2491 "ui_hit_test" @{ point = @{ x = 10; y = 10 }; max_results = 16 }),
-        (Tool-Request 2492 "ui_hit_test" @{ point = @{ x = 500; y = 500 }; max_results = 16 }),
+        # Scoped below the fixture's 10,001-node stress subtree, which both UI
+        # walks stop at by design.
+        (Tool-Request 2490 "ui_list_controls" @{ root_path = "/root/RuntimeRoot/Spatial"; max_results = 32 }),
+        (Tool-Request 2491 "ui_hit_test" @{ point = @{ x = 10; y = 10 }; root_path = "/root/RuntimeRoot/Spatial"; max_results = 16 }),
+        (Tool-Request 2492 "ui_hit_test" @{ point = @{ x = 500; y = 500 }; root_path = "/root/RuntimeRoot/Spatial"; max_results = 16 }),
         # Phase 7B spatial reads against the game's root viewport worlds. The
         # fixture places a unit box at x=2 in 3D, a unit rectangle at x=2 in 2D,
         # and a 4x4 navigation region around the origin in both.
@@ -1330,7 +1332,7 @@ try {
     Assert-True ($gameControls.Count -eq 1) "ui_list_controls in the game did not list the fixture button."
     $gameHit = Tool-Payload $runtimeById[2491]
     Assert-True ($null -ne $gameHit.topmost -and $gameHit.topmost.node_path -eq $gameButtonPath) "ui_hit_test in the game did not name the button under the point: $($gameHit | ConvertTo-Json -Compress -Depth 4)"
-    Assert-True ($gameHit.root_path -eq "/root") "ui_hit_test in the game did not report the game root it covered: $($gameHit.root_path)"
+    Assert-True ($gameHit.root_path -eq "/root/RuntimeRoot/Spatial") "ui_hit_test in the game did not report the subtree it covered: $($gameHit.root_path)"
     Assert-True ((Tool-Payload $runtimeById[2492]).hit_count_total -eq 0) "ui_hit_test in the game reported a hit where no Control is."
     $mouseBatch = Tool-Payload $runtimeById[2480]
     Assert-True ($mouseBatch.outcome -eq "completed" -and $mouseBatch.delivery -eq "immediate" -and $mouseBatch.paused -eq $false -and $mouseBatch.queued_event_count -eq 0) "A batch on a running game was not reported as delivered at once: $($mouseBatch | ConvertTo-Json -Compress)"
