@@ -87,7 +87,11 @@ jobs:
           # count the manifest owns, so the documentation contract that runs
           # against the built binary has nothing in it to check; its links are
           # covered by Validate Docs, which needs no build at all.
-          build_ignored='^(docs/brand/|\.github/ISSUE_TEMPLATE/|\.github/pull_request_template\.md$|\.github/FUNDING\.yml$|\.github/CODEOWNERS$|\.github/labeler\.yml$|\.github/release\.yml$|\.github/workflows/(codeql|supply-chain|triage)\.yml$|\.editorconfig$|\.gitattributes$|\.gitignore$|LICENSE$|CODE_OF_CONDUCT\.md$|AI\.md$)'
+          #
+          # site/ is the project website. Its build is a gate of its own in
+          # pages.yml, which runs on every pull request, and nothing in it can
+          # reach the compiler or the manifest.
+          build_ignored='^(docs/brand/|site/|\.github/ISSUE_TEMPLATE/|\.github/pull_request_template\.md$|\.github/FUNDING\.yml$|\.github/CODEOWNERS$|\.github/labeler\.yml$|\.github/release\.yml$|\.github/workflows/(codeql|supply-chain|triage|pages)\.yml$|\.editorconfig$|\.gitattributes$|\.gitignore$|LICENSE$|CODE_OF_CONDUCT\.md$|AI\.md$)'
 
           # Only these can change what a running Godot editor or a sanitizer
           # build observes. Prose cannot, which is the whole point.
