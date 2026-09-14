@@ -1,6 +1,6 @@
 # Managed editor recovery
 
-Managed mode gives autonomous MCP work its own editor and project copy. It is opt-in at Didi startup; ordinary attachment keeps its existing behavior.
+Managed mode gives autonomous MCP work its own editor and project copy. It is opt-in at Didi startup; ordinary attachment keeps its existing behavior. Without it the four recovery tools are advertised as `currentMode: "unavailable"` and answer `409` with `data.code: "managed_mode_disabled"`, the restore preview included, so a host does not offer them and a caller can branch on the code.
 
 ```powershell
 didi --project "D:\MyGame" --managed-editor "C:\Godot\Godot_v4.5.1-stable_win64.exe" --recovery-workspace "D:\MyGame-recovery-01"

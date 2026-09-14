@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cctype>
 #include "didi/mcp/tool_registry.hpp"
+#include "didi/mcp/tool_availability.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
 #include "didi/mcp/resource_registry.hpp"
 #include "didi/mcp/prompt_registry.hpp"
@@ -1074,8 +1075,9 @@ static void test_semantic_failures_carry_a_code_a_client_can_branch_on() {
     ASSERT_EQ(code_of("resource_inspect",
                       didi::json{{"resource_path", "res://nothing_here.tres"}}), 404);
 
-    // A mode that is switched off is a 501: the request was not wrong.
-    ASSERT_EQ(code_of("runtime_recovery_status", didi::json::object()), 501);
+    // A mode that is switched off is a 409 with a stable code: the request
+    // was not wrong, and nothing is unimplemented (#599).
+    ASSERT_EQ(code_of("runtime_recovery_status", didi::json::object()), 409);
 }
 
 static void test_path_validation_failures_carry_a_code_too() {
@@ -2627,6 +2629,46 @@ static void test_offline_hierarchy_reports_instances_and_inheritance() {
     ASSERT_EQ(derived_payload["inherits"], "res://main.tscn");
     ASSERT_TRUE(!(derived_payload["scene_tree"].contains("instance_of")));
     ASSERT_EQ(derived_payload["scene_tree"]["children"][0]["name"], "Added");
+}
+
+static void test_managed_recovery_off_is_advertised_and_refused_before_the_gate() {
+    // Break caught: the four managed-recovery tools advertised currentMode
+    // local and answered 501 unimplemented when managed mode was off, and the
+    // restore preview issued a token for a call that could only say so (#599).
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setManagedRecovery(nullptr);
+    ASSERT_TRUE(!registry.managedRecoveryEnabled());
+    for (const auto* name : {"runtime_checkpoint", "runtime_recovery_status",
+                             "runtime_restore_checkpoint", "runtime_recover_editor"}) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        ASSERT_TRUE(didi::mcp::managedRecoveryTool(name));
+        ASSERT_EQ(didi::mcp::currentModeFor(tool->capability, name, false, false, std::nullopt,
+                                            false, false),
+                  "unavailable");
+        ASSERT_EQ(didi::mcp::currentModeFor(tool->capability, name, false, false, std::nullopt,
+                                            false, true),
+                  "local");
+        const auto refused = registry.callTool(name, name == std::string("runtime_restore_checkpoint")
+                                                         ? didi::json{{"checkpoint_id", "nope"}}
+                                                         : didi::json::object());
+        ASSERT_TRUE(refused.isError);
+        const auto payload = didi::json::parse(refused.content[0].text);
+        ASSERT_EQ(payload["error"]["code"], 409);
+        ASSERT_EQ(payload["error"]["data"]["code"], "managed_mode_disabled");
+        ASSERT_TRUE(payload["error"]["data"]["retryable"] == false);
+    }
+    ASSERT_TRUE(!didi::mcp::managedRecoveryTool("runtime_stop"));
+    // The preview refuses the same way, and mints nothing.
+    const auto preview = registry.callTool(
+        "runtime_restore_checkpoint", {{"checkpoint_id", "nope"}, {"dry_run", true}});
+    ASSERT_TRUE(preview.isError);
+    const auto preview_payload = didi::json::parse(preview.content[0].text);
+    ASSERT_EQ(preview_payload["error"]["code"], 409);
+    ASSERT_EQ(preview_payload["error"]["data"]["code"], "managed_mode_disabled");
+    ASSERT_TRUE(!preview_payload.contains("mutation_preview"));
+    ASSERT_TRUE(preview.content[0].text.find("confirmation_token") == std::string::npos);
 }
 
 static didi::json hierarchyFixtureScene() {
@@ -5409,6 +5451,8 @@ struct RegisterToolTests {
                      test_offline_hierarchy_reads_main_scene_and_multiline_properties);
         registerTest("Tools.OfflineHierarchyReportsInstancesAndInheritance",
                      test_offline_hierarchy_reports_instances_and_inheritance);
+        registerTest("Tools.ManagedRecoveryOffIsAdvertisedAndRefusedBeforeTheGate",
+                     test_managed_recovery_off_is_advertised_and_refused_before_the_gate);
         registerTest("Hierarchy.ClassFilterKeepsMatchingBranches",
                      test_hierarchy_class_filter_keeps_only_matching_branches);
         registerTest("Hierarchy.NodeBudgetReportsWhatItCut",

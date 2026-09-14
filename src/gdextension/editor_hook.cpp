@@ -1412,9 +1412,10 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
                                    method == "physics.clearance" ||
                                    method == "vision.frustumQuery" || method == "nav.queryPath" ||
                                    method == "anim.listTracks" || method == "anim.playTrack" ||
-                                   // Enumerating Controls is a read, and the
-                                   // running game is where a caller most needs it.
-                                   method == "ui.listControls";
+                                   // Enumerating Controls and hit-testing a point
+                                   // are reads, and the running game is where a
+                                   // caller most needs them (#592).
+                                   method == "ui.listControls" || method == "ui.hitTest";
         if (m_sessionKind == runtime::SessionKind::game && !game_admitted) {
             return {{"error", {{"code", 409},
                                 {"message", "Editor-only method is unavailable in a game session: " + method}}}};

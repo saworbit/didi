@@ -674,7 +674,8 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         for (const auto& t : tools) {
             json definition = t.toJson();
             addCurrentAvailability(definition, t.capability, connected, session_kind, false,
-                                   managed_unavailable);
+                                   managed_unavailable,
+                                   ToolRegistry::instance().managedRecoveryEnabled());
             // The host preloads the page from the tool that opens it. Declared
             // only to a client that negotiated MCP Apps, so a host that cannot
             // render it is not handed a URI it would have to guess about.

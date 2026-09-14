@@ -1322,9 +1322,9 @@ injected, and nothing is mutated.
 Live only, and deliberately: a `.tscn` holds anchors and offsets, not the
 rectangle they resolve to, so an offline answer would be a fabricated one.
 
-### `ui_hit_test` — Live
+### `ui_hit_test` — Live (editor or game)
 
-Requires finite viewport-space `point.x` and `point.y`. Optional `root_path` defaults to `/root`, `include_mouse_filter_ignore` defaults to false, and `max_results` defaults to `32` with range `1..256`. The editor bridge traverses at most 10,000 nodes under the active edited scene, transforms the point into each Control's local space, honors inherited visibility and clipping, and orders hits by canvas layer, effective z-index, then scene draw order. Results include canonical node path, class, effective mouse filter, layer/z/order, local point, and global rectangle. Script-defined `_has_point` overrides are used when callable; otherwise Godot's documented local rectangle default is applied. No input event is created or injected.
+Requires finite viewport-space `point.x` and `point.y`. Optional `root_path` defaults to `/root`, `include_mouse_filter_ignore` defaults to false, and `max_results` defaults to `32` with range `1..256`. The bridge traverses at most 10,000 nodes under the active edited scene in an editor, or under the running game's root in a game, the same two roots `ui_list_controls` reads, so what a game lists can be hit-tested before a click is injected at it. It transforms the point into each Control's local space, honors inherited visibility and clipping, and orders hits by canvas layer, effective z-index, then scene draw order. Results include canonical node path, class, effective mouse filter, layer/z/order, local point, and global rectangle. Script-defined `_has_point` overrides are used when callable; otherwise Godot's documented local rectangle default is applied. No input event is created or injected.
 
 ## 13. Phase 6 mutation safety
 
@@ -1383,7 +1383,7 @@ text. See [Control Room Design](CONTROL_ROOM_DESIGN.md).
 
 ## Managed editor recovery
 
-These host tools require managed startup; they return a disabled error in ordinary attach mode. See [Managed Recovery](MANAGED_RECOVERY.md).
+These host tools require managed startup. Without `--managed-editor` discovery advertises them as `currentMode: "unavailable"`, and every call, the restore preview included, answers `409` with `data.code: "managed_mode_disabled"` and no token: nothing about the request was wrong, nothing is unimplemented, and retrying cannot help until the server is started in managed mode. See [Managed Recovery](MANAGED_RECOVERY.md).
 
 | Tool | Arguments | Behavior |
 | --- | --- | --- |

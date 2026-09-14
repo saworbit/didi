@@ -1534,6 +1534,19 @@ static CallToolResult withErrorDataFloor(CallToolResult result,
 // The shape the rest of the surface already uses for a caller mistake: a
 // sentence a person or an agent can act on, plus a stable machine code beside
 // it rather than instead of it (#406).
+// Off is a state the server knows at startup, not a missing implementation,
+// and a caller branches on the code (#599).
+static CallToolResult managedRecoveryDisabled(const ResolvedToolBinding& binding) {
+    return CallToolResult::error(json{{"error", {
+        {"code", 409},
+        {"message", "Managed recovery is disabled. Start Didi with --managed-editor and "
+                    "--recovery-workspace to use an isolated project copy."},
+        {"data", {{"tool", binding.invoked_name},
+                  {"canonical_tool", binding.canonical_name},
+                  {"code", "managed_mode_disabled"},
+                  {"retryable", false}}}}}}.dump());
+}
+
 static CallToolResult invalidArgumentsError(const ResolvedToolBinding& binding,
                                             const std::string& message) {
     return CallToolResult::error(json{{"error", {
@@ -1579,6 +1592,9 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         return invalidArgumentsError(binding, *invalid);
     }
     const bool recovery_tool = name == "runtime_checkpoint" || name == "runtime_recovery_status" || name == "runtime_restore_checkpoint" || name == "runtime_recover_editor";
+    // Before the confirmation gate: it used to issue a token for a restore that
+    // could only answer that the mode is off (#599).
+    if (recovery_tool && !m_recovery) return managedRecoveryDisabled(binding);
     if (m_recovery) {
         if (name == "runtime_attach_session" || name == "runtime_detach_session")
             return m_recovery->annotate(CallToolResult::error("Managed mode owns its editor route; use a separate ordinary Didi session to attach elsewhere."));
@@ -2001,13 +2017,15 @@ void ToolRegistry::registerAllDefaultTools() {
             t.inputSchema["required"] = json::array({"checkpoint_id"});
         }
         t.handler = [this, operation = t.name](const json& args) {
-            // 501: the mode is off, not the request wrong. A caller that
-            // branches on the code can tell those apart without reading prose.
+            // Off is a state, not a request that was wrong and not a tool
+            // nobody wrote: 409 with a stable code, the same answer callTool
+            // gives before the confirmation gate (#599).
             if (!m_recovery) {
                 return CallToolResult::errorJson(
-                    501,
+                    409,
                     "Managed recovery is disabled. Start Didi with --managed-editor and "
-                    "--recovery-workspace to use an isolated project copy.");
+                    "--recovery-workspace to use an isolated project copy.",
+                    {{"code", "managed_mode_disabled"}, {"retryable", false}});
             }
             if (operation == "runtime_recovery_status") return CallToolResult::successJson(m_recovery->status());
             if (operation == "runtime_recover_editor") {
@@ -3930,7 +3948,8 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "ui_hit_test";
-        t.description = "Hit-tests live Control nodes at a viewport-space point without injecting input.";
+        t.description = "Hit-tests live Control nodes at a viewport-space point without injecting input. "
+                        "Editor or game: the edited scene in an editor, the running scene in a game.";
         t.inputSchema = {{"type", "object"}, {"properties", {
             {"point", {{"type", "object"}, {"properties", {
                 {"x", {{"type", "number"}}}, {"y", {{"type", "number"}}}

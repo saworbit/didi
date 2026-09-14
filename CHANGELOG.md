@@ -66,6 +66,19 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **What discovery advertises is what a call gets, for hit-testing a game
+  and for managed recovery.** `ui_hit_test` promised a game default in its
+  own `root_path` description and was refused for a game session, while
+  `ui_list_controls`, the other half of the same read, answered; it now
+  answers for the running game's root the way the listing does, so what a
+  game lists can be hit-tested before a click is injected at it (#592). The
+  four managed-recovery tools advertised `currentMode: "local"` and answered
+  `501 unimplemented` when the server was not started with
+  `--managed-editor`, and `runtime_restore_checkpoint` issued a confirmation
+  token before saying so; discovery and the control room now advertise them
+  as `unavailable`, every call answers `409` with `data.code:
+  "managed_mode_disabled"`, and the check runs before the confirmation gate,
+  so no token is minted for a call that cannot succeed (#599).
 - **Three places where the published contract and the handler disagreed.**
   `runtime_explore_scene` refused every `duration_ms` below 3000 unless
   `stuck_ms` was lowered too, because the default of one exceeded what the
