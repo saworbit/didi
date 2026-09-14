@@ -754,6 +754,7 @@ const char* engineIncidentKindName(EngineIncidentKind kind) {
         case EngineIncidentKind::unreachable: return "engine_unreachable";
         case EngineIncidentKind::hung: return "engine_hung";
         case EngineIncidentKind::session_lost: return "session_lost";
+        case EngineIncidentKind::stopped: return "game_stopped";
         case EngineIncidentKind::none: break;
     }
     return "none";
@@ -889,6 +890,39 @@ void annotateRouteObstruction(Error& error) {
     if (obstruction->kind == "bridge_held") {
         error.data["bridge_held_by_another_client"] = true;
     }
+    // A game that exited because this caller asked is not coming back, so a
+    // retry can only loop (#595).
+    if (obstruction->kind == "game_stopped") error.data["retryable"] = false;
+}
+
+namespace {
+std::mutex g_requested_stops_mutex;
+std::vector<RequestedStop> g_requested_stops;
+} // namespace
+
+void recordRequestedStop(RequestedStop stop) {
+    if (stop.at_ms == 0) {
+        stop.at_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::system_clock::now().time_since_epoch())
+                         .count();
+    }
+    std::lock_guard<std::mutex> lock(g_requested_stops_mutex);
+    // One entry per session, and only a handful: a server stops a few games
+    // in its life, not thousands.
+    g_requested_stops.erase(
+        std::remove_if(g_requested_stops.begin(), g_requested_stops.end(),
+                       [&](const RequestedStop& known) { return known.session_id == stop.session_id; }),
+        g_requested_stops.end());
+    if (g_requested_stops.size() >= 16) g_requested_stops.erase(g_requested_stops.begin());
+    g_requested_stops.push_back(std::move(stop));
+}
+
+std::optional<RequestedStop> requestedStopFor(uint64_t pid, const std::string& session_id) {
+    std::lock_guard<std::mutex> lock(g_requested_stops_mutex);
+    for (const auto& stop : g_requested_stops) {
+        if (stop.session_id == session_id && stop.pid == pid) return stop;
+    }
+    return std::nullopt;
 }
 
 void annotateEngineState(Error& error, const std::optional<SessionDescriptor>& session) {
@@ -916,6 +950,33 @@ void annotateEngineState(Error& error, const std::optional<SessionDescriptor>& s
                                       {"exception", crash.exception},
                                       {"on_main_thread", crash.on_main_thread},
                                       {"in_extension", crash.in_extension}};
+    }
+
+    // A game this server asked to exit is not a lost engine. It answered the
+    // stop, it is gone because of it, and the exit code is the one the caller
+    // chose; reporting that as a timeout to retry sent every caller into a
+    // loop against a process that will never answer (#595).
+    if (const auto stop = requestedStopFor(session->pid, session->session_id)) {
+        const bool gone = report.state != ProcessInstanceState::alive;
+        const std::string code = std::to_string(stop->exit_code);
+        const std::string cause =
+            gone ? "runtime_stop asked the game to exit with code " + code + ", and it did."
+                 : "runtime_stop asked the game to exit with code " + code +
+                       "; it is still shutting down.";
+        const std::string recovery =
+            "The game is gone because this caller asked. Launch it again, or call "
+            "runtime_list_sessions and attach the editor with runtime_attach_session." +
+            std::string(kWhatStillWorks);
+        error.data["incident"] = engineIncidentKindName(EngineIncidentKind::stopped);
+        error.data["cause"] = cause;
+        error.data["recovery"] = recovery;
+        error.data["exit_code"] = stop->exit_code;
+        error.data["requested_by"] = "runtime_stop";
+        error.data["retryable"] = false;
+        recordRouteObstruction(RouteObstruction{engineIncidentKindName(EngineIncidentKind::stopped),
+                                                cause, recovery, session->pid, session->session_id,
+                                                0});
+        return;
     }
 
     // The facts above say what happened. Without this the caller still has to

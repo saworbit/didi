@@ -350,7 +350,15 @@ CallToolResult handleRuntimeStop(const json& args, std::shared_ptr<ipc::IIpcClie
         return liveValidationError(
             "Invalid runtime stop request: exit_code must be an integer from 0 to 255", ipc);
     }
-    return forwardLiveRuntime("runtime_stop", "runtime.stop", args, ipc);
+    // Which game is being asked to go, read before the request so the answer
+    // to every later call can say the exit was this caller's doing (#595).
+    const auto lease = runtime::acquireRuntimeRouteLease(ipc);
+    auto result = forwardLiveRuntime("runtime_stop", "runtime.stop", args, ipc);
+    if (!result.isError && lease.has_value() && lease->descriptor.has_value()) {
+        runtime::recordRequestedStop({lease->descriptor->pid, lease->descriptor->session_id,
+                                      args.value("exit_code", int64_t{0}), 0});
+    }
+    return result;
 }
 
 CallToolResult handleRuntimeGetTree(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
