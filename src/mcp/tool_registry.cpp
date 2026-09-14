@@ -818,7 +818,15 @@ static json outputSchemaForTool(const std::string& name) {
                               {"variables", {{"type", "array"}}},
                               {"constants", {{"type", "array"}}},
                               {"enums", {{"type", "array"}}},
-                              {"signals", {{"type", "array"}}}},
+                              {"signals", {{"type", "array"}}},
+                              // What was left out, which nothing here said
+                              // before: a 10 MB script answered with 15 MB of
+                              // JSON and no field a caller could read to know
+                              // whether it was complete (#575).
+                              {"symbol_count_total", integer_type},
+                              {"returned_count", integer_type},
+                              {"truncated", boolean_type},
+                              {"max_symbols", integer_type}},
                              {"execution_mode", "file_path"});
     }
     if (name == "script_reflect_class") {
@@ -2395,7 +2403,11 @@ void ToolRegistry::registerAllDefaultTools() {
             {"type", "object"},
             {"properties", {
                 {"file_path", {{"type", "string"}, {"description", "Path to script"}}},
-                {"source_text", {{"type", "string"}, {"description", "Optional source code"}}}
+                {"source_text", {{"type", "string"}, {"description", "Optional source code"}}},
+                {"max_symbols", {{"type", "integer"},
+                                 {"default", offline::GDScriptDiagnostics::kDefaultMaxSymbols},
+                                 {"minimum", 1},
+                                 {"maximum", 100000}}}
             }}
         };
         t.handler = [this](const json& args) { return handleScriptGetSymbols(args, m_ipcClient); };

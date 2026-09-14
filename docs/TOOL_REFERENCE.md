@@ -261,6 +261,11 @@ Extracts functions, variables, signals, enums, and inner classes from GDScript t
 
 - `file_path` (`string`, optional).
 - `source_text` (`string`, optional).
+- `max_symbols` (`integer`, `1..100000`, default `2000`): stop after this many declarations, counted across all six kinds rather than per kind, because the response is one thing.
+
+The result always says what it left out: `symbol_count_total` is how many declarations the file holds, `returned_count` how many came back, and `truncated` whether those differ. The scan reads the whole file either way, so the total is the real total and not a count of what fitted. Declarations are returned in file order, so the budget is not spent entirely on whichever kind happens to come first in the response.
+
+This is the same disclosure `scene_get_hierarchy`, `runtime_get_tree`, `project_search_text`, `ui_list_controls` and `scene_get_selection` publish. This tool had no limit at all: a 10 MB script with 120,000 declarations returned 15 MB of JSON with `isError: false` and no field a caller could read to know whether the answer was complete.
 
 ### `script_create` — Offline
 

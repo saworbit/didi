@@ -216,7 +216,10 @@ CallToolResult handleScriptGetSymbols(const json& args, std::shared_ptr<ipc::IIp
             400, "No source text or valid script file found for symbol extraction.");
     }
 
-    json syms = offline::GDScriptDiagnostics::extractSymbols(source_text);
+    const auto max_symbols = static_cast<size_t>(
+        args.value("max_symbols",
+                   static_cast<uint64_t>(offline::GDScriptDiagnostics::kDefaultMaxSymbols)));
+    json syms = offline::GDScriptDiagnostics::extractSymbols(source_text, max_symbols);
     syms["file_path"] = file_path;
     return CallToolResult::successJson(syms);
 }

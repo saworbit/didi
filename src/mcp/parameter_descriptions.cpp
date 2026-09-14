@@ -204,6 +204,10 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"query_project_resources.include_uid",
          "Read each resource's uid:// identifier. On by default; turning it off skips "
          "opening the files."},
+        {"script_get_symbols.max_symbols",
+         "Stop after this many declarations, counted across every kind, and report truncated. "
+         "Defaults to 2000. symbol_count_total says how many the file holds either way, so a "
+         "clipped answer can be told from a complete one."},
         {"project_search_text.query",
          "The text to look for. At most 256 UTF-8 bytes."},
         {"project_search_text.case_sensitive",

@@ -824,6 +824,50 @@ static void test_gdscript_symbol_patch_refuses_an_unrecognised_symbol_type() {
     ASSERT_EQ(didi::offline::GDScriptDiagnostics::symbolTypes().size(), size_t(6));
 }
 
+static void test_gdscript_extract_symbols_reports_what_it_left_out() {
+    // Break caught: this was the one reader on the surface with no limit and no
+    // truncation disclosure, so a 10 MB script came back as 15 MB of JSON with
+    // every declaration in it, isError false, and nothing a caller could read
+    // to tell a complete answer from a clipped one.
+    std::string source = "extends Node\n";
+    for (int index = 0; index < 40; ++index) {
+        source += "var v" + std::to_string(index) + ": int = 0\n";
+        source += "func f" + std::to_string(index) + "() -> int:\n\treturn 0\n";
+    }
+    source += "signal done\n";
+    source += "const LIMIT := 1\n";
+
+    // 82 declarations: 40 variables, 40 functions, a signal and a constant.
+    const auto whole = didi::offline::GDScriptDiagnostics::extractSymbols(source);
+    ASSERT_EQ(whole["symbol_count_total"].get<size_t>(), size_t(82));
+    ASSERT_EQ(whole["returned_count"].get<size_t>(), size_t(82));
+    ASSERT_EQ(whole["truncated"], false);
+    ASSERT_EQ(whole["functions"].size(), size_t(40));
+
+    // Asked for less, the answer says so and still reports the total, which is
+    // the fact that makes the clipping visible.
+    const auto clipped = didi::offline::GDScriptDiagnostics::extractSymbols(source, 10);
+    ASSERT_EQ(clipped["symbol_count_total"].get<size_t>(), size_t(82));
+    ASSERT_EQ(clipped["returned_count"].get<size_t>(), size_t(10));
+    ASSERT_EQ(clipped["truncated"], true);
+    ASSERT_EQ(clipped["max_symbols"].get<size_t>(), size_t(10));
+    size_t counted = 0;
+    for (const auto* kind : {"functions", "variables", "constants", "signals", "enums",
+                             "classes"}) {
+        counted += clipped[kind].size();
+    }
+    ASSERT_EQ(counted, size_t(10));
+    // Counted across all six kinds, and in file order, so the budget is not
+    // spent entirely on whichever kind happens to come first in the response.
+    ASSERT_EQ(clipped["variables"][0]["name"], "v0");
+
+    // Exactly at the limit is not truncated. Off by one here would report every
+    // complete answer as clipped, which is the same defect the other way round.
+    const auto exact = didi::offline::GDScriptDiagnostics::extractSymbols(source, 82);
+    ASSERT_EQ(exact["truncated"], false);
+    ASSERT_EQ(exact["returned_count"].get<size_t>(), size_t(82));
+}
+
 struct RegisterScriptPatchTests {
     RegisterScriptPatchTests() {
         registerTest("GDScript.DiagnosticsDeprecation", test_gdscript_diagnostics_deprecation);
@@ -845,6 +889,8 @@ struct RegisterScriptPatchTests {
                      test_gdscript_symbol_patch_keeps_a_nested_method_nested);
         registerTest("GDScript.PatchRefusesAmbiguousName",
                      test_gdscript_symbol_patch_refuses_an_ambiguous_name);
+        registerTest("GDScript.ExtractReportsTruncation",
+                     test_gdscript_extract_symbols_reports_what_it_left_out);
         registerTest("GDScript.PatchRefusesAbsentSymbol",
                      test_gdscript_symbol_patch_refuses_a_symbol_the_script_does_not_declare);
         registerTest("GDScript.PatchRefusesUnknownSymbolType",
