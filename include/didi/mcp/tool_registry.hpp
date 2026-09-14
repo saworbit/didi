@@ -56,6 +56,9 @@ public:
 
     void registerAllDefaultTools();
     void setManagedRecovery(std::shared_ptr<runtime::ManagedRecovery> recovery) { m_recovery = std::move(recovery); }
+    // Whether the server was started in managed mode. Discovery reads it so
+    // the four recovery tools are advertised as unavailable when it was not.
+    bool managedRecoveryEnabled() const { return m_recovery != nullptr; }
     // Mirrors the server's confirmation policy so didi_control_room can report
     // it. The gate itself stays in the protocol layer; this is only the view.
     void setConfirmationsSkipped(bool skipped) { m_skipConfirmations = skipped; }

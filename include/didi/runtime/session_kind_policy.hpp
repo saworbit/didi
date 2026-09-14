@@ -30,12 +30,13 @@ inline LiveSessionKindPolicy livePolicyForTool(std::string_view name) {
         name == "spatial_query_clearance" || name == "spatial_query_frustum" ||
         name == "anim_list_tracks" ||
         name == "runtime_read_profiler" ||
-        // Where the Controls are. The editor answers for the scene being
-        // edited and a game for the one being played, and both are questions
-        // somebody asks: one while building a menu, the other while trying to
-        // press it. Unlike ui_hit_test this needs no editor viewport, only a
-        // tree with Controls in it.
-        name == "ui_list_controls" ||
+        // Where the Controls are, and what sits under a point. The editor
+        // answers for the scene being edited and a game for the one being
+        // played, and both are questions somebody asks: one while building a
+        // menu, the other while trying to press it. Neither needs an editor
+        // viewport, only a tree with Controls in it; the hit test was refused
+        // for a game while its own root_path description promised one (#592).
+        name == "ui_list_controls" || name == "ui_hit_test" ||
         // A running game can be driven and read but could never be seen. The
         // frame is in the process Didi is attached to; the editor-only camera
         // identifiers stay editor-only.
@@ -60,7 +61,7 @@ inline LiveSessionKindPolicy livePolicyForMethod(std::string_view method) {
         method == "physics.clearance" || method == "vision.frustumQuery" ||
         method == "nav.queryPath" ||
         method == "anim.listTracks" || method == "runtime.readProfiler" ||
-        method == "ui.listControls" ||
+        method == "ui.listControls" || method == "ui.hitTest" ||
         method == "profiler.sample" ||
         method == "vision.captureViewport" || method == "vision.capturePasses" ||
         method == "vision.diffViewport") {

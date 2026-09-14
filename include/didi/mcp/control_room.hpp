@@ -125,6 +125,9 @@ struct ControlRoomInputs {
     bool connected{false};
     std::optional<std::string> session_kind;
     bool managed_unavailable{false};
+    // Whether the server was started in managed mode; off means the four
+    // recovery tools are unavailable, and the tool rows say so (#599).
+    bool managed_recovery_enabled{true};
     // Why there is no route, when something is known. "Route: detached" is also
     // what this said thirty seconds after the editor crashed, and what a second
     // server on a held editor was told, so the one tool whose job is to say what

@@ -33,13 +33,18 @@ bool managedRouteUnavailable(const std::shared_ptr<ipc::IIpcClient>& client,
 std::string currentModeFor(const ExecutionCapability& capability,
                            const std::string& identifier, bool resource, bool connected,
                            const std::optional<std::string>& session_kind,
-                           bool managed_unavailable);
+                           bool managed_unavailable, bool managed_recovery_enabled = true);
+
+// The four tools managed mode owns. Without --managed-editor they are switched
+// off, and discovery says so rather than advertising a mode a call refuses.
+bool managedRecoveryTool(std::string_view name);
 
 // Writes currentMode, liveAvailable, editorConnected and any sessionKind into
 // `definition["_meta"]["didi"]`.
 void addCurrentAvailability(json& definition, const ExecutionCapability& capability,
                             bool connected, const std::optional<std::string>& session_kind,
-                            bool resource = false, bool managed_unavailable = false);
+                            bool resource = false, bool managed_unavailable = false,
+                            bool managed_recovery_enabled = true);
 
 }  // namespace mcp
 }  // namespace didi

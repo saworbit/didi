@@ -87,6 +87,11 @@ script = ExtResource("2_pausable")
 
 [node name="MouseMotionDelta" type="Node2D" parent="Spatial/AnimTarget"]
 
+[node name="GameButton" type="Button" parent="Spatial/AnimTarget"]
+offset_right = 100.0
+offset_bottom = 40.0
+text = "Go"
+
 [node name="Player" type="AnimationPlayer" parent="Spatial"]
 libraries = {
 "": SubResource("anim_library")

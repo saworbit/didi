@@ -296,7 +296,8 @@ json buildControlRoomModel(const ControlRoomInputs& in,
             else ++unimplemented;
         }
         const std::string mode = currentModeFor(tool.capability, tool.name, false, in.connected,
-                                                in.session_kind, in.managed_unavailable);
+                                                in.session_kind, in.managed_unavailable,
+                                                in.managed_recovery_enabled);
         if (mode == "live") ++live_now;
         rows.push_back({{"name", tool.name},
                         {"mode", mode},

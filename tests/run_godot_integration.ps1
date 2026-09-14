@@ -711,6 +711,13 @@ try {
         (Tool-Request 2482 "eval_gdscript" @{ expression = "node.get('position')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/MouseButtonProbe" }),
         (Tool-Request 2483 "eval_gdscript" @{ expression = "node.get('position')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/MouseMotionProbe" }),
         (Tool-Request 2484 "eval_gdscript" @{ expression = "node.get('position')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/MouseMotionDelta" }),
+        # ui_hit_test in a game session. Its root_path description promised a
+        # game default while the policy refused the session kind, so the half
+        # of the read that says what sits under a point was missing exactly
+        # where a caller needs it, right before injecting a click (#592).
+        (Tool-Request 2490 "ui_list_controls" @{ max_results = 32 }),
+        (Tool-Request 2491 "ui_hit_test" @{ point = @{ x = 10; y = 10 }; max_results = 16 }),
+        (Tool-Request 2492 "ui_hit_test" @{ point = @{ x = 500; y = 500 }; max_results = 16 }),
         # Phase 7B spatial reads against the game's root viewport worlds. The
         # fixture places a unit box at x=2 in 3D, a unit rectangle at x=2 in 2D,
         # and a 4x4 navigation region around the origin in both.
@@ -1318,6 +1325,13 @@ try {
     $pausableAfter = (Tool-Payload $runtimeById[2476]).value
     Assert-True ($pausableAfter -eq ($pausableBefore + 2)) "A node that pauses observed $($pausableAfter - $pausableBefore) held events in the stepped frame, expected 2."
     Assert-True ((Tool-Payload $runtimeById[2477]).value -eq ($cancelBefore + 1)) "is_action_just_pressed did not see the held press in the stepped frame."
+    $gameButtonPath = "/root/RuntimeRoot/Spatial/AnimTarget/GameButton"
+    $gameControls = @((Tool-Payload $runtimeById[2490]).controls | Where-Object { $_.node_path -eq $gameButtonPath })
+    Assert-True ($gameControls.Count -eq 1) "ui_list_controls in the game did not list the fixture button."
+    $gameHit = Tool-Payload $runtimeById[2491]
+    Assert-True ($null -ne $gameHit.topmost -and $gameHit.topmost.node_path -eq $gameButtonPath) "ui_hit_test in the game did not name the button under the point: $($gameHit | ConvertTo-Json -Compress -Depth 4)"
+    Assert-True ($gameHit.root_path -eq "/root") "ui_hit_test in the game did not report the game root it covered: $($gameHit.root_path)"
+    Assert-True ((Tool-Payload $runtimeById[2492]).hit_count_total -eq 0) "ui_hit_test in the game reported a hit where no Control is."
     $mouseBatch = Tool-Payload $runtimeById[2480]
     Assert-True ($mouseBatch.outcome -eq "completed" -and $mouseBatch.delivery -eq "immediate" -and $mouseBatch.paused -eq $false -and $mouseBatch.queued_event_count -eq 0) "A batch on a running game was not reported as delivered at once: $($mouseBatch | ConvertTo-Json -Compress)"
     Assert-True ((@($mouseBatch.event_types) -join ",") -eq "mouse_motion,mouse_button,mouse_button") "mouse_motion was not accepted as an event kind: $(@($mouseBatch.event_types) -join ',')"

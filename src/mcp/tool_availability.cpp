@@ -31,10 +31,15 @@ bool managedRouteUnavailable(const std::shared_ptr<ipc::IIpcClient>& client, boo
     return sessions->activeSession().has_value();
 }
 
+bool managedRecoveryTool(std::string_view name) {
+    return name == "runtime_checkpoint" || name == "runtime_recovery_status" ||
+           name == "runtime_restore_checkpoint" || name == "runtime_recover_editor";
+}
+
 std::string currentModeFor(const ExecutionCapability& capability, const std::string& identifier,
                            bool resource, bool connected,
                            const std::optional<std::string>& session_kind,
-                           bool managed_unavailable) {
+                           bool managed_unavailable, bool managed_recovery_enabled) {
     const auto has_mode = [&](const std::string& mode) {
         return std::find(capability.modes.begin(), capability.modes.end(), mode) !=
                capability.modes.end();
@@ -44,6 +49,10 @@ std::string currentModeFor(const ExecutionCapability& capability, const std::str
         connected && has_mode("live") && liveAllowedFor(identifier, resource, effective_kind);
 
     if (!capability.implemented) return "unimplemented";
+    // Implemented and switched off, which is a different state from either:
+    // the mode was advertised as local while every call answered that
+    // managed mode is off (#599).
+    if (!resource && !managed_recovery_enabled && managedRecoveryTool(identifier)) return "unavailable";
     if (live_available) return "live";
     // A connected route of the wrong kind is an authoritative live selection, not an invitation
     // to silently run an offline fallback. This applies equally to tools and resources.
@@ -64,7 +73,8 @@ std::string currentModeFor(const ExecutionCapability& capability, const std::str
 
 void addCurrentAvailability(json& definition, const ExecutionCapability& capability,
                             bool connected, const std::optional<std::string>& session_kind,
-                            bool resource, bool managed_unavailable) {
+                            bool resource, bool managed_unavailable,
+                            bool managed_recovery_enabled) {
     const auto has_mode = [&](const std::string& mode) {
         return std::find(capability.modes.begin(), capability.modes.end(), mode) !=
                capability.modes.end();
@@ -75,7 +85,8 @@ void addCurrentAvailability(json& definition, const ExecutionCapability& capabil
         connected && has_mode("live") && liveAllowedFor(identifier, resource, effective_kind);
 
     definition["_meta"]["didi"]["currentMode"] = currentModeFor(
-        capability, identifier, resource, connected, session_kind, managed_unavailable);
+        capability, identifier, resource, connected, session_kind, managed_unavailable,
+        managed_recovery_enabled);
     definition["_meta"]["didi"]["liveAvailable"] = live_available;
     definition["_meta"]["didi"]["editorConnected"] = connected && effective_kind == "editor";
     if (!effective_kind.empty()) definition["_meta"]["didi"]["sessionKind"] = effective_kind;

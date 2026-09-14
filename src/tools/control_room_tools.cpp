@@ -149,6 +149,7 @@ CallToolResult handleControlRoom(const json& args, const std::shared_ptr<ipc::II
         if (active.has_value()) inputs.selected_session_id = active->session_id;
     }
     inputs.managed_unavailable = managedRouteUnavailable(ipc, inputs.connected);
+    inputs.managed_recovery_enabled = ToolRegistry::instance().managedRecoveryEnabled();
     if (!inputs.connected) inputs.route_obstruction = runtime::lastRouteObstruction();
 
     inputs.sessions = gatherSessions(sessions);
