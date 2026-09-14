@@ -76,6 +76,9 @@ const std::map<std::string, std::string>& bridgeErrorSentences() {
     {"cyclic_instance",
      "The scene to instance contains the edited scene, so the result could never be saved: "
      "Godot refuses that save and reports nothing to the caller."},
+    {"input_queue_full",
+     "Too many input events are held for the paused game. Resume it, or advance it a frame, "
+     "so they are delivered first."},
     {"camera_path_does_not_resolve_to_camera3d",
      "That path resolves to a node, but not to a Camera3D."},
     {"camera_postcondition_mismatch",
@@ -3475,6 +3478,7 @@ Result<VariantValue> buildInjectedEvent(const runtime::InjectedInputEvent& spec)
         case Kind::action: class_name = "InputEventAction"; break;
         case Kind::key: class_name = "InputEventKey"; break;
         case Kind::mouse_button: class_name = "InputEventMouseButton"; break;
+        case Kind::mouse_motion: class_name = "InputEventMouseMotion"; break;
         case Kind::joypad_button: class_name = "InputEventJoypadButton"; break;
         case Kind::joypad_motion: class_name = "InputEventJoypadMotion"; break;
     }
@@ -3503,6 +3507,24 @@ Result<VariantValue> buildInjectedEvent(const runtime::InjectedInputEvent& spec)
         if (value.isErr()) return value.error();
         auto result = callObject(object, owner, method, 373806689LL, {&value.value()});
         return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
+    };
+    // InputEventMouse.set_position, set_global_position and
+    // InputEventMouseMotion.set_relative all carry 743155724 on 4.5.1, 4.6.2
+    // and 4.7.2.
+    auto set_vector2 = [&](const char* owner, const char* method, double x, double y) -> Result<void> {
+        auto value = makeVector2(x, y);
+        if (value.isErr()) return value.error();
+        auto result = callObject(object, owner, method, 743155724LL, {&value.value()});
+        return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
+    };
+    // A click has one position in the viewport, and the same point in its
+    // canvas layer unless the caller said otherwise.
+    auto set_mouse_position = [&]() -> Result<void> {
+        auto placed = set_vector2("InputEventMouse", "set_position", spec.position_x, spec.position_y);
+        if (placed.isErr()) return placed;
+        const double global_x = spec.has_global_position ? spec.global_position_x : spec.position_x;
+        const double global_y = spec.has_global_position ? spec.global_position_y : spec.position_y;
+        return set_vector2("InputEventMouse", "set_global_position", global_x, global_y);
     };
     auto check = [&](const Result<void>& step) { return step.isErr(); };
 
@@ -3538,6 +3560,13 @@ Result<VariantValue> buildInjectedEvent(const runtime::InjectedInputEvent& spec)
             if (check(step = set_bool("InputEventMouseButton", "set_pressed", spec.pressed))) return fail(step.error());
             if (check(step = set_bool("InputEventMouseButton", "set_double_click", spec.double_click))) return fail(step.error());
             if (check(step = set_float("InputEventMouseButton", "set_factor", spec.factor))) return fail(step.error());
+            if (check(step = set_int("InputEvent", "set_device", 1286410249LL, spec.device))) return fail(step.error());
+            if (spec.has_position && check(step = set_mouse_position())) return fail(step.error());
+            break;
+        }
+        case Kind::mouse_motion: {
+            if (check(step = set_mouse_position())) return fail(step.error());
+            if (check(step = set_vector2("InputEventMouseMotion", "set_relative", spec.relative_x, spec.relative_y))) return fail(step.error());
             if (check(step = set_int("InputEvent", "set_device", 1286410249LL, spec.device))) return fail(step.error());
             break;
         }
@@ -3601,6 +3630,30 @@ json inputMapMissingActions(const json& params, const std::string& session_kind)
     return liveResult({{"missing", std::move(missing)}, {"session_kind", session_kind}});
 }
 
+// Events injected while the tree was paused, held until it runs again.
+//
+// A paused tree delivers _input only to nodes whose process_mode lets them run
+// while paused, and a node that pauses never sees an event dispatched during
+// the pause: Input hands it out on the next frame, which processes nothing for
+// that node, and by the frame after that it is gone. Pause, press, step, look
+// is the sequence the three tools exist for, and it reported success at every
+// step and did nothing (#594). So a batch injected while paused is held here
+// and handed to Input the moment the tree resumes, through runtime.setPaused,
+// which the step also goes through, so it lands in the first frame that
+// processes. Main thread only, like everything else in this file.
+std::vector<VariantValue> g_queuedInjectedInput;
+constexpr size_t kMaxQueuedInjectedEvents = 256;
+
+Result<bool> liveSceneTreeIsPaused() {
+    auto tree = liveSceneTree();
+    if (tree.isErr()) return tree.error();
+    auto paused = callObject(tree.value(), "SceneTree", "is_paused", 36873697LL);
+    if (paused.isErr()) return paused.error();
+    auto flag = scalarFromVariant<GDExtensionBool>(paused.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (flag.isErr()) return flag.error();
+    return flag.value() != 0;
+}
+
 json injectInput(const json& params, const std::string& session_kind) {
     if (session_kind != "game") return bridgeError(409, "session_kind_rejected");
     auto parsed = runtime::parseInputInjectionRequest(params);
@@ -3619,6 +3672,26 @@ json injectInput(const json& params, const std::string& session_kind) {
         events.push_back(std::move(built.value()));
         event_types.push_back(spec.kindName());
     }
+    auto paused = liveSceneTreeIsPaused();
+    if (paused.isErr()) return errorJson(paused.error().code, paused.error().message);
+    if (paused.value()) {
+        const size_t count = events.size();
+        if (g_queuedInjectedInput.size() + count > kMaxQueuedInjectedEvents) {
+            return bridgeError(409, "input_queue_full",
+                               {{"queued_event_count", g_queuedInjectedInput.size()},
+                                {"max_queued_events", kMaxQueuedInjectedEvents}});
+        }
+        for (auto& event : events) g_queuedInjectedInput.push_back(std::move(event));
+        return liveResult({{"dispatched_event_count", 0}, {"queued_event_count", count},
+                           {"event_types", std::move(event_types)},
+                           {"outcome", "queued"}, {"rollback", "not_available"},
+                           {"paused", true}, {"delivery", "next_unpaused_frame"},
+                           {"message", "The game is paused, so a node that pauses would not receive "
+                                       "these events. They are held and handed to Input when "
+                                       "runtime_step or runtime_set_paused resumes the tree, and "
+                                       "land in the first frame that processes."},
+                           {"session_kind", session_kind}});
+    }
     size_t dispatched = 0;
     for (auto& event : events) {
         auto sent = callObject(input.value(), "Input", "parse_input_event", kInputParseInputEventHash, {&event});
@@ -3631,12 +3704,33 @@ json injectInput(const json& params, const std::string& session_kind) {
         }
         ++dispatched;
     }
-    return liveResult({{"dispatched_event_count", dispatched}, {"event_types", std::move(event_types)},
+    return liveResult({{"dispatched_event_count", dispatched}, {"queued_event_count", 0},
+                       {"event_types", std::move(event_types)},
                        {"outcome", "completed"}, {"rollback", "not_available"},
+                       {"paused", false}, {"delivery", "immediate"},
                        {"session_kind", session_kind}});
 }
 
 } // namespace
+
+Result<size_t> GodotBridge::releaseQueuedInput() {
+    if (g_queuedInjectedInput.empty()) return size_t{0};
+    std::vector<VariantValue> pending;
+    pending.swap(g_queuedInjectedInput);
+    auto input = singleton("Input");
+    if (input.isErr()) return input.error();
+    size_t released = 0;
+    for (auto& event : pending) {
+        auto sent = callObject(input.value(), "Input", "parse_input_event", kInputParseInputEventHash, {&event});
+        if (sent.isErr()) {
+            return Error(sent.error().code,
+                         "Released " + std::to_string(released) + " held input event(s) before Input "
+                         "refused one; the rest were dropped: " + sent.error().message);
+        }
+        ++released;
+    }
+    return released;
+}
 
 
 // Phase 7B spatial reads. Both use only the attached session root viewport's

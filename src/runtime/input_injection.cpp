@@ -58,6 +58,34 @@ Result<double> numberField(const json& event, const char* key, double minimum, d
     return number;
 }
 
+struct Vector2Field {
+    bool present{false};
+    double x{0.0};
+    double y{0.0};
+};
+
+// A {x, y} object of finite numbers, the spelling every other tool takes for a
+// Vector2.
+Result<Vector2Field> vector2Field(const json& event, const char* key, bool required) {
+    Vector2Field field;
+    if (!event.contains(key)) {
+        if (required) return Error::invalidArgument(std::string(key) + " is required");
+        return field;
+    }
+    const auto& value = event[key];
+    if (!value.is_object() || !onlyKeys(value, {"x", "y"}) || !value.contains("x") ||
+        !value.contains("y") || !value["x"].is_number() || !value["y"].is_number()) {
+        return Error::invalidArgument(std::string(key) + " must be an object with numeric x and y");
+    }
+    field.x = value["x"].get<double>();
+    field.y = value["y"].get<double>();
+    if (!std::isfinite(field.x) || !std::isfinite(field.y)) {
+        return Error::invalidArgument(std::string(key) + " must be finite");
+    }
+    field.present = true;
+    return field;
+}
+
 Result<bool> boolField(const json& event, const char* key, bool required, bool fallback) {
     if (!event.contains(key)) {
         if (required) return Error::invalidArgument(std::string(key) + " is required");
@@ -118,13 +146,49 @@ Result<InjectedInputEvent> parseEvent(const json& event) {
         DIDI_TRY(parsed.device, integerField(event, "device", -1, 31, false, -1));
     } else if (type == "mouse_button") {
         parsed.kind = Kind::mouse_button;
-        if (!onlyKeys(event, {"type", "button_index", "pressed", "double_click", "factor", "device"})) {
+        if (!onlyKeys(event, {"type", "button_index", "pressed", "double_click", "factor", "device",
+                              "position", "global_position"})) {
             return Error::invalidArgument("mouse_button event contains an unknown property");
         }
         DIDI_TRY(parsed.button_index, integerField(event, "button_index", 1, 9, true, 0));
         DIDI_TRY(parsed.pressed, boolField(event, "pressed", true, false));
         DIDI_TRY(parsed.double_click, boolField(event, "double_click", false, false));
         DIDI_TRY(parsed.factor, numberField(event, "factor", 0.0, 8.0, false, 1.0));
+        DIDI_TRY(parsed.device, integerField(event, "device", -1, 31, false, -1));
+        Vector2Field position;
+        Vector2Field global_position;
+        DIDI_TRY(position, vector2Field(event, "position", false));
+        DIDI_TRY(global_position, vector2Field(event, "global_position", false));
+        if (global_position.present && !position.present) {
+            return Error::invalidArgument(
+                "global_position needs position: the viewport position is where the click "
+                "lands, and global_position is only where the same point is in its canvas layer");
+        }
+        parsed.has_position = position.present;
+        parsed.position_x = position.x;
+        parsed.position_y = position.y;
+        parsed.has_global_position = global_position.present;
+        parsed.global_position_x = global_position.x;
+        parsed.global_position_y = global_position.y;
+    } else if (type == "mouse_motion") {
+        parsed.kind = Kind::mouse_motion;
+        if (!onlyKeys(event, {"type", "position", "global_position", "relative", "device"})) {
+            return Error::invalidArgument("mouse_motion event contains an unknown property");
+        }
+        Vector2Field position;
+        Vector2Field global_position;
+        Vector2Field relative;
+        DIDI_TRY(position, vector2Field(event, "position", true));
+        DIDI_TRY(global_position, vector2Field(event, "global_position", false));
+        DIDI_TRY(relative, vector2Field(event, "relative", false));
+        parsed.has_position = true;
+        parsed.position_x = position.x;
+        parsed.position_y = position.y;
+        parsed.has_global_position = global_position.present;
+        parsed.global_position_x = global_position.x;
+        parsed.global_position_y = global_position.y;
+        parsed.relative_x = relative.x;
+        parsed.relative_y = relative.y;
         DIDI_TRY(parsed.device, integerField(event, "device", -1, 31, false, -1));
     } else if (type == "joypad_button") {
         parsed.kind = Kind::joypad_button;
@@ -158,6 +222,7 @@ const char* InjectedInputEvent::kindName() const {
         case Kind::action: return "action";
         case Kind::key: return "key";
         case Kind::mouse_button: return "mouse_button";
+        case Kind::mouse_motion: return "mouse_motion";
         case Kind::joypad_button: return "joypad_button";
         case Kind::joypad_motion: return "joypad_motion";
     }

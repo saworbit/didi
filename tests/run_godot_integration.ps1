@@ -692,6 +692,20 @@ try {
             @{ type = "joypad_button"; button_index = 22; pressed = $true; device = 0 }
         ) }),
         (Tool-Request 398 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }),
+        # A click with no position lands at the viewport origin, and a caller
+        # who found a control's rect through ui_list_controls had no way to
+        # aim at it (#597). Motion first, the way a pointer arrives, then the
+        # press and the release at the same point; the fixture records where
+        # each mouse event said it happened.
+        (Tool-Request 2480 "runtime_inject_input" @{ events = @(
+            @{ type = "mouse_motion"; position = @{ x = 40; y = 30 }; relative = @{ x = 5; y = 5 } },
+            @{ type = "mouse_button"; button_index = 1; pressed = $true; position = @{ x = 40; y = 30 } },
+            @{ type = "mouse_button"; button_index = 1; pressed = $false; position = @{ x = 40; y = 30 } }
+        ) }),
+        (Tool-Request 2481 "runtime_read_profiler" @{ duration_ms = 50; sample_count = 2; categories = @("frame") }),
+        (Tool-Request 2482 "eval_gdscript" @{ expression = "node.get('position')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/MouseButtonProbe" }),
+        (Tool-Request 2483 "eval_gdscript" @{ expression = "node.get('position')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/MouseMotionProbe" }),
+        (Tool-Request 2484 "eval_gdscript" @{ expression = "node.get('position')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/MouseMotionDelta" }),
         # Phase 7B spatial reads against the game's root viewport worlds. The
         # fixture places a unit box at x=2 in 3D, a unit rectangle at x=2 in 2D,
         # and a 4x4 navigation region around the origin in both.
@@ -785,6 +799,20 @@ try {
         (Tool-Request 2383 "runtime_step" @{ frames = 1 }),
         (Tool-Request 2384 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }),
         (Tool-Request 2385 "eval_gdscript" @{ expression = "node.get('process_priority')"; context_node = "/root/RuntimeRoot" }),
+        # The loop above proves delivery to a node that processes while paused.
+        # A game's own nodes pause with the tree, and for one of those an event
+        # dispatched during the pause was gone before the step ran a frame
+        # (#594). The batch is held instead and released into the stepped
+        # frame, where both _input and is_action_just_pressed see it.
+        (Tool-Request 2471 "eval_gdscript" @{ expression = "node.get('process_priority')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/PausableProbe" }),
+        (Tool-Request 2472 "eval_gdscript" @{ expression = "node.get('process_physics_priority')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/PausableProbe" }),
+        (Tool-Request 2473 "runtime_inject_input" @{ events = @(
+            @{ type = "action"; action_name = "ui_cancel"; pressed = $true },
+            @{ type = "action"; action_name = "ui_cancel"; pressed = $false }) }),
+        (Tool-Request 2474 "eval_gdscript" @{ expression = "node.get('process_priority')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/PausableProbe" }),
+        (Tool-Request 2475 "runtime_step" @{ frames = 1 }),
+        (Tool-Request 2476 "eval_gdscript" @{ expression = "node.get('process_priority')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/PausableProbe" }),
+        (Tool-Request 2477 "eval_gdscript" @{ expression = "node.get('process_physics_priority')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/PausableProbe" }),
         (Tool-Request 367 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot/RuntimeChild/Nested"; max_depth = 1 }),
         (Tool-Request 379 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot/RuntimeChild"; max_depth = 1 }),
         (Tool-Request 307 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 17 }),
@@ -1270,6 +1298,29 @@ try {
     Assert-True (($loopFrameAfter - $loopFrameBefore) -eq 1) "The composed loop advanced from frame $loopFrameBefore to $loopFrameAfter, expected exactly one."
     Assert-True ($loopStep.frames -eq 1 -and $loopStep.paused -eq $true -and $loopAfter.paused -eq $true) "The composed loop did not finish re-paused, so the next press would land in an unknown number of frames."
     Assert-True ($loopEval.value -eq $loopFrameAfter -and $loopEval.session_kind -eq "game") "The stepped frame read back through the tree and through an expression disagree ($loopFrameAfter against $($loopEval.value))."
+    # A press injected while paused is held and released into the stepped
+    # frame, and the node that pauses sees it there (#594).
+    $loopHeld = Tool-Payload $runtimeById[2381]
+    Assert-True ($loopHeld.outcome -eq "queued" -and $loopHeld.paused -eq $true -and $loopHeld.dispatched_event_count -eq 0 -and $loopHeld.queued_event_count -eq 1) "A press injected into a paused game was not reported as held: $($loopHeld | ConvertTo-Json -Compress)"
+    Assert-True ($loopStep.released_input_events -eq 1) "The step did not report releasing the held press: $($loopStep | ConvertTo-Json -Compress)"
+    $pausableBefore = (Tool-Payload $runtimeById[2471]).value
+    $cancelBefore = (Tool-Payload $runtimeById[2472]).value
+    $held = Tool-Payload $runtimeById[2473]
+    Assert-True ($held.outcome -eq "queued" -and $held.paused -eq $true -and $held.dispatched_event_count -eq 0 -and $held.queued_event_count -eq 2 -and $held.delivery -eq "next_unpaused_frame") "A batch injected into a paused game was not reported as held: $($held | ConvertTo-Json -Compress)"
+    Assert-True ((Tool-Payload $runtimeById[2474]).value -eq $pausableBefore) "A held batch reached a node that pauses before the tree ran a frame."
+    $releasingStep = Tool-Payload $runtimeById[2475]
+    Assert-True ($releasingStep.released_input_events -eq 2 -and $releasingStep.paused -eq $true) "The step did not report releasing the held batch: $($releasingStep | ConvertTo-Json -Compress)"
+    $pausableAfter = (Tool-Payload $runtimeById[2476]).value
+    Assert-True ($pausableAfter -eq ($pausableBefore + 2)) "A node that pauses observed $($pausableAfter - $pausableBefore) held events in the stepped frame, expected 2."
+    Assert-True ((Tool-Payload $runtimeById[2477]).value -eq ($cancelBefore + 1)) "is_action_just_pressed did not see the held press in the stepped frame."
+    $mouseBatch = Tool-Payload $runtimeById[2480]
+    Assert-True ($mouseBatch.outcome -eq "completed" -and $mouseBatch.delivery -eq "immediate" -and $mouseBatch.paused -eq $false -and $mouseBatch.queued_event_count -eq 0) "A batch on a running game was not reported as delivered at once: $($mouseBatch | ConvertTo-Json -Compress)"
+    Assert-True ((@($mouseBatch.event_types) -join ",") -eq "mouse_motion,mouse_button,mouse_button") "mouse_motion was not accepted as an event kind: $(@($mouseBatch.event_types) -join ',')"
+    $clickAt = (Tool-Payload $runtimeById[2482]).value
+    Assert-True ($clickAt.x -eq 40 -and $clickAt.y -eq 30) "An injected click did not land where it was aimed: $($clickAt | ConvertTo-Json -Compress)"
+    $motionAt = (Tool-Payload $runtimeById[2483]).value
+    $motionBy = (Tool-Payload $runtimeById[2484]).value
+    Assert-True ($motionAt.x -eq 40 -and $motionAt.y -eq 30 -and $motionBy.x -eq 5 -and $motionBy.y -eq 5) "Injected mouse motion lost its position or its relative movement: at $($motionAt | ConvertTo-Json -Compress) by $($motionBy | ConvertTo-Json -Compress)"
 
     $cappedTree = Tool-Payload $runtimeById[367]
     $cappedTreeBytes = [Text.Encoding]::UTF8.GetByteCount([string]$runtimeById[367].result.content[0].text)

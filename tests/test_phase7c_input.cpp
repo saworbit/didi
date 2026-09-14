@@ -78,6 +78,59 @@ void test_parses_every_event_kind_with_defaults() {
          {"target_context", "game_input"}}).isOk());
 }
 
+void test_mouse_events_carry_a_position() {
+    // Break caught: the mouse_button shape had no position, so every injected
+    // click landed at the viewport origin, and there was no mouse_motion shape
+    // at all (#597).
+    auto parsed = parseInputInjectionRequest(batch({
+        {{"type", "mouse_button"}, {"button_index", 1}, {"pressed", true},
+         {"position", {{"x", 40}, {"y", 30}}}},
+        {{"type", "mouse_button"}, {"button_index", 1}, {"pressed", true},
+         {"position", {{"x", 40}, {"y", 30}}}, {"global_position", {{"x", 140}, {"y", 130}}}},
+        {{"type", "mouse_button"}, {"button_index", 4}, {"pressed", true}},
+        {{"type", "mouse_motion"}, {"position", {{"x", 40.5}, {"y", 30.5}}},
+         {"relative", {{"x", 5}, {"y", -5}}}},
+        {{"type", "mouse_motion"}, {"position", {{"x", 1}, {"y", 2}}}, {"device", 3}},
+    }));
+    ASSERT_TRUE(parsed.isOk());
+    const auto& events = parsed.value();
+    ASSERT_EQ(events.size(), 5u);
+    ASSERT_TRUE(events[0].has_position && !events[0].has_global_position);
+    ASSERT_EQ(events[0].position_x, 40.0);
+    ASSERT_EQ(events[0].position_y, 30.0);
+    ASSERT_TRUE(events[1].has_global_position);
+    ASSERT_EQ(events[1].global_position_x, 140.0);
+    // A wheel click needs no position, and the shape does not demand one.
+    ASSERT_TRUE(!events[2].has_position);
+    ASSERT_EQ(events[3].kind, InjectedInputEvent::Kind::mouse_motion);
+    ASSERT_EQ(std::string(events[3].kindName()), "mouse_motion");
+    ASSERT_EQ(events[3].position_x, 40.5);
+    ASSERT_EQ(events[3].relative_y, -5.0);
+    ASSERT_EQ(events[3].device, -1);
+    ASSERT_EQ(events[4].relative_x, 0.0);
+    ASSERT_EQ(events[4].device, 3);
+
+    const json bad[] = {
+        // Motion has to say where the pointer is.
+        batch({{{"type", "mouse_motion"}, {"relative", {{"x", 1}, {"y", 1}}}}}),
+        // A position is two finite numbers and nothing else.
+        batch({{{"type", "mouse_button"}, {"button_index", 1}, {"pressed", true}, {"position", {{"x", 1}}}}}),
+        batch({{{"type", "mouse_button"}, {"button_index", 1}, {"pressed", true},
+                {"position", {{"x", 1}, {"y", 2}, {"z", 3}}}}}),
+        batch({{{"type", "mouse_button"}, {"button_index", 1}, {"pressed", true}, {"position", "40,30"}}}),
+        // global_position alone says nothing about where the click lands.
+        batch({{{"type", "mouse_button"}, {"button_index", 1}, {"pressed", true},
+                {"global_position", {{"x", 1}, {"y", 2}}}}}),
+        // Motion has no buttons.
+        batch({{{"type", "mouse_motion"}, {"position", {{"x", 1}, {"y", 2}}}, {"pressed", true}}}),
+    };
+    for (const auto& params : bad) {
+        auto refused = parseInputInjectionRequest(params);
+        ASSERT_TRUE(refused.isErr());
+        ASSERT_EQ(refused.error().code, 400);
+    }
+}
+
 void test_rejects_malformed_batches() {
     const json bad[] = {
         json::object(),
@@ -162,6 +215,7 @@ struct RegisterPhase7cInput {
     RegisterPhase7cInput() {
         registerTest("phase7c_input.registry_live_game_only", test_registry_advertises_live_game_only_mutation);
         registerTest("phase7c_input.parses_every_kind", test_parses_every_event_kind_with_defaults);
+        registerTest("phase7c_input.mouse_events_carry_a_position", test_mouse_events_carry_a_position);
         registerTest("phase7c_input.rejects_malformed", test_rejects_malformed_batches);
         registerTest("phase7c_input.count_and_byte_caps", test_enforces_count_and_byte_caps);
         registerTest("phase7c_input.hook_rejects_editor", test_hook_rejects_editor_sessions_before_the_bridge);

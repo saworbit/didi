@@ -50,6 +50,14 @@ func _input(event: InputEvent) -> void:
 	input_counter += 1
 	input_counter_node.name = "InputCounter_%d" % input_counter
 	set_meta("last_input_class", event.get_class())
+	# Where a mouse event said it happened, so the harness can check that an
+	# injected click lands where it was aimed rather than at the origin (#597).
+	# Written into Node2D positions, which the expression sandbox can read.
+	if event is InputEventMouseButton:
+		$Spatial/AnimTarget/MouseButtonProbe.position = event.position
+	elif event is InputEventMouseMotion:
+		$Spatial/AnimTarget/MouseMotionProbe.position = event.position
+		$Spatial/AnimTarget/MouseMotionDelta.position = event.relative
 
 func _mark_unsafe_callback() -> void:
 	process_physics_priority += 1

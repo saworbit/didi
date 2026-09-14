@@ -340,11 +340,13 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"inject_input_event.events",
          "The input events to inject, in order, each an object in Godot's InputEvent shape."},
         {"inject_input_event.target_context",
-         "Which process receives the input: the running game or the editor."},
+         "Always game_input: the events reach the attached game's root viewport, and an "
+         "editor session refuses the call. There is no second value."},
         {"runtime_inject_input.events",
          "The input events to inject, in order, each an object in Godot's InputEvent shape."},
         {"runtime_inject_input.target_context",
-         "Which process receives the input: the running game or the editor."},
+         "Always game_input: the events reach the attached game's root viewport, and an "
+         "editor session refuses the call. There is no second value."},
 
         // -- Viewport and visual ------------------------------------------
         {"capture_viewport.camera_identifier",

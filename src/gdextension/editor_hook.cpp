@@ -1202,6 +1202,13 @@ void EditorHook::scheduleRuntimeStep(
         fulfillCommand(promise, control, std::move(resumed));
         return;
     }
+    {
+        std::lock_guard<std::mutex> lock(m_stepMutex);
+        if (m_pendingRuntimeStep.has_value() && m_pendingRuntimeStep->control == control) {
+            m_pendingRuntimeStep->released_input_events =
+                resumed.value("released_input_events", int64_t{0});
+        }
+    }
     DIDI_LOG_INFO("EDITOR_HOOK", "Scheduled runtime frame step for ", frames, " frame(s)");
 }
 
@@ -1236,7 +1243,8 @@ void EditorHook::processRuntimeStepFrame() {
     completed->control->markCompleted();
     fulfillCommand(completed->response_promise, completed->control,
                    {{"status", "success"}, {"frames", completed->requested_frames},
-                    {"paused", true}, {"execution_mode", "live"},
+                    {"paused", true}, {"released_input_events", completed->released_input_events},
+                    {"execution_mode", "live"},
                     {"is_live_engine", true}, {"session_kind", sessionKindName(m_sessionKind)}});
 }
 
