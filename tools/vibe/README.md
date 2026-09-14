@@ -48,6 +48,13 @@ twice.
 | `probes/pipelined_requests.py` | Requests that overlap, because a host is not obliged to wait. Green: answers come back complete, in order and correctly addressed. Kept as the regression probe. |
 | `probes/capture_baselines.py` | A capture id from a dead process, and ids nobody minted. Green: made-up ids are refused by name, and a real id outlives its process on purpose. |
 | `probes/engine_versions.py` | The same questions asked of whichever editor is attached, printed as a table meant to be diffed between two engines. |
+| `probes/game_session.py` | The second kind of session. Starts the game as its own process, attaches to it, and checks what only a game can answer: stepping verified to the frame through a native property, input injected while paused, a click with no position, and what the server says after a stop it asked for itself. Prints expected against observed. |
+| `probes/game_session_census.py` | The wide pass over the same game: every tool asked once with the game attached, the control room's per-kind modes, invariants, explore, checkpoints, and a fresh server started while two sessions are alive. |
+| `probes/scene_ownership.py` | Godot's own rules for a scene, asked of the tools that edit one: an instanced sub-scene's internals, an inherited scene, a script whose `extends` the node cannot take, signal connections, and a scene instanced into itself. Reads the saved file after every save. |
+| `probes/instance_overrides.py` | A property, a visibility flag and a group set on a node inside an instanced sub-scene, saved, read back from the file and after a reload, beside the same edit on a node the scene owns. |
+| `probes/editor_log_delta.py` | The editor's own log (`--log-file`) read after every call, so each ERROR or WARNING line Godot prints is attributed to the tool call that caused it. |
+| `bind_census.py` | Not a probe against the server: every `(class, method, hash)` bind in `src/gdextension` checked against `--dump-extension-api` output from each installed engine, `hash_compatibility` included. A miss is a null bind that prints at startup or answers 501 at call time. |
+| `fixtures/` | What the ownership and game probes need beyond the sandbox: a sub-scene, a scene inheriting `main.tscn`, a game scene with a ticking script, a `Node3D` script. `sandbox.py --fixtures` copies them in. |
 | `report.py` | Files a directory of finding bodies as issues in one pass. |
 
 The probe files are kept after their findings are fixed, and are worth re-running
@@ -84,7 +91,9 @@ the answer is "the same thing", the probe is a record, not a guard.
 
 ```powershell
 # 1. a project you are free to break, with the current addon in it
-python tools/vibe/sandbox.py $env:TEMP\vibe\proj --launch C:\Godot\Godot_v4.5.1-stable_win64_console.exe
+#    (--fixtures adds the sub-scene, inherited scene and game scene the
+#    ownership and game probes expect)
+python tools/vibe/sandbox.py $env:TEMP\vibe\proj --fixtures --launch C:\Godot\Godot_v4.5.1-stable_win64_console.exe
 
 # 2. what does the surface look like from here?
 python tools/vibe/probe.py -p $env:TEMP\vibe\proj --list --dump-tools $env:TEMP\vibe\tools.json
@@ -428,6 +437,48 @@ second agent `409` with `leased_by` and `reason_code: already_leased`. Both were
 untested and both were fine. Recorded so the tenth session spends its budget
 elsewhere.
 
+**The editor already knows what a scene file can hold, and the tools do not
+ask.** Three findings in one shape: a node removed from inside an instanced
+sub-scene or from an inherited scene (#589), a property set on a node inside an
+instance (#588), and the edited scene instanced into itself (#590). Each
+reports success, `editor_save_scene` reports `saved`, and the file is
+byte-identical, because `PackedScene.pack` only stores what the scene owns or
+has marked editable, and Godot's own `SceneTreeDock` refuses all three before
+the tree is touched. The hierarchy shows none of this (#591): an instance root,
+an instance's internal node and an inherited node all read like an owned one.
+**Read the file after every save, byte count first.** One trap inside the
+trap: before Godot 4.7 `scene_close` refuses without `discard_unsaved`, and
+`scene_open` on an open scene is a tab switch, so the first run of
+`scene_ownership.py` believed a reload that never happened. A scene that
+*instances* the one under test is the reload that cannot lie.
+
+**The second kind of session refuses well and succeeds badly.** Nine sessions
+attached to an editor. With a game attached, every editor-only tool answers
+`409` with `allowed_session_kinds`, which is right; the findings were all
+`isError: false`. Input injected while paused is `completed` and never
+delivered, not even by a `runtime_step` (#594). A stop the server itself
+requested is reported afterwards as a retryable connection timeout (#595). A
+click has no position and lands at the origin (#597). The policy has one read
+on each side of the line (#592). And script state, which is the only state a
+game author writes an invariant about, cannot be read by the sandbox that the
+invariant and explore tools document with `node.get('health')` (#593); the
+fixture's ticker mirrors its frame counter into the parent's `position.x` so a
+step can still be verified to the frame. **Pause, inject, step, read is the
+workflow those tools exist for; run it end to end and read the output stream,
+not the tool's own response.**
+
+**Read the editor's own log after every call.** `didi_control_room` prints
+`ERROR: Parameter "mb" is null` in the editor on 4.5 and 4.6, every time
+(#600), and the game's stdout carries two ANSI-coloured INFO lines per command
+(#601). Neither shows in any tool response. `editor_log_delta.py` attributes
+each new log line to the call before it; `bind_census.py` names the bind
+behind a null-bind error in seconds from the engine's own API dump, and found
+exactly one across 4.5.1, 4.6.2 and 4.7.2: `get_unsaved_scenes`, absent before
+4.7, which the control room already reports as a limitation and still asks
+for on every call. A burst of `Inconsistent redo history` seen once during the
+ownership probe reproduced under no attributed call and was left unfiled; a
+log line that cannot be tied to a call is a lead, not a finding.
+
 ## Sessions so far
 
 | Date | Scope | Server | Findings |
@@ -448,6 +499,8 @@ elsewhere.
 | 2026-09-14 | What the host operating system does to an argument the server already accepted: a case-insensitive filesystem, device names, dot segments. Then files this harness did not author -- CRLF, a BOM, a missing final newline -- the empty string sent to every required string parameter, and the handshake once it is past. | `2.0.0+39daaad58e9d` | #546-#557, twelve findings. |
 
 | 2026-09-14 | The tools that supply part of their own input, and the preview path against the call path: the visual diff, the confirmation token against the world rather than the call, `dry_run` versus real, the largest accepted argument rather than the smallest, and the whole live surface re-asked on a second engine. | `2.0.0+74578cb657ee` | #568-#577, ten findings. |
+
+| 2026-09-14 | The running game as a second kind of session (pause, step, injected input, invariants, explore, stop, and a fresh server beside two live sessions), Godot's own ownership rules asked of the scene tools (instanced and inherited nodes, a scene instanced into itself), the editor's own log read after every call, and every method bind checked against three engine API dumps. | `2.0.0+0ddfa3614b61` | #588-#603, sixteen findings. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log

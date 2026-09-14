@@ -151,6 +151,11 @@ def main() -> int:
     parser.add_argument("--build-tree", help="Take the addon from this build directory.")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument(
+        "--fixtures",
+        action="store_true",
+        help="Also copy tools/vibe/fixtures in: a sub-scene, an inherited scene, a game scene.",
+    )
+    parser.add_argument(
         "--launch",
         metavar="GODOT_EXE",
         help="Open the editor on the new project once it is written.",
@@ -164,6 +169,10 @@ def main() -> int:
         build_tree=Path(args.build_tree) if args.build_tree else None,
         overwrite=args.overwrite,
     )
+    if args.fixtures:
+        for fixture in sorted((Path(__file__).resolve().parent / "fixtures").iterdir()):
+            if fixture.is_file():
+                shutil.copy(fixture, project / fixture.name)
     print(project)
     if args.launch:
         process = launch_editor(project, args.launch, log_file=project.parent / "editor.log")
