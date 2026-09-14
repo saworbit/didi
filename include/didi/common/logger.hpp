@@ -9,6 +9,7 @@
 #include <chrono>
 #include <iomanip>
 #include <functional>
+#include <optional>
 
 namespace didi {
 
@@ -28,6 +29,21 @@ public:
 
     void setLevel(LogLevel level);
     LogLevel getLevel() const;
+
+    // The level a DIDI_LOG_LEVEL value or a log_level setting names, or
+    // nothing for text that names none.
+    static std::optional<LogLevel> parseLevel(std::string_view text);
+
+    // Whether DIDI_LOG_LEVEL was set for this process. The environment wins
+    // over any default or setting, because it was set for this one launch.
+    static bool levelSetByEnvironment();
+
+    // ANSI colour on the console lines. Defaults to whether stderr is a
+    // terminal: the escape codes are for a person reading a terminal, and
+    // written into a redirected stream they are noise in every file and
+    // Output dock that stream lands in (#601).
+    void setColorEnabled(bool enabled);
+    bool colorEnabled() const;
 
     void log(LogLevel level, std::string_view tag, std::string_view message);
     void setSink(LogSink sink);
@@ -64,6 +80,7 @@ private:
     }
 
     std::atomic<LogLevel> m_level{LogLevel::Info};
+    std::atomic<bool> m_color{false};
     mutable std::mutex m_mutex;
     LogSink m_sink;
 };

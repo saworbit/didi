@@ -11,6 +11,45 @@
 
 void registerTest(const std::string& name, std::function<void()> fn);
 
+namespace {
+
+// Break caught: the console line carried ANSI colour codes whether or not
+// stderr was a terminal, so a game whose output was redirected to a file
+// received escape sequences around every extension line (#601).
+void test_logger_writes_no_escape_codes_without_colour() {
+    auto& logger = didi::Logger::instance();
+    const auto previous_level = logger.getLevel();
+    const bool previous_color = logger.colorEnabled();
+    logger.setLevel(didi::LogLevel::Info);
+    std::ostringstream captured;
+    auto* previous = std::cerr.rdbuf(captured.rdbuf());
+    logger.setColorEnabled(false);
+    logger.log(didi::LogLevel::Info, "TEST", "plain line");
+    logger.setColorEnabled(true);
+    logger.log(didi::LogLevel::Info, "TEST", "coloured line");
+    std::cerr.rdbuf(previous);
+    logger.setColorEnabled(previous_color);
+    logger.setLevel(previous_level);
+    const auto text = captured.str();
+    const auto plain_end = text.find("plain line");
+    ASSERT_TRUE(plain_end != std::string::npos);
+    ASSERT_TRUE(text.substr(0, plain_end).find("\033[") == std::string::npos);
+    ASSERT_TRUE(text.find("\033[32m", plain_end) != std::string::npos);
+    ASSERT_TRUE(text.find("[INFO ] [TEST] plain line") != std::string::npos);
+}
+
+void test_logger_parses_every_level_name() {
+    ASSERT_TRUE(didi::Logger::parseLevel("DEBUG") == didi::LogLevel::Debug);
+    ASSERT_TRUE(didi::Logger::parseLevel("info") == didi::LogLevel::Info);
+    ASSERT_TRUE(didi::Logger::parseLevel("2") == didi::LogLevel::Warn);
+    ASSERT_TRUE(didi::Logger::parseLevel("ERROR") == didi::LogLevel::Error);
+    ASSERT_TRUE(didi::Logger::parseLevel("none") == didi::LogLevel::None);
+    ASSERT_TRUE(!didi::Logger::parseLevel("loud").has_value());
+    ASSERT_TRUE(!didi::Logger::parseLevel("").has_value());
+}
+
+} // namespace
+
 static void test_runtime_log_ring_reports_gap_and_advances_past_filtered_records() {
     // Break caught: returning only matching records without advancing the cursor loops forever.
     didi::godot::RuntimeLogRing ring(3);
@@ -189,6 +228,8 @@ struct RegisterRuntimeLogTests {
         registerTest("RuntimeLogs.PublicContract", test_runtime_log_ring_rejects_invalid_levels_and_queries);
         registerTest("RuntimeLogs.SequenceExhaustion", test_runtime_log_ring_stops_before_sequence_wraparound);
         registerTest("RuntimeLogs.LoggerSinkMirroring", test_logger_sink_mirrors_records_below_console_threshold);
+        registerTest("RuntimeLogs.LoggerColourOnlyWhenAsked", test_logger_writes_no_escape_codes_without_colour);
+        registerTest("RuntimeLogs.LoggerParsesLevels", test_logger_parses_every_level_name);
         registerTest("RuntimeLogs.LoggerSinkRecursion", test_logger_sink_does_not_recurse_when_sink_logs);
     }
 } g_registerRuntimeLogTests;

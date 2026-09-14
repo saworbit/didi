@@ -49,12 +49,26 @@ public:
             object_get_instance_from_id = (GDExtensionInterfaceObjectGetInstanceFromId)p_get_proc_address("object_get_instance_from_id");
             object_get_instance_id = (GDExtensionInterfaceObjectGetInstanceId)p_get_proc_address("object_get_instance_id");
             classdb_construct_object = (GDExtensionInterfaceClassdbConstructObject2)p_get_proc_address("classdb_construct_object2");
+            // Which engine this extension was loaded into, read before anything
+            // newer than the floor is asked for. get_godot_version2 has been
+            // there since 4.5, which is this project's floor, and it is what
+            // lets a caller see that the pinned class reference is from a
+            // different minor than the editor in front of them (#405).
+            get_godot_version2 = (GDExtensionInterfaceGetGodotVersion2)p_get_proc_address("get_godot_version2");
             // Class registration. Didi has only ever called the engine, never
             // extended it, so these are new. The interface exposes several
             // variants with different GDExtensionClassCreationInfo layouts;
             // which are present depends on the running engine, so each is
             // resolved and the caller selects the newest available.
-            classdb_register_extension_class6 = (GDExtensionInterfaceClassdbRegisterExtensionClass6)p_get_proc_address("classdb_register_extension_class6");
+            //
+            // The engine prints an ERROR for a name it does not have, so a
+            // variant newer than the running engine is not asked for at all:
+            // asking printed "non-existent interface function" at every
+            // startup of every editor and game on 4.5 and 4.6 (#600).
+            // classdb_register_extension_class6 is @since 4.7.
+            classdb_register_extension_class6 = engineVersionAtLeast(4, 7)
+                ? (GDExtensionInterfaceClassdbRegisterExtensionClass6)p_get_proc_address("classdb_register_extension_class6")
+                : nullptr;
             classdb_register_extension_class4 = (GDExtensionInterfaceClassdbRegisterExtensionClass4)p_get_proc_address("classdb_register_extension_class4");
             classdb_unregister_extension_class = (GDExtensionInterfaceClassdbUnregisterExtensionClass)p_get_proc_address("classdb_unregister_extension_class");
             object_set_instance = (GDExtensionInterfaceObjectSetInstance)p_get_proc_address("object_set_instance");
@@ -74,15 +88,18 @@ public:
             variant_get_type = (GDExtensionInterfaceVariantGetType)p_get_proc_address("variant_get_type");
             packed_byte_array_operator_index_const = (GDExtensionInterfacePackedByteArrayOperatorIndexConst)p_get_proc_address("packed_byte_array_operator_index_const");
             register_main_loop_callbacks = (GDExtensionInterfaceRegisterMainLoopCallbacks)p_get_proc_address("register_main_loop_callbacks");
-            // Which engine this extension was loaded into. Didi published its
-            // own build identity and never the engine's, so nothing could tell
-            // a caller that the pinned class reference is from a different
-            // minor than the editor in front of them (#405). get_godot_version2
-            // has been there since 4.5, which is this project's floor.
-            get_godot_version2 = (GDExtensionInterfaceGetGodotVersion2)p_get_proc_address("get_godot_version2");
         }
 
         m_initialized = p_get_proc_address != nullptr && m_library != nullptr;
+    }
+
+    // Whether the running engine is at least major.minor. False when the
+    // engine did not offer the version call, so nothing newer is asked for.
+    bool engineVersionAtLeast(uint32_t major, uint32_t minor) const {
+        if (!get_godot_version2) return false;
+        GDExtensionGodotVersion2 version{};
+        get_godot_version2(&version);
+        return version.major > major || (version.major == major && version.minor >= minor);
     }
 
     // The engine's own version string, for example

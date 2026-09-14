@@ -203,6 +203,11 @@ Remove-Item -Path (Join-Path $buildRoot "godot_crash_*.dmp") -Force -ErrorAction
 # the engine does not.
 $previousCrashCaptureDir = $env:DIDI_CRASH_CAPTURE_DIR
 $env:DIDI_CRASH_CAPTURE_DIR = $buildRoot
+# The readiness probe reads the extension's own "Named pipe server started"
+# line, and the extension logs at WARN by default so a game's output is not
+# its log (#601). The processes this script launches are asked for INFO.
+$previousDidiLogLevel = $env:DIDI_LOG_LEVEL
+$env:DIDI_LOG_LEVEL = "INFO"
 
 # The engine's own script documentation thread can trap inside
 # Thread::wait_to_finish and take the editor down with an illegal instruction.
@@ -1707,6 +1712,11 @@ try {
         # and 4.6 it cannot, and the dashboard says so rather than reading green
         # as clean (#557).
         (Tool-Request 5570 "didi_control_room" @{}),
+        # Every dashboard read on 4.5 and 4.6 used to print ERROR: Parameter
+        # "mb" is null into the editor's log, because the bind for a 4.7-only
+        # method was looked up on every call. The engine's error stream is
+        # what runtime_watch_invariants reads, so it is read here (#600).
+        (Tool-Request 5571 "runtime_read_logs" @{ minimum_level = "error"; limit = 200 }),
         (Tool-Request 117 "scene_close" @{}),
         (Tool-Request 91 "scene_close" @{ discard_unsaved = $true }),
         (Tool-Request 92 "scene_create" @{ scene_path = "res://created_phase2.tscn"; root_type = "Node2D"; root_name = "Created" }),
@@ -3229,6 +3239,8 @@ try {
     $dirtyProbe = Tool-Payload $byId[116]
     Assert-True ($dirtyProbe.scene_saved -eq $false) "A live scene mutation did not say the change is unsaved: $($dirtyProbe | ConvertTo-Json -Compress)"
     Assert-True ($dirtyProbe.limitation -match "editor_save_scene") "A live scene mutation did not say how to persist the change: $($dirtyProbe.limitation)"
+    $engineErrorsAfterRoom = @((Tool-Payload $byId[5571]).records | Where-Object { $_.message -match 'Parameter "mb" is null' })
+    Assert-True ($engineErrorsAfterRoom.Count -eq 0) "The dashboard read left $($engineErrorsAfterRoom.Count) engine error(s) about a missing method bind in the log."
     $roomAfterMutation = Tool-Payload $byId[5570]
     $projectLight = @($roomAfterMutation.lights | Where-Object { $_.label -eq "Project" })[0]
     $unsavedFact = @($roomAfterMutation.facts | Where-Object { $_.label -eq "Unsaved scenes" })[0]
@@ -3770,6 +3782,12 @@ finally {
     }
     else {
         $env:DIDI_CRASH_CAPTURE_DIR = $previousCrashCaptureDir
+    }
+    if ($null -eq $previousDidiLogLevel) {
+        Remove-Item Env:DIDI_LOG_LEVEL -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:DIDI_LOG_LEVEL = $previousDidiLogLevel
     }
     if ($integrationSucceeded -and $descriptorEntries.Count -ne 0) {
         throw "Runtime descriptor directory was not empty after exact-PID cleanup: $($descriptorEntries.Name -join ', ')"

@@ -2509,6 +2509,35 @@ json liveSceneMutation(json fields) {
     return liveResult(fields);
 }
 
+// Whether EditorInterface.get_unsaved_scenes exists on this engine, asked once.
+//
+// classdb_get_method_bind prints an ERROR when it answers null, and this was
+// asked on every call, so every didi_control_room read on 4.5 and 4.6 put a
+// red line in the editor's log and in the stream runtime_watch_invariants
+// reads for engine errors (#600). ClassDB.class_has_method answers the same
+// question without printing, and the answer cannot change for the life of the
+// process, so it is asked once and the bind is only looked up where it exists.
+// ClassDB.class_has_method is 3860701026 on 4.5.1, 4.6.2 and 4.7.2.
+bool unsavedScenesBindAvailable() {
+    static std::optional<bool> cached;
+    if (cached.has_value()) return *cached;
+    auto class_db = singleton("ClassDB");
+    if (class_db.isErr()) return false;
+    auto class_name = makeStringName("EditorInterface");
+    auto method_name = makeStringName("get_unsaved_scenes");
+    auto no_inheritance = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    if (class_name.isErr() || method_name.isErr() || no_inheritance.isErr()) return false;
+    auto answer = callObject(class_db.value(), "ClassDB", "class_has_method", 3860701026LL,
+                             {&class_name.value(), &method_name.value(), &no_inheritance.value()});
+    if (answer.isErr()) return false;
+    auto declared = scalarFromVariant<GDExtensionBool>(answer.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (declared.isErr()) return false;
+    const bool available = declared.value() != 0 &&
+                           requireMethodBind("EditorInterface", "get_unsaved_scenes", 1139954409LL).isOk();
+    cached = available;
+    return available;
+}
+
 // The editor's own list of scenes with unsaved changes. The read side of dirty
 // state, EditorInterface.get_unsaved_scenes, binds from Godot 4.7; 4.5 and 4.6
 // expose only the write side, so on those engines the answer is null with
@@ -2517,7 +2546,7 @@ json liveSceneMutation(json fields) {
 // can answer.
 json unsavedScenesReport(GDExtensionObjectPtr editor) {
     json report = {{"unsaved_scenes_readable", false}, {"unsaved_scenes", nullptr}};
-    if (!requireMethodBind("EditorInterface", "get_unsaved_scenes", 1139954409LL).isOk()) {
+    if (!unsavedScenesBindAvailable()) {
         return report;
     }
     auto unsaved = callObject(editor, "EditorInterface", "get_unsaved_scenes", 1139954409LL);
@@ -3712,6 +3741,31 @@ json injectInput(const json& params, const std::string& session_kind) {
 }
 
 } // namespace
+
+std::optional<std::string> GodotBridge::projectSettingString(const std::string& name) {
+    auto settings = singleton("ProjectSettings");
+    if (settings.isErr()) return std::nullopt;
+    auto setting_name = makeString(name);
+    if (setting_name.isErr()) return std::nullopt;
+    // ProjectSettings.has_setting is 3927539163 and get_setting is 223050753
+    // on 4.5.1, 4.6.2 and 4.7.2.
+    auto present = callObject(settings.value(), "ProjectSettings", "has_setting", 3927539163LL,
+                              {&setting_name.value()});
+    if (present.isErr()) return std::nullopt;
+    auto has = scalarFromVariant<GDExtensionBool>(present.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (has.isErr() || !has.value()) return std::nullopt;
+    VariantValue fallback;
+    auto value = callObject(settings.value(), "ProjectSettings", "get_setting", 223050753LL,
+                            {&setting_name.value(), &fallback});
+    if (value.isErr()) return std::nullopt;
+    const auto type = GodotApi::instance().variant_get_type(value.value().ptr());
+    if (type != GDEXTENSION_VARIANT_TYPE_STRING && type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+        return std::nullopt;
+    }
+    auto text = stringFromVariant(value.value(), type);
+    if (text.isErr()) return std::nullopt;
+    return text.value();
+}
 
 Result<size_t> GodotBridge::releaseQueuedInput() {
     if (g_queuedInjectedInput.empty()) return size_t{0};
@@ -9298,7 +9352,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             // arrives in 4.7, so this is a runtime bind probe rather than a
             // version-string comparison: the guard stays wherever it is absent.
             const bool dirty_state_readable =
-                requireMethodBind("EditorInterface", "get_unsaved_scenes", 1139954409LL).isOk();
+                unsavedScenesBindAvailable();
             bool verified_clean = false;
             if (!discard_unsaved) {
                 if (!dirty_state_readable) {

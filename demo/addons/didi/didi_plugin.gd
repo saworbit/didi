@@ -28,6 +28,7 @@ var _console: Control
 
 func _enter_tree() -> void:
 	Settings.ensure_registered()
+	Settings.ensure_project_settings_registered()
 	_console = Console.new()
 	_console.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_console.size_flags_vertical = Control.SIZE_EXPAND_FILL

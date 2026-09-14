@@ -2,6 +2,14 @@
 #include <cstdlib>
 #include <cstring>
 
+#if defined(_WIN32)
+#include <io.h>
+#define DIDI_STDERR_IS_TTY() (_isatty(_fileno(stderr)) != 0)
+#else
+#include <unistd.h>
+#define DIDI_STDERR_IS_TTY() (isatty(STDERR_FILENO) != 0)
+#endif
+
 namespace didi {
 
 namespace {
@@ -20,15 +28,32 @@ Logger& Logger::instance() {
 }
 
 Logger::Logger() {
-    const char* env_level = std::getenv("DIDI_LOG_LEVEL");
-    if (env_level) {
-        std::string lvl(env_level);
-        if (lvl == "DEBUG" || lvl == "debug" || lvl == "0") m_level = LogLevel::Debug;
-        else if (lvl == "INFO" || lvl == "info" || lvl == "1") m_level = LogLevel::Info;
-        else if (lvl == "WARN" || lvl == "warn" || lvl == "2") m_level = LogLevel::Warn;
-        else if (lvl == "ERROR" || lvl == "error" || lvl == "3") m_level = LogLevel::Error;
-        else if (lvl == "NONE" || lvl == "none" || lvl == "4") m_level = LogLevel::None;
+    if (const char* env_level = std::getenv("DIDI_LOG_LEVEL")) {
+        if (auto level = parseLevel(env_level)) m_level = *level;
     }
+    m_color = DIDI_STDERR_IS_TTY();
+}
+
+std::optional<LogLevel> Logger::parseLevel(std::string_view text) {
+    if (text == "DEBUG" || text == "debug" || text == "0") return LogLevel::Debug;
+    if (text == "INFO" || text == "info" || text == "1") return LogLevel::Info;
+    if (text == "WARN" || text == "warn" || text == "2") return LogLevel::Warn;
+    if (text == "ERROR" || text == "error" || text == "3") return LogLevel::Error;
+    if (text == "NONE" || text == "none" || text == "4") return LogLevel::None;
+    return std::nullopt;
+}
+
+bool Logger::levelSetByEnvironment() {
+    const char* env_level = std::getenv("DIDI_LOG_LEVEL");
+    return env_level && parseLevel(env_level).has_value();
+}
+
+void Logger::setColorEnabled(bool enabled) {
+    m_color.store(enabled, std::memory_order_relaxed);
+}
+
+bool Logger::colorEnabled() const {
+    return m_color.load(std::memory_order_relaxed);
 }
 
 void Logger::setLevel(LogLevel level) {
@@ -73,10 +98,11 @@ void Logger::log(LogLevel level, std::string_view tag, std::string_view message)
         default: break;
     }
 
+    const bool color = m_color.load(std::memory_order_relaxed);
     std::lock_guard<std::mutex> lock(m_mutex);
-    std::cerr << color_code << "[" << std::put_time(&bt, "%Y-%m-%d %H:%M:%S")
+    std::cerr << (color ? color_code : "") << "[" << std::put_time(&bt, "%Y-%m-%d %H:%M:%S")
               << "." << std::setfill('0') << std::setw(3) << ms.count() << "] "
-              << "[" << level_str << "] [" << tag << "]\033[0m "
+              << "[" << level_str << "] [" << tag << "]" << (color ? "\033[0m" : "") << " "
               << message << std::endl;
 }
 
