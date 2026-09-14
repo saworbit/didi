@@ -40,6 +40,14 @@ twice.
 | `probes/line_endings.py` | A CRLF file, a BOM, a missing final newline -- patched one method at a time, byte-counted before and after. |
 | `probes/position_offsets.py` | The line and column every reader reports, asked of a file with multi-byte characters and four different framings. |
 | `probes/session_lifecycle.py` | The handshake once it is past: a call before `initialize`, a second `initialize`, a missing or doubled `initialized`, a reused id, and a confirmation token carried across a client change. |
+| `probes/viewport_diff_blindness.py` | The visual regression tool asked about a frame that changed. Reads both PNGs itself so it can say the frame moved without asking the tool under test. Order matters: it diffs *before* it captures. |
+| `probes/stale_confirmation.py` | The world moved between the preview and the confirm -- the file grown, deleted, or its method removed. The token binds to the call; this asks whether it binds to anything else. |
+| `probes/preview_vs_real.py` | Each mutating call twice, `dry_run` then for real, printing the pairs that disagree. A preview is a promise; this counts the ones the server will not keep. |
+| `probes/oversized_arguments.py` | The largest accepted string rather than the smallest: a `maxLength` census beside session eight's `minLength` one, a megabyte sent to required parameters, and a 10 MB file read back. |
+| `probes/node_path_forms.py` | The *other* path namespace. `..`, `.`, `%Unique`, `Node:property`, doubled separators -- asked of a reader, a second reader and a writer. |
+| `probes/pipelined_requests.py` | Requests that overlap, because a host is not obliged to wait. Green: answers come back complete, in order and correctly addressed. Kept as the regression probe. |
+| `probes/capture_baselines.py` | A capture id from a dead process, and ids nobody minted. Green: made-up ids are refused by name, and a real id outlives its process on purpose. |
+| `probes/engine_versions.py` | The same questions asked of whichever editor is attached, printed as a table meant to be diffed between two engines. |
 | `report.py` | Files a directory of finding bodies as issues in one pass. |
 
 The probe files are kept after their findings are fixed, and are worth re-running
@@ -340,6 +348,86 @@ running.
 server's memory. A dry run in one `probe.py` invocation and a confirm in the
 next is not a test of the gate, it is a test of process lifetime.
 
+**A tool that takes its own input has to be able to get it.** Most tools here
+answer about something the caller named. `viewport_diff_capture` is different:
+it takes half of its own input, the comparison capture, and it has no
+`select_main_screen` while the sibling that captures for the caller does -- and
+that parameter exists because "an editor viewport has no size unless its main
+screen is showing". So it compares against whatever was last rendered and
+reports `bit_identical: true`, `ssim: 1.0`, for a frame where 55% of the pixels
+changed (#568). The one tool whose whole job is answering "did this change?" is
+the one that cannot make the thing render. **When a tool supplies part of its
+own input, ask what it can do that a caller could not.**
+
+**Order is part of the repro, and a probe can hide its own finding.** The first
+version of `viewport_diff_blindness.py` captured a second frame before it
+diffed, to prove the frame had changed. That capture carries
+`select_main_screen`, which forces the render -- so the diff then worked, three
+times in a row, and the probe printed a clean bill of health for a broken tool.
+Moving one call above another turned `bit_identical=True` into
+`changed_pixels=630000`. **If a probe does anything to the subject before it
+asks its question, that setup is part of the experiment.**
+
+**A guard can be switched off by an argument nobody validates.**
+`script_patch_method` refuses a `new_definition` that declares the wrong kind of
+symbol, and the code comment says why: without it "a body with a mistyped name,
+or no declaration at all, deleted the target and reported the patch done".
+`symbol_type` has no `enum`, and an unrecognised value takes an `else` branch
+that skips that check by design. So `symbol_type: "fucntion"` -- one
+transposition -- replaces a whole function with a variable and reports success
+(#570). **Where the code branches on a string, check that the schema constrains
+it; an unenumerated string is a switch a caller can flip by accident.**
+
+**A preview is a promise, and the preview path is not the call path.** #399
+closed "the dry run issued a token for arguments the real call refuses" by
+checking argument *names* before previewing. One level down, a `..` in a node
+path is refused by every reader and every writer, and previewed happily by seven
+of nine mutating tools (#571) -- including one that reports
+`preview_kind: "target_state"` and a real `before`, which is the preview saying
+it looked. The control in the same run is a node that does not exist: `404` on
+both paths, so the preview *does* resolve node paths. It runs one rule and not
+the other. **Run every probe twice, `dry_run` then for real, and diff the pair.**
+
+**A token can bind to the call and not to the world.** The confirmation gate
+binds hard to tool, arguments, project and session, refuses reuse, and survives
+a failed confirm without being spent -- all verified. What it does not carry is
+any record of the target it previewed, so a file rewritten between the dry run
+and the confirm is changed anyway, and `before.size_bytes` sits in the preview
+unused (#572). The blackboard exists because two agents are expected, which
+makes a concurrent edit the supported path. **Ask what a token is bound to, then
+ask what it is not.**
+
+**Census the other end of the range.** Session eight sent `""` to every required
+string parameter. Sending a megabyte instead finds a different surface: 90 of
+191 string parameters carry `maxLength` and 50 required ones carry nothing,
+while 62 of 64 numeric parameters carry a `minimum` (#573). The project believes
+in bounds; it applied them to 97% of its numbers and 47% of its strings. The
+same unbounded space is what lets an 8 MB `method_name` become a 16.8 MB
+response, because a dry run echoes its arguments twice (#574). **A census is a
+direction as well as a question -- run it both ways.**
+
+**Two claims in one object.** `case_sensitive` is published with
+`"default": true` and a description reading "Off by default" (#576). Nothing can
+catch that: the description tests count descriptions, the schema tests read
+keys, and no test compares one against the other. A description that names a
+default beside a `default` key is worth grepping for as a class.
+
+**The engine matrix came back green, which is worth writing down.** Nine
+sessions have driven 4.5.1. Run against 4.7.2, the whole live surface answers
+the same way: the same 68 live tools, the same findings reproducing identically,
+`script_reflect_class` correctly reporting
+`api_version_matches_attached_engine`, and the control room switching
+"Unsaved scenes: not reported before Godot 4.7" for an actual answer. The
+capability difference is reported rather than hidden. `engine_versions.py` makes
+the comparison a `diff` so the next session can re-check it cheaply.
+
+**Pipelining and lease conflicts are also green.** Four requests written to
+stdin before any answer is read come back complete, in order and correctly
+addressed, including duplicate ids; a blackboard task claimed twice answers the
+second agent `409` with `leased_by` and `reason_code: already_leased`. Both were
+untested and both were fine. Recorded so the tenth session spends its budget
+elsewhere.
+
 ## Sessions so far
 
 | Date | Scope | Server | Findings |
@@ -358,6 +446,8 @@ next is not a test of the gate, it is a test of process lifetime.
 | 2026-09-12 | The methods around `tools/call` rather than through it, two servers against one editor, the blackboard's own stated rules, path confinement and what the write actually does with the path, and the editor killed mid-session. | `1.8.0+3a528c10387d` | #525-#537, thirteen findings. |
 
 | 2026-09-14 | What the host operating system does to an argument the server already accepted: a case-insensitive filesystem, device names, dot segments. Then files this harness did not author -- CRLF, a BOM, a missing final newline -- the empty string sent to every required string parameter, and the handshake once it is past. | `2.0.0+39daaad58e9d` | #546-#557, twelve findings. |
+
+| 2026-09-14 | The tools that supply part of their own input, and the preview path against the call path: the visual diff, the confirmation token against the world rather than the call, `dry_run` versus real, the largest accepted argument rather than the smallest, and the whole live surface re-asked on a second engine. | `2.0.0+74578cb657ee` | #568-#577, ten findings. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log
