@@ -1169,7 +1169,7 @@ Capture depends on the engine exposing the class-registration interface. Where i
 
 - `runtime_set_paused` requires boolean `paused` and verifies the observed `SceneTree.paused` value. Resuming reports `released_input_events`: how many events `runtime_inject_input` held during the pause were handed to Input on the way to running.
 - `runtime_step` accepts `frames` (default `1`, `1..60`), requires an already-paused **game**, allows one pending step, advances exactly that many process callbacks, and re-pauses before resolving. It resumes through the same path, so the stepped frame carries the input held during the pause, and the response reports `released_input_events`. Editor sessions, concurrent steps, failure to verify pause, and shutdown cancellation are errors.
-- `runtime_stop` accepts `exit_code` (default `0`, `0..255`) for a game and requests `SceneTree.quit`. Success means shutdown was requested, not that the process has exited; confirm exit by polling session discovery.
+- `runtime_stop` accepts `exit_code` (default `0`, `0..255`) for a game and requests `SceneTree.quit`. Success means shutdown was requested, not that the process has exited; confirm exit by polling session discovery. The server remembers the request: the first call to reach the stopped game afterwards answers with `incident: "game_stopped"`, `exit_code`, `requested_by: "runtime_stop"` and `retryable: false` rather than a timeout to retry, later calls carry the same fact under `route_obstruction`, and `didi_control_room` names it until another session is attached.
 
 ### `runtime_get_tree` — Live
 
