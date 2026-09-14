@@ -1,4 +1,5 @@
 #include "didi/offline/gdscript_diagnostics.hpp"
+#include "didi/common/json_bounds.hpp"
 #include "didi/offline/class_reference.hpp"
 
 #include <chrono>
@@ -866,6 +867,37 @@ static void test_gdscript_extract_symbols_reports_what_it_left_out() {
     const auto exact = didi::offline::GDScriptDiagnostics::extractSymbols(source, 82);
     ASSERT_EQ(exact["truncated"], false);
     ASSERT_EQ(exact["returned_count"].get<size_t>(), size_t(82));
+
+    // The byte budget is published whether or not it is reached, the way
+    // runtime_get_tree publishes its own.
+    ASSERT_EQ(whole["max_response_bytes"].get<size_t>(), didi::kMaxToolResponseBytes);
+}
+
+static void test_gdscript_extract_symbols_stops_at_the_response_budget() {
+    // The second lever, and a different question from max_symbols. That one is
+    // what a caller sets to get a smaller answer; this one is what keeps a
+    // response from being lost entirely, and a caller who raises max_symbols
+    // must not be able to talk their way past it.
+    //
+    // Signatures are the part of a declaration with no bound of its own, so the
+    // budget is reached with few declarations and long parameter lists rather
+    // than by writing eight megabytes of tiny ones.
+    const std::string wide_parameters(600000, 'a');
+    std::string source = "extends Node\n";
+    for (int index = 0; index < 40; ++index) {
+        source += "func f" + std::to_string(index) + "(" + wide_parameters + ") -> int:\n";
+        source += "\treturn 0\n";
+    }
+
+    const auto capped = didi::offline::GDScriptDiagnostics::extractSymbols(source, 100000);
+    // Every declaration was counted, and the answer says how many came back.
+    ASSERT_EQ(capped["symbol_count_total"].get<size_t>(), size_t(40));
+    ASSERT_TRUE(capped["returned_count"].get<size_t>() < size_t(40));
+    ASSERT_TRUE(capped["returned_count"].get<size_t>() > size_t(0));
+    ASSERT_EQ(capped["truncated"], true);
+    ASSERT_EQ(capped["max_response_bytes"].get<size_t>(), didi::kMaxToolResponseBytes);
+    // And the response it produced is inside the budget it published.
+    ASSERT_TRUE(capped.dump().size() <= didi::kMaxToolResponseBytes);
 }
 
 struct RegisterScriptPatchTests {
@@ -891,6 +923,8 @@ struct RegisterScriptPatchTests {
                      test_gdscript_symbol_patch_refuses_an_ambiguous_name);
         registerTest("GDScript.ExtractReportsTruncation",
                      test_gdscript_extract_symbols_reports_what_it_left_out);
+        registerTest("GDScript.ExtractStopsAtTheResponseBudget",
+                     test_gdscript_extract_symbols_stops_at_the_response_budget);
         registerTest("GDScript.PatchRefusesAbsentSymbol",
                      test_gdscript_symbol_patch_refuses_a_symbol_the_script_does_not_declare);
         registerTest("GDScript.PatchRefusesUnknownSymbolType",

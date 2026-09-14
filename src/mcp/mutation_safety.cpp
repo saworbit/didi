@@ -1,4 +1,5 @@
 #include "didi/mcp/mutation_safety.hpp"
+#include "didi/common/json_bounds.hpp"
 #include "didi/mcp/error_data.hpp"
 
 #include "didi/common/secure_random.hpp"
@@ -178,6 +179,11 @@ const std::unordered_set<std::string_view> kIdempotentWriters = {
     // read-only, and the hint is read rather than ignored.
     "runtime_attach_session", "runtime_detach_session"
 };
+
+// Above any value a person reads in a preview and well under the response
+// budget, so a preview that trips the cap loses the pasted blob and keeps every
+// argument that was actually readable.
+constexpr size_t kPreviewValueElisionBytes = 4096;
 
 int64_t currentTimeMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -491,6 +497,40 @@ MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
             preview_payload["confirmation_token"] = token;
             preview_payload["expires_at_ms"] = expires_at;
         }
+        // What the composed preview may serialize to. Every string argument
+        // carries a declared bound since #573, but a tool that takes a list of
+        // them can still sum past this, and a preview that cannot be delivered
+        // is worse than one that says what it left out. Charged last, after the
+        // token, because the token is bound to the real arguments rather than
+        // to this copy of them: eliding what is shown cannot make a confirm
+        // fail.
+        //
+        // Two passes, and both of them say so. The first replaces oversized
+        // values with the byte count that stood there. The second is for the
+        // shape the first cannot help with, many short strings rather than a
+        // few long ones, and replaces the argument block whole.
+        bool response_truncated = false;
+        if (preview_payload.dump().size() > kMaxToolResponseBytes) {
+            response_truncated = true;
+            elideLargeStrings(preview_payload["arguments"], kPreviewValueElisionBytes);
+            for (auto& change : preview_payload["changes"]) {
+                elideLargeStrings(change["target"], kPreviewValueElisionBytes);
+            }
+            if (preview_payload.dump().size() > kMaxToolResponseBytes) {
+                const auto arguments_bytes = preview_payload["arguments"].dump().size();
+                preview_payload["arguments"] =
+                    "[elided: the argument set serializes to " +
+                    std::to_string(arguments_bytes) +
+                    " bytes, past the preview's response budget. Dry-run with fewer or "
+                    "smaller arguments to read it.]";
+                for (auto& change : preview_payload["changes"]) {
+                    change["target"] = "[elided: see mutation_preview.arguments]";
+                }
+            }
+        }
+        preview_payload["max_response_bytes"] = kMaxToolResponseBytes;
+        preview_payload["truncated"] = response_truncated;
+
         MutationDecision decision;
         decision.execute = false;
         decision.payload = {{"dry_run", true}, {"mutation_preview", std::move(preview_payload)}};

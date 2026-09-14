@@ -826,7 +826,8 @@ static json outputSchemaForTool(const std::string& name) {
                               {"symbol_count_total", integer_type},
                               {"returned_count", integer_type},
                               {"truncated", boolean_type},
-                              {"max_symbols", integer_type}},
+                              {"max_symbols", integer_type},
+                              {"max_response_bytes", integer_type}},
                              {"execution_mode", "file_path"});
     }
     if (name == "script_reflect_class") {
