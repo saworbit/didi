@@ -247,13 +247,13 @@ std::optional<std::string> checkObject(const json& schema, const json& value,
     const auto properties = schema.find("properties");
     const bool has_properties = properties != schema.end() && properties->is_object();
 
+    std::vector<std::string> missing;
     if (schema.contains("required") && schema["required"].is_array()) {
         for (const auto& field : schema["required"]) {
             if (!field.is_string()) continue;
             const auto name = field.get<std::string>();
             if (value.contains(name)) continue;
-            return named ? where + " is missing required property " + quoted(name) + "."
-                         : "Missing required argument " + quoted(name) + ".";
+            missing.push_back(quoted(name));
         }
     }
 
@@ -268,22 +268,55 @@ std::optional<std::string> checkObject(const json& schema, const json& value,
     const bool says_closed = additional != schema.end() && additional->is_boolean() &&
                              !additional->get<bool>();
     const bool closed = says_closed || (!named && topLevelArgumentsAreClosed(schema));
+    std::vector<std::string> unknown;
     if (closed) {
         for (auto it = value.begin(); it != value.end(); ++it) {
             if (has_properties && properties->contains(it.key())) continue;
-            std::vector<std::string> accepted;
-            if (has_properties) {
-                for (auto known = properties->begin(); known != properties->end(); ++known) {
-                    accepted.push_back(known.key());
-                }
-            }
-            std::sort(accepted.begin(), accepted.end());
-            const std::string list = accepted.empty()
-                                         ? "It takes no arguments."
-                                         : "This tool accepts: " + joinNames(accepted) + ".";
-            return named ? where + " has an unknown property " + quoted(it.key()) + "."
-                         : "Unknown argument " + quoted(it.key()) + ". " + list;
+            unknown.push_back(quoted(it.key()));
         }
+    }
+
+    // Both halves, in one answer.
+    //
+    // The two checks ran in sequence and each returned on its first find, so
+    // the useful half only ever fired when every required argument was already
+    // present under its correct name. Get a *required* name wrong -- which is
+    // the likelier mistake, since a required argument is one the caller has to
+    // name -- and the response reported a name they did not use as missing and
+    // said nothing about the ones they did. A caller then could not tell
+    // whether `node_path` had been ignored, accepted, or was the thing that
+    // should have been `target_node`, and an agent's retry added the missing
+    // name to the wrong set and spent another round trip (#577).
+    if (!missing.empty() || !unknown.empty()) {
+        std::vector<std::string> accepted;
+        if (has_properties) {
+            for (auto known = properties->begin(); known != properties->end(); ++known) {
+                accepted.push_back(known.key());
+            }
+        }
+        std::sort(accepted.begin(), accepted.end());
+        const std::string list = accepted.empty()
+                                     ? "It takes no arguments."
+                                     : "This tool accepts: " + joinNames(accepted) + ".";
+        if (named) {
+            if (!missing.empty()) {
+                return where + " is missing required property " + missing.front() + ".";
+            }
+            return where + " has an unknown property " + unknown.front() + ".";
+        }
+        std::string message;
+        if (!missing.empty()) {
+            message += missing.size() == 1
+                           ? "Missing required argument " + missing.front() + "."
+                           : "Missing required arguments " + joinNames(missing) + ".";
+        }
+        if (!unknown.empty()) {
+            if (!message.empty()) message += " ";
+            message += unknown.size() == 1
+                           ? "Unknown argument " + unknown.front() + "."
+                           : "Unknown arguments " + joinNames(unknown) + ".";
+        }
+        return message + " " + list;
     }
 
     if (!has_properties || depth >= kMaxDepth) return std::nullopt;
@@ -396,6 +429,44 @@ void requireNonEmptyRequiredStrings(std::string_view schema_source, json& schema
         }
         if (found->contains("minLength")) continue;
         (*found)["minLength"] = 1;
+    }
+}
+
+namespace {
+
+// What kind of string this parameter holds, by name. A closed set would go
+// stale the first time a parameter is added, so the path rule is a suffix: a
+// new foo_path is bounded as a path without anyone remembering to say so.
+int boundForParameter(std::string_view name) {
+    if (name == "source_text" || name == "new_definition") return bounds::kBody;
+    if (name == "path" || name == "target_node" || name == "source_scene") return bounds::kPath;
+    if (name.size() > 5 && name.substr(name.size() - 5) == "_path") return bounds::kPath;
+    return bounds::kIdentifier;
+}
+
+}  // namespace
+
+void boundRequiredStrings(std::string_view schema_source, json& schema) {
+    (void)schema_source;
+    if (!schema.is_object() || !schema.contains("properties") || !schema.contains("required")) {
+        return;
+    }
+    auto& properties = schema["properties"];
+    const auto& required = schema["required"];
+    if (!properties.is_object() || !required.is_array()) return;
+    for (const auto& name : required) {
+        if (!name.is_string()) continue;
+        const auto key = name.get<std::string>();
+        auto found = properties.find(key);
+        if (found == properties.end() || !found->is_object()) continue;
+        const auto type = found->find("type");
+        if (type == found->end() || !type->is_string() || type->get<std::string>() != "string") {
+            continue;
+        }
+        // A schema that states its own bound keeps it. Several already do, and
+        // they are narrower than anything derived from a name.
+        if (found->contains("maxLength")) continue;
+        (*found)["maxLength"] = boundForParameter(key);
     }
 }
 

@@ -1326,7 +1326,12 @@ static void test_tools_call_enforces_the_published_input_schema() {
                                {"dry_run", true}});
     ASSERT_TRUE(preview.result["isError"].get<bool>());
     ASSERT_TRUE(errorText(preview).find("new_definition") != std::string::npos);
-    ASSERT_TRUE(preview.result.dump().find("confirmation_token") == std::string::npos);
+    // The refusal also names what was sent and what this tool takes, so the
+    // caller fixes both halves in one round trip (#577), which is why this asks
+    // whether a token was minted rather than searching the text for the word.
+    ASSERT_TRUE(errorText(preview).find("new_body") != std::string::npos);
+    ASSERT_TRUE(!preview.result.contains("mutation_preview"));
+    ASSERT_TRUE(errorText(preview).find("\"confirmation_token\":") == std::string::npos);
 
     // A call that satisfies the schema is not touched by any of this.
     const auto allowed = call("blackboard_read", {{"board", "default"}});

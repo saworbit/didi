@@ -51,6 +51,38 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **Every required string parameter carries a declared length.** `minLength`
+  landed in #553; the other end did not, so 50 required strings had no
+  `maxLength` at all while 62 of 64 numbers carried a `minimum`. The split was
+  not along any line a caller could guess: a blackboard key was capped at 512
+  bytes and a Godot node path was not capped at all. Sized by what the value is
+  rather than by one global number: an identifier is 256, a path is the 1024
+  `search_path` already used, and a body (`source_text`, `new_definition`) is
+  1,048,576, which is the one place a large number is right and the point is
+  that it is declared. A schema stating its own narrower bound keeps it.
+  Stamped where `minLength` is stamped, so a parameter added later is bounded
+  without anyone remembering to say so, and a contract test keeps the count of
+  unbounded required strings at zero (#573).
+- **A refusal names both halves of the mistake.** The missing-argument check
+  and the unknown-argument check ran in sequence and each returned on its first
+  find, so the message that lists what a tool accepts only ever appeared when
+  every required argument was already correct. Getting a *required* name wrong,
+  which is the likelier mistake, reported a name the caller had not used as
+  missing and said nothing about the ones they had: `{"node_path",
+  "property"}` answered `Missing required argument 'target_node'.` and left
+  them to guess whether `node_path` had been ignored or accepted. One message
+  now carries the missing names, the unknown names and the whole parameter set
+  (#577).
+- **`case_sensitive` describes what it does.** Both `project_search_text` and
+  `project_search_symbols` published `"default": true` beside "Off by
+  default", and the handler is case-sensitive, so the declared default was
+  right and the description was the opposite of the behaviour. A caller who
+  read the prose and searched for `Player` in a codebase that spells it
+  `player` got zero matches and no reason to doubt the tool. A contract test
+  now compares every boolean parameter's prose against its declared default,
+  which is a class of defect neither the description tests nor the schema tests
+  could see: one counts descriptions and the other reads keys, and nothing
+  compared them (#576).
 - **`script_get_symbols` publishes a limit and says what it left out.** It was
   the one reader on the surface with neither: a 10 MB script with 120,000
   declarations came back as 15 MB of JSON, `isError: false`, with no
