@@ -227,6 +227,7 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
     std::string symbol_name = args.value("method_name", args.value("symbol_name", ""));
     std::string new_definition = args.value("new_definition", "");
     std::string symbol_type = args.value("symbol_type", "function");
+    const bool create_if_missing = args.value("create_if_missing", false);
 
     // Named one at a time, and only the published names. The old message listed
     // all three whichever was missing, and offered 'symbol_name', which is not
@@ -277,13 +278,17 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
     // breaks; it joins the file in the file's convention either way.
     const std::string working_definition = strings::replaceAll(new_definition, "\r\n", "\n");
 
-    auto patch_res = offline::GDScriptDiagnostics::patchSymbol(working_content, symbol_name,
-                                                              working_definition, symbol_type);
+    auto patch_res = offline::GDScriptDiagnostics::patchSymbol(
+        working_content, symbol_name, working_definition, symbol_type, create_if_missing);
     if (patch_res.isErr()) {
-        return CallToolResult::errorJson(400, patch_res.error().message);
+        // The patcher's own code, not a flat 400. A symbol the script does not
+        // declare is a 404, which is what a caller branches on to decide
+        // between retrying with the right name and creating the symbol (#569).
+        return CallToolResult::fromError(patch_res.error());
     }
 
-    std::string patched_content = patch_res.value();
+    const bool created = patch_res.value().created;
+    std::string patched_content = patch_res.value().source_text;
     // A file that ended without a newline keeps ending without one. The
     // patcher terminates what it splices in, so the one it adds at the end of
     // the file is the only byte here that was not asked for.
@@ -323,6 +328,10 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
         {"status", "success"},
         {"file_path", reported_path},
         {"method_name", symbol_name},
+        // Which of the two things happened. One response shape stood in for
+        // both, so a caller who asked to replace a method and got a new one
+        // appended had nothing in the answer that said so (#569).
+        {"created", created},
         {"has_errors", has_error},
         {"diagnostics", diag_arr}
     };

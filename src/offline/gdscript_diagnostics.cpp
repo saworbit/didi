@@ -695,14 +695,32 @@ static std::string reindentDefinition(const std::string& definition,
     return out.str();
 }
 
-Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_text,
-                                                    const std::string& symbol_name,
-                                                    const std::string& new_definition,
-                                                    const std::string& symbol_type) {
-    std::vector<std::string> lines = strings::split(source_text, '\n');
-    std::string escaped_name = escapeRegex(symbol_name);
-    std::string pattern;
+const std::vector<std::string>& GDScriptDiagnostics::symbolTypes() {
+    static const std::vector<std::string> types = {"function", "variable", "constant",
+                                                   "signal",   "enum",     "class"};
+    return types;
+}
 
+bool GDScriptDiagnostics::isKnownSymbolType(const std::string& symbol_type) {
+    const auto& types = symbolTypes();
+    return std::find(types.begin(), types.end(), symbol_type) != types.end();
+}
+
+namespace {
+
+// The lines in a script that declare one symbol, by the rules a patch matches
+// with. Shared so that asking whether a symbol is there and replacing it are
+// the same question: a preview that answers it differently from the write is
+// how a caller comes to approve a replacement and get an append.
+//
+// Members are separated from locals because a local named like a member is not
+// a second declaration of it. When every match is a local the whole list is
+// returned, which is what the replacement path has always acted on.
+std::vector<size_t> findDeclarationLines(const std::vector<std::string>& lines,
+                                         const std::string& symbol_name,
+                                         const std::string& symbol_type) {
+    const std::string escaped_name = escapeRegex(symbol_name);
+    std::string pattern;
     if (symbol_type == "function") {
         pattern = R"re(^\s*(static\s+)?func\s+)re" + escaped_name + R"re(\s*(\(|$))re";
     } else if (symbol_type == "variable") {
@@ -713,24 +731,17 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
         pattern = R"re(^\s*enum\s+)re" + escaped_name + R"re(\s*(\{|\s|$))re";
     } else if (symbol_type == "class") {
         pattern = R"re(^\s*class\s+)re" + escaped_name + R"re(\s*:)re";
-    } else {
-        pattern = R"re(^\s*(\w+\s+)*)re" + escaped_name + R"re(\s*(\(|$|:|=))re";
     }
-
-    std::regex symbol_regex(pattern);
-    int start_line = -1;
-    int end_line = -1;
-    // Leading whitespace of the declaration being replaced. A method declared
-    // inside a nested class lives at one tab; writing the replacement at column
-    // zero moved it out of the class and left a script that does not parse.
-    std::string declaration_indent;
+    // "constant" is matched by parseDeclaration, which reads it as a variable,
+    // so it builds no pattern and needs none. Every value outside the published
+    // set is refused before this runs.
+    const std::regex symbol_regex(pattern.empty() ? std::string("(?!)") : pattern);
 
     // parseDeclaration balances annotation argument lists, so it recognises
-    // declarations the pattern above cannot, such as @export_range(0, 100) var
-    // speed. Fall back to the pattern for symbol types it does not model.
-    const bool parsed_kind = symbol_type == "function" || symbol_type == "variable" ||
-                             symbol_type == "constant" || symbol_type == "signal" ||
-                             symbol_type == "enum";
+    // declarations the patterns above cannot, such as @export_range(0, 100) var
+    // speed. An inner class is the one kind it does not model, so that is the
+    // one kind matched by pattern.
+    const bool parsed_kind = symbol_type != "class";
     auto kind_matches = [&](const GDScriptDeclaration& declaration) {
         if (symbol_type == "variable") {
             return declaration.kind == "variable" || declaration.kind == "constant";
@@ -738,9 +749,96 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
         return declaration.kind == symbol_type;
     };
     auto declares_symbol = [&](const std::string& line) {
-        const auto declaration = parseDeclaration(line);
+        const auto declaration = GDScriptDiagnostics::parseDeclaration(line);
         if (!declaration || declaration->name != symbol_name) return false;
         return kind_matches(*declaration);
+    };
+
+    // The declaration a line sits inside, found by walking back to the nearest
+    // shallower declaration. Block statements between the two are stepped over,
+    // so a var inside an `if` inside a func still reports the func.
+    auto enclosing_declaration = [&](size_t index) -> std::optional<GDScriptDeclaration> {
+        size_t limit = getIndentLevel(lines[index]);
+        for (size_t back = index; back > 0; --back) {
+            const std::string& candidate = lines[back - 1];
+            if (strings::trim(candidate).empty()) continue;
+            const size_t candidate_indent = getIndentLevel(candidate);
+            if (candidate_indent >= limit) continue;
+            limit = candidate_indent;
+            const auto declaration = GDScriptDiagnostics::parseDeclaration(candidate);
+            if (declaration) return declaration;
+        }
+        return std::nullopt;
+    };
+
+    std::vector<size_t> matches;
+    std::vector<size_t> member_matches;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        const bool matched =
+            parsed_kind ? declares_symbol(lines[i]) : std::regex_search(lines[i], symbol_regex);
+        if (!matched) continue;
+        matches.push_back(i);
+        const auto enclosing = enclosing_declaration(i);
+        if (!enclosing || enclosing->kind == "class") member_matches.push_back(i);
+    }
+
+    // A local named like the member is not a second declaration of it, so the
+    // ambiguity the caller is told about is judged among members only. When
+    // every match is a local there is nothing to choose between and the first
+    // one still wins, as it always did.
+    if (!member_matches.empty()) return member_matches;
+    return matches;
+}
+
+}  // namespace
+
+bool GDScriptDiagnostics::declaresSymbol(const std::string& source_text,
+                                         const std::string& symbol_name,
+                                         const std::string& symbol_type) {
+    if (symbol_name.empty() || !isKnownSymbolType(symbol_type)) return false;
+    const std::vector<std::string> lines = strings::split(source_text, '\n');
+    return !findDeclarationLines(lines, symbol_name, symbol_type).empty();
+}
+
+Result<SymbolPatch> GDScriptDiagnostics::patchSymbol(const std::string& source_text,
+                                                    const std::string& symbol_name,
+                                                    const std::string& new_definition,
+                                                    const std::string& symbol_type,
+                                                    bool create_if_missing) {
+    // An unrecognised kind used to fall through to a loose regex, and on the
+    // way past it switched off the guard below that checks the replacement
+    // declares what it replaces. One mistyped letter in symbol_type, a value
+    // nothing validated, replaced a function with a variable and reported
+    // success. A kind this does not model is a bad argument, not permission to
+    // skip a check (#570).
+    if (!isKnownSymbolType(symbol_type)) {
+        std::string accepted;
+        for (const auto& type : symbolTypes()) {
+            if (!accepted.empty()) accepted += ", ";
+            accepted += type;
+        }
+        return Error::invalidArgument("Argument 'symbol_type' is '" + symbol_type +
+                                      "', which is not a kind of symbol this patches. It "
+                                      "accepts: " + accepted + ".");
+    }
+
+    std::vector<std::string> lines = strings::split(source_text, '\n');
+    int start_line = -1;
+    int end_line = -1;
+    // Leading whitespace of the declaration being replaced. A method declared
+    // inside a nested class lives at one tab; writing the replacement at column
+    // zero moved it out of the class and left a script that does not parse.
+    std::string declaration_indent;
+
+    // parseDeclaration models every kind but an inner class, which is matched
+    // by pattern instead. Both live in findDeclarationLines now, so the check
+    // below and the search agree about what declares this symbol.
+    const bool parsed_kind = symbol_type != "class";
+    auto kind_matches = [&](const GDScriptDeclaration& declaration) {
+        if (symbol_type == "variable") {
+            return declaration.kind == "variable" || declaration.kind == "constant";
+        }
+        return declaration.kind == symbol_type;
     };
 
     // The replacement has to declare the symbol it replaces. Without this the
@@ -763,9 +861,8 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
                 "Argument 'new_definition' declares nothing. It has to declare " + wanted +
                 ", because that is what this call replaces.");
         }
-        // Only for the kinds parseDeclaration models. An unrecognised
-        // symbol_type falls through to the regex path below, and this check has
-        // nothing to compare against.
+        // Only for the kinds parseDeclaration models. An inner class is matched
+        // by pattern, and this check has nothing to compare against for it.
         if (parsed_kind && !kind_matches(*replacement)) {
             return Error::invalidArgument(
                 "Argument 'new_definition' declares a " + replacement->kind + " named '" +
@@ -801,22 +898,18 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
         return enclosing->kind + " " + enclosing->name;
     };
 
-    std::vector<size_t> matches;
-    std::vector<size_t> member_matches;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        const bool matched = parsed_kind ? declares_symbol(lines[i])
-                                         : std::regex_search(lines[i], symbol_regex);
-        if (!matched) continue;
-        matches.push_back(i);
-        const auto enclosing = enclosing_declaration(i);
-        if (!enclosing || enclosing->kind == "class") member_matches.push_back(i);
-    }
+    std::vector<size_t> matches = findDeclarationLines(lines, symbol_name, symbol_type);
 
-    // A local named like the member is not a second declaration of it, so the
-    // ambiguity below is judged among members only. When every match is a local
-    // there is nothing to choose between and the first one still wins, as it
-    // always did.
-    if (!member_matches.empty()) matches = member_matches;
+    // A patch names a symbol that is there. When it is not, this appended one
+    // and reported the same success as a replacement, so a typo'd method_name
+    // left a method nobody calls beside the one the caller meant to edit and
+    // said nothing about it. Creating is still available, on a flag that says
+    // so (#569).
+    if (matches.empty() && !create_if_missing) {
+        return Error::notFound(
+            "This script declares no " + symbol_type + " named '" + symbol_name +
+            "'. Patch a symbol it declares, or pass create_if_missing to add this one.");
+    }
 
     // One name can be declared once at the top level and again inside a nested
     // class. Taking the first match rewrote whichever came first in the file
@@ -885,6 +978,7 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
         }
     }
 
+    SymbolPatch patched;
     std::ostringstream result;
     if (start_line != -1 && end_line != -1) {
         // Replace existing block
@@ -901,7 +995,9 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
             if (i + 1 < lines.size()) result << "\n";
         }
     } else {
-        // Symbol not found, insert intelligently
+        // Symbol not found, insert intelligently. Only reachable with
+        // create_if_missing set; the refusal above is the default.
+        patched.created = true;
         if (symbol_type == "signal" || symbol_type == "variable" || symbol_type == "enum") {
             // Insert near top after extends/class_name
             int insert_pos = 0;
@@ -932,7 +1028,8 @@ Result<std::string> GDScriptDiagnostics::patchSymbol(const std::string& source_t
         }
     }
 
-    return result.str();
+    patched.source_text = result.str();
+    return patched;
 }
 
 namespace {

@@ -1,4 +1,6 @@
 #include "didi/mcp/tool_registry.hpp"
+
+#include "didi/offline/gdscript_diagnostics.hpp"
 #include "didi/mcp/error_data.hpp"
 #include "didi/mcp/parameter_descriptions.hpp"
 #include "didi/mcp/control_room.hpp"
@@ -14,6 +16,8 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -1158,12 +1162,20 @@ struct FileTarget {
     // Whether the call needs the file to be there already. script_patch_method
     // rewrites a method in an existing script; script_create writes a new one.
     bool must_exist;
+    // The argument naming the symbol inside that file this call is about, for
+    // the tools that rewrite one. Empty when the file is the whole target.
+    //
+    // `before` carried exists, path and size_bytes -- whether the file is
+    // there, never whether the symbol is -- so a preview of a replacement and a
+    // preview of an append read identically, which is the one fact that tells
+    // them apart (#569).
+    std::string_view symbol_argument{};
 };
 
 const std::unordered_map<std::string_view, FileTarget>& fileTargets() {
     static const std::unordered_map<std::string_view, FileTarget> targets = {
-        {"script_patch_method", {"file_path", true}},
-        {"patch_script_symbols", {"file_path", true}},
+        {"script_patch_method", {"file_path", true, "method_name"}},
+        {"patch_script_symbols", {"file_path", true, "method_name"}},
         {"script_create", {"script_path", false}},
         {"resource_create", {"save_path", false}},
         {"scene_pack_branch", {"scene_path", false}},
@@ -1218,6 +1230,31 @@ std::optional<Error> probeFileTarget(const FileTarget& target, const json& argum
     const auto size = std::filesystem::file_size(resolved.value(), error);
     before = {{"exists", true}, {"path", reported},
               {"size_bytes", error ? 0 : static_cast<uint64_t>(size)}};
+
+    // Whether the symbol this call replaces is in that file, answered by the
+    // same search the write uses, so the preview refuses what the write would
+    // refuse rather than describing an append as a planned replacement.
+    if (target.symbol_argument.empty()) return std::nullopt;
+    const auto symbol_key = std::string(target.symbol_argument);
+    if (!arguments.contains(symbol_key) || !arguments[symbol_key].is_string()) {
+        return std::nullopt;
+    }
+    const auto symbol_name = arguments[symbol_key].get<std::string>();
+    const auto symbol_type = arguments.value("symbol_type", std::string("function"));
+    if (!offline::GDScriptDiagnostics::isKnownSymbolType(symbol_type)) return std::nullopt;
+    std::ifstream script(resolved.value(), std::ios::binary);
+    if (!script.is_open()) return std::nullopt;
+    std::stringstream contents;
+    contents << script.rdbuf();
+    const bool declared = offline::GDScriptDiagnostics::declaresSymbol(
+        contents.str(), symbol_name, symbol_type);
+    before["symbol_exists"] = declared;
+    if (!declared && !arguments.value("create_if_missing", false)) {
+        return Error::notFound("This script declares no " + symbol_type + " named '" +
+                               symbol_name +
+                               "'. Patch a symbol it declares, or pass create_if_missing to "
+                               "add this one.");
+    }
     return std::nullopt;
 }
 
@@ -2283,7 +2320,10 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"method_name", {{"type", "string"}, {"minLength", 1}, {"description", "Method name to replace"}}},
                 {"new_definition", {{"type", "string"}, {"minLength", 1},
                                     {"description", "New method implementation. It has to declare the symbol named by method_name."}}},
-                {"symbol_type", {{"type", "string"}, {"default", "function"}}}
+                {"symbol_type", {{"type", "string"},
+                                 {"enum", offline::GDScriptDiagnostics::symbolTypes()},
+                                 {"default", "function"}}},
+                {"create_if_missing", {{"type", "boolean"}, {"default", false}}}
             }},
             {"required", {"file_path", "method_name", "new_definition"}}
         };

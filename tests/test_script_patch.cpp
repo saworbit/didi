@@ -256,7 +256,7 @@ static void test_gdscript_symbol_patch_function() {
     auto patch_res = didi::offline::GDScriptDiagnostics::patchSymbol(original, "calculate_damage", new_func, "function");
     ASSERT_TRUE(patch_res.isOk());
 
-    std::string patched = patch_res.value();
+    std::string patched = patch_res.value().source_text;
     ASSERT_TRUE(patched.find("var multiplier = 3") != std::string::npos);
     ASSERT_TRUE(patched.find("func other_func():") != std::string::npos);
 }
@@ -269,10 +269,19 @@ static void test_gdscript_symbol_patch_signal() {
 
     std::string new_signal = "signal health_changed(new_hp: int)";
 
-    auto patch_res = didi::offline::GDScriptDiagnostics::patchSymbol(original, "health_changed", new_signal, "signal");
-    ASSERT_TRUE(patch_res.isOk());
+    // A signal this script does not declare, so this is the create path and
+    // says so. Without the flag the patch is refused (#569).
+    auto refused = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "health_changed", new_signal, "signal");
+    ASSERT_TRUE(refused.isErr());
+    ASSERT_EQ(refused.error().code, 404);
 
-    std::string patched = patch_res.value();
+    auto patch_res = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "health_changed", new_signal, "signal", true);
+    ASSERT_TRUE(patch_res.isOk());
+    ASSERT_TRUE(patch_res.value().created);
+
+    std::string patched = patch_res.value().source_text;
     ASSERT_TRUE(patched.find("signal health_changed(new_hp: int)") != std::string::npos);
 }
 
@@ -294,7 +303,7 @@ static void test_gdscript_symbol_patch_preserves_ordinary_comments() {
     auto patch_res = didi::offline::GDScriptDiagnostics::patchSymbol(original, "calculate_damage", new_func, "function");
     ASSERT_TRUE(patch_res.isOk());
 
-    std::string patched = patch_res.value();
+    std::string patched = patch_res.value().source_text;
     ASSERT_TRUE(patched.find("# Copyright 2026 Example Project\n") == 0);
     ASSERT_TRUE(patched.find("## Calculates damage dealt by the attacker.") == std::string::npos);
     ASSERT_TRUE(patched.find("@warning_ignore(\"unused_parameter\")") == std::string::npos);
@@ -327,7 +336,7 @@ static void test_gdscript_symbol_patch_preserves_next_sibling_preamble() {
         "@warning_ignore(\"unused_parameter\")\n"
         "func other_func():\n"
         "\tpass\n";
-    ASSERT_EQ(patch_res.value(), expected);
+    ASSERT_EQ(patch_res.value().source_text, expected);
 }
 
 static void test_gdscript_symbol_patch_keeps_the_blank_lines_after_the_symbol() {
@@ -379,7 +388,7 @@ static void test_gdscript_symbol_patch_keeps_the_blank_lines_after_the_symbol() 
         "\n"
         "func register_hit() -> int:\n"
         "\treturn 0\n";
-    ASSERT_EQ(patch_res.value(), expected);
+    ASSERT_EQ(patch_res.value().source_text, expected);
 
     // A blank line between two statements is part of the body, not a
     // separator, so it has to survive as well.
@@ -396,7 +405,7 @@ static void test_gdscript_symbol_patch_keeps_the_blank_lines_after_the_symbol() 
     auto body_res = didi::offline::GDScriptDiagnostics::patchSymbol(
         spaced_body, "after", "func after() -> void:\n\treturn", "function");
     ASSERT_TRUE(body_res.isOk());
-    ASSERT_EQ(body_res.value(),
+    ASSERT_EQ(body_res.value().source_text,
               "func run() -> void:\n"
               "\tvar first := 1\n"
               "\n"
@@ -422,7 +431,7 @@ static void test_gdscript_symbol_patch_parameterized_annotation() {
     auto patch_res = didi::offline::GDScriptDiagnostics::patchSymbol(original, "speed", new_var, "variable");
     ASSERT_TRUE(patch_res.isOk());
 
-    std::string patched = patch_res.value();
+    std::string patched = patch_res.value().source_text;
     ASSERT_TRUE(patched.find("@export_range(0, 250, 5) var speed: float = 20.0") != std::string::npos);
     ASSERT_TRUE(patched.find("@export_range(0, 100, 1)") == std::string::npos);
     ASSERT_EQ(patched.find("var speed"), patched.rfind("var speed"));
@@ -452,7 +461,7 @@ static void test_gdscript_symbol_patch_keeps_annotated_neighbour() {
         "@export var gamma: float = 3.0\n\n\n"
         "func total() -> float:\n"
         "\treturn alpha + beta + gamma\n";
-    ASSERT_EQ(patch_res.value(), expected);
+    ASSERT_EQ(patch_res.value().source_text, expected);
 
     // The same scan runs for every symbol type, so a function sitting under an
     // annotated variable must not consume that variable either.
@@ -471,7 +480,7 @@ static void test_gdscript_symbol_patch_keeps_annotated_neighbour() {
         "@onready var timer: Timer = $Timer\n"
         "func _ready() -> void:\n"
         "\ttimer.stop()\n";
-    ASSERT_EQ(func_res.value(), func_expected);
+    ASSERT_EQ(func_res.value().source_text, func_expected);
 
     // A bare annotation on its own line still belongs to the symbol below it.
     std::string bare_original =
@@ -487,7 +496,7 @@ static void test_gdscript_symbol_patch_keeps_annotated_neighbour() {
         "extends Node\n\n"
         "@export\n"
         "var speed: float = 20.0\n";
-    ASSERT_EQ(bare_res.value(), bare_expected);
+    ASSERT_EQ(bare_res.value().source_text, bare_expected);
 }
 
 static void test_gdscript_extract_symbols_constants_and_container_types() {
@@ -655,7 +664,7 @@ static void test_gdscript_symbol_patch_keeps_a_nested_method_nested() {
         "\t\thp -= amount * 2\n\n"
         "func outer_only() -> void:\n"
         "\tpass\n";
-    ASSERT_EQ(patch_res.value(), expected);
+    ASSERT_EQ(patch_res.value().source_text, expected);
 
     // A replacement that already carries the target indentation lands in the
     // same place rather than being shifted a second time.
@@ -663,7 +672,7 @@ static void test_gdscript_symbol_patch_keeps_a_nested_method_nested() {
         original, "inner_only",
         "\tfunc inner_only(amount: int) -> void:\n\t\thp -= amount * 2\n", "function");
     ASSERT_TRUE(preindented.isOk());
-    ASSERT_EQ(preindented.value(), expected);
+    ASSERT_EQ(preindented.value().source_text, expected);
 }
 
 static void test_gdscript_symbol_patch_refuses_an_ambiguous_name() {
@@ -703,8 +712,8 @@ static void test_gdscript_symbol_patch_refuses_an_ambiguous_name() {
     auto local_res = didi::offline::GDScriptDiagnostics::patchSymbol(
         with_local, "speed", "var speed: float = 20.0", "variable");
     ASSERT_TRUE(local_res.isOk());
-    ASSERT_TRUE(local_res.value().find("var speed: float = 20.0") != std::string::npos);
-    ASSERT_TRUE(local_res.value().find("\t\tvar speed := 1.0") != std::string::npos);
+    ASSERT_TRUE(local_res.value().source_text.find("var speed: float = 20.0") != std::string::npos);
+    ASSERT_TRUE(local_res.value().source_text.find("\t\tvar speed := 1.0") != std::string::npos);
 }
 
 static void test_gdscript_symbol_patch_refuses_a_replacement_that_declares_something_else() {
@@ -735,7 +744,84 @@ static void test_gdscript_symbol_patch_refuses_a_replacement_that_declares_somet
     auto good = didi::offline::GDScriptDiagnostics::patchSymbol(
         original, "hello", "func hello() -> void:\n\treturn\n", "function");
     ASSERT_TRUE(good.isOk());
-    ASSERT_TRUE(good.value().find("\treturn") != std::string::npos);
+    ASSERT_TRUE(good.value().source_text.find("\treturn") != std::string::npos);
+}
+
+static void test_gdscript_symbol_patch_refuses_a_symbol_the_script_does_not_declare() {
+    // Break caught: a method_name with no declaration behind it was appended
+    // and reported the same success as a replacement, so the typo `ready` for
+    // `_ready` left a dead method beside the one the caller meant to edit.
+    std::string original =
+        "extends Node\n\n"
+        "func _ready() -> void:\n"
+        "\tprint(\"hi\")\n";
+
+    auto typo = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "ready", "func ready() -> void:\n\tprint(\"typo\")\n", "function");
+    ASSERT_TRUE(typo.isErr());
+    ASSERT_EQ(typo.error().code, 404);
+    ASSERT_TRUE(typo.error().message.find("declares no function named 'ready'") !=
+                std::string::npos);
+    ASSERT_TRUE(typo.error().message.find("create_if_missing") != std::string::npos);
+
+    // Asked for, it still appends, and the answer says which of the two
+    // happened.
+    auto created = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "ready", "func ready() -> void:\n\tprint(\"typo\")\n", "function", true);
+    ASSERT_TRUE(created.isOk());
+    ASSERT_TRUE(created.value().created);
+    ASSERT_TRUE(created.value().source_text.find("func ready()") != std::string::npos);
+    ASSERT_TRUE(created.value().source_text.find("func _ready()") != std::string::npos);
+
+    // A replacement is not a create, whatever the flag says.
+    auto replaced = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "_ready", "func _ready() -> void:\n\treturn\n", "function", true);
+    ASSERT_TRUE(replaced.isOk());
+    ASSERT_TRUE(!replaced.value().created);
+
+    // The same question, asked without patching anything.
+    ASSERT_TRUE(didi::offline::GDScriptDiagnostics::declaresSymbol(original, "_ready",
+                                                                   "function"));
+    ASSERT_TRUE(!didi::offline::GDScriptDiagnostics::declaresSymbol(original, "ready",
+                                                                    "function"));
+}
+
+static void test_gdscript_symbol_patch_refuses_an_unrecognised_symbol_type() {
+    // Break caught: an unrecognised symbol_type fell through to a loose regex
+    // and, on the way, switched off the guard that checks the replacement
+    // declares what it replaces. So `fucntion` for `function` replaced a
+    // function with a variable and reported success.
+    std::string original =
+        "extends Node\n\n"
+        "var speed := 5\n\n"
+        "func take_damage(amount: int) -> void:\n"
+        "\tprint(\"hurt\")\n";
+
+    for (const char* spelling : {"fucntion", "FUNCTION", "banana", ""}) {
+        auto refused = didi::offline::GDScriptDiagnostics::patchSymbol(
+            original, "take_damage", "var take_damage := 0\n", spelling);
+        ASSERT_TRUE(refused.isErr());
+        ASSERT_EQ(refused.error().code, 400);
+        ASSERT_TRUE(refused.error().message.find("'symbol_type'") != std::string::npos);
+        ASSERT_TRUE(refused.error().message.find("function, variable, constant, signal, "
+                                                 "enum, class") != std::string::npos);
+        // The file is what it was. The old fall-through had already written it.
+        ASSERT_TRUE(original.find("func take_damage(amount: int) -> void:") !=
+                    std::string::npos);
+    }
+
+    // Spelled right, the kind guard fires as it always did.
+    auto guarded = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "take_damage", "var take_damage := 0\n", "function");
+    ASSERT_TRUE(guarded.isErr());
+    ASSERT_EQ(guarded.error().code, 400);
+    ASSERT_TRUE(guarded.error().message.find("declares a variable") != std::string::npos);
+
+    // And every kind the schema publishes is still accepted.
+    for (const auto& kind : didi::offline::GDScriptDiagnostics::symbolTypes()) {
+        ASSERT_TRUE(didi::offline::GDScriptDiagnostics::isKnownSymbolType(kind));
+    }
+    ASSERT_EQ(didi::offline::GDScriptDiagnostics::symbolTypes().size(), size_t(6));
 }
 
 struct RegisterScriptPatchTests {
@@ -759,6 +845,10 @@ struct RegisterScriptPatchTests {
                      test_gdscript_symbol_patch_keeps_a_nested_method_nested);
         registerTest("GDScript.PatchRefusesAmbiguousName",
                      test_gdscript_symbol_patch_refuses_an_ambiguous_name);
+        registerTest("GDScript.PatchRefusesAbsentSymbol",
+                     test_gdscript_symbol_patch_refuses_a_symbol_the_script_does_not_declare);
+        registerTest("GDScript.PatchRefusesUnknownSymbolType",
+                     test_gdscript_symbol_patch_refuses_an_unrecognised_symbol_type);
         registerTest("GDScript.PatchRefusesMismatchedReplacement",
                      test_gdscript_symbol_patch_refuses_a_replacement_that_declares_something_else);
         registerTest("GDScript.ExtractConstantsAndContainerTypes", test_gdscript_extract_symbols_constants_and_container_types);
