@@ -67,6 +67,15 @@ json bridgeError(int code, const std::string& identifier, json data = json::obje
 // passes it as `detail`, and it is appended to the sentence.
 const std::map<std::string, std::string>& bridgeErrorSentences() {
     static const std::map<std::string, std::string> sentences = {
+    {"node_not_owned",
+     "The edited scene does not own this node, so the file cannot hold the change and a save "
+     "would report saved having written none of it."},
+    {"node_inherited",
+     "This node is inherited from the base scene, and a scene file has no way to record "
+     "removing, moving or duplicating an inherited node."},
+    {"cyclic_instance",
+     "The scene to instance contains the edited scene, so the result could never be saved: "
+     "Godot refuses that save and reports nothing to the caller."},
     {"camera_path_does_not_resolve_to_camera3d",
      "That path resolves to a node, but not to a Camera3D."},
     {"camera_postcondition_mismatch",
@@ -1541,6 +1550,571 @@ Result<std::string> logicalPathFromEditedRoot(GDExtensionObjectPtr root,
     return logical_root + "/" + relative_path.value();
 }
 
+// ---------------------------------------------------------------------------
+// Scene ownership: what the file can hold.
+//
+// SceneState::_parse_node keeps a node only when the edited root owns it, or
+// when the instance that owns it is one the edited root marked editable, so a
+// change to a node inside an instanced sub-scene was applied to the live tree,
+// reported as applied, and dropped by the save. A node the edited scene
+// inherits is owned by the edited root, but its existence is recorded in the
+// base scene, and a .tscn has no marker for "this inherited node is gone", so
+// removing, moving or duplicating one was dropped the same way. The editor
+// refuses both before anything happens, in SceneTreeDock::_validate_no_foreign;
+// the bridge now does too, on the real call and on the preview (#588, #589).
+//
+// Node.get_scene_inherited_state is not bound to GDExtension, so the base
+// scene is read from the edited scene's own PackedScene: SceneState.
+// get_node_instance(0) is the base when the file's root node carries instance=
+// and null otherwise, and the base's own state lists the paths the edited scene
+// inherits, base by base. Every bind below carries the same hash on 4.5.1,
+// 4.6.2 and 4.7.2.
+
+struct InheritedSceneState {
+    // The scene the edited scene inherits, or empty when it inherits nothing.
+    std::string base_scene;
+    // Root-relative node paths the base chain declares, "." for the root.
+    std::set<std::string> node_paths;
+};
+
+// A PackedScene through the loader's cache, which for the scene open in the
+// editor is the editor's own copy. 404 when there is no such file.
+Result<VariantValue> loadPackedSceneVariant(const std::string& scene_path) {
+    auto loader = singleton("ResourceLoader");
+    if (loader.isErr()) return loader.error();
+    auto path_value = makeString(scene_path);
+    auto hint = makeString("PackedScene");
+    auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
+    if (path_value.isErr() || hint.isErr() || cache_mode.isErr()) {
+        return Error::internal("Failed to construct scene resource arguments");
+    }
+    auto exists_value = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                                   {&path_value.value(), &hint.value()});
+    if (exists_value.isErr()) return exists_value.error();
+    auto exists = scalarFromVariant<GDExtensionBool>(exists_value.value(),
+                                                     GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (exists.isErr()) return exists.error();
+    if (!exists.value()) return Error::notFound("PackedScene not found: " + scene_path);
+    return callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                      {&path_value.value(), &hint.value(), &cache_mode.value()});
+}
+
+Result<InheritedSceneState> inheritedSceneState(GDExtensionObjectPtr root) {
+    InheritedSceneState state;
+    const auto edited_path = editedScenePath(root);
+    // Never saved: there is no file for anything to inherit from.
+    if (edited_path.empty()) return state;
+    auto current = loadPackedSceneVariant(edited_path);
+    if (current.isErr()) {
+        // A path with no file behind it yet inherits nothing either.
+        if (current.error().code == 404) return state;
+        return current.error();
+    }
+    auto index_zero = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+    auto for_parent = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    if (index_zero.isErr()) return index_zero.error();
+    if (for_parent.isErr()) return for_parent.error();
+    // Inheritance chains are short. The bound is so a file that names itself
+    // as its own base cannot spin here.
+    constexpr int kMaxInheritanceDepth = 16;
+    for (int depth = 0; depth < kMaxInheritanceDepth; ++depth) {
+        auto packed = objectFromVariant(current.value());
+        if (packed.isErr()) return packed.error();
+        if (!packed.value()) break;
+        auto state_value = callObject(packed.value(), "PackedScene", "get_state", 3479783971LL);
+        if (state_value.isErr()) return state_value.error();
+        auto scene_state = objectFromVariant(state_value.value());
+        if (scene_state.isErr()) return scene_state.error();
+        if (!scene_state.value()) break;
+        auto count_value = callObject(scene_state.value(), "SceneState", "get_node_count",
+                                      3905245786LL);
+        if (count_value.isErr()) return count_value.error();
+        auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (count.isErr()) return count.error();
+        if (count.value() <= 0) break;
+        if (depth > 0) {
+            for (int64_t i = 0; i < count.value(); ++i) {
+                auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+                if (index.isErr()) return index.error();
+                auto path_value = callObject(scene_state.value(), "SceneState", "get_node_path",
+                                             2272487792LL, {&index.value(), &for_parent.value()});
+                if (path_value.isErr()) return path_value.error();
+                auto path = stringFromVariant(path_value.value(), GDEXTENSION_VARIANT_TYPE_NODE_PATH);
+                if (path.isErr()) return path.error();
+                // SceneState spells a child of the root "./Child";
+                // Node.get_path_to spells the same node "Child". One
+                // spelling, so the two can be compared.
+                std::string relative = path.value();
+                if (strings::startsWith(relative, "./")) relative = relative.substr(2);
+                state.node_paths.insert(relative);
+            }
+        }
+        auto base_value = callObject(scene_state.value(), "SceneState", "get_node_instance",
+                                     511017218LL, {&index_zero.value()});
+        if (base_value.isErr()) return base_value.error();
+        auto base = objectFromVariant(base_value.value());
+        if (base.isErr()) return base.error();
+        if (!base.value()) break;
+        if (depth == 0) {
+            auto base_path_value = callObject(base.value(), "Resource", "get_path", 201670096LL);
+            if (base_path_value.isErr()) return base_path_value.error();
+            auto base_path = stringFromVariant(base_path_value.value(),
+                                               GDEXTENSION_VARIANT_TYPE_STRING);
+            if (base_path.isErr()) return base_path.error();
+            state.base_scene = base_path.value();
+        }
+        current = std::move(base_value);
+    }
+    return state;
+}
+
+struct NodeOwnership {
+    // The edited root owns it, or it is the root: what the file lists.
+    bool owned_by_scene{false};
+    // Owned by an instance the edited scene has not marked editable, or by
+    // nothing: the packer discards it, and everything under it.
+    bool foreign{false};
+    // Declared by the scene this one inherits.
+    bool inherited{false};
+    std::string owner_scene;    // the instance's scene file, when foreign
+    std::string instance_root;  // that instance's logical path, when foreign
+};
+
+Result<NodeOwnership> classifyNodeOwnership(GDExtensionObjectPtr root, GDExtensionObjectPtr node,
+                                            const InheritedSceneState& inherited) {
+    NodeOwnership ownership;
+    if (node == root) {
+        ownership.owned_by_scene = true;
+        return ownership;
+    }
+    auto owner_value = callObject(node, "Node", "get_owner", 3160264692LL);
+    if (owner_value.isErr()) return owner_value.error();
+    auto owner = objectFromVariant(owner_value.value());
+    if (owner.isErr()) return owner.error();
+    if (owner.value() == root) {
+        ownership.owned_by_scene = true;
+    } else if (!owner.value()) {
+        ownership.foreign = true;
+    } else {
+        auto owner_arg = makeObject(owner.value());
+        if (owner_arg.isErr()) return owner_arg.error();
+        // is_editable_instance asserts its argument is a descendant and prints
+        // when it is not, so that is asked first. An owner is always an
+        // ancestor of what it owns, so anything not beneath the root sits
+        // above it and cannot be an instance the root marked.
+        auto beneath_value = callObject(root, "Node", "is_ancestor_of", 3093956946LL,
+                                        {&owner_arg.value()});
+        if (beneath_value.isErr()) return beneath_value.error();
+        auto beneath = scalarFromVariant<GDExtensionBool>(beneath_value.value(),
+                                                          GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (beneath.isErr()) return beneath.error();
+        bool editable = false;
+        if (beneath.value()) {
+            auto editable_value = callObject(root, "Node", "is_editable_instance", 3093956946LL,
+                                             {&owner_arg.value()});
+            if (editable_value.isErr()) return editable_value.error();
+            auto flag = scalarFromVariant<GDExtensionBool>(editable_value.value(),
+                                                           GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (flag.isErr()) return flag.error();
+            editable = flag.value() != 0;
+        }
+        if (!editable) {
+            ownership.foreign = true;
+            auto owner_scene = callObject(owner.value(), "Node", "get_scene_file_path", 201670096LL);
+            if (owner_scene.isOk()) {
+                auto text = stringFromVariant(owner_scene.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                if (text.isOk()) ownership.owner_scene = text.value();
+            }
+            if (beneath.value()) {
+                auto instance_root = logicalPathFromEditedRoot(root, owner.value());
+                if (instance_root.isOk()) ownership.instance_root = instance_root.value();
+            }
+        }
+    }
+    if (ownership.owned_by_scene && !inherited.base_scene.empty()) {
+        auto relative = relativePathWithinEditedRoot(root, node);
+        if (relative.isErr()) return relative.error();
+        ownership.inherited = inherited.node_paths.count(relative.value()) > 0;
+    }
+    return ownership;
+}
+
+// The node and every descendant the edited root owns, which is the set a
+// branch loses when it leaves the tree: Node::_propagate_after_exit_tree
+// clears any owner that is no longer an ancestor. Internal children are
+// skipped, as the packer skips them.
+Result<std::vector<GDExtensionObjectPtr>> collectNodesOwnedBy(GDExtensionObjectPtr root,
+                                                              GDExtensionObjectPtr node) {
+    std::vector<GDExtensionObjectPtr> owned;
+    std::vector<GDExtensionObjectPtr> pending{node};
+    auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    if (include_internal.isErr()) return include_internal.error();
+    while (!pending.empty()) {
+        GDExtensionObjectPtr current = pending.back();
+        pending.pop_back();
+        auto owner_value = callObject(current, "Node", "get_owner", 3160264692LL);
+        if (owner_value.isErr()) return owner_value.error();
+        auto owner = objectFromVariant(owner_value.value());
+        if (owner.isErr()) return owner.error();
+        if (owner.value() == root) owned.push_back(current);
+        auto children = callObject(current, "Node", "get_children", 873284517LL, {&include_internal.value()});
+        if (children.isErr()) return children.error();
+        auto size_value = callVariant(children.value(), "size");
+        if (size_value.isErr()) return size_value.error();
+        auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (size.isErr()) return size.error();
+        for (int64_t i = 0; i < size.value(); ++i) {
+            auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+            if (index.isErr()) return index.error();
+            auto child_variant = callVariant(children.value(), "get", {&index.value()});
+            if (child_variant.isErr()) return child_variant.error();
+            auto child = objectFromVariant(child_variant.value());
+            if (child.isErr() || !child.value()) return Error::internal("Godot returned an invalid child node");
+            pending.push_back(child.value());
+        }
+    }
+    return owned;
+}
+
+enum class SceneEdit {
+    // A value, group or script on the node: an override the file holds for an
+    // inherited node, nothing for a foreign one.
+    Property,
+    // Removing, moving or duplicating the node: nothing the file can hold for
+    // a foreign or an inherited node.
+    Structure,
+    // A new node under this one: dropped with its parent when the parent is
+    // foreign, kept under an inherited one.
+    AddChild
+};
+
+// The refusal the file's rules give this edit, or nothing when it can be saved.
+std::optional<json> refuseUnsavableEdit(GDExtensionObjectPtr root, GDExtensionObjectPtr node,
+                                        const std::string& described_path, SceneEdit edit) {
+    InheritedSceneState inherited;
+    if (edit == SceneEdit::Structure) {
+        auto loaded = inheritedSceneState(root);
+        if (loaded.isErr()) return errorJson(loaded.error().code, loaded.error().message);
+        inherited = std::move(loaded.value());
+    }
+    auto ownership = classifyNodeOwnership(root, node, inherited);
+    if (ownership.isErr()) return errorJson(ownership.error().code, ownership.error().message);
+    const auto& owned = ownership.value();
+    if (owned.foreign) {
+        const char* dropped = edit == SceneEdit::AddChild
+            ? "a node added under it"
+            : (edit == SceneEdit::Structure ? "removing, moving or duplicating it"
+                                            : "a change to it");
+        std::string detail = "`" + described_path + "` ";
+        if (!owned.owner_scene.empty() && !owned.instance_root.empty()) {
+            detail += "belongs to the instance of " + owned.owner_scene + " at " +
+                      owned.instance_root + ", so a save would drop " + dropped + ". Edit " +
+                      owned.owner_scene + " itself, or turn on Editable Children for " +
+                      owned.instance_root + " in the editor first.";
+        } else {
+            detail += std::string("is not owned by the edited scene, so a save would drop ") + dropped + ".";
+        }
+        json data = {{"target_node", described_path}};
+        if (!owned.owner_scene.empty()) data["owner_scene"] = owned.owner_scene;
+        if (!owned.instance_root.empty()) data["instance_root"] = owned.instance_root;
+        return bridgeError(409, "node_not_owned", std::move(data), detail);
+    }
+    if (owned.inherited && edit == SceneEdit::Structure) {
+        const std::string detail = "`" + described_path + "` is inherited from " +
+                                   inherited.base_scene + ". Make the change in " +
+                                   inherited.base_scene + ", or override its properties here instead.";
+        return bridgeError(409, "node_inherited",
+                           {{"target_node", described_path}, {"base_scene", inherited.base_scene}},
+                           detail);
+    }
+    return std::nullopt;
+}
+
+// One res:// path from a ResourceLoader.get_dependencies entry: the path on its
+// own, or "uid::type::path" when the file recorded a uid, in which case the uid
+// is asked for its current path and the recorded one is the fallback.
+Result<std::string> dependencyResourcePath(const std::string& entry) {
+    std::vector<std::string> parts;
+    size_t start = 0;
+    while (true) {
+        const size_t separator = entry.find("::", start);
+        parts.push_back(entry.substr(
+            start, separator == std::string::npos ? std::string::npos : separator - start));
+        if (separator == std::string::npos) break;
+        start = separator + 2;
+    }
+    if (!parts.empty() && strings::startsWith(parts.front(), "uid://")) {
+        auto uids = singleton("ResourceUID");
+        if (uids.isErr()) return uids.error();
+        auto text = makeString(parts.front());
+        if (text.isErr()) return text.error();
+        auto id_value = callObject(uids.value(), "ResourceUID", "text_to_id", 1321353865LL,
+                                   {&text.value()});
+        if (id_value.isErr()) return id_value.error();
+        auto id = scalarFromVariant<int64_t>(id_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (id.isErr()) return id.error();
+        if (id.value() >= 0) {
+            auto id_arg = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, id.value());
+            if (id_arg.isErr()) return id_arg.error();
+            auto known_value = callObject(uids.value(), "ResourceUID", "has_id", 1116898809LL,
+                                          {&id_arg.value()});
+            if (known_value.isErr()) return known_value.error();
+            auto known = scalarFromVariant<GDExtensionBool>(known_value.value(),
+                                                            GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (known.isErr()) return known.error();
+            if (known.value()) {
+                auto path_value = callObject(uids.value(), "ResourceUID", "get_id_path",
+                                             844755477LL, {&id_arg.value()});
+                if (path_value.isErr()) return path_value.error();
+                auto path = stringFromVariant(path_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                if (path.isErr()) return path.error();
+                if (!path.value().empty()) return path.value();
+            }
+        }
+    }
+    for (const auto& part : parts) {
+        if (strings::startsWith(part, "res://")) return part;
+    }
+    return std::string();
+}
+
+// Whether a PackedScene file is there to read. ResourceLoader.get_dependencies
+// prints an engine ERROR for a path it cannot open, so nothing below asks it
+// about a file this has not seen first.
+Result<bool> packedSceneExists(const std::string& scene_path) {
+    auto loader = singleton("ResourceLoader");
+    if (loader.isErr()) return loader.error();
+    auto path_value = makeString(scene_path);
+    auto hint = makeString("PackedScene");
+    if (path_value.isErr()) return path_value.error();
+    if (hint.isErr()) return hint.error();
+    auto exists_value = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                                   {&path_value.value(), &hint.value()});
+    if (exists_value.isErr()) return exists_value.error();
+    auto exists = scalarFromVariant<GDExtensionBool>(exists_value.value(),
+                                                     GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (exists.isErr()) return exists.error();
+    return exists.value() != 0;
+}
+
+// The scene files from `scene_path` down to the edited scene, or empty when
+// the edited scene is not among its dependencies. Instancing and inheritance
+// are both ext_resources of type PackedScene, so both kinds of cycle are
+// found by one walk over the scene files each scene depends on. This is the
+// check SceneTreeDock makes before it instances a dropped scene and
+// EditorNode makes before it saves; EditorInterface.save_scene returns OK
+// either way, so the refusal has to come before the tree holds the cycle (#590).
+Result<std::vector<std::string>> instanceCycleChain(const std::string& scene_path,
+                                                    const std::string& edited_path) {
+    if (scene_path == edited_path) return std::vector<std::string>{scene_path};
+    auto loader = singleton("ResourceLoader");
+    if (loader.isErr()) return loader.error();
+    auto is_scene_file = [](const std::string& path) {
+        return strings::endsWith(path, ".tscn") || strings::endsWith(path, ".scn");
+    };
+    // A project has far fewer scenes than this; the bound is so a walk over
+    // one that does not cannot run on.
+    constexpr size_t kMaxScenesWalked = 4096;
+    std::vector<std::vector<std::string>> pending{{scene_path}};
+    std::set<std::string> visited{scene_path};
+    while (!pending.empty()) {
+        auto chain = std::move(pending.back());
+        pending.pop_back();
+        auto present = packedSceneExists(chain.back());
+        if (present.isErr()) return present.error();
+        if (!present.value()) continue;
+        auto path_value = makeString(chain.back());
+        if (path_value.isErr()) return path_value.error();
+        auto dependencies = callObject(loader.value(), "ResourceLoader", "get_dependencies",
+                                       3538744774LL, {&path_value.value()});
+        if (dependencies.isErr()) return dependencies.error();
+        auto size_value = callVariant(dependencies.value(), "size");
+        if (size_value.isErr()) return size_value.error();
+        auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (size.isErr()) return size.error();
+        for (int64_t i = 0; i < size.value(); ++i) {
+            auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+            if (index.isErr()) return index.error();
+            auto entry_value = callVariant(dependencies.value(), "get", {&index.value()});
+            if (entry_value.isErr()) return entry_value.error();
+            auto entry = stringFromVariant(
+                entry_value.value(), GodotApi::instance().variant_get_type(entry_value.value().ptr()));
+            if (entry.isErr()) return entry.error();
+            auto dependency = dependencyResourcePath(entry.value());
+            if (dependency.isErr()) return dependency.error();
+            if (dependency.value().empty() || !is_scene_file(dependency.value())) continue;
+            if (dependency.value() == edited_path) {
+                chain.push_back(dependency.value());
+                return chain;
+            }
+            if (visited.size() >= kMaxScenesWalked) continue;
+            if (!visited.insert(dependency.value()).second) continue;
+            auto next = chain;
+            next.push_back(dependency.value());
+            pending.push_back(std::move(next));
+        }
+    }
+    return std::vector<std::string>{};
+}
+
+std::optional<json> refuseInstanceCycle(GDExtensionObjectPtr root, const std::string& scene_path) {
+    const auto edited = editedScenePath(root);
+    // An unsaved scene is in no file's dependencies.
+    if (edited.empty()) return std::nullopt;
+    auto chain = instanceCycleChain(scene_path, edited);
+    if (chain.isErr()) return errorJson(chain.error().code, chain.error().message);
+    if (chain.value().empty()) return std::nullopt;
+    std::string detail;
+    if (chain.value().size() == 1) {
+        detail = scene_path + " is the edited scene.";
+    } else if (chain.value().size() == 2) {
+        detail = scene_path + " instances or inherits " + edited + ", the edited scene.";
+    } else {
+        detail = scene_path + " reaches " + edited + ", the edited scene, through";
+        for (size_t i = 1; i + 1 < chain.value().size(); ++i) {
+            detail += (i == 1 ? " " : ", ") + chain.value()[i];
+        }
+        detail += ".";
+    }
+    return bridgeError(409, "cyclic_instance",
+                       {{"scene_path", scene_path}, {"edited_scene", edited}, {"chain", chain.value()}},
+                       detail);
+}
+
+struct AttachableScript {
+    VariantValue script;
+    GDExtensionObjectPtr object{nullptr};
+    std::string base_type;
+};
+
+// Everything script.attachToNode checks before it touches the undo history,
+// in one place, so the preview refuses the way the real call does (#603).
+Result<AttachableScript> loadAttachableScript(GDExtensionObjectPtr node,
+                                              const std::string& script_path) {
+    auto valid_path = validateScriptPath(script_path);
+    if (valid_path.isErr()) return valid_path.error();
+    auto old_script = callObject(node, "Object", "get_script", 1214101251LL);
+    if (old_script.isErr()) return old_script.error();
+    if (GodotApi::instance().variant_get_type(old_script.value().ptr()) == GDEXTENSION_VARIANT_TYPE_OBJECT) {
+        auto existing = objectFromVariant(old_script.value());
+        if (existing.isErr()) return existing.error();
+        if (existing.value()) {
+            return Error(409, "Target node already has a script; detach it before attaching another");
+        }
+    }
+    auto loader = singleton("ResourceLoader");
+    if (loader.isErr()) return loader.error();
+    auto path = makeString(script_path);
+    auto hint = makeString("Script");
+    auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
+    if (path.isErr() || hint.isErr() || cache_mode.isErr()) {
+        return Error::internal("Failed to construct script load arguments");
+    }
+    auto loaded = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                             {&path.value(), &hint.value(), &cache_mode.value()});
+    if (loaded.isErr()) return loaded.error();
+    auto resource = objectFromVariant(loaded.value());
+    if (resource.isErr()) return resource.error();
+    if (!resource.value()) return Error::notFound("Script resource not found: " + script_path);
+    auto class_name = makeString("Script");
+    if (class_name.isErr()) return class_name.error();
+    auto is_script_value = callObject(resource.value(), "Object", "is_class", 3927539163LL,
+                                      {&class_name.value()});
+    if (is_script_value.isErr()) return is_script_value.error();
+    auto is_script = scalarFromVariant<GDExtensionBool>(is_script_value.value(),
+                                                        GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (is_script.isErr()) return is_script.error();
+    if (!is_script.value()) return Error::invalidArgument("Resource is not a Script: " + script_path);
+    auto base_type_value = callObject(resource.value(), "Script", "get_instance_base_type", 2002593661LL);
+    if (base_type_value.isErr()) return base_type_value.error();
+    auto base_type = stringFromVariant(base_type_value.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+    if (base_type.isErr()) return base_type.error();
+    auto base_class = makeString(base_type.value());
+    if (base_class.isErr()) return base_class.error();
+    auto compatible_value = callObject(node, "Object", "is_class", 3927539163LL, {&base_class.value()});
+    if (compatible_value.isErr()) return compatible_value.error();
+    auto compatible = scalarFromVariant<GDExtensionBool>(compatible_value.value(),
+                                                         GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (compatible.isErr()) return compatible.error();
+    if (!compatible.value()) {
+        return Error(422, "Script base type " + base_type.value() +
+                              " is incompatible with the target node");
+    }
+    AttachableScript attachable;
+    attachable.object = resource.value();
+    attachable.base_type = base_type.value();
+    attachable.script = std::move(loaded.value());
+    return attachable;
+}
+
+// The checks a mutation runs on its target before it does anything, asked by
+// the preview through scene.getProperty with a `mutation` block naming the
+// tool and its arguments. A dry run that had opened the node had everything
+// the real call uses to refuse it, and previewed it as planned anyway: the
+// '..' rule was #571, and these are the ownership, cycle and base-type rules
+// (#588, #589, #590, #603).
+std::optional<json> previewMutationPreconditions(GDExtensionObjectPtr root, GDExtensionObjectPtr node,
+                                                 const std::string& described_path,
+                                                 const json& mutation) {
+    if (!mutation.is_object()) return std::nullopt;
+    const std::string tool = mutation.value("tool", "");
+    const json arguments = mutation.value("arguments", json::object());
+    auto string_argument = [&](const char* name) -> std::optional<std::string> {
+        if (!arguments.is_object() || !arguments.contains(name) || !arguments[name].is_string()) {
+            return std::nullopt;
+        }
+        return arguments[name].get<std::string>();
+    };
+    if (tool == "scene_remove_node" || tool == "scene_duplicate_node" ||
+        tool == "scene_reparent_node") {
+        if (node == root) return errorJson(400, "Cannot mutate the edited scene root");
+        if (auto refused = refuseUnsavableEdit(root, node, described_path, SceneEdit::Structure)) {
+            return refused;
+        }
+        if (auto new_parent_path = string_argument("new_parent_path")) {
+            auto new_parent = resolveNode(root, *new_parent_path);
+            if (new_parent.isErr()) return errorJson(new_parent.error().code, new_parent.error().message);
+            if (auto refused = refuseUnsavableEdit(root, new_parent.value(), *new_parent_path,
+                                                   SceneEdit::AddChild)) {
+                return refused;
+            }
+        }
+        return std::nullopt;
+    }
+    if (tool == "scene_instantiate_node") {
+        if (auto refused = refuseUnsavableEdit(root, node, described_path, SceneEdit::AddChild)) {
+            return refused;
+        }
+        if (auto scene_path = string_argument("scene_path")) {
+            auto valid_scene = validateResPath(*scene_path, ".tscn");
+            if (valid_scene.isErr()) {
+                return errorJson(valid_scene.error().code, valid_scene.error().message);
+            }
+            auto present = packedSceneExists(*scene_path);
+            if (present.isErr()) return errorJson(present.error().code, present.error().message);
+            if (!present.value()) return errorJson(404, "PackedScene not found: " + *scene_path);
+            if (auto refused = refuseInstanceCycle(root, *scene_path)) return refused;
+        }
+        return std::nullopt;
+    }
+    if (tool == "scene_set_property" || tool == "scene_add_to_group" ||
+        tool == "scene_remove_from_group" || tool == "script_attach_to_node" ||
+        tool == "script_detach_from_node") {
+        if (auto refused = refuseUnsavableEdit(root, node, described_path, SceneEdit::Property)) {
+            return refused;
+        }
+        if (tool == "script_attach_to_node") {
+            if (auto script_path = string_argument("script_path")) {
+                auto attachable = loadAttachableScript(node, *script_path);
+                if (attachable.isErr()) {
+                    return errorJson(attachable.error().code, attachable.error().message);
+                }
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 // What the class says about a property, as opposed to what it currently holds.
 // An empty resource slot reads back as nil, so the value alone cannot say the
 // slot is a TileSet, and a resource write has nothing to validate against
@@ -1664,7 +2238,8 @@ Result<void> countDescendantsByType(GDExtensionObjectPtr root, std::map<std::str
 
 Result<json> buildHierarchy(GDExtensionObjectPtr node, int depth, int max_depth,
                             const std::string& logical_path,
-                            HierarchyBudget& budget) {
+                            HierarchyBudget& budget, GDExtensionObjectPtr root,
+                            const InheritedSceneState& inherited) {
     auto name = nodeString(node, "get_name", 2002593661LL);
     auto type = nodeString(node, "get_class", 201670096LL);
     if (name.isErr()) return name.error();
@@ -1674,6 +2249,36 @@ Result<json> buildHierarchy(GDExtensionObjectPtr node, int depth, int max_depth,
         {"name", name.value()}, {"type", type.value()}, {"path", path},
         {"properties", json::object()}, {"children", json::array()}
     };
+
+    // Where the node comes from, so a caller can see what the file will hold
+    // before mutating it: an instance root names its scene, a node inside an
+    // instance is not owned by the edited scene, and a node the scene inherits
+    // says so. The editor shows the same three facts as the link icon, the
+    // greyed rows and the inherited marker; the walk reported none of them, so
+    // a caller had no way to tell an instance's internals from its own nodes
+    // until the save dropped the change (#591).
+    auto ownership = classifyNodeOwnership(root, node, inherited);
+    if (ownership.isErr()) return ownership.error();
+    result["owned_by_scene"] = ownership.value().owned_by_scene;
+    if (ownership.value().inherited) result["inherited"] = true;
+    if (node != root) {
+        auto scene_path = callObject(node, "Node", "get_scene_file_path", 201670096LL);
+        if (scene_path.isErr()) return scene_path.error();
+        auto instance_of = stringFromVariant(scene_path.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+        if (instance_of.isErr()) return instance_of.error();
+        if (!instance_of.value().empty()) {
+            result["instance_of"] = instance_of.value();
+            auto node_value = makeObject(node);
+            if (node_value.isErr()) return node_value.error();
+            auto editable_value = callObject(root, "Node", "is_editable_instance", 3093956946LL,
+                                             {&node_value.value()});
+            if (editable_value.isErr()) return editable_value.error();
+            auto editable = scalarFromVariant<GDExtensionBool>(editable_value.value(),
+                                                               GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (editable.isErr()) return editable.error();
+            result["editable_instance"] = editable.value() != 0;
+        }
+    }
 
     // Charged before descending, so the node that crosses the limit is the one
     // that stops rather than the one after it.
@@ -1722,7 +2327,7 @@ Result<json> buildHierarchy(GDExtensionObjectPtr node, int depth, int max_depth,
         auto child_name = nodeString(child.value(), "get_name", 2002593661LL);
         if (child_name.isErr()) return child_name.error();
         auto child_json = buildHierarchy(child.value(), depth + 1, max_depth,
-                                         path + "/" + child_name.value(), budget);
+                                         path + "/" + child_name.value(), budget, root, inherited);
         if (child_json.isErr()) return child_json.error();
         if (child_json.value().is_null()) {
             result["children_truncated"] = true;
@@ -5659,6 +6264,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
             return bridgeError(404, "tilemap_target_not_found", {{"path", tilemap_path}},
                                "Path " + tilemap_path + " resolves to nothing.");
         }
+        if (auto refused = refuseUnsavableEdit(root.value(), layer.value(), tilemap_path,
+                                               SceneEdit::Property)) {
+            return *refused;
+        }
         auto correct_class = objectIsClass(layer.value(), "TileMapLayer");
         if (correct_class.isErr() || !correct_class.value()) {
             return wrongNodeTypeError("tilemap_target_wrong_type", tilemap_path, layer.value());
@@ -5829,6 +6438,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
             return bridgeError(404, "gridmap_target_not_found", {{"path", gridmap_path}},
                                "Path " + gridmap_path + " resolves to nothing.");
         }
+        if (auto refused = refuseUnsavableEdit(root.value(), grid.value(), gridmap_path,
+                                               SceneEdit::Property)) {
+            return *refused;
+        }
         auto correct_class = objectIsClass(grid.value(), "GridMap");
         if (correct_class.isErr() || !correct_class.value()) {
             return wrongNodeTypeError("gridmap_target_wrong_type", gridmap_path, grid.value());
@@ -5967,6 +6580,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
         const auto camera_path = params["camera_path"].get<std::string>();
         auto camera = resolveNode(root.value(), camera_path);
         if (camera.isErr()) return errorJson(camera.error().code, camera.error().message);
+        if (auto refused = refuseUnsavableEdit(root.value(), camera.value(), camera_path,
+                                               SceneEdit::Property)) {
+            return *refused;
+        }
         auto class_name = makeString("Camera3D");
         if (class_name.isErr()) return errorJson(500, class_name.error().message);
         auto class_result = callObject(camera.value(), "Object", "is_class", 3927539163LL,
@@ -8049,6 +8666,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (root.isErr()) return errorJson(root.error().code, root.error().message);
         auto node = resolveNode(root.value(), params.value("target_node", ""));
         if (node.isErr()) return errorJson(node.error().code, node.error().message);
+        if (auto refused = refuseUnsavableEdit(root.value(), node.value(),
+                                               params.value("target_node", ""),
+                                               SceneEdit::Property)) {
+            return *refused;
+        }
         auto old_script = callObject(node.value(), "Object", "get_script", 1214101251LL);
         if (old_script.isErr()) return errorJson(old_script.error().code, old_script.error().message);
         auto old_type = GodotApi::instance().variant_get_type(old_script.value().ptr());
@@ -8065,46 +8687,12 @@ json GodotBridge::execute(const std::string& method, const json& params,
         const bool attaching = method == "script.attachToNode";
         if (attaching) {
             script_path = params.value("script_path", "");
-            auto valid_path = validateScriptPath(script_path);
-            if (valid_path.isErr()) return errorJson(valid_path.error().code, valid_path.error().message);
-            if (old_object) return errorJson(409, "Target node already has a script; detach it before attaching another");
-            auto loader = singleton("ResourceLoader");
-            if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
-            auto path = makeString(script_path);
-            auto hint = makeString("Script");
-            auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
-            if (path.isErr() || hint.isErr() || cache_mode.isErr()) return errorJson(500, "Failed to construct script load arguments");
-            auto loaded = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
-                                     {&path.value(), &hint.value(), &cache_mode.value()});
-            if (loaded.isErr()) return errorJson(loaded.error().code, loaded.error().message);
-            auto resource = objectFromVariant(loaded.value());
-            if (resource.isErr() || !resource.value()) return errorJson(404, "Script resource not found: " + script_path);
-            auto class_name = makeString("Script");
-            auto is_script_value = class_name.isOk()
-                ? callObject(resource.value(), "Object", "is_class", 3927539163LL, {&class_name.value()})
-                : Result<VariantValue>(class_name.error());
-            auto is_script = is_script_value.isOk()
-                ? scalarFromVariant<GDExtensionBool>(is_script_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
-                : Result<GDExtensionBool>(is_script_value.error());
-            if (is_script.isErr() || !is_script.value()) return errorJson(400, "Resource is not a Script: " + script_path);
-            auto base_type_value = callObject(resource.value(), "Script", "get_instance_base_type", 2002593661LL);
-            if (base_type_value.isErr()) return errorJson(base_type_value.error().code, base_type_value.error().message);
-            auto base_type = stringFromVariant(base_type_value.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
-            if (base_type.isErr()) return errorJson(base_type.error().code, base_type.error().message);
-            auto base_class = makeString(base_type.value());
-            auto compatible_value = base_class.isOk()
-                ? callObject(node.value(), "Object", "is_class", 3927539163LL, {&base_class.value()})
-                : Result<VariantValue>(base_class.error());
-            auto compatible = compatible_value.isOk()
-                ? scalarFromVariant<GDExtensionBool>(compatible_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
-                : Result<GDExtensionBool>(compatible_value.error());
-            if (compatible.isErr()) return errorJson(compatible.error().code, compatible.error().message);
-            if (!compatible.value()) {
-                return errorJson(422, "Script base type " + base_type.value() +
-                                      " is incompatible with the target node");
+            auto attachable = loadAttachableScript(node.value(), script_path);
+            if (attachable.isErr()) {
+                return errorJson(attachable.error().code, attachable.error().message);
             }
-            requested_script_object = resource.value();
-            new_script = std::move(loaded.value());
+            requested_script_object = attachable.value().object;
+            new_script = std::move(attachable.value().script);
         } else if (!old_object) {
             return errorJson(409, "Target node has no script to detach");
         }
@@ -8483,6 +9071,13 @@ json GodotBridge::execute(const std::string& method, const json& params,
 
         auto node = resolveNode(root.value(), params.value("target_node", ""));
         if (node.isErr()) return errorJson(node.error().code, node.error().message);
+        if (method != "scene.listGroups") {
+            if (auto refused = refuseUnsavableEdit(root.value(), node.value(),
+                                                   params.value("target_node", ""),
+                                                   SceneEdit::Property)) {
+                return *refused;
+            }
+        }
         if (method == "scene.listGroups") {
             auto groups_value = callObject(node.value(), "Node", "get_groups", 3995934104LL);
             if (groups_value.isErr()) return errorJson(groups_value.error().code, groups_value.error().message);
@@ -9046,8 +9641,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
         int max_depth = std::clamp(params.value("max_depth", 10), 0, 64);
         auto logical_root = logicalPathFromEditedRoot(root, target.value());
         if (logical_root.isErr()) return errorJson(logical_root.error().code, logical_root.error().message);
+        auto inherited = inheritedSceneState(root);
+        if (inherited.isErr()) return errorJson(inherited.error().code, inherited.error().message);
         HierarchyBudget budget;
-        auto hierarchy = buildHierarchy(target.value(), 0, max_depth, logical_root.value(), budget);
+        auto hierarchy = buildHierarchy(target.value(), 0, max_depth, logical_root.value(), budget,
+                                        root, inherited.value());
         if (hierarchy.isErr()) return errorJson(hierarchy.error().code, hierarchy.error().message);
         if (hierarchy.value().is_null()) {
             return errorJson(413, "The edited scene root alone exceeds the hierarchy response budget");
@@ -9066,6 +9664,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                  {"max_response_bytes", kMaxHierarchyResponseBytes},
                                  {"message", "Use focused property/signal tools for fields omitted from hierarchy traversal."}};
         if (budget.truncated) hierarchy_result["truncated"] = true;
+        // The base scene, once, at the top: the root is that scene's root
+        // rather than an instance of it, so it does not carry instance_of.
+        if (!inherited.value().base_scene.empty()) {
+            hierarchy_result["inherits"] = inherited.value().base_scene;
+        }
         addEditedSceneIdentity(hierarchy_result, root);
         return liveResult(hierarchy_result);
     }
@@ -9520,6 +10123,22 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (root.isErr()) return errorJson(root.error().code, root.error().message);
         auto node = resolveNode(root.value(), params.value("target_node", ""));
         if (node.isErr()) return errorJson(node.error().code, node.error().message);
+        if (method == "scene.setProperty") {
+            if (auto refused = refuseUnsavableEdit(root.value(), node.value(),
+                                                   params.value("target_node", ""),
+                                                   SceneEdit::Property)) {
+                return *refused;
+            }
+        } else if (params.contains("mutation")) {
+            // The preview probe reads its target through this method, and
+            // names the mutation it is previewing so that call's own
+            // preconditions run here before the read.
+            if (auto refused = previewMutationPreconditions(root.value(), node.value(),
+                                                            params.value("target_node", ""),
+                                                            params["mutation"])) {
+                return *refused;
+            }
+        }
         std::string property = params.value("property_name", "");
         if (property.empty()) return errorJson(400, "property_name is required");
         auto descriptor = findPropertyDescriptor(node.value(), property);
@@ -9594,6 +10213,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (root.isErr()) return errorJson(root.error().code, root.error().message);
         auto parent = resolveNode(root.value(), params.value("parent_path", "/root"));
         if (parent.isErr()) return errorJson(parent.error().code, parent.error().message);
+        if (auto refused = refuseUnsavableEdit(root.value(), parent.value(),
+                                               params.value("parent_path", "/root"),
+                                               SceneEdit::AddChild)) {
+            return *refused;
+        }
         const std::string instance_scene_path = params.value("scene_path", "");
         std::string node_type = params.value("node_type", "");
         // The tool handler refuses this too, but mutate_scene_tree with
@@ -9640,6 +10264,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (!scene_exists.value()) {
                 return errorJson(404, "PackedScene not found: " + instance_scene_path);
             }
+            if (auto refused = refuseInstanceCycle(root.value(), instance_scene_path)) return *refused;
             auto resource = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
                                        {&scene_path_value.value(), &packed_hint.value(),
                                         &cache_mode.value()});
@@ -9846,6 +10471,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto node = resolveNode(root.value(), params.value("target_node", ""));
         if (node.isErr()) return errorJson(node.error().code, node.error().message);
         if (node.value() == root.value()) return errorJson(400, "Cannot mutate the edited scene root");
+        if (auto refused = refuseUnsavableEdit(root.value(), node.value(),
+                                               params.value("target_node", ""),
+                                               SceneEdit::Structure)) {
+            return *refused;
+        }
         auto parent_variant = callObject(node.value(), "Node", "get_parent", 3160264692LL);
         if (parent_variant.isErr()) return errorJson(parent_variant.error().code, parent_variant.error().message);
         auto parent = objectFromVariant(parent_variant.value());
@@ -9871,7 +10501,29 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                          {&child.value(), &readable.value(), &internal.value()});
             auto restore_index = managerMethod(manager.value(), "add_undo_method", parent.value(), "move_child",
                                                {&child.value(), &old_index.value()});
-            if (action.isErr() || keep.isErr() || remove.isErr() || restore_index.isErr() || restore.isErr()) {
+            // Godot clears the owner of every node whose owner is no longer an
+            // ancestor when a branch leaves the tree, so the undo put the node
+            // back without its ownership and the next save would have dropped
+            // it, and every mutation after the undo now refuses it as not
+            // owned. The editor's own delete restores owners on undo, and so
+            // does this. Registered after add_child, because undo operations
+            // run in the order they were added and set_owner needs the node in
+            // the tree.
+            auto owned = collectNodesOwnedBy(root.value(), node.value());
+            auto owner_value = makeObject(root.value());
+            bool restore_owners = owned.isOk() && owner_value.isOk();
+            if (restore_owners) {
+                for (auto owned_node : owned.value()) {
+                    auto restore_owner = managerMethod(manager.value(), "add_undo_method", owned_node,
+                                                       "set_owner", {&owner_value.value()});
+                    if (restore_owner.isErr()) {
+                        restore_owners = false;
+                        break;
+                    }
+                }
+            }
+            if (action.isErr() || keep.isErr() || remove.isErr() || restore_index.isErr() || restore.isErr() ||
+                !restore_owners) {
                 if (action.isOk()) abandonAction(manager.value());
                 return errorJson(500, "Failed to register remove UndoRedo transaction");
             }
@@ -9883,6 +10535,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (method == "scene.reparentNode") {
             auto new_parent = resolveNode(root.value(), params.value("new_parent_path", ""));
             if (new_parent.isErr()) return errorJson(new_parent.error().code, new_parent.error().message);
+            if (auto refused = refuseUnsavableEdit(root.value(), new_parent.value(),
+                                                   params.value("new_parent_path", ""),
+                                                   SceneEdit::AddChild)) {
+                return *refused;
+            }
             if (new_parent.value() == node.value()) {
                 return errorJson(400, "Cannot reparent a node to itself");
             }

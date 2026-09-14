@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **989** |
-| Live-harness assertions | 896 |
+| Automated tests | **991** |
+| Live-harness assertions | 926 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**641 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**643 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -42,7 +42,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `ManagedProcess` | 6 |
 | `McpServer` | 40 |
 | `Phase5` | 16 |
-| `Phase6` | 20 |
+| `Phase6` | 21 |
 | `Phase7Contract` | 9 |
 | `Phase7Diagnostics` | 1 |
 | `Phase7Navigation` | 1 |
@@ -68,7 +68,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `SpeculativeVerify` | 8 |
 | `TestRunner` | 1 |
 | `ToolManifest` | 1 |
-| `Tools` | 89 |
+| `Tools` | 90 |
 | `UiListControls` | 6 |
 | `ViewportIsolation` | 2 |
 | `autoload_diagnostics` | 6 |
@@ -113,11 +113,11 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Live Godot harness (`tests/*.ps1`)
 
-**896 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
+**926 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
 
 | File | Assertions |
 | --- | ---: |
-| `run_godot_integration.ps1` | 896 |
+| `run_godot_integration.ps1` | 926 |
 
 ## What is not counted here
 

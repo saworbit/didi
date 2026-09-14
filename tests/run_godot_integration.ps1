@@ -1704,6 +1704,36 @@ try {
         # script_create and resource_create both made theirs.
         (Tool-Request 2389 "scene_create" @{ scene_path = "res://nested/probe/created_nested.tscn"; root_type = "Node2D"; root_name = "Nested" }),
         (Tool-Request 2390 "scene_close" @{ discard_unsaved = $true }),
+        # Godot's own ownership rules, asked of the tools that edit a scene.
+        # The packer keeps only nodes the edited scene owns, so a change inside
+        # an instanced sub-scene was applied live, reported success, and
+        # dropped by the save; a .tscn has no removal marker for an inherited
+        # node, so removing one went the same way; and a scene instanced into
+        # itself can never be saved at all. The editor refuses all three before
+        # anything happens, and so does the bridge now, on the real call and
+        # on the dry run alike (#588, #589, #590, #591).
+        (Tool-Request 2440 "scene_open" @{ scene_path = "res://ownership_main.tscn" }),
+        (Tool-Request 2441 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 3 }),
+        (Tool-Request 2442 "scene_set_property" @{ target_node = "/root/OwnerMain/SubInst/Inner"; property_name = "visible"; value = $false }),
+        (Tool-Request 2443 "scene_set_property" @{ target_node = "/root/OwnerMain/SubInst/Inner"; property_name = "visible"; value = $false; dry_run = $true }),
+        (Tool-Request 2444 "scene_remove_node" @{ target_node = "/root/OwnerMain/SubInst/Inner" }),
+        (Tool-Request 2445 "scene_add_to_group" @{ target_node = "/root/OwnerMain/SubInst/Inner"; group = "ownership_probe" }),
+        (Tool-Request 2446 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/OwnerMain/SubInst/Inner"; name = "UnderForeign" }),
+        (Tool-Request 2447 "scene_instantiate_node" @{ scene_path = "res://ownership_main.tscn"; parent_path = "/root/OwnerMain"; name = "Self" }),
+        (Tool-Request 2448 "scene_instantiate_node" @{ scene_path = "res://ownership_derived.tscn"; parent_path = "/root/OwnerMain"; name = "Loop" }),
+        (Tool-Request 2449 "scene_instantiate_node" @{ scene_path = "res://ownership_main.tscn"; parent_path = "/root/OwnerMain"; name = "Self"; dry_run = $true }),
+        (Tool-Request 2450 "scene_set_property" @{ target_node = "/root/OwnerMain/SubInst"; property_name = "visible"; value = $false }),
+        (Tool-Request 2451 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 3 }),
+        (Tool-Request 2452 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 2453 "scene_open" @{ scene_path = "res://ownership_derived.tscn" }),
+        (Tool-Request 2454 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 3 }),
+        (Tool-Request 2455 "scene_remove_node" @{ target_node = "/root/OwnerMain/Own" }),
+        (Tool-Request 2456 "scene_remove_node" @{ target_node = "/root/OwnerMain/Own"; dry_run = $true }),
+        (Tool-Request 2457 "scene_reparent_node" @{ target_node = "/root/OwnerMain/Own"; new_parent_path = "/root/OwnerMain/Added" }),
+        (Tool-Request 2458 "scene_duplicate_node" @{ target_node = "/root/OwnerMain/Own" }),
+        (Tool-Request 2459 "scene_set_property" @{ target_node = "/root/OwnerMain/Own"; property_name = "visible"; value = $false }),
+        (Tool-Request 2460 "scene_remove_node" @{ target_node = "/root/OwnerMain/Added" }),
+        (Tool-Request 2461 "scene_close" @{ discard_unsaved = $true }),
         # UID resolution against the engine's own ResourceUID table. The addon
         # script ships with a .uid sidecar, so the files and the engine both
         # know it and must agree. The rest are the honest misses.
@@ -3187,6 +3217,58 @@ try {
     Assert-True $byId[98].result.isError "Absolute filesystem scene path was accepted."
     $nested = Tool-Payload $byId[2389]
     Assert-True ($nested.saved -eq $true -and $nested.opened -eq $true) "scene_create did not create the missing project directory for a nested scene path."
+    # Ownership: instanced sub-scene internals, inherited nodes, and a scene
+    # instanced into itself (#588, #589, #590, #591).
+    Assert-True ((Tool-Payload $byId[2440]).opened -eq $true) "The ownership fixture scene could not be opened."
+    $ownerPayload = Tool-Payload $byId[2441]
+    $ownerTree = $ownerPayload.scene_tree
+    $ownedNode = @($ownerTree.children | Where-Object { $_.name -eq "Own" })[0]
+    $subInst = @($ownerTree.children | Where-Object { $_.name -eq "SubInst" })[0]
+    $inner = @($subInst.children | Where-Object { $_.name -eq "Inner" })[0]
+    Assert-True ($null -ne $ownedNode -and $null -ne $subInst -and $null -ne $inner) "The ownership fixture did not open with its instance in place: $($ownerTree | ConvertTo-Json -Compress -Depth 4)"
+    Assert-True ($ownerTree.owned_by_scene -eq $true) "The edited root was not reported as owned by its own scene."
+    Assert-True ($ownedNode.owned_by_scene -eq $true) "A node the edited scene owns was not reported as owned."
+    Assert-True ($subInst.instance_of -eq "res://ownership_sub.tscn") "An instance root did not name the scene it instances: $($subInst | ConvertTo-Json -Compress)"
+    Assert-True ($subInst.editable_instance -eq $false) "A fresh instance root did not report editable_instance false."
+    Assert-True ($subInst.owned_by_scene -eq $true) "An instance root is owned by the edited scene and was not reported so."
+    Assert-True ($inner.owned_by_scene -eq $false) "A node inside an instance was reported as owned by the edited scene."
+    Assert-True ($null -eq $inner.instance_of) "A node inside an instance was reported as an instance root."
+    Assert-True ($null -eq $ownerPayload.inherits) "A scene that inherits nothing reported a base scene."
+    foreach ($id in 2442, 2443, 2444, 2445, 2446) {
+        Assert-True $byId[$id].result.isError "Request $id mutated a node inside an instanced sub-scene, which the file cannot hold."
+        $refusal = $byId[$id].result.content[0].text | ConvertFrom-Json
+        Assert-True ($refusal.error.code -eq 409 -and $refusal.error.data.code -eq "node_not_owned") "Request $id did not refuse as node_not_owned: $($byId[$id].result.content[0].text)"
+        Assert-True ($refusal.error.data.owner_scene -eq "res://ownership_sub.tscn" -and $refusal.error.data.instance_root -eq "/root/OwnerMain/SubInst") "Request $id did not name the owning scene and its instance root: $($byId[$id].result.content[0].text)"
+    }
+    foreach ($id in 2447, 2448, 2449) {
+        Assert-True $byId[$id].result.isError "Request $id instanced a scene that contains the edited scene."
+        $refusal = $byId[$id].result.content[0].text | ConvertFrom-Json
+        Assert-True ($refusal.error.code -eq 409 -and $refusal.error.data.code -eq "cyclic_instance") "Request $id did not refuse as cyclic_instance: $($byId[$id].result.content[0].text)"
+    }
+    Assert-True ((Tool-Payload $byId[2450]).applied -eq $true) "An instance root is owned by the edited scene, and a property write to it was refused."
+    $afterTree = (Tool-Payload $byId[2451]).scene_tree
+    $afterSub = @($afterTree.children | Where-Object { $_.name -eq "SubInst" })[0]
+    Assert-True (@($afterSub.children | Where-Object { $_.name -eq "Inner" }).Count -eq 1) "A refused removal still took the node out of the live tree."
+    Assert-True (@($afterTree.children | Where-Object { $_.name -in @("Self", "Loop") }).Count -eq 0) "A refused cyclic instance still landed in the live tree."
+    Assert-True ((Tool-Payload $byId[2452]).closed -eq $true) "The ownership fixture could not be discarded."
+    Assert-True ((Tool-Payload $byId[2453]).opened -eq $true) "The inherited fixture scene could not be opened."
+    $derivedPayload = Tool-Payload $byId[2454]
+    Assert-True ($derivedPayload.inherits -eq "res://ownership_main.tscn") "An inherited scene did not name its base: $($derivedPayload | ConvertTo-Json -Compress -Depth 4)"
+    $inheritedOwn = @($derivedPayload.scene_tree.children | Where-Object { $_.name -eq "Own" })[0]
+    $addedNode = @($derivedPayload.scene_tree.children | Where-Object { $_.name -eq "Added" })[0]
+    $inheritedSub = @($derivedPayload.scene_tree.children | Where-Object { $_.name -eq "SubInst" })[0]
+    Assert-True ($inheritedOwn.inherited -eq $true) "A node from the base scene was not marked inherited: $($inheritedOwn | ConvertTo-Json -Compress)"
+    Assert-True ($inheritedSub.inherited -eq $true -and $inheritedSub.instance_of -eq "res://ownership_sub.tscn") "An inherited instance root lost its scene or its inherited mark: $($inheritedSub | ConvertTo-Json -Compress)"
+    Assert-True ($null -eq $addedNode.inherited) "A node added in the inheriting scene was marked inherited."
+    Assert-True ($null -eq $derivedPayload.scene_tree.instance_of) "An inherited root was reported as an instance of its base."
+    foreach ($id in 2455, 2456, 2457, 2458) {
+        Assert-True $byId[$id].result.isError "Request $id removed, moved or duplicated an inherited node, which the file cannot record."
+        $refusal = $byId[$id].result.content[0].text | ConvertFrom-Json
+        Assert-True ($refusal.error.code -eq 409 -and $refusal.error.data.code -eq "node_inherited" -and $refusal.error.data.base_scene -eq "res://ownership_main.tscn") "Request $id did not refuse as node_inherited naming the base: $($byId[$id].result.content[0].text)"
+    }
+    Assert-True ((Tool-Payload $byId[2459]).applied -eq $true) "A property override on an inherited node is what the file holds, and it was refused."
+    Assert-True ((Tool-Payload $byId[2460]).status -eq "success") "Removing a node the inheriting scene added was refused."
+    Assert-True ((Tool-Payload $byId[2461]).closed -eq $true) "The inherited fixture could not be discarded."
     Assert-True ((Tool-Payload $byId[99]).opened -eq $true) "Explicit scene overwrite failed."
     Assert-True ((Tool-Payload $byId[100]).scene_tree.name -eq "Replaced") "Explicit scene overwrite did not replace the root."
     Assert-True ((Tool-Payload $byId[101]).closed -eq $true) "Clean replaced scene could not be closed."

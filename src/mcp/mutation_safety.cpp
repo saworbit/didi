@@ -433,7 +433,8 @@ MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
         bool target_read = false;
         if (probe) {
             if (auto problem = probe(sanitized, before, subject)) {
-                return errorDecision(binding, problem->code, problem->message, context);
+                return errorDecision(binding, problem->code, problem->message, context,
+                                     problem->data);
             }
             target_read = !before.is_null();
         }

@@ -396,6 +396,51 @@ TEST(Phase6, RepeatabilityFollowsTheMutationBoundaryAndTheArguments) {
     ASSERT_FALSE(repeatable("editor_render_ghost_preview", {{"replace", false}}));
 }
 
+// A bridge that refuses the probe's read the way the real call would refuse
+// the mutation, delivered the way the IPC client delivers a bridge error
+// envelope: as an Error carrying the bridge's code and data, with the
+// identifier a caller branches on under data.code.
+class RefusingProbeClient final : public didi::ipc::IIpcClient {
+public:
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override {}
+    bool isConnected() const override { return true; }
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json& params,
+                                         int) override {
+        methods.push_back(method);
+        last_params = params;
+        return didi::Error(409, "The edited scene does not own this node.",
+                           didi::json{{"code", "node_not_owned"}, {"retryable", false}});
+    }
+    std::vector<std::string> methods;
+    didi::json last_params;
+};
+
+TEST(Phase6, RegistryDryRunRefusesWhatTheProbeRefuses) {
+    // Break caught: the probe passed a 404 through and swallowed every other
+    // refusal, so a node the file cannot hold previewed as a planned mutation
+    // with the target read (#588). The refusal's data has to survive too,
+    // because data.code is what a caller branches on.
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    auto client = std::make_shared<RefusingProbeClient>();
+    registry.setIpcClient(client);
+    const auto result = registry.callTool(
+        "scene_remove_node",
+        {{"target_node", "/root/Main/SubInst/Inner"}, {"dry_run", true}});
+    ASSERT_TRUE(result.isError);
+    const auto payload = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(payload["error"]["code"], 409);
+    ASSERT_EQ(payload["error"]["data"]["code"], "node_not_owned");
+    // The probe named the mutation, so the bridge could run that call's checks.
+    ASSERT_EQ(client->last_params["mutation"]["tool"], "scene_remove_node");
+    ASSERT_EQ(client->last_params["mutation"]["arguments"]["target_node"],
+              "/root/Main/SubInst/Inner");
+    ASSERT_TRUE(std::find(client->methods.begin(), client->methods.end(),
+                          "scene.removeNode") == client->methods.end());
+    registry.setIpcClient(nullptr);
+}
+
 TEST(Phase6, RegistryDryRunNeverDispatchesMutationHandler) {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();

@@ -287,8 +287,12 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
                 {"properties", ne.properties},
                 {"children", json::array()}
             };
-            if (!ne.instance_path.empty()) {
-                n["instance"] = ne.instance_path;
+            // The scene an instance root comes from, under the name the live
+            // walk uses. The root's own instance= line is the scene this one
+            // inherits, reported once at the top rather than as the root being
+            // an instance of itself (#591).
+            if (!ne.instance_path.empty() && idx != 0) {
+                n["instance_of"] = ne.instance_path;
             }
             if (!ne.transform.empty()) {
                 n["transform"] = ne.transform;
@@ -322,6 +326,7 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
             {"file_path", root},
             {"scene_tree", std::move(tree)}
         };
+        if (!nodes[0].instance_path.empty()) tree_res["inherits"] = nodes[0].instance_path;
         if (depth_truncated) tree_res["truncated"] = true;
         // The caller asked for the main scene without naming it. Say which file
         // answered, so the reply cannot be read as a scoped one.
