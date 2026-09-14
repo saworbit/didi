@@ -53,8 +53,13 @@ twice.
 | `probes/scene_ownership.py` | Godot's own rules for a scene, asked of the tools that edit one: an instanced sub-scene's internals, an inherited scene, a script whose `extends` the node cannot take, signal connections, and a scene instanced into itself. Reads the saved file after every save. |
 | `probes/instance_overrides.py` | A property, a visibility flag and a group set on a node inside an instanced sub-scene, saved, read back from the file and after a reload, beside the same edit on a node the scene owns. |
 | `probes/editor_log_delta.py` | The editor's own log (`--log-file`) read after every call, so each ERROR or WARNING line Godot prints is attributed to the tool call that caused it. |
+| `probes/domain_mutation_honesty.py` | The domain tools -- tilemap, gridmap, shader uniform, audio bus -- asked whether their mutations survive, read back from the `.tscn` bytes rather than from the tool that wrote. Needs `--fixtures`. |
+| `probes/project_root_encoding.py` | The project path before the server has read it: what MSVC's ANSI-codepage `argv` does to a non-ASCII directory name. Needs no editor and no addon. |
+| `probes/file_encodings.py` | A `.gd` that is not valid UTF-8 -- Latin-1, UTF-16, a truncated sequence, an embedded NUL -- asked of the script tools, with a plain-broken UTF-8 file as the control. |
+| `probes/preview_value_rules.py` | `signal_emit`'s `dry_run` against its confirm, for argument *values* rather than names. The third layer of the seam #399 and #571 opened. |
+| `probes/offline_refusals.py` | Not what a live-only tool answers offline -- what it *refuses* with. One message, fourteen tools. Run with no editor on the project. |
 | `bind_census.py` | Not a probe against the server: every `(class, method, hash)` bind in `src/gdextension` checked against `--dump-extension-api` output from each installed engine, `hash_compatibility` included. A miss is a null bind that prints at startup or answers 501 at call time. |
-| `fixtures/` | What the ownership and game probes need beyond the sandbox: a sub-scene, a scene inheriting `main.tscn`, a game scene with a ticking script, a `Node3D` script. `sandbox.py --fixtures` copies them in. |
+| `fixtures/` | What the ownership, game and domain probes need beyond the sandbox: a sub-scene, a scene inheriting `main.tscn`, a game scene with a ticking script and an AnimationPlayer, a `Node3D` script, and since session eleven a `domain.tscn` (TileMapLayer with a real TileSet over a generated atlas, a ShaderMaterial over a four-uniform shader, an AnimationPlayer) plus `domain3d.tscn` (a GridMap with a MeshLibrary). `sandbox.py --fixtures` copies them in. |
 | `report.py` | Files a directory of finding bodies as issues in one pass. |
 
 The probe files are kept after their findings are fixed, and are worth re-running
@@ -103,6 +108,8 @@ python tools/vibe/probe.py -p $env:TEMP\vibe\proj --calls tools/vibe/probes/read
 python tools/vibe/probe.py -p $env:TEMP\vibe\proj --calls tools/vibe/probes/schema_enforcement.json
 
 # 4. narrow a single case until the repro is two lines
+#    (--schema still needs -p: the server refuses to start without a project root,
+#     so a schema lookup with no sandbox exits before it answers `initialize`)
 python tools/vibe/probe.py -p $env:TEMP\vibe\proj --schema scene_add_to_group
 python tools/vibe/probe.py -p $env:TEMP\vibe\proj --call scene_add_to_group '{"group":"x"}'
 
@@ -479,6 +486,72 @@ for on every call. A burst of `Inconsistent redo history` seen once during the
 ownership probe reproduced under no attributed call and was left unfiled; a
 log line that cannot be tied to a call is a lead, not a finding.
 
+**The host operating system gets the argument before the server does.** Session
+eight asked what Windows does to a `res://` path the server had already
+accepted. One step earlier is the project path itself, and MSVC's narrow
+`main(int argc, char** argv)` converts the wide command line through the ANSI
+codepage before a single line of didi runs. So the answer splits on what cp1252
+can encode: `ó` arrives as a lone high byte and the process fast-fails with
+`0xC0000409` and *no output at all*, while `日` arrives as `?` and gets
+"The explicit project root is not an accessible directory" about a directory
+that is perfectly accessible (#611). The catch that was written for this case
+names `std::filesystem::filesystem_error`; the throw is a `std::system_error`,
+so the message "The project root must be valid UTF-8" has never once reached a
+caller. **Probe the process before the protocol.** Nothing above `initialize`
+can find this, and a Windows username with an accent in it is ordinary.
+
+**A guard scoped to one status class leaves the others behind.** #547 was a fix
+applied to the live path and not the offline one. The same shape, one layer
+down: `phase7_live_forward.cpp` carries a careful comment about why an engine
+answer must not be reported as a 503 routing problem, and the condition it
+guards is `failure.code >= 400 && failure.code < 500`. An engine refusal with a
+5xx therefore still arrives as `503 runtime_route_request_failed` with
+`data.code: "not_connected"` on a session whose very next call succeeds (#625).
+The condition that carried the meaning was `!transport.has_value()` -- the
+engine answered -- and the status range was a detail that quietly narrowed it.
+**When a fix keys on two conditions, ask which one was the finding.**
+
+**Setting a property and storing a Variant are different things.**
+`scene_set_property` goes through `Object::set`, which coerces, so `{"value": 1}`
+into a float property becomes `1.0` and everything is fine.
+`shader_set_uniform` ends at `ShaderMaterial.set_shader_parameter`, which stores
+the Variant exactly as handed over -- so the same `1` lands as a Godot `int` in
+a `float` slot, reads back as `1` through the tool that would catch it, and is
+*discarded by the save*, reverting to the shader's default (#612). The tool, its
+reader and `editor_save_scene` all report success on the way to losing the
+value. **When two tools look like siblings, find the engine call at the bottom
+of each; that is where they stop being siblings.**
+
+**Census the refusals, not just the answers.** Every session has run the
+interesting probes twice, offline and live, and every one of those asked what
+the *answer* looked like. The refusal is what a caller meets first, because no
+editor running is the ordinary state of a machine. Asked of fourteen live-only
+tools it is one string, fourteen times: "No atomic runtime route is available
+for live dispatch", naming no engine, no editor and nothing to do (#615) --
+while `audio_configure_bus` has a hand-written "Godot Editor is offline ... so
+launch Godot to change it" sitting in `handleAudioConfigureBus` that the route
+check answers in front of, so it has never shipped. **A message nobody can reach
+is the same as no message, and a `grep` will not tell you which you have.**
+
+**Look again, later.** #622 was filed saying `audio_configure_bus` changes
+nothing on disk and nothing can persist it. Both halves were wrong, and the
+mistake was looking once, immediately: the editor's bus-layout autosave writes
+`default_bus_layout.tres` a few seconds afterwards, unprompted and not on
+`editor_save_scene`. The finding survived in the opposite direction -- the tool
+reports an in-memory change, with `revert_with` and `undo_redo_registered:
+false`, for something that reaches a tracked project file on its own. **Anything
+the editor owns may be written on its own schedule; a single `ls` right after
+the call is a measurement of latency, not of persistence.**
+
+**A control that cannot pass proves nothing.** Two probes this session reported
+a clean sweep of failures because their control was broken rather than because
+the subject was. `preview_value_rules.py`'s control emitted a signal with no
+listener, which `signal_emit` refuses outright (#624), so every row failed and
+the probe read as "the gate refuses everything". `file_encodings.py` checked for
+the substring `utf` anywhere in the payload and matched `file_path:
+"res://utf16.gd"`, marking the worst case as passing. **Write the row that must
+stay green first, and make sure it is green for the reason you think.**
+
 ## Sessions so far
 
 | Date | Scope | Server | Findings |
@@ -501,6 +574,8 @@ log line that cannot be tied to a call is a lead, not a finding.
 | 2026-09-14 | The tools that supply part of their own input, and the preview path against the call path: the visual diff, the confirmation token against the world rather than the call, `dry_run` versus real, the largest accepted argument rather than the smallest, and the whole live surface re-asked on a second engine. | `2.0.0+74578cb657ee` | #568-#577, ten findings. |
 
 | 2026-09-14 | The running game as a second kind of session (pause, step, injected input, invariants, explore, stop, and a fresh server beside two live sessions), Godot's own ownership rules asked of the scene tools (instanced and inherited nodes, a scene instanced into itself), the editor's own log read after every call, and every method bind checked against three engine API dumps. | `2.0.0+0ddfa3614b61` | #588-#603, sixteen findings. |
+
+| 2026-09-15 | The domain tools given something to bite on for the first time (a real TileSet, MeshLibrary, ShaderMaterial and AnimationPlayer), the project path before the server parses it, files that are not valid UTF-8, the preview path against the call path for argument *values*, and the refusal every live-only tool gives when no editor is running. | `2.0.0+e8999e1bd52f` | #611-#625, fifteen findings. One of them, #622, was filed wrong and corrected in place. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log

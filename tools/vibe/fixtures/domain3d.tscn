@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://bvibedomain3d1"]
+
+[ext_resource type="MeshLibrary" path="res://blocks.tres" id="1_lib"]
+
+[node name="Domain3D" type="Node3D"]
+
+[node name="Grid" type="GridMap" parent="."]
+mesh_library = ExtResource("1_lib")
+cell_size = Vector3(2, 2, 2)
