@@ -8,6 +8,7 @@
 #include "didi/common/logger.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/common/scene_node_path.hpp"
 #include "didi/tools/resolved_tool_binding.hpp"
 #include "didi/mcp/phase7_schemas.hpp"
 #include "didi/mcp/schema_validation.hpp"
@@ -17,10 +18,12 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace didi {
 namespace mcp {
@@ -1203,8 +1206,78 @@ const std::unordered_map<std::string_view, std::string_view>& nodeTargets() {
     return targets;
 }
 
+// Every argument that names a node in the edited scene. nodeTargets() lists the
+// one argument a preview reads the target through; this lists all of them,
+// because the '..' rule is a property of the argument rather than of the
+// target, and needs nothing opened to apply.
+const std::unordered_map<std::string_view, std::vector<std::string_view>>& editedSceneNodePaths() {
+    static const std::unordered_map<std::string_view, std::vector<std::string_view>> arguments = {
+        {"scene_instantiate_node", {"parent_path"}},
+        {"scene_remove_node", {"target_node"}},
+        {"scene_set_property", {"target_node"}},
+        {"scene_get_property", {"target_node"}},
+        {"scene_add_to_group", {"target_node"}},
+        {"scene_remove_from_group", {"target_node"}},
+        {"scene_duplicate_node", {"target_node"}},
+        {"scene_reparent_node", {"target_node", "new_parent_path"}},
+        {"scene_pack_branch", {"target_node"}},
+        {"scene_call_method", {"target_node"}},
+        {"script_attach_to_node", {"target_node"}},
+        {"script_detach_from_node", {"target_node"}},
+        {"signal_emit", {"target_node"}},
+        {"signal_connect", {"emitter_node", "target_node"}},
+        {"signal_disconnect", {"emitter_node", "target_node"}},
+    };
+    return arguments;
+}
+
+// The refusal the real call would give, asked before a preview is composed.
+//
+// #399 was "the dry run issued a token for arguments the real call refuses",
+// and it was closed by checking argument names on the preview path. This is the
+// same defect one level down: the names and types are fine, the value is
+// refused, and nothing on the preview path asked. Seven of nine cases previewed
+// a call the server then rejected, one of them as a planned_mutation with a
+// real before read off the live tree (#571).
+std::optional<Error> refuseUnusableNodePaths(const ResolvedToolBinding& binding,
+                                             const json& arguments) {
+    const auto entry = editedSceneNodePaths().find(binding.policy_source);
+    if (entry == editedSceneNodePaths().end() || !arguments.is_object()) return std::nullopt;
+    for (const auto& name : entry->second) {
+        const auto key = std::string(name);
+        if (!arguments.contains(key) || !arguments[key].is_string()) continue;
+        if (auto refused =
+                paths::refuseParentRelativeNodePath(arguments[key].get<std::string>())) {
+            return Error(refused->code,
+                         "Argument '" + key + "': " + refused->message);
+        }
+    }
+    return std::nullopt;
+}
+
+// A digest of a file's bytes, so a confirm can tell the file it is about to
+// write from the one the preview read. size_bytes alone would pass an edit that
+// landed on the same length, which is the ordinary shape of an edit.
+std::string contentDigestOf(const std::filesystem::path& path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) return {};
+    uint64_t hash = 1469598103934665603ull;
+    char buffer[8192];
+    while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0) {
+        const auto read = static_cast<size_t>(file.gcount());
+        for (size_t index = 0; index < read; ++index) {
+            hash ^= static_cast<unsigned char>(buffer[index]);
+            hash *= 1099511628211ull;
+        }
+        if (!file) break;
+    }
+    std::ostringstream output;
+    output << std::hex << std::setfill('0') << std::setw(16) << hash;
+    return output.str();
+}
+
 std::optional<Error> probeFileTarget(const FileTarget& target, const json& arguments,
-                                     json& before) {
+                                     json& before, json& subject) {
     if (!arguments.is_object() || !arguments.contains(std::string(target.argument)) ||
         !arguments[std::string(target.argument)].is_string()) {
         return std::nullopt;
@@ -1223,13 +1296,23 @@ std::optional<Error> probeFileTarget(const FileTarget& target, const json& argum
     // to -- res://PLAYER.gd for res://player.gd on Windows, res://d1/../x.gd
     // for res://x.gd -- which is the one preview that misleads (#546, #551).
     const std::string reported = paths::resourcePathOf(resolved.value());
+    subject = {{"path", reported}};
+    if (!target.symbol_argument.empty() &&
+        arguments.contains(std::string(target.symbol_argument)) &&
+        arguments[std::string(target.symbol_argument)].is_string()) {
+        subject["symbol"] = arguments[std::string(target.symbol_argument)];
+    }
     if (!exists) {
         before = {{"exists", false}, {"path", reported}};
         return std::nullopt;
     }
     const auto size = std::filesystem::file_size(resolved.value(), error);
     before = {{"exists", true}, {"path", reported},
-              {"size_bytes", error ? 0 : static_cast<uint64_t>(size)}};
+              {"size_bytes", error ? 0 : static_cast<uint64_t>(size)},
+              // What the confirm compares. size_bytes was in the response
+              // already and was never compared, and on its own it would pass an
+              // edit that kept the length (#572).
+              {"content_digest", contentDigestOf(resolved.value())}};
 
     // Whether the symbol this call replaces is in that file, answered by the
     // same search the write uses, so the preview refuses what the write would
@@ -1241,7 +1324,13 @@ std::optional<Error> probeFileTarget(const FileTarget& target, const json& argum
     }
     const auto symbol_name = arguments[symbol_key].get<std::string>();
     const auto symbol_type = arguments.value("symbol_type", std::string("function"));
-    if (!offline::GDScriptDiagnostics::isKnownSymbolType(symbol_type)) return std::nullopt;
+    // The argument checks the write makes, made here too. A new_definition that
+    // declares the wrong kind is refused by the write and used to preview as a
+    // planned_mutation with a real before read off the file (#571).
+    if (auto refused = offline::GDScriptDiagnostics::validatePatchArguments(
+            symbol_name, arguments.value("new_definition", std::string()), symbol_type)) {
+        return *refused;
+    }
     std::ifstream script(resolved.value(), std::ios::binary);
     if (!script.is_open()) return std::nullopt;
     std::stringstream contents;
@@ -1269,11 +1358,13 @@ std::optional<Error> probeFileTarget(const FileTarget& target, const json& argum
 // preview asks it to stop there and report what it found (#463).
 std::optional<Error> probeCallMethodTarget(const json& arguments,
                                            const std::shared_ptr<ipc::IIpcClient>& client,
-                                           json& before) {
+                                           json& before, json& subject) {
     if (!client || !arguments.is_object() || !arguments.contains("target_node") ||
         !arguments["target_node"].is_string()) {
         return std::nullopt;
     }
+    subject = {{"target_node", arguments["target_node"]},
+               {"method_name", arguments.value("method_name", json(nullptr))}};
     json request = arguments;
     request["preview"] = true;
     auto response = client->sendRequest("scene.callMethod", request, 5000);
@@ -1310,10 +1401,14 @@ std::optional<Error> probeCallMethodTarget(const json& arguments,
 
 std::optional<Error> probeNodeTarget(const std::string& argument, const json& arguments,
                                      const std::shared_ptr<ipc::IIpcClient>& client,
-                                     json& before) {
+                                     json& before, json& subject) {
     if (!client || !arguments.is_object() || !arguments.contains(argument) ||
         !arguments[argument].is_string()) {
         return std::nullopt;
+    }
+    subject = {{argument, arguments[argument]}};
+    if (arguments.contains("property_name") && arguments["property_name"].is_string()) {
+        subject["property_name"] = arguments["property_name"];
     }
     // scene.getProperty resolves the node and reads one value, changing
     // nothing. Asked for the property this call is about to set, the answer is
@@ -1529,18 +1624,21 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
     }
     TargetProbe target_probe;
     if (const auto file = fileTargets().find(binding.policy_source); file != fileTargets().end()) {
-        target_probe = [target = file->second](const json& call_arguments, json& before) {
-            return probeFileTarget(target, call_arguments, before);
+        target_probe = [target = file->second](const json& call_arguments, json& before,
+                                               json& subject) {
+            return probeFileTarget(target, call_arguments, before, subject);
         };
     } else if (binding.policy_source == "scene_call_method" && lease.has_value()) {
-        target_probe = [client = m_sourceIpcClient](const json& call_arguments, json& before) {
-            return probeCallMethodTarget(call_arguments, client, before);
+        target_probe = [client = m_sourceIpcClient](const json& call_arguments, json& before,
+                                                    json& subject) {
+            return probeCallMethodTarget(call_arguments, client, before, subject);
         };
     } else if (const auto node = nodeTargets().find(binding.policy_source);
                node != nodeTargets().end() && lease.has_value()) {
         target_probe = [argument = std::string(node->second),
-                        client = m_sourceIpcClient](const json& call_arguments, json& before) {
-            return probeNodeTarget(argument, call_arguments, client, before);
+                        client = m_sourceIpcClient](const json& call_arguments, json& before,
+                                                    json& subject) {
+            return probeNodeTarget(argument, call_arguments, client, before, subject);
         };
     } else if (binding.policy_source == "project_apply_changes") {
         // This tool has no target to read, so its preview bound the arguments
@@ -1553,19 +1651,23 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         // It reports the refusal and nothing else. Filling `before` with the
         // repository would flip target_read to true, and the target here is the
         // files this call will overwrite, which the preview still has not read.
-        target_probe = [](const json& call_arguments, json& before) -> std::optional<Error> {
+        target_probe = [](const json& call_arguments, json& before,
+                          json& subject) -> std::optional<Error> {
             (void)call_arguments;
             (void)before;
+            (void)subject;
             auto resolved = offline::resolveSandboxRepository();
             if (resolved.isErr()) return resolved.error();
             return std::nullopt;
         };
     } else if (binding.policy_source == "project_set_setting") {
-        target_probe = [](const json& call_arguments, json& before) -> std::optional<Error> {
+        target_probe = [](const json& call_arguments, json& before,
+                          json& subject) -> std::optional<Error> {
             if (!call_arguments.is_object() || !call_arguments.contains("setting") ||
                 !call_arguments["setting"].is_string()) {
                 return std::nullopt;
             }
+            subject = {{"setting", call_arguments["setting"]}};
             auto read = offline::readProjectSetting(
                 std::filesystem::current_path(), call_arguments["setting"].get<std::string>());
             if (read.isErr()) return std::nullopt;
@@ -1574,6 +1676,12 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                       {"literal", read.value().literal}};
             return std::nullopt;
         };
+    }
+    // Before the preview is composed, on the same arguments the real call would
+    // check, because a dry run that cannot be followed by a successful confirm
+    // should return the error the confirm would have returned (#571).
+    if (auto unusable = refuseUnusableNodePaths(binding, arguments)) {
+        return CallToolResult::fromError(*unusable);
     }
     auto safety = m_mutationSafety.evaluate(binding, arguments, safety_context, target_probe);
     if (!safety.execute) {

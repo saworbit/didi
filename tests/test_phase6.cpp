@@ -1,4 +1,5 @@
 #include "didi/common/project_path.hpp"
+#include "didi/common/scene_node_path.hpp"
 #include "didi/gdextension/session_host.hpp"
 #include "didi/mcp/mutation_safety.hpp"
 #include "didi/mcp/tool_registry.hpp"
@@ -555,7 +556,7 @@ TEST(Phase6, CallMethodPreviewReadsTheCallNotTheName) {
     const auto binding = didi::mcp::resolveAliasBinding("scene_call_method", arguments);
 
     // What the probe now reports: facts about this call, not a constant.
-    didi::mcp::TargetProbe reading = [](const didi::json&, didi::json& before)
+    didi::mcp::TargetProbe reading = [](const didi::json&, didi::json& before, didi::json&)
         -> std::optional<didi::Error> {
         before = {{"target_node", "/root/Main"}, {"method_name", "take_damage"},
                   {"method_exists", true}, {"script_is_tool", true},
@@ -577,7 +578,7 @@ TEST(Phase6, CallMethodPreviewReadsTheCallNotTheName) {
 
     // And a call the engine will refuse is refused at preview, rather than
     // coming back shaped like one that will work and carrying a token.
-    didi::mcp::TargetProbe refusing = [](const didi::json&, didi::json&)
+    didi::mcp::TargetProbe refusing = [](const didi::json&, didi::json&, didi::json&)
         -> std::optional<didi::Error> {
         return didi::Error(422, "The node's script is not a @tool script");
     };
@@ -610,4 +611,126 @@ TEST(Phase6, RuntimeInputAliasDryRunKeepsInvokedIdentity) {
               alias.payload["mutation_preview"]["binding_hash"]);
     ASSERT_EQ(canonical.payload["mutation_preview"]["arguments"],
               alias.payload["mutation_preview"]["arguments"]);
+}
+
+
+// Break caught: every field on the token bound it to the *call* -- the tool,
+// the arguments, the project, the session. Nothing bound it to the *world*, so
+// a file rewritten between the preview and the confirm was overwritten with a
+// change approved against bytes that were no longer there, and the answer was
+// indistinguishable from one where nothing had happened (#572).
+TEST(Phase6, ConfirmationComparesTheTargetAgainstThePreview) {
+    ScopedPhase6Directory directory("stale-confirmation");
+    didi::mcp::MutationSafety safety;
+    auto context = offlineContext(directory.root);
+    const didi::json arguments = {{"file_path", "res://drift.gd"},
+                                  {"method_name", "take_damage"},
+                                  {"new_definition", "func take_damage() -> void:\n\tpass\n"}};
+    const auto binding = didi::mcp::resolveAliasBinding("script_patch_method", arguments);
+
+    // What the file looks like, as the probe would report it. The test moves it
+    // rather than the filesystem, because what the gate compares is what the
+    // probe read.
+    std::string digest = "28510c216b02e9e7";
+    uint64_t size = 103;
+    didi::mcp::TargetProbe reading = [&](const didi::json&, didi::json& before,
+                                         didi::json& subject) -> std::optional<didi::Error> {
+        before = {{"exists", true}, {"path", "res://drift.gd"}, {"size_bytes", size},
+                  {"content_digest", digest}, {"symbol_exists", true}};
+        subject = {{"path", "res://drift.gd"}, {"symbol", "take_damage"}};
+        return std::nullopt;
+    };
+
+    const auto preview = safety.evaluate(binding, dryRun(arguments), context, reading);
+    ASSERT_FALSE(preview.is_error);
+    const auto& mutation_preview = preview.payload["mutation_preview"];
+    ASSERT_EQ(mutation_preview["target_checked_on_confirm"], true);
+    // The subject the change is about, not the argument object over again. Two
+    // copies made every preview a little over twice the size of its request
+    // (#574).
+    const auto& target = mutation_preview["changes"][0]["target"];
+    ASSERT_EQ(target["path"], "res://drift.gd");
+    ASSERT_EQ(target["symbol"], "take_damage");
+    ASSERT_FALSE(target.contains("new_definition"));
+    ASSERT_TRUE(mutation_preview["arguments"].contains("new_definition"));
+    const auto token = mutation_preview["confirmation_token"].get<std::string>();
+
+    // Something else rewrites the file. Same length, different bytes, which is
+    // the ordinary shape of an edit and the case size_bytes alone would pass.
+    digest = "0e554dd98e61ba22";
+    auto confirmed = arguments;
+    confirmed["confirmation_token"] = token;
+    const auto drifted = safety.evaluate(binding, confirmed, context, reading);
+    ASSERT_TRUE(drifted.is_error);
+    ASSERT_EQ(drifted.payload["error"]["code"], 409);
+    ASSERT_EQ(drifted.payload["error"]["data"]["target_changed"], true);
+
+    // The token is still there, the same as an argument mismatch, so a caller
+    // can look at what changed rather than minting a second one to find out.
+    digest = "28510c216b02e9e7";
+    const auto spent = safety.evaluate(binding, confirmed, context, reading);
+    ASSERT_FALSE(spent.is_error);
+    ASSERT_TRUE(spent.execute);
+
+    // And it is spent once.
+    const auto replay = safety.evaluate(binding, confirmed, context, reading);
+    ASSERT_TRUE(replay.is_error);
+    ASSERT_EQ(replay.payload["error"]["code"], 409);
+
+    // A target that has gone is not drift. What this protects is the other
+    // writer's work, and there is none left to discard; refusing here would
+    // also undo #425, where a token minted while the target was there stays
+    // spendable once it is not.
+    const auto second = safety.evaluate(binding, dryRun(arguments), context, reading);
+    auto vanished = arguments;
+    vanished["confirmation_token"] =
+        second.payload["mutation_preview"]["confirmation_token"];
+    didi::mcp::TargetProbe gone = [](const didi::json&, didi::json& before,
+                                     didi::json& subject) -> std::optional<didi::Error> {
+        before = {{"exists", false}, {"path", "res://drift.gd"}};
+        subject = {{"path", "res://drift.gd"}};
+        return std::nullopt;
+    };
+    const auto still_spendable = safety.evaluate(binding, vanished, context, gone);
+    ASSERT_FALSE(still_spendable.is_error);
+    ASSERT_TRUE(still_spendable.execute);
+}
+
+// A tool with no probe reads nothing, so there is nothing to compare, and the
+// preview says which of the two it is rather than leaving a caller to assume
+// the check ran.
+TEST(Phase6, APreviewThatReadsNothingSaysTheConfirmCannotCompare) {
+    ScopedPhase6Directory directory("unprobed-confirmation");
+    didi::mcp::MutationSafety safety;
+    auto context = offlineContext(directory.root);
+    const didi::json arguments = {{"board", "default"}};
+    const auto preview = evaluateBinding(safety, "blackboard_clear", dryRun(arguments), context);
+    ASSERT_FALSE(preview.is_error);
+    const auto& mutation_preview = preview.payload["mutation_preview"];
+    ASSERT_EQ(mutation_preview["target_read"], false);
+    ASSERT_EQ(mutation_preview["target_checked_on_confirm"], false);
+    // No subject of its own, so the reader is pointed at the one copy of the
+    // arguments rather than handed a second.
+    ASSERT_TRUE(mutation_preview["changes"][0]["target"].is_string());
+}
+
+// Break caught: the '..' rule ran in the bridge alone, so a dry run composed a
+// preview for a call the server already knew it would reject and the identical
+// call without dry_run came back 400. The rule is a property of the argument,
+// so it needs no engine, no open scene and no node to apply -- which is exactly
+// why the preview path could run it and did not (#571).
+TEST(Phase6, ParentRelativeNodePathsAreRefusedWithoutAnEngine) {
+    for (const auto* refused : {"..", "../..", "/root/Main/../Main", "../Main",
+                                "/root/..", "Main/../Other"}) {
+        const auto problem = didi::paths::refuseParentRelativeNodePath(refused);
+        ASSERT_TRUE(problem.has_value());
+        ASSERT_EQ(problem->code, 400);
+        ASSERT_TRUE(problem->message.find("Parent-relative") != std::string::npos);
+    }
+    // Segments are compared whole, so a node legitimately named with dots is
+    // not a parent reference.
+    for (const auto* allowed : {"", ".", "/root", "/root/Main", "/root/Main/Child",
+                                "/root/..foo", "/root/x..y", "/root/Main/...."}) {
+        ASSERT_FALSE(didi::paths::refuseParentRelativeNodePath(allowed).has_value());
+    }
 }

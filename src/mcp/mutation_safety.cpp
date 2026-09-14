@@ -301,6 +301,28 @@ std::string MutationSafety::bindingHash(const ResolvedToolBinding& binding,
     return output.str();
 }
 
+std::string MutationSafety::targetFingerprint(const json& before) {
+    if (before.is_null()) return {};
+    // A target that is not there has nothing to fingerprint. That is not the
+    // same as a target this could not read: a preview of a file that does not
+    // exist yet says so, and there is no earlier state for a confirm to
+    // compare against.
+    if (before.is_object() && before.value("exists", true) == false) return {};
+    // The whole of what the probe read, not one field of it. before.size_bytes
+    // was already in the response and was never compared; comparing size alone
+    // would still pass an edit that happened to land on the same length, and
+    // the file probe carries a content hash for exactly that reason.
+    const auto serialized = before.dump();
+    uint64_t hash = 1469598103934665603ull;
+    for (const auto byte : serialized) {
+        hash ^= static_cast<unsigned char>(byte);
+        hash *= 1099511628211ull;
+    }
+    std::ostringstream output;
+    output << std::hex << std::setfill('0') << std::setw(16) << hash;
+    return output.str();
+}
+
 MutationDecision MutationSafety::errorDecision(const ResolvedToolBinding& binding, int code,
                                                const std::string& message,
                                                const MutationContext& context,
@@ -401,15 +423,27 @@ MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
         // cannot succeed now fails the way the real call would, rather than
         // coming back shaped like one that will (#417).
         json before;
+        json subject;
         bool target_read = false;
         if (probe) {
-            if (auto problem = probe(sanitized, before)) {
+            if (auto problem = probe(sanitized, before, subject)) {
                 return errorDecision(binding, problem->code, problem->message, context);
             }
             target_read = !before.is_null();
         }
+        const auto fingerprint = targetFingerprint(before);
 
-        json change = {{"target", previewArguments(sanitized)}};
+        // What the change is about, not the argument object over again. The
+        // arguments are at mutation_preview.arguments one level up, and
+        // carrying them twice made every preview a little over twice the size
+        // of its request with no cap anywhere along the way (#574).
+        json change = json::object();
+        if (!subject.is_null()) {
+            change["target"] = std::move(subject);
+        } else {
+            change["target"] = "see mutation_preview.arguments: this tool names no subject of "
+                               "its own beyond the arguments it was given";
+        }
         if (target_read) {
             change["kind"] = "planned_mutation";
             change["before"] = std::move(before);
@@ -432,6 +466,11 @@ MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
             {"binding_hash", bindingHash(binding, sanitized, context)},
             {"preview_kind", target_read ? "target_state" : "argument_binding"},
             {"target_read", target_read},
+            // Whether the confirm will compare the target against what this
+            // preview saw. False means nothing was read, so nothing can be
+            // compared, which is a fact about this tool rather than about the
+            // call.
+            {"target_checked_on_confirm", !fingerprint.empty()},
             {"changes", json::array({std::move(change)})},
             {"requires_confirmation", requires_confirmation}
         };
@@ -446,7 +485,8 @@ MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
                 std::lock_guard<std::mutex> lock(m_mutex);
                 prune(now);
                 m_confirmations[token] = {
-                    std::string(binding.invoked_name), sanitized, context, expires_at};
+                    std::string(binding.invoked_name), sanitized, context, expires_at,
+                    fingerprint};
             }
             preview_payload["confirmation_token"] = token;
             preview_payload["expires_at_ms"] = expires_at;
@@ -492,8 +532,9 @@ MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
     // previewed, and the retry with the exact previewed arguments came back
     // "unknown or already used" (#398). An expired token is dropped, because it
     // is dead either way; a mismatch leaves it where it was.
-    enum class TokenVerdict { Unknown, Expired, Mismatch, Spendable };
+    enum class TokenVerdict { Unknown, Expired, Mismatch, Drifted, Spendable };
     TokenVerdict verdict = TokenVerdict::Unknown;
+    std::string previewed_fingerprint;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         const auto found = m_confirmations.find(confirmation_token);
@@ -508,8 +549,46 @@ MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
             verdict = TokenVerdict::Mismatch;
         } else {
             verdict = TokenVerdict::Spendable;
-            m_confirmations.erase(found);
+            previewed_fingerprint = found->second.target_fingerprint;
         }
+    }
+
+    // The target, read again, against what the preview saw. Everything above
+    // binds the token to the call; nothing bound it to the world, so a file
+    // rewritten between the preview and the confirm was overwritten with a
+    // change approved against 103 bytes that were no longer there, and the
+    // answer was indistinguishable from one where nothing had happened (#572).
+    //
+    // Outside the lock, because the probe opens files and can talk to the
+    // engine. The token is still held: a drifted confirm leaves it where it
+    // was, the same as an argument mismatch, so the caller can look and decide
+    // rather than having to mint a second one to find out what changed.
+    if (verdict == TokenVerdict::Spendable && !previewed_fingerprint.empty() && probe) {
+        json before;
+        json subject;
+        if (auto problem = probe(sanitized, before, subject)) {
+            return errorDecision(binding, problem->code, problem->message, context);
+        }
+        const auto current = targetFingerprint(before);
+        // A target that has gone is not drift. What this protects is the other
+        // writer's work, and there is none left to discard; refusing here would
+        // also undo #425, where a token minted while the target was there has
+        // to stay spendable once it is not, or a correct preview-then-confirm
+        // ends in "this mutation does not require a confirmation token". A
+        // target that is still there and holds something else is the case that
+        // costs someone their edit.
+        if (!current.empty() && current != previewed_fingerprint) {
+            verdict = TokenVerdict::Drifted;
+        }
+    }
+    if (verdict == TokenVerdict::Spendable) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        // Re-found rather than held, because the lock was released to probe.
+        // Another thread spending it first is the replay case and answers
+        // "unknown or already used" on the next line, which is correct.
+        const auto found = m_confirmations.find(confirmation_token);
+        if (found == m_confirmations.end()) verdict = TokenVerdict::Unknown;
+        else m_confirmations.erase(found);
     }
     if (verdict == TokenVerdict::Unknown) {
         return errorDecision(binding, 409,
@@ -524,6 +603,14 @@ MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
             "Confirmation token does not match this tool, arguments, project, or session. "
             "The token is still valid; retry with the arguments you previewed.",
             context);
+    }
+    if (verdict == TokenVerdict::Drifted) {
+        return errorDecision(
+            binding, 409,
+            "The target has changed since you previewed it, so this confirmation is for a "
+            "state that is no longer there. Dry-run again and read the new preview before "
+            "confirming.",
+            context, {{"target_changed", true}, {"dry_run_argument", "dry_run"}});
     }
     MutationDecision decision;
     decision.arguments = std::move(sanitized);

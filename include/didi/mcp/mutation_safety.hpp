@@ -33,7 +33,14 @@ struct MutationContext {
 // is there now. Returning nothing without filling `before` means this tool has
 // no probe, and the preview says so instead of claiming to have planned
 // something.
-using TargetProbe = std::function<std::optional<Error>(const json& arguments, json& before)>;
+// `subject` is what the change is about -- the resolved path, the node, the
+// symbol -- filled by the probes that know. The preview used to put the whole
+// argument object here as well as one level up, so every response was a little
+// over twice the size of its request at every scale, and a reader pretty
+// printing it saw the same megabyte twice (#574). Naming the subject is what
+// that field was for.
+using TargetProbe =
+    std::function<std::optional<Error>(const json& arguments, json& before, json& subject)>;
 
 struct MutationDecision {
     bool execute{true};
@@ -106,6 +113,13 @@ private:
         json arguments;
         MutationContext context;
         int64_t expires_at_ms{0};
+        // What the target looked like when the preview was written, when the
+        // preview read one. Every other field binds the token to the *call*;
+        // this is the only one that binds it to the *world*, and without it a
+        // confirm was approved against a file the preview never saw (#572).
+        // Empty when nothing was read, which the preview already discloses as
+        // target_read: false.
+        std::string target_fingerprint;
     };
 
     static bool sameContext(const MutationContext& left, const MutationContext& right);
@@ -113,6 +127,9 @@ private:
     static std::string bindingHash(const ResolvedToolBinding& binding,
                                    const json& arguments,
                                    const MutationContext& context);
+    // A stable digest of what the probe read. The preview already computes it;
+    // this is what lets the confirm compare.
+    static std::string targetFingerprint(const json& before);
     // `data` is what this call site knows beyond the floor. Everything the
     // floor fills -- code, tool, canonical_tool, retryable -- is added after,
     // and never over the top of a key given here.

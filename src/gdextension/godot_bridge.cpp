@@ -7,6 +7,7 @@
 #include "didi/common/godot_error.hpp"
 #include "didi/common/json_bounds.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/common/scene_node_path.hpp"
 #include "didi/runtime/input_injection.hpp"
 #include "didi/runtime/ghost_preview.hpp"
 #include "didi/runtime/spatial_queries.hpp"
@@ -1490,18 +1491,8 @@ Result<std::string> relativePathWithinEditedRoot(GDExtensionObjectPtr root,
 
 Result<GDExtensionObjectPtr> resolveNode(GDExtensionObjectPtr root, const std::string& path) {
     if (path.empty() || path == "/root" || path == ".") return root;
-    size_t segment_start = 0;
-    while (segment_start <= path.size()) {
-        const size_t segment_end = path.find('/', segment_start);
-        const std::string segment = path.substr(
-            segment_start,
-            segment_end == std::string::npos ? std::string::npos : segment_end - segment_start);
-        if (segment == "..") {
-            return Error::invalidArgument("Parent-relative '..' paths are not allowed in the edited scene");
-        }
-        if (segment_end == std::string::npos) break;
-        segment_start = segment_end + 1;
-    }
+    // The same rule the preview path runs, from the one place that states it.
+    if (auto refused = paths::refuseParentRelativeNodePath(path)) return *refused;
     std::string relative = path;
     if (strings::startsWith(relative, "/root/")) relative = relative.substr(6);
     auto root_name = nodeString(root, "get_name", 2002593661LL);

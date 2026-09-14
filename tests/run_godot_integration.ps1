@@ -2112,6 +2112,18 @@ try {
         # The sibling that takes a frame off the same viewport and could not ask
         # for the screen either.
         (Tool-Request 2413 "viewport_capture_passes" @{ passes = @("color"); camera_identifier = "editor_2d"; select_main_screen = $true }),
+        # A dry run is a promise about a call that will be made later, and the
+        # artifact a person approves. The '..' rule is a property of the
+        # argument, so it needs nothing opened to apply, and it ran on the write
+        # path alone: seven of nine cases previewed a planned_mutation for a
+        # call the identical arguments then had refused 400 (#571).
+        (Tool-Request 2417 "scene_add_to_group" @{ target_node = ".."; group = "probe"; dry_run = $true }),
+        (Tool-Request 2418 "scene_add_to_group" @{ target_node = ".."; group = "probe" }),
+        (Tool-Request 2419 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/Container"; new_parent_path = ".."; dry_run = $true }),
+        (Tool-Request 2420 "scene_set_property" @{ target_node = "/root/SmokeRoot/../SmokeRoot"; property_name = "name"; value = "Hijacked"; dry_run = $true }),
+        # The control: a path that resolves to nothing is a 404 on both paths,
+        # and always was.
+        (Tool-Request 2421 "scene_add_to_group" @{ target_node = "/root/Nope"; group = "probe"; dry_run = $true }),
         (Tool-Request 2414 "editor_undo" @{}),
         (Tool-Request 2415 "editor_undo" @{}),
         (Tool-Request 2416 "editor_undo" @{})
@@ -2176,6 +2188,20 @@ try {
     # text item, so the payload is read out of that rather than off content[0].
     $twoDPasses = (@($phase4ById[2413].result.content | Where-Object type -eq "text")[0].text | ConvertFrom-Json)
     Assert-True ($twoDPasses.main_screen_selected -eq "2D") "viewport_capture_passes did not select the 2D main screen before capturing."
+
+    # A dry run that cannot be followed by a successful confirm returns the
+    # error the confirm would have returned (#571).
+    foreach ($refusedPath in @(2417, 2419, 2420)) {
+        $refusedText = ($phase4ById[$refusedPath].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+        Assert-True $phase4ById[$refusedPath].result.isError "A dry run of request $refusedPath previewed a parent-relative node path the real call refuses."
+        Assert-True ($refusedText -match "Parent-relative") "Request $refusedPath was refused for the wrong reason: $refusedText"
+        Assert-True ($refusedText -notmatch "planned_mutation") "Request $refusedPath still composed a preview for a call that cannot run."
+    }
+    Assert-True $phase4ById[2418].result.isError "The real call accepted a parent-relative node path."
+    # Still a 404, not the new refusal: the two answers were always the same on
+    # this one, and that is the control.
+    $missingNodeText = ($phase4ById[2421].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+    Assert-True ($missingNodeText -notmatch "Parent-relative") "An absent node was refused as a parent-relative path: $missingNodeText"
     Assert-True (@($phase4ById[416].result.content | Where-Object type -eq "image").Count -eq 1) "Viewport diff did not return exactly one PNG content item."
     $restoredDiff = Tool-Payload $phase4ById[418]
     Assert-True ($restoredDiff.identical -eq $true -and $restoredDiff.changed_pixels -eq 0) "Undo did not restore an exact baseline viewport at threshold zero."

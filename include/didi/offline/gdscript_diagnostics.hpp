@@ -69,6 +69,14 @@ public:
     static bool declaresSymbol(const std::string& source_text, const std::string& symbol_name,
                                const std::string& symbol_type);
 
+    // The checks patchSymbol makes on its arguments alone, before any file is
+    // opened. Exposed so a dry run runs them: the preview described a
+    // replacement as planned for a call the write then refused 400, which is
+    // the same defect as the node-path one (#571).
+    static std::optional<Error> validatePatchArguments(const std::string& symbol_name,
+                                                       const std::string& new_definition,
+                                                       const std::string& symbol_type);
+
     static Result<SymbolPatch> patchSymbol(const std::string& source_text,
                                            const std::string& symbol_name,
                                            const std::string& new_definition,

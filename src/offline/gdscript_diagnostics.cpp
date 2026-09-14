@@ -800,11 +800,9 @@ bool GDScriptDiagnostics::declaresSymbol(const std::string& source_text,
     return !findDeclarationLines(lines, symbol_name, symbol_type).empty();
 }
 
-Result<SymbolPatch> GDScriptDiagnostics::patchSymbol(const std::string& source_text,
-                                                    const std::string& symbol_name,
-                                                    const std::string& new_definition,
-                                                    const std::string& symbol_type,
-                                                    bool create_if_missing) {
+std::optional<Error> GDScriptDiagnostics::validatePatchArguments(
+    const std::string& symbol_name, const std::string& new_definition,
+    const std::string& symbol_type) {
     // An unrecognised kind used to fall through to a loose regex, and on the
     // way past it switched off the guard below that checks the replacement
     // declares what it replaces. One mistyped letter in symbol_type, a value
@@ -822,6 +820,55 @@ Result<SymbolPatch> GDScriptDiagnostics::patchSymbol(const std::string& source_t
                                       "accepts: " + accepted + ".");
     }
 
+    // The replacement has to declare the symbol it replaces. Without this the
+    // text was spliced in whatever it was, so a body with a mistyped name, or
+    // no declaration at all, deleted the target and reported the patch done.
+    std::optional<GDScriptDeclaration> replacement;
+    for (const auto& line : strings::split(new_definition, '\n')) {
+        const std::string trimmed = strings::trim(line);
+        if (trimmed.empty() || strings::startsWith(trimmed, "#")) continue;
+        replacement = parseDeclaration(line);
+        // A bare annotation on its own line belongs to the declaration under
+        // it, the same rule the preamble scan uses.
+        if (!replacement && strings::startsWith(trimmed, "@")) continue;
+        break;
+    }
+    const std::string wanted = "a " + symbol_type + " named '" + symbol_name + "'";
+    if (!replacement) {
+        return Error::invalidArgument(
+            "Argument 'new_definition' declares nothing. It has to declare " + wanted +
+            ", because that is what this call replaces.");
+    }
+    // Only for the kinds parseDeclaration models. An inner class is matched by
+    // pattern, and this check has nothing to compare against for it.
+    const bool parsed_kind = symbol_type != "class";
+    const bool kind_matches = symbol_type == "variable"
+                                  ? (replacement->kind == "variable" ||
+                                     replacement->kind == "constant")
+                                  : replacement->kind == symbol_type;
+    if (parsed_kind && !kind_matches) {
+        return Error::invalidArgument(
+            "Argument 'new_definition' declares a " + replacement->kind + " named '" +
+            replacement->name + "', but this call asks for " + wanted + ".");
+    }
+    if (replacement->name != symbol_name) {
+        return Error::invalidArgument(
+            "Argument 'new_definition' declares '" + replacement->name + "', not '" +
+            symbol_name + "'. Patch the name it declares, or rename the symbol in the "
+            "replacement to match.");
+    }
+    return std::nullopt;
+}
+
+Result<SymbolPatch> GDScriptDiagnostics::patchSymbol(const std::string& source_text,
+                                                    const std::string& symbol_name,
+                                                    const std::string& new_definition,
+                                                    const std::string& symbol_type,
+                                                    bool create_if_missing) {
+    if (auto refused = validatePatchArguments(symbol_name, new_definition, symbol_type)) {
+        return *refused;
+    }
+
     std::vector<std::string> lines = strings::split(source_text, '\n');
     int start_line = -1;
     int end_line = -1;
@@ -829,52 +876,6 @@ Result<SymbolPatch> GDScriptDiagnostics::patchSymbol(const std::string& source_t
     // inside a nested class lives at one tab; writing the replacement at column
     // zero moved it out of the class and left a script that does not parse.
     std::string declaration_indent;
-
-    // parseDeclaration models every kind but an inner class, which is matched
-    // by pattern instead. Both live in findDeclarationLines now, so the check
-    // below and the search agree about what declares this symbol.
-    const bool parsed_kind = symbol_type != "class";
-    auto kind_matches = [&](const GDScriptDeclaration& declaration) {
-        if (symbol_type == "variable") {
-            return declaration.kind == "variable" || declaration.kind == "constant";
-        }
-        return declaration.kind == symbol_type;
-    };
-
-    // The replacement has to declare the symbol it replaces. Without this the
-    // text was spliced in whatever it was, so a body with a mistyped name, or
-    // no declaration at all, deleted the target and reported the patch done.
-    {
-        std::optional<GDScriptDeclaration> replacement;
-        for (const auto& line : strings::split(new_definition, '\n')) {
-            const std::string trimmed = strings::trim(line);
-            if (trimmed.empty() || strings::startsWith(trimmed, "#")) continue;
-            replacement = parseDeclaration(line);
-            // A bare annotation on its own line belongs to the declaration
-            // under it, the same rule the preamble scan below uses.
-            if (!replacement && strings::startsWith(trimmed, "@")) continue;
-            break;
-        }
-        const std::string wanted = "a " + symbol_type + " named '" + symbol_name + "'";
-        if (!replacement) {
-            return Error::invalidArgument(
-                "Argument 'new_definition' declares nothing. It has to declare " + wanted +
-                ", because that is what this call replaces.");
-        }
-        // Only for the kinds parseDeclaration models. An inner class is matched
-        // by pattern, and this check has nothing to compare against for it.
-        if (parsed_kind && !kind_matches(*replacement)) {
-            return Error::invalidArgument(
-                "Argument 'new_definition' declares a " + replacement->kind + " named '" +
-                replacement->name + "', but this call asks for " + wanted + ".");
-        }
-        if (replacement->name != symbol_name) {
-            return Error::invalidArgument(
-                "Argument 'new_definition' declares '" + replacement->name +
-                "', not '" + symbol_name + "'. Patch the name it declares, or rename the "
-                "symbol in the replacement to match.");
-        }
-    }
 
     // The declaration a line sits inside, found by walking back to the nearest
     // shallower declaration. Block statements between the two are stepped over,
