@@ -173,7 +173,7 @@ def banner(w, h, sig_s, sig_y, title_pt, sub_y, M, rule=True, centre=True, dark=
           f'<text x="{M}" y="{h-60}" font-family="{FONT}" font-size="25" fill="{fg}" '
           f'opacity=".88">Native C++20 MCP server for Godot 4.5+</text>'
           f'<text x="{w-M}" y="{h-60}" text-anchor="end" font-family="{MONO}" font-size="20" '
-          f'fill="{mute}">98 tools &#183; local IPC &#183; zero deps</text>')
+          f'fill="{mute}">116 tools &#183; local IPC &#183; zero deps</text>')
     return svg(f"0 0 {w} {h}", "".join(parts))
 
 write("social-preview.svg", banner(1280, 640, 2.55, 168, 20, 420, 96))

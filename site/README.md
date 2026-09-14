@@ -7,7 +7,7 @@ to `main`, and checked on every pull request. No branch carries generated HTML.
 ```
 site/
 ├── build.py        the generator: stdlib only, verifies its own output
-├── templates/      one file per page: index.html, brand.html, 404.html
+├── templates/      one file per page: index.html, 404.html
 ├── partials/       head, nav and footer, shared by every page
 └── static/         copied to the site root as-is (site.css)
 ```

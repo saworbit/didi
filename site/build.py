@@ -81,16 +81,6 @@ PAGES = (
         ),
     ),
     Page(
-        template="brand.html",
-        output="brand/index.html",
-        root="../",
-        title="The Didi mark",
-        description=(
-            "The Didi identity: a lowercase d whose bowl is entered by a node and a pipe. "
-            "The mark, the wordmark, the lockups, the palette, and the files."
-        ),
-    ),
-    Page(
         template="404.html",
         output="404.html",
         root=BASE_PATH,

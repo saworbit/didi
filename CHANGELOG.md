@@ -53,14 +53,19 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 - **A project website.** [saworbit.github.io/didi](https://saworbit.github.io/didi/)
   is rendered from `site/` by a Pages workflow on every push to `main` and
-  checked on every pull request: the landing page, the brand identity board,
-  and the brand assets. The marks are inlined from `docs/brand/svg` at build
+  checked on every pull request: the landing page and the brand assets it
+  draws on. The marks are inlined from `docs/brand/svg` at build
   time, and the version and surface counts are read from `CMakeLists.txt` and
   the README status block, so the site cannot publish a number the README does
   not. The CI change classifier treats `site/` and the Pages workflow as
   repository furniture, since nothing in either can reach the compiler.
 
 ### Fixed
+
+- **The social preview banner named the wrong surface size.** The count in
+  its text had not moved since the surface was 98 names. `docs/brand/build.py`
+  now says 116 tools, and `social-preview.svg` and `.png` are regenerated
+  from it.
 
 - **Every required string parameter carries a declared length.** `minLength`
   landed in #553; the other end did not, so 50 required strings had no
