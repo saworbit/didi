@@ -153,7 +153,9 @@ def main() -> int:
     parser.add_argument(
         "--fixtures",
         action="store_true",
-        help="Also copy tools/vibe/fixtures in: a sub-scene, an inherited scene, a game scene.",
+        help="Also copy tools/vibe/fixtures in: a sub-scene, an inherited scene, a game "
+             "scene, and the domain scenes (a TileMapLayer with a real TileSet, a GridMap "
+             "with a MeshLibrary, a ShaderMaterial, an AnimationPlayer).",
     )
     parser.add_argument(
         "--launch",
