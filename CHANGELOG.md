@@ -66,6 +66,37 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **Scene edits the file cannot hold are refused before they happen, and the
+  hierarchy says who owns what.** Godot's packer keeps only the nodes the
+  edited scene owns, so a property, group or script change on a node inside an
+  instanced sub-scene was applied to the live tree, reported as applied, and
+  dropped by the save, which reported `saved` (#588). A `.tscn` has no marker
+  for a removed inherited node, so removing, moving or duplicating one went the
+  same way, and so did removing a node inside an instance (#589). Instancing
+  the edited scene into itself, directly or through a scene that depends on
+  it, built a recursive tree the editor then refused to save in a dialog the
+  caller never sees (#590). All of these now answer `409` before anything is
+  touched: `node_not_owned` names the owning scene and the instance root,
+  `node_inherited` names the base scene, and `cyclic_instance` names the chain
+  of scene files, which are the checks the editor makes in
+  `SceneTreeDock` before the same operations. The property gate also covers
+  `tilemap_set_cells`, `gridmap_set_cells` and `viewport_set_camera_transform`,
+  which write node state the packer drops the same way. Undoing a
+  `scene_remove_node` now restores the ownership of the branch it puts back:
+  Godot clears the owner of a node whose owner is no longer an ancestor when
+  the branch leaves the tree, so the restored node was one the next save would
+  have dropped, which the new gate was the first thing to notice. The dry-run preview refuses the
+  same calls with the same codes, because the probe now names the mutation it
+  is previewing and the bridge runs that call's own preconditions before the
+  read; the script base-type check runs on the preview the same way, so
+  `script_attach_to_node` no longer previews an attach the real call refuses
+  (#603). `scene_get_hierarchy` carries `owned_by_scene` on every node,
+  `instance_of` and `editable_instance` on instance roots, `inherited` on
+  nodes from the base scene and `inherits` at the top level, live and offline;
+  the offline parse's `instance` field is now `instance_of`, the same name on
+  both routes (#591). The `saved` answer from `editor_save_scene` is documented
+  as Godot's acceptance of the request, since `EditorInterface.save_scene`
+  returns OK for any open scene with a path.
 - **A bounded reader publishes `max_response_bytes`, and both new ones use the
   same figure.** `script_get_symbols` and the dry-run preview each grew a count
   bound without one, which left the response size resting on a per-item
