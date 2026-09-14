@@ -51,6 +51,23 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`script_patch_method` refuses a symbol the script does not declare.** It
+  appended one instead and reported the same success as a replacement, so the
+  typo `ready` for `_ready` left a method nobody calls beside the one the
+  caller meant to edit, with `has_errors: false` because the file still
+  parses. A name the script does not declare is a 404 now, naming the kind and
+  the name; `create_if_missing: true` keeps the append for the callers who
+  want it, and `created` in the result says which of the two happened. The dry
+  run answers the same way, with `before.symbol_exists` (#569).
+- **`symbol_type` publishes the six kinds it models, and refuses the rest.**
+  It was a bare string with a default and no `enum`, and an unrecognised value
+  did not just fall through to a looser match: it switched off the check that
+  the replacement declares what it replaces. So `fucntion` for `function`
+  replaced a function with a variable, deleted the body and reported success,
+  while the schema said only "Defaults to function". The argument check now
+  refuses anything outside `function`, `variable`, `constant`, `signal`,
+  `enum` and `class` before the file is opened, and the patcher refuses it
+  again behind that. `patch_script_symbols` is the same handler (#570).
 - **Every required string parameter carries `minLength: 1`** unless the schema
   says otherwise, stamped where `additionalProperties` is stamped. 41 of 90
   accepted `""`, and the handlers behind them each answered differently: five
