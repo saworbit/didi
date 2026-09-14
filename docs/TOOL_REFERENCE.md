@@ -348,6 +348,7 @@ Draws the live 3D scene again with replacement materials and returns one image p
 - `passes` (`array`, required): 1 to 4 of `color`, `depth`, `normal`, `segmentation`, with no repeats. Each comes back as its own image block, in the order given, and `pass_order` names them.
 - `camera_identifier` (`string`): editor sessions only. A game has one root viewport and the argument is refused there.
 - `depth_far` (`number`): the distance mapped to white. Defaults to the rendering camera's own far plane, which is the distance past which that camera draws nothing. The value used is reported as `depth_far`.
+- `select_main_screen` (`boolean`, default `false`): selects the main screen the `camera_identifier` belongs to before capturing and puts the previous one back, the same as `viewport_capture_frame`. Editor sessions only.
 
 `depth` paints geometry a grey that rises with distance in front of the camera, with `depth_far` mapped to white. `normal` paints the world-space surface normal as `n * 0.5 + 0.5`, in world space rather than view space so a surface that faces up reads the same whichever way the camera is turned. `color` is the ordinary frame, captured with nothing replaced. `segmentation` paints each node a flat colour of its own and returns a legend saying which is which.
 
@@ -380,6 +381,7 @@ Captures a fresh frame from the same viewport the baseline came from and compare
 - `threshold`: integer `0..255`, default `0`; a pixel changes when any RGBA channel delta is greater than the threshold.
 - `camera_identifier`, `node_isolation_path`, and `isolation_background`: same live selectors as capture.
 - `min_ssim` (`number`, `0.0..1.0`) and `max_hamming_distance` (`integer`, `0..64`): perceptual tolerances. When either is given the result carries `perceptually_identical` and the `perceptual_tolerance` that was applied.
+- `select_main_screen` (`boolean`, default `false`): same flag `viewport_capture_frame` takes, and the comparison capture needs it for the same reason. This tool takes its own frame off the viewport, and an editor viewport has no size unless its main screen is showing, so without it the comparison was taken from a viewport that was never made to render and the answer was agreement about a frame that had changed. The result carries `main_screen_selected`, `main_screen_restored` and `previous_main_screen` when a screen was actually selected.
 
 Dimensions must match exactly; Didi does not resample or color-convert. Metadata reports both IDs, resolution, changed/total pixels, ratio, per-channel mean absolute error, maximum channel delta, nullable bounding box, and `identical`.
 

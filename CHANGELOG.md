@@ -51,6 +51,17 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`viewport_diff_capture` makes the viewport render before it compares.**
+  It takes its own comparison capture and had no way to ask for the main
+  screen, so it read whatever was last drawn in a viewport with no size and
+  answered `bit_identical: true`, `ssim: 1.0`, `isError: false` for a frame
+  where 55% of the pixels had changed. No threshold could help, because the
+  image was stale. `select_main_screen` is on `viewport_diff_capture` and
+  `viewport_capture_passes` now, the way it has been on
+  `viewport_capture_frame`, and all three go through the same deferred path:
+  select the screen, wait a frame for the layout, capture, put the previous
+  screen back. A call that names no camera selects the screen its own default
+  camera belongs to rather than asking for one (#568).
 - **`script_patch_method` refuses a symbol the script does not declare.** It
   appended one instead and reported the same success as a replacement, so the
   typo `ready` for `_ready` left a method nobody calls beside the one the
