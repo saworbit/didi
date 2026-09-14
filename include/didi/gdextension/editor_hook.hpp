@@ -208,6 +208,9 @@ private:
         bool awaiting_next_callback{true};
         std::shared_ptr<std::promise<json>> response_promise;
         std::shared_ptr<CommandControl> control;
+        // Input held during the pause and handed to Input when this step
+        // resumed the tree, so the caller knows the stepped frame carried it.
+        int64_t released_input_events{0};
     };
 
     // A capture that had to change the editor's main screen first.

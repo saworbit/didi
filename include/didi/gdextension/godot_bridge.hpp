@@ -169,6 +169,12 @@ public:
                                                    const std::string& session_kind,
                                                    double requested_depth_far);
     Result<void> forceDraw();
+    // Hands Input the events runtime.injectInput held while the tree was
+    // paused, so they land in the first frame that processes. Called by
+    // runtime.setPaused on the way to running, which the step also takes.
+    // Returns how many were handed over.
+    Result<size_t> releaseQueuedInput();
+
     // Performance.get_monitor support for runtime.readProfiler. Preflight is
     // the availability check the contract names: the pinned bind exists.
     Result<void> preflightPerformanceMonitors();

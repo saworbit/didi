@@ -3551,7 +3551,10 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "runtime_inject_input";
-        t.description = "Synthesizes InputEventKey, InputEventMouseButton, or InputEventAction to simulate gameplay.";
+        t.description = "Dispatches action, key, mouse button, mouse motion and joypad events into the "
+                        "running game. A mouse event carries the viewport position it lands at. A batch "
+                        "injected while the game is paused is held and released into the first frame "
+                        "that processes, by runtime_step or runtime_set_paused.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {

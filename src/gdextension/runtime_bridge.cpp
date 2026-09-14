@@ -1,5 +1,6 @@
 #include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/gdextension/editor_hook.hpp"
+#include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/gdextension_api.hpp"
 #include "didi/common/logger.hpp"
 
@@ -503,7 +504,20 @@ json executeRuntimeBridge(const std::string& method, const json& params,
             return errorJson(500, "Godot SceneTree pause state did not match the requested value");
         }
         DIDI_LOG_INFO("RUNTIME_BRIDGE", requested ? "Game paused" : "Game resumed");
-        return liveResult({{"status", "success"}, {"paused", observed.value()}}, session_kind);
+        json response = liveResult({{"status", "success"}, {"paused", observed.value()}}, session_kind);
+        if (!requested) {
+            // Input injected during the pause is handed over now, so it lands
+            // in the first frame that processes (#594). The step resumes
+            // through here too, so a stepped frame carries the held batch.
+            auto released = GodotBridge::instance().releaseQueuedInput();
+            if (released.isErr()) {
+                response["released_input_events"] = 0;
+                response["input_release_error"] = released.error().message;
+            } else {
+                response["released_input_events"] = released.value();
+            }
+        }
+        return response;
     }
 
     if (method == "runtime.stop") {

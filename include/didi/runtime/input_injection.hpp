@@ -14,7 +14,7 @@ namespace runtime {
 // defaults applied, so the engine side only constructs objects and never
 // interprets JSON.
 struct InjectedInputEvent {
-    enum class Kind { action, key, mouse_button, joypad_button, joypad_motion };
+    enum class Kind { action, key, mouse_button, mouse_motion, joypad_button, joypad_motion };
 
     Kind kind{Kind::action};
     bool pressed{false};
@@ -41,6 +41,21 @@ struct InjectedInputEvent {
     bool double_click{false};
     double factor{1.0};
     double pressure{1.0};
+
+    // mouse_button and mouse_motion. Where the event happens in the game's
+    // root viewport; a click that names no position lands at the origin, which
+    // is where every injected click landed before the shape had one (#597).
+    // global_position defaults to position.
+    bool has_position{false};
+    double position_x{0.0};
+    double position_y{0.0};
+    bool has_global_position{false};
+    double global_position_x{0.0};
+    double global_position_y{0.0};
+
+    // mouse_motion
+    double relative_x{0.0};
+    double relative_y{0.0};
 
     // joypad_motion
     int64_t axis{0};

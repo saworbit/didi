@@ -1,6 +1,7 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource path="res://runtime_probe.gd" type="Script" id="1_runtime"]
+[ext_resource path="res://runtime_pausable_probe.gd" type="Script" id="2_pausable"]
 
 [sub_resource type="BoxShape3D" id="box_3d"]
 size = Vector3(1, 1, 1)
@@ -76,6 +77,15 @@ navigation_mesh = SubResource("nav_mesh_3d")
 navigation_polygon = SubResource("nav_polygon_2d")
 
 [node name="AnimTarget" type="Node2D" parent="Spatial"]
+
+[node name="PausableProbe" type="Node2D" parent="Spatial/AnimTarget"]
+script = ExtResource("2_pausable")
+
+[node name="MouseButtonProbe" type="Node2D" parent="Spatial/AnimTarget"]
+
+[node name="MouseMotionProbe" type="Node2D" parent="Spatial/AnimTarget"]
+
+[node name="MouseMotionDelta" type="Node2D" parent="Spatial/AnimTarget"]
 
 [node name="Player" type="AnimationPlayer" parent="Spatial"]
 libraries = {
