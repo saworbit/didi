@@ -66,6 +66,21 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **Injected input reaches a paused game's nodes, and a click lands where it
+  is aimed.** A paused tree delivers `_input` only to nodes that process while
+  paused, so a batch injected during a pause reported `completed` and was gone
+  before `runtime_step` ran a frame, which made pause, press, step, look do
+  nothing (#594). `runtime_inject_input` now holds such a batch and reports
+  `outcome: "queued"` with `paused: true` and `delivery:
+  "next_unpaused_frame"`; `runtime_set_paused` and `runtime_step` hand the held
+  events to Input on the way to running, so they land in the first frame that
+  processes, and both report `released_input_events`. The `mouse_button` shape
+  had no position, so every injected click landed at the viewport origin and a
+  caller who had found a control's rect could not click it (#597); it now takes
+  `position` and `global_position`, and a `mouse_motion` shape with `position`
+  and `relative` moves the pointer first. `target_context` is a constant whose
+  description offered the editor as a choice the schema refused; the description
+  now says it is always `game_input` (#602).
 - **Scene edits the file cannot hold are refused before they happen, and the
   hierarchy says who owns what.** Godot's packer keeps only the nodes the
   edited scene owns, so a property, group or script change on a node inside an
