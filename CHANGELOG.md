@@ -66,6 +66,19 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **Three places where the published contract and the handler disagreed.**
+  `runtime_explore_scene` refused every `duration_ms` below 3000 unless
+  `stuck_ms` was lowered too, because the default of one exceeded what the
+  other allowed; the default is now the smaller of 3000 and the window, and a
+  caller who sets both backwards is still refused (#596). `runtime_read_logs`
+  and `runtime_read_output` carried `exhausted: false` on every page, a flag
+  that meant the 64-bit sequence had wrapped and read as "there is more"; it
+  is now `sequence_overflowed`, every page carries `has_more`, and the tools
+  say to page until it is false (#598). `runtime_watch_invariants` documented
+  `node.get('health')` as its example expression, which the sandbox refuses
+  because a script's own variable can run a getter; the example, the probe
+  descriptions and the refusal now say native properties only and show one
+  that works (#593).
 - **The extension no longer prints engine errors at startup and on every
   dashboard read, and its log stays out of a game's output.** On Godot 4.5
   and 4.6 every `didi_control_room` call printed `ERROR: Parameter "mb" is
