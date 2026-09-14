@@ -1,0 +1,22 @@
+[gd_scene load_steps=3 format=3 uid="uid://game0001"]
+
+[ext_resource type="Script" path="res://ticker.gd" id="1_ticker"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_wall"]
+size = Vector2(20, 200)
+
+[node name="Game" type="Node2D"]
+
+[node name="Ticker" type="Node" parent="."]
+script = ExtResource("1_ticker")
+
+[node name="Button" type="Button" parent="."]
+offset_right = 120.0
+offset_bottom = 40.0
+text = "Go"
+
+[node name="Wall" type="StaticBody2D" parent="."]
+position = Vector2(100, 0)
+
+[node name="Shape" type="CollisionShape2D" parent="Wall"]
+shape = SubResource("RectangleShape2D_wall")
