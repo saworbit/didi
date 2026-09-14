@@ -95,8 +95,21 @@ json bridgeLight(const ControlRoomInputs& in) {
             return light("Bridge", "warn", "Build mismatch",
                          in.selected_session_id.value_or(""), bridgeBuildReason(in));
         }
+        if (in.requested_stop.has_value()) {
+            return light("Bridge", "warn",
+                         "Game stopped (exit " + std::to_string(in.requested_stop->exit_code) + ")",
+                         in.selected_session_id.value_or(""),
+                         "runtime_stop asked this game to exit and it is still answering while it "
+                         "shuts down. It will not be there for the next call; attach another "
+                         "session.");
+        }
         return light("Bridge", "ok", kind == "editor" ? "Editor attached" : "Game attached",
                      in.selected_session_id.value_or(""), "");
+    }
+    // A game this server asked to stop is not a session that went missing.
+    if (in.route_obstruction.has_value() && in.route_obstruction->kind == "game_stopped") {
+        return light("Bridge", "warn", "Game stopped on request", "",
+                     in.route_obstruction->cause + " " + in.route_obstruction->recovery);
     }
     if (in.managed_unavailable) {
         return light("Bridge", "bad", "Route unreachable",

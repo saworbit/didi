@@ -766,6 +766,57 @@ void test_engine_incident_says_what_happened_and_what_to_do() {
     ASSERT_EQ(std::string(engineIncidentKindName(EngineIncidentKind::none)), std::string("none"));
 }
 
+// After runtime_stop, the first call to reach the game answered a retryable
+// connection timeout, the ones after it "no route", and nothing said the exit
+// was requested by this caller with this code (#595).
+void test_a_requested_stop_is_reported_as_the_exit_it_is() {
+    didi::runtime::SessionDescriptor descriptor;
+    descriptor.pid = 4244;
+    descriptor.started_at_ms = 1;
+    descriptor.session_id = "stopped-on-request";
+    didi::runtime::recordRequestedStop({4244, "stopped-on-request", 7, 0});
+
+    didi::Error timeout(504, "Cannot connect to Godot Didi GDExtension IPC pipe.",
+                        didi::json{{"retryable", true}, {"outcome", "not_started"}});
+    didi::runtime::annotateEngineState(timeout, descriptor);
+    ASSERT_EQ(timeout.data["incident"].get<std::string>(), std::string("game_stopped"));
+    ASSERT_EQ(timeout.data["exit_code"].get<int64_t>(), 7);
+    ASSERT_EQ(timeout.data["requested_by"].get<std::string>(), std::string("runtime_stop"));
+    ASSERT_FALSE(timeout.data["retryable"].get<bool>());
+    ASSERT_TRUE(timeout.data["cause"].get<std::string>().find("code 7") != std::string::npos);
+
+    // The calls after it carry the same fact, and are no more retryable.
+    const auto remembered = didi::runtime::lastRouteObstruction();
+    ASSERT_TRUE(remembered.has_value());
+    ASSERT_EQ(remembered->kind, std::string("game_stopped"));
+    didi::Error later(503, "No runtime session is attached");
+    didi::runtime::annotateRouteObstruction(later);
+    ASSERT_EQ(later.data["route_obstruction"]["kind"].get<std::string>(), std::string("game_stopped"));
+    ASSERT_FALSE(later.data["retryable"].get<bool>());
+
+    // The extension refusing because its loop has stopped, while the process
+    // still answers, is the same requested exit.
+    didi::Error refused(503, "Godot main-loop bridge is not running");
+    descriptor.session_id = "stopped-on-request";
+    ASSERT_TRUE(didi::runtime::annotateRequestedStop(refused, descriptor));
+    ASSERT_EQ(refused.data["incident"].get<std::string>(), std::string("game_stopped"));
+    ASSERT_FALSE(refused.data["retryable"].get<bool>());
+
+    // A different session on the same pid was not the one asked to stop.
+    descriptor.session_id = "another-session";
+    didi::Error other(504, "Cannot connect");
+    didi::runtime::annotateEngineState(other, descriptor);
+    ASSERT_TRUE(!other.data.contains("incident") ||
+                other.data["incident"].get<std::string>() != "game_stopped");
+    didi::Error untouched(503, "x");
+    ASSERT_FALSE(didi::runtime::annotateRequestedStop(untouched, descriptor));
+    ASSERT_TRUE(!untouched.data.is_object() || !untouched.data.contains("incident"));
+    ASSERT_EQ(std::string(didi::runtime::engineIncidentKindName(
+                  didi::runtime::EngineIncidentKind::stopped)),
+              std::string("game_stopped"));
+    didi::runtime::clearRouteObstruction();
+}
+
 class SessionDirectoryFixture {
 public:
     SessionDirectoryFixture() {
@@ -2829,6 +2880,8 @@ struct RegisterRuntimeRoutingTests {
                      test_releasing_every_route_frees_every_ownership_lock);
         registerTest("RuntimeRouting.DisconnectReleasesEveryRoute",
                      test_disconnect_releases_every_route_not_only_the_selected_one);
+        registerTest("RuntimeRouting.RequestedStopIsReportedAsAnExit",
+                     test_a_requested_stop_is_reported_as_the_exit_it_is);
         registerTest("RuntimeRouting.ShutdownReleasesUnselectedRoute",
                      test_server_shutdown_releases_a_route_the_selection_never_pointed_at);
         registerTest("RuntimeRouting.ReattachStillHandshakes",

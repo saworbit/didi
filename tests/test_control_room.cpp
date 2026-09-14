@@ -193,6 +193,24 @@ void test_detached_says_which_kind_of_detached() {
         ControlRoomInputs in;
         in.connected = false;
         didi::runtime::RouteObstruction crashed;
+        {
+            // A game this server asked to stop is named as such, connected or
+            // not, rather than as a session that went missing (#595).
+            ControlRoomInputs stopping = in;
+            stopping.connected = true;
+            stopping.session_kind = "game";
+            stopping.requested_stop = didi::runtime::RequestedStop{4244, "stopping", 3, 0};
+            const auto lit = buildControlRoomModel(stopping, {}).dump();
+            ASSERT_TRUE(lit.find("Game stopped (exit 3)") != std::string::npos);
+            ControlRoomInputs gone = in;
+            gone.connected = false;
+            didi::runtime::RouteObstruction stopped;
+            stopped.kind = "game_stopped";
+            stopped.cause = "runtime_stop asked the game to exit with code 3, and it did.";
+            gone.route_obstruction = stopped;
+            const auto rendered_gone = buildControlRoomModel(gone, {}).dump();
+            ASSERT_TRUE(rendered_gone.find("Game stopped on request") != std::string::npos);
+        }
         crashed.kind = "engine_crashed";
         crashed.cause = "The engine process is gone and left no crash report.";
         crashed.recovery = "Ask the user to restart the Godot editor.";

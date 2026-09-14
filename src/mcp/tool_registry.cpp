@@ -291,7 +291,12 @@ Error normalizeLiveRouteError(Error error,
     const auto transport = ipc::transportFailureState(error);
     const bool explicit_quarantine = error.data.is_object() &&
                                      error.data.value("route_quarantine", false);
-    if (!transport.has_value() && !explicit_quarantine) return error;
+    if (!transport.has_value() && !explicit_quarantine) {
+        // The extension refusing because its main loop has stopped, on a game
+        // this caller asked to stop, is the requested exit (#595).
+        if (error.code == 503 || error.code == 504) runtime::annotateRequestedStop(error, session);
+        return error;
+    }
     if (!error.data.is_object()) error.data = json::object();
     if (transport.has_value()) {
         error.data["outcome"] = transport->outcome_unknown ? "unknown_outcome" : "not_started";

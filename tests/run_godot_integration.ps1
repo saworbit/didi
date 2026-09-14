@@ -3489,7 +3489,14 @@ try {
     $stopRequests = @(
         (@{ jsonrpc = "2.0"; id = 330; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 331 "runtime_attach_session" @{ session_id = $gameSession.session_id }),
-        (Tool-Request 332 "runtime_stop" @{ exit_code = 0 })
+        (Tool-Request 332 "runtime_stop" @{ exit_code = 0 }),
+        # The game is gone because this caller asked. The first call to reach
+        # it used to answer a retryable timeout and the ones after it "no
+        # route", with nothing saying the exit was requested (#595). The
+        # profiler window gives the process time to go before the read.
+        (Tool-Request 333 "runtime_read_profiler" @{ duration_ms = 300; sample_count = 2; categories = @("frame") }),
+        (Tool-Request 334 "runtime_get_session" @{}),
+        (Tool-Request 335 "didi_control_room" @{})
     )
     $rawStopResponses = Invoke-Didi -Requests $stopRequests -Arguments @("--project", $fixtureRoot)
     $stopResponses = @($rawStopResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
@@ -3497,6 +3504,28 @@ try {
     $stopById = @{}
     foreach ($response in $stopResponses) { $stopById[[int]$response.id] = $response }
     Assert-True ((Tool-Payload $stopById[332]).shutdown_requested -eq $true) "Runtime stop did not report a shutdown request."
+    # The first live call after the stop lands while the loop is gone and the
+    # process still tearing down, or after it has gone; both are the exit this
+    # caller asked for, and neither is a retry.
+    $afterStopText = $stopById[333].result.content[0].text
+    Assert-True $stopById[333].result.isError "A live call after runtime_stop still reached the game: $afterStopText"
+    $afterStop = $afterStopText | ConvertFrom-Json
+    $afterStopObstruction = $afterStop.error.data.route_obstruction
+    Assert-True (($afterStop.error.data.incident -eq "game_stopped" -and $afterStop.error.data.exit_code -eq 0 -and $afterStop.error.data.requested_by -eq "runtime_stop") -or ($null -ne $afterStopObstruction -and $afterStopObstruction.kind -eq "game_stopped")) "The first call after runtime_stop did not report the requested exit: $afterStopText"
+    Assert-True ($afterStop.error.data.retryable -eq $false) "A call after runtime_stop still invited a retry: $afterStopText"
+    # A handshake can still succeed while the process tears down; then the
+    # answer says what the caller did. Once it is gone, the answer is the exit.
+    $sessionText = $stopById[334].result.content[0].text
+    $sessionAfterStop = $sessionText | ConvertFrom-Json
+    if ($stopById[334].result.isError) {
+        $sessionObstruction = $sessionAfterStop.error.data.route_obstruction
+        Assert-True (($sessionAfterStop.error.data.incident -eq "game_stopped") -or ($null -ne $sessionObstruction -and $sessionObstruction.kind -eq "game_stopped")) "runtime_get_session after runtime_stop did not report the requested exit: $sessionText"
+    } else {
+        Assert-True ($sessionAfterStop.stop_requested.exit_code -eq 0 -and $sessionAfterStop.stop_requested.requested_by -eq "runtime_stop") "runtime_get_session reached the stopping game and did not say the exit was requested: $sessionText"
+    }
+    $roomAfterStop = Tool-Payload $stopById[335]
+    $roomAfterStopText = $roomAfterStop | ConvertTo-Json -Compress -Depth 8
+    Assert-True ($roomAfterStopText -match "Game stopped|game_stopped") "The control room did not say the game was stopped on request: $($roomAfterStopText.Substring(0, [Math]::Min(600, $roomAfterStopText.Length)))"
 
     $stopDeadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
     while ([DateTime]::UtcNow -lt $stopDeadline -and -not $game.HasExited) { Start-Sleep -Milliseconds 100 }

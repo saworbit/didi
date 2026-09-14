@@ -66,6 +66,17 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A game stopped on request is reported as the exit it is.** After
+  `runtime_stop`, the first call to reach the game answered a `504` with
+  `retryable: true` and a sentence about a pipe, the calls after it a `503`
+  about a missing route, and nothing said the exit was requested by this
+  caller with this code, so the sensible next move was to retry a process
+  that would never answer (#595). The server now remembers the stop it asked
+  for: the first call to reach the stopped game answers `incident:
+  "game_stopped"` with `exit_code`, `requested_by: "runtime_stop"` and
+  `retryable: false`, later calls carry the same fact under
+  `route_obstruction`, and `didi_control_room` names it until another session
+  is attached.
 - **What discovery advertises is what a call gets, for hit-testing a game
   and for managed recovery.** `ui_hit_test` promised a game default in its
   own `root_path` description and was refused for a game session, while

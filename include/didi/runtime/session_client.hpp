@@ -83,7 +83,7 @@ EngineCrashReport findEngineCrashReport(const std::string& project_path, uint64_
 // A transport failure already carries facts. This is the reading of them: one
 // classification site, so the routes that report a failure cannot disagree
 // about what kind of failure it was.
-enum class EngineIncidentKind { none, crashed, unreachable, hung, session_lost };
+enum class EngineIncidentKind { none, crashed, unreachable, hung, session_lost, stopped };
 
 struct EngineIncident {
     EngineIncidentKind kind{EngineIncidentKind::none};
@@ -145,6 +145,26 @@ struct RouteObstruction {
 void recordRouteObstruction(RouteObstruction obstruction);
 void clearRouteObstruction();
 std::optional<RouteObstruction> lastRouteObstruction();
+
+// A stop this server asked for, remembered so the game's absence afterwards
+// is reported as the exit it is. The first call to reach a stopped game used
+// to answer a retryable connection timeout, the ones after it "no route", and
+// nothing said the exit was requested by this caller with this code (#595).
+struct RequestedStop {
+    uint64_t pid{0};
+    std::string session_id;
+    int64_t exit_code{0};
+    int64_t at_ms{0};
+};
+
+void recordRequestedStop(RequestedStop stop);
+std::optional<RequestedStop> requestedStopFor(uint64_t pid, const std::string& session_id);
+
+// Adds the requested-stop incident to an error about a session this server
+// asked to stop, whatever shape the failure took: the transport failing once
+// the process is gone, or the extension answering that its main loop has
+// stopped while the process is still tearing down. Returns whether it did.
+bool annotateRequestedStop(Error& error, const std::optional<SessionDescriptor>& session);
 
 // Merges the remembered obstruction into an error that is about to say only
 // that nothing is attached. Does nothing when there is none, so a server that
