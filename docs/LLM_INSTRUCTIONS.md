@@ -117,7 +117,7 @@ where it is. Editor or game.
 
 - `script_check_syntax` runs lightweight checks and can invoke `godot --headless --check-only` only for a file path.
 - `script_get_symbols` extracts parser-recognized symbols from a file or source text.
-- `script_patch_method` rewrites a matching project file and then runs available diagnostics.
+- `script_patch_method` rewrites a symbol the script already declares, then runs available diagnostics. A name it does not declare is a 404, not an append: pass `create_if_missing` when adding is what you meant, and read `created` in the result to tell the two apart. `symbol_type` is one of `function`, `variable`, `constant`, `signal`, `enum`, `class`.
 - `shader_get_visual_graph` describes a VisualShader as nodes and links. It is refused on a shader written as code, which is the answer, not a failure.
 - `shader_set_uniform` writes one, in the same JSON spelling `scene_set_property` uses for that type. Check `applied`, and remember the material may be shared with other nodes.
 - `shader_list_uniforms` reads a ShaderMaterial's parameters. `value` is the effective value, the material's override where it has one and the shader's declared default otherwise; the two are not distinguished, so do not read a value as proof the material set it. A null value means the engine could not supply one, not that the uniform has none.

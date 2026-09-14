@@ -4917,7 +4917,12 @@ static void test_writers_report_the_path_they_resolved() {
 
     const auto created = registry.callTool(
         "script_create",
-        didi::json{{"script_path", "res://d1/../reported.gd"}, {"source_text", "extends Node\n"}});
+        didi::json{{"script_path", "res://d1/../reported.gd"},
+                   // With a _ready in it, because the patch below replaces one.
+                   // A patch names a symbol the script declares, so a fixture
+                   // that declares none can only exercise the create path
+                   // (#569).
+                   {"source_text", "extends Node\n\nfunc _ready() -> void:\n\tpass\n"}});
     ASSERT_TRUE(!created.isError);
     ASSERT_EQ(didi::json::parse(created.content[0].text)["script_path"], "res://reported.gd");
     ASSERT_TRUE(std::filesystem::is_regular_file("reported.gd"));

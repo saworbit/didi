@@ -44,7 +44,13 @@ const std::unordered_map<std::string, std::string>& sharedDescriptions() {
          "res://scenes/player.tscn and res://scenes itself, never res://scenes_v2. Defaults "
          "to the project root."},
         {"symbol_type",
-         "Which kind of symbol the name refers to. Defaults to function."},
+         "Which kind of symbol the name refers to: function, variable, constant, signal, "
+         "enum or class. Defaults to function. Anything else is refused, because an "
+         "unrecognised kind cannot be checked against the replacement."},
+        {"create_if_missing",
+         "Add the symbol when the script does not declare it. Off by default: a patch names "
+         "a symbol that is there, and appending one for a misspelt name leaves dead code "
+         "beside the symbol you meant to edit. The result says which happened with created."},
         {"collision_mask",
          "Physics layers to test against, as a bit mask. Defaults to 1, layer one only."},
         {"board",

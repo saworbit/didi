@@ -281,10 +281,15 @@ Rewrites a matching GDScript symbol in a project-root-confined file, then runs t
 - `file_path` (`string`, required, non-empty).
 - `method_name` (`string`, required, non-empty).
 - `new_definition` (`string`, required, non-empty); it must declare the symbol `method_name` names.
-- `symbol_type` (`string`, default `"function"`).
+- `symbol_type` (`string`, default `"function"`); one of `function`, `variable`, `constant`, `signal`, `enum`, `class`. Any other value is refused by the argument check before the file is opened.
+- `create_if_missing` (`boolean`, default `false`); add the symbol when the script does not declare it.
 - Legacy alias: `patch_script_symbols`.
 
 The replacement is read before it is spliced. A `new_definition` that declares nothing, declares a different name, or declares a different kind of symbol is refused with a 400 and no write, because the old behaviour was to splice it anyway: a mistyped name deleted the target and still reported the method patched.
+
+The symbol has to be there. A `method_name` the script does not declare is a 404 naming the kind and the name, because a patch names a symbol a caller has in mind and appending one for a misspelt name leaves dead code beside the symbol they meant to edit. `create_if_missing: true` keeps the append, and `created` in the result says which of the two happened. The dry run answers the same way: `before.symbol_exists` reports whether the symbol is in the file, and a preview of an absent symbol is refused rather than described as a planned replacement.
+
+`symbol_type` is checked against the published set rather than passed through. An unrecognised value used to fall through to a looser match and, on the way past, switch off the check that the replacement declares what it replaces, so one mistyped letter replaced a function with a variable and reported success.
 
 The indentation of the declaration being replaced is preserved, so a method declared inside a nested `class` stays inside it.
 
