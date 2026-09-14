@@ -117,11 +117,16 @@ CallToolResult sendPhase7LiveRequest(const ResolvedToolBinding& binding,
             data["upstream_message"] = failure.message;
             return phase7Error(binding, failure.code, failure.message, std::move(data));
         }
-        return phase7Error(binding, 503, "runtime_route_request_failed",
-                           {{"retryable", false},
-                            {"route_quarantine", quarantined},
-                            {"upstream_code", failure.code},
-                            {"upstream_message", failure.message}});
+        json data = {{"retryable", false},
+                     {"route_quarantine", quarantined},
+                     {"upstream_code", failure.code},
+                     {"upstream_message", failure.message}};
+        // A game this caller asked to stop is the requested exit, whether the
+        // transport went or the extension said its main loop has stopped
+        // while the process still answers (#595).
+        Error stopped(503, failure.message, data);
+        if (runtime::annotateRequestedStop(stopped, lease->descriptor)) data = stopped.data;
+        return phase7Error(binding, 503, "runtime_route_request_failed", std::move(data));
     }
 
     json payload = response.value();

@@ -224,6 +224,12 @@ CallToolResult forwardLiveRuntime(const char* tool, const std::string& method, c
                                               ? "unknown_outcome"
                                               : "not_started";
             } else {
+            // A refusal from the extension of a game this caller asked to stop,
+            // such as its main loop having gone while the process still
+            // answers, is the requested exit and not a route to retry (#595).
+            if (error.code == 503 || error.code == 504) {
+                runtime::annotateRequestedStop(error, session);
+            }
                 error.data["outcome"] = "unknown_outcome";
             }
             runtime::annotateEngineState(error, session);
@@ -308,7 +314,22 @@ CallToolResult handleRuntimeGetSession(const json&,
         error.data["available_without_engine"] = available_without_engine;
         return sessionError(error, sessions);
     }
-    auto payload = localSessionSuccess(result.value());
+    auto value = result.value();
+    // A handshake can still succeed while a game this caller asked to stop is
+    // tearing down: its IPC thread answers after its main loop has gone. The
+    // answer is true, and it says what the caller did (#595).
+    if (value.is_object() && value.contains("session") && value["session"].is_object()) {
+        const auto& session = value["session"];
+        if (const auto stop = runtime::requestedStopFor(session.value("pid", uint64_t{0}),
+                                                        session.value("session_id", std::string()))) {
+            value["stop_requested"] = {
+                {"exit_code", stop->exit_code},
+                {"requested_by", "runtime_stop"},
+                {"note", "This session was asked to exit and is still answering while it shuts "
+                         "down; it will not be there for the next call."}};
+        }
+    }
+    auto payload = localSessionSuccess(value);
     return payload;
 }
 

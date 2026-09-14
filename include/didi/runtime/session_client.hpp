@@ -160,6 +160,12 @@ struct RequestedStop {
 void recordRequestedStop(RequestedStop stop);
 std::optional<RequestedStop> requestedStopFor(uint64_t pid, const std::string& session_id);
 
+// Adds the requested-stop incident to an error about a session this server
+// asked to stop, whatever shape the failure took: the transport failing once
+// the process is gone, or the extension answering that its main loop has
+// stopped while the process is still tearing down. Returns whether it did.
+bool annotateRequestedStop(Error& error, const std::optional<SessionDescriptor>& session);
+
 // Merges the remembered obstruction into an error that is about to say only
 // that nothing is attached. Does nothing when there is none, so a server that
 // has simply never attached still answers exactly as it did.

@@ -900,6 +900,40 @@ std::mutex g_requested_stops_mutex;
 std::vector<RequestedStop> g_requested_stops;
 } // namespace
 
+// A game this server asked to exit is not a lost engine. It answered the
+// stop, it is going because of it, and the exit code is the one the caller
+// chose; reporting that as a timeout to retry sent every caller into a loop
+// against a process that will never answer (#595). The process lingers for a
+// moment after its main loop stops, so the same fact is attached whether the
+// failure was the transport going or the extension saying its loop has
+// stopped.
+bool annotateRequestedStop(Error& error, const std::optional<SessionDescriptor>& session) {
+    if (!session.has_value()) return false;
+    const auto stop = requestedStopFor(session->pid, session->session_id);
+    if (!stop.has_value()) return false;
+    if (!error.data.is_object()) error.data = json::object();
+    const auto report = describeProcessInstance(session->pid, session->started_at_ms);
+    const bool gone = report.state != ProcessInstanceState::alive;
+    const std::string code = std::to_string(stop->exit_code);
+    const std::string cause =
+        gone ? "runtime_stop asked the game to exit with code " + code + ", and it did."
+             : "runtime_stop asked the game to exit with code " + code +
+                   "; the process is still shutting down.";
+    const std::string recovery =
+        "The game is gone because this caller asked. Launch it again, or call "
+        "runtime_list_sessions and attach the editor with runtime_attach_session." +
+        std::string(kWhatStillWorks);
+    error.data["incident"] = engineIncidentKindName(EngineIncidentKind::stopped);
+    error.data["cause"] = cause;
+    error.data["recovery"] = recovery;
+    error.data["exit_code"] = stop->exit_code;
+    error.data["requested_by"] = "runtime_stop";
+    error.data["retryable"] = false;
+    recordRouteObstruction(RouteObstruction{engineIncidentKindName(EngineIncidentKind::stopped),
+                                            cause, recovery, session->pid, session->session_id, 0});
+    return true;
+}
+
 void recordRequestedStop(RequestedStop stop) {
     if (stop.at_ms == 0) {
         stop.at_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -952,32 +986,8 @@ void annotateEngineState(Error& error, const std::optional<SessionDescriptor>& s
                                       {"in_extension", crash.in_extension}};
     }
 
-    // A game this server asked to exit is not a lost engine. It answered the
-    // stop, it is gone because of it, and the exit code is the one the caller
-    // chose; reporting that as a timeout to retry sent every caller into a
-    // loop against a process that will never answer (#595).
-    if (const auto stop = requestedStopFor(session->pid, session->session_id)) {
-        const bool gone = report.state != ProcessInstanceState::alive;
-        const std::string code = std::to_string(stop->exit_code);
-        const std::string cause =
-            gone ? "runtime_stop asked the game to exit with code " + code + ", and it did."
-                 : "runtime_stop asked the game to exit with code " + code +
-                       "; it is still shutting down.";
-        const std::string recovery =
-            "The game is gone because this caller asked. Launch it again, or call "
-            "runtime_list_sessions and attach the editor with runtime_attach_session." +
-            std::string(kWhatStillWorks);
-        error.data["incident"] = engineIncidentKindName(EngineIncidentKind::stopped);
-        error.data["cause"] = cause;
-        error.data["recovery"] = recovery;
-        error.data["exit_code"] = stop->exit_code;
-        error.data["requested_by"] = "runtime_stop";
-        error.data["retryable"] = false;
-        recordRouteObstruction(RouteObstruction{engineIncidentKindName(EngineIncidentKind::stopped),
-                                                cause, recovery, session->pid, session->session_id,
-                                                0});
-        return;
-    }
+    // A game this server asked to exit is not a lost engine (#595).
+    if (annotateRequestedStop(error, session)) return;
 
     // The facts above say what happened. Without this the caller still has to
     // work out what to do about it, and the thing it does by default is call

@@ -124,6 +124,9 @@ struct ControlRoomInputs {
 
     bool connected{false};
     std::optional<std::string> session_kind;
+    // The stop this server asked of the attached session, while the session
+    // still answers during its shutdown (#595).
+    std::optional<runtime::RequestedStop> requested_stop;
     bool managed_unavailable{false};
     // Whether the server was started in managed mode; off means the four
     // recovery tools are unavailable, and the tool rows say so (#599).

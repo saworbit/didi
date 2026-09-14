@@ -3504,15 +3504,28 @@ try {
     $stopById = @{}
     foreach ($response in $stopResponses) { $stopById[[int]$response.id] = $response }
     Assert-True ((Tool-Payload $stopById[332]).shutdown_requested -eq $true) "Runtime stop did not report a shutdown request."
-    Assert-True $stopById[334].result.isError "runtime_get_session reached a game this caller had stopped."
-    $stoppedText = $stopById[334].result.content[0].text
-    $stopped = $stoppedText | ConvertFrom-Json
-    $stoppedIncident = $stopped.error.data.incident
-    $stoppedObstruction = $stopped.error.data.route_obstruction
-    Assert-True (($stoppedIncident -eq "game_stopped" -and $stopped.error.data.exit_code -eq 0 -and $stopped.error.data.requested_by -eq "runtime_stop") -or ($null -ne $stoppedObstruction -and $stoppedObstruction.kind -eq "game_stopped")) "A call after runtime_stop did not report the requested exit: $stoppedText"
-    Assert-True ($stopped.error.data.retryable -eq $false) "A call after runtime_stop still invited a retry: $stoppedText"
+    # The first live call after the stop lands while the loop is gone and the
+    # process still tearing down, or after it has gone; both are the exit this
+    # caller asked for, and neither is a retry.
+    $afterStopText = $stopById[333].result.content[0].text
+    Assert-True $stopById[333].result.isError "A live call after runtime_stop still reached the game: $afterStopText"
+    $afterStop = $afterStopText | ConvertFrom-Json
+    $afterStopObstruction = $afterStop.error.data.route_obstruction
+    Assert-True (($afterStop.error.data.incident -eq "game_stopped" -and $afterStop.error.data.exit_code -eq 0 -and $afterStop.error.data.requested_by -eq "runtime_stop") -or ($null -ne $afterStopObstruction -and $afterStopObstruction.kind -eq "game_stopped")) "The first call after runtime_stop did not report the requested exit: $afterStopText"
+    Assert-True ($afterStop.error.data.retryable -eq $false) "A call after runtime_stop still invited a retry: $afterStopText"
+    # A handshake can still succeed while the process tears down; then the
+    # answer says what the caller did. Once it is gone, the answer is the exit.
+    $sessionText = $stopById[334].result.content[0].text
+    $sessionAfterStop = $sessionText | ConvertFrom-Json
+    if ($stopById[334].result.isError) {
+        $sessionObstruction = $sessionAfterStop.error.data.route_obstruction
+        Assert-True (($sessionAfterStop.error.data.incident -eq "game_stopped") -or ($null -ne $sessionObstruction -and $sessionObstruction.kind -eq "game_stopped")) "runtime_get_session after runtime_stop did not report the requested exit: $sessionText"
+    } else {
+        Assert-True ($sessionAfterStop.stop_requested.exit_code -eq 0 -and $sessionAfterStop.stop_requested.requested_by -eq "runtime_stop") "runtime_get_session reached the stopping game and did not say the exit was requested: $sessionText"
+    }
     $roomAfterStop = Tool-Payload $stopById[335]
-    Assert-True (($roomAfterStop | ConvertTo-Json -Compress -Depth 8) -match "game_stopped") "The control room did not say the game was stopped on request."
+    $roomAfterStopText = $roomAfterStop | ConvertTo-Json -Compress -Depth 8
+    Assert-True ($roomAfterStopText -match "Game stopped|game_stopped") "The control room did not say the game was stopped on request: $($roomAfterStopText.Substring(0, [Math]::Min(600, $roomAfterStopText.Length)))"
 
     $stopDeadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
     while ([DateTime]::UtcNow -lt $stopDeadline -and -not $game.HasExited) { Start-Sleep -Milliseconds 100 }

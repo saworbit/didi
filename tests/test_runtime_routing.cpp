@@ -794,12 +794,23 @@ void test_a_requested_stop_is_reported_as_the_exit_it_is() {
     ASSERT_EQ(later.data["route_obstruction"]["kind"].get<std::string>(), std::string("game_stopped"));
     ASSERT_FALSE(later.data["retryable"].get<bool>());
 
+    // The extension refusing because its loop has stopped, while the process
+    // still answers, is the same requested exit.
+    didi::Error refused(503, "Godot main-loop bridge is not running");
+    descriptor.session_id = "stopped-on-request";
+    ASSERT_TRUE(didi::runtime::annotateRequestedStop(refused, descriptor));
+    ASSERT_EQ(refused.data["incident"].get<std::string>(), std::string("game_stopped"));
+    ASSERT_FALSE(refused.data["retryable"].get<bool>());
+
     // A different session on the same pid was not the one asked to stop.
     descriptor.session_id = "another-session";
     didi::Error other(504, "Cannot connect");
     didi::runtime::annotateEngineState(other, descriptor);
     ASSERT_TRUE(!other.data.contains("incident") ||
                 other.data["incident"].get<std::string>() != "game_stopped");
+    didi::Error untouched(503, "x");
+    ASSERT_FALSE(didi::runtime::annotateRequestedStop(untouched, descriptor));
+    ASSERT_TRUE(!untouched.data.is_object() || !untouched.data.contains("incident"));
     ASSERT_EQ(std::string(didi::runtime::engineIncidentKindName(
                   didi::runtime::EngineIncidentKind::stopped)),
               std::string("game_stopped"));
