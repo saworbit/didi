@@ -223,8 +223,15 @@ void EditorHook::processQueue() {
                 scheduleRuntimeStep(frames, cmd.response_promise, cmd.control);
                 continue;
             }
-            if (cmd.method == "vision.captureViewport" &&
-                scheduleMainScreenCapture(cmd.params, cmd.response_promise, cmd.control)) {
+            // Every method that takes a frame off an editor viewport, not just
+            // the first one that needed it. viewport_diff_capture takes its own
+            // comparison capture, so without this it compared the baseline
+            // against whatever was last rendered in a viewport with no size and
+            // reported bit_identical for a frame that had wholly changed (#568).
+            if ((cmd.method == "vision.captureViewport" || cmd.method == "vision.diffViewport" ||
+                 cmd.method == "vision.capturePasses") &&
+                scheduleMainScreenCapture(cmd.method, cmd.params, cmd.response_promise,
+                                          cmd.control)) {
                 continue;
             }
             if (cmd.method == "scene.callMethod" &&
@@ -883,6 +890,7 @@ void EditorHook::scheduleAssetReimport(
 }
 
 bool EditorHook::scheduleMainScreenCapture(
+    const std::string& method,
     const json& params,
     const std::shared_ptr<std::promise<json>>& promise,
     const std::shared_ptr<CommandControl>& control) {
@@ -898,7 +906,10 @@ bool EditorHook::scheduleMainScreenCapture(
         return refuse(409, "select_main_screen applies to an editor session. A game has one "
                            "viewport and no main screen to choose.");
     }
-    const auto identifier = params.value("camera_identifier", std::string());
+    // The same default the renderers apply, so a call that names no camera
+    // selects the screen the frame will actually be taken from rather than
+    // being told to name one the tool already defaults to.
+    const auto identifier = params.value("camera_identifier", std::string("active_editor_view"));
     const auto viewport = selectEditorViewport(identifier);
     if (!viewport.has_value()) {
         return refuse(400, "select_main_screen needs a camera_identifier naming an editor "
@@ -928,7 +939,7 @@ bool EditorHook::scheduleMainScreenCapture(
 
     std::lock_guard<std::recursive_mutex> lock(m_reimportMutex);
     m_pendingMainScreenCapture = PendingMainScreenCapture{
-        params, target, previous.value_or(std::string()), 1, promise, control
+        method, params, target, previous.value_or(std::string()), 1, promise, control
     };
     DIDI_LOG_INFO("EDITOR_HOOK", "Selected the ", target,
                   " main screen for a capture; answering next frame");
@@ -948,8 +959,9 @@ void EditorHook::processMainScreenCaptureFrame() {
         m_pendingMainScreenCapture.reset();
     }
 
-    json result = ViewportRenderer::instance().captureViewport(ready->params,
-                                                               sessionKindName(m_sessionKind));
+    // Through the ordinary dispatcher, so the deferred answer is the same
+    // answer the synchronous path gives, guards included.
+    json result = executeOnMainThread(ready->method, ready->params);
 
     // Put the editor back the way it was found, whatever the capture did. A
     // main screen an addon owns cannot be named back, so that is said rather

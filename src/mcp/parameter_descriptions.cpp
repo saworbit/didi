@@ -51,6 +51,11 @@ const std::unordered_map<std::string, std::string>& sharedDescriptions() {
          "Add the symbol when the script does not declare it. Off by default: a patch names "
          "a symbol that is there, and appending one for a misspelt name leaves dead code "
          "beside the symbol you meant to edit. The result says which happened with created."},
+        {"select_main_screen",
+         "Select the editor main screen this camera_identifier belongs to before capturing, "
+         "then put the previous one back. An editor viewport has no size unless its main "
+         "screen is showing, so without this an unattended agent cannot capture one at all. "
+         "Editor sessions only."},
         {"collision_mask",
          "Physics layers to test against, as a bit mask. Defaults to 1, layer one only."},
         {"board",

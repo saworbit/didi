@@ -189,7 +189,7 @@ private:
     // Selects the main screen a capture needs, then answers it a frame later.
     // Returns false when the request does not need this, so the caller runs the
     // ordinary synchronous path.
-    bool scheduleMainScreenCapture(const json& params,
+    bool scheduleMainScreenCapture(const std::string& method, const json& params,
                                    const std::shared_ptr<std::promise<json>>& promise,
                                    const std::shared_ptr<CommandControl>& control);
     void processMainScreenCaptureFrame();
@@ -217,6 +217,10 @@ private:
     // not do it, measured on 4.7.2. So the capture cannot be answered in the
     // frame that asked for it (#381).
     struct PendingMainScreenCapture {
+        // Which vision method to answer with once the screen is showing. All
+        // three take a frame off an editor viewport, and a viewport that is not
+        // on screen has no size, so all three need this (#568).
+        std::string method;
         json params;
         std::string selected_screen;
         // Empty when the screen that was showing is one this cannot name, which

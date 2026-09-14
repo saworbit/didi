@@ -2046,7 +2046,11 @@ try {
         (Tool-Request 402 "scene_open" @{ scene_path = "res://main.tscn" }),
         (Tool-Request 403 "viewport_capture_frame" @{ camera_identifier = "active_editor_view" }),
         (Tool-Request 404 "project_search_text" @{ query = "DIDI_PHASE4_SEARCH_PROBE"; search_path = "res://"; extensions = @(".gd"); max_results = 10 }),
-        (Tool-Request 405 "project_search_symbols" @{ query = "phase_four_probe"; search_path = "res://"; extensions = @(".gd"); match = "exact"; kinds = @("function"); max_results = 10 })
+        (Tool-Request 405 "project_search_symbols" @{ query = "phase_four_probe"; search_path = "res://"; extensions = @(".gd"); match = "exact"; kinds = @("function"); max_results = 10 }),
+        # A real 2D frame to diff against later. It has to be taken with the
+        # main screen showing or it is Godot's 2x2 minimum, which is the whole
+        # point of the opt-in.
+        (Tool-Request 2408 "viewport_capture_frame" @{ camera_identifier = "editor_2d"; select_main_screen = $true })
     )
     $rawPhase4BaselineResponses = Invoke-Didi -Requests $phase4BaselineRequests -Arguments @("--project", $fixtureRoot)
     $phase4BaselineResponses = @($rawPhase4BaselineResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
@@ -2062,6 +2066,8 @@ try {
     # improve (#419).
     Assert-True ($textSearch.execution_mode -eq "local" -and @($textSearch.matches).Count -eq 2) "Bounded project text search did not find the fixture probe."
     Assert-True ($textSearch.matches[0].path -eq "res://subject.gd") "Project text search leaked a non-resource result path."
+    $twoDBaseline = Tool-Payload $phase4BaselineById[2408]
+    Assert-True ($twoDBaseline.capture_id -match '^[0-9a-f]{32}$') "The 2D baseline capture did not return a process-local ID."
     $symbolSearch = Tool-Payload $phase4BaselineById[405]
     Assert-True ($symbolSearch.lexical -eq $true -and @($symbolSearch.matches).Count -eq 1) "Lexical symbol search did not find exactly one fixture function."
     Assert-True ($symbolSearch.matches[0].name -eq "phase_four_probe" -and $symbolSearch.matches[0].kind -eq "function") "Symbol search returned the wrong declaration."
@@ -2091,7 +2097,24 @@ try {
         # own label, which for a 2D project reads as an empty scene.
         (Tool-Request 2258 "viewport_capture_frame" @{ camera_identifier = "2d" }),
         (Tool-Request 2259 "viewport_capture_frame" @{ camera_identifier = "canvas_item" }),
-        (Tool-Request 2261 "viewport_capture_frame" @{ camera_identifier = "not_a_viewport" })
+        (Tool-Request 2261 "viewport_capture_frame" @{ camera_identifier = "not_a_viewport" }),
+        # viewport_diff_capture takes its own comparison capture and had no way
+        # to make the viewport it is capturing render. So it compared the
+        # baseline against whatever was last drawn in a viewport with no size
+        # and answered bit_identical for a frame that had wholly changed, which
+        # is the worst failure available to the one tool whose job is to say
+        # whether anything moved (#568). A 900x700 red rectangle is added to the
+        # 2D frame between the baseline and the diff, and undone afterwards.
+        (Tool-Request 2409 "scene_instantiate_node" @{ node_type = "ColorRect"; parent_path = "/root/SmokeRoot"; name = "DiffScreenProbe" }),
+        (Tool-Request 2410 "scene_set_property" @{ target_node = "/root/SmokeRoot/DiffScreenProbe"; property_name = "size"; value = @{ x = 900; y = 700 } }),
+        (Tool-Request 2411 "scene_set_property" @{ target_node = "/root/SmokeRoot/DiffScreenProbe"; property_name = "color"; value = @{ r = 1; g = 0; b = 0; a = 1 } }),
+        (Tool-Request 2412 "viewport_diff_capture" @{ baseline_capture_id = $twoDBaseline.capture_id; camera_identifier = "editor_2d"; select_main_screen = $true; threshold = 0 }),
+        # The sibling that takes a frame off the same viewport and could not ask
+        # for the screen either.
+        (Tool-Request 2413 "viewport_capture_passes" @{ passes = @("color"); camera_identifier = "editor_2d"; select_main_screen = $true }),
+        (Tool-Request 2414 "editor_undo" @{}),
+        (Tool-Request 2415 "editor_undo" @{}),
+        (Tool-Request 2416 "editor_undo" @{})
     )
     $rawPhase4Responses = Invoke-Didi -Requests $phase4Requests -Arguments @("--project", $fixtureRoot)
     $phase4Responses = @($rawPhase4Responses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
@@ -2138,6 +2161,21 @@ try {
     $changedDiff = Tool-Payload $phase4ById[416]
     Assert-True ($changedDiff.changed_pixels -gt 0 -and $null -ne $changedDiff.bounding_box) "Visual mutation did not produce a bounded non-empty pixel diff."
     Assert-True ($changedDiff.comparison_capture_id -match '^[0-9a-f]{32}$') "Viewport diff did not retain the fresh comparison capture."
+
+    # The diff's own comparison capture has to come off a viewport that was made
+    # to render. Without the opt-in it came off one with no size and the answer
+    # was agreement (#568).
+    $twoDDiffText = ($phase4ById[2412].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+    Assert-True (-not $phase4ById[2412].result.isError) "viewport_diff_capture refused select_main_screen: $twoDDiffText"
+    $twoDDiff = Tool-Payload $phase4ById[2412]
+    Assert-True ($twoDDiff.main_screen_selected -eq "2D") "viewport_diff_capture did not select the 2D main screen before taking its comparison capture."
+    Assert-True ($twoDDiff.bit_identical -eq $false -and $twoDDiff.changed_pixels -gt 0) "viewport_diff_capture reported an unchanged 2D frame after a 900x700 rectangle was added to it."
+    $twoDPassesText = ($phase4ById[2413].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+    Assert-True (-not $phase4ById[2413].result.isError) "viewport_capture_passes refused select_main_screen: $twoDPassesText"
+    # A pass capture answers with its images first and its metadata as the one
+    # text item, so the payload is read out of that rather than off content[0].
+    $twoDPasses = (@($phase4ById[2413].result.content | Where-Object type -eq "text")[0].text | ConvertFrom-Json)
+    Assert-True ($twoDPasses.main_screen_selected -eq "2D") "viewport_capture_passes did not select the 2D main screen before capturing."
     Assert-True (@($phase4ById[416].result.content | Where-Object type -eq "image").Count -eq 1) "Viewport diff did not return exactly one PNG content item."
     $restoredDiff = Tool-Payload $phase4ById[418]
     Assert-True ($restoredDiff.identical -eq $true -and $restoredDiff.changed_pixels -eq 0) "Undo did not restore an exact baseline viewport at threshold zero."
