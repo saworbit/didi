@@ -1118,7 +1118,9 @@ Result<void> prepareNativePropertyReads(const std::string& source,
         }
         if (getter_name.empty()) {
             return Error(403,
-                         "node.get is limited to native ClassDB-defined properties");
+                         "node.get reads native ClassDB properties only. A script's own variable is "
+                         "refused because reading it can run its getter; read a native property "
+                         "such as node.get(\"position\").x instead.");
         }
         auto property_value = callObject(class_db.value(), "ClassDB",
                                          "class_get_property", 2498641674LL,

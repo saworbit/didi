@@ -151,9 +151,13 @@ Result<json> RuntimeLogRing::read(uint64_t cursor, size_t limit, std::string_vie
     uint64_t next_cursor = start;
     json records = json::array();
     const int minimum_rank = levelRank(minimum_level);
+    bool inspected_any = false;
+    uint64_t last_inspected = 0;
 
     for (const auto& record : m_records) {
         if (record.sequence < start) continue;
+        inspected_any = true;
+        last_inspected = record.sequence;
         next_cursor = record.sequence == std::numeric_limits<uint64_t>::max()
             ? std::numeric_limits<uint64_t>::max() : record.sequence + 1;
         if (levelRank(record.level) < minimum_rank) continue;
@@ -170,12 +174,23 @@ Result<json> RuntimeLogRing::read(uint64_t cursor, size_t limit, std::string_vie
         if (records.size() >= limit) break;
     }
 
+    // Whether the ring still holds records past this page, which is the one
+    // thing a pager reads. Retained records past the last one inspected,
+    // whatever their level: the cursor advances over what a filter excludes,
+    // so a page that stopped at its limit has more to inspect even when the
+    // rest would be filtered. The field this replaces was `exhausted`, which
+    // said the 64-bit sequence had wrapped, and read as "there is more" on
+    // every page of every session (#598).
+    const bool has_more = !m_records.empty() &&
+                          (inspected_any ? m_records.back().sequence > last_inspected
+                                         : m_records.back().sequence >= start);
     return json{
         {"records", std::move(records)},
         {"next_cursor", next_cursor},
         {"oldest_cursor", oldest},
         {"dropped_before_cursor", dropped},
-        {"exhausted", m_exhausted}
+        {"has_more", has_more},
+        {"sequence_overflowed", m_exhausted}
     };
 }
 

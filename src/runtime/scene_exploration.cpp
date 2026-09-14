@@ -113,6 +113,14 @@ Result<SceneExplorationRequest> parseSceneExplorationRequest(const json& params)
                             request.stuck_ms);
     if (stuck.isErr()) return stuck.error();
     request.stuck_ms = stuck.value();
+    // The default has to be valid for every window the schema accepts. A
+    // caller who set a short duration and nothing else was refused, because
+    // the default stuck interval was longer than the window, so the default is
+    // the smaller of 3000 and the window (#596). A caller who sets both and
+    // gets them backwards is still refused below.
+    if (!params.contains("stuck_ms")) {
+        request.stuck_ms = std::min(request.stuck_ms, request.duration_ms);
+    }
 
     auto pause = boundedBool(params, "pause_on_stuck", request.pause_on_stuck);
     if (pause.isErr()) return pause.error();

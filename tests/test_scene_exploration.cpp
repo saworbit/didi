@@ -106,6 +106,17 @@ void test_request_defaults_and_refusals() {
     negative_epsilon["movement_epsilon"] = -0.5;
     ASSERT_TRUE(rejected(negative_epsilon));
 
+    // A short window and nothing else is a valid request: the default stuck
+    // interval follows the window down, so a caller does not have to know
+    // about stuck_ms to ask for a short run (#596).
+    auto short_window = minimalParams();
+    short_window["duration_ms"] = 800;
+    ASSERT_EQ(parsed(short_window).stuck_ms, 800);
+    auto backwards = minimalParams();
+    backwards["duration_ms"] = 800;
+    backwards["stuck_ms"] = 900;
+    ASSERT_TRUE(rejected(backwards));
+
     // A stuck window longer than the run is a condition the run could never
     // report, which is worse than refusing it.
     auto unreportable = minimalParams();

@@ -187,7 +187,39 @@ static void test_runtime_log_ring_stops_before_sequence_wraparound() {
     const auto page = ring.read(0, 1, "debug");
     ASSERT_TRUE(page.isOk());
     ASSERT_EQ(page.value()["records"][0]["sequence"], std::numeric_limits<uint64_t>::max());
-    ASSERT_TRUE(page.value()["exhausted"]);
+    ASSERT_TRUE(page.value()["sequence_overflowed"]);
+    // The last record is the last record; a page that read it has no more,
+    // even though its cursor can go no further.
+    ASSERT_TRUE(!page.value()["has_more"]);
+    ASSERT_TRUE(!page.value().contains("exhausted"));
+}
+
+static void test_runtime_log_ring_says_whether_a_page_has_more() {
+    // Break caught: every page carried exhausted: false, the sequence-overflow
+    // flag, and nothing said whether the ring held records past the page, so
+    // a caller paging until "exhausted" turned true never stopped (#598).
+    didi::godot::RuntimeLogRing ring(8);
+    for (const char* message : {"one", "two", "three", "four"}) {
+        ASSERT_TRUE(ring.append("info", "test", message).isOk());
+    }
+    const auto first = ring.read(0, 2, "debug").value();
+    ASSERT_EQ(first["records"].size(), 2u);
+    ASSERT_TRUE(first["has_more"]);
+    ASSERT_TRUE(!first["sequence_overflowed"]);
+    const auto second = ring.read(first["next_cursor"].get<uint64_t>(), 2, "debug").value();
+    ASSERT_EQ(second["records"].size(), 2u);
+    ASSERT_TRUE(!second["has_more"]);
+    const auto empty = ring.read(second["next_cursor"].get<uint64_t>(), 2, "debug").value();
+    ASSERT_EQ(empty["records"].size(), 0u);
+    ASSERT_TRUE(!empty["has_more"]);
+    // A filter that excludes the rest does not turn has_more off: the cursor
+    // still has records to advance over.
+    const auto filtered = ring.read(0, 1, "error").value();
+    ASSERT_EQ(filtered["records"].size(), 0u);
+    ASSERT_TRUE(!filtered["has_more"]);
+    ASSERT_TRUE(ring.append("error", "test", "five").isOk());
+    const auto page_before_error = ring.read(0, 2, "debug").value();
+    ASSERT_TRUE(page_before_error["has_more"]);
 }
 
 static void test_logger_sink_mirrors_records_below_console_threshold() {
@@ -227,6 +259,7 @@ struct RegisterRuntimeLogTests {
         registerTest("RuntimeLogs.MalformedUtf8", test_runtime_log_ring_replaces_malformed_utf8_scalars);
         registerTest("RuntimeLogs.PublicContract", test_runtime_log_ring_rejects_invalid_levels_and_queries);
         registerTest("RuntimeLogs.SequenceExhaustion", test_runtime_log_ring_stops_before_sequence_wraparound);
+        registerTest("RuntimeLogs.PageSaysWhetherThereIsMore", test_runtime_log_ring_says_whether_a_page_has_more);
         registerTest("RuntimeLogs.LoggerSinkMirroring", test_logger_sink_mirrors_records_below_console_threshold);
         registerTest("RuntimeLogs.LoggerColourOnlyWhenAsked", test_logger_writes_no_escape_codes_without_colour);
         registerTest("RuntimeLogs.LoggerParsesLevels", test_logger_parses_every_level_name);
