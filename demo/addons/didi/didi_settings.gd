@@ -26,6 +26,14 @@ const CLIENT_LOG_LEVEL := "didi/client/log_level"
 const CLIENT_SKIP_CONFIRMATIONS := "didi/client/skip_confirmations"
 const CLIENT_PIPE_NAME := "didi/client/pipe_name"
 
+## The one setting that is a project setting rather than an editor setting:
+## the level the native extension logs at. It has to reach every process that
+## loads the addon, the editor and every game it runs, and only project.godot
+## travels with both. WARN by default, so a game's own output is not two INFO
+## lines per tool call; DIDI_LOG_LEVEL in the environment still wins.
+const NATIVE_LOG_LEVEL := "didi/native/log_level"
+const NATIVE_LOG_LEVEL_DEFAULT := "WARN"
+
 const LOG_LEVELS := ["DEBUG", "INFO", "WARN", "ERROR", "NONE"]
 
 const _DEFAULTS := {
@@ -69,6 +77,21 @@ static func ensure_registered() -> void:
 		"hint": PROPERTY_HINT_ENUM,
 		"hint_string": ",".join(LOG_LEVELS),
 	})
+
+
+## Declares the native log level under Project Settings so it can be found and
+## set there. The extension reads it at startup and needs nothing from here.
+static func ensure_project_settings_registered() -> void:
+	if not ProjectSettings.has_setting(NATIVE_LOG_LEVEL):
+		ProjectSettings.set_setting(NATIVE_LOG_LEVEL, NATIVE_LOG_LEVEL_DEFAULT)
+	ProjectSettings.set_initial_value(NATIVE_LOG_LEVEL, NATIVE_LOG_LEVEL_DEFAULT)
+	ProjectSettings.add_property_info({
+		"name": NATIVE_LOG_LEVEL,
+		"type": TYPE_STRING,
+		"hint": PROPERTY_HINT_ENUM,
+		"hint_string": ",".join(LOG_LEVELS),
+	})
+	ProjectSettings.set_as_basic(NATIVE_LOG_LEVEL, true)
 
 
 static func get_value(key: String) -> Variant:

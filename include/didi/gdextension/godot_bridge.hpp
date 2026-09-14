@@ -169,6 +169,11 @@ public:
                                                    const std::string& session_kind,
                                                    double requested_depth_far);
     Result<void> forceDraw();
+    // A string project setting, or nothing when the project does not set it
+    // or the engine cannot answer yet. Read at initialization for the
+    // extension's own log level (#601).
+    std::optional<std::string> projectSettingString(const std::string& name);
+
     // Hands Input the events runtime.injectInput held while the tree was
     // paused, so they land in the first frame that processes. Called by
     // runtime.setPaused on the way to running, which the step also takes.

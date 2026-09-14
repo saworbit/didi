@@ -88,9 +88,29 @@ static void didi_main_loop_shutdown() {
     EditorHook::instance().cancelPendingCommands("Godot main loop is shutting down");
 }
 
+// The level the extension logs at, once the project can be asked.
+//
+// The extension ships inside the addon, so a game exported with it, or run
+// from the editor, wrote two INFO lines per tool call into its own output at
+// the default level, with nothing but an environment variable to lower it
+// (#601). The order is the environment, then the didi/native/log_level
+// project setting, then the WARN the library entry point already applied.
+static void applyProjectLogLevel() {
+    if (Logger::levelSetByEnvironment()) return;
+    const auto configured = GodotBridge::instance().projectSettingString("didi/native/log_level");
+    if (!configured.has_value()) return;
+    if (auto level = Logger::parseLevel(*configured)) {
+        Logger::instance().setLevel(*level);
+    } else {
+        DIDI_LOG_WARN("GDEXTENSION", "didi/native/log_level names no level: ", *configured,
+                      "; expected DEBUG, INFO, WARN, ERROR or NONE");
+    }
+}
+
 static void initialize_didi_module(void *userdata, GDExtensionInitializationLevel p_level) {
     (void)userdata;
     if (p_level == GDEXTENSION_INITIALIZATION_SCENE) {
+        applyProjectLogLevel();
         const auto kind = engineIsEditorHint() ? "editor" : "game";
         const auto resolved_project = resolveGodotProjectPath();
         const auto project_path = resolved_project.isOk() ? resolved_project.value() : fallbackCanonicalProjectPath();
@@ -156,6 +176,15 @@ GDE_EXPORT GDExtensionBool didi_library_init(GDExtensionInterfaceGetProcAddress 
         r_initialization->minimum_initialization_level = GDEXTENSION_INITIALIZATION_CORE;
         DIDI_LOG_INFO("GDEXTENSION", "Didi runtime disabled for isolated offline helper");
         return 1;
+    }
+    // The extension's console lines go wherever the engine's stderr goes: the
+    // terminal that launched the editor, or a game's own output. INFO is the
+    // server's default, where the lines are the operator's log; here they are
+    // noise in someone else's stream, so the default is WARN. DIDI_LOG_LEVEL
+    // still wins, and the project setting is applied once the project can be
+    // read (#601).
+    if (!didi::Logger::levelSetByEnvironment()) {
+        didi::Logger::instance().setLevel(didi::LogLevel::Warn);
     }
     didi::godot::GodotApi::instance().init(p_get_proc_address, p_library, r_initialization);
 
