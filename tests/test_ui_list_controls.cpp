@@ -103,9 +103,14 @@ void test_a_game_session_is_allowed_by_every_gate() {
     ASSERT_TRUE(didi::mcp::liveAllowedFor("ui_list_controls", false, "game"));
     ASSERT_TRUE(didi::mcp::liveAllowedFor("ui_list_controls", false, "editor"));
 
-    // And the neighbouring tool stays editor-only: it needs an editor viewport,
-    // and widening this one must not widen that one.
-    ASSERT_FALSE(didi::mcp::liveAllowedFor("ui_hit_test", false, "game"));
+    // The neighbouring tool answers the opposite question of the same read, so
+    // it is admitted by the same three gates: a game is where a caller most
+    // needs to know what sits under a point before injecting a click (#592).
+    ASSERT_TRUE(didi::runtime::livePolicyForTool("ui_hit_test") ==
+                LiveSessionKindPolicy::editor_or_game);
+    ASSERT_TRUE(didi::runtime::livePolicyForMethod("ui.hitTest") ==
+                LiveSessionKindPolicy::editor_or_game);
+    ASSERT_TRUE(didi::mcp::liveAllowedFor("ui_hit_test", false, "game"));
     ASSERT_TRUE(didi::mcp::liveAllowedFor("ui_hit_test", false, "editor"));
 }
 
