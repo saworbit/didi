@@ -745,13 +745,24 @@ jobs:
           # the entry a host reads nor the answer it gets may say fallback. #419
           # fixed the answers and the entry kept the old word, which is how
           # eleven tools came to advertise one mode and report another (#503).
+          # Implemented and switched off is a third state: the four
+          # managed-recovery tools keep their local mode in executionModes and
+          # report unavailable while the server runs without --managed-editor,
+          # so a host does not offer a tool every call refuses (#599).
+          recovery_tools = {'runtime_checkpoint', 'runtime_recovery_status',
+                            'runtime_restore_checkpoint', 'runtime_recover_editor'}
           for name, tool in by_name.items():
               meta = tool['_meta']['didi']
               if not meta['implemented'] or 'live' in meta['executionModes']:
                   continue
               assert 'offline_fallback' not in meta['executionModes'], (name, meta)
               assert meta['currentMode'] != 'offline_fallback', (name, meta)
+              if meta['currentMode'] == 'unavailable':
+                  assert name in recovery_tools, (name, meta)
+                  continue
               assert meta['executionModes'] == [meta['currentMode']], (name, meta)
+          for name in recovery_tools:
+              assert by_name[name]['_meta']['didi']['currentMode'] == 'unavailable', (name, by_name[name]['_meta']['didi'])
 
           project = json.loads(req('resources/read', {'uri': 'godot://project/tree'}, 3)['result']['contents'][0]['text'])
           # A filesystem index with no live path, so there is nothing for it
