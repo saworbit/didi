@@ -113,7 +113,7 @@ Administrators can configure Didi globally or per-service using standard environ
 | `GODOT_BIN` | File path | Auto-detected | Path to the Godot binary executable (e.g. `C:\Godot\Godot_v4.7.2-stable_win64_console.exe` or `/usr/bin/godot`) |
 | `GODOT_PATH` | Directory path | Auto-detected | Directory or path containing Godot executable |
 | `DIDI_PROJECT_ROOT` | Directory path | Required unless `--project` is supplied | Root folder of the target Godot project containing `project.godot` (e.g. `D:/my_game`) |
-| `DIDI_LOG_LEVEL` | `DEBUG`, `INFO`, `WARN`, `ERROR`, `NONE` | `INFO` | Stderr logging verbosity |
+| `DIDI_LOG_LEVEL` | `DEBUG`, `INFO`, `WARN`, `ERROR`, `NONE` | `INFO` for the server, `WARN` for the extension | Stderr logging verbosity. The extension inside the addon writes to whatever stream the engine's stderr is, the editor's terminal or a game's own output, so its default is `WARN`; the `didi/native/log_level` project setting raises or lowers it for every process that loads the addon, and this variable wins over both. Colour is used only when stderr is a terminal. |
 | `DIDI_PIPE_NAME` | Pipe / Socket Path | Default | Override Named Pipe / UNIX domain socket path |
 | `DIDI_SESSION_DIR` | Directory path | Windows: `<OS temp>/didi-sessions`; POSIX: `$XDG_RUNTIME_DIR/didi-sessions`, otherwise `<OS temp>/didi-sessions-<euid>` | Controlled test/deployment override for the descriptor registry; Didi validates paths/handles but the operator must provision access controls appropriate to the host. |
 

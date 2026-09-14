@@ -172,7 +172,7 @@ declares no content-security-policy domains and the host's default `default-src
 | :--- | :--- | :--- |
 | `GODOT_BIN` | auto-detected | Explicit path to the Godot binary (e.g. `C:\Godot\Godot_v4.7.2-stable_win64_console.exe`) |
 | `GODOT_PATH` | auto-detected | Fallback path to the Godot installation directory |
-| `DIDI_LOG_LEVEL` | `INFO` | Logging verbosity: `DEBUG`, `INFO`, `WARN`, `ERROR`, `NONE` |
+| `DIDI_LOG_LEVEL` | `INFO` (server), `WARN` (extension) | Logging verbosity: `DEBUG`, `INFO`, `WARN`, `ERROR`, `NONE`. The extension's level can also be set per project with the `didi/native/log_level` project setting; the variable wins over it. Colour codes are written only to a terminal. |
 | `DIDI_SESSION_DIR` | Platform registry described above | Controlled descriptor-registry override; both Didi components must run under compatible local accounts, and the operator owns override-directory access controls. |
 
 ---

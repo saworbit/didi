@@ -66,6 +66,20 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The extension no longer prints engine errors at startup and on every
+  dashboard read, and its log stays out of a game's output.** On Godot 4.5
+  and 4.6 every `didi_control_room` call printed `ERROR: Parameter "mb" is
+  null` into the editor's log, because the bind for `get_unsaved_scenes`, a
+  4.7 method, was looked up on every call, and every editor and game printed
+  `non-existent interface function` at startup because a 4.7 class
+  registration function was asked for on every engine (#600). The method is
+  now checked once through `ClassDB.class_has_method`, and the interface
+  function is asked for only from 4.7. The extension also wrote two coloured
+  INFO lines per tool call into a game's own output (#601): its default level
+  is now `WARN`, the `didi/native/log_level` project setting sets it for every
+  process that loads the addon, `DIDI_LOG_LEVEL` still wins over both, and
+  colour codes are written only when stderr is a terminal. The server's
+  default stays `INFO`.
 - **Injected input reaches a paused game's nodes, and a click lands where it
   is aimed.** A paused tree delivers `_input` only to nodes that process while
   paused, so a batch injected during a pause reported `completed` and was gone
