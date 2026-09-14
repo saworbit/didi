@@ -5,9 +5,11 @@
 // compile when it is the first include in a translation unit.
 #include "didi/common/types.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <string>
 
 namespace didi {
 
@@ -34,6 +36,53 @@ inline std::optional<int64_t> boundedJsonInteger(const json& value,
         return std::nullopt;
     }
     return number;
+}
+
+// What a single tool response may serialize to, and the headroom left for the
+// envelope the registry stamps around it.
+//
+// One figure for every reader that composes a bounded answer, so the two levers
+// stay distinguishable: a caller who wants a small answer asks for one, with
+// max_symbols or max_nodes or max_results. This is the other lever, the one for
+// not losing the whole response. 8 MiB is the figure scene_get_hierarchy
+// already published, and the readers that grew a cap later use it too rather
+// than each picking their own (#574, #575).
+constexpr size_t kMaxToolResponseBytes = 8 * 1024 * 1024;
+constexpr size_t kToolResponseEnvelopeReserveBytes = 256 * 1024;
+
+// The budget the body of a response has, once the envelope is allowed for.
+constexpr size_t toolResponseBodyBudget() {
+    return kMaxToolResponseBytes - kToolResponseEnvelopeReserveBytes;
+}
+
+// Replaces every string longer than `threshold` with a note saying how many
+// bytes stood there, and reports how many it replaced.
+//
+// An elision that says nothing is worse than the size it saves: the preview is
+// the artifact a person approves, so a value that was dropped has to say it was
+// dropped and how big it was. Recurses into arrays and objects, because the
+// oversized value is as likely to be one entry of a path list as a top-level
+// argument.
+inline size_t elideLargeStrings(json& value, size_t threshold) {
+    size_t elided = 0;
+    if (value.is_string()) {
+        const auto& text = value.get_ref<const std::string&>();
+        if (text.size() > threshold) {
+            value = "[elided: " + std::to_string(text.size()) + " bytes]";
+            ++elided;
+        }
+        return elided;
+    }
+    if (value.is_array()) {
+        for (auto& entry : value) elided += elideLargeStrings(entry, threshold);
+        return elided;
+    }
+    if (value.is_object()) {
+        for (auto it = value.begin(); it != value.end(); ++it) {
+            elided += elideLargeStrings(it.value(), threshold);
+        }
+    }
+    return elided;
 }
 
 } // namespace didi

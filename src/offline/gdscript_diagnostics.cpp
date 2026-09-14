@@ -1,4 +1,6 @@
 #include "didi/offline/gdscript_diagnostics.hpp"
+
+#include "didi/common/json_bounds.hpp"
 #include "didi/offline/test_runner.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
@@ -1076,13 +1078,24 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text, size_t 
     // Counted across all six kinds. The scan runs to the end of the file either
     // way, because the total is the fact that tells a caller their answer was
     // clipped, and it costs one more pass over lines already read.
+    //
+    // Two levers, and they are different questions. max_symbols is what a
+    // caller sets when they want a smaller answer. The byte budget is the one
+    // that keeps a response from being lost entirely, charged per declaration
+    // the way scene_get_hierarchy charges per node, so the declaration that
+    // crosses the limit is the one that stops rather than the one after it.
     size_t total = 0;
     size_t returned = 0;
-    auto room = [&]() {
+    size_t estimated_bytes = 0;
+    const size_t byte_budget = toolResponseBodyBudget();
+    auto add = [&](json& into, json entry) {
         ++total;
-        if (returned >= max_symbols) return false;
+        if (returned >= max_symbols) return;
+        const size_t entry_bytes = entry.dump().size() + 2;
+        if (estimated_bytes + entry_bytes > byte_budget) return;
+        estimated_bytes += entry_bytes;
         ++returned;
-        return true;
+        into.push_back(std::move(entry));
     };
 
     std::string multiline_delimiter;
@@ -1118,8 +1131,7 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text, size_t 
             }
             const auto after_params = tail.substr(close_paren + 1);
             const auto arrow = after_params.find("->");
-            if (!room()) continue;
-            functions.push_back({
+            add(functions, {
                 {"name", declaration->name},
                 {"parameters", std::string(tail.substr(open_paren + 1, close_paren - open_paren - 1))},
                 {"return_type", arrow == std::string_view::npos
@@ -1129,8 +1141,7 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text, size_t 
             });
         } else if (declaration->kind == "variable") {
             const auto type = readColonType(tail);
-            if (!room()) continue;
-            variables.push_back({
+            add(variables, {
                 {"name", declaration->name},
                 {"exported", exported},
                 {"type", type.empty() ? std::string("Variant") : type},
@@ -1139,8 +1150,7 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text, size_t 
         } else if (declaration->kind == "constant") {
             const auto type = readColonType(tail);
             const auto assign = tail.find('=');
-            if (!room()) continue;
-            constants.push_back({
+            add(constants, {
                 {"name", declaration->name},
                 {"type", type.empty() ? std::string("Variant") : type},
                 {"value", assign == std::string_view::npos
@@ -1154,8 +1164,7 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text, size_t 
             const bool has_arguments = open_paren != std::string_view::npos &&
                                        close_paren != std::string_view::npos &&
                                        close_paren > open_paren;
-            if (!room()) continue;
-            signals.push_back({
+            add(signals, {
                 {"name", declaration->name},
                 {"arguments", has_arguments
                                   ? std::string(tail.substr(open_paren + 1,
@@ -1164,14 +1173,12 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text, size_t 
                 {"line", i + 1}
             });
         } else if (declaration->kind == "enum") {
-            if (!room()) continue;
-            enums.push_back({
+            add(enums, {
                 {"name", declaration->name},
                 {"line", i + 1}
             });
         } else if (declaration->kind == "class") {
-            if (!room()) continue;
-            classes.push_back({
+            add(classes, {
                 {"name", declaration->name},
                 {"line", i + 1}
             });
@@ -1193,7 +1200,10 @@ json GDScriptDiagnostics::extractSymbols(const std::string& source_text, size_t 
         {"symbol_count_total", total},
         {"returned_count", returned},
         {"truncated", returned < total},
-        {"max_symbols", max_symbols}
+        {"max_symbols", max_symbols},
+        // Always reported, the way runtime_get_tree reports its own, so the two
+        // tree-shaped readers answer the same question the same way.
+        {"max_response_bytes", kMaxToolResponseBytes}
     };
 }
 

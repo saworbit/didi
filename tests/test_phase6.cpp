@@ -1,3 +1,4 @@
+#include "didi/common/json_bounds.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/scene_node_path.hpp"
 #include "didi/gdextension/session_host.hpp"
@@ -733,4 +734,48 @@ TEST(Phase6, ParentRelativeNodePathsAreRefusedWithoutAnEngine) {
                                 "/root/..foo", "/root/x..y", "/root/Main/...."}) {
         ASSERT_FALSE(didi::paths::refuseParentRelativeNodePath(allowed).has_value());
     }
+}
+
+// The other lever on a preview, and the one that keeps it deliverable. Every
+// string argument carries a declared bound since #573, but a tool that takes a
+// list of them can still sum past the response budget, and a preview that
+// cannot be delivered is worse than one that says what it left out (#574).
+TEST(Phase6, APreviewStaysInsideItsResponseBudget) {
+    ScopedPhase6Directory directory("preview-response-budget");
+    didi::mcp::MutationSafety safety;
+    auto context = offlineContext(directory.root);
+
+    // A list of large paths: the shape a per-argument bound cannot catch.
+    didi::json paths = didi::json::array();
+    for (int index = 0; index < 40; ++index) {
+        paths.push_back("res://" + std::string(300000, 'a') + std::to_string(index) + ".tscn");
+    }
+    const didi::json arguments = {{"paths", paths}};
+    const auto preview =
+        evaluateBinding(safety, "project_apply_changes", dryRun(arguments), context);
+    ASSERT_FALSE(preview.is_error);
+    const auto& mutation_preview = preview.payload["mutation_preview"];
+
+    // Published whether or not it was reached, and reached here.
+    ASSERT_EQ(mutation_preview["max_response_bytes"].get<size_t>(), didi::kMaxToolResponseBytes);
+    ASSERT_EQ(mutation_preview["truncated"], true);
+    ASSERT_TRUE(preview.payload.dump().size() <= didi::kMaxToolResponseBytes);
+
+    // What was dropped says it was dropped, and how big it was. An elision that
+    // says nothing is worse than the size it saves, because the preview is the
+    // artifact a person approves.
+    const auto shown = mutation_preview["arguments"].dump();
+    ASSERT_TRUE(shown.find("[elided:") != std::string::npos);
+    ASSERT_TRUE(shown.find("bytes") != std::string::npos);
+
+    // An ordinary preview is untouched and says so.
+    const didi::json small = {{"paths", didi::json::array({"res://main.tscn"})}};
+    const auto ordinary =
+        evaluateBinding(safety, "project_apply_changes", dryRun(small), context);
+    ASSERT_FALSE(ordinary.is_error);
+    const auto& ordinary_preview = ordinary.payload["mutation_preview"];
+    ASSERT_EQ(ordinary_preview["truncated"], false);
+    ASSERT_EQ(ordinary_preview["max_response_bytes"].get<size_t>(),
+              didi::kMaxToolResponseBytes);
+    ASSERT_EQ(ordinary_preview["arguments"]["paths"][0], "res://main.tscn");
 }
