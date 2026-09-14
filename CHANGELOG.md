@@ -51,6 +51,19 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A bounded reader publishes `max_response_bytes`, and both new ones use the
+  same figure.** `script_get_symbols` and the dry-run preview each grew a count
+  bound without one, which left the response size resting on a per-item
+  declaration: a caller raising `max_symbols` could talk past it, and a tool
+  taking a list of bounded strings could sum past it. Both now carry the 8 MiB
+  `scene_get_hierarchy` publishes, reported whether or not it is reached, with
+  `truncated` beside it. Symbols are charged per declaration the way hierarchy
+  charges per node, so the one that crosses the limit is the one that stops. A
+  preview replaces values over 4 KiB with the byte count that stood there, and
+  the argument block whole if that is not enough; an elision always says it is
+  one, because the preview is the artifact a person approves. The confirmation
+  token is bound to the real arguments rather than the displayed copy, so
+  nothing elided for reading can fail a later confirm (#574, #575).
 - **Every required string parameter carries a declared length.** `minLength`
   landed in #553; the other end did not, so 50 required strings had no
   `maxLength` at all while 62 of 64 numbers carried a `minimum`. The split was
