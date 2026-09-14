@@ -81,6 +81,9 @@ class ChangeClassificationTests(unittest.TestCase):
             ".github/workflows/codeql.yml",
             ".github/workflows/supply-chain.yml",
             ".github/workflows/triage.yml",
+            ".github/workflows/pages.yml",
+            "site/build.py",
+            "site/templates/index.html",
             ".editorconfig",
             ".gitattributes",
             "LICENSE",
@@ -138,7 +141,7 @@ class ChangeClassificationTests(unittest.TestCase):
         # A pattern that matches nothing in the tree is either a typo or a
         # leftover, and either way it is not doing what it claims. Directory
         # prefixes are checked as directories; the rest as files.
-        for prefix in ("docs/brand", ".github/ISSUE_TEMPLATE"):
+        for prefix in ("docs/brand", "site", ".github/ISSUE_TEMPLATE"):
             self.assertTrue(
                 (REPOSITORY_ROOT / prefix).is_dir(),
                 f"{prefix} is ignored for builds but is not in the tree",
@@ -152,6 +155,7 @@ class ChangeClassificationTests(unittest.TestCase):
             ".github/workflows/codeql.yml",
             ".github/workflows/supply-chain.yml",
             ".github/workflows/triage.yml",
+            ".github/workflows/pages.yml",
             ".editorconfig",
             ".gitattributes",
             ".gitignore",

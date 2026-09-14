@@ -39,6 +39,7 @@ compatibility guarantees has not started. See
 
 | Document | Target Audience | Description |
 | :--- | :--- | :--- |
+| 🌐 [**Project Website**](https://saworbit.github.io/didi/) | **Everyone** | What Didi is, the tool surface, setup, and the in-editor console. |
 | 📚 [**Documentation Index**](docs/README.md) | **Everyone** | Every page under `docs/`, grouped, with the status of each design record. |
 | 🚀 [**Quickstart Guide**](docs/QUICKSTART.md) | **Developers / Humans** | 5-minute step-by-step setup for Godot, Cursor, Claude, and VS Code. |
 | 🤖 [**LLM Agent Instructions**](docs/LLM_INSTRUCTIONS.md) | **AI Assistants / LLMs** | Dedicated system prompt & decision tree for Claude, Cursor, Windsurf, Antigravity. |

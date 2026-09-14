@@ -49,6 +49,17 @@ release changed, which is why it lives here and not in a version section.
 Discovery now exposes 116 canonical tools plus 10 legacy registrations (126 total). 113 canonical tools are implemented and 3 remain unimplemented.
 The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
+### Added
+
+- **A project website.** [saworbit.github.io/didi](https://saworbit.github.io/didi/)
+  is rendered from `site/` by a Pages workflow on every push to `main` and
+  checked on every pull request: the landing page and the brand assets it
+  draws on. The marks are inlined from `docs/brand/svg` at build
+  time, and the version and surface counts are read from `CMakeLists.txt` and
+  the README status block, so the site cannot publish a number the README does
+  not. The CI change classifier treats `site/` and the Pages workflow as
+  repository furniture, since nothing in either can reach the compiler.
+
 ### Fixed
 
 - **A bounded reader publishes `max_response_bytes`, and both new ones use the
@@ -64,6 +75,10 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   one, because the preview is the artifact a person approves. The confirmation
   token is bound to the real arguments rather than the displayed copy, so
   nothing elided for reading can fail a later confirm (#574, #575).
+- **The social preview banner named the wrong surface size.** The count in
+  its text had not moved since the surface was 98 names. `docs/brand/build.py`
+  now says 116 tools, and `social-preview.svg` and `.png` are regenerated
+  from it.
 - **Every required string parameter carries a declared length.** `minLength`
   landed in #553; the other end did not, so 50 required strings had no
   `maxLength` at all while 62 of 64 numbers carried a `minimum`. The split was
