@@ -51,6 +51,37 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A confirmation token is bound to what the preview saw, not only to the
+  call.** The preview read the target, computed `before`, signed it and never
+  looked again, so a file rewritten between the preview and the confirm was
+  overwritten with a change approved against bytes that were no longer there,
+  and the answer was `status: "success"` either way. The confirm reads the
+  target again and compares everything the probe reported, including a digest
+  of a file's bytes so an edit that keeps the length is caught like any other.
+  A mismatch is `409` with `data.target_changed` and nothing applied. The
+  preview says up front whether that check will be possible with
+  `target_checked_on_confirm`. A target that has *gone* is not a change of this
+  kind: there is no other writer's work to discard, and #425's rule that a
+  token minted while the target was there stays spendable once it is not is
+  unchanged (#572).
+- **A dry run runs the argument checks the real call runs.** The `..` node path
+  rule lived in the bridge alone, so seven of nine cases previewed a mutation
+  the identical arguments were then refused for: `scene_reparent_node` wrote
+  `preview_kind: "target_state"` and `kind: "planned_mutation"` over a real
+  `before` read off the live tree, for a call that cannot run. The rule is a
+  property of the argument, so it needs no engine and no open scene, and it now
+  lives in one place both binaries read. The same goes for
+  `script_patch_method`'s replacement guard: a `new_definition` that declares
+  the wrong kind of symbol is refused at the preview rather than at the write
+  (#571).
+- **A preview carries its arguments once.** `mutation_preview.arguments` and
+  `mutation_preview.changes[0].target` held the same object, so every response
+  was a little over twice the size of its request at every scale, with no cap
+  anywhere along the way: an 8 MB argument returned 16.8 MB of JSON on one
+  stdio frame with `isError: false`. `changes[].target` names what the change
+  is about now, such as the path and the symbol, which is what the field was
+  for; a tool with no subject of its own says so and points at the arguments
+  one level up (#574).
 - **`viewport_diff_capture` makes the viewport render before it compares.**
   It takes its own comparison capture and had no way to ask for the main
   screen, so it read whatever was last drawn in a viewport with no size and
