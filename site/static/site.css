@@ -201,6 +201,12 @@ tr.didi td:first-child { border-left: 3px solid var(--violet); padding-left: 14p
 .chips li { margin: 0; font-family: var(--mono); font-size: 12px; padding: 5px 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 6px; }
 .chips li.off { color: var(--no); border-color: var(--no-bd); background: var(--no-bg); }
 
+/* Call-out */
+.callout { margin-top: 20px; border: 1px solid var(--line); border-left: 3px solid var(--violet); background: var(--surface); padding: 22px 24px; display: flex; gap: 24px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.callout h3 { margin-bottom: 6px; }
+.callout p { margin: 0; font-size: 14.5px; max-width: 70ch; }
+.callout > div { min-width: 0; flex: 1 1 400px; }
+
 /* Code */
 pre {
   background: var(--code-bg); color: var(--code-fg); font-family: var(--mono); font-size: 13px; line-height: 1.6;

@@ -5,7 +5,7 @@
 
 <header class="hero">
   <div class="hero-copy">
-    <p class="tag">godot-mcp-native <span class="dot">&middot;</span> v{{version}} <span class="dot">&middot;</span> MIT</p>
+    <p class="tag">godot-mcp-native <span class="dot">&middot;</span> v{{version}} <span class="dot">&middot;</span> MIT <span class="dot">&middot;</span> Windows <span class="dot">&middot;</span> macOS <span class="dot">&middot;</span> Linux</p>
     <h1>A native MCP server that reaches into a running Godot editor.</h1>
     <p class="lead">Didi is a C++20 <a href="https://modelcontextprotocol.io/">Model Context Protocol</a> server for Godot 4.5+. A standalone binary speaks MCP to your assistant, a GDExtension speaks Godot inside the editor, and between them is a local named pipe rather than a network. Live scene objects, native undo history, real pixels, and an honest <code>implemented: false</code> wherever it cannot execute.</p>
     <div class="cta">
@@ -83,6 +83,24 @@
         <tr><td>External dependencies</td><td>Node.js or Python runtime</td><td>Node.js runtime plus WebSockets</td><td class="yes">None at runtime</td></tr>
       </tbody>
     </table>
+  </div>
+</section>
+
+<section id="platforms">
+  <p class="eyebrow">Platforms</p>
+  <h2>Windows, macOS and Linux.</h2>
+  <p>Every release ships a built archive for all three, with checksums and build provenance, and every push builds Didi and runs the suites on all three. The live editor harness runs on Windows in CI, so that is where Didi has the most hours behind it, and the other two are where a tester is worth the most.</p>
+  <div class="grid three">
+    <div class="card"><h3>Windows <span class="n">x64</span></h3><p class="tools">didi-windows-x64.zip &middot; didi.exe</p><p>MSVC build, the native and Python suites, and the live Godot editor harness on 4.5.1 and 4.7.2, on every push. The platform Didi is developed on.</p></div>
+    <div class="card"><h3>Linux <span class="n">x64</span></h3><p class="tools">didi-linux-x64.tar.gz &middot; didi</p><p>gcc build, the suites, and an ASan and UBSan run on every push. The archive is built in an Ubuntu 22.04 container so it runs on older glibc. No live editor run in CI yet.</p></div>
+    <div class="card"><h3>macOS <span class="n">Apple silicon</span></h3><p class="tools">didi-macos-arm64.tar.gz &middot; didi</p><p>clang build and the suites on every push. No Intel archive, and no live editor run in CI yet.</p></div>
+  </div>
+  <div class="callout">
+    <div>
+      <h3>Testers wanted on macOS and Linux</h3>
+      <p>Those are the least-tested platforms. If you run Didi there, tell us how it went, good or bad: the Godot version, the client, and what the Didi tab's Diagnostics page reported. Every run is evidence CI does not have.</p>
+    </div>
+    <a class="btn primary" href="https://github.com/saworbit/didi/issues/new/choose">Report a run</a>
   </div>
 </section>
 

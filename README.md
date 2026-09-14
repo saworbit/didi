@@ -33,6 +33,26 @@ compatibility guarantees has not started. See
 [Stability](CHANGELOG.md#stability) before you pin a version, and the
 [Breaking](CHANGELOG.md#breaking) list before you upgrade.
 
+## 🖥️ Platforms
+
+Didi builds, tests and ships on **Windows, macOS and Linux**. Every release
+carries one archive per platform, with `SHA256SUMS` and a build provenance
+attestation beside them.
+
+| Platform | Release archive | On every push | Live editor coverage |
+| :--- | :--- | :--- | :--- |
+| **Windows x64** | `didi-windows-x64.zip` | MSVC build, native and Python suites | Godot 4.5.1 and 4.7.2 editors, in CI |
+| **Linux x64** | `didi-linux-x64.tar.gz`, built in an Ubuntu 22.04 container so it runs on older glibc | gcc build, native and Python suites, ASan and UBSan | Not in CI |
+| **macOS (Apple silicon)** | `didi-macos-arm64.tar.gz`; there is no Intel archive | clang build, native and Python suites | Not in CI |
+
+**macOS and Linux are the least-tested platforms, and testers are wanted.**
+The live editor harness runs on Windows in CI, so a real editor session on
+either of the other two is evidence CI does not have. If you run Didi there,
+[open an issue](https://github.com/saworbit/didi/issues/new/choose) with the
+Godot version, the client, and what the Didi tab's **Diagnostics** page
+reported, whether it worked or not. [Contributing](CONTRIBUTING.md) says what
+a useful report contains.
+
 ---
 
 ## 🧭 Navigating the Documentation

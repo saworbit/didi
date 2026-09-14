@@ -125,6 +125,30 @@ unmergeable.
 Everything else -- CodeQL, OpenSSF Scorecard, dependency review, workflow
 linting, labelling -- runs alongside and does not block a merge.
 
+## 🧪 Testing on macOS and Linux
+
+The build matrix compiles Didi and runs the suites on all three platforms, but
+the live Godot editor harness runs on Windows only, so macOS and Linux have the
+fewest real editor hours behind them. A report from either is worth more than
+most pull requests.
+
+What a useful report contains:
+
+1. The platform and architecture, the Godot version, and the client you
+   connected.
+2. Whether you built from source or used the release archive.
+3. What the Didi tab's **Diagnostics** page reported, pasted whole. It names
+   the path or pid behind every check and is meant to be copied into an issue.
+4. What you did and what happened, including the runs that went fine. A clean
+   run on a platform CI cannot exercise is evidence too.
+
+[Open an issue](https://github.com/saworbit/didi/issues/new/choose) with it.
+If you can go further, `tests/run_godot_integration.ps1` is the harness CI runs
+on Windows; getting it, or a port of it, running on macOS or Linux is the step
+that would let CI cover those platforms itself.
+
+---
+
 ## 🔒 Workflow changes
 
 Workflows run with a token that can write to this repository, so two rules are

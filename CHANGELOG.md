@@ -59,6 +59,10 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   the README status block, so the site cannot publish a number the README does
   not. The CI change classifier treats `site/` and the Pages workflow as
   repository furniture, since nothing in either can reach the compiler.
+- **Platform support is stated where people look.** The README, the website,
+  the repository card and the contributing guide now say that Didi builds,
+  tests and ships on Windows, macOS and Linux, which of those the live editor
+  harness covers in CI, and that testers on macOS and Linux are wanted.
 
 ### Fixed
 
