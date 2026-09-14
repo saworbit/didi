@@ -211,7 +211,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"project_search_text.query",
          "The text to look for. At most 256 UTF-8 bytes."},
         {"project_search_text.case_sensitive",
-         "Match case exactly. Off by default."},
+         "Match case exactly. On by default; pass false to fold case."},
         {"project_search_text.whole_word",
          "Match only where the query is bounded by non-word characters, so tick does not "
          "match ticket."},
@@ -223,7 +223,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"project_search_symbols.query",
          "The declaration name to look for. At most 256 UTF-8 bytes."},
         {"project_search_symbols.case_sensitive",
-         "Match case exactly. Off by default."},
+         "Match case exactly. On by default; pass false to fold case."},
         {"project_search_symbols.match",
          "How the query is compared against a declaration name: an exact match, a prefix, or "
          "anywhere in the name."},

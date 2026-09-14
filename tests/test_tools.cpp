@@ -1,5 +1,6 @@
 #include "didi/common/engine_version.hpp"
 #include <algorithm>
+#include <cctype>
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
 #include "didi/mcp/resource_registry.hpp"
@@ -4746,6 +4747,111 @@ void test_offline_capability_is_derived_not_listed() {
 // no target in it and reported the same success as a lab with one (#553,
 // #554). The stamp lives in one place now, and this walks the published
 // surface so the next tool cannot quietly reintroduce the gap.
+static void test_a_wrong_required_name_reports_both_halves() {
+    // Break caught: the missing check and the unknown check ran in sequence and
+    // each returned on its first find, so the useful half only fired when every
+    // required argument was already correct. Getting a required name wrong --
+    // the likelier mistake -- reported a name the caller had not used as
+    // missing and said nothing about the two they had (#577).
+    ScopedToolProject project("argument-name-errors");
+    writeAuditFile("project.godot", "config_version=5\n");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto both = registry.callTool(
+        "scene_get_property", didi::json{{"node_path", "/root"}, {"property", "name"}});
+    ASSERT_TRUE(both.isError);
+    const auto message =
+        didi::json::parse(both.content[0].text)["error"]["message"].get<std::string>();
+    // The mistake, the fix, and the whole parameter set, in one round trip.
+    ASSERT_TRUE(message.find("'target_node'") != std::string::npos);
+    ASSERT_TRUE(message.find("'property_name'") != std::string::npos);
+    ASSERT_TRUE(message.find("'node_path'") != std::string::npos);
+    ASSERT_TRUE(message.find("'property'") != std::string::npos);
+    ASSERT_TRUE(message.find("This tool accepts:") != std::string::npos);
+
+    // Each half alone still reads as it did, rather than naming an empty set.
+    const auto only_unknown = registry.callTool(
+        "scene_get_property",
+        didi::json{{"target_node", "/root"}, {"property_name", "name"}, {"bogus", 1}});
+    ASSERT_TRUE(only_unknown.isError);
+    const auto unknown_message =
+        didi::json::parse(only_unknown.content[0].text)["error"]["message"].get<std::string>();
+    ASSERT_TRUE(unknown_message.find("Unknown argument 'bogus'.") != std::string::npos);
+    ASSERT_TRUE(unknown_message.find("Missing") == std::string::npos);
+
+    const auto only_missing = registry.callTool(
+        "scene_get_property", didi::json{{"target_node", "/root"}});
+    ASSERT_TRUE(only_missing.isError);
+    const auto missing_message =
+        didi::json::parse(only_missing.content[0].text)["error"]["message"].get<std::string>();
+    ASSERT_TRUE(missing_message.find("Missing required argument 'property_name'.") !=
+                std::string::npos);
+    ASSERT_TRUE(missing_message.find("Unknown") == std::string::npos);
+
+    // A name that is a parameter of this tool is not reported as unknown, even
+    // when another required one is absent.
+    const auto partial = registry.callTool(
+        "blackboard_write", didi::json{{"key", "k"}, {"value", "v"}});
+    ASSERT_TRUE(partial.isError);
+    const auto partial_message =
+        didi::json::parse(partial.content[0].text)["error"]["message"].get<std::string>();
+    ASSERT_TRUE(partial_message.find("'key'") != std::string::npos);
+    ASSERT_TRUE(partial_message.find("'value'") == std::string::npos);
+}
+
+static void test_a_description_naming_a_default_agrees_with_it() {
+    // A class of defect no existing test can see, because the description tests
+    // count descriptions and the schema tests read the keys, and nothing
+    // compares one against the other. project_search_text.case_sensitive
+    // published "default": true beside "Off by default", and the handler was
+    // case-sensitive, so a caller who read the prose and searched for Player in
+    // a codebase spelling it player got zero matches and no reason to doubt the
+    // tool (#576).
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    size_t compared = 0;
+    for (const auto& tool : registry.listTools()) {
+        const auto definition = tool.toJson();
+        const auto& schema = definition["inputSchema"];
+        if (!schema.is_object() || !schema.contains("properties")) continue;
+        const auto& properties = schema["properties"];
+        if (!properties.is_object()) continue;
+        for (auto it = properties.begin(); it != properties.end(); ++it) {
+            const auto& property = it.value();
+            if (!property.is_object() || !property.contains("default") ||
+                !property.contains("description")) {
+                continue;
+            }
+            if (!property["default"].is_boolean() || !property["description"].is_string()) {
+                continue;
+            }
+            std::string prose = property["description"].get<std::string>();
+            std::transform(prose.begin(), prose.end(), prose.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            const bool says_on = prose.find("on by default") != std::string::npos;
+            const bool says_off = prose.find("off by default") != std::string::npos;
+            if (!says_on && !says_off) continue;
+            ++compared;
+            const bool declared = property["default"].get<bool>();
+            if (says_on && !declared) {
+                std::cerr << tool.name << "." << it.key()
+                          << " says on by default and declares false" << std::endl;
+            }
+            if (says_off && declared) {
+                std::cerr << tool.name << "." << it.key()
+                          << " says off by default and declares true" << std::endl;
+            }
+            ASSERT_TRUE(!(says_on && !declared));
+            ASSERT_TRUE(!(says_off && declared));
+        }
+    }
+    // A number near zero means the walk stopped reading schemas rather than
+    // that the surface stopped saying what its defaults are.
+    ASSERT_TRUE(compared >= 5);
+}
+
 static void test_required_strings_refuse_the_empty_string() {
     ScopedToolProject project("required-strings");
     writeAuditFile("project.godot", "config_version=5\n");
@@ -4773,6 +4879,9 @@ static void test_required_strings_refuse_the_empty_string() {
             // real answer for: an empty script file is a file.
             if (tool.name == "script_create" && key == "source_text") {
                 ASSERT_TRUE(!property.contains("minLength"));
+                // Exempt from the floor, not from the ceiling: an empty file is
+                // a file, and a file still has a declared largest size.
+                ASSERT_TRUE(property.contains("maxLength"));
                 continue;
             }
             ++required_strings;
@@ -4781,6 +4890,14 @@ static void test_required_strings_refuse_the_empty_string() {
             }
             ASSERT_TRUE(property.contains("minLength"));
             ASSERT_TRUE(property["minLength"].get<int>() >= 1);
+            // The other end of the same question. 50 required strings had no
+            // declared length at all, so a megabyte in an identifier field was
+            // accepted and whatever went wrong went wrong further in (#573).
+            if (!property.contains("maxLength")) {
+                std::cerr << tool.name << "." << key << " carries no maxLength" << std::endl;
+            }
+            ASSERT_TRUE(property.contains("maxLength"));
+            ASSERT_TRUE(property["maxLength"].get<int>() >= property["minLength"].get<int>());
         }
     }
     // The census counted 90 across the surface. A number well below that means
@@ -5379,6 +5496,10 @@ struct RegisterToolTests {
                      test_rename_refuses_what_it_cannot_do_safely);
         registerTest("Tools.RequiredStringsRefuseEmpty",
                      test_required_strings_refuse_the_empty_string);
+        registerTest("Tools.WrongRequiredNameReportsBothHalves",
+                     test_a_wrong_required_name_reports_both_halves);
+        registerTest("Tools.DescriptionsAgreeWithDeclaredDefaults",
+                     test_a_description_naming_a_default_agrees_with_it);
         registerTest("Tools.HandlerFailuresCarryTheEnvelope",
                      test_handler_failures_carry_the_error_envelope);
         registerTest("Tools.SetSettingCreateGuardIsLiveOnly",

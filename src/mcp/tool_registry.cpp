@@ -980,6 +980,11 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
     // each answered differently (#553, #554). One stamp, same as the closure
     // below, so the argument check answers before any handler can.
     requireNonEmptyRequiredStrings(binding.schema_source, tool.inputSchema);
+    // And the other end of the same question. 50 required strings had no
+    // declared length, so a megabyte in an identifier field was accepted and
+    // whatever went wrong went wrong further in, where the message is about
+    // something else (#573).
+    boundRequiredStrings(binding.schema_source, tool.inputSchema);
     // Publish the closure the validator performs. #418 closed arguments by
     // default and the schemas did not follow, so 73 of them accepted anything
     // by JSON Schema while the server refused the same call: a client

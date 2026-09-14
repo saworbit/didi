@@ -57,5 +57,33 @@ namespace mcp {
 // gap. A minLength written inline in a schema is the author's and wins.
 void requireNonEmptyRequiredStrings(std::string_view schema_source, json& schema);
 
+// Stamps maxLength on every required string parameter that does not already
+// carry one, sized by what the value is rather than by one global number.
+//
+// The surface split in an odd place: 62 of 64 numeric parameters carried a
+// minimum, and 90 of 191 strings carried a maxLength, with 50 required ones
+// unbounded. A blackboard key was capped at 512 bytes and a Godot node path was
+// not capped at all. A length nobody declared is a question the schema cannot
+// answer, and it is also what the server agrees to buffer before any handler
+// has looked at the call (#573).
+void boundRequiredStrings(std::string_view schema_source, json& schema);
+
+// The declared ceiling for each kind of string, so the stamp and the tests read
+// the same numbers.
+namespace bounds {
+// An identifier: a method, a property, a group, an action, a setting key. Godot
+// has no identifier near this length; the figure matches project_search_text's
+// query, which is the bound the surface already published for a short value.
+constexpr int kIdentifier = 256;
+// A path, res:// or node. The 1024 project_search_text.search_path already
+// uses.
+constexpr int kPath = 1024;
+// A body: a whole script file, or one symbol's definition. The one place a
+// large number is the right answer, and the point is that it is declared. Far
+// above any hand-written .gd, and small enough that a fat-fingered paste is
+// refused in the envelope rather than buffered.
+constexpr int kBody = 1048576;
+}  // namespace bounds
+
 } // namespace mcp
 } // namespace didi

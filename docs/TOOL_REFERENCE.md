@@ -817,7 +817,7 @@ Not implemented. To put a packed scene in the edited scene, pass `scene_path` to
 
 - `query` (`string`, required): the text or symbol name to look for, at most 256 UTF-8 bytes.
 - `search_path` (`string`): where to look, defaulting to the project root.
-- `extensions` (`array`), `case_sensitive` (`boolean`), `max_results` (`integer`): common to both.
+- `extensions` (`array`), `case_sensitive` (`boolean`, default `true`), `max_results` (`integer`): common to both. Matching is case-sensitive unless `case_sensitive: false` folds it.
 - `whole_word` (`boolean`): `project_search_text` only.
 - `match` (`string`) and `kinds` (`array`): `project_search_symbols` only. `match` is `exact`, `prefix`, or `contains`.
 
