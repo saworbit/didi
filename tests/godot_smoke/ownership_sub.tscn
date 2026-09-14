@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[node name="Sub" type="Node2D"]
+
+[node name="Inner" type="Sprite2D" parent="."]
+position = Vector2(1, 2)

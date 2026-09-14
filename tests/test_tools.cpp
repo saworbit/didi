@@ -2581,6 +2581,54 @@ static void test_offline_hierarchy_reads_main_scene_and_multiline_properties() {
     ASSERT_EQ(properties["label"], "\"after the array\"");
 }
 
+static void test_offline_hierarchy_reports_instances_and_inheritance() {
+    // Break caught: the parse named an instance root's scene under a field the
+    // live walk never produced, and an inherited scene's root was reported as
+    // an instance of its base rather than the scene as inheriting it (#591).
+    ScopedToolProject project("scene-hierarchy-instances");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    std::ofstream("project.godot")
+        << "config_version=5\n\n"
+        << "[application]\n\n"
+        << "run/main_scene=\"res://main.tscn\"\n";
+    std::ofstream("sub.tscn")
+        << "[gd_scene format=3]\n\n"
+        << "[node name=\"Sub\" type=\"Node2D\"]\n\n"
+        << "[node name=\"Inner\" type=\"Sprite2D\" parent=\".\"]\n";
+    std::ofstream("main.tscn")
+        << "[gd_scene load_steps=2 format=3]\n\n"
+        << "[ext_resource type=\"PackedScene\" path=\"res://sub.tscn\" id=\"1_sub\"]\n\n"
+        << "[node name=\"Main\" type=\"Node2D\"]\n\n"
+        << "[node name=\"Child\" type=\"Sprite2D\" parent=\".\"]\n\n"
+        << "[node name=\"SubInst\" parent=\".\" instance=ExtResource(\"1_sub\")]\n";
+    std::ofstream("derived.tscn")
+        << "[gd_scene load_steps=2 format=3]\n\n"
+        << "[ext_resource type=\"PackedScene\" path=\"res://main.tscn\" id=\"1_main\"]\n\n"
+        << "[node name=\"Main\" instance=ExtResource(\"1_main\")]\n\n"
+        << "[node name=\"Added\" type=\"Label\" parent=\".\"]\n";
+
+    const auto main = registry.callTool("scene_get_hierarchy", {{"root_path", "res://main.tscn"}});
+    ASSERT_TRUE(!(main.isError));
+    const auto main_payload = didi::json::parse(main.content[0].text);
+    ASSERT_TRUE(!(main_payload.contains("inherits")));
+    const auto& main_children = main_payload["scene_tree"]["children"];
+    ASSERT_EQ(main_children.size(), 2u);
+    ASSERT_TRUE(!(main_children[0].contains("instance_of")));
+    ASSERT_EQ(main_children[1]["name"], "SubInst");
+    ASSERT_EQ(main_children[1]["instance_of"], "res://sub.tscn");
+    ASSERT_TRUE(!(main_children[1].contains("instance")));
+
+    const auto derived =
+        registry.callTool("scene_get_hierarchy", {{"root_path", "res://derived.tscn"}});
+    ASSERT_TRUE(!(derived.isError));
+    const auto derived_payload = didi::json::parse(derived.content[0].text);
+    ASSERT_EQ(derived_payload["inherits"], "res://main.tscn");
+    ASSERT_TRUE(!(derived_payload["scene_tree"].contains("instance_of")));
+    ASSERT_EQ(derived_payload["scene_tree"]["children"][0]["name"], "Added");
+}
+
 static didi::json hierarchyFixtureScene() {
     // A shape that exercises every option: two branches, a repeated type deep in
     // one of them, and a leaf type that appears in both.
@@ -5359,6 +5407,8 @@ struct RegisterToolTests {
                      test_resource_create_refuses_what_it_cannot_write);
         registerTest("Tools.OfflineHierarchyMainSceneAndMultilineProperties",
                      test_offline_hierarchy_reads_main_scene_and_multiline_properties);
+        registerTest("Tools.OfflineHierarchyReportsInstancesAndInheritance",
+                     test_offline_hierarchy_reports_instances_and_inheritance);
         registerTest("Hierarchy.ClassFilterKeepsMatchingBranches",
                      test_hierarchy_class_filter_keeps_only_matching_branches);
         registerTest("Hierarchy.NodeBudgetReportsWhatItCut",

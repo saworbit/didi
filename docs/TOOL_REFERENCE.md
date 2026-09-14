@@ -54,6 +54,8 @@ failure is permanent: there is nothing to retry and nothing to fix in the call.
 
 Returns a recursive hierarchy. Live results contain node name, class, logical path, and children; unsupported bulk fields are named in `omitted_fields`. Offline mode parses an explicit in-project `.tscn` file, or the `run/main_scene` declared by the project-root `project.godot`, and returns `source: "parsed_tscn_file"`. It does not probe `demo/` or recursively guess a scene.
 
+Every node carries `owned_by_scene`: whether the edited scene root owns it, which is what the file will list. An instance root carries `instance_of`, the scene it instances, and `editable_instance`, the editor's Editable Children flag; a node inside an instance that is not editable reports `owned_by_scene: false`, and the mutation tools refuse it. A scene that inherits another carries `inherits` at the top level with the base scene's path, and each node the base declares carries `inherited: true`. The editor shows the same three facts as the link icon, the greyed rows and the inherited marker. Offline, `instance_of` and `inherits` are read from the file's `instance=` lines; the ownership flags need the live tree.
+
 Offline there is no scene tree, so a `root_path` that is not a `.tscn` is refused rather than answered from a different file. A node path scopes the result only with an editor attached. Omitting `root_path`, or passing `/root` or `.`, still reads the main scene, and the response then carries `requested_root_path` and `substituted_main_scene: true` so it cannot be read as a scoped answer.
 
 A `.tscn` `root_path` is read from the file in either mode. It used to be handed to the live bridge when an editor was attached, and the bridge resolves node paths only, so the documented argument came back as a 404 naming the file it had just been given.
@@ -81,11 +83,15 @@ Creates a built-in ClassDB node, or an instance of a packed scene, under the act
 - `properties` (`object`, optional): Initial property values. Each value is a JSON null, boolean, signed integer, real, string, or a vector/colour object compatible with that property's Godot type, the same contract as `scene_set_property`'s `value`.
 - `scene_path` (`string`, optional): a `res://` `.tscn` to instance rather than a type to construct. The instance is made with `GEN_EDIT_STATE_INSTANCE`, which is what the editor's own scene drop uses, so the scene file records an instance of that scene and not a copy of its nodes. `properties` still applies, to the instance root. The result reports the instance's own class in `node_type` and echoes `scene_path`. A missing scene is `404`, a resource that is not a PackedScene is `422`, and so is one whose dependencies did not load, because instantiating that returns nothing and puts the reason in a console the caller cannot read.
 
+A `parent_path` inside an instanced sub-scene the edited scene has not marked editable is refused with `409` and `data.code: "node_not_owned"`, because the packer drops such a node together with its parent on save. A `scene_path` naming the edited scene, or any scene whose PackedScene dependencies reach it, is refused with `409` and `data.code: "cyclic_instance"`, with the chain of scene files under `data.chain`. That is the check the editor's own scene drop makes: Godot accepts the recursive tree and then refuses to save it in a dialog, while `EditorInterface.save_scene` still returns OK. Both refusals also answer the dry run, which previews against the parent.
+
 ### `scene_remove_node` — Live
 
-Detaches a node through UndoRedo while retaining its lifetime for undo/redo. Undo restores its original sibling index.
+Detaches a node through UndoRedo while retaining its lifetime for undo/redo. Undo restores its original sibling index and the ownership of every node in the branch, which Godot clears when a branch leaves the tree; without that the restored node was one the next save would have dropped.
 
 - `target_node` (`string`, required).
+
+Refused with `409` before anything is touched, on the real call and on the dry run, for a node the file cannot lose: `data.code: "node_not_owned"` for a node inside an instanced sub-scene the edited scene has not marked editable, naming `owner_scene` and `instance_root`, and `data.code: "node_inherited"` for a node the scene inherits, naming `base_scene`. A `.tscn` has no deletion marker, so the live removal was reported as success and dropped by the save; the editor refuses both in the same place.
 
 ### `scene_reparent_node` — Live
 
@@ -95,9 +101,13 @@ Calls Godot's `Node.reparent` through UndoRedo.
 - `new_parent_path` (`string`, required).
 - `keep_global_transform` (`boolean`, default `true`).
 
+The `node_not_owned` and `node_inherited` refusals of `scene_remove_node` apply to `target_node`, and `new_parent_path` is refused with `node_not_owned` when it lies inside an instance that is not editable, because a node placed there is dropped on save.
+
 ### `scene_set_property` — Live
 
 Sets an existing property through UndoRedo. Unknown properties and incompatible types are rejected.
+
+A node inside an instanced sub-scene the edited scene has not marked editable is refused with `409` and `data.code: "node_not_owned"`, naming the owning scene and the instance root, on the real call and on the dry run: the packer drops such a node, so the change was applied live, reported as applied, and lost on save. An inherited node is accepted, and the save records the value as an override. `scene_add_to_group`, `scene_remove_from_group`, `script_attach_to_node` and `script_detach_from_node` run the same check.
 
 The accepted JSON for each Godot type:
 
@@ -161,6 +171,8 @@ Results carry `target_node`, `method_name`, `awaited`, and `returned`.
 Duplicates a node branch through UndoRedo and names the copy from `<source-name>Copy`, subject to Godot's uniqueness rules.
 
 - `target_node` (`string`, required).
+
+Refused with `409 node_not_owned` or `409 node_inherited` the way `scene_remove_node` is; the editor refuses duplicating either kind of node.
 
 ### `mutate_scene_tree` — Unimplemented legacy name
 
@@ -971,7 +983,7 @@ All four tools are live-only, and the first three return an error when no editor
 
 - `editor_undo`: Undoes the active edited scene's most recent UndoRedo action.
 - `editor_redo`: Redoes the active edited scene's next action.
-- `editor_save_scene`: Calls `EditorInterface.save_scene` for the active scene.
+- `editor_save_scene`: Calls `EditorInterface.save_scene` for the active scene. `saved` means Godot accepted the request: that call returns OK for any open scene with a path, including one the editor then refuses to write, so the refusals the scene tools make for foreign nodes, inherited nodes and cyclic instances happen before the tree can reach a state the save would drop.
 - `editor_reload_project`: Requests an `EditorFileSystem.scan_sources` rescan; it is not a full editor restart. Phase 6 requires an exact dry-run confirmation token. With no editor connected it drops Didi's cached resource index instead, so the next offline read crawls the project again.
 
 ## 10. Phase 2 project wiring
@@ -1311,7 +1323,7 @@ Requires finite viewport-space `point.x` and `point.y`. Optional `root_path` def
 
 Every implemented mutating tool schema includes `dry_run: boolean`. A true dry-run stops at the registry boundary and returns `dry_run: true` plus `mutation_preview`; no tool handler, subprocess, filesystem writer, or Godot main-thread command runs. The preview reports the exact tool/arguments, canonical project, execution mode, optional session ID, route generation, binding hash, and a change record.
 
-The preview opens its target where it can, and runs the argument checks the real call runs before it opens anything. A dry-run against a script, resource, node or setting that is not there returns the same failure the real call would, and so does one whose arguments the real call refuses: a parent-relative `..` node path, or a `new_definition` that declares a different kind of symbol from the one named. Those are properties of the argument rather than of the target, so they need nothing opened and are answered whether or not the tool has a probe. A preview cannot approve a call that can never execute. A tool with no target to read is still held to any precondition it shares with a read-only sibling: `project_apply_changes` runs the git work tree check `project_verify_changes` runs, so a project no repository holds is refused at the preview rather than handed a token that cannot be spent. The preview still reports `target_read: false` there, because the files the call would overwrite have not been opened. `target_read` and `preview_kind` say which happened: `target_state` with `changes[].kind: "planned_mutation"` and a `before` holding current state, or `argument_binding` with `changes[].kind: "unverified_mutation"` when the tool has no probe or the engine could not be reached. `changes[].target` names what the change is about, such as the resolved path and the symbol, rather than repeating the argument object that is already at `mutation_preview.arguments`; a tool that names no subject of its own says so and points there.
+The preview opens its target where it can, and runs the argument checks the real call runs before it opens anything. A dry-run against a script, resource, node or setting that is not there returns the same failure the real call would, and so does one whose arguments the real call refuses: a parent-relative `..` node path, or a `new_definition` that declares a different kind of symbol from the one named. A preview that opens a node also runs that call's own checks on it, and refuses with the code and `data.code` the real call gives: a node the file cannot hold, a scene that would instance the edited scene into itself, a script whose base type the node cannot take, or a node that already has one. Those are properties of the argument rather than of the target, so they need nothing opened and are answered whether or not the tool has a probe. A preview cannot approve a call that can never execute. A tool with no target to read is still held to any precondition it shares with a read-only sibling: `project_apply_changes` runs the git work tree check `project_verify_changes` runs, so a project no repository holds is refused at the preview rather than handed a token that cannot be spent. The preview still reports `target_read: false` there, because the files the call would overwrite have not been opened. `target_read` and `preview_kind` say which happened: `target_state` with `changes[].kind: "planned_mutation"` and a `before` holding current state, or `argument_binding` with `changes[].kind: "unverified_mutation"` when the tool has no probe or the engine could not be reached. `changes[].target` names what the change is about, such as the resolved path and the symbol, rather than repeating the argument object that is already at `mutation_preview.arguments`; a tool that names no subject of its own says so and points there.
 
 Every preview publishes `max_response_bytes`, 8 MiB, and `truncated`. Every string argument carries a declared length, but a tool that takes a list of them can still sum past that, and a preview that cannot be delivered is worse than one that says what it left out. When the cap trips, values over 4 KiB are replaced with the byte count that stood there, and if that is not enough the argument block is replaced whole with a note naming its size. An elision always says it is one. The confirmation token is bound to the real arguments rather than to this copy of them, so nothing that is elided for reading can make a later confirm fail. Reading a live node sends one read-only property read and changes nothing.
 

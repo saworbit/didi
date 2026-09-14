@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="PackedScene" path="res://ownership_sub.tscn" id="1_sub"]
+
+[node name="OwnerMain" type="Node2D"]
+
+[node name="Own" type="Sprite2D" parent="."]
+
+[node name="SubInst" parent="." instance=ExtResource("1_sub")]

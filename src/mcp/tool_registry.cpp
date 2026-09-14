@@ -932,6 +932,8 @@ static json outputSchemaForTool(const std::string& name) {
                               {"root_path", string_type},
                               {"scene_file_path", {{"type", {"string", "null"}}}},
                               {"scene_is_unsaved", boolean_type},
+                              // Both: the scene this one inherits, when it does.
+                              {"inherits", string_type},
                               {"omitted_fields", array_of(string_type)},
                               {"max_nodes", integer_type},
                               {"max_response_bytes", integer_type},
@@ -1205,6 +1207,10 @@ const std::unordered_map<std::string_view, FileTarget>& fileTargets() {
 // argument that names it.
 const std::unordered_map<std::string_view, std::string_view>& nodeTargets() {
     static const std::unordered_map<std::string_view, std::string_view> targets = {
+        // The parent is what an instantiate reads: a parent inside an instance
+        // the edited scene cannot edit drops the new node on save, and the
+        // scene to instance is checked against the edited one (#590).
+        {"scene_instantiate_node", "parent_path"},
         {"scene_remove_node", "target_node"},
         {"scene_set_property", "target_node"},
         {"scene_add_to_group", "target_node"},
@@ -1413,46 +1419,70 @@ std::optional<Error> probeCallMethodTarget(const json& arguments,
     return std::nullopt;
 }
 
-std::optional<Error> probeNodeTarget(const std::string& argument, const json& arguments,
+std::optional<Error> probeNodeTarget(const std::string& tool, const std::string& argument,
+                                     const json& arguments,
                                      const std::shared_ptr<ipc::IIpcClient>& client,
                                      json& before, json& subject) {
-    if (!client || !arguments.is_object() || !arguments.contains(argument) ||
-        !arguments[argument].is_string()) {
+    if (!client || !arguments.is_object()) return std::nullopt;
+    json target;
+    if (arguments.contains(argument) && arguments[argument].is_string()) {
+        target = arguments[argument];
+    } else if (argument == "parent_path") {
+        // The tool's own default, so an instantiate that names no parent is
+        // still previewed against the node it will land under.
+        target = "/root";
+    } else {
         return std::nullopt;
     }
-    subject = {{argument, arguments[argument]}};
+    subject = {{argument, target}};
     if (arguments.contains("property_name") && arguments["property_name"].is_string()) {
         subject["property_name"] = arguments["property_name"];
     }
     // scene.getProperty resolves the node and reads one value, changing
     // nothing. Asked for the property this call is about to set, the answer is
     // the before state; otherwise `name` stands in for "this node is there".
+    //
+    // The request names the mutation being previewed, so the bridge runs that
+    // call's own preconditions on the node before the read: whether the file
+    // can hold the edit, whether the scene to instance contains this one,
+    // whether the script's base type fits. A dry run that had opened the node
+    // had everything the real call uses to refuse it, and previewed it as
+    // planned anyway (#588, #590, #603).
     const std::string property = arguments.value("property_name", std::string("name"));
     auto response = client->sendRequest(
         "scene.getProperty",
-        {{"target_node", arguments[argument]}, {"property_name", property}}, 5000);
+        {{"target_node", target}, {"property_name", property},
+         {"mutation", {{"tool", tool}, {"arguments", arguments}}}}, 5000);
     if (response.isErr()) {
-        // A node that is not there is the failure the real call would hit, and
-        // it is the whole point of reading the target. Anything else means the
-        // probe could not reach the engine, which is not evidence the mutation
-        // would fail, so the preview goes on unverified rather than refusing a
-        // call that might be fine.
-        if (response.error().code == 404) return response.error();
+        // The IPC client hands a bridge refusal back as an error with the
+        // bridge's code and data, so this is where a live refusal arrives. A
+        // 4xx is the failure the real call would hit: the node is not there,
+        // the file cannot hold the edit, the script does not fit. A 5xx means
+        // the probe could not reach the engine, which is not evidence the
+        // mutation would fail, so the preview goes on unverified rather than
+        // refusing a call that might be fine.
+        if (response.error().code >= 400 && response.error().code < 500) return response.error();
         return std::nullopt;
     }
     const auto& payload = response.value();
     if (payload.is_object() && payload.contains("error")) {
         const auto& error = payload["error"];
         const auto code = error.value("code", 500);
-        // A node that is not there is the failure the real call would hit. A
-        // property that is not there is too, when the call names one.
-        if (code == 404) {
-            return Error(404, error.value("message", std::string("Scene node not found")));
+        // A refusal is the failure the real call would hit: the node or the
+        // property is not there, the file cannot hold the edit, the script
+        // does not fit. Its data travels with it, because the code under
+        // data.code is what a caller branches on. A 5xx is the engine failing
+        // to answer, which is not evidence the mutation would fail, so the
+        // preview goes on unverified rather than refusing a call that might
+        // be fine.
+        if (code >= 400 && code < 500) {
+            return Error(code, error.value("message", std::string("The engine refused this call")),
+                         error.contains("data") ? error["data"] : json());
         }
         return std::nullopt;
     }
     if (payload.is_object() && payload.contains("value")) {
-        before = {{"target_node", arguments[argument]}, {"property_name", property},
+        before = {{"target_node", target}, {"property_name", property},
                   {"value", payload["value"]}};
     }
     return std::nullopt;
@@ -1649,10 +1679,11 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         };
     } else if (const auto node = nodeTargets().find(binding.policy_source);
                node != nodeTargets().end() && lease.has_value()) {
-        target_probe = [argument = std::string(node->second),
+        target_probe = [tool = std::string(binding.policy_source),
+                        argument = std::string(node->second),
                         client = m_sourceIpcClient](const json& call_arguments, json& before,
                                                     json& subject) {
-            return probeNodeTarget(argument, call_arguments, client, before, subject);
+            return probeNodeTarget(tool, argument, call_arguments, client, before, subject);
         };
     } else if (binding.policy_source == "project_apply_changes") {
         // This tool has no target to read, so its preview bound the arguments

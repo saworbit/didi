@@ -57,6 +57,8 @@ Property values are limited to JSON null, boolean, signed integer, real, and str
 
 Pass `scene_path` to `scene_instantiate_node` to put an instance of a `.tscn` in the edited scene, which is what `scene_pack_branch` output is for. Do not use the legacy `mutate_scene_tree` or `instantiate_asset` names.
 
+Nodes inside an instanced sub-scene belong to that scene's file. `scene_get_hierarchy` marks an instance root with `instance_of` and its internals with `owned_by_scene: false`; edit the sub-scene itself rather than the instance's internals, because the mutation tools refuse those edits with `409` and `data.code: "node_not_owned"`. In a scene that inherits another, `inherits` names the base and each inherited node carries `inherited: true`; their properties can be overridden here, but removing, moving or duplicating one is refused with `node_inherited`. Instancing the edited scene into itself, directly or through another scene, is refused with `cyclic_instance`.
+
 ### Wire scripts, groups, and project configuration
 
 - Attach and detach existing GDScript resources with `script_attach_to_node` and `script_detach_from_node`; both are UndoRedo-backed.
