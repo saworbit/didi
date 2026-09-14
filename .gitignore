@@ -16,6 +16,10 @@ Makefile
 __pycache__/
 *.py[cod]
 
+# The project website, rendered by site/build.py. Pages deploys it from
+# the workflow, so the output is never committed.
+_site/
+
 # Agent-Internal Workflow Artifacts
 .superpowers/
 docs/superpowers/

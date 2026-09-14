@@ -1,0 +1,315 @@
+{{partial:head}}
+<body>
+{{partial:nav}}
+<main class="wrap" id="main">
+
+<header class="hero">
+  <div class="hero-copy">
+    <p class="tag">godot-mcp-native <span class="dot">&middot;</span> v{{version}} <span class="dot">&middot;</span> MIT</p>
+    <h1>A native MCP server that reaches into a running Godot editor.</h1>
+    <p class="lead">Didi is a C++20 <a href="https://modelcontextprotocol.io/">Model Context Protocol</a> server for Godot 4.5+. A standalone binary speaks MCP to your assistant, a GDExtension speaks Godot inside the editor, and between them is a local named pipe rather than a network. Live scene objects, native undo history, real pixels, and an honest <code>implemented: false</code> wherever it cannot execute.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/saworbit/didi/blob/main/docs/QUICKSTART.md">Five-minute quickstart</a>
+      <a class="btn" href="https://github.com/saworbit/didi">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        GitHub
+      </a>
+      <a class="btn" href="https://github.com/saworbit/didi/releases/latest">Download v{{version}}</a>
+    </div>
+  </div>
+  <div class="hero-mark">{{svg:didi-mark-gradient|role="img" aria-label="The Didi mark: a node enters the bowl of a lowercase d through a pipe"}}</div>
+</header>
+
+<ul class="stats" aria-label="At a glance">
+  <li><b>{{canonical}}</b><span>canonical tools</span></li>
+  <li><b>{{implemented}}</b><span>implemented today</span></li>
+  <li><b>{{tests}}</b><span>tests in the suites</span></li>
+  <li><b>0</b><span>runtime dependencies</span></li>
+  <li><b>4.5+</b><span>Godot, editor and game</span></li>
+</ul>
+
+<section id="how">
+  <p class="eyebrow">How it works</p>
+  <h2>The mark is the architecture.</h2>
+  <p>A node enters a ring through a pipe. That is the whole request path: an MCP client, a local named pipe or Unix socket, and the live Godot scene it reaches into. Left to right is the direction of every call.</p>
+  <figure class="path">
+    <svg viewBox="0 0 900 214" role="img" aria-label="Request path: the assistant is the node, the local pipe carries the call, the ring is the live Godot scene">
+      <g fill="#8A2BE2"><circle cx="110" cy="110" r="25.3"/><rect x="110" y="95.7" width="40" height="28.6"/></g>
+      <rect x="150" y="95.7" width="470" height="28.6" fill="var(--ink)"/>
+      <g fill="none" stroke="#478cbf" stroke-width="25.3" stroke-linecap="round"><circle cx="664" cy="110" r="44"/></g>
+      <path d="M709 13 V154" fill="none" stroke="var(--ink)" stroke-width="25.3" stroke-linecap="round"/>
+      <g font-family="var(--mono)" font-size="12.5" fill="var(--muted)" text-anchor="middle">
+        <text class="role" x="110" y="176">node</text><text x="110" y="196" fill="var(--ink)">your assistant</text>
+        <text class="role" x="385" y="176">pipe</text><text x="385" y="196" fill="var(--ink)">didi &middot; local IPC</text>
+        <text class="role" x="686" y="176">ring</text><text x="686" y="196" fill="var(--ink)">the live Godot scene</text>
+      </g>
+      <g class="detail" font-family="var(--mono)" font-size="11" fill="var(--muted)" text-anchor="middle">
+        <text x="385" y="82">JSON-RPC 2.0 over stdio, then an authenticated process-unique endpoint</text>
+      </g>
+    </svg>
+  </figure>
+  <div class="cols three">
+    <div>
+      <p class="who violet">Node &middot; the client</p>
+      <h3>Your assistant</h3>
+      <p>Claude Code, Claude Desktop, Cursor, VS Code, Windsurf or Antigravity launches <code>didi</code> and speaks MCP over stdio. Every definition carries specification annotations and <code>_meta.didi</code> execution metadata, so a client can see whether a tool is live, offline, unavailable or unimplemented before it calls.</p>
+    </div>
+    <div>
+      <p class="who slate">Pipe &middot; the bridge</p>
+      <h3>Didi</h3>
+      <p>One C++20 binary, <code>didi</code> or <code>didi.exe</code>: the JSON-RPC dispatcher, the registry of {{canonical}} canonical tools, <code>godot://</code> resources and prompt workflows, and an offline engine that parses GDScript and <code>.tscn</code> files when no editor is running. It reaches the editor over an authenticated, process-unique local IPC endpoint.</p>
+    </div>
+    <div>
+      <p class="who blue">Ring &middot; the scene</p>
+      <h3>Godot 4.5+</h3>
+      <p>The Didi GDExtension inside the editor dispatches on the main thread through <code>EditorInterface</code>, edits the live SceneTree through <code>EditorUndoRedoManager</code>, and captures the real viewport as PNG. A running game publishes a session the same way, with its own smaller set of live tools.</p>
+    </div>
+  </div>
+</section>
+
+<section id="why">
+  <p class="eyebrow">Why Didi</p>
+  <h2>Native, local, and explicit about what it can actually execute.</h2>
+  <p>Most bridges into Godot either drive the command line, which cannot see the editor, or chain a Node.js process, a WebSocket and a plugin, which can. Didi is the plugin and the server in one native binary each, with nothing between them but a pipe.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Feature</th><th>Script and CLI wrappers</th><th>Multi-hop network bridges</th><th>Didi</th></tr></thead>
+      <tbody>
+        <tr><td>Execution topology</td><td>Offline CLI subprocesses</td><td>Node.js, WebSocket and a C# plugin</td><td class="yes">Direct C++ GDExtension plus a standalone binary</td></tr>
+        <tr><td>In-memory scene access</td><td><span class="no">Blind to live editor state</span></td><td><span class="warn">Depends on the bridge</span></td><td class="yes">Direct Godot objects for every live tool</td></tr>
+        <tr><td>Undo and redo safety</td><td><span class="no">None; files are overwritten</span></td><td><span class="warn">Varies</span></td><td class="yes">Native <code>EditorUndoRedoManager</code> transactions</td></tr>
+        <tr><td>Visual inspection</td><td><span class="no">None</span></td><td><span class="warn">Often needs an export</span></td><td class="yes">Live editor PNG capture, node isolation, exact pixel diffs</td></tr>
+        <tr><td>Transport</td><td>A process start per call</td><td>Network or a multi-process bridge</td><td class="yes">Local named pipe or Unix socket</td></tr>
+        <tr><td>External dependencies</td><td>Node.js or Python runtime</td><td>Node.js runtime plus WebSockets</td><td class="yes">None at runtime</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="tools">
+  <p class="eyebrow">The surface</p>
+  <h2>{{canonical}} canonical tools across fourteen domains.</h2>
+  <p>The canonical names are the stable protocol surface; {{legacy}} legacy names are registered beside them for older clients, {{total}} entries in <code>tools/list</code>. Availability is stated per definition rather than implied by a name.</p>
+  <div class="grid three">
+    <div class="card"><h3>Scene tree and nodes <span class="n">7</span></h3><p class="tools">scene_get_hierarchy &middot; scene_instantiate_node &middot; scene_remove_node &middot; scene_reparent_node &middot; scene_set_property &middot; scene_get_property &middot; scene_duplicate_node</p><p>Live against the edited scene. The hierarchy also has an offline <code>.tscn</code> fallback.</p></div>
+    <div class="card"><h3>Signals and events <span class="n">4</span></h3><p class="tools">signal_list_connections &middot; signal_connect &middot; signal_disconnect &middot; signal_emit</p><p>Connect and disconnect land in the scene's undo history. Emit requires confirmation.</p></div>
+    <div class="card"><h3>Scripting and reflection <span class="n">4</span></h3><p class="tools">script_check_syntax &middot; script_reflect_class &middot; script_get_symbols &middot; script_patch_method</p><p>Offline and file-based. Reflection covers every engine class from the pinned Godot API dump.</p></div>
+    <div class="card"><h3>Vision and render <span class="n">5</span></h3><p class="tools">viewport_capture_frame &middot; viewport_diff_capture &middot; viewport_set_camera_transform &middot; viewport_create_test_lab &middot; viewport_toggle_debug_draw</p><p>Real editor pixels with a process-local capture ID, reversible node isolation, and exact RGBA diffs.</p></div>
+    <div class="card"><h3>Physics and navigation <span class="n">6</span></h3><p class="tools">physics_raycast_query &middot; physics_simulate_step &middot; nav_bake_mesh &middot; nav_query_path &middot; anim_list_tracks &middot; anim_play_track</p><p>Raycasts and path queries run against the existing worlds in the editor or a game. Stepping and baking are API-blocked and say so.</p></div>
+    <div class="card"><h3>Tilemaps and GridMaps <span class="n">3</span></h3><p class="tools">tilemap_set_cells &middot; tilemap_get_used_rect &middot; gridmap_set_cells</p><p>Editor-only batch editing: the whole request is preflighted, then applied as one undo action.</p></div>
+    <div class="card"><h3>Resources and files <span class="n">9</span></h3><p class="tools">resource_create &middot; resource_inspect &middot; project_list_resources &middot; project_get_uid_map &middot; project_audit_assets &middot; project_analyze_impact &middot; project_search_text &middot; project_search_symbols &middot; asset_reimport</p><p>Bounded offline search, impact analysis and import health. Reimport is editor-only and waits for a stable idle editor.</p></div>
+    <div class="card"><h3>Runtime and debug <span class="n">4</span></h3><p class="tools">runtime_launch &middot; runtime_inject_input &middot; runtime_get_call_stack &middot; runtime_read_profiler</p><p>Bounded child launches, explicit press and release events into a game, live <code>Performance</code> monitors. The call stack is API-blocked.</p></div>
+    <div class="card"><h3>Editor lifecycle <span class="n">4</span></h3><p class="tools">editor_undo &middot; editor_redo &middot; editor_save_scene &middot; editor_reload_project</p><p>Live. Reload asks the editor for a resource-filesystem rescan rather than restarting anything.</p></div>
+    <div class="card"><h3>Project wiring <span class="n">18</span></h3><p class="tools">script attach and detach &middot; autoloads &middot; InputMap &middot; settings &middot; groups &middot; scene create, open, close and pack</p><p>Live with undo history, atomic <code>ProjectSettings</code> writes, overwrite guards and normalized <code>res://</code> paths.</p></div>
+    <div class="card"><h3>Runtime sessions <span class="n">10</span></h3><p class="tools">runtime_list_sessions &middot; attach, detach, get &middot; logs and output &middot; pause, step, stop, tree &middot; eval_gdscript</p><p>Attachment is deterministic or explicit and always authenticated. Evaluation is a strict read-only expression subset, not arbitrary GDScript.</p></div>
+    <div class="card"><h3>Deep domains <span class="n">6</span></h3><p class="tools">csharp_check_build &middot; shader_check_compile &middot; project_list_export_presets &middot; project_export &middot; gridmap_export_mesh_library &middot; ui_hit_test</p><p>Bounded subprocesses with no shell, per-request deadlines, a 1 MiB output cap and project-contained output paths.</p></div>
+    <div class="card"><h3>Agent coordination <span class="n">10</span></h3><p class="tools">blackboard_write &middot; blackboard_read &middot; blackboard_patch &middot; blackboard_list_keys &middot; blackboard_clear &middot; blackboard_task_create, claim, update, complete, list</p><p>File-backed under <code>.didi/blackboard/</code> with an exclusive OS lock per operation and expiring leases, so two agents racing for one task produce a single winner.</p></div>
+    <div class="card"><h3>Managed recovery <span class="n">4</span></h3><p class="tools">runtime_recovery_status &middot; runtime_checkpoint &middot; runtime_recover_editor &middot; runtime_restore_checkpoint</p><p>Opt-in owned editor, a separate project copy, saved-file checkpoints, one automatic restart, confirmed restore.</p></div>
+    <div class="card note"><h3>Resources and prompts</h3><p class="tools">godot://project/tree &middot; godot://editor/state &middot; runtime logs &middot; prompt workflows</p><p>Dynamic resources for the project tree and editor state, plus prompt templates an agent can follow. <a href="https://github.com/saworbit/didi/blob/main/docs/RESOURCES_AND_PROMPTS.md">Resources and prompts</a>.</p></div>
+  </div>
+  <div class="honest">
+    <div>
+      <h3>Honest by construction</h3>
+      <p>{{implemented}} of the {{canonical}} canonical names are implemented in at least one mode. The remaining {{unimplemented}} are registered so the surface is stable, carry <code>implemented: false</code>, and return a tool error when called. Nothing pretends. The three are blocked by the engine API, and the evidence for that is public.</p>
+      <ul class="chips" aria-label="Registered and unimplemented">
+        <li class="off">physics_simulate_step</li><li class="off">nav_bake_mesh</li><li class="off">runtime_get_call_stack</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Read the metadata, not the name</h3>
+      <p>Every definition in <code>tools/list</code> says how it runs right now: <code>executionModes</code>, <code>implemented</code>, <code>currentMode</code>, <code>liveAvailable</code>, <code>editorConnected</code> and the selected <code>sessionKind</code>. A tool with no editor behind it reports <code>unavailable</code>, and a tool with an offline path reports <code>offline_fallback</code> only when a live call would have been better.</p>
+      <p><a href="https://github.com/saworbit/didi/blob/main/docs/CAPABILITIES.md">Current capability matrix</a> &middot; <a href="https://github.com/saworbit/didi/blob/main/docs/TOOL_REFERENCE.md">Tool reference</a> &middot; <a href="https://github.com/saworbit/didi/blob/main/docs/PHASE_7_API_FEASIBILITY.md">Feasibility evidence</a></p>
+    </div>
+  </div>
+</section>
+
+<section id="safety">
+  <p class="eyebrow">Safety</p>
+  <h2>An agent with real access needs real brakes.</h2>
+  <p>Didi edits the project that is open in front of you. So every mutation can be previewed, the dangerous ones need a token the preview issued, and the person at the editor can undo what the agent did.</p>
+  <div class="grid three">
+    <div class="card"><h3>An explicit project, always</h3><p>Didi refuses to start without <code>--project</code> or <code>DIDI_PROJECT_ROOT</code>, and the directory must contain <code>project.godot</code>. Endpoint names carry a stable project key.</p></div>
+    <div class="card"><h3>One client per session</h3><p>A per-session OS lock admits one MCP client at a time and is released when that client exits. The blackboard tools are how separate agents share decisions instead.</p></div>
+    <div class="card"><h3>Dry-run on every mutation</h3><p>Every implemented mutation advertises <code>dry_run</code> and answers with a handler-free change plan bound to the exact project and live route.</p></div>
+    <div class="card"><h3>Confirmation tokens</h3><p>Always-confirmed and overwrite-confirmed tools need the 64-hex, 120-second, single-use <code>confirmation_token</code> that the exact preview returned.</p></div>
+    <div class="card"><h3>Native undo</h3><p>Scene mutations register with the edited scene's <code>EditorUndoRedoManager</code> history. Ctrl+Z in the editor works on what the agent did.</p></div>
+    <div class="card"><h3>Annotations that mean it</h3><p><code>readOnlyHint</code>, <code>destructiveHint</code>, <code>idempotentHint</code> and <code>openWorldHint</code> on every definition, with the managed-mode restart caveat stated rather than hidden.</p></div>
+    <div class="card"><h3>Bounded live work</h3><p>A 15-second main-thread deadline. Work that never started says <code>not_started</code>; work that started and did not resolve says <code>unknown_outcome</code> and quarantines the route, so nothing blindly retries a mutation.</p></div>
+    <div class="card"><h3>Authenticated local IPC</h3><p>A process-unique endpoint, owner-only session descriptors, and a session ID bound to PID plus process start time. Public responses never include the token.</p></div>
+    <div class="card"><h3>Crash recovery, opt in</h3><p>Start with <code>--managed-editor</code> and <code>--recovery-workspace</code> and Didi edits a separate project copy, checkpoints saved files, and can restart its owned editor once without replaying an uncertain edit.</p></div>
+  </div>
+</section>
+
+<section id="setup">
+  <p class="eyebrow">Setup</p>
+  <h2>Sixty seconds, three steps.</h2>
+  <p>Build the binary and the addon together, enable the plugin, point your assistant at the binary. The in-editor console generates the third step for you with the binary already located. <a href="https://github.com/saworbit/didi/blob/main/docs/QUICKSTART.md">The full quickstart</a> covers each client by hand, and <a href="https://github.com/saworbit/didi/releases/latest">the release page</a> has built archives for Windows, Linux and macOS with checksums and build provenance.</p>
+  <div class="steps">
+    <div class="step">
+      <p class="num">Step 1 &middot; build</p>
+      <pre><code><span class="c"># Release binary and the complete addon, assembled under build/</span>
+git clone https://github.com/saworbit/didi.git
+cd didi
+cmake -B build -S .
+cmake --build build --config Release</code></pre>
+      <p>On Windows this produces <code>build/Release/didi.exe</code> and <code>build/addons/didi/</code> with the extension library inside it.</p>
+    </div>
+    <div class="step">
+      <p class="num">Step 2 &middot; enable</p>
+      <pre><code>your_game/
+├── addons/
+│   └── didi/          <span class="c">← copy build/addons/didi here</span>
+│       ├── plugin.cfg
+│       ├── didi.gdextension
+│       └── bin/
+└── project.godot</code></pre>
+      <p>Open the project, then <b>Project &rarr; Project Settings &rarr; Plugins</b> and enable <b>Didi Native MCP Bridge</b>. A <b>Didi</b> tab appears beside 2D, 3D and Script.</p>
+    </div>
+    <div class="step">
+      <p class="num">Step 3 &middot; connect</p>
+      <pre><code>{
+  <span class="k">"mcpServers"</span>: {
+    <span class="k">"didi"</span>: {
+      <span class="k">"command"</span>: <span class="s">"D:/didi/build/Release/didi.exe"</span>,
+      <span class="k">"args"</span>: [<span class="s">"--project"</span>, <span class="s">"D:/my_game"</span>]
+    }
+  }
+}</code></pre>
+      <p>Into <code>claude_desktop_config.json</code>, <code>.cursor/mcp.json</code> or your client's equivalent. Or open the Didi tab's <b>Connect</b> page and copy the generated one.</p>
+    </div>
+  </div>
+</section>
+
+<section id="console">
+  <p class="eyebrow">In the editor</p>
+  <h2>Can my assistant reach this project right now?</h2>
+  <p>Enabling the plugin adds a <b>Didi</b> main screen to the editor. It answers the question every bridge raises first, without anyone reading a log: six cards, each with a red, amber or green light, the fact behind it, and the one thing to do about it.</p>
+  <div class="console" role="img" aria-label="The Didi dashboard in the Godot editor: five tabs, three switches, and six status cards with coloured lights">
+    <div class="bar">
+      <div class="mk">{{svg:didi-mark-compact|aria-hidden="true" focusable="false"}}</div>
+      <div class="tabs"><span class="on">Dashboard</span><span>Connect</span><span>Log</span><span>Settings</span><span>Diagnostics</span></div>
+      <div class="switches">
+        <span class="switch on"><i></i>Live bridge</span>
+        <span class="switch on"><i></i>Auto refresh</span>
+        <span class="switch"><i></i>Technical detail</span>
+      </div>
+    </div>
+    <div class="lights">
+      <div class="light ok"><span class="lamp"></span><b>Live bridge</b><span>Up for 14 min</span></div>
+      <div class="light ok"><span class="lamp"></span><b>Extension</b><span>Loaded &middot; addons/didi/bin</span></div>
+      <div class="light ok"><span class="lamp"></span><b>Server binary</b><span>Verified by running it</span></div>
+      <div class="light warn"><span class="lamp"></span><b>Client configuration</b><span>Absent <em>Write it</em></span></div>
+      <div class="light ok"><span class="lamp"></span><b>This editor</b><span>Session 3f9c&hellip; &middot; pid 18240</span></div>
+      <div class="light ok"><span class="lamp"></span><b>Other sessions</b><span>None competing</span></div>
+    </div>
+  </div>
+  <div class="console-note">
+    <div>
+      <h3>Switches that do something</h3>
+      <p><b>Live bridge</b> opens and closes the bridge for real, loading and unloading the extension and reporting the status Godot returns, including the one that means "not without a restart". <b>Auto refresh</b> re-reads state on a timer. <b>Technical detail</b> reveals the session id, the endpoint, the descriptor path and the other sessions on the machine.</p>
+    </div>
+    <div>
+      <h3>The other four tabs</h3>
+      <p><b>Connect</b> generates the launch configuration for Claude Code, Cursor, Claude Desktop and VS Code, and can write it into the project. <b>Log</b> shows the console's own record and Godot's log for the last run, filterable by level and text. <b>Settings</b> lives in your editor's <code>EditorSettings</code>, where nothing in the project can change it. <b>Diagnostics</b> names the path or pid behind every check and copies into an issue. The console never displays, copies or reports a session token.</p>
+    </div>
+  </div>
+</section>
+
+<section id="docs">
+  <p class="eyebrow">Documentation</p>
+  <h2>Every page, grouped by what you came for.</h2>
+  <p>The documentation lives in the repository so it is versioned with the code it describes. <a href="https://github.com/saworbit/didi/blob/main/docs/README.md">The index</a> lists every page, including the design records and their status.</p>
+  <div class="docs">
+    <div>
+      <h3>Start here</h3>
+      <ul>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/QUICKSTART.md">Quickstart</a><small>Godot and one assistant in about five minutes.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/INTEGRATION_GUIDE.md">Integration guide</a><small>Installing the addon into an existing project and wiring each client.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/LLM_INSTRUCTIONS.md">Instructions for agents</a><small>The system prompt and decision tree to hand an assistant.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/MANAGED_RECOVERY.md">Managed recovery</a><small>Owned editor, checkpoints, reconciliation, and recovery limits.</small></li>
+      </ul>
+    </div>
+    <div>
+      <h3>What Didi does today</h3>
+      <ul>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/CAPABILITIES.md">Capability matrix</a><small>The authoritative list of live, offline, unavailable and unimplemented.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/TOOL_REFERENCE.md">Tool reference</a><small>Behaviour, arguments and limits for every canonical tool and legacy name.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/RESOURCES_AND_PROMPTS.md">Resources and prompts</a><small>The <code>godot://</code> resources and the prompt templates.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/CONTROL_ROOM_DESIGN.md">Control room</a><small>The MCP Apps dashboard rendered inside your assistant.</small></li>
+      </ul>
+    </div>
+    <div>
+      <h3>How it works</h3>
+      <ul>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/ARCHITECTURE.md">Architecture</a><small>The C++20 design, the dual topology, threading, and the IPC transport.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/API_SPECIFICATION.md">API and wire protocol</a><small>JSON-RPC 2.0 over the wire and the binary frame format.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/ADMIN_GUIDE.md">Administration</a><small>DACL hardening, headless CI, observability, troubleshooting.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/DEVELOPER_GUIDE.md">Developer guide</a><small>Building from source, the test suites, and adding a tool.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/TEST_INVENTORY.md">Test inventory</a><small>Generated. What each suite contains and how many cases it runs.</small></li>
+      </ul>
+    </div>
+    <div>
+      <h3>Where it is going</h3>
+      <ul>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/ROADMAP.md">Roadmap</a><small>Completed phases and the technical build order.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/SURFACE_AMENDMENTS.md">Surface amendments</a><small>Every accepted change to the canonical tool surface.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/PHASE_7_API_FEASIBILITY.md">Phase 7 feasibility gate</a><small>Reproducible results on Godot 4.5.1 and 4.7.2, and the three blocked contracts.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/FUTURE_PHASES_DESIGN.md">Future phases</a><small>The design for what follows Phase 6.</small></li>
+      </ul>
+    </div>
+    <div>
+      <h3>The project</h3>
+      <ul>
+        <li><a href="https://github.com/saworbit/didi/blob/main/CHANGELOG.md">Changelog</a><small>Version history, and what a version number does and does not promise.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/SECURITY.md">Security policy</a><small>Supported release line, the local attachment boundary, private reporting.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/CONTRIBUTING.md">Contributing</a><small>Build, test and review expectations for a change you want merged.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/AI.md">On the use of AI</a><small>Where AI was used, what checks it, and who is responsible when it is wrong.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/THIRD_PARTY.md">Third-party code</a><small>The vendored sources no package manager resolves.</small></li>
+      </ul>
+    </div>
+    <div>
+      <h3>Identity</h3>
+      <ul>
+        <li><a href="{{root}}brand/">The Didi mark</a><small>Construction, scale, lockups, colour, applications, and the rejected directions.</small></li>
+        <li><a href="https://github.com/saworbit/didi/blob/main/docs/brand/BRAND.md">Brand guide</a><small>The rules, and the assets they generate from.</small></li>
+        <li><a href="https://github.com/saworbit/didi/tree/main/docs/brand">Asset sources</a><small>Thirteen SVG sources and every PNG export, in the repository.</small></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="brand">
+  <p class="eyebrow">Identity</p>
+  <h2>A mark that is the thing it names.</h2>
+  <div class="brand-row">
+    <div>
+      <p>The mark is a lowercase <em>d</em> whose bowl is entered from the left by a node and a pipe. It carries three readings at once, and all three are literally true of Didi: the product's own initial; the real topology of a client, a local pipe and the live scene it reaches into; and two figures, one tall and one small, for Didi and Gogo, the pair who wait for Godot.</p>
+      <p>The ring is drawn open, never filled. Didi reaches into a running scene; it does not replace it. Both brand colours were already in the README badges before there was a logo: MCP violet enters at the node, Godot blue leaves at the last <em>i</em>.</p>
+      <div class="cta">
+        <a class="btn primary" href="{{root}}brand/">The full identity board</a>
+        <a class="btn" href="https://github.com/saworbit/didi/tree/main/docs/brand">Download the assets</a>
+      </div>
+    </div>
+    <div>
+      <div class="lock">
+        <div class="lockcard on-dark">
+          <div class="art">{{svg:didi-signature-brand|role="img" aria-label="The Didi brand signature: violet node in, Godot-blue node out"}}</div>
+          <div class="note"><span class="verdict yes">Primary</span><h4 style="margin-top:12px">The signature</h4><p>The node feeds the wordmark's own first <em>d</em>, so mark and name are one object.</p></div>
+        </div>
+        <div class="lockcard on-light">
+          <div class="art" style="width:120px">{{svg:didi-lockup-stacked|role="img" aria-label="The stacked lockup: the mark above the wordmark"}}</div>
+          <div class="note"><span class="verdict yes">Stacked</span><h4 style="margin-top:12px">For square and narrow spaces</h4><p>Mark over wordmark, one colour, no stutter.</p></div>
+        </div>
+      </div>
+      <div class="swatches" style="margin-top:22px">
+        <div class="sw"><div class="chip" style="background:#8A2BE2"></div><div><b>MCP violet</b><code>#8A2BE2</code><p>The entering node.</p></div></div>
+        <div class="sw"><div class="chip" style="background:#478cbf"></div><div><b>Godot blue</b><code>#478cbf</code><p>The far side, the live engine.</p></div></div>
+        <div class="sw"><div class="chip" style="background:#6A5ACD"></div><div><b>Slate</b><code>#6A5ACD</code><p>Single-colour brand use.</p></div></div>
+        <div class="sw"><div class="chip" style="background:#0E1116"></div><div><b>Ground</b><code>#0E1116</code><p>Icon tile, banners, social preview.</p></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+{{partial:footer}}

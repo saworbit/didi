@@ -1,0 +1,51 @@
+<footer>
+  <div class="wrap foot">
+    <div class="sig">{{svg:didi-signature-brand|role="img" aria-label="Didi"}}</div>
+    <div>
+      <p class="quote">&ldquo;Nothing happens. Nobody comes, nobody goes. It's awful!&rdquo; &mdash; <cite>Waiting for Godot</cite></p>
+      <p>Didi keeps the bridge native, local, and explicit about what it can actually execute.</p>
+      <p>MIT licence. Didi is an independent project. The Godot Engine logo is a trademark of the Godot Foundation; Didi's mark is original work and shares no geometry with it.</p>
+    </div>
+    <nav aria-label="Project">
+      <a href="https://github.com/saworbit/didi">github.com/saworbit/didi</a>
+      <a href="https://github.com/saworbit/didi/releases">Releases</a>
+      <a href="https://github.com/saworbit/didi/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/saworbit/didi/blob/main/SECURITY.md">Security policy</a>
+      <a href="https://github.com/saworbit/didi/blob/main/CONTRIBUTING.md">Contributing</a>
+      <a href="https://github.com/saworbit/didi/blob/main/AI.md">On the use of AI</a>
+      <a href="{{root}}brand/">Brand identity</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(function () {
+  var root = document.documentElement;
+  var toggle = document.getElementById("theme");
+  var menu = document.querySelector(".menu");
+  var links = document.getElementById("links");
+  if (toggle) {
+    toggle.addEventListener("click", function () {
+      var current = root.getAttribute("data-theme");
+      var system = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      var next = (current || system) === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("didi-theme", next); } catch (error) {}
+    });
+  }
+  if (menu && links) {
+    menu.addEventListener("click", function () {
+      var open = links.classList.toggle("open");
+      menu.setAttribute("aria-expanded", open ? "true" : "false");
+      menu.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+    });
+    links.addEventListener("click", function (event) {
+      if (event.target.tagName === "A") {
+        links.classList.remove("open");
+        menu.setAttribute("aria-expanded", "false");
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>
