@@ -274,6 +274,17 @@ Runs Didi's string/comment-aware lightweight GDScript diagnostics. When an in-pr
 
 A file whose bytes are not valid UTF-8 is reported as `has_errors: true` with one diagnostic under `rule: "invalid_encoding"`, and Godot is not spawned for it. The engine does refuse such a file — "contains invalid unicode (UTF-8), so it was not loaded" — but its refusal points at engine source rather than at a `res://` line, so there was no location to hang a diagnostic on and the check came back clean about a script the engine will not load. Engine load failures that name no `res://` line are now kept as diagnostics rather than dropped.
 
+Both this tool and `shader_check_compile` spawn a Godot to answer, and both say
+which one. `engine_version` is the engine that ran, read from the banner it
+printed, in the same spelling `script_reflect_class` uses for `api_version`.
+`engine_executable` is the binary it came from. `attached_engine_version` is the
+engine this session is attached to, and `matches_attached_engine` says whether
+the two are the same line. Godot is discovered newest-first from `GODOT_BIN`,
+`GODOT_PATH` and a fixed list, so on a machine with several installed the check
+can answer about a different engine from the one the project is open in; all
+four fields are `null` when there is nothing to compare, and an unknown version
+is never reported as a match.
+
 Godot's `--headless --check-only` runs in a process with no `SceneTree`, and a project's autoload singletons are registered when the `SceneTree` is built. So the check reports `Compile Error: Identifier not found: <Name>` for every autoload a script names, on every call, for a script the engine compiles and runs without complaint. This is permanent. It is not the `project_set_autoload` limitation below, which clears when the editor restarts; no invocation avoids this one, and `--path`, the `res://` spelling and `--editor` were all confirmed to report it on Godot 4.7.2.
 
 Didi therefore reads the `[autoload]` section of `project.godot` and demotes those diagnostics to `severity: "warning"`, adding a `note` saying why. When they were the only errors, the `Compilation failed` line the compiler prints after them is demoted too, so `has_errors` is a verdict about the script rather than about the checker. Nothing is dropped, so an autoload whose own script is broken is still visible. An `Identifier not found` naming anything that is not a registered autoload stays an error, and a real parse error beside an autoload one keeps `has_errors: true`.

@@ -66,6 +66,14 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`script_check_syntax` and `shader_check_compile` name the engine that
+  answered.** Both spawn a Godot to answer "will the engine accept this?", and
+  `resolveGodotExecutable` picks newest-first from `GODOT_BIN`, `GODOT_PATH` and
+  a fixed list, so on a machine with 4.5, 4.6 and 4.7 installed both answered
+  about a 4.5 project using 4.7. Neither said so, and `script_check_syntax` had
+  no `raw_output` for it to hide in (#617). Both now carry `engine_version`,
+  `engine_executable`, `attached_engine_version` and
+  `matches_attached_engine`, the same shape #466 gave `script_reflect_class`.
 - **The fix cycle spawns the interpreter it is running, not a command called
   `python`.** There is no such command on macOS -- the Xcode Command Line Tools
   provide `python3` and Apple removed the Python 2 shim in 12.3 -- nor in a
