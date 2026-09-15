@@ -1477,6 +1477,17 @@ void addEditedSceneIdentity(json& payload, GDExtensionObjectPtr root) {
 }
 
 
+// SceneState spells a child of the edited root "./Child"; relativePathWithinEditedRoot,
+// which asks Node.get_path_to, spells the same node "Child". Both spell the
+// root ".". One spelling, so the two can be compared. Every comparison of a
+// SceneState path against a relativePathWithinEditedRoot result goes through
+// here, because the one that did not cost #660: a persistent group read as
+// transient, so its undo put the membership back in a form the next save drops.
+std::string sceneStatePathWithinEditedRoot(const std::string& state_path) {
+    if (strings::startsWith(state_path, "./")) return state_path.substr(2);
+    return state_path;
+}
+
 Result<std::string> relativePathWithinEditedRoot(GDExtensionObjectPtr root,
                                                  GDExtensionObjectPtr target) {
     if (root == target) return std::string(".");
@@ -1640,12 +1651,7 @@ Result<InheritedSceneState> inheritedSceneState(GDExtensionObjectPtr root) {
                 if (path_value.isErr()) return path_value.error();
                 auto path = stringFromVariant(path_value.value(), GDEXTENSION_VARIANT_TYPE_NODE_PATH);
                 if (path.isErr()) return path.error();
-                // SceneState spells a child of the root "./Child";
-                // Node.get_path_to spells the same node "Child". One
-                // spelling, so the two can be compared.
-                std::string relative = path.value();
-                if (strings::startsWith(relative, "./")) relative = relative.substr(2);
-                state.node_paths.insert(relative);
+                state.node_paths.insert(sceneStatePathWithinEditedRoot(path.value()));
             }
         }
         auto base_value = callObject(scene_state.value(), "SceneState", "get_node_instance",
@@ -1773,6 +1779,76 @@ Result<std::vector<GDExtensionObjectPtr>> collectNodesOwnedBy(GDExtensionObjectP
         }
     }
     return owned;
+}
+
+// The non-internal children of a node, in tree order. Internal children are
+// skipped, as the packer skips them.
+Result<std::vector<GDExtensionObjectPtr>> childNodes(GDExtensionObjectPtr node) {
+    std::vector<GDExtensionObjectPtr> collected;
+    auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    if (include_internal.isErr()) return include_internal.error();
+    auto children = callObject(node, "Node", "get_children", 873284517LL, {&include_internal.value()});
+    if (children.isErr()) return children.error();
+    auto size_value = callVariant(children.value(), "size");
+    if (size_value.isErr()) return size_value.error();
+    auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (size.isErr()) return size.error();
+    for (int64_t i = 0; i < size.value(); ++i) {
+        auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+        if (index.isErr()) return index.error();
+        auto child_variant = callVariant(children.value(), "get", {&index.value()});
+        if (child_variant.isErr()) return child_variant.error();
+        auto child = objectFromVariant(child_variant.value());
+        if (child.isErr() || !child.value()) return Error::internal("Godot returned an invalid child node");
+        collected.push_back(child.value());
+    }
+    return collected;
+}
+
+// The descendants of a freshly duplicated branch that the edited root has to
+// own, which is every node whose counterpart in the source branch it owns.
+// Node::duplicate returns the copy's root owned by nobody and every descendant
+// the same, so the caller sets the root's owner and this finds the rest;
+// without it PackedScene::pack kept only the copy's root and the next save
+// dropped the whole subtree (#659).
+//
+// Mirroring the source is the rule rather than owning everything, because two
+// kinds of descendant must not be owned: a child added at runtime that the
+// scene never held, which would start being saved, and a node inside an
+// instantiated sub-scene, which is owned by that instance and would be
+// flattened out of it. Checked against 4.5.1, 4.6.2 and 4.7.2, which agree.
+//
+// The two trees have the same shape by construction. A divergence stops the
+// walk rather than pairing nodes by position that are not each other's copy.
+Result<std::vector<GDExtensionObjectPtr>> collectDuplicateDescendantsToOwn(
+    GDExtensionObjectPtr root, GDExtensionObjectPtr source, GDExtensionObjectPtr duplicate) {
+    std::vector<GDExtensionObjectPtr> to_own;
+    std::function<Result<void>(GDExtensionObjectPtr, GDExtensionObjectPtr, bool)> visit =
+        [&](GDExtensionObjectPtr source_node, GDExtensionObjectPtr duplicate_node,
+            bool is_branch_root) -> Result<void> {
+        if (!is_branch_root) {
+            auto owner_value = callObject(source_node, "Node", "get_owner", 3160264692LL);
+            if (owner_value.isErr()) return owner_value.error();
+            auto owner = objectFromVariant(owner_value.value());
+            if (owner.isErr()) return owner.error();
+            if (owner.value() == root) to_own.push_back(duplicate_node);
+        }
+        auto source_children = childNodes(source_node);
+        if (source_children.isErr()) return source_children.error();
+        auto duplicate_children = childNodes(duplicate_node);
+        if (duplicate_children.isErr()) return duplicate_children.error();
+        if (source_children.value().size() != duplicate_children.value().size()) {
+            return Error::internal("Godot's duplicate does not match the branch it copied");
+        }
+        for (size_t i = 0; i < source_children.value().size(); ++i) {
+            auto nested = visit(source_children.value()[i], duplicate_children.value()[i], false);
+            if (nested.isErr()) return nested;
+        }
+        return Result<void>::ok();
+    };
+    auto visited = visit(source, duplicate, true);
+    if (visited.isErr()) return visited.error();
+    return to_own;
 }
 
 enum class SceneEdit {
@@ -9469,7 +9545,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 if (state_path_value.isErr()) return errorJson(state_path_value.error().code, state_path_value.error().message);
                 auto state_path = stringFromVariant(state_path_value.value(), GDEXTENSION_VARIANT_TYPE_NODE_PATH);
                 if (state_path.isErr()) return errorJson(state_path.error().code, state_path.error().message);
-                if (state_path.value() != relative_path.value()) continue;
+                if (sceneStatePathWithinEditedRoot(state_path.value()) != relative_path.value()) continue;
                 auto groups = callObject(state.value(), "SceneState", "get_node_groups", 647634434LL, {&index.value()});
                 if (groups.isErr()) return errorJson(groups.error().code, groups.error().message);
                 auto group_count_value = callVariant(groups.value(), "size");
@@ -11050,6 +11126,12 @@ json GodotBridge::execute(const std::string& method, const json& params,
             GodotApi::instance().object_destroy(duplicate_node.value());
             return errorJson(500, "Failed to construct duplicate transaction arguments");
         }
+        auto descendants_to_own =
+            collectDuplicateDescendantsToOwn(root.value(), node.value(), duplicate_node.value());
+        if (descendants_to_own.isErr()) {
+            GodotApi::instance().object_destroy(duplicate_node.value());
+            return errorJson(descendants_to_own.error().code, descendants_to_own.error().message);
+        }
         auto preflight = preflightNodeUndoTransaction();
         if (preflight.isErr()) {
             GodotApi::instance().object_destroy(duplicate_node.value());
@@ -11064,8 +11146,24 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto add = managerMethod(manager.value(), "add_do_method", parent.value(), "add_child",
                                  {&duplicate_value.value(), &readable.value(), &internal.value()});
         auto own = managerMethod(manager.value(), "add_do_method", duplicate_node.value(), "set_owner", {&owner.value()});
+        // The copy's root is not the whole copy. Godot leaves every duplicated
+        // descendant unowned and the packer keeps only what the edited root
+        // owns, so a branch duplicated here reached the file as a bare root
+        // and the children the editor was showing were gone (#659). Registered
+        // after add_child, because UndoRedo runs do operations in the order
+        // they were added and set_owner needs the node in the tree; that is
+        // the same ordering rule scene.removeNode states for its undo side.
+        bool owned_descendants = true;
+        for (auto descendant : descendants_to_own.value()) {
+            auto own_descendant =
+                managerMethod(manager.value(), "add_do_method", descendant, "set_owner", {&owner.value()});
+            if (own_descendant.isErr()) {
+                owned_descendants = false;
+                break;
+            }
+        }
         auto remove = managerMethod(manager.value(), "add_undo_method", parent.value(), "remove_child", {&duplicate_value.value()});
-        if (keep.isErr() || add.isErr() || own.isErr() || remove.isErr()) {
+        if (keep.isErr() || add.isErr() || own.isErr() || !owned_descendants || remove.isErr()) {
             abandonAction(manager.value());
             if (keep.isErr()) GodotApi::instance().object_destroy(duplicate_node.value());
             return errorJson(500, "Failed to register duplicate UndoRedo transaction");

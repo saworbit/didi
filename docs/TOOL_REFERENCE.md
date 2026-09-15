@@ -185,6 +185,8 @@ Results carry `target_node`, `method_name`, `awaited`, and `returned`.
 
 Duplicates a node branch through UndoRedo and names the copy from `<source-name>Copy`, subject to Godot's uniqueness rules.
 
+The copy's descendants are owned the way the source branch's are, so the whole branch survives the next save. Godot's own `duplicate` leaves them unowned and the packer keeps only what the edited root owns, which is why this is stated rather than assumed. A child the source branch had at runtime and the scene never owned stays unowned in the copy too, and a node inside an instanced sub-scene stays owned by that instance.
+
 - `target_node` (`string`, required).
 
 Refused with `409 node_not_owned` or `409 node_inherited` the way `scene_remove_node` is; the editor refuses duplicating either kind of node.
