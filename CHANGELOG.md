@@ -66,6 +66,21 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A reconfigure with no source change recompiles one file, not 57 targets.**
+  The build identity carries a wall-clock stamp, so `version.hpp` was different
+  on every configure -- and it sits behind `mcp_protocol.hpp`, which 28 files
+  include, so a "nothing changed" reconfigure cost several minutes of compiling
+  (#633). `kBuildId` moves into a generated translation unit with an `extern`
+  declaration in the header, which keeps the identity exactly as it was and
+  leaves one object file to rebuild. CI never saw this; every incremental
+  workflow did.
+- **The checkpoint file-count boundary is tested with eleven files, not ten
+  thousand.** One test created, hashed, copied and then deleted ten thousand
+  files to reach the limit: 80 to 90 seconds on NTFS, which dominated the whole
+  native suite and left a temp directory full of them behind on an unclean exit
+  (#627). The limit is a value with a test seam now, production keeps its
+  10000, and a second test asserts that it does. The suite's Checkpoints block
+  went from 101 seconds to 5.
 - **The tilemap and gridmap rules a schema cannot state answer with a
   sentence.** Uniqueness across array entries and a constraint between two
   fields of one entry are hand-written, run either side of the schema check, and

@@ -257,22 +257,41 @@ TEST(Checkpoints, AbandonedFixtureSweepKeepsLiveOwnersAndClearsDeadOnes) {
     CHECK(kept_unowned);
 }
 TEST(Checkpoints, FileCountBoundaryRetainsMaximumSizedSnapshots) {
+    // The same boundary, reached with eleven files instead of ten thousand.
+    // Creating, hashing, copying and deleting ten thousand files took 80 to 90
+    // seconds on NTFS and dominated the whole native suite, for a limit that is
+    // one comparison (#627). Production keeps its 10000; only this test lowers
+    // it, and puts it back either way.
+    constexpr size_t limit = 10;
+    struct RestoreLimit {
+        size_t previous;
+        ~RestoreLimit() { didi::runtime::setCheckpointMaxFilesForTesting(previous); }
+    } restore{didi::runtime::setCheckpointMaxFilesForTesting(limit)};
+    CHECK(didi::runtime::checkpointMaxFiles() == limit);
+
     Fixture f;
-    for (int i = 0; i < 10000; ++i)
+    for (size_t i = 0; i < limit; ++i)
         f.put(fs::path("source") / std::to_string(i), "");
     CheckpointStore s(f.root / "source", f.root / "snapshots");
     auto cp = s.create("at-limit");
     CHECK(cp.isOk());
-    CHECK(cp.value().at("files") == 10000);
+    CHECK(cp.value().at("files") == limit);
     f.put("source/overflow", "");
     CHECK(s.create("too-many").isErr());
-    for (int i = 0; i < 10000; ++i)
+    for (size_t i = 0; i < limit; ++i)
         fs::remove(f.root / "source" / std::to_string(i));
     // Retention must not incorrectly count the manifest as a project file.
     for (int i = 0; i < 5; ++i)
         CHECK(s.create("retention-at-limit").isOk());
     CHECK(s.list().isOk());
     CHECK(s.list().value().size() == 5);
+}
+
+TEST(Checkpoints, TheProductionFileLimitIsUnchanged) {
+    // The seam above is only worth having if it cannot quietly move the real
+    // limit, so the shipped value is asserted on its own.
+    CHECK(didi::runtime::checkpointMaxFiles() == didi::runtime::kDefaultCheckpointMaxFiles);
+    CHECK(didi::runtime::kDefaultCheckpointMaxFiles == 10000);
 }
 namespace {
 void checkConcurrentMutation(bool addFile) {
