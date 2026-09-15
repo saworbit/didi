@@ -60,6 +60,12 @@ twice.
 | `probes/offline_refusals.py` | Not what a live-only tool answers offline -- what it *refuses* with. One message, fourteen tools. Run with no editor on the project. |
 | `probes/posix_platform.py` | The states only a POSIX host can create: a file the process may not read against one that is not there, a directory it may not write into, a symlink out of the project shown to the read path and the write path, a name that is not valid UTF-8, a name containing a newline, a FIFO where a `.gd` is expected, and whether the host folds case. Skips a row by name when the host cannot set it up; run it as a user who is not root, or the permission rows cannot exist. |
 | `probes/project_state_census.py` | The other half of `handler_error_census.py`. That one builds arguments from each tool's schema and so can only reach failures an argument can cause; this walks a *project file* through every state it can be in -- absent, unreadable bytes, structurally valid and empty, valid and incomplete, correct -- and asks the readers. Reports the bare strings and, separately, which states answer identically. |
+| `probes/headless_editor.py` | The live surface with nothing to draw on: an editor started `--headless`, asked the tools whose answer is a picture. Decodes every image it is handed rather than believing the response about it. First caller anywhere of `viewport_capture_passes`, `viewport_create_test_lab`, `viewport_set_camera_transform`, and of `asset_reimport` against a real imported asset. |
+| `probes/blackboard_two_writers.py` | Two servers writing one board, interleaved by hand rather than by luck: the same key, two different keys, an interleaved patch, and a clear while the other holds a task. |
+| `probes/empty_versus_absent.py` | "Nothing there" beside "no such thing", for nine readers at once, printing whether the two answers differ at all. The oldest lesson in this file, asked as a census instead of one tool at a time. |
+| `probes/yolo_mode.py` | `--yolo`, the mode where the confirmation gate is not there. Diffs what each mode publishes about itself before any call, then walks the three gate kinds in both. |
+| `editor_exit_status.py` | Not a probe against the server: the same editor invocation with and without the built addon installed, exit statuses side by side. The control for a crash on shutdown. |
+| `wait_for_session.py` | Polls `runtime_list_sessions` through the same binary the probes use, so a slow first import reads as a slow import rather than as an absent session. |
 | `bind_census.py` | Not a probe against the server: every `(class, method, hash)` bind in `src/gdextension` checked against `--dump-extension-api` output from each installed engine, `hash_compatibility` included. A miss is a null bind that prints at startup or answers 501 at call time. |
 | `fixtures/` | What the ownership, game and domain probes need beyond the sandbox: a sub-scene, a scene inheriting `main.tscn`, a game scene with a ticking script and an AnimationPlayer, a `Node3D` script, and since session eleven a `domain.tscn` (TileMapLayer with a real TileSet over a generated atlas, a ShaderMaterial over a four-uniform shader, an AnimationPlayer) plus `domain3d.tscn` (a GridMap with a MeshLibrary). `sandbox.py --fixtures` copies them in. |
 | `report.py` | Files a directory of finding bodies as issues in one pass. |
@@ -635,6 +641,121 @@ exists afterwards. And a Godot editor runs headless on Linux with the addon
 loaded and publishes a session, which makes live coverage on that platform a
 thing a container can do.
 
+**A headless editor is a configuration, not a degraded one.** Twelve sessions
+drove an editor with a window, because that is what a desktop has. A build
+machine, a container and a box reached over ssh have `--headless`, and so does
+every CI runner, which is why no session had ever seen one. Didi attaches
+happily -- session published, bridge green, `68 live now` -- and then every tool
+whose answer is a picture returns `404 not_found` with the three words "Viewport
+image is unavailable", while the strictly *worse* state, no editor at all, gets
+a synthesised frame and a sentence naming the cause (#676). `editor_save_scene`
+makes the engine print `ERROR: Parameter "t" is null` from the dummy renderer on
+every save and reports `saved` (#683). Identical on Windows, macOS and Ubuntu.
+**Ask what your subject looks like without the thing your machine always has.**
+
+**Watch the process exit, not only the calls.** Every probe here calls a tool and
+reads the answer; none had ever looked at what the editor does on the way out.
+It aborts, on both POSIX platforms and on both invocations, immediately after
+`[Didi] Didi Native MCP Editor Plugin deactivated.` -- `malloc_consolidate():
+invalid chunk size` on Linux, an uncaught `std::system_error: mutex lock failed`
+on macOS -- and exits 0 on Windows (#688). A crash on shutdown needs a control
+more than most findings do, because "Godot does this" is entirely plausible and
+the subject is a whole engine; `editor_exit_status.py` runs the same invocation
+with and without the addon and prints the four statuses together. Without the
+addon, all four are 0.
+
+**A tool that shells out has a failure its caller cannot see.**
+`script_check_syntax` runs Godot with `--check-only` and merges the compiler's
+diagnostics into its own. Point `GODOT_BIN` at a real file that is not Godot and
+the launch fails, the compiler diagnostics are simply absent, and a script with
+four parse errors comes back `has_errors: false`, `diagnostics_count: 0`, with
+`engine_version: null` as the only trace and no `exit_code` at all (#677). The
+sibling that does the same job for shaders says "Failed to launch process" on
+the same misconfiguration. A directory or a missing path is caught and falls
+back to discovery -- the one value that gets through is the *plausible* wrong
+one. **When an answer is assembled from a subprocess, ask what the tool says
+when the subprocess never ran.**
+
+**An honesty field can be switched off by the path the caller took.** Three
+tools shell out to a discovered engine and publish whether it is the one the
+caller is editing in. `matches_attached_engine` is `false` and correct after an
+explicit `runtime_attach_session`, and `null` without one -- on the same server,
+against the same editor, on the path every other live tool routes over
+transparently (#687). `runtime_launch` has no such field at all: which engine
+ran the project appears only in Godot's own banner inside the captured logs.
+**A field that reports a mismatch has its own precondition; find out what it
+is.**
+
+**The layer below `tools/call` has a layer below it too.** `blackboard_patch`
+hands back nlohmann's exception text -- `[json.exception.parse_error.105]`,
+`[json.exception.out_of_range.403]`, `[json.exception.other_error.501]` -- for
+every failure past the argument check, without saying which of up to a hundred
+operations failed (#679). The one case the server checks itself reads like the
+rest of the surface: "Argument 'operations' entry 0 must be an object, not an
+integer." The `items` schema is `{"type": "object"}` for a closed RFC 6902
+vocabulary, which is #570's lesson where the unconstrained string is the whole
+operation object.
+
+**Two agents is the supported path, and only tasks are protected.** The
+blackboard exists because more than one client is expected, and the lease covers
+tasks. Keys have no revision and no compare-and-set: both agents read 0, both
+write 1, the board holds 1, neither call is an error (#682). Writes to
+*different* keys compose correctly, which is the important half. A key whose
+`ttl_seconds` has lapsed reads exactly like a path never written -- `found:
+false` both times, with `include_metadata: true` set on both (#680) -- while the
+lease one layer up answers `409` with `leased_by`. And `blackboard_clear`, the
+only destructive call in the family and the only one gated unconditionally,
+takes neither `author` nor `reason`, which every value write does (#681).
+**Run two of the thing, then ask which half of it the guarantee covers.**
+
+**A mode is a product, and there are three nobody had started the server in.**
+Thirteen sessions probed the confirmation gate and every one ran a server in the
+mode where the gate exists. With `--yolo`, `initialize`, the annotations and
+every tool's `_meta.didi` are byte-identical to the default; the only difference
+on the published surface is one fact inside `didi_control_room`, and the
+per-result `_meta.didi.confirmation: "skipped"` arrives after the mutation
+(#684). `--log-level DEBUG` is worse than invisible: the startup log is one line
+per registered tool, the logger writes from the thread that would service the
+request, and against a client that does not drain stderr the pipe fills and
+`initialize` is never answered -- one row of six, and the one the field-trial
+docs tell people to use (#689). **Read the process's own `--help`; each flag is
+a product nobody has probed.**
+
+**The launcher is not the program.** `--managed-editor` pointed at Godot's
+Windows `*_console.exe` refuses to start -- "Owned editor did not attach within
+30 seconds; inspect editor log" -- and the editor log shows a healthy editor
+with the plugin active. That build is a launcher: it starts the ordinary editor
+as a child, the child publishes the descriptor 3.7 seconds in under a pid that
+is not the one didi spawned, and managed mode waits out its whole budget for a
+pid that will never appear (#678). The same command with the non-console binary
+answers `initialize` in six seconds. Session twelve ran managed recovery on
+Linux, where the launcher does not exist, and found it green. **When a platform
+ships two binaries for one program, the harness has been using one of them.**
+
+**Asked and green this session, so the fourteenth can spend its budget
+elsewhere.** A project reached over UNC is opened, read, written and searched
+correctly, reports its own path in that form, and `path_confinement.py` holds on
+it unchanged. `--recovery-workspace` pointed at a directory that already has
+files in it refuses -- "Managed container must be new" -- and touches nothing.
+`viewport_set_camera_transform` answers well: `old`, `new`,
+`undo_redo_registered`, and the sentence about the change being in the editor
+rather than on disk. `ui_hit_test` is correct on a headless editor -- the right
+`local_point`, the invisible `Button` excluded, `hit_count_total: 0` outside
+every rect -- because a Control's rect is layout, not rendering.
+`asset_reimport` on a real imported `.png` works headless on all three
+platforms, `csharp_check_build` on a project with no C# refuses by name, and
+`runtime_launch` reports its own timeout as `success: false` with a sentence
+beside `exit_code: 124`. `didi_control_room` carries the server's own log from
+`INFO` down. The annotations are no longer a function of one read/write bit --
+the four hints take seven distinct combinations and `openWorldHint` is set on
+exactly the tools that start a subprocess -- so #507 has not come back, and
+`_meta.didi`'s `currentMode` matches what each tool then answers, offline and
+live. Of the 126 names, eleven had never appeared in any probe, README or
+manifest here; five are legacy aliases, three of the rest are the registered
+unimplemented set, and `spatial_query_raycast_batch`, `project_set_input_action`
+and `shader_get_visual_graph` answered correctly. Eight of nine reader pairs in
+`empty_versus_absent.py` are distinguishable; the ninth is #680.
+
 ## Sessions so far
 
 | Date | Scope | Server | Findings |
@@ -661,6 +782,8 @@ thing a container can do.
 | 2026-09-15 | The domain tools given something to bite on for the first time (a real TileSet, MeshLibrary, ShaderMaterial and AnimationPlayer), the project path before the server parses it, files that are not valid UTF-8, the preview path against the call path for argument *values*, and the refusal every live-only tool gives when no editor is running. | `2.0.0+e8999e1bd52f` | #611-#625, fifteen findings. One of them, #622, was filed wrong and corrected in place. |
 
 | 2026-09-15 | The other two supported platforms, for the first time: a Linux and a macOS runner beside a local Ubuntu container and a headless Godot editor on it. POSIX states Windows cannot make (unreadable files, symlinks, non-UTF-8 names, FIFOs), the shipped archives read as artefacts rather than as build output, a census of project *state* rather than of arguments, and the export and gridmap families, never swept. | `2.0.0+c3fcfb282883` and `2.0.0+nogit` (Linux) | #647-#657, eleven findings. |
+
+| 2026-09-16 | A headless editor, the only kind a runner can have and the only kind no session had probed, on Windows and -- for the first time anywhere -- on live macOS and Linux runners. Then the modes and the processes around the surface: `--yolo` and `--log-level DEBUG`, `--managed-editor` on Windows, a project over UNC, two servers writing one blackboard, the engines the subprocess tools shell out to, and what the editor does on the way out. | `2.0.0+0aadad99005d`, and `2.0.0+408a953f8f37` on the runners | #676-#689, fourteen findings. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log

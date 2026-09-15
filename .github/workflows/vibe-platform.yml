@@ -149,3 +149,126 @@ jobs:
             spctl -a -vvv -t install "$root/bin/didi" || true
           fi
           "$root/bin/didi" --version || echo "the shipped binary did not run: $?"
+
+  # Twelve sessions of live probing have driven an editor with a window, on
+  # Windows, because that is the machine the harness lives on. README asks for
+  # macOS and Linux testers and says plainly that a real editor session on
+  # either is evidence CI does not have -- and a runner has no display, so the
+  # only editor it can run is `--headless`.
+  #
+  # That is not a lesser version of the configuration. It is the ordinary state
+  # of a build machine, a container and a box reached over ssh, and it is a
+  # state no session had probed anywhere until the thirteenth: every tool whose
+  # answer is a picture needs a rendering device, and there is not one.
+  live:
+    name: ${{ matrix.os }} live editor
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    env:
+      GODOT_VERSION: 4.5.1-stable
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install Build Tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build build-essential
+          # Godot links these even with --headless; without them the editor
+          # exits before it can load the addon and the whole job reads as "no
+          # session was published", which is the wrong finding.
+          sudo apt-get install -y --no-install-recommends \
+            libfontconfig1 libx11-6 libxcursor1 libxinerama1 libxrandr2 libxi6 libgl1 || true
+          sudo apt-get install -y --no-install-recommends libasound2t64 \
+            || sudo apt-get install -y --no-install-recommends libasound2 || true
+
+      - name: Install Build Tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Configure and Build
+        run: |
+          cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+
+      - name: Fetch a Godot Editor
+        run: |
+          set -eux
+          cd "$RUNNER_TEMP"
+          case "$RUNNER_OS" in
+            macOS) asset="Godot_v${GODOT_VERSION}_macos.universal.zip" ;;
+            *)     asset="Godot_v${GODOT_VERSION}_linux.x86_64.zip" ;;
+          esac
+          curl -fsSL -o godot.zip \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/${asset}"
+          unzip -q godot.zip -d godot
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            echo "GODOT_BIN=$RUNNER_TEMP/godot/Godot.app/Contents/MacOS/Godot" >> "$GITHUB_ENV"
+          else
+            binary=$(find godot -maxdepth 1 -type f -name 'Godot_v*' -print -quit)
+            echo "GODOT_BIN=$RUNNER_TEMP/$binary" >> "$GITHUB_ENV"
+          fi
+          ls -la godot
+
+      - name: Open a Headless Editor on a Sandbox
+        id: editor
+        run: |
+          set -x
+          chmod +x "$GODOT_BIN"
+          "$GODOT_BIN" --version
+          python3 tools/vibe/sandbox.py "$RUNNER_TEMP/live-proj" --fixtures --overwrite --build-tree build
+          # Godot writes the import cache on first open. A first run that is
+          # also the run under test confuses "the editor is still importing"
+          # with "the tool answered nothing".
+          "$GODOT_BIN" --headless --path "$RUNNER_TEMP/live-proj" --import || true
+          nohup "$GODOT_BIN" --editor --headless --path "$RUNNER_TEMP/live-proj" \
+            --log-file "$RUNNER_TEMP/editor.log" > "$RUNNER_TEMP/editor.stdout" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/editor.pid"
+          python3 -u tools/vibe/wait_for_session.py "$RUNNER_TEMP/live-proj" --timeout 150
+
+      - name: Probe -- does the editor exit cleanly, and is it the addon?
+        continue-on-error: true
+        run: |
+          # Both POSIX runners aborted on shutdown right after the plugin
+          # deactivated. The control is the same invocation with no addon in
+          # the project: without it, "Godot does this" is the other
+          # explanation and neither can be ruled out.
+          python3 -u tools/vibe/editor_exit_status.py --godot "$GODOT_BIN" --build-tree build
+
+      - name: Probe -- the live surface with nothing to draw on
+        continue-on-error: true
+        run: python3 -u tools/vibe/probes/headless_editor.py -p "$RUNNER_TEMP/live-proj"
+
+      - name: Probe -- the whole live surface, as a table to diff
+        continue-on-error: true
+        run: python3 -u tools/vibe/probes/engine_versions.py -p "$RUNNER_TEMP/live-proj"
+
+      - name: Probe -- the editor's own log, per call
+        continue-on-error: true
+        run: |
+          python3 -u tools/vibe/probes/editor_log_delta.py \
+            -p "$RUNNER_TEMP/live-proj" --log "$RUNNER_TEMP/editor.log"
+
+      - name: What the Editor Printed
+        if: always()
+        continue-on-error: true
+        run: |
+          echo "::group::editor.log"
+          cat "$RUNNER_TEMP/editor.log" || true
+          echo "::endgroup::"
+          echo "::group::editor stdout"
+          cat "$RUNNER_TEMP/editor.stdout" || true
+          echo "::endgroup::"
+
+      - name: Stop the Editor
+        if: always()
+        continue-on-error: true
+        run: kill "$(cat "$RUNNER_TEMP/editor.pid")" || true
