@@ -66,6 +66,30 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`project_rename_references` previews the plan it is about to carry out.**
+  It is in the always-confirmed list with the reason written beside it: it
+  rewrites several files at once, there is no editor undo stack behind a file
+  on disk, and the preview is the only chance to see which files it will touch.
+  It had no preview probe, so the dry run bound the two identifiers the caller
+  had just typed to a token, reported `target_read: false`, and named no file
+  (#662). The preview now runs the scan and the plan the execute path already
+  computes: `before` carries `updated_files` with a per-file `changed_lines`
+  count, `updated_file_count`, `changed_lines` and `code_reference_count`. The
+  refusals moved with it, so a `new_name` that collides with an existing
+  connection is refused at the preview with its conflict list instead of
+  minting a token for a call that cannot run. The confirmation is bound to that
+  plan, so a project that changes in between is refused rather than rewritten
+  against a plan nobody saw.
+- **A match in a scene or a resource is not called a source code reference.**
+  The name-target fallback never looked at which file the line came from, so a
+  `[node name="health"]` line in a `.tscn`, an `ext_resource` line and a
+  property in a `.tres` all came back as `code_reference` (#665). They are
+  `resource_reference` now, which is the distinction `collectNodePathImpacts`
+  in the same file already made. It matters most in
+  `project_rename_references`, where the same bucket is returned as
+  `code_references_not_updated` under a limitation pointing at
+  `script_patch_method`, which cannot touch a `.tscn`; that limitation now says
+  which entries it applies to.
 - **The whole-project readers answer on a project with a baked mesh in it.**
   A Godot resource writes a packed array on one line, and an `ArrayMesh` or a
   baked `Curve3D` puts hundreds of kilobytes there. `project_analyze_impact`

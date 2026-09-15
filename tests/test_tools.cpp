@@ -1537,6 +1537,91 @@ static void test_project_audit_survives_a_very_long_line() {
     ASSERT_TRUE(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() < 20);
 }
 
+static void test_a_rename_preview_shows_the_files_it_will_change() {
+    // project_rename_references is in kAlwaysConfirmed with the reason written
+    // beside it: it rewrites several files at once, there is no editor undo
+    // stack behind a file on disk, and the preview is the only chance to see
+    // which files it is about to touch. It had no probe, so the preview showed
+    // the two identifiers the caller had just typed, said target_read: false,
+    // and minted a token anyway (#662).
+    ScopedToolProject project("rename-preview");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("scripts/player.gd",
+                   "extends Node\n"
+                   "signal health\n"
+                   "func go():\n"
+                   "    health.emit()\n");
+    writeAuditFile("scenes/lab.tscn",
+                   "[gd_scene format=3]\n\n"
+                   "[node name=\"Root\" type=\"Node2D\"]\n\n"
+                   "[connection signal=\"health\" from=\".\" to=\".\" method=\"_on_health\"]\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto preview = [&](const didi::json& arguments) {
+        auto call = arguments;
+        call["dry_run"] = true;
+        const auto result = registry.callTool("project_rename_references", call);
+        return std::pair<bool, didi::json>{
+            result.isError, didi::json::parse(result.content[0].text, nullptr, false)};
+    };
+
+    const auto [error, answer] =
+        preview(didi::json{{"target", "health"}, {"new_name", "hp"}});
+    ASSERT_TRUE(!error);
+    ASSERT_EQ(answer["mutation_preview"]["target_read"], true);
+    ASSERT_EQ(answer["mutation_preview"]["preview_kind"], "target_state");
+    // The plan, not the arguments: the file that will be rewritten and how many
+    // of its lines change.
+    const auto& before = answer["mutation_preview"]["changes"][0]["before"];
+    ASSERT_EQ(before["updated_file_count"], 1u);
+    ASSERT_EQ(before["updated_files"][0]["path"], "res://scenes/lab.tscn");
+    ASSERT_EQ(before["updated_files"][0]["changed_lines"], 1u);
+    ASSERT_EQ(before["changed_lines"], 1u);
+    ASSERT_EQ(before["code_reference_count"], 2u);
+
+    // And a preview refuses what the call refuses rather than minting a token
+    // for it. hp is already a connection signal here, which is the collision
+    // that merges two symbols with no way back.
+    writeAuditFile("scenes/other.tscn",
+                   "[gd_scene format=3]\n\n"
+                   "[node name=\"Other\" type=\"Node2D\"]\n\n"
+                   "[connection signal=\"hp\" from=\".\" to=\".\" method=\"_on_hp\"]\n");
+    const auto [collision_error, collision] =
+        preview(didi::json{{"target", "health"}, {"new_name", "hp"}});
+    ASSERT_TRUE(collision_error);
+    ASSERT_EQ(collision["error"]["code"], 409);
+    ASSERT_TRUE(collision.dump().find("confirmation_token") == std::string::npos);
+}
+
+static void test_a_name_in_a_scene_is_not_a_code_reference() {
+    // The fallback kind never looked at which file the line came from, so a
+    // [node name="health"] line in a .tscn came back as a code_reference.
+    // counts_by_kind is what a caller branches on to decide whether a rename is
+    // safe, and it read as two script sites when one of them was a scene (#665).
+    ScopedToolProject project("impact-kind-by-file");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("scripts/player.gd", "extends Node\nvar health := 10\n");
+    writeAuditFile("scenes/lab.tscn",
+                   "[gd_scene format=3]\n\n"
+                   "[node name=\"Root\" type=\"Node2D\"]\n\n"
+                   "[node name=\"health\" type=\"Node2D\" parent=\".\"]\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto result = registry.callTool("project_analyze_impact", didi::json{{"target", "health"}});
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(report["counts_by_kind"]["code_reference"], 1u);
+    ASSERT_EQ(report["counts_by_kind"]["resource_reference"], 1u);
+    for (const auto& impact : report["impacts"]) {
+        const auto path = impact["path"].get<std::string>();
+        const auto kind = impact["kind"].get<std::string>();
+        ASSERT_EQ(kind, path == "res://scripts/player.gd" ? "code_reference" : "resource_reference");
+    }
+}
+
 static void test_project_impact_answers_on_a_packed_array_line() {
     // A .tres writes a packed array on one line, and an ArrayMesh or a baked
     // Curve3D puts hundreds of kilobytes there. Both name-target passes ran the
@@ -1574,7 +1659,8 @@ static void test_project_impact_answers_on_a_packed_array_line() {
     // Prompt and still complete: the declaration and both uses are found, and
     // the name on the resource's own line is found too.
     const auto report = didi::json::parse(result.content[0].text);
-    ASSERT_EQ(report["counts_by_kind"]["code_reference"], 3u);
+    ASSERT_EQ(report["counts_by_kind"]["code_reference"], 2u);
+    ASSERT_EQ(report["counts_by_kind"]["resource_reference"], 1u);
     ASSERT_EQ(report["declared_in"].size(), 1u);
     ASSERT_EQ(report["declared_in"][0]["path"], "res://scripts/player.gd");
     // Loose on purpose, the way the audit's bound is: it separates linear from
@@ -5843,6 +5929,10 @@ struct RegisterToolTests {
                      test_an_empty_new_definition_never_mints_a_token);
         registerTest("Tools.ProjectAuditLongLine",
                      test_project_audit_survives_a_very_long_line);
+        registerTest("Tools.RenamePreviewShowsItsPlan",
+                     test_a_rename_preview_shows_the_files_it_will_change);
+        registerTest("Tools.ImpactKindNamesTheFile",
+                     test_a_name_in_a_scene_is_not_a_code_reference);
         registerTest("Tools.ProjectImpactPackedArrayLine",
                      test_project_impact_answers_on_a_packed_array_line);
         registerTest("Tools.ProjectScanBoundSkipsAndSaysSo",

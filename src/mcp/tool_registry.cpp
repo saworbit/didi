@@ -12,6 +12,7 @@
 #include "didi/tools/resolved_tool_binding.hpp"
 #include "didi/mcp/phase7_schemas.hpp"
 #include "didi/mcp/schema_validation.hpp"
+#include "didi/offline/project_impact.hpp"
 #include "didi/offline/project_settings_file.hpp"
 #include "didi/offline/speculative_verify.hpp"
 #include <algorithm>
@@ -1771,6 +1772,47 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                         client = m_sourceIpcClient](const json& call_arguments, json& before,
                                                     json& subject) {
             return probeNodeTarget(tool, argument, call_arguments, client, before, subject);
+        };
+    } else if (binding.policy_source == "project_rename_references") {
+        // This tool is always confirmed on the grounds that "the preview is the
+        // only chance to see which files it is about to touch", and the preview
+        // showed neither: with no probe it bound the two identifiers the caller
+        // had just typed to a token and said the target was not read (#662).
+        //
+        // The plan is derived before anything is staged and it is free to
+        // derive, so the preview derives it. `before` carries the files, the
+        // changed-line counts and how many references will be reported and not
+        // rewritten, which makes target_read true and binds the confirm to what
+        // the preview saw: a project that changes in between no longer spends
+        // the token against a different plan.
+        target_probe = [](const json& call_arguments, json& before,
+                          json& subject) -> std::optional<Error> {
+            if (!call_arguments.is_object() || !call_arguments.contains("target") ||
+                !call_arguments.contains("new_name") || !call_arguments["target"].is_string() ||
+                !call_arguments["new_name"].is_string()) {
+                return std::nullopt;
+            }
+            offline::ProjectRenameOptions options;
+            options.target = call_arguments["target"].get<std::string>();
+            options.new_name = call_arguments["new_name"].get<std::string>();
+            if (call_arguments.contains("max_impacts") &&
+                call_arguments["max_impacts"].is_number_unsigned()) {
+                options.max_impacts = call_arguments["max_impacts"].get<size_t>();
+            }
+            std::error_code root_error;
+            const auto root = std::filesystem::current_path(root_error);
+            if (root_error) return Error::internal("The project root could not be resolved");
+            // The refusals come back as errors, so the preview fails the way the
+            // call would rather than handing out a token for it.
+            auto plan = offline::planRenameReferences(paths::projectPathToUtf8(root), options);
+            if (plan.isErr()) return plan.error();
+            subject = {{"target", options.target}, {"new_name", options.new_name}};
+            before = {{"updated_files", plan.value()["updated_files"]},
+                      {"updated_file_count", plan.value()["updated_file_count"]},
+                      {"changed_lines", plan.value()["changed_lines"]},
+                      {"code_reference_count", plan.value()["code_reference_count"]},
+                      {"scanned_files", plan.value()["scanned_files"]}};
+            return std::nullopt;
         };
     } else if (binding.policy_source == "project_apply_changes") {
         // This tool has no target to read, so its preview bound the arguments
