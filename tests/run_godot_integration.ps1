@@ -1789,7 +1789,39 @@ try {
         (Tool-Request 108 "editor_undo" @{}),
         (Tool-Request 109 "scene_pack_branch" @{ target_node = "/root/SmokeRoot/Subject"; scene_path = "res://transient_probe.tscn" }),
         (Tool-Request 110 "scene_remove_from_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two_transient" }),
+        # The other direction of the same undo. The transient probe above
+        # passed whatever the code did, because the persistence read never
+        # matched anything and always answered transient (#660). This one adds
+        # a persistent membership, removes it, undoes, and packs: the group has
+        # to be in the file, which it is not when the undo restores it
+        # transient.
+        (Tool-Request 2493 "scene_add_to_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two_persistent"; persistent = $true }),
+        (Tool-Request 2494 "scene_remove_from_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two_persistent" }),
+        (Tool-Request 2495 "editor_undo" @{}),
+        (Tool-Request 2496 "scene_pack_branch" @{ target_node = "/root/SmokeRoot/Subject"; scene_path = "res://persistent_probe.tscn" }),
+        (Tool-Request 2497 "scene_remove_from_group" @{ target_node = "/root/SmokeRoot/Subject"; group = "phase_two_persistent" }),
         (Tool-Request 111 "scene_close" @{ discard_unsaved = $true }),
+        # A duplicate with a child in it, written out by the save rather than
+        # by scene_pack_branch. The existing duplicate case copies
+        # /root/SmokeRoot/Spawned, which is a leaf, so nothing there could show
+        # the copy reaching the file without its subtree (#659); and
+        # scene_pack_branch cannot show it either, because it normalises the
+        # owners of the branch it packs. The edited scene's own save is the
+        # path that keeps only what the edited root owns, so this probe runs in
+        # a scene of its own and reads the file that save wrote.
+        (Tool-Request 2498 "scene_create" @{ scene_path = "res://duplicate_probe.tscn"; root_type = "Node2D"; root_name = "DupRoot"; overwrite = $true }),
+        (Tool-Request 2499 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/DupRoot"; name = "DupBranch" }),
+        (Tool-Request 2500 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/DupRoot/DupBranch"; name = "DupLeaf" }),
+        (Tool-Request 2501 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/DupRoot/DupBranch/DupLeaf"; name = "DupDeep" }),
+        (Tool-Request 2502 "scene_duplicate_node" @{ target_node = "/root/DupRoot/DupBranch" }),
+        (Tool-Request 2503 "editor_save_scene" @{}),
+        # And again through undo and redo. The owners are registered as do
+        # methods, so a redo has to put them back the same way the first apply
+        # did; the file this save writes is the one the assertions read.
+        (Tool-Request 2504 "editor_undo" @{}),
+        (Tool-Request 2505 "editor_redo" @{}),
+        (Tool-Request 2506 "editor_save_scene" @{}),
+        (Tool-Request 2507 "scene_close" @{ discard_unsaved = $true }),
         (Tool-Request 112 "scene_create" @{ scene_path = "res:////escape.tscn" }),
         # A nested path whose parent directory does not exist yet. ResourceSaver
         # cannot create it, so this used to come back as a bare Error 19 while
@@ -3504,6 +3536,23 @@ try {
     $transientProbe = Get-Content -LiteralPath (Join-Path $fixtureRoot "transient_probe.tscn") -Raw
     Assert-True ($transientProbe -notmatch "phase_two_transient") "Remove undo changed a transient group into persistent membership."
     Assert-True ((Tool-Payload $byId[110]).removed -eq $true) "Transient group cleanup failed."
+    Assert-True ((Tool-Payload $byId[2493]).added -eq $true) "Persistent group setup failed."
+    Assert-True ((Tool-Payload $byId[2494]).removed -eq $true) "Persistent group removal failed."
+    Assert-True (-not $byId[2495].result.isError) "Persistent group removal could not be undone."
+    Assert-True ((Tool-Payload $byId[2496]).saved -eq $true) "Persistent group probe scene could not be packed."
+    $persistentProbe = Get-Content -LiteralPath (Join-Path $fixtureRoot "persistent_probe.tscn") -Raw
+    Assert-True ($persistentProbe -match "phase_two_persistent") "Remove undo restored a persistent group as transient, so the save dropped it."
+    Assert-True ((Tool-Payload $byId[2497]).removed -eq $true) "Persistent group cleanup failed."
+    Assert-True ((Tool-Payload $byId[2498]).opened -eq $true) "Duplicate probe scene could not be created: $($byId[2498].result.content[0].text)"
+    Assert-True ((Tool-Payload $byId[2502]).status -eq "success") "A branch with children could not be duplicated: $($byId[2502].result.content[0].text)"
+    Assert-True ((Tool-Payload $byId[2503]).status -eq "saved") "The scene holding the duplicated branch could not be saved."
+    Assert-True (-not $byId[2504].result.isError) "The duplicate could not be undone."
+    Assert-True (-not $byId[2505].result.isError) "The duplicate could not be redone."
+    Assert-True ((Tool-Payload $byId[2506]).status -eq "saved") "The redone duplicate could not be saved."
+    $duplicateProbe = Get-Content -LiteralPath (Join-Path $fixtureRoot "duplicate_probe.tscn") -Raw
+    Assert-True ($duplicateProbe -match 'name="DupLeaf" type="Node" parent="DupBranchCopy"') "A duplicated branch reached the saved file without its children: $duplicateProbe"
+    Assert-True ($duplicateProbe -match 'name="DupDeep" type="Node" parent="DupBranchCopy/DupLeaf"') "A duplicated branch reached the saved file without its grandchildren: $duplicateProbe"
+    Assert-True ((Tool-Payload $byId[2507]).closed -eq $true) "Duplicate probe scene could not be closed."
     Assert-True ((Tool-Payload $byId[111]).closed -eq $true) "Smoke scene cleanup failed."
     Assert-True $byId[112].result.isError "Non-normalized res:// scene path was accepted."
     Assert-True ($byId[112].result.content[0].text -match "normalized") "Non-normalized path error was not actionable."
