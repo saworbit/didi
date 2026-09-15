@@ -105,9 +105,14 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   process, and waits for the whole tree rather than for that one process: it
   used to return while a launcher's editor was still exiting, so
   `runtime_restore_checkpoint` renamed a project directory another process
-  still had open. CI runs the managed recovery suites against the console
-  build, which is the one the issue was about and the one that step had been
-  filtering out.
+  still had open. A restore also retries that rename for a few seconds rather
+  than failing on it: once no owned process holds the workspace, what is left
+  is somebody else's handle on a file written moments ago -- a scanner, an
+  indexer -- held for a fraction of a second, and a destructive operation
+  should not stop for that. CI runs the managed recovery suites against the
+  console build, which is the one the issue was about and the one that step
+  had been filtering out; the suites' own fixture cleanup waits for the editor
+  to release the workspace instead of reporting the wait as an error.
 - **`--log-level DEBUG` answers a client that does not read stderr.** The
   startup log at `DEBUG` is one line per registered tool, which is past a pipe
   buffer, and it was written inline on the thread that would have answered
