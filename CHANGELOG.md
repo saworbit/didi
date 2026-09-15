@@ -66,6 +66,16 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A live-only tool with no engine attached says what to do about it.** All
+  fourteen answered "No atomic runtime route is available for live dispatch",
+  which names neither Godot, nor the editor, nor anything a caller can act on,
+  in the single most common state a caller meets (#615). The refusal now names
+  the tool, says it needs a live Godot engine, and says how to get one, with
+  `blocked_on`, `needs_live_engine`, `offline_fallback`, `discover_with` and
+  `attach_with` beside it, plus `offline_alternative` where a sibling answers
+  offline. `audio_configure_bus` had that sentence written for this case and it
+  sat behind the route check where it could never ship; its content is in the
+  shared refusal now.
 - **A script the engine cannot read is not a script with nothing in it.**
   `script_get_symbols` returned empty lists for a `.gd` saved as UTF-16 or in a
   single-byte encoding, with `truncated: false` confirming nothing was dropped,

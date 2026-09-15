@@ -45,6 +45,16 @@ place rather than at each call site:
   request changed. True for `confirmation_required`, `rate_limited`,
   `not_connected` and `timeout`; false otherwise.
 
+A live-only tool called with no engine attached — the most common state a
+caller meets — answers `503` and names itself, says it needs a live Godot
+engine, and says how to get one: open the project in the Godot editor with the
+Didi addon enabled, then `runtime_list_sessions` and `runtime_attach_session`.
+Beside the sentence, `data` carries `blocked_on: "no_live_session"`,
+`needs_live_engine`, `offline_fallback`, `discover_with` and `attach_with`, and
+`offline_alternative` where this server knows of a sibling that answers offline.
+`retryable` stays `true`, because the same call succeeds once an engine is
+there; `blocked_on` is what says that a human has to put one there.
+
 A tool that knows more says more, and nothing it already set is overwritten. The
 confirmation gate's `428` adds `dry_run_argument` and `confirmation_argument`, so
 the recovery path is a field rather than a sentence. Phase 7 live failures add
