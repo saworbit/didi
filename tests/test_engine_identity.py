@@ -99,6 +99,28 @@ class EngineIdentityTests(unittest.TestCase):
         self.assertIn("Godot did not compile this script", message)
         self.assertIn(not_an_engine.name, message)
 
+    def test_a_machine_with_no_godot_still_answers(self):
+        # The line between the two states that both end in no diagnostics. A
+        # GODOT_BIN naming nothing is discarded by resolution, which falls
+        # through to discovery: on a machine with Godot that finds one, and on
+        # a machine without it falls through to the bare name and nothing runs.
+        # Both must answer. Refusing the second would take this tool away from
+        # a supported configuration for a misconfiguration it does not have,
+        # which is what the first version of the #677 fix did.
+        missing = FIXTURE_PROJECT / "no_such_godot_binary"
+        self.assertFalse(missing.exists())
+        result = _call("script_check_syntax",
+                       {"file_path": "res://tmp_engine_identity_probe.gd"},
+                       self._environment_with(missing))
+        self.assertFalse(result.get("isError"), result)
+        body = json.loads(result["content"][0]["text"])
+        # Whether the compiler ran is published either way, so a caller reading
+        # has_errors knows what produced it.
+        self.assertIn("engine_available", body)
+        self.assertIn("has_errors", body)
+        if not body["engine_available"]:
+            self.assertIn("engine_unavailable_reason", body)
+
     def test_runtime_launch_names_the_engine_that_ran_the_project(self):
         # It had no engine fields at all. Which build ran the project appeared
         # only because Godot prints its own banner into the captured logs, so a
