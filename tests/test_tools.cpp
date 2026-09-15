@@ -3243,6 +3243,67 @@ static void test_reimport_progress_requires_two_idle_frames_and_times_out() {
               didi::godot::ReimportProgressState::TimedOut);
 }
 
+static void test_a_write_is_applied_when_every_member_landed() {
+    // Break caught: a colour or vector write that landed correctly reports
+    // applied: false, because the comparison was exact for composites (#618).
+    using didi::godot::jsonValuesEquivalent;
+
+    // float32 is what a Color channel and a Vector component are made of, so
+    // 0.1 reads back as 0.10000000149011612. That is the same value.
+    ASSERT_TRUE(jsonValuesEquivalent(didi::json{{"r", 0.10000000149011612}, {"g", 0.2f},
+                                                {"b", 0.3f}, {"a", 1.0}},
+                                     didi::json{{"r", 0.1}, {"g", 0.2}, {"b", 0.3}, {"a", 1.0}}));
+    ASSERT_TRUE(jsonValuesEquivalent(didi::json{{"x", 0.10000000149011612}, {"y", 0.2f}},
+                                     didi::json{{"x", 0.1}, {"y", 0.2}}));
+    ASSERT_TRUE(jsonValuesEquivalent(didi::json::array({0.10000000149011612, 2.0}),
+                                     didi::json::array({0.1, 2.0})));
+
+    // A real difference is still a real difference, in a member as much as in a
+    // scalar.
+    ASSERT_TRUE(!jsonValuesEquivalent(didi::json{{"x", 0.1}, {"y", 0.2}},
+                                      didi::json{{"x", 0.1}, {"y", 0.5}}));
+    ASSERT_TRUE(!jsonValuesEquivalent(didi::json{{"x", 0.1}},
+                                      didi::json{{"x", 0.1}, {"y", 0.2}}));
+    ASSERT_TRUE(!jsonValuesEquivalent(didi::json::array({1.0}), didi::json::array({1.0, 2.0})));
+
+    // The scalar rules are unchanged: an integer written to a float property
+    // reads back as a real and that is not a failure to apply.
+    ASSERT_TRUE(jsonValuesEquivalent(didi::json(1.0), didi::json(1)));
+    ASSERT_TRUE(!jsonValuesEquivalent(didi::json(1.0), didi::json(2.0)));
+    ASSERT_TRUE(!jsonValuesEquivalent(didi::json("text"), didi::json(1.0)));
+}
+
+static void test_a_declared_hint_range_is_read_as_the_engine_spells_it() {
+    // Break caught: a shader author's hint_range is not reported and not
+    // honoured, so a caller cannot learn a bound without reading the shader
+    // source (#620).
+    using didi::godot::parseShaderHintRange;
+
+    const auto plain = parseShaderHintRange("0,1");
+    ASSERT_TRUE(plain.has_value());
+    ASSERT_TRUE(plain->minimum == 0.0 && plain->maximum == 1.0);
+    ASSERT_TRUE(!plain->step.has_value());
+    ASSERT_TRUE(!plain->or_greater && !plain->or_less);
+
+    const auto stepped = parseShaderHintRange("-2.5,7.5,0.25");
+    ASSERT_TRUE(stepped.has_value());
+    ASSERT_TRUE(stepped->minimum == -2.5 && stepped->maximum == 7.5);
+    ASSERT_TRUE(stepped->step.has_value() && *stepped->step == 0.25);
+
+    // or_greater and or_less say the author meant a slider bound rather than a
+    // limit, and a value past one of them is not a mistake.
+    const auto open = parseShaderHintRange("0,1,or_greater,or_less");
+    ASSERT_TRUE(open.has_value());
+    ASSERT_TRUE(!open->step.has_value());
+    ASSERT_TRUE(open->or_greater && open->or_less);
+
+    // Anything that does not start with two numbers is not a range.
+    ASSERT_TRUE(!parseShaderHintRange("").has_value());
+    ASSERT_TRUE(!parseShaderHintRange("0").has_value());
+    ASSERT_TRUE(!parseShaderHintRange("Low,High").has_value());
+    ASSERT_TRUE(!parseShaderHintRange("0,1x").has_value());
+}
+
 static void test_tool_capabilities_are_honest() {
     auto& reg = didi::mcp::ToolRegistry::instance();
     reg.registerAllDefaultTools();
@@ -5496,6 +5557,10 @@ struct RegisterToolTests {
         registerTest("Tools.AssetReimportPublicValidationAndSchema", test_asset_reimport_public_validation_and_schema);
         registerTest("Tools.ViewportDiffPublicValidationAndSchema", test_viewport_diff_public_validation_and_schema);
         registerTest("EditorHook.ReimportProgress", test_reimport_progress_requires_two_idle_frames_and_times_out);
+        registerTest("Tools.ShaderWriteAppliedComparesMembers",
+                     test_a_write_is_applied_when_every_member_landed);
+        registerTest("Tools.ShaderHintRangeIsReadAsTheEngineSpellsIt",
+                     test_a_declared_hint_range_is_read_as_the_engine_spells_it);
         registerTest("McpServer.PreservesInjectedIpcClient", test_mcp_server_preserves_injected_ipc_client);
         registerTest("Tools.RuntimeSessionLocalAndValidated", test_runtime_get_session_is_local_and_attach_rejects_non_string_id);
         registerTest("Tools.RuntimeReadLogsInputValidation", test_runtime_read_logs_rejects_invalid_cursor_limit_and_level);

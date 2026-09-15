@@ -571,23 +571,6 @@ bool jsonTypeIsInsidePropertyContract(int godot_type) {
                PropertyTypeMatch::UnsupportedPropertyType;
 }
 
-// Did a property end up holding what the caller asked for?
-//
-// Compares by value rather than by JSON type, because Godot legitimately
-// changes the type on the way in: an integer written to a float property reads
-// back as a real, and reporting that as "not applied" would be a false alarm
-// on a write that worked perfectly. Only a genuine difference should be
-// reported as one.
-bool jsonScalarsEquivalent(const json& observed, const json& requested) {
-    if (observed.is_number() && requested.is_number()) {
-        const double a = observed.get<double>();
-        const double b = requested.get<double>();
-        if (!std::isfinite(a) || !std::isfinite(b)) return observed == requested;
-        const double scale = std::max({1.0, std::fabs(a), std::fabs(b)});
-        return std::fabs(a - b) <= 1e-9 * scale;
-    }
-    return observed == requested;
-}
 
 // Refuses a number the property cannot hold.
 //
@@ -746,6 +729,19 @@ Result<VariantValue> makeJsonVariantForProperty(const json& value, GDExtensionVa
             if (isWholeNumberJsonReal(value)) {
                 return makeScalar(GDEXTENSION_VARIANT_TYPE_INT,
                                   static_cast<int64_t>(value.get<double>()));
+            }
+            break;
+        // The other direction, and it is the one that loses data. Object::set
+        // coerces an int Variant to the float the property declares, so a
+        // scene property survived this; ShaderMaterial::set_shader_parameter
+        // stores the Variant as handed to it, so a float uniform ended up
+        // holding an int and Godot dropped the mismatched parameter the next
+        // time the material was serialised (#612). 1 is the ordinary JSON
+        // spelling of a whole number, so this happened every time a caller set
+        // a float uniform to 0 or 1.
+        case GDEXTENSION_VARIANT_TYPE_FLOAT:
+            if (value.is_number()) {
+                return makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, value.get<double>());
             }
             break;
         case GDEXTENSION_VARIANT_TYPE_VECTOR2:
@@ -2486,6 +2482,36 @@ void abandonAction(GDExtensionObjectPtr manager) {
                      {&execute.value()});
 }
 
+// See the header for why the tolerance is sized to a float32 round trip.
+bool jsonValuesEquivalentImpl(const json& observed, const json& requested) {
+    if (observed.is_number() && requested.is_number()) {
+        const double a = observed.get<double>();
+        const double b = requested.get<double>();
+        if (!std::isfinite(a) || !std::isfinite(b)) return observed == requested;
+        const double scale = std::max({1.0, std::fabs(a), std::fabs(b)});
+        // A shader float, a Color channel and a Vector component are all 32 bit
+        // in a standard build, which carries about seven decimal digits.
+        return std::fabs(a - b) <= 1e-6 * scale;
+    }
+    if (observed.is_object() && requested.is_object()) {
+        if (observed.size() != requested.size()) return false;
+        for (auto it = requested.begin(); it != requested.end(); ++it) {
+            const auto found = observed.find(it.key());
+            if (found == observed.end()) return false;
+            if (!jsonValuesEquivalentImpl(*found, it.value())) return false;
+        }
+        return true;
+    }
+    if (observed.is_array() && requested.is_array()) {
+        if (observed.size() != requested.size()) return false;
+        for (size_t index = 0; index < observed.size(); ++index) {
+            if (!jsonValuesEquivalentImpl(observed[index], requested[index])) return false;
+        }
+        return true;
+    }
+    return observed == requested;
+}
+
 json liveResult(const json& fields) {
     json result = fields;
     result["execution_mode"] = "live";
@@ -2501,6 +2527,73 @@ json liveResult(const json& fields) {
 // rather than as the warning that it was unsaved (#557). The offline setting
 // writer set the precedent with its limitation paragraph for the mode where
 // this matters less.
+// Parses "min,max[,step][,flags...]". Anything that does not start with two
+// numbers is not a range this can act on, and is passed over rather than
+// guessed at.
+std::optional<ShaderHintRange> parseShaderHintRangeImpl(const std::string& hint_string) {
+    std::vector<std::string> fields;
+    std::string current;
+    for (const char character : hint_string) {
+        if (character == ',') {
+            fields.push_back(current);
+            current.clear();
+            continue;
+        }
+        current.push_back(character);
+    }
+    fields.push_back(current);
+
+    const auto number = [](const std::string& text) -> std::optional<double> {
+        std::string trimmed = text;
+        const auto first = trimmed.find_first_not_of(" \t");
+        if (first == std::string::npos) return std::nullopt;
+        const auto last = trimmed.find_last_not_of(" \t");
+        trimmed = trimmed.substr(first, last - first + 1);
+        if (trimmed.empty()) return std::nullopt;
+        try {
+            size_t consumed = 0;
+            const double parsed = std::stod(trimmed, &consumed);
+            if (consumed != trimmed.size()) return std::nullopt;
+            return parsed;
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+    };
+
+    if (fields.size() < 2) return std::nullopt;
+    const auto minimum = number(fields[0]);
+    const auto maximum = number(fields[1]);
+    if (!minimum.has_value() || !maximum.has_value()) return std::nullopt;
+
+    ShaderHintRange range;
+    range.minimum = *minimum;
+    range.maximum = *maximum;
+    size_t flags_from = 2;
+    if (fields.size() > 2) {
+        if (const auto step = number(fields[2])) {
+            range.step = *step;
+            flags_from = 3;
+        }
+    }
+    for (size_t index = flags_from; index < fields.size(); ++index) {
+        if (fields[index] == "or_greater") range.or_greater = true;
+        if (fields[index] == "or_less") range.or_less = true;
+    }
+    return range;
+}
+
+}  // namespace
+
+bool jsonValuesEquivalent(const json& observed, const json& requested) {
+    return jsonValuesEquivalentImpl(observed, requested);
+}
+
+std::optional<ShaderHintRange> parseShaderHintRange(const std::string& hint_string) {
+    return parseShaderHintRangeImpl(hint_string);
+}
+
+namespace {
+
 json liveSceneMutation(json fields) {
     fields["scene_saved"] = false;
     fields["limitation"] =
@@ -9843,6 +9936,59 @@ json GodotBridge::execute(const std::string& method, const json& params,
         return liveResult(hierarchy_result);
     }
 
+    // The uniform PropertyInfo the engine hands back carries the hint a shader
+    // author wrote, and the bridge read only name and type out of it, so a
+    // caller had no way to learn a declared range short of reading the shader
+    // source -- which is the thing these tools exist to avoid (#620).
+    //
+    // PROPERTY_HINT_RANGE is 1 and PROPERTY_HINT_ENUM is 2 on 4.5.1, 4.6.2 and
+    // 4.7.2. Any other hint is reported by number rather than guessed at.
+    const auto readUniformHint = [](VariantValue& entry, VariantValue& hint_key,
+                                    VariantValue& hint_string_key) -> json {
+        auto hint_value = callVariant(entry, "get", {&hint_key});
+        if (hint_value.isErr()) return json(nullptr);
+        auto hint = scalarFromVariant<int64_t>(hint_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (hint.isErr() || hint.value() == 0) return json(nullptr);
+
+        std::string hint_string;
+        auto text_value = callVariant(entry, "get", {&hint_string_key});
+        if (text_value.isOk()) {
+            const auto text_type = GodotApi::instance().variant_get_type(text_value.value().ptr());
+            if (text_type == GDEXTENSION_VARIANT_TYPE_STRING ||
+                text_type == GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+                auto text = stringFromVariant(text_value.value(), text_type);
+                if (text.isOk()) hint_string = text.value();
+            }
+        }
+
+        if (hint.value() == 1) {
+            const auto range = parseShaderHintRange(hint_string);
+            if (!range.has_value()) return json(nullptr);
+            return json{{"kind", "range"},
+                        {"minimum", range->minimum},
+                        {"maximum", range->maximum},
+                        {"step", range->step.has_value() ? json(*range->step) : json(nullptr)},
+                        {"or_greater", range->or_greater},
+                        {"or_less", range->or_less},
+                        {"hint_string", hint_string}};
+        }
+        if (hint.value() == 2) {
+            json options = json::array();
+            std::string current;
+            for (const char character : hint_string) {
+                if (character == ',') {
+                    options.push_back(current);
+                    current.clear();
+                    continue;
+                }
+                current.push_back(character);
+            }
+            if (!current.empty() || !options.empty()) options.push_back(current);
+            return json{{"kind", "enum"}, {"options", options}, {"hint_string", hint_string}};
+        }
+        return json{{"kind", "other"}, {"hint", hint.value()}, {"hint_string", hint_string}};
+    };
+
     if (method == "shader.listUniforms" || method == "shader.setUniform" ||
         method == "shader.getVisualGraph") {
         // One path to the material for all three, so a slot one of them accepts
@@ -10097,12 +10243,16 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto name_key = makeString("name");
             auto type_key = makeString("type");
             auto class_key = makeString("class_name");
-            if (name_key.isErr() || type_key.isErr() || class_key.isErr()) {
+            auto hint_key = makeString("hint");
+            auto hint_string_key = makeString("hint_string");
+            if (name_key.isErr() || type_key.isErr() || class_key.isErr() || hint_key.isErr() ||
+                hint_string_key.isErr()) {
                 return errorJson(500, "Failed to build uniform keys");
             }
             bool declared = false;
             int64_t declared_type = 0;
             std::string declared_class;
+            json declared_hint = json(nullptr);
             for (int64_t index = 0; index < count.value() && !declared; ++index) {
                 auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
                 if (index_value.isErr()) return errorJson(500, index_value.error().message);
@@ -10135,6 +10285,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
                         if (text.isOk()) declared_class = text.value();
                     }
                 }
+                declared_hint = readUniformHint(entry.value(), hint_key.value(),
+                                                hint_string_key.value());
             }
             if (!declared) {
                 return errorJson(404, "The shader declares no uniform named " + requested_name);
@@ -10145,6 +10297,30 @@ json GodotBridge::execute(const std::string& method, const json& params,
             const auto uniform_type = static_cast<GDExtensionVariantType>(declared_type);
             auto compatible = validateJsonForPropertyType(requested_name, params["value"], uniform_type);
             if (compatible.isErr()) return errorJson(compatible.error().code, compatible.error().message);
+
+            // A value outside a declared hint_range is usually a slipped digit
+            // or a confusion between a normalised and an absolute scale, and
+            // this server already treats that class as worth refusing by name:
+            // audio.configureBus bounds volume_db for exactly this reason. The
+            // range a shader author wrote down is the same kind of statement.
+            // or_greater and or_less say the author meant a slider bound rather
+            // than a limit, and those are honoured.
+            if (declared_hint.is_object() && declared_hint.value("kind", "") == "range" &&
+                params["value"].is_number()) {
+                const double sent = params["value"].get<double>();
+                const double minimum = declared_hint.value("minimum", 0.0);
+                const double maximum = declared_hint.value("maximum", 0.0);
+                const bool under = sent < minimum && !declared_hint.value("or_less", false);
+                const bool over = sent > maximum && !declared_hint.value("or_greater", false);
+                if (under || over) {
+                    std::ostringstream refusal;
+                    refusal << "Uniform \"" << requested_name << "\" declares hint_range("
+                            << minimum << ", " << maximum << "); " << sent
+                            << " is outside it. Send a value from " << minimum << " to " << maximum
+                            << ".";
+                    return errorJson(400, refusal.str());
+                }
+            }
             auto new_value = uniform_type == GDEXTENSION_VARIANT_TYPE_OBJECT
                 ? makeResourceForProperty(requested_name, params["value"], declared_class)
                 : makeJsonVariantForProperty(params["value"], uniform_type);
@@ -10203,23 +10379,41 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 }
             }
             json observed_payload = observed_json.isOk() ? observed_json.value() : json(nullptr);
-            return liveResult({{"status", "success"},
-                               {"target_node", target_path},
-                               {"property_name", property},
-                               {"uniform_name", requested_name},
-                               {"type", godotVariantTypeName(static_cast<int>(declared_type))},
-                               {"value", observed_payload},
-                               {"requested_value", params["value"]},
-                               {"old_value", old_payload},
-                               {"applied", jsonScalarsEquivalent(observed_payload, params["value"])},
-                               {"undo_redo_registered", true}});
+            // What was asked for, encoded the way it was actually sent to the
+            // engine. A colour may be spelled {r,g,b} with the alpha left off,
+            // which this tool's own schema documents, and comparing the
+            // observed four keys against the requested three reported every
+            // such write as one that did not land (#618).
+            auto requested_json = variantToJson(new_value.value(), 0, true);
+            const json& requested_payload =
+                requested_json.isOk() ? requested_json.value() : params["value"];
+            // The same disclosure every other open-scene mutator carries. The
+            // change is in the edited scene and its undo history, and is
+            // discarded the same way if the editor closes without saving, so
+            // the absence of scene_saved read as "this one did not need
+            // saving" (#623).
+            return liveSceneMutation({{"status", "success"},
+                                      {"target_node", target_path},
+                                      {"property_name", property},
+                                      {"uniform_name", requested_name},
+                                      {"type", godotVariantTypeName(static_cast<int>(declared_type))},
+                                      {"hint", declared_hint},
+                                      {"value", observed_payload},
+                                      {"requested_value", params["value"]},
+                                      {"old_value", old_payload},
+                                      {"applied", jsonValuesEquivalent(observed_payload, requested_payload)},
+                                      {"undo_redo_registered", true}});
         }
 
         constexpr int64_t kMaxUniforms = 256;
         const int64_t reported = std::min<int64_t>(count.value(), kMaxUniforms);
         auto name_key = makeString("name");
         auto type_key = makeString("type");
-        if (name_key.isErr() || type_key.isErr()) return errorJson(500, "Failed to build uniform keys");
+        auto hint_key = makeString("hint");
+        auto hint_string_key = makeString("hint_string");
+        if (name_key.isErr() || type_key.isErr() || hint_key.isErr() || hint_string_key.isErr()) {
+            return errorJson(500, "Failed to build uniform keys");
+        }
 
         json listed = json::array();
         for (int64_t index = 0; index < reported; ++index) {
@@ -10247,6 +10441,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
 
             json uniform = {{"name", name.value()},
                             {"type", godotVariantTypeName(static_cast<int>(declared_type))},
+                            {"hint", readUniformHint(entry.value(), hint_key.value(),
+                                                     hint_string_key.value())},
                             {"settable", jsonTypeIsInsidePropertyContract(static_cast<int>(declared_type))}};
 
             auto uniform_name = makeStringName(name.value());
@@ -10374,7 +10570,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         return liveSceneMutation({{"status", "success"}, {"target_node", params.value("target_node", "")},
                                   {"property_name", property}, {"value", observed_json.value()},
                                   {"requested_value", params["value"]}, {"old_value", old_json.value()},
-                                  {"applied", jsonScalarsEquivalent(observed_json.value(), params["value"])},
+                                  {"applied", jsonValuesEquivalent(observed_json.value(), params["value"])},
                                   {"undo_redo_registered", true}});
     }
 
