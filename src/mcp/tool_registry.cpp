@@ -860,7 +860,17 @@ static json outputSchemaForTool(const std::string& name) {
                                           {"enum", json::array({"expired", "no_record"})}}},
                               {"expired_at_ms", integer_type},
                               {"expired_author", string_type},
-                              {"expired_reason", string_type}},
+                              {"expired_reason", string_type},
+                              {"cleared_at_ms", integer_type},
+                              {"cleared_by", string_type},
+                              {"cleared_reason", string_type},
+                              {"last_board_clear", {{"type", "object"}}},
+                              // What a writer pins a change to: the board's
+                              // revision for blackboard_patch, this path's
+                              // write time for blackboard_write. 0 means
+                              // nothing is there (#682).
+                              {"revision", integer_type},
+                              {"updated_at_ms", integer_type}},
                              {"execution_mode", "found"});
     }
     if (name == "blackboard_task_list") {
@@ -3493,11 +3503,13 @@ void ToolRegistry::registerAllDefaultTools() {
                           {"description", "Dot or slash path such as architecture.inventory.slots. Segments cannot be empty, '.' or '..'."}}},
                 {"value", {{"description", "Any JSON value. Stored and returned verbatim; Didi never interprets or executes it."}}},
                 {"author", {{"type", "string"}, {"maxLength", 128},
-                            {"description", "Who wrote it. Recorded as metadata, never verified."}}},
+                            {"description", "Who wrote it. Recorded as metadata, never verified. The task tools call the same idea agent_id, because there it is an identity a lease is checked against rather than provenance."}}},
                 {"reason", {{"type", "string"}, {"maxLength", 512},
                             {"description", "Why it was written. Recorded as metadata."}}},
                 {"ttl_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 2592000},
-                                 {"description", "Drop the entry once this many seconds have passed. Expiry is applied on the next read, listing or write."}}}
+                                 {"description", "Drop the entry once this many seconds have passed. Expiry is applied on the next read, listing or write."}}},
+                {"expected_updated_at_ms", {{"type", "integer"}, {"minimum", 0},
+                                          {"description", "Only write if the path is still at this updated_at_ms, which blackboard_read returns. 0 means the path must not exist yet. A mismatch is refused 409 with reason_code stale_write and the time it actually holds, the shape blackboard_task_claim already uses for a claim somebody else holds. Omit it for a last-writer-wins write."}}}
             }},
             {"required", json::array({"path", "value"})},
             {"additionalProperties", false}
@@ -3538,8 +3550,11 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"operations", {{"type", "array"}, {"minItems", 1}, {"maxItems", 100},
                                 {"description", "RFC 6902 operations against the board root. If any one fails, none is applied and the board is unchanged."},
                                 {"items", {{"type", "object"}}}}},
-                {"author", {{"type", "string"}, {"maxLength", 128}}},
-                {"reason", {{"type", "string"}, {"maxLength", 512}}}
+                {"author", {{"type", "string"}, {"maxLength", 128},
+                            {"description", "Who applied the patch. Recorded as metadata, never verified. The task tools call the same idea agent_id, because there it is an identity a lease is checked against rather than provenance."}}},
+                {"reason", {{"type", "string"}, {"maxLength", 512}}},
+                {"expected_revision", {{"type", "integer"}, {"minimum", 0},
+                                       {"description", "Only apply if the board is still at this revision, which every read and write returns. A patch spans paths, so its unit is the board rather than one key. A mismatch is refused 409 with reason_code stale_patch."}}}
             }},
             {"required", json::array({"operations"})},
             {"additionalProperties", false}
@@ -3576,7 +3591,11 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"board", {{"type", "string"}, {"default", "default"}, {"minLength", 1}, {"maxLength", 64},
                            {"description", "Board name. Letters, digits, underscore and hyphen. Separate boards do not see each other."}}},
                 {"path", {{"type", "string"}, {"maxLength", 512},
-                          {"description", "Dot or slash path to remove. Omit to clear the entire board."}}}
+                          {"description", "Dot or slash path to remove. Omit to clear the entire board."}}},
+                {"author", {{"type", "string"}, {"maxLength", 128},
+                            {"description", "Who removed it. Recorded where a later reader can find it, since the keys themselves are gone: a read of a cleared path answers reason: cleared and names you."}}},
+                {"reason", {{"type", "string"}, {"maxLength", 512},
+                            {"description", "Why it was removed. Recorded beside the author."}}}
             }},
             {"additionalProperties", false}
         };
@@ -3595,6 +3614,8 @@ void ToolRegistry::registerAllDefaultTools() {
                              {"description", "Letters, digits, underscore, hyphen and dot. Generated as TASK-n when omitted."}}},
                 {"title", {{"type", "string"}, {"minLength", 1}, {"maxLength", 512}}},
                 {"description", {{"type", "string"}, {"maxLength", 4096}}},
+                {"author", {{"type", "string"}, {"maxLength", 128},
+                            {"description", "Who asked for this task, which is not who should do it. Recorded as metadata, never verified. The claim and update tools take agent_id instead, because there it is an identity the lease is checked against rather than provenance."}}},
                 {"assigned_to", {{"type", "string"}, {"maxLength", 128},
                                  {"description", "A suggestion only. Claiming is what actually assigns work."}}},
                 {"dependencies", {{"type", "array"}, {"maxItems", 64}, {"items", {{"type", "string"}}},

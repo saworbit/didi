@@ -420,6 +420,113 @@ void test_blackboard_patch_failures_name_the_operation() {
     ASSERT_TRUE(!blackboardRead(absent).value()["found"].get<bool>());
 }
 
+// Break caught: two agents both read 0, both incremented, and the board held 1
+// with neither call an error and nothing in either response saying a
+// concurrent change had happened. The lease was the only concurrency guard on
+// this surface and it covers tasks (#682).
+void test_blackboard_write_can_refuse_a_stale_write() {
+    BoardFixture fixture("compare-and-set");
+    int64_t now_ms = 3'000'000;
+
+    BlackboardWriteRequest first;
+    first.path = "counter";
+    first.value = json{{"n", 0}};
+    first.author = std::string("A");
+    const auto written = blackboardWrite(first, fixedClock(&now_ms));
+    ASSERT_TRUE(written.isOk());
+
+    BlackboardReadRequest read;
+    read.path = "counter";
+    const auto seen = blackboardRead(read, fixedClock(&now_ms));
+    ASSERT_TRUE(seen.isOk());
+    const auto version = seen.value()["updated_at_ms"].get<int64_t>();
+    ASSERT_TRUE(version > 0);
+
+    // B writes first, using what it read.
+    now_ms += 10;
+    BlackboardWriteRequest b;
+    b.path = "counter";
+    b.value = json{{"n", 1}};
+    b.author = std::string("B");
+    b.expected_updated_at_ms = version;
+    ASSERT_TRUE(blackboardWrite(b, fixedClock(&now_ms)).isOk());
+
+    // A writes second, pinned to the same value it read, and is refused rather
+    // than quietly displacing B.
+    now_ms += 10;
+    BlackboardWriteRequest a;
+    a.path = "counter";
+    a.value = json{{"n", 1}};
+    a.author = std::string("A");
+    a.expected_updated_at_ms = version;
+    const auto refused = blackboardWrite(a, fixedClock(&now_ms));
+    ASSERT_TRUE(refused.isErr());
+    ASSERT_EQ(refused.error().code, 409);
+    ASSERT_EQ(refused.error().data.value("reason_code", std::string()), "stale_write");
+    ASSERT_EQ(refused.error().data.value("last_written_by", std::string()), "B");
+
+    // B's value is still there: the refusal wrote nothing.
+    const auto after = blackboardRead(read, fixedClock(&now_ms));
+    ASSERT_EQ(after.value()["value"]["n"].get<int>(), 1);
+
+    // 0 means "and it must not exist yet".
+    BlackboardWriteRequest fresh;
+    fresh.path = "not_yet";
+    fresh.value = 1;
+    fresh.expected_updated_at_ms = 0;
+    ASSERT_TRUE(blackboardWrite(fresh, fixedClock(&now_ms)).isOk());
+    const auto again = blackboardWrite(fresh, fixedClock(&now_ms));
+    ASSERT_TRUE(again.isErr());
+    ASSERT_EQ(again.error().code, 409);
+
+    // A caller that passes nothing keeps the old behaviour.
+    BlackboardWriteRequest unpinned;
+    unpinned.path = "counter";
+    unpinned.value = json{{"n", 9}};
+    ASSERT_TRUE(blackboardWrite(unpinned, fixedClock(&now_ms)).isOk());
+}
+
+// Break caught: blackboard_clear is the one destructive call on the board and
+// was the only one with no identity argument at all. An agent that came back to
+// find its keys gone could read `author` on every value still there and nothing
+// about the call that removed the rest (#681).
+void test_blackboard_clear_records_who_removed_it() {
+    BoardFixture fixture("clear-attribution");
+    int64_t now_ms = 4'000'000;
+    writeValue("plan.step", 1, &now_ms);
+
+    BlackboardClearRequest clear;
+    clear.path = "plan";
+    clear.author = std::string("agent-b");
+    clear.reason = std::string("superseded by the new plan");
+    const auto removed = blackboardClear(clear, fixedClock(&now_ms));
+    ASSERT_TRUE(removed.isOk());
+    ASSERT_EQ(removed.value()["audit"]["author"].get<std::string>(), "agent-b");
+
+    BlackboardReadRequest read;
+    read.path = "plan.step";
+    const auto gone = blackboardRead(read, fixedClock(&now_ms));
+    ASSERT_TRUE(!gone.value()["found"].get<bool>());
+    ASSERT_EQ(gone.value()["reason"].get<std::string>(), "cleared");
+    ASSERT_EQ(gone.value()["cleared_by"].get<std::string>(), "agent-b");
+    ASSERT_EQ(gone.value()["cleared_reason"].get<std::string>(), "superseded by the new plan");
+
+    // A clear of the whole board has no surviving path to hang a tombstone on,
+    // so what is left is the board-level line.
+    writeValue("other.key", 2, &now_ms);
+    BlackboardClearRequest whole;
+    whole.author = std::string("agent-c");
+    whole.reason = std::string("fresh start");
+    ASSERT_TRUE(blackboardClear(whole, fixedClock(&now_ms)).isOk());
+
+    BlackboardReadRequest swept;
+    swept.path = "other.key";
+    const auto after = blackboardRead(swept, fixedClock(&now_ms));
+    ASSERT_TRUE(!after.value()["found"].get<bool>());
+    ASSERT_EQ(after.value()["reason"].get<std::string>(), "no_record");
+    ASSERT_EQ(after.value()["last_board_clear"]["author"].get<std::string>(), "agent-c");
+}
+
 void test_blackboard_bounds_refuse_oversize_input() {
     BoardFixture fixture("bounds");
 
@@ -1011,6 +1118,10 @@ struct Register {
                      test_blackboard_expiry_is_not_a_missing_key);
         registerTest("Blackboard.PatchFailuresNameTheOperation",
                      test_blackboard_patch_failures_name_the_operation);
+        registerTest("Blackboard.WriteCanRefuseAStaleWrite",
+                     test_blackboard_write_can_refuse_a_stale_write);
+        registerTest("Blackboard.ClearRecordsWhoRemovedIt",
+                     test_blackboard_clear_records_who_removed_it);
         registerTest("Blackboard.ConcurrentWritersDoNotLose",
                      test_blackboard_concurrent_writers_do_not_lose);
         registerTest("Blackboard.ExpiryRemovesEntries", test_blackboard_expiry_removes_entries);
