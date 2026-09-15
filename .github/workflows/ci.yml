@@ -884,8 +884,20 @@ jobs:
         env:
           GODOT_VERSION: ${{ matrix.godot-version }}
         run: |
-          $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v${env:GODOT_VERSION}-stable_win64*.exe" |
-                   Where-Object { $_.Name -notlike "*console*" } | Select-Object -First 1
+          # The console build on purpose, and only here. It is a launcher: it
+          # starts the ordinary editor as a child, and the child is what loads
+          # the addon and publishes the session. Managed mode waited for the pid
+          # it spawned, so it never attached and refused after thirty seconds
+          # (#678) -- and this step could not see it, because it had been
+          # selecting the other binary. The launcher is the harder of the two
+          # and covers everything the plain one does; the plain one is still
+          # driven by the integration harness in the step above.
+          $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v${env:GODOT_VERSION}-stable_win64_console.exe" |
+                   Select-Object -First 1
+          if (-not $godot) {
+            $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v${env:GODOT_VERSION}-stable_win64*.exe" |
+                     Where-Object { $_.Name -notlike "*console*" } | Select-Object -First 1
+          }
           if (-not $godot) { throw "Godot executable not found under godot-bin" }
           $env:DIDI_TEST_BINARY = (Resolve-Path build/Release/didi.exe).Path
           $env:DIDI_RECOVERY_GODOT = $godot.FullName

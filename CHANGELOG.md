@@ -66,6 +66,29 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`--managed-editor` starts against Godot's Windows console build.** It
+  refused after thirty seconds with "Owned editor did not attach", and pointed
+  the reader at an editor log that shows a healthy editor (#678).
+  `Godot_v*_win64_console.exe` is a launcher: it starts the ordinary editor as
+  a child, and the child is what loads the addon and publishes the session, so
+  managed mode waited for the process ID it spawned next to a descriptor for
+  its own workspace that had arrived in under four seconds. The owned editor is
+  now matched by the workspace it published on, which this run created and
+  nothing else has open, and `runtime_recovery_status` reports `editor_pid`
+  beside `pid` so the two are not confused when they differ. A refusal now
+  names the launched process ID, the workspace and every process that published
+  a session for it. `stop()` ends the job rather than only the launched
+  process, and waits for the whole tree rather than for that one process: it
+  used to return while a launcher's editor was still exiting, so
+  `runtime_restore_checkpoint` renamed a project directory another process
+  still had open. A restore also retries that rename for a few seconds rather
+  than failing on it: once no owned process holds the workspace, what is left
+  is somebody else's handle on a file written moments ago -- a scanner, an
+  indexer -- held for a fraction of a second, and a destructive operation
+  should not stop for that. CI runs the managed recovery suites against the
+  console build, which is the one the issue was about and the one that step
+  had been filtering out; the suites' own fixture cleanup waits for the editor
+  to release the workspace instead of reporting the wait as an error.
 - **`--log-level DEBUG` answers a client that does not read stderr.** The
   startup log at `DEBUG` is one line per registered tool, which is past a pipe
   buffer, and it was written inline on the thread that would have answered
