@@ -66,6 +66,23 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The fix cycle spawns the interpreter it is running, not a command called
+  `python`.** There is no such command on macOS -- the Xcode Command Line Tools
+  provide `python3` and Apple removed the Python 2 shim in 12.3 -- nor in a
+  plain `ubuntu:24.04` image, so two gates in `tools/field-trial/cycle.py` died
+  on any machine GitHub did not prepare (#635). Both GitHub runners ship a
+  `python` shim, which is why CI could not see it. `sys.executable` is correct
+  by construction and needs no PATH lookup, which is what two existing test
+  modules already do.
+- **Both Python floors are written down.** The C++ build needs 3.9, which is
+  what a stock macOS ships; the Python test suite needs 3.10, because
+  `requirements-dev.txt` pins `jsonschema==4.26.0` and that release declares
+  `requires-python >= 3.10`. Neither number appeared anywhere, so a 3.9 machine
+  met the second one as a pip resolution error listing every jsonschema that
+  ever existed and naming no Python version (#634). The pin stays exact,
+  because CI reads it from that file and checks what it installed against it.
+  The floor is now in `requirements-dev.txt`, in the developer guide, and in a
+  configure-time note.
 - **A reconfigure with no source change recompiles one file, not 57 targets.**
   The build identity carries a wall-clock stamp, so `version.hpp` was different
   on every configure -- and it sits behind `mcp_protocol.hpp`, which 28 files

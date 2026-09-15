@@ -6,9 +6,20 @@ This guide explains how to build, test, and extend Didi (`godot-mcp-native`).
 
 ## 🛠️ Build Environment Setup
 
+Two Python floors, and they are different numbers. **The C++ build needs 3.9 or
+newer**, which is what a stock macOS ships through the Xcode Command Line Tools;
+`CMakeLists.txt` states it, so a generator step that slips past it fails at
+configure with a version rather than inside the generator. **The Python test
+suite needs 3.10 or newer**, because `requirements-dev.txt` pins
+`jsonschema==4.26.0` and that release declares `requires-python >= 3.10`. On 3.9
+the C++ build and its native suite are fine and `pip install -r
+requirements-dev.txt` fails with a resolution error that never names a Python
+version.
+
 ### Windows (MSVC)
 - Visual Studio 2022 / Build Tools with C++20 support
 - CMake 3.20+
+- Python 3.9+ to build, 3.10+ to run the Python suite
 - Godot 4.5+
 - Windows PowerShell 5.1 or newer for the live integration harness (PowerShell 7 also works)
 
