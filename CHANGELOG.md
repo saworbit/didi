@@ -66,6 +66,16 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The server starts under a project root with an accent in it.** On Windows
+  the narrow `main` the CRT synthesises converts the command line and the
+  environment through the system ANSI codepage, so `--project` and
+  `DIDI_PROJECT_ROOT` arrived mangled. A root holding a character that codepage
+  can represent, such as the one in `C:/Users/Jose`, killed the process with
+  `0xC0000409` and no output at all; Cyrillic, CJK and emoji roots became
+  question marks and were refused as an inaccessible directory (#611). The
+  Windows entry point is now `wmain`, so both arrive as UTF-16 and are encoded
+  to UTF-8 here, and the refusal written for an undecodable root is reachable
+  instead of escaping `main`.
 - **A game stopped on request is reported as the exit it is.** After
   `runtime_stop`, the first call to reach the game answered a `504` with
   `retryable: true` and a sentence about a pipe, the calls after it a `503`
