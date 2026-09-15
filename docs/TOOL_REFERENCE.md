@@ -262,6 +262,8 @@ Runs Didi's string/comment-aware lightweight GDScript diagnostics. When an in-pr
 - At least one is required.
 - Legacy alias: `analyze_script_diagnostics`.
 
+A file whose bytes are not valid UTF-8 is reported as `has_errors: true` with one diagnostic under `rule: "invalid_encoding"`, and Godot is not spawned for it. The engine does refuse such a file — "contains invalid unicode (UTF-8), so it was not loaded" — but its refusal points at engine source rather than at a `res://` line, so there was no location to hang a diagnostic on and the check came back clean about a script the engine will not load. Engine load failures that name no `res://` line are now kept as diagnostics rather than dropped.
+
 Godot's `--headless --check-only` runs in a process with no `SceneTree`, and a project's autoload singletons are registered when the `SceneTree` is built. So the check reports `Compile Error: Identifier not found: <Name>` for every autoload a script names, on every call, for a script the engine compiles and runs without complaint. This is permanent. It is not the `project_set_autoload` limitation below, which clears when the editor restarts; no invocation avoids this one, and `--path`, the `res://` spelling and `--editor` were all confirmed to report it on Godot 4.7.2.
 
 Didi therefore reads the `[autoload]` section of `project.godot` and demotes those diagnostics to `severity: "warning"`, adding a `note` saying why. When they were the only errors, the `Compilation failed` line the compiler prints after them is demoted too, so `has_errors` is a verdict about the script rather than about the checker. Nothing is dropped, so an autoload whose own script is broken is still visible. An `Identifier not found` naming anything that is not a registered autoload stays an error, and a real parse error beside an autoload one keeps `has_errors: true`.
@@ -289,6 +291,8 @@ Extracts functions, variables, signals, enums, and inner classes from GDScript t
 - `file_path` (`string`, optional).
 - `source_text` (`string`, optional).
 - `max_symbols` (`integer`, `1..100000`, default `2000`): stop after this many declarations, counted across all six kinds rather than per kind, because the response is one thing.
+
+A file whose bytes are not valid UTF-8 is refused with `415` and `code: "binary_or_invalid_utf8"`, the same classification `project_search_text` reports for it. Godot will not load such a script at all, and returning an empty symbol list for one was byte for byte the answer a correct empty script gets, so an agent asking where a method lives was told there is no such method. A `.gd` saved as UTF-16 or in a single-byte encoding is what happens when a script is opened and saved by an editor that is not Godot.
 
 The result always says what it left out: `symbol_count_total` is how many declarations the file holds, `returned_count` how many came back, and `truncated` whether those differ. The scan reads the whole file either way, so the total is the real total and not a count of what fitted. Declarations are returned in file order, so the budget is not spent entirely on whichever kind happens to come first in the response.
 

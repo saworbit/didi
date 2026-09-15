@@ -66,6 +66,19 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A script the engine cannot read is not a script with nothing in it.**
+  `script_get_symbols` returned empty lists for a `.gd` saved as UTF-16 or in a
+  single-byte encoding, with `truncated: false` confirming nothing was dropped,
+  which is byte for byte the answer a correct empty script gets; an agent asking
+  where a method lives was told there is no such method (#614). It now refuses
+  with `415` and `binary_or_invalid_utf8`, the classification
+  `project_search_text` already reported for the same files.
+- **`script_check_syntax` fails a script Godot refuses to load.** It reported
+  `has_errors: false` for the same files. The engine does refuse them, but its
+  refusal points at engine source rather than at a `res://` line, so the parser
+  dropped the message and the answer came back clean (#613). The encoding is
+  checked before Godot is spawned, and an engine load failure with no `res://`
+  line is now kept as a diagnostic rather than dropped.
 - **Emitting a signal nothing is connected to is a no-op, and says so.**
   Godot keeps a signal in its object's signal map only once it has a
   connection, so a built-in signal with no listeners returns `ERR_UNAVAILABLE`
