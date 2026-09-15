@@ -16,6 +16,12 @@
 CMakeLists.txt text eol=lf
 *.py text eol=lf
 *.ps1 text eol=lf
+# Shell scripts and the container recipe must be LF wherever they are
+# checked out. tools/localci/lane.sh is COPYed into a Linux image and a
+# CRLF copy fails as `bad interpreter: /usr/bin/env bash^M`; macos.sh
+# pipes a heredoc into a remote shell, which breaks the same way.
+*.sh text eol=lf
+Dockerfile text eol=lf
 .editorconfig text eol=lf
 .gitattributes text eol=lf
 CODEOWNERS text eol=lf
