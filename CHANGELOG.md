@@ -66,6 +66,25 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A duplicated branch survives the save.** `scene_duplicate_node` set the
+  owner of the copy's root and nothing else. Godot leaves every duplicated
+  descendant unowned and `PackedScene::pack` keeps only what the edited root
+  owns, so the editor showed the children, the tool reported success,
+  `editor_save_scene` reported saved, and the file held a bare copy of the root
+  (#659). The copy's descendants now take their owners from the branch they
+  were copied from, which keeps a runtime-only child unowned and leaves a node
+  inside an instanced sub-scene owned by that instance. The harness case only
+  ever duplicated a leaf, so nothing could fail; the new one duplicates a
+  branch two levels deep, saves, undoes, redoes, saves again, and reads the
+  file.
+- **Undoing `scene_remove_from_group` puts a persistent group back
+  persistent.** Deciding that needs the node's `SceneState` entry, and the two
+  sides of the comparison spelled the same node differently: `SceneState` says
+  `./Subject` where `Node.get_path_to` says `Subject`. Nothing ever matched,
+  every membership read as transient, and the undo restored it transient, so
+  the next save dropped a group the editor was still showing (#660). Both
+  comparisons now go through one helper. The harness covered only the transient
+  direction, which passed whatever the code did.
 - **`audio_configure_bus` says where the change ends up.** It writes the
   running engine's `AudioServer` and reports `undo_redo_registered: false`
   beside a `revert_with` block, which is the shape of "this lives in memory".
