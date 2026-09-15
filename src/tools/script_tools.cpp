@@ -5,6 +5,7 @@
 #include "didi/common/project_path.hpp"
 #include "didi/common/engine_version.hpp"
 #include "didi/offline/gdscript_diagnostics.hpp"
+#include "didi/offline/project_search.hpp"
 #include "didi/offline/project_settings_file.hpp"
 #include "didi/offline/resource_indexer.hpp"
 #include "didi/runtime/session_client.hpp"
@@ -12,12 +13,33 @@
 #include <cctype>
 #include <fstream>
 #include <sstream>
+#include <optional>
 #include <string>
 #include <vector>
 #include <filesystem>
 
 namespace didi {
 namespace mcp {
+
+// Godot refuses to load a script whose bytes are not valid UTF-8, and says so:
+// "contains invalid unicode (UTF-8), so it was not loaded". A .gd saved as
+// UTF-16 or ANSI is not exotic on Windows -- it is what happens when a script
+// is opened and saved by an editor that is not Godot -- and both tools below
+// answered about such a file as though they had read it (#613, #614).
+// project_search_text has classified these since it was written, so the
+// classifier is the one it uses.
+std::optional<std::string> scriptEncodingRefusal(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) return std::nullopt;
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    const auto contents = buffer.str();
+    if (contents.empty() || offline::isValidUtf8Text(contents)) return std::nullopt;
+    return std::string(
+        "This file is not valid UTF-8, so Godot will not load it as a script. It is most "
+        "likely saved as UTF-16 or in a single-byte encoding; save it as UTF-8 and try "
+        "again.");
+}
 
 CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     (void)ipc;
@@ -30,25 +52,43 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
     }
 
     std::string analysis_path = file_path;
+    std::optional<std::string> encoding_refusal;
     if (source_text.empty() && !file_path.empty()) {
         auto resolved = paths::resolveProjectFile(file_path);
         if (resolved.isErr()) {
             return CallToolResult::fromError(resolved.error(), "Invalid script file path: ");
         }
         analysis_path = paths::projectPathToUtf8(resolved.value());
+        // Asked before Godot is spawned. The engine does refuse the file, but
+        // its refusal has no res:// frame to hang a diagnostic on, so the
+        // parser dropped it and the answer came back clean about a script the
+        // engine will not load (#613).
+        encoding_refusal = scriptEncodingRefusal(resolved.value());
     }
 
-    auto diags = offline::GDScriptDiagnostics::analyze(analysis_path, source_text);
     json diag_arr = json::array();
     bool has_error = false;
-    for (const auto& d : diags) {
-        if (d.severity == "error") has_error = true;
-        diag_arr.push_back(d.toJson());
+    size_t diagnostics_count = 0;
+    if (encoding_refusal.has_value()) {
+        has_error = true;
+        diagnostics_count = 1;
+        diag_arr.push_back(json{{"severity", "error"},
+                                {"message", *encoding_refusal},
+                                {"rule", "invalid_encoding"},
+                                {"line", 0},
+                                {"column", 0}});
+    } else {
+        auto diags = offline::GDScriptDiagnostics::analyze(analysis_path, source_text);
+        diagnostics_count = diags.size();
+        for (const auto& d : diags) {
+            if (d.severity == "error") has_error = true;
+            diag_arr.push_back(d.toJson());
+        }
     }
 
     json result = {
         {"file_path", file_path},
-        {"diagnostics_count", diags.size()},
+        {"diagnostics_count", diagnostics_count},
         {"has_errors", has_error},
         {"diagnostics", diag_arr}
     };
@@ -202,6 +242,18 @@ CallToolResult handleScriptGetSymbols(const json& args, std::shared_ptr<ipc::IIp
         auto resolved = paths::resolveProjectFile(file_path);
         if (resolved.isErr()) {
             return CallToolResult::fromError(resolved.error(), "Invalid script file path: ");
+        }
+        // "this file declares nothing" and "I could not read this file" were
+        // the same answer, down to truncated: false confirming nothing was
+        // dropped. An agent asking where a method lives got "there is no such
+        // method" and acted on it (#614).
+        if (auto refused = scriptEncodingRefusal(resolved.value())) {
+            return CallToolResult::error(json{{"error", {
+                {"code", 415},
+                {"message", *refused},
+                {"data", {{"code", "binary_or_invalid_utf8"},
+                          {"file_path", file_path},
+                          {"retryable", false}}}}}}.dump());
         }
         std::ifstream file(resolved.value());
         if (file.is_open()) {

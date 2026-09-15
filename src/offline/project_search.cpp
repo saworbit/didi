@@ -11,6 +11,45 @@
 
 namespace didi::offline {
 namespace fs = std::filesystem;
+bool isValidUtf8Text(std::string_view value) {
+    for (size_t i = 0; i < value.size();) {
+        const auto first = static_cast<unsigned char>(value[i]);
+        if (first == 0) return false;
+        if (first < 0x80) {
+            ++i;
+            continue;
+        }
+        size_t continuation_count = 0;
+        uint32_t codepoint = 0;
+        if ((first & 0xE0u) == 0xC0u) {
+            continuation_count = 1;
+            codepoint = first & 0x1Fu;
+            if (codepoint < 2) return false;
+        } else if ((first & 0xF0u) == 0xE0u) {
+            continuation_count = 2;
+            codepoint = first & 0x0Fu;
+        } else if ((first & 0xF8u) == 0xF0u) {
+            continuation_count = 3;
+            codepoint = first & 0x07u;
+        } else {
+            return false;
+        }
+        if (i + continuation_count >= value.size()) return false;
+        for (size_t offset = 1; offset <= continuation_count; ++offset) {
+            const auto next = static_cast<unsigned char>(value[i + offset]);
+            if ((next & 0xC0u) != 0x80u) return false;
+            codepoint = (codepoint << 6u) | (next & 0x3Fu);
+        }
+        if ((continuation_count == 2 && codepoint < 0x800u) ||
+            (continuation_count == 3 && codepoint < 0x10000u) ||
+            codepoint > 0x10FFFFu || (codepoint >= 0xD800u && codepoint <= 0xDFFFu)) {
+            return false;
+        }
+        i += continuation_count + 1;
+    }
+    return true;
+}
+
 namespace {
 
 // Every plain-text file format a Godot project holds references in. It was the
@@ -140,44 +179,6 @@ struct FileRecord {
     uintmax_t size{0};
 };
 
-bool isValidUtf8Text(std::string_view value) {
-    for (size_t i = 0; i < value.size();) {
-        const auto first = static_cast<unsigned char>(value[i]);
-        if (first == 0) return false;
-        if (first < 0x80) {
-            ++i;
-            continue;
-        }
-        size_t continuation_count = 0;
-        uint32_t codepoint = 0;
-        if ((first & 0xE0u) == 0xC0u) {
-            continuation_count = 1;
-            codepoint = first & 0x1Fu;
-            if (codepoint < 2) return false;
-        } else if ((first & 0xF0u) == 0xE0u) {
-            continuation_count = 2;
-            codepoint = first & 0x0Fu;
-        } else if ((first & 0xF8u) == 0xF0u) {
-            continuation_count = 3;
-            codepoint = first & 0x07u;
-        } else {
-            return false;
-        }
-        if (i + continuation_count >= value.size()) return false;
-        for (size_t offset = 1; offset <= continuation_count; ++offset) {
-            const auto next = static_cast<unsigned char>(value[i + offset]);
-            if ((next & 0xC0u) != 0x80u) return false;
-            codepoint = (codepoint << 6u) | (next & 0x3Fu);
-        }
-        if ((continuation_count == 2 && codepoint < 0x800u) ||
-            (continuation_count == 3 && codepoint < 0x10000u) ||
-            codepoint > 0x10FFFFu || (codepoint >= 0xD800u && codepoint <= 0xDFFFu)) {
-            return false;
-        }
-        i += continuation_count + 1;
-    }
-    return true;
-}
 
 Result<std::string> readTextFile(const FileRecord& file) {
     std::ifstream input(file.disk_path, std::ios::binary);

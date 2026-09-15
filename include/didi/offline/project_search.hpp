@@ -8,6 +8,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace didi::offline {
@@ -21,6 +22,16 @@ inline constexpr size_t kSearchMaxFiles = 10000;
 inline constexpr size_t kMaxReportedUnsearchableExtensions = 16;
 inline constexpr uintmax_t kSearchMaxTotalBytes = 64u * 1024u * 1024u;
 inline constexpr size_t kSearchMaxPreviewBytes = 1024;
+
+// Whether a byte string is text this server will read as UTF-8.
+//
+// A NUL or a malformed sequence means the file is binary or in some other
+// encoding, and `project_search_text` has classified files with this since it
+// was written. The script tools did not, so a .gd saved as UTF-16 or ANSI --
+// which is what happens when a script is touched by an editor that is not
+// Godot -- read as a script with no symbols and no syntax errors, which is the
+// same answer a correct empty script gets (#613, #614).
+[[nodiscard]] bool isValidUtf8Text(std::string_view value);
 
 // What a declaration can live in. Symbol search keeps this narrower set: there
 // are no GDScript or C# declarations in a shader, a .json or a .godot, so
