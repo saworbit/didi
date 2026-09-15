@@ -66,6 +66,37 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **Emitting a signal nothing is connected to is a no-op, and says so.**
+  Godot keeps a signal in its object's signal map only once it has a
+  connection, so a built-in signal with no listeners returns `ERR_UNAVAILABLE`
+  and the bridge answered "The engine refused the emit" -- in exactly the state
+  a caller is most likely to be in, driving a signal by hand before the
+  connection exists (#624). It now reports `emitted: false`,
+  `connection_count: 0` and a sentence saying nothing is listening. A delivered
+  emit reports the count it reached.
+- **An engine that answered is no longer reported as a session that is gone.**
+  The guard that keeps an engine's own refusal from reading as a routing
+  problem was scoped to 4xx, so a 5xx came back as `503` with
+  `data.code: "not_connected"` on a session whose very next call succeeded, and
+  an agent branching on that field detached and re-attached over a per-call
+  refusal (#625). An engine failure now answers `502` with
+  `code: "engine_refused"` and the engine's status under `upstream_code`;
+  `503` and `not_connected` stay for a route that could not deliver. A game
+  stopped on request still answers as the requested exit.
+- **`signal_emit`'s dry run runs the argument-value rules the confirmed call
+  runs.** #399 moved the argument *names* onto the preview path and the values
+  stayed behind, so a preview signed nesting, array and object sizes the
+  confirmed call then refused: two round trips and a spent token to learn
+  something the first call could have said (#616). The rules run before the
+  preview now, and the refusal names the entry, the rule and the limit instead
+  of answering `unsupported_signal_emit_argument`.
+- **A preview says what its probe actually read.** The probe reads a node's
+  `name` to confirm the node is there, and that was reported as the before
+  state of a `planned_mutation` of `name`. `signal_emit` changes no property of
+  its target, and neither do the eight other tools that reach the same branch,
+  so a caller diffing `before` against the result saw `name` unchanged and
+  concluded the call had not happened (#621). Those previews now report
+  `changes[].kind: "resolved_target"` with `before.resolved: true`.
 - **A float shader uniform set to a whole number survives the save.**
   `ShaderMaterial.set_shader_parameter` stores the Variant it is handed without
   coercing it, and the bridge built an `int` Variant for a JSON integer, so a

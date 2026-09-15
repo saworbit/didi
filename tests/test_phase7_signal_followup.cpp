@@ -174,14 +174,34 @@ TEST_CASE(phase7_application_error_does_not_quarantine_the_route) {
     ASSERT_EQ(detailed_error.at("data").at("tilemap_path"), "/root/Main/Walls");
     ASSERT_EQ(detailed->quarantines, 0);
 
-    // An engine-side failure that is not the caller's to fix keeps the routing
-    // status, because retrying the same arguments is not the answer to it.
+    // An engine-side failure is still not the caller's to fix, so it does not
+    // pass through as the engine's own status. It is not a routing failure
+    // either: the route delivered and the engine answered, on a session whose
+    // next call succeeds. Reporting it as 503 with data.code "not_connected"
+    // said the session was gone and sent a caller off to re-attach over a
+    // per-call refusal (#625).
     auto internal = std::make_shared<FailingRoute>(didi::Error(500, "tilemap_snapshot_failed"));
     const auto internal_error = errorPayload(
         didi::mcp::sendPhase7LiveRequest(connect, didi::json::object(), internal));
-    ASSERT_EQ(internal_error.at("code"), 503);
-    ASSERT_EQ(internal_error.at("message"), "runtime_route_request_failed");
+    ASSERT_EQ(internal_error.at("code"), 502);
+    ASSERT_EQ(internal_error.at("message"), "tilemap_snapshot_failed");
+    ASSERT_EQ(internal_error.at("data").at("code"), "engine_refused");
+    ASSERT_EQ(internal_error.at("data").at("retryable"), false);
     ASSERT_EQ(internal_error.at("data").at("upstream_code"), 500);
+    ASSERT_EQ(internal_error.at("data").at("upstream_message"), "tilemap_snapshot_failed");
+    ASSERT_EQ(internal->quarantines, 0);
+
+    // A route that could not deliver is the case 503 and not_connected are
+    // still for, and it is untouched.
+    auto unreachable = std::make_shared<FailingRoute>(didi::ipc::transportFailure(
+        "The Godot side closed the IPC pipe while reading the response length",
+        {true, false, false}));
+    const auto unreachable_error = errorPayload(
+        didi::mcp::sendPhase7LiveRequest(connect, didi::json::object(), unreachable));
+    ASSERT_EQ(unreachable_error.at("code"), 503);
+    ASSERT_EQ(unreachable_error.at("message"), "runtime_route_request_failed");
+    // data.code comes from the status floor the registry applies on the way
+    // out, so 503 here is what makes it not_connected there.
 }
 
 // Loses its connection on the first request the way a pipe that went away does,

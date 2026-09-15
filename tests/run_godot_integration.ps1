@@ -2637,6 +2637,63 @@ try {
     $callById = @{}
     foreach ($response in $callResponses) { $callById[[int]$response.id] = $response }
 
+    # signal_emit. Another confirmation-gated tool, so it needs its own --yolo
+    # batch for the same reason: the token only exists in the response to the
+    # dry run, and a batch is built before the process starts. The gate itself
+    # is asserted elsewhere.
+    $emitRequests = @(
+        (@{ jsonrpc = "2.0"; id = 2462; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 2463 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 2464 "scene_open" @{ scene_path = "res://main.tscn" }),
+        # Nothing is connected to this signal. Godot keeps a signal in
+        # Object::signal_map only once it has a connection, so emit_signal
+        # returns ERR_UNAVAILABLE and this was reported as "The engine refused
+        # the emit" -- in the state a caller is most likely to be in, driving a
+        # signal by hand before the connection exists (#624).
+        (Tool-Request 2465 "signal_emit" @{ target_node = "/root/SmokeRoot/Subject"; signal_name = "renamed"; arguments = @() }),
+        # Emitting a signal changes no property of the node, and the preview
+        # reported its liveness read of name as the before state of a planned
+        # mutation of name (#621).
+        (Tool-Request 2466 "signal_emit" @{ target_node = "/root/SmokeRoot/Subject"; signal_name = "renamed"; arguments = @(); dry_run = $true }),
+        # A dry run must not sign argument values the confirmed call refuses
+        # (#616). Nine levels of nesting, one past the limit.
+        (Tool-Request 2467 "signal_emit" @{ target_node = "/root/SmokeRoot/Subject"; signal_name = "renamed"; dry_run = $true; arguments = @(
+            @{ a = @{ b = @{ c = @{ d = @{ e = @{ f = @{ g = @{ h = @{ i = 1 } } } } } } } } }) }),
+        (Tool-Request 2468 "signal_connect" @{ emitter_node = "/root/SmokeRoot/Subject"; signal_name = "renamed"; target_node = "/root/SmokeRoot/Subject"; target_method = "notify_property_list_changed" }),
+        # The other half of the pair: with something connected the same call
+        # reports the delivery and the count it reached.
+        (Tool-Request 2469 "signal_emit" @{ target_node = "/root/SmokeRoot/Subject"; signal_name = "renamed"; arguments = @() }),
+        (Tool-Request 2470 "signal_disconnect" @{ emitter_node = "/root/SmokeRoot/Subject"; signal_name = "renamed"; target_node = "/root/SmokeRoot/Subject"; target_method = "notify_property_list_changed" })
+    )
+    $rawEmitResponses = Invoke-Didi -Requests $emitRequests -Arguments @("--project", $fixtureRoot, "--yolo")
+    $emitResponses = @($rawEmitResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json })
+    Assert-True ($emitResponses.Count -eq $emitRequests.Count) "Expected $($emitRequests.Count) signal_emit responses, received $($emitResponses.Count)."
+    $emitById = @{}
+    foreach ($response in $emitResponses) { $emitById[[int]$response.id] = $response }
+
+    Assert-True (-not $emitById[2465].result.isError) "An emit with nothing connected was refused: $($emitById[2465].result.content[0].text)"
+    $quiet = Tool-Payload $emitById[2465]
+    Assert-True ($quiet.emitted -eq $false) "An emit with no listeners claimed it was delivered."
+    Assert-True ($quiet.connection_count -eq 0) "An emit with no listeners reported $($quiet.connection_count) connection(s)."
+    Assert-True ($quiet.note -match "Nothing is connected") "An emit with no listeners did not say why nothing happened."
+
+    Assert-True (-not $emitById[2469].result.isError) "An emit with a listener connected was refused: $($emitById[2469].result.content[0].text)"
+    $delivered = Tool-Payload $emitById[2469]
+    Assert-True ($delivered.emitted -eq $true) "An emit with a listener connected reported it was not delivered."
+    Assert-True ($delivered.connection_count -ge 1) "An emit with a listener connected reported $($delivered.connection_count) connection(s)."
+
+    $emitPreview = (Tool-Payload $emitById[2466]).mutation_preview
+    Assert-True ($null -ne $emitPreview) "signal_emit dry_run did not return a preview."
+    Assert-True ($emitPreview.target_read -eq $true) "The signal_emit preview did not read its target."
+    Assert-True ($emitPreview.changes[0].kind -eq "resolved_target") "The signal_emit preview reported its liveness read as $($emitPreview.changes[0].kind)."
+    Assert-True ($null -eq $emitPreview.changes[0].before.property_name) "The signal_emit preview still named a property it will not change."
+    Assert-True ($emitPreview.changes[0].before.resolved -eq $true) "The signal_emit preview did not say the node resolved."
+
+    Assert-True $emitById[2467].result.isError "A dry run signed arguments nested past the limit."
+    Assert-True ($emitById[2467].result.content[0].text -match "nested more than 8") "The refusal does not name the rule that was broken: $($emitById[2467].result.content[0].text)"
+    Assert-True ($emitById[2467].result.content[0].text -match "entry 0") "The refusal does not name which argument was wrong."
+    Assert-True ($emitById[2467].result.content[0].text -notmatch "confirmation_token") "A refused dry run still minted a token."
+
     $addResult = Tool-Payload $callById[2405]
     Assert-True ($addResult.returned -eq 5) "scene_call_method did not return what the method returned: $($addResult | ConvertTo-Json -Depth 6 -Compress)"
     Assert-True ($addResult.awaited -eq $false) "A synchronous method reported that it was awaited."

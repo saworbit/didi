@@ -452,7 +452,13 @@ MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
                                "its own beyond the arguments it was given";
         }
         if (target_read) {
-            change["kind"] = "planned_mutation";
+            // A probe that resolved the target without reading anything the
+            // call will change says so. Reporting it as a planned mutation of
+            // whatever the probe happened to read described a property the
+            // call will never touch (#621).
+            const bool resolved_only =
+                before.is_object() && before.value("probe_kind", std::string()) == "node_resolved";
+            change["kind"] = resolved_only ? "resolved_target" : "planned_mutation";
             change["before"] = std::move(before);
         } else {
             // Not "planned_mutation": nothing was planned, the arguments were

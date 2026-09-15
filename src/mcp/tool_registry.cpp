@@ -202,6 +202,7 @@ CallToolResult handleSignalListConnections(const ResolvedToolBinding& binding, c
 CallToolResult handleSignalConnect(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleSignalDisconnect(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleSignalEmit(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+std::optional<Error> refuseUnusableSignalArguments(const ResolvedToolBinding& binding, const json& arguments);
 
 CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectVerifyChanges(const json& args);
@@ -1487,8 +1488,23 @@ std::optional<Error> probeNodeTarget(const std::string& tool, const std::string&
         return std::nullopt;
     }
     if (payload.is_object() && payload.contains("value")) {
-        before = {{"target_node", target}, {"property_name", property},
-                  {"value", payload["value"]}};
+        if (arguments.contains("property_name") && arguments["property_name"].is_string()) {
+            before = {{"target_node", target}, {"property_name", property},
+                      {"value", payload["value"]}};
+        } else {
+            // `name` stood in for "this node is there", and then it was
+            // reported as the before state of a planned mutation of `name`.
+            // signal_emit does not change a node's name, and neither does any
+            // of the eight other tools that reach this branch, so a caller
+            // diffing before against after saw the property unchanged and
+            // concluded the call had not happened (#621). What the probe did
+            // is the fact worth reporting.
+            before = {{"target_node", target},
+                      {"probe_kind", "node_resolved"},
+                      {"resolved", true},
+                      {"note", "the node resolved and its preconditions were checked; this tool "
+                               "changes no property of it, so there is no before state to diff"}};
+        }
     }
     return std::nullopt;
 }
@@ -1747,6 +1763,12 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
     // check, because a dry run that cannot be followed by a successful confirm
     // should return the error the confirm would have returned (#571).
     if (auto unusable = refuseUnusableNodePaths(binding, arguments)) {
+        return CallToolResult::fromError(*unusable);
+    }
+    // Same rule, one level further in: the argument names and types are fine,
+    // a value is refused, and the preview path never asked. A dry run signed
+    // nesting and collection sizes the confirmed call then rejected (#616).
+    if (auto unusable = refuseUnusableSignalArguments(binding, arguments)) {
         return CallToolResult::fromError(*unusable);
     }
     auto safety = m_mutationSafety.evaluate(binding, arguments, safety_context, target_probe);
