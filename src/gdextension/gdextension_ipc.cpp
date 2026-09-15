@@ -13,6 +13,19 @@ GDExtensionIpc& GDExtensionIpc::instance() {
 }
 
 GDExtensionIpc::GDExtensionIpc() {
+    // Touched here so EditorHook's function-local static finishes constructing
+    // first. Statics are destroyed in reverse order of construction, and this
+    // object's destructor calls stop(), which calls EditorHook::instance(). The
+    // hook used to be constructed inside start(), which is after this one, so
+    // at process exit the destructors ran in the order EditorHook then this,
+    // and stop() then locked a mutex and swapped a queue that had already been
+    // destroyed. macOS threw std::system_error out of a destructor ("mutex lock
+    // failed: Invalid argument") and aborted; Linux corrupted the heap and
+    // aborted in malloc. Both landed immediately after the editor plugin said
+    // it had deactivated (#688). EditorHook's own constructor touches
+    // Logger::instance(), so the whole chain -- Logger, EditorHook, this -- is
+    // built in an order whose reverse is safe.
+    EditorHook::instance();
     m_server = ipc::createIpcServer();
 }
 
@@ -23,8 +36,9 @@ GDExtensionIpc::~GDExtensionIpc() {
 bool GDExtensionIpc::start(const std::string& kind, const std::string& project_path) {
     if (!m_server || m_server->isRunning()) return false;
 
-    // Establish the logger mirror and immutable session classification before lifecycle events are emitted.
-    EditorHook::instance();
+    // Establish the immutable session classification before lifecycle events are
+    // emitted. The logger mirror is already up: the constructor above builds the
+    // hook so the destruction order comes out right.
     EditorHook::instance().setSessionKind(kind);
 
     const auto prepared = m_sessionHost.prepare(kind, project_path,
