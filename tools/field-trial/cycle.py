@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -321,11 +322,19 @@ def verify(worktree: Path, godot: str | None, batch: Path) -> tuple[bool, str, s
         return False, f"build failed: {(built.stdout or built.stderr or '')[-400:]}", transcript
 
     build_dir = worktree / "build-ninja"
+    # sys.executable, not "python". There is no command called python on macOS
+    # -- the Xcode Command Line Tools provide python3 and Apple removed the
+    # Python 2 shim in 12.3 -- nor in a plain ubuntu:24.04 image, where it needs
+    # the separate python-is-python3 package. ci.yml computes DIDI_PYTHON for
+    # exactly this reason and nothing in this tooling read it; the interpreter
+    # already running the cycle is correct by construction and needs no PATH
+    # lookup, which is what tests/test_control_room_app.py and
+    # tests/test_phase7_schema_contract.py already do (#635).
     steps = [
         ([str(build_dir / "didi_tests.exe")], "native tests"),
-        (["python", "-m", "unittest", "discover", "-s", "tests", "-t", "tests",
+        ([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-t", "tests",
           "-p", "test_*.py"], "python tests"),
-        (["python", "tools/validate_documentation.py"], "documentation"),
+        ([sys.executable, "tools/validate_documentation.py"], "documentation"),
     ]
     if godot:
         steps.append((["powershell", "-File", "tests/run_godot_integration.ps1",

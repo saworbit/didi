@@ -444,6 +444,21 @@ if(DIDI_BUILD_TESTS)
         TIMEOUT 600)
 
     if(Python3_Interpreter_FOUND)
+        # Two floors, and they are different numbers. The build needs 3.9, which
+        # is what a stock macOS ships through the Xcode Command Line Tools. The
+        # Python suite needs 3.10, because requirements-dev.txt pins jsonschema
+        # 4.26.0 and that release declares requires-python >= 3.10. Neither was
+        # written down anywhere, so a 3.9 machine met the second one as a pip
+        # resolution error listing every jsonschema that ever existed, which
+        # never mentions Python (#634).
+        if(Python3_VERSION VERSION_LESS 3.10)
+            message(STATUS
+                "Python ${Python3_VERSION} can build Didi, but the Python test suite needs "
+                "3.10 or newer: requirements-dev.txt pins jsonschema 4.26.0, which declares "
+                "requires-python >= 3.10. didi_python_tests is still registered and will "
+                "fail on the modules that import jsonschema.")
+        endif()
+
         # Discovery rather than a module list, so this cannot drift from the
         # list CI names explicitly. tests/ is not a package, so it has to be the
         # top level directory too.
