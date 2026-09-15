@@ -66,6 +66,14 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The tilemap and gridmap rules a schema cannot state answer with a
+  sentence.** Uniqueness across array entries and a constraint between two
+  fields of one entry are hand-written, run either side of the schema check, and
+  are the rules a caller is most likely to trip because no schema-aware client
+  can pre-check them. All three answered with a raw identifier naming neither
+  the offending cell, nor the rule, nor what to change, and the third did not
+  even say which of several rules it stood for (#619). They now name the entry
+  indices, the coordinate or position, and the values.
 - **A live-only tool with no engine attached says what to do about it.** All
   fourteen answered "No atomic runtime route is available for live dispatch",
   which names neither Godot, nor the editor, nor anything a caller can act on,
