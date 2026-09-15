@@ -1,6 +1,7 @@
 #include "didi/common/engine_version.hpp"
 #include "didi/offline/test_runner.hpp"
 #include "didi/offline/project_search.hpp"
+#include "didi/offline/resource_indexer.hpp"
 #include "didi/offline/project_impact.hpp"
 #include <algorithm>
 #include <cctype>
@@ -1620,6 +1621,103 @@ static void test_a_name_in_a_scene_is_not_a_code_reference() {
         const auto kind = impact["kind"].get<std::string>();
         ASSERT_EQ(kind, path == "res://scripts/player.gd" ? "code_reference" : "resource_reference");
     }
+}
+
+static void test_a_name_json_cannot_carry_is_named_rather_than_blamed_on_the_caller() {
+    // A POSIX filename is a byte string: the only bytes it may not hold are
+    // '/' and NUL, so a .gd copied off an old drive is a legal file with a name
+    // that is not UTF-8. JSON is defined over Unicode, so serialising such a
+    // path threw, and the throw was caught as "an argument has the wrong type"
+    // on calls that carried no arguments at all (#650).
+    //
+    // The decoder first, which is the part every platform can check.
+    ASSERT_TRUE(didi::paths::isDecodableUtf8("res://plain.gd"));
+    ASSERT_TRUE(didi::paths::isDecodableUtf8("res://caf\xE2\x88\x9A.gd"));
+    ASSERT_TRUE(didi::paths::isDecodableUtf8(""));
+    // A lone continuation byte, a truncated sequence, an overlong form, a
+    // surrogate and a code point past U+10FFFF are each a byte string that no
+    // JSON string can hold.
+    ASSERT_TRUE(!didi::paths::isDecodableUtf8("latin1_caf\xE9.gd"));
+    ASSERT_TRUE(!didi::paths::isDecodableUtf8("\xC3"));
+    ASSERT_TRUE(!didi::paths::isDecodableUtf8("\xC0\xAF"));
+    ASSERT_TRUE(!didi::paths::isDecodableUtf8("\xED\xA0\x80"));
+    ASSERT_TRUE(!didi::paths::isDecodableUtf8("\xF5\x80\x80\x80"));
+
+    // And the lossy form keeps everything it can decode, so the file can be
+    // named. U+FFFD is EF BF BD.
+    ASSERT_EQ(didi::paths::lossyUtf8("latin1_caf\xE9.gd"), "latin1_caf\xEF\xBF\xBD.gd");
+    ASSERT_EQ(didi::paths::lossyUtf8("res://plain.gd"), "res://plain.gd");
+
+    // A response that cannot be encoded is a fault in the server, not a caller
+    // sending an argument of the wrong type. Reached through a real tool rather
+    // than a test-only one, because a tool registered here would be on the
+    // published surface: project_analyze_impact accepts any byte over 0x7F in
+    // an identifier, which is right for a language whose names may hold Unicode
+    // letters, and echoes the target it was given back into its answer.
+    ScopedToolProject project("undecodable-answer");
+    writeAuditFile("project.godot", "config_version=5\n");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto result = registry.callTool(
+        "project_analyze_impact", didi::json{{"target", std::string("caf\xE9")}});
+    ASSERT_TRUE(result.isError);
+    const auto answer = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(answer["error"]["code"], 500);
+    ASSERT_EQ(answer["error"]["data"]["code"], "response_not_encodable");
+    // The old answer was wrong twice: the wrong code, and the wrong party.
+    ASSERT_TRUE(answer["error"]["message"].get<std::string>().find("wrong type") ==
+                std::string::npos);
+
+#if !defined(_WIN32)
+    // And the walkers agree about such a file rather than one failing, one
+    // omitting it in silence, and the rest depending on its extension. Only
+    // here: on Windows a name is UTF-16 and the filesystem cannot hold one of
+    // these, and the default macOS volume refuses the name with EILSEQ, so this
+    // is the platform where the state exists. The test is registered on every
+    // platform so the published test count does not move with the host.
+    const auto undecodable =
+        std::filesystem::current_path() / std::filesystem::path(std::string("latin1_caf\xE9.gd"));
+    {
+        std::ofstream out(undecodable, std::ios::binary);
+        if (!out) return;  // a filesystem that will not hold the name
+        out << "extends Node\n";
+    }
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+
+    const auto listed = registry.callTool("project_list_resources", didi::json::object());
+    ASSERT_TRUE(!listed.isError);
+    const auto listing = didi::json::parse(listed.content[0].text);
+    ASSERT_EQ(listing["undecodable_path_count"], 1u);
+    // Named, with the byte that could not be decoded shown as U+FFFD, which is
+    // the one fact a user needs in order to go and rename the file.
+    ASSERT_EQ(listing["undecodable_paths"][0], "res://latin1_caf\xEF\xBF\xBD.gd");
+    for (const auto& resource : listing["resources"]) {
+        ASSERT_TRUE(resource["path"].get<std::string>().find("latin1_caf") == std::string::npos);
+    }
+
+    const auto searched =
+        registry.callTool("project_search_text", didi::json{{"query", "extends"}});
+    ASSERT_TRUE(!searched.isError);
+    const auto search = didi::json::parse(searched.content[0].text);
+    bool named_in_search = false;
+    for (const auto& diagnostic : search["diagnostics"]) {
+        if (diagnostic["reason"] == "undecodable_name") named_in_search = true;
+    }
+    ASSERT_TRUE(named_in_search);
+
+    // The two that used to answer 400 invalid_arguments for a call with no
+    // arguments now answer at all.
+    const auto audited = registry.callTool("project_audit_assets", didi::json::object());
+    ASSERT_TRUE(!audited.isError);
+    ASSERT_EQ(didi::json::parse(audited.content[0].text)["undecodable_path_count"], 1u);
+    const auto symbols =
+        registry.callTool("project_search_symbols", didi::json{{"query", "Node"}});
+    ASSERT_TRUE(!symbols.isError);
+
+    std::error_code cleanup;
+    std::filesystem::remove(undecodable, cleanup);
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+#endif
 }
 
 static void test_project_impact_answers_on_a_packed_array_line() {
@@ -5933,6 +6031,8 @@ struct RegisterToolTests {
                      test_a_rename_preview_shows_the_files_it_will_change);
         registerTest("Tools.ImpactKindNamesTheFile",
                      test_a_name_in_a_scene_is_not_a_code_reference);
+        registerTest("Tools.UndecodableNameIsNotACallerError",
+                     test_a_name_json_cannot_carry_is_named_rather_than_blamed_on_the_caller);
         registerTest("Tools.ProjectImpactPackedArrayLine",
                      test_project_impact_answers_on_a_packed_array_line);
         registerTest("Tools.ProjectScanBoundSkipsAndSaysSo",

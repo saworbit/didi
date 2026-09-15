@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 namespace didi::paths {
 
@@ -36,6 +37,81 @@ inline std::filesystem::path projectPathFromUtf8(const std::string& value) {
 inline std::string projectPathToUtf8(const std::filesystem::path& path) {
     const auto value = path.generic_u8string();
     return {reinterpret_cast<const char*>(value.data()), value.size()};
+}
+
+// Whether a byte string is well-formed UTF-8, and a lossy rendering of one
+// that is not.
+//
+// A POSIX filename is a byte string: the only bytes it may not hold are '/'
+// and NUL, so a .gd copied off an old drive or unpacked from a Latin-1 zip is
+// a legal file with a name that is not UTF-8. On Windows a name is UTF-16 and
+// always converts, which is why this only bites on Unix; the default macOS
+// volume refuses the name outright, so it is Linux and the other Unix
+// filesystems that can hold one.
+//
+// JSON is defined over Unicode, so such a path cannot be put in a response at
+// all: serialising it threw, four project walkers died on the throw, and each
+// reported that an argument the caller never sent had the wrong type (#650).
+// Naming the file is the one thing a user needs here, so the lossy form exists
+// to say which file it was.
+inline bool isDecodableUtf8(std::string_view value) {
+    size_t index = 0;
+    while (index < value.size()) {
+        const auto lead = static_cast<unsigned char>(value[index]);
+        size_t length = 0;
+        unsigned int code_point = 0;
+        if (lead < 0x80) {
+            ++index;
+            continue;
+        }
+        if ((lead & 0xE0) == 0xC0) { length = 2; code_point = lead & 0x1Fu; }
+        else if ((lead & 0xF0) == 0xE0) { length = 3; code_point = lead & 0x0Fu; }
+        else if ((lead & 0xF8) == 0xF0) { length = 4; code_point = lead & 0x07u; }
+        else return false;
+        if (index + length > value.size()) return false;
+        for (size_t offset = 1; offset < length; ++offset) {
+            const auto continuation = static_cast<unsigned char>(value[index + offset]);
+            if ((continuation & 0xC0) != 0x80) return false;
+            code_point = (code_point << 6) | (continuation & 0x3Fu);
+        }
+        // Overlong forms, surrogates and anything past U+10FFFF are all
+        // rejected, because a decoder that accepts them lets the same character
+        // have two spellings and JSON does not.
+        if ((length == 2 && code_point < 0x80) || (length == 3 && code_point < 0x800) ||
+            (length == 4 && code_point < 0x10000) || code_point > 0x10FFFF ||
+            (code_point >= 0xD800 && code_point <= 0xDFFF)) {
+            return false;
+        }
+        index += length;
+    }
+    return true;
+}
+
+// The same string with every byte that is not part of a well-formed sequence
+// replaced by U+FFFD, so it can be named in a response.
+inline std::string lossyUtf8(std::string_view value) {
+    std::string out;
+    out.reserve(value.size());
+    size_t index = 0;
+    while (index < value.size()) {
+        size_t length = 1;
+        const auto lead = static_cast<unsigned char>(value[index]);
+        if (lead >= 0x80) {
+            if ((lead & 0xE0) == 0xC0) length = 2;
+            else if ((lead & 0xF0) == 0xE0) length = 3;
+            else if ((lead & 0xF8) == 0xF0) length = 4;
+            else length = 0;
+        }
+        if (length != 0 && index + length <= value.size() &&
+            isDecodableUtf8(value.substr(index, length))) {
+            out.append(value.substr(index, length));
+            index += length;
+            continue;
+        }
+        out += "\xEF\xBF\xBD";  // U+FFFD, written as bytes so the source stays ASCII
+        ++index;
+    }
+    return out;
 }
 
 // UTF-8 encoding of a path in its native separator form. Use this where the

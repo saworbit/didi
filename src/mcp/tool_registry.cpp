@@ -2010,6 +2010,29 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         }
         return protected_mutation ? finish(std::move(result)) : std::move(result);
     } catch (const json::type_error& e) {
+        // 316 is a dump that could not be encoded, not an argument that was
+        // read at the wrong type, and the two are opposite causes wearing one
+        // exception type. A project holding a file whose name is not valid
+        // UTF-8 made four walkers answer "an argument has the wrong type" on
+        // calls that carried no arguments at all (#650). The catch below keyed
+        // on the type where the finding was a cause, which is #625's shape.
+        if (e.id == 316) {
+            DIDI_LOG_ERROR("TOOL_EXEC", "Response from tool '", name,
+                           "' could not be encoded: ", e.what());
+            auto result = CallToolResult::error(
+                json{{"error",
+                      {{"code", 500},
+                       {"message", "The answer from '" + name +
+                                       "' holds bytes that are not valid UTF-8, so it cannot be "
+                                       "sent as JSON. This is a fault in the server or in what it "
+                                       "read, not in the call."},
+                       {"data", {{"tool", binding.invoked_name},
+                                 {"canonical_tool", binding.canonical_name},
+                                 {"code", "response_not_encodable"},
+                                 {"retryable", false}}}}}}
+                    .dump());
+            return protected_mutation ? finish(std::move(result)) : std::move(result);
+        }
         // A handler read an argument at a type the value does not have. The
         // schema check above names the property whenever the schema pins its
         // type, so what lands here is a property the schema left open. That is

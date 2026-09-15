@@ -271,6 +271,22 @@ void ResourceIndexer::scan(const std::string& root_dir) {
                 // Convert to res:// relative path
                 const auto rel = fs::relative(entry.path(), root_path);
                 const std::string rel_path = "res://" + paths::projectPathToUtf8(rel);
+                // A POSIX filename is a byte string and need not be UTF-8, and
+                // JSON is defined over Unicode, so a path like this cannot be
+                // put in any response. It used to reach one: serialising threw,
+                // and the throw was caught as a caller sending an argument of
+                // the wrong type, on calls that carried no arguments at all
+                // (#650). Skipped here, once, so every tool reading the index
+                // gives the same answer about it rather than one failing, one
+                // silently omitting it, and the rest depending on the
+                // extension.
+                if (!paths::isDecodableUtf8(rel_path)) {
+                    if (m_undecodable_paths.size() < kMaxReportedUndecodablePaths) {
+                        m_undecodable_paths.push_back(paths::lossyUtf8(rel_path));
+                    }
+                    ++m_undecodable_path_count;
+                    continue;
+                }
 
                 const std::string ext = paths::projectPathToUtf8(entry.path().extension());
                 const std::string filename = paths::projectPathToUtf8(entry.path().filename());

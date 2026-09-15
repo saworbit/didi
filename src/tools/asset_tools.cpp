@@ -47,6 +47,14 @@ CallToolResult handleQueryProjectResources(const json& args, std::shared_ptr<ipc
         {"resources", res_arr}
     };
     if (indexer->truncated()) out["truncated"] = true;
+    // A file whose name is not valid UTF-8 is not in the list and cannot be,
+    // because no JSON response can carry it. Said rather than silently omitted:
+    // before this the serialisation threw and the call answered that an
+    // argument had the wrong type, on a call that carried none (#650).
+    if (indexer->undecodablePathCount() > 0) {
+        out["undecodable_paths"] = indexer->undecodablePaths();
+        out["undecodable_path_count"] = indexer->undecodablePathCount();
+    }
     return CallToolResult::successJson(out);
 }
 

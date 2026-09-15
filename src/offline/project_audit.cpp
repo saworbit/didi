@@ -318,6 +318,15 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         {"import_issue_count", import_health["import_issue_count"]}
     };
     if (scan.truncated) result["truncated"] = true;
+    // Same reason as the scan bounds above: a file this cannot name is a file
+    // the answer is missing, and saying so beats omitting it (#650).
+    {
+        const auto indexer = ResourceIndexer::sharedIndex(root_dir);
+        if (indexer->undecodablePathCount() > 0) {
+            result["undecodable_paths"] = indexer->undecodablePaths();
+            result["undecodable_path_count"] = indexer->undecodablePathCount();
+        }
+    }
     if (import_health.contains("import_scan_truncated")) {
         result["import_scan_truncated"] = true;
     }

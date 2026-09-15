@@ -259,7 +259,18 @@ Result<std::vector<FileRecord>> collectFiles(const fs::path& root,
             ++response.skipped_files;
             continue;
         }
-        files.push_back({entry_path, "res://" + paths::projectPathToUtf8(relative), size});
+        auto resource_path = "res://" + paths::projectPathToUtf8(relative);
+        // A name that is not valid UTF-8 cannot go in a JSON response at all,
+        // and putting one there took this and three sibling walkers out with a
+        // message blaming the caller's arguments (#650). Reported the way an
+        // unreadable file is, with the undecodable bytes shown as U+FFFD so the
+        // file can be named.
+        if (!paths::isDecodableUtf8(resource_path)) {
+            ++response.skipped_files;
+            response.diagnostics.push_back({paths::lossyUtf8(resource_path), "undecodable_name"});
+            continue;
+        }
+        files.push_back({entry_path, std::move(resource_path), size});
         response.scanned_bytes += size;
     }
     std::sort(files.begin(), files.end(), [](const auto& left, const auto& right) {
