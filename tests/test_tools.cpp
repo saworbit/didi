@@ -1,5 +1,7 @@
 #include "didi/common/engine_version.hpp"
 #include "didi/offline/test_runner.hpp"
+#include "didi/offline/project_search.hpp"
+#include "didi/offline/project_impact.hpp"
 #include <algorithm>
 #include <cctype>
 #include "didi/mcp/tool_registry.hpp"
@@ -1533,6 +1535,101 @@ static void test_project_audit_survives_a_very_long_line() {
     ASSERT_EQ(report["dead_signals"].size(), 1u);
     ASSERT_EQ(report["dead_signals"][0]["signal"], "never_used");
     ASSERT_TRUE(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() < 20);
+}
+
+static void test_project_impact_answers_on_a_packed_array_line() {
+    // A .tres writes a packed array on one line, and an ArrayMesh or a baked
+    // Curve3D puts hundreds of kilobytes there. Both name-target passes ran the
+    // regex engine over every line whether or not the name could be on it, and
+    // the cost is quadratic in the line's length, so a project holding one
+    // baked mesh took minutes and past a megabyte on a line never answered
+    // (#661).
+    //
+    // The audit's own long-line test uses an unbroken run of name bytes, which
+    // is a different shape. This one is the numeric array, where the target is
+    // in the file and never on the long line, which is the case that pays.
+    ScopedToolProject project("project-impact-packed-line");
+    writeAuditFile("project.godot", "config_version=5\n");
+    std::string packed = "[gd_resource type=\"ArrayMesh\" format=3]\n\n[resource]\nsurfaces/0 = "
+                         "PackedVector3Array(";
+    // A megabyte and a half on the line, which is the size the report says
+    // never came back at all. A shorter one still finished inside a loose bound
+    // on a fast machine, so the test could not fail.
+    for (int i = 0; i < 400000; ++i) packed += "1.0,";
+    packed += "1.0)\nname = \"health\"\n";
+    writeAuditFile("mesh.tres", packed);
+    writeAuditFile("scripts/player.gd",
+                   "extends Node\n"
+                   "var health := 10\n"
+                   "func hurt():\n"
+                   "    health -= 1\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = registry.callTool("project_analyze_impact", didi::json{{"target", "health"}});
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    ASSERT_TRUE(!result.isError);
+
+    // Prompt and still complete: the declaration and both uses are found, and
+    // the name on the resource's own line is found too.
+    const auto report = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(report["counts_by_kind"]["code_reference"], 3u);
+    ASSERT_EQ(report["declared_in"].size(), 1u);
+    ASSERT_EQ(report["declared_in"][0]["path"], "res://scripts/player.gd");
+    // Loose on purpose, the way the audit's bound is: it separates linear from
+    // quadratic, not a fast machine from a slow one. This took ten seconds
+    // before the guard.
+    ASSERT_TRUE(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() < 20);
+}
+
+static void test_a_file_over_the_scan_bound_is_skipped_and_said_so() {
+    // The whole-project readers held every file in memory at once with none of
+    // the bounds the search tools apply (#664). A file over the per-file cap is
+    // now left out, counted, and the scan marked truncated, because an analysis
+    // of part of a project that reads like an analysis of the project is the
+    // answer this cannot give.
+    ScopedToolProject project("project-scan-bounds");
+    writeAuditFile("project.godot", "config_version=5\n");
+    std::string huge = "[gd_resource type=\"Resource\" format=3]\n\n[resource]\n";
+    // Comfortably over the per-file cap, in lines so nothing else about the
+    // file is unusual.
+    while (huge.size() < didi::offline::kSearchMaxFileBytes + 1024) {
+        huge += "filler = \"health\"\n";
+    }
+    writeAuditFile("huge.tres", huge);
+    writeAuditFile("scripts/player.gd", "extends Node\nvar health := 10\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto impact = registry.callTool("project_analyze_impact", didi::json{{"target", "health"}});
+    ASSERT_TRUE(!impact.isError);
+    const auto impact_report = didi::json::parse(impact.content[0].text);
+    // The script was read and the oversized resource was not, and the answer
+    // says it is partial rather than presenting itself as the whole project.
+    ASSERT_EQ(impact_report["scanned_files"], 1u);
+    ASSERT_EQ(impact_report["truncated"], true);
+
+    const auto audit = registry.callTool("project_audit_assets", didi::json::object());
+    ASSERT_TRUE(!audit.isError);
+    const auto audit_report = didi::json::parse(audit.content[0].text);
+    ASSERT_EQ(audit_report["scanned_text_files"], 1u);
+    ASSERT_EQ(audit_report["skipped_text_files"], 1u);
+    ASSERT_EQ(audit_report["truncated"], true);
+
+    // And the rewrite refuses outright, which is the refusal that already
+    // existed for a truncated resource index: renaming the files that were read
+    // and leaving the rest is the half-applied change it exists to prevent.
+    // Asked of the offline function rather than through the tool, because the
+    // tool's dry run is intercepted by the mutation envelope and never reaches
+    // the scan.
+    didi::offline::ProjectRenameOptions rename_options;
+    rename_options.target = "health";
+    rename_options.new_name = "hp";
+    const auto rename = didi::offline::renameReferences(std::filesystem::current_path().string(), rename_options);
+    ASSERT_TRUE(rename.isErr());
+    ASSERT_TRUE(rename.error().message.find("truncated") != std::string::npos);
 }
 
 static void test_project_impact_finds_scene_and_animation_references_a_search_cannot_explain() {
@@ -5746,6 +5843,10 @@ struct RegisterToolTests {
                      test_an_empty_new_definition_never_mints_a_token);
         registerTest("Tools.ProjectAuditLongLine",
                      test_project_audit_survives_a_very_long_line);
+        registerTest("Tools.ProjectImpactPackedArrayLine",
+                     test_project_impact_answers_on_a_packed_array_line);
+        registerTest("Tools.ProjectScanBoundSkipsAndSaysSo",
+                     test_a_file_over_the_scan_bound_is_skipped_and_said_so);
         registerTest("Tools.ProjectImpactFindings",
                      test_project_impact_finds_scene_and_animation_references_a_search_cannot_explain);
         registerTest("Tools.ProjectImpactFileTarget",

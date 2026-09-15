@@ -66,6 +66,30 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The whole-project readers answer on a project with a baked mesh in it.**
+  A Godot resource writes a packed array on one line, and an `ArrayMesh` or a
+  baked `Curve3D` puts hundreds of kilobytes there. `project_analyze_impact`
+  and `project_audit_assets` handed every such line to the regex engine, at a
+  cost quadratic in its length, so one 400 KB line cost ten seconds in each and
+  a line past a megabyte never came back inside any client timeout (#661). Both
+  now check for the literal they are looking for before running a pattern, which
+  is the guard the sibling collectors in the same file already had. The same
+  calls answer in hundredths of a second and return the same findings. The
+  profile moved one of the two sites the report named: `referencesIn` was
+  already cheap, and the cost was the dead-signal member-call pattern, which is
+  asked a line at a time now.
+- **Those two readers are bounded, and say when they read less than the whole
+  project.** They held every file in memory at once with none of the limits
+  `project_search_text` applies, so on a 71 MB project one call cost 86 MB of
+  working set and 10.7 seconds, where the bounded sibling reading the same
+  bytes cost 10 MB (#664). The shared scan now applies the same three bounds --
+  4 MiB per file, 64 MiB in total, 10000 files -- and reports what they kept
+  out: the same project now costs 8 MB and answers in 1.9 seconds, and says
+  `truncated: true` rather than presenting a partial read as a whole one.
+  `project_rename_references` already refused a truncated scan and now names
+  which of the two reasons it was. `project_audit_assets` goes through that
+  scan rather than its own copy of the same loop, so a file type added to one
+  can no longer be invisible to the other.
 - **A duplicated branch survives the save.** `scene_duplicate_node` set the
   owner of the copy's root and nothing else. Godot leaves every duplicated
   descendant unowned and `PackedScene::pack` keeps only what the edited root

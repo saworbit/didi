@@ -24,6 +24,10 @@ struct ProjectTextScan {
     std::vector<ResourceInfo> resources;
     std::vector<ProjectTextSource> sources;
     bool truncated{false};
+    // Files a bound kept out of sources. Reported rather than dropped, because
+    // an analysis of part of a project that reads like an analysis of the
+    // project is the answer this cannot give.
+    size_t skipped_files{0};
 };
 
 // How the resource list underneath the scan is obtained.
@@ -41,6 +45,14 @@ enum class ScanIndex { shared, fresh };
 // Scans root_dir and reads every scene, resource, script and shader in it.
 // Files that cannot be read are skipped rather than failing the scan: a
 // partial answer about a project is worth more than no answer.
+//
+// Bounded by the same three limits project_search declares -- per file, in
+// total, and by file count -- because this holds the whole project in memory at
+// once and Didi is a process a client starts and keeps. A project with 181 MB
+// of text across thirty resource files cost 198 MB of working set on every
+// call, where the bounded sibling reading the same bytes cost 10 MB (#664). A
+// file a bound keeps out raises skipped_files and truncated, so a caller that
+// refuses to act on a partial read still refuses.
 ProjectTextScan scanProjectText(const std::string& root_dir,
                                 ScanIndex index = ScanIndex::shared);
 

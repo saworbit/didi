@@ -1,8 +1,10 @@
 #include "didi/offline/project_text_scan.hpp"
 
 #include "didi/common/project_path.hpp"
+#include "didi/offline/project_search.hpp"
 
 #include <fstream>
+#include <system_error>
 #include <memory>
 #include <sstream>
 
@@ -44,12 +46,33 @@ ProjectTextScan scanProjectText(const std::string& root_dir, ScanIndex index) {
     scan.truncated = indexer->truncated();
 
     const auto root = paths::projectPathFromUtf8(root_dir);
+    uintmax_t scanned_bytes = 0;
     for (const auto& resource : scan.resources) {
         if (!carriesReferences(resource.type)) continue;
+        if (scan.sources.size() >= kSearchMaxFiles) {
+            ++scan.skipped_files;
+            scan.truncated = true;
+            continue;
+        }
         auto relative = resource.path;
         if (strings::startsWith(relative, "res://")) relative.erase(0, 6);
-        auto text = readFile(root / paths::projectPathFromUtf8(relative));
-        if (!text.empty()) scan.sources.push_back({resource.path, std::move(text)});
+        const auto absolute = root / paths::projectPathFromUtf8(relative);
+        // Asked of the filesystem rather than of the bytes, so a file over the
+        // limit is never read into memory to be discarded. A file whose size
+        // cannot be read falls through to readFile, which returns nothing for
+        // anything it cannot open.
+        std::error_code size_error;
+        const auto size = std::filesystem::file_size(absolute, size_error);
+        if (!size_error &&
+            (size > kSearchMaxFileBytes || scanned_bytes + size > kSearchMaxTotalBytes)) {
+            ++scan.skipped_files;
+            scan.truncated = true;
+            continue;
+        }
+        auto text = readFile(absolute);
+        if (text.empty()) continue;
+        scanned_bytes += text.size();
+        scan.sources.push_back({resource.path, std::move(text)});
     }
     return scan;
 }
