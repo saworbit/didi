@@ -39,7 +39,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `ImportHealth` | 15 |
 | `InvariantWatch` | 4 |
 | `JsonRpc` | 4 |
-| `ManagedProcess` | 6 |
+| `ManagedProcess` | 7 |
 | `McpServer` | 41 |
 | `Phase5` | 17 |
 | `Phase6` | 22 |
