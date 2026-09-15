@@ -9164,13 +9164,40 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto after = readState();
         if (after.isErr()) return errorJson(after.error().code, after.error().message);
 
-        return liveResult({{"status", "success"},
-                           {"bus", index},
-                           {"applied", std::move(applied)},
-                           {"before", before.value()},
-                           {"after", after.value()},
-                           {"undo_redo_registered", false},
-                           {"revert_with", before.value()}});
+        // Where the change ends up, which is not where this handler leaves it.
+        //
+        // undo_redo_registered: false beside a revert_with block is the shape of
+        // "this lives in memory, here is how to put it back", and in an attached
+        // editor that is not the whole story. The editor's own bus-layout
+        // autosave notices the AudioServer change and writes
+        // res://default_bus_layout.tres a moment later with no call from here,
+        // so a tracked project file appears in the working tree carrying
+        // whatever value was tried last. A caller sweeping bus volumes to find
+        // a mix reasonably believed nothing had been committed (#622).
+        //
+        // Confirmed on 4.5.1: the file is absent from the integration fixture
+        // and present in the copy after a run whose only bus calls are this
+        // tool's.
+        const bool editor_session = session_kind == "editor";
+        return liveResult(
+            {{"status", "success"},
+             {"bus", index},
+             {"applied", std::move(applied)},
+             {"before", before.value()},
+             {"after", after.value()},
+             {"undo_redo_registered", false},
+             {"persisted_by_editor", editor_session},
+             {"layout_path", "res://default_bus_layout.tres"},
+             {"limitation",
+              editor_session
+                  ? "This sets the running engine's audio bus state. This tool writes no "
+                    "file, but the editor's own bus-layout autosave picks the change up and "
+                    "writes res://default_bus_layout.tres shortly afterwards, so it reaches "
+                    "the project on disk anyway. revert_with restores the previous values."
+                  : "This sets the running game's audio bus state and nothing writes it "
+                    "down. It is gone when the process exits, and the project's bus layout "
+                    "on disk is unchanged. revert_with restores the previous values."},
+             {"revert_with", before.value()}});
     }
 
     if (method == "audio.listBuses") {
