@@ -66,6 +66,21 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The schema gate refuses arguments that are not an object.** The one place
+  that reads a tool's published schema returned "no complaint" for an array, a
+  number or a string, so the gate reported that a call had satisfied a contract
+  it cannot satisfy (#629). It now names the type it was given. No handler was
+  ever reached with one: `tools/call` and `MutationSafety::evaluate` both refuse
+  a non-object first.
+- **`viewport_diff_capture` refuses a malformed capture id with the error
+  envelope.** Seven argument checks in the handler duplicated bounds the
+  published schema already states, and `dispatchTool` checks that schema before
+  any handler runs, so six of them could not be reached (#628). The seventh
+  could: the schema states the capture id's `pattern` and the checker does not
+  model `pattern`, so a 32-character id in the wrong case reached the handler
+  and came back as a bare sentence with no code to branch on. The duplicates are
+  gone and the surviving check answers the way #424 made its two neighbours
+  answer.
 - **The server starts under a project root with an accent in it.** On Windows
   the narrow `main` the CRT synthesises converts the command line and the
   environment through the system ANSI codepage, so `--project` and
