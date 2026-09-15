@@ -13,6 +13,38 @@
 namespace didi::runtime {
 namespace fs = std::filesystem;
 namespace {
+// Renaming a directory the owned editor has just released.
+//
+// stop() proves no process this server started is left, and the restore leaves
+// its own working directory before it renames. What is left on Windows is
+// somebody else's handle on a file that was written moments ago -- a scanner,
+// an indexer, a backup agent -- and it is held for a fraction of a second.
+// Without a retry that made a destructive, important operation fail and tell
+// the reader to sort out a lock that had already gone by the time they read
+// the sentence. The console build made it routine rather than rare, because
+// two processes release the addon's DLL instead of one (#678).
+//
+// Bounded, and the last error is what the caller is told, so a handle that is
+// really held still reports the same refusal it always did.
+void renameWithRetry(const fs::path& from, const fs::path& to) {
+    using namespace std::chrono;
+    constexpr auto kBudget = seconds(10);
+    constexpr auto kPause = milliseconds(50);
+    const auto deadline = steady_clock::now() + kBudget;
+    for (;;) {
+        std::error_code error;
+        fs::rename(from, to, error);
+        if (!error) return;
+        if (steady_clock::now() >= deadline) {
+            // The throwing form, so the caller's catch reports what the
+            // filesystem said, exactly as it did before there was a retry.
+            fs::rename(from, to);
+            return;
+        }
+        std::this_thread::sleep_for(kPause);
+    }
+}
+
 Error recoveryError(const std::string& message) { return Error(409, message); }
 bool scenePersistence(const std::string& name) {
     static const std::unordered_set<std::string> names{"scene_instantiate_node",
@@ -452,8 +484,8 @@ Result<json> ManagedRecovery::restore(const std::string& id) {
     try {
         // Leaving cwd releases Windows' directory handle before renaming the whole workspace.
         fs::current_path(m_container);
-        fs::rename(m_store.project(), old);
-        fs::rename(staged, m_store.project());
+        renameWithRetry(m_store.project(), old);
+        renameWithRetry(staged, m_store.project());
         fs::current_path(m_store.project());
     } catch (const std::exception& e) {
         std::error_code rollback_error;
