@@ -300,16 +300,23 @@ installed the check can answer about a different engine from the one the project
 is open in; the fields are `null` when there is nothing to compare, and an
 unknown version is never reported as a match.
 
-A compiler pass that did not happen is not a script with no errors. If the Godot
-that was selected cannot be launched, or runs and prints no version banner, the
-call is refused `503` with `code: "engine_unavailable"`, naming the executable it
+A compiler pass that did not happen is not a script with no errors. When the
+executable that was tried is a file that exists and it prints no version banner,
+the call is refused `503` with `code: "engine_unavailable"`, naming what was
 tried and why nothing came back, rather than answering `has_errors: false` about
 a script nobody compiled. A path that is obviously wrong is discarded earlier and
 discovery finds an engine instead; the value this catches is a real file that is
 not the engine, which is what a version-manager shim or the wrong file out of a
-bundle looks like. A check given `source_text` spawns no Godot by design and is
-unaffected. `engine_exit_code` and `engine_duration_seconds` accompany a check
-that did run, so a caller can see the subprocess happened.
+bundle looks like.
+
+A machine with no Godot installed at all is a different state and is not
+refused: discovery falls through to a bare name, nothing runs, and the answer is
+the lexer verdict as it has always been. `engine_available` says which of the
+two happened on every check that named a file, with `engine_unavailable_reason`
+when it is false, so `has_errors` is never read as a compiler verdict nobody
+made. A check given `source_text` spawns no Godot by design and carries neither.
+`engine_exit_code` and `engine_duration_seconds` accompany a check that did run,
+so a caller can see the subprocess happened.
 
 Godot's `--headless --check-only` runs in a process with no `SceneTree`, and a project's autoload singletons are registered when the `SceneTree` is built. So the check reports `Compile Error: Identifier not found: <Name>` for every autoload a script names, on every call, for a script the engine compiles and runs without complaint. This is permanent. It is not the `project_set_autoload` limitation below, which clears when the editor restarts; no invocation avoids this one, and `--path`, the `res://` spelling and `--editor` were all confirmed to report it on Godot 4.7.2.
 

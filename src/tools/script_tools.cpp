@@ -134,7 +134,17 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
     // idea on the shader half, already refuses this; so does this now. A check
     // given source_text runs no engine by design and is left alone.
     const bool engine_was_asked = source_text.empty() && !file_path.empty();
-    if (engine_was_asked && !engine.ran && !encoding_refusal.has_value()) {
+    // Only when an engine was actually there to be wrong about.
+    //
+    // A machine with no Godot installed falls through to the bare name
+    // `godot`, the exec fails with 127, and answering the lexer verdict is
+    // what this tool has always done and what the output schema documents.
+    // Refusing there would take the tool away from a supported configuration
+    // for a misconfiguration it does not have. The value #677 is about is a
+    // path that names a real file which is not the engine -- a version-manager
+    // shim, the wrong file out of a bundle -- and that is the one this catches.
+    const bool engine_was_wrong = engine_was_asked && engine.executable_exists && !engine.ran;
+    if (engine_was_wrong && !encoding_refusal.has_value()) {
         json data = {{"code", "engine_unavailable"},
                      {"tool", "script_check_syntax"},
                      {"engine_executable", engine.executable.empty() ? json(nullptr)
@@ -162,12 +172,18 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
         {"has_errors", has_error},
         {"diagnostics", diag_arr}
     };
-    // Published so a caller can see the subprocess ran, which is what the
-    // shader half already reports and this one did not.
+    // Published so a caller can see whether the subprocess ran at all, which
+    // is what the shader half already reports and this one did not. False is
+    // the honest answer on a machine with no Godot: the lexer found what it
+    // found, and nothing compiled the script.
     if (engine_was_asked) {
+        result["engine_available"] = engine.ran;
         result["engine_exit_code"] =
             engine.exit_code.has_value() ? json(*engine.exit_code) : json(nullptr);
         result["engine_duration_seconds"] = engine.duration_seconds;
+        if (!engine.ran && !engine.failure.empty()) {
+            result["engine_unavailable_reason"] = engine.failure;
+        }
     }
 
     // Which engine answered. The whole question this tool exists for is "will
