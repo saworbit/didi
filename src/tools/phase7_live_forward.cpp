@@ -106,15 +106,47 @@ CallToolResult sendPhase7LiveRequest(const ResolvedToolBinding& binding,
         // The status is part of what it said. A 503 reads as a transport or
         // routing problem, so a rejected request sent a caller off to
         // re-verify the session when the engine had already answered and the
-        // fix was in the arguments. When the transport is intact and the
-        // engine refused with a client error, that status and message are the
-        // result; 503 stays for a route that could not deliver at all.
-        if (!transport.has_value() && failure.code >= 400 && failure.code < 500) {
+        // fix was in the arguments. When the transport is intact the engine
+        // answered, and that status and message are the result; 503 stays for
+        // a route that could not deliver at all.
+        //
+        // The clause that used to stand here scoped this to 4xx, which threw
+        // the argument away for the one class it matters most in: an engine
+        // that refused with a 5xx was reported as a 503 with
+        // `data.code: "not_connected"`, on a session whose very next call
+        // succeeded. `not_connected` was accidentally true of the signal and
+        // false of the session, and the field means the session, so an agent
+        // branching on it detached and re-attached over a per-call refusal
+        // (#625). A 5xx is still not the caller's to fix, so it becomes a 502
+        // rather than passing through, which keeps it distinguishable from
+        // both a caller error and a route that could not deliver.
+        if (!transport.has_value()) {
             json data = failure.data.is_object() ? failure.data : json::object();
             data["retryable"] = false;
             data["route_quarantine"] = quarantined;
             data["upstream_code"] = failure.code;
             data["upstream_message"] = failure.message;
+            // An engine-side failure is still not the caller's to fix, so it
+            // does not pass through as the engine's own 5xx and does not look
+            // like a request the caller can correct. It is reported as 502:
+            // the route delivered and the engine failed, which is a different
+            // fact from the route not delivering, and neither of them is
+            // "this session is not connected".
+            if (failure.code >= 500) {
+                // A game this caller asked to stop answers here, because the
+                // extension reports a stopped main loop as an engine failure
+                // while the process still answers. That is a fact about the
+                // session and it used to be attached on the 503 path this
+                // class fell through to, so it is asked here before the
+                // per-call classification takes over (#595).
+                Error stopped(503, failure.message, data);
+                if (runtime::annotateRequestedStop(stopped, lease->descriptor)) {
+                    return phase7Error(binding, 503, "runtime_route_request_failed",
+                                       std::move(stopped.data));
+                }
+                if (!data.contains("code")) data["code"] = "engine_refused";
+                return phase7Error(binding, 502, failure.message, std::move(data));
+            }
             return phase7Error(binding, failure.code, failure.message, std::move(data));
         }
         json data = {{"retryable", false},

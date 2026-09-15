@@ -33,6 +33,8 @@ struct RegisterPhase7Signals { RegisterPhase7Signals() { registerTest("Phase7Sig
 #include "didi/tools/resolved_tool_binding.hpp"
 #include <limits>
 #include <memory>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace didi::mcp {
@@ -44,6 +46,7 @@ CallToolResult handleSignalDisconnect(const ResolvedToolBinding&, const json&,
                                       std::shared_ptr<ipc::IIpcClient>);
 CallToolResult handleSignalEmit(const ResolvedToolBinding&, const json&,
                                 std::shared_ptr<ipc::IIpcClient>);
+std::optional<Error> refuseUnusableSignalArguments(const ResolvedToolBinding&, const json&);
 }
 
 namespace {
@@ -70,6 +73,27 @@ public:
     didi::json last_params;
 };
 
+// Answers scene.getProperty the way the bridge does, so the preview probe has
+// something to read.
+class SignalProbeClient final : public didi::ipc::IIpcClient {
+public:
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override { connected = false; }
+    bool isConnected() const override { return connected; }
+    didi::Result<didi::json> sendRequest(const std::string& method,
+                                         const didi::json&,
+                                         int) override {
+        ++requests;
+        if (method == "scene.getProperty") {
+            return didi::json{{"status", "success"}, {"value", "Domain"}};
+        }
+        return didi::json{{"emitted", true}};
+    }
+
+    bool connected{true};
+    int requests{0};
+};
+
 didi::json signalResultPayload(const didi::mcp::CallToolResult& result) {
     ASSERT_TRUE(!result.content.empty());
     return didi::json::parse(result.content.front().text);
@@ -82,6 +106,88 @@ void assertSignalRequestRejected(const didi::mcp::CallToolResult& result,
     ASSERT_TRUE(payload["error"]["code"] == 400);
     ASSERT_TRUE(payload["error"]["data"]["retryable"] == false);
     ASSERT_TRUE(client->requests == 0);
+}
+
+void test_a_signal_emit_preview_reports_what_it_actually_read() {
+    // Break caught: a dry run signs argument values the confirmed call refuses
+    // (#616), and reports the node's name as the before state of a planned
+    // mutation of a property the call never touches (#621).
+    using namespace didi::mcp;
+
+    const auto binding = resolveAliasBinding("signal_emit");
+    const auto refusal = [&binding](const didi::json& arguments) {
+        return refuseUnusableSignalArguments(
+            binding, didi::json{{"target_node", "/root/Domain"},
+                                {"signal_name", "renamed"},
+                                {"arguments", arguments}});
+    };
+
+    // Every rule the confirmed call applies, named, with the bound.
+    didi::json deep = 1;
+    for (int level = 0; level < 9; ++level) deep = didi::json{{"a", deep}};
+    const auto nested = refusal(didi::json::array({deep}));
+    ASSERT_TRUE(nested.has_value() && nested->code == 400);
+    ASSERT_TRUE(nested->message.find("entry 0") != std::string::npos);
+    ASSERT_TRUE(nested->message.find("nested more than 8") != std::string::npos);
+
+    didi::json long_array = didi::json::array();
+    for (int index = 0; index < 200; ++index) long_array.push_back(index);
+    const auto oversized = refusal(didi::json::array({long_array}));
+    ASSERT_TRUE(oversized.has_value() && oversized->code == 400);
+    ASSERT_TRUE(oversized->message.find("200 entries") != std::string::npos);
+    ASSERT_TRUE(oversized->message.find("limit is 64") != std::string::npos);
+
+    didi::json wide = didi::json::object();
+    for (int index = 0; index < 200; ++index) wide[std::to_string(index)] = index;
+    const auto keys = refusal(didi::json::array({wide}));
+    ASSERT_TRUE(keys.has_value() && keys->message.find("200 keys") != std::string::npos);
+
+    didi::json too_many = didi::json::array();
+    for (int index = 0; index < 17; ++index) too_many.push_back(index);
+    const auto counted = refusal(too_many);
+    ASSERT_TRUE(counted.has_value() && counted->message.find("at most 16") != std::string::npos);
+
+    didi::json big = didi::json::array({std::string(4097, 'x')});
+    const auto long_string = refusal(big);
+    ASSERT_TRUE(long_string.has_value() && long_string->message.find("4096") != std::string::npos);
+
+    // Arguments the call accepts are not refused, and neither is another tool's.
+    ASSERT_TRUE(!refusal(didi::json::array({1, "two", true, nullptr})).has_value());
+    ASSERT_TRUE(!refuseUnusableSignalArguments(
+        resolveAliasBinding("scene_set_property"),
+        didi::json{{"arguments", didi::json::array({deep})}}).has_value());
+
+    // The dry run runs them before it composes anything, so nothing is signed.
+    auto client = std::make_shared<SignalProbeClient>();
+    auto& registry = ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(client);
+    const auto signed_deep = registry.callTool(
+        "signal_emit", didi::json{{"target_node", "/root/Domain"},
+                                  {"signal_name", "renamed"},
+                                  {"arguments", didi::json::array({deep})},
+                                  {"dry_run", true}});
+    ASSERT_TRUE(signed_deep.isError);
+    const auto refused_payload = signalResultPayload(signed_deep);
+    ASSERT_TRUE(refused_payload["error"]["code"] == 400);
+    ASSERT_TRUE(refused_payload["error"]["message"].get<std::string>().find("entry 0") !=
+                std::string::npos);
+    ASSERT_TRUE(signed_deep.content.front().text.find("confirmation_token") == std::string::npos);
+
+    // And what it did read is reported as what it was: the node resolved.
+    const auto preview = registry.callTool(
+        "signal_emit", didi::json{{"target_node", "/root/Domain"},
+                                  {"signal_name", "renamed"},
+                                  {"arguments", didi::json::array()},
+                                  {"dry_run", true}});
+    registry.setIpcClient(nullptr);
+    ASSERT_TRUE(!preview.isError);
+    const auto preview_payload = signalResultPayload(preview);
+    const auto& change = preview_payload["mutation_preview"]["changes"][0];
+    ASSERT_TRUE(preview_payload["mutation_preview"]["target_read"] == true);
+    ASSERT_TRUE(change["kind"] == "resolved_target");
+    ASSERT_TRUE(change["before"]["resolved"] == true);
+    ASSERT_TRUE(!change["before"].contains("property_name"));
 }
 
 void test_phase7_signal_handlers_reject_non_exact_requests_without_dispatch() {
@@ -334,6 +440,8 @@ struct RegisterPhase7SignalBehavior {
                      test_phase7_signal_handlers_reject_non_exact_requests_without_dispatch);
         registerTest("Phase7Signals.ExactForwarding",
                      test_phase7_signal_handlers_forward_exact_normalized_requests_once);
+        registerTest("Phase7Signals.EmitPreviewReportsWhatItRead",
+                     test_a_signal_emit_preview_reports_what_it_actually_read);
         registerTest("Phase7Signals.ConfirmationAndPublicGate",
                      test_phase7_signal_emit_confirmation_replay_and_public_gate_do_not_dispatch);
     }

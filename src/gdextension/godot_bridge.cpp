@@ -8313,14 +8313,51 @@ json GodotBridge::execute(const std::string& method, const json& params,
         std::vector<const VariantValue*> call_arguments{&signal_name_value.value()};
         call_arguments.reserve(native_arguments.size() + 1);
         for (auto& argument : native_arguments) call_arguments.push_back(&argument);
+        // How many listeners this emit can reach, read before the emit rather
+        // than after it, because a one-shot connection disconnects itself on
+        // delivery. It is also what tells a refusal apart from a no-op below.
+        int64_t connection_count = 0;
+        if (requireMethodBind("Object", "get_signal_connection_list", 3147814860LL).isOk()) {
+            auto connections = callObject(target.value(), "Object", "get_signal_connection_list",
+                                          3147814860LL, {&signal_name_value.value()});
+            if (connections.isOk()) {
+                auto size_value = callVariant(connections.value(), "size");
+                if (size_value.isOk()) {
+                    auto size = scalarFromVariant<int64_t>(size_value.value(),
+                                                           GDEXTENSION_VARIANT_TYPE_INT);
+                    if (size.isOk()) connection_count = size.value();
+                }
+            }
+        }
         auto emitted = callObject(target.value(), "Object", "emit_signal", 4047867050LL,
                                   call_arguments);
         if (emitted.isErr()) return errorJson(500, emitted.error().message);
         auto emit_code = scalarFromVariant<int64_t>(
             emitted.value(), GDEXTENSION_VARIANT_TYPE_INT);
         if (emit_code.isErr()) return errorJson(500, emit_code.error().message);
+        // ERR_UNAVAILABLE with nothing connected is not a failure. Godot keeps
+        // a signal in Object::signal_map only once it has a connection, so
+        // emitting a built-in signal nobody is listening to returns
+        // ERR_UNAVAILABLE and the bridge reported "The engine refused the
+        // emit." That is the state a caller is most likely to be in -- driving
+        // a signal by hand during bring-up, before the connection exists -- and
+        // in GDScript the same call is an unremarkable no-op (#624). The signal
+        // is known to be declared by this point: the arity check above read it
+        // out of the object's own signal list.
+        constexpr int64_t kErrUnavailable = 2;
+        if (emit_code.value() == kErrUnavailable && connection_count == 0) {
+            return liveResult({{"emitted", false},
+                               {"connection_count", 0},
+                               {"argument_count", emit_arguments.size()},
+                               {"note", "Nothing is connected to this signal, so the emit reached "
+                                        "no listeners. Connect something with signal_connect to "
+                                        "observe it."},
+                               {"outcome", "completed"},
+                               {"rollback", "not_available"}});
+        }
         if (emit_code.value() != 0) return bridgeError(500, "signal_emit_failed");
         return liveResult({{"emitted", true},
+                           {"connection_count", connection_count},
                            {"argument_count", emit_arguments.size()},
                            {"outcome", "completed"},
                            {"rollback", "not_available"}});
