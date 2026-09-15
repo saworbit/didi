@@ -195,9 +195,12 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   beside `pid` so the two are not confused when they differ. A refusal now
   names the launched process ID, the workspace and every process that published
   a session for it. `stop()` ends the job rather than only the launched
-  process, so a launcher's editor goes with it. CI runs the managed recovery
-  suites against the console build, which is the one the issue was about and
-  the one that step had been filtering out.
+  process, and waits for the whole tree rather than for that one process: it
+  used to return while a launcher's editor was still exiting, so
+  `runtime_restore_checkpoint` renamed a project directory another process
+  still had open. CI runs the managed recovery suites against the console
+  build, which is the one the issue was about and the one that step had been
+  filtering out.
 - **`--log-level DEBUG` answers a client that does not read stderr.** The
   startup log at `DEBUG` is one line per registered tool, which is past a pipe
   buffer, and it was written inline on the thread that would have answered
