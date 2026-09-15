@@ -370,7 +370,7 @@ CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::I
     // Reading the selected session takes no route and changes no selection,
     // which is what an offline-only tool is allowed to do.
     const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
-    const auto attached = sessions ? sessions->activeSession()
+    const auto attached = sessions ? sessions->observableSession()
                                    : std::optional<runtime::SessionDescriptor>{};
     const auto configured = offline::resolveGodotExecutableDetailed();
     versions::annotateConfiguredEngine(result, configured.configured, configured.configured_rejected);

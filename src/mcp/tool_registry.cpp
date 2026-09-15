@@ -748,7 +748,15 @@ static json outputSchemaForTool(const std::string& name) {
                               {"engine_version", nullable_string},
                               {"engine_executable", nullable_string},
                               {"attached_engine_version", nullable_string},
-                              {"matches_attached_engine", {{"type", {"boolean", "null"}}}}},
+                              {"matches_attached_engine", {{"type", {"boolean", "null"}}}},
+                              // Present when an engine was asked, so a caller
+                              // can see the subprocess ran rather than infer
+                              // it from a version string. A check that never
+                              // produced a verdict is now an error instead of
+                              // a clean answer, so these never describe one
+                              // that did not happen (#677).
+                              {"engine_exit_code", {{"type", {"integer", "null"}}}},
+                              {"engine_duration_seconds", {{"type", "number"}}}},
                              {"execution_mode", "has_errors"});
     }
     if (name == "project_search_text" || name == "project_search_symbols") {
@@ -3783,12 +3791,17 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"extra_args", {{"type", "array"}, {"items", {{"type", "string"}}}}}
             }}
         };
-        t.handler = [this](const json& args) { return handleExecuteTestSession(args, m_ipcClient); };
+        // The source client, not the lease dispatcher: this tool spawns its own
+        // Godot and takes no live route, and the wrapper is not a session
+        // client, so reading the session through it answered "no session" next
+        // to a live editor (#687). script_check_syntax and shader_check_compile
+        // already read the source client for the same reason.
+        t.handler = [this](const json& args) { return handleExecuteTestSession(args, m_sourceIpcClient); };
         registerTool(t);
 
         // Alias
         t.name = "execute_test_session";
-        t.handler = [this](const json& args) { return handleExecuteTestSession(args, m_ipcClient); };
+        t.handler = [this](const json& args) { return handleExecuteTestSession(args, m_sourceIpcClient); };
         registerTool(t);
     }
     {

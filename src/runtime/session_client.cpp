@@ -1439,6 +1439,29 @@ public:
         return std::nullopt;
     }
 
+    std::optional<SessionDescriptor> observableSession() const override {
+        if (auto selected = activeSession(); selected.has_value()) return selected;
+        // The rule auto-selection uses, without the attach: one live session on
+        // this project, or the one editor among several. Anything ambiguous
+        // stays unanswered, because naming the wrong engine is worse than
+        // naming none.
+        json diagnostics = json::array();
+        std::vector<SessionDescriptor> matching;
+        for (const auto& session : discoverSessions(diagnostics, m_descriptorOpenedHook)) {
+            if (session.alive && session.descriptor.project_path == m_projectRoot) {
+                matching.push_back(session.descriptor);
+            }
+        }
+        if (matching.size() == 1) return matching.front();
+        const auto editors = std::count_if(
+            matching.begin(), matching.end(),
+            [](const SessionDescriptor& session) { return session.kind == "editor"; });
+        if (editors != 1) return std::nullopt;
+        return *std::find_if(
+            matching.begin(), matching.end(),
+            [](const SessionDescriptor& session) { return session.kind == "editor"; });
+    }
+
     std::optional<RuntimeRouteLease> acquireRouteLease() override {
         (void)isConnected();
         std::string selected;
