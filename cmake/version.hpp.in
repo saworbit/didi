@@ -15,6 +15,11 @@ inline const char* kProjectVersion = "@PROJECT_VERSION@";
 // while both say 1.6.0. The version alone cannot tell them apart. This can:
 // it carries the commit and the moment the build tree was configured, so two
 // binaries match only when they were configured together.
-inline const char* kBuildId = "@DIDI_BUILD_ID@";
+// Declared here and defined in the generated build_id.cpp. The string changes
+// on every configure, and this header sits behind mcp_protocol.hpp, which 28
+// files include, so holding the value here meant a reconfigure with no source
+// change recompiled 57 of 149 targets (#633). One translation unit now
+// recompiles instead, and this header changes only when the version does.
+extern const char* const kBuildId;
 
 }  // namespace didi

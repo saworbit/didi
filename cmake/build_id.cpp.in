@@ -1,0 +1,14 @@
+// Generated from CMakeLists.txt. The copy in the build tree is an output: do
+// not edit it.
+//
+// This file exists so that the one string that changes on every configure does
+// not sit inside a widely included header. See the comment beside kBuildId in
+// version.hpp.in.
+
+#include "didi/common/version.hpp"
+
+namespace didi {
+
+const char* const kBuildId = "@DIDI_BUILD_ID@";
+
+}  // namespace didi

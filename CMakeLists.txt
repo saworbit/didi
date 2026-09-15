@@ -42,6 +42,18 @@ configure_file(
     @ONLY
 )
 
+# The build id is the half that changes on every configure, and version.hpp sits
+# behind mcp_protocol.hpp, which 28 files include. Keeping the volatile string in
+# its own translation unit means a reconfigure with no source change recompiles
+# one file rather than 57 targets (#633). configure_file rewrites an output only
+# when its content differs, so version.hpp itself is now untouched unless the
+# version is.
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/build_id.cpp.in"
+    "${CMAKE_BINARY_DIR}/generated/src/didi_build_id.cpp"
+    @ONLY
+)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -210,7 +222,7 @@ set(CORE_SOURCES
 
 find_package(Threads REQUIRED)
 
-add_library(didi_core STATIC ${CORE_SOURCES})
+add_library(didi_core STATIC ${CORE_SOURCES} "${CMAKE_BINARY_DIR}/generated/src/didi_build_id.cpp")
 set_target_properties(didi_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(didi_core PUBLIC ${DIDI_INCLUDE_DIRECTORIES})
 target_link_libraries(didi_core PUBLIC Threads::Threads)

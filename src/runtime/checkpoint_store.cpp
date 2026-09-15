@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <map>
 #include <set>
+#include <atomic>
 #include <sstream>
 #include <stdexcept>
 #ifdef _WIN32
@@ -17,7 +18,7 @@ namespace didi::runtime {
 namespace {
 namespace fs = std::filesystem;
 constexpr uint64_t maxBytes = 256ull * 1024 * 1024;
-constexpr size_t maxFiles = 10000;
+std::atomic<size_t> g_max_files{kDefaultCheckpointMaxFiles};
 const json exclusions = {".git",
                          ".godot",
                          ".didi",
@@ -214,7 +215,8 @@ Tree scan(const fs::path& root, bool filter = true) {
         if (it->is_directory())
             tree.dirs.push_back(rel);
         else {
-            require(tree.files.size() < maxFiles, "Checkpoint file count limit exceeded");
+            require(tree.files.size() < checkpointMaxFiles(),
+                    "Checkpoint file count limit exceeded");
             auto size = it->file_size();
             require(size <= maxBytes - tree.bytes, "Checkpoint byte limit exceeded");
             tree.bytes += size;
@@ -272,7 +274,7 @@ json manifest(const fs::path& folder, const std::string& id) {
                 j.at("created_at_ms").is_number_unsigned() && j.at("entries").is_array(),
             "Invalid checkpoint manifest");
     require(j.at("files").is_number_unsigned() && j.at("bytes").is_number_unsigned() &&
-                j.at("files").get<uint64_t>() <= maxFiles &&
+                j.at("files").get<uint64_t>() <= checkpointMaxFiles() &&
                 j.at("bytes").get<uint64_t>() <= maxBytes &&
                 j.at("files") == j.at("entries").size(),
             "Invalid checkpoint bounds");
@@ -318,6 +320,12 @@ json summary(json manifest) {
     return manifest;
 }
 } // namespace
+size_t checkpointMaxFiles() { return g_max_files.load(std::memory_order_relaxed); }
+
+size_t setCheckpointMaxFilesForTesting(size_t files) {
+    return g_max_files.exchange(files, std::memory_order_relaxed);
+}
+
 CheckpointStore::CheckpointStore(fs::path project, fs::path store)
     : m_project(std::move(project)), m_store(std::move(store)) {}
 Result<void> CheckpointStore::initialize(const fs::path& source, const fs::path& container) {
