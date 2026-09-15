@@ -77,6 +77,58 @@ Result<std::filesystem::path> resolveSessionDescriptorDirectory() {
 #endif
 }
 
+SessionDirectorySearch describeSessionDescriptorSearch() {
+    SessionDirectorySearch search;
+    const auto resolved = resolveSessionDescriptorDirectory();
+    if (resolved.isOk()) search.scanned = paths::nativePathToUtf8(resolved.value());
+
+    // The candidate list the addon walks, so the two halves of the product
+    // answer the same question. Read-only: nothing here is adopted.
+    std::vector<std::filesystem::path> candidates;
+    const auto add = [&candidates](const std::filesystem::path& base, bool with_suffix) {
+        if (base.empty()) return;
+#if defined(_WIN32)
+        (void)with_suffix;
+        candidates.push_back(base / "didi-sessions");
+#else
+        candidates.push_back(with_suffix
+                                 ? base / ("didi-sessions-" + std::to_string(geteuid()))
+                                 : base / "didi-sessions");
+        if (with_suffix) candidates.push_back(base / "didi-sessions");
+#endif
+    };
+    for (const char* name : {"XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP", "TEMPDIR"}) {
+        if (const char* value = std::getenv(name); value && *value) add(value, true);
+    }
+#if !defined(_WIN32)
+    add("/tmp", true);
+#endif
+
+    std::error_code error;
+    std::set<std::string> seen;
+    if (!search.scanned.empty()) seen.insert(search.scanned);
+    for (const auto& candidate : candidates) {
+        const auto normalized = absoluteLexicalPath(candidate);
+        const auto shown = paths::nativePathToUtf8(normalized);
+        if (!seen.insert(shown).second) continue;
+        if (!std::filesystem::is_directory(normalized, error) || error) {
+            error.clear();
+            continue;
+        }
+        bool holds_descriptor = false;
+        for (std::filesystem::directory_iterator it(normalized, error), end;
+             !error && it != end; it.increment(error)) {
+            if (it->path().extension() == ".json") {
+                holds_descriptor = true;
+                break;
+            }
+        }
+        error.clear();
+        if (holds_descriptor) search.elsewhere.push_back(shown);
+    }
+    return search;
+}
+
 Result<ProcessIdentity> queryProcessIdentity(uint64_t pid) {
     if (pid == 0) return Error::invalidArgument("Process identity requires a non-zero PID");
 #if defined(_WIN32)
@@ -1264,7 +1316,24 @@ public:
             item["stale"] = !session.alive;
             listed.push_back(std::move(item));
         }
-        return json{{"sessions", listed}, {"diagnostics", diagnostics}};
+        // Which directory was read, always. "No session" and "the editor
+        // published somewhere else" used to be byte-identical answers, with a
+        // reason line naming one cause and telling the reader to do the thing
+        // they had already done (#649).
+        //
+        // Its own field rather than an entry in diagnostics, which carries
+        // faults: a directory that is simply empty because Godot is not running
+        // is not one, and a test pins that array to empty for a clean scan.
+        // descriptor_directories_with_sessions is the divergence itself, and
+        // appears only when there is one.
+        const auto search = describeSessionDescriptorSearch();
+        json answer{{"sessions", listed}, {"diagnostics", diagnostics},
+                    {"descriptor_directory",
+                     search.scanned.empty() ? json(nullptr) : json(search.scanned)}};
+        if (!search.elsewhere.empty()) {
+            answer["descriptor_directories_with_sessions"] = search.elsewhere;
+        }
+        return answer;
     }
 
     // Selects a session for the process, which is what the legacy lifecycle

@@ -284,6 +284,8 @@ A file whose bytes are not valid UTF-8 is reported as `has_errors: true` with on
 A file that exists and this process cannot open is refused with `403`, `code: "forbidden"` and `reason: "unreadable"`, naming the `res://` path. That is `project_search_text`'s word for the same state, and it is deliberately not a diagnostic: reported as a syntax error at line 1 of a file whose bytes were never read, it sent readers to edit a line that is fine. An absent path is `404` on this tool and `script_get_symbols`, so the two states no longer read as each other's opposite. On Unix the state is a mode with no read bit; on Windows it is a file another program is holding open without sharing.
  The engine does refuse such a file — "contains invalid unicode (UTF-8), so it was not loaded" — but its refusal points at engine source rather than at a `res://` line, so there was no location to hang a diagnostic on and the check came back clean about a script the engine will not load. Engine load failures that name no `res://` line are now kept as diagnostics rather than dropped.
 
+A `GODOT_BIN` that is set and cannot be used -- a directory, which is what a macOS `Godot.app` bundle is, or a path with nothing behind it -- is reported rather than dropped: `engine_executable_configured` and `engine_executable_configured_rejected` say what was set and why it was not used, beside the `engine_executable` that ran instead, and the server logs a WARN line. Neither field appears when the variable is unset or was used.
+
 Both this tool and `shader_check_compile` spawn a Godot to answer, and both say
 which one. `engine_version` is the engine that ran, read from the banner it
 printed, in the same spelling `script_reflect_class` uses for `api_version`.
@@ -1150,6 +1152,8 @@ Published private descriptors use this exact schema:
 
 On POSIX the endpoint is the OS temporary directory plus `godot_didi_<project-key>_<pid>_<session-prefix>.sock`. Session ID and token are cryptographically random lowercase hex values of 32 and 64 characters. The stable project key isolates endpoint namespaces while PID/session identity preserves concurrent instances. PID plus process-start identity prevents PID reuse from reviving a stale descriptor. Malformed, symlink/reparse, oversized (>64 KiB), escaped, or unprovably stale descriptors are diagnosed rather than deleted. Orderly shutdown and proven-stale cleanup atomically retire an exact identity-matched descriptor to an unpredictable no-replace non-`.json` path and re-verify it.
 
+
+`descriptor_directory` names the one directory this server reads for session descriptors, whether or not anything was in it, so "Godot is not running" and "the editor published somewhere this server is not reading" are different answers rather than the same empty one. `descriptor_directories_with_sessions` appears only when another candidate directory on this machine holds descriptors, which says where to point `DIDI_SESSION_DIR`. `diagnostics` stays for faults; an empty directory is not one.
 ### `runtime_attach_session` — Local session management
 
 Requires `session_id`. Didi connects to the exact validated process-unique endpoint and performs a token-authenticated protocol `1.3` handshake with a 3,000 ms finite deadline. The token is inserted only into the internal envelope and stripped before bridge dispatch, responses, logs, and diagnostics. Route replacement is transactional: connection, authentication, ID, or protocol failure leaves the previous session selected.

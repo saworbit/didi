@@ -548,6 +548,34 @@ void test_session_host_retained_file_survives_replacement_after_verification() {
     std::filesystem::remove_all(directory);
 }
 
+void test_session_listing_names_the_directory_it_read() {
+    // "Godot is not running" and "the editor published somewhere this server is
+    // not reading" came back byte-identical, and the reason line named one
+    // cause and told the reader to do the thing they had already done (#649).
+    // Every input to that decision was in the answer except the one that was
+    // wrong.
+    const auto directory = makeSessionDirectory();
+    auto client = didi::runtime::createRuntimeSessionClient(
+        std::filesystem::current_path().string(), [] { return std::make_unique<FakeIpcClient>(); });
+    const auto listed = client->listSessions(std::nullopt);
+    ASSERT_TRUE(listed.isOk());
+    ASSERT_TRUE(listed.value()["sessions"].empty());
+    // The one directory this server reads, named whether or not anything was in
+    // it, so two empty answers about different directories are different
+    // answers.
+    ASSERT_TRUE(listed.value().contains("descriptor_directory"));
+    ASSERT_TRUE(listed.value()["descriptor_directory"].is_string());
+    const auto named = listed.value()["descriptor_directory"].get<std::string>();
+    ASSERT_TRUE(named.find("didi") != std::string::npos);
+    // An empty directory is not a fault, so diagnostics stays for faults.
+    ASSERT_TRUE(listed.value()["diagnostics"].empty());
+    // And nothing claims a divergence when there is none.
+    ASSERT_TRUE(!listed.value().contains("descriptor_directories_with_sessions"));
+
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
 void test_runtime_session_discovery_ignores_retained_retirement_files() {
     // Would fail if retained non-.json retirement files appeared as discoverable sessions.
     const auto directory = makeSessionDirectory();
@@ -1198,6 +1226,8 @@ struct RegisterRuntimeSessionTests {
                      test_session_host_retirement_exhaustion_never_overwrites_collisions);
         registerTest("RuntimeSessions.HostRetainedFileSurvivesReplacementAfterVerification",
                      test_session_host_retained_file_survives_replacement_after_verification);
+        registerTest("RuntimeSessions.ListingNamesTheDirectoryItRead",
+                     test_session_listing_names_the_directory_it_read);
         registerTest("RuntimeSessions.DiscoveryIgnoresRetainedRetirementFiles",
                      test_runtime_session_discovery_ignores_retained_retirement_files);
         registerTest("RuntimeSessions.ReaperRemovesProvenGoneTombstone",

@@ -6,6 +6,7 @@
 #include "didi/common/engine_version.hpp"
 #include "didi/offline/gdscript_diagnostics.hpp"
 #include "didi/offline/project_search.hpp"
+#include "didi/offline/test_runner.hpp"
 #include "didi/offline/project_settings_file.hpp"
 #include "didi/offline/resource_indexer.hpp"
 #include "didi/runtime/session_client.hpp"
@@ -138,6 +139,8 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
     const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
     const auto attached = sessions ? sessions->activeSession()
                                    : std::optional<runtime::SessionDescriptor>{};
+    const auto configured = offline::resolveGodotExecutableDetailed();
+    versions::annotateConfiguredEngine(result, configured.configured, configured.configured_rejected);
     versions::annotateCheckEngine(result, engine.version, engine.executable,
                                   attached.has_value() ? attached->engine_version
                                                        : std::string());

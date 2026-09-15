@@ -49,6 +49,20 @@ inline void annotateApiVersion(json& target,
 // shape #466 gave script_reflect_class: name the version, and say whether it is
 // the engine in front of the caller. An unknown version is not a match, and
 // saying nothing would read as one.
+// What GODOT_BIN was set to and why it was not used, beside the executable that
+// ran instead.
+//
+// A GODOT_BIN that cannot be used was discarded in silence and engine_executable
+// named the fallback, so the one field that could have shown a user their
+// variable was ignored named something they never set (#656). Absent when the
+// variable is unset or was used, so a normal answer is unchanged.
+inline void annotateConfiguredEngine(json& target, const std::string& configured,
+                                     const std::string& rejected_because) {
+    if (configured.empty() || rejected_because.empty()) return;
+    target["engine_executable_configured"] = configured;
+    target["engine_executable_configured_rejected"] = rejected_because;
+}
+
 inline void annotateCheckEngine(json& target,
                                 const std::string& engine_version,
                                 const std::string& engine_executable,

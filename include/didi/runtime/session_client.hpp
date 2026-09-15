@@ -172,6 +172,26 @@ bool annotateRequestedStop(Error& error, const std::optional<SessionDescriptor>&
 void annotateRouteObstruction(Error& error);
 Result<std::filesystem::path> resolveSessionDescriptorDirectory();
 
+// Where the descriptors were looked for, and where else on this machine any
+// were found.
+//
+// This server reads exactly one directory. When the editor published somewhere
+// else there is nothing to find, and "nothing to find" was reported in the same
+// words as "Godot is not running": the reason line named one cause and told the
+// reader to do the thing they had already done (#649). The two states were
+// byte-identical, so a user could not tell them apart at all.
+//
+// The addon already treats this as a list rather than a single answer, with the
+// comment that mirroring it as candidates is what keeps a divergence from
+// becoming a blank panel. elsewhere does not change which directory is
+// authoritative; it says where to point DIDI_SESSION_DIR.
+struct SessionDirectorySearch {
+    std::string scanned;                     // the directory this server reads
+    std::vector<std::string> elsewhere;      // other candidates holding descriptors
+};
+
+SessionDirectorySearch describeSessionDescriptorSearch();
+
 using DescriptorOpenedHook = std::function<void(const std::filesystem::path&)>;
 
 struct SessionDescriptor {

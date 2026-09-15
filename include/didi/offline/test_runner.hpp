@@ -9,6 +9,26 @@
 namespace didi {
 namespace offline {
 
+// What GODOT_BIN and GODOT_PATH resolved to, and what was discarded on the way.
+//
+// A GODOT_BIN that is set and cannot be used was dropped in silence, resolution
+// fell through to the known locations, and script_check_syntax reported that
+// fallthrough as engine_executable -- so the one field that could have shown a
+// user their variable was ignored named something they never set (#656).
+//
+// On macOS the thing called Godot is /Applications/Godot.app, a directory, and
+// the executable is three levels inside it, so the obvious value to set is
+// exactly the one that gets discarded. ADMIN_GUIDE tells people to set this
+// variable when "installations use another name or layout", which is precisely
+// the population that will set it wrong.
+struct GodotExecutableResolution {
+    std::string executable;             // what will actually be run
+    std::string configured;             // what GODOT_BIN held, empty when unset
+    std::string configured_rejected;    // why it was not used, empty when it was
+};
+
+GodotExecutableResolution resolveGodotExecutableDetailed();
+
 std::string resolveGodotExecutable();
 
 // The engine that answered, read out of what it printed.

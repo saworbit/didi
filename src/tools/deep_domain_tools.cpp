@@ -372,9 +372,10 @@ CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::I
     const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
     const auto attached = sessions ? sessions->activeSession()
                                    : std::optional<runtime::SessionDescriptor>{};
+    const auto configured = offline::resolveGodotExecutableDetailed();
+    versions::annotateConfiguredEngine(result, configured.configured, configured.configured_rejected);
     versions::annotateCheckEngine(
-        result, offline::engineVersionFromOutput(run.value().output),
-        offline::resolveGodotExecutable(),
+        result, offline::engineVersionFromOutput(run.value().output), configured.executable,
         attached.has_value() ? attached->engine_version : std::string());
     return CallToolResult::successJson(result);
 }
