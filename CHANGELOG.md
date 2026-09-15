@@ -66,6 +66,21 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A script this process may not read is not reported as bad code.**
+  `script_check_syntax` answered `isError: false`, `has_errors: true` and one
+  diagnostic at line 1 column 1 of a file whose bytes were never read, under
+  `rule: "file_not_found"` about a file that is found, so a reader acting on it
+  went and edited a line that is fine. `script_get_symbols` answered `400
+  invalid_arguments` about arguments that were fine. Both were the inverse of
+  the absent case, which answers `404`, so the state a `chmod` fixes was the one
+  that read like a code problem (#653). Both now refuse with `403`,
+  `code: "forbidden"` and `reason: "unreadable"` -- `project_search_text`'s
+  word for the same state -- naming the `res://` path rather than the absolute
+  host path. The fabricated diagnostic no longer carries a line and column it
+  did not derive from the file. The state is a mode with no read bit on Unix and
+  a file another program is holding open on Windows, and the new test creates
+  whichever of those the host supports.
+
 - **A file whose name JSON cannot carry is named, not blamed on the caller.**
   A POSIX filename is a byte string, so a `.gd` copied off an old drive or
   unpacked from a Latin-1 zip is a legal file with a name that is not UTF-8.

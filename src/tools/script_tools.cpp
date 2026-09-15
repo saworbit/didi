@@ -41,6 +41,39 @@ std::optional<std::string> scriptEncodingRefusal(const std::filesystem::path& pa
         "again.");
 }
 
+// The file is there and this process may not read it: chmod 000 on Unix, an ACL
+// on Windows, or a file another process holds without sharing. It is what a
+// file copied out of another user's home, restored from an archive, or dropped
+// by a container build looks like.
+//
+// script_check_syntax used to report it as a syntax error at line 1 column 1 of
+// a file whose bytes were never read, with isError: false, has_errors: true and
+// rule "file_not_found" about a file that is found; an assistant acting on that
+// goes and edits line 1. script_get_symbols reported it as 400
+// invalid_arguments, about arguments that were fine. Both were the inverse of
+// the absent case, which answers 404, so the state a chmod fixes was the one
+// that read like a code problem (#653).
+//
+// `reason` carries project_search_text's word for the same state, which is the
+// vocabulary two sibling readers of the same tree should not each invent, and
+// the path is the res:// spelling rather than the absolute host path.
+std::optional<CallToolResult> unreadableScriptRefusal(const std::filesystem::path& resolved,
+                                                      const std::string& file_path) {
+    std::ifstream probe(resolved, std::ios::binary);
+    if (probe.is_open()) return std::nullopt;
+    return CallToolResult::error(
+        json{{"error",
+              {{"code", 403},
+               {"message", "This file is there and cannot be read: " + file_path +
+                               ". Check its permissions, or whether another process is holding "
+                               "it open."},
+               {"data", {{"code", "forbidden"},
+                         {"reason", "unreadable"},
+                         {"file_path", file_path},
+                         {"retryable", false}}}}}}
+            .dump());
+}
+
 CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     std::string file_path = args.value("file_path", "");
     std::string source_text = args.value("source_text", "");
@@ -59,6 +92,9 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
             return CallToolResult::fromError(resolved.error(), "Invalid script file path: ");
         }
         analysis_path = paths::projectPathToUtf8(resolved.value());
+        // Before the encoding question, because a file this process cannot open
+        // answers neither question and used to answer both wrongly (#653).
+        if (auto refused = unreadableScriptRefusal(resolved.value(), file_path)) return *refused;
         // Asked before Godot is spawned. The engine does refuse the file, but
         // its refusal has no res:// frame to hang a diagnostic on, so the
         // parser dropped it and the answer came back clean about a script the
@@ -260,6 +296,9 @@ CallToolResult handleScriptGetSymbols(const json& args, std::shared_ptr<ipc::IIp
         // the same answer, down to truncated: false confirming nothing was
         // dropped. An agent asking where a method lives got "there is no such
         // method" and acted on it (#614).
+        if (auto unreadable = unreadableScriptRefusal(resolved.value(), file_path)) {
+            return *unreadable;
+        }
         if (auto refused = scriptEncodingRefusal(resolved.value())) {
             return CallToolResult::error(json{{"error", {
                 {"code", 415},
