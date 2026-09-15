@@ -4,6 +4,7 @@ import io
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -498,13 +499,18 @@ class BuildCommandTests(unittest.TestCase):
 
     def test_refuses_an_empty_prompt_at_launch(self):
         with self.assertRaises(ValueError):
-            RUNNER.run_agent(["python"], "   ", REPOSITORY_ROOT, 5)
+            RUNNER.run_agent([sys.executable], "   ", REPOSITORY_ROOT, 5)
 
 
 class ResolveExecutableTests(unittest.TestCase):
     def test_resolves_the_client_to_a_real_path(self):
         # npm installs it as claude.cmd on Windows; a bare name never launches.
-        resolved = RUNNER.resolve_executable("python")
+        #
+        # The bare name is the interpreter running this test rather than the
+        # literal "python", which is not a command on macOS or in a plain
+        # ubuntu:24.04 image and so failed there for a reason that had nothing
+        # to do with what this test is about (#635).
+        resolved = RUNNER.resolve_executable(Path(sys.executable).name)
         self.assertTrue(Path(resolved).exists(), resolved)
 
     def test_says_so_plainly_when_the_client_is_absent(self):
@@ -559,6 +565,32 @@ FIX_PATCH = "\n".join([
     "+    ASSERT_TRUE(accepts(1.0));",
     "",
 ])
+
+
+class InterpreterTests(unittest.TestCase):
+    """The cycle must not spell the interpreter as a bare `python`.
+
+    There is no command called `python` on macOS -- the Xcode Command Line Tools
+    provide `python3` and Apple removed the Python 2 shim in 12.3 -- nor in a
+    plain `ubuntu:24.04` image without `python-is-python3`. Both GitHub runners
+    provide a shim, so CI cannot see this; the only machines it breaks are
+    contributors' (#635).
+    """
+
+    def test_the_cycle_spells_the_interpreter_as_the_one_it_is_running(self):
+        source = CYCLE_PATH.read_text(encoding="utf-8")
+        for spelling in ('["python"', '"python",', "['python'", "'python',"):
+            self.assertTrue(spelling not in source,
+                            f'cycle.py still spells the interpreter as {spelling}')
+        self.assertIn("sys.executable", source)
+
+    def test_every_gate_command_names_an_executable_that_exists(self):
+        # The two Python gates in particular, which is what failed outright.
+        for command in (
+            [sys.executable, "-m", "unittest", "--help"],
+            [sys.executable, "-c", "pass"],
+        ):
+            self.assertTrue(Path(command[0]).exists(), command[0])
 
 
 class StagedPatchMismatchTests(unittest.TestCase):

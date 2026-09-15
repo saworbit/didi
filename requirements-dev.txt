@@ -1,1 +1,10 @@
+# Needs Python 3.10 or newer. jsonschema 4.26.0 declares
+# requires-python >= 3.10, so on an older interpreter pip answers with a
+# resolution error listing every jsonschema that ever existed and never names a
+# Python version (#634). The C++ build has a lower floor of 3.9, which is what a
+# stock macOS ships; see CMakeLists.txt and the developer guide.
+#
+# The pin is exact on purpose. CI reads the version from this file and checks it
+# against what it installed, so a Dependabot bump is one reviewable change
+# rather than two literals that can drift.
 jsonschema==4.26.0
