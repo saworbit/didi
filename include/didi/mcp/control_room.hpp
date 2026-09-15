@@ -164,6 +164,16 @@ struct ControlRoomInputs {
     bool unsaved_scenes_readable{false};
     std::vector<std::string> unsaved_scenes;
 
+    // Whether the attached editor has a rendering device, and which display
+    // driver it came up on. A headless editor is the only one a build machine,
+    // a container or an ssh session can run, and every tool whose answer is a
+    // picture fails on it for as long as it lives. This page reported a
+    // connected editor and three green lights beside that (#676). Empty when
+    // nothing is attached, the route is a game, or the editor is older than
+    // the field.
+    std::string display_server;
+    bool renders{true};
+
     std::vector<ControlRoomSession> sessions;
     std::optional<std::string> selected_session_id;
 

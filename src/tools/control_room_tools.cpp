@@ -135,6 +135,11 @@ CallToolResult handleControlRoom(const json& args, const std::shared_ptr<ipc::II
             if (state.isOk() && state.value().is_object()) {
                 const auto& answer = state.value();
                 inputs.unsaved_scenes_asked = true;
+                inputs.display_server = answer.value("display_server", std::string());
+                // Absent means an extension older than the field, which is the
+                // one state where assuming it can draw is the safe guess: every
+                // engine before this could, or the caller would have noticed.
+                inputs.renders = answer.value("renders", true);
                 inputs.unsaved_scenes_readable = answer.value("unsaved_scenes_readable", false);
                 const auto listed = answer.find("unsaved_scenes");
                 if (inputs.unsaved_scenes_readable && listed != answer.end() && listed->is_array()) {
