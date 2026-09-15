@@ -163,12 +163,42 @@ struct Board {
     // between them (#680). Bounded, because a board that remembers every expiry
     // forever is a board that fills up with the past.
     json expired = json::object();
+    // What a clear removed, the same shape and for the same reason as the
+    // expiries above: the one destructive call on the board was the only one a
+    // later reader could learn nothing about (#681).
+    json cleared = json::object();
+    // Board-level events a path tombstone cannot hold, which today is one: a
+    // clear of the whole board, where there is no surviving path to attach
+    // anything to.
+    json audit = json::array();
+    // Bumped by every mutation. A patch spans paths, so "has this changed
+    // since I read it" is a question about the board rather than about a key
+    // (#682).
+    int64_t revision = 0;
 };
 
 // How many lapsed keys a board remembers. Enough that an agent coming back to
 // its own claim finds out what happened to it, few enough that the record
 // cannot crowd out the board.
 constexpr size_t kBlackboardMaxExpiredRecords = 256;
+// The same bound, for the same reason, on what a clear leaves behind.
+constexpr size_t kBlackboardMaxClearedRecords = 256;
+// Board-level events. One line per whole-board clear is not a stream, so this
+// is small on purpose.
+constexpr size_t kBlackboardMaxAuditRecords = 64;
+
+// Keeps the most recent `limit` entries of a path-keyed tombstone map.
+void trimTombstones(json& records, const char* at_field, size_t limit) {
+    if (records.size() <= limit) return;
+    std::vector<std::pair<int64_t, std::string>> by_age;
+    by_age.reserve(records.size());
+    for (const auto& entry : records.items()) {
+        by_age.emplace_back(entry.value().value(at_field, int64_t{0}), entry.key());
+    }
+    std::sort(by_age.begin(), by_age.end());
+    const size_t drop = records.size() - limit;
+    for (size_t index = 0; index < drop; ++index) records.erase(by_age[index].second);
+}
 
 Result<std::filesystem::path> boardDirectory() {
     std::error_code error;
@@ -212,16 +242,7 @@ bool sweepExpired(Board& board, int64_t now_ms) {
     }
     // Oldest first, so what a board remembers is the recent past rather than
     // an arbitrary slice of everything that ever lapsed.
-    if (board.expired.size() > kBlackboardMaxExpiredRecords) {
-        std::vector<std::pair<int64_t, std::string>> by_age;
-        by_age.reserve(board.expired.size());
-        for (const auto& entry : board.expired.items()) {
-            by_age.emplace_back(entry.value().value("expired_at_ms", int64_t{0}), entry.key());
-        }
-        std::sort(by_age.begin(), by_age.end());
-        const size_t drop = board.expired.size() - kBlackboardMaxExpiredRecords;
-        for (size_t index = 0; index < drop; ++index) board.expired.erase(by_age[index].second);
-    }
+    trimTombstones(board.expired, "expired_at_ms", kBlackboardMaxExpiredRecords);
     return true;
 }
 
@@ -260,6 +281,13 @@ Result<Board> loadBoard(const std::filesystem::path& file) {
     if (document.contains("expired") && document["expired"].is_object()) {
         board.expired = document["expired"];
     }
+    if (document.contains("cleared") && document["cleared"].is_object()) {
+        board.cleared = document["cleared"];
+    }
+    if (document.contains("audit") && document["audit"].is_array()) board.audit = document["audit"];
+    if (document.contains("revision") && document["revision"].is_number_integer()) {
+        board.revision = document["revision"].get<int64_t>();
+    }
     return board;
 }
 
@@ -269,7 +297,10 @@ Result<bool> saveBoard(const std::filesystem::path& file, const Board& board) {
         {"state", board.state},
         {"meta", board.meta},
         {"tasks", board.tasks},
-        {"expired", board.expired}
+        {"expired", board.expired},
+        {"cleared", board.cleared},
+        {"audit", board.audit},
+        {"revision", board.revision}
     };
     const std::string serialized = document.dump();
     if (serialized.size() > kBlackboardMaxBoardBytes) {
@@ -564,6 +595,34 @@ Result<json> blackboardWrite(const BlackboardWriteRequest& request, BlackboardCl
 
         const bool replaced = cursor->contains(parts.back());
         const json previous = replaced ? (*cursor)[parts.back()] : json();
+
+        // "Only if this has not changed since I read it." Refused with the
+        // shape the task lease already uses, because it is the same problem:
+        // a claim somebody else is holding (#682).
+        if (request.expected_updated_at_ms.has_value()) {
+            const int64_t held = board.meta.contains(path)
+                                     ? board.meta[path].value("updated_at_ms", int64_t{0})
+                                     : 0;
+            if (held != *request.expected_updated_at_ms) {
+                Error conflict(409,
+                               held == 0
+                                   ? "expected_updated_at_ms " +
+                                         std::to_string(*request.expected_updated_at_ms) +
+                                         " but '" + path + "' does not exist; nothing was written"
+                                   : "expected_updated_at_ms " +
+                                         std::to_string(*request.expected_updated_at_ms) +
+                                         " but '" + path + "' was last written at " +
+                                         std::to_string(held) + "; nothing was written");
+                conflict.data = {{"reason_code", "stale_write"},
+                                 {"path", path},
+                                 {"expected_updated_at_ms", *request.expected_updated_at_ms},
+                                 {"current_updated_at_ms", held}};
+                if (board.meta.contains(path) && board.meta[path].contains("author")) {
+                    conflict.data["last_written_by"] = board.meta[path]["author"];
+                }
+                return conflict;
+            }
+        }
         (*cursor)[parts.back()] = request.value;
 
         auto bounds = checkBoardBounds(candidate_state);
@@ -587,8 +646,13 @@ Result<json> blackboardWrite(const BlackboardWriteRequest& request, BlackboardCl
         };
         if (replaced) result["previous_value"] = previous;
 
-        if (request.dry_run) return result;
+        if (request.dry_run) {
+            result["revision"] = board.revision;
+            return result;
+        }
 
+        ++board.revision;
+        result["revision"] = board.revision;
         board.state = candidate_state;
         board.meta[path] = entry;
         // The path exists again, so the record of its last lapse is history
@@ -622,8 +686,19 @@ Result<json> blackboardRead(const BlackboardReadRequest& request, BlackboardCloc
         json result = {
             {"board", request.board},
             {"path", path},
-            {"deep", request.deep}
+            {"deep", request.deep},
+            // What a writer pins to. `revision` is the board's, for
+            // blackboard_patch; `updated_at_ms` is this path's, for
+            // blackboard_write's expected_updated_at_ms. 0 means nothing is
+            // there, which is the value that says "and it must stay that way"
+            // (#682).
+            {"revision", board.revision}
         };
+        if (!parts.empty()) {
+            result["updated_at_ms"] = board.meta.contains(path)
+                                          ? board.meta[path].value("updated_at_ms", int64_t{0})
+                                          : 0;
+        }
 
         const json* value = &board.state;
         if (!parts.empty()) {
@@ -641,11 +716,28 @@ Result<json> blackboardRead(const BlackboardReadRequest& request, BlackboardCloc
                     if (author != lapsed->end()) result["expired_author"] = *author;
                     const auto why = lapsed->find("reason");
                     if (why != lapsed->end()) result["expired_reason"] = *why;
-                } else {
-                    // Never written, cleared, or lapsed longer ago than this
-                    // board remembers. The three are not separable from here,
-                    // and claiming one of them would be worse than saying so.
-                    result["reason"] = "no_record";
+                    return result;
+                }
+                const auto removed = board.cleared.find(path);
+                if (removed != board.cleared.end()) {
+                    result["reason"] = "cleared";
+                    result["cleared_at_ms"] = removed->value("cleared_at_ms", int64_t{0});
+                    const auto by = removed->find("author");
+                    if (by != removed->end()) result["cleared_by"] = *by;
+                    const auto why = removed->find("reason");
+                    if (why != removed->end()) result["cleared_reason"] = *why;
+                    return result;
+                }
+                // Never written, cleared longer ago than this board remembers,
+                // or taken by a clear of the whole board. The last of those is
+                // the one thing still knowable, so it is offered.
+                result["reason"] = "no_record";
+                if (!board.audit.empty()) {
+                    const auto& last = board.audit.back();
+                    if (last.value("action", std::string()) == "clear" &&
+                        last.value("path", std::string()).empty()) {
+                        result["last_board_clear"] = last;
+                    }
                 }
                 return result;
             }
@@ -775,6 +867,20 @@ Result<json> blackboardPatch(const BlackboardPatchRequest& request, BlackboardCl
         Board board = loaded.value();
         sweepExpired(board, now_ms);
 
+        // "Only if the board has not changed since I read it." A patch spans
+        // paths, so its unit is the board rather than a key (#682).
+        if (request.expected_revision.has_value() &&
+            *request.expected_revision != board.revision) {
+            Error conflict(409, "expected_revision " +
+                                    std::to_string(*request.expected_revision) +
+                                    " but the board is at revision " +
+                                    std::to_string(board.revision) + "; nothing was applied");
+            conflict.data = {{"reason_code", "stale_patch"},
+                             {"expected_revision", *request.expected_revision},
+                             {"current_revision", board.revision}};
+            return conflict;
+        }
+
         // All or nothing, one operation at a time. The patch is applied to a
         // copy and the board is only replaced once every operation has
         // succeeded; applying them singly is what lets a refusal say which one
@@ -821,9 +927,12 @@ Result<json> blackboardPatch(const BlackboardPatchRequest& request, BlackboardCl
 
         if (request.dry_run) {
             result["resulting_value"] = patched;
+            result["revision"] = board.revision;
             return result;
         }
 
+        ++board.revision;
+        result["revision"] = board.revision;
         board.state = patched;
         board.meta = meta;
         auto saved = saveBoard(file, board);
@@ -900,11 +1009,20 @@ Result<json> blackboardClear(const BlackboardClearRequest& request, BlackboardCl
         const std::string path = joinPath(parts);
         size_t removed_keys = 0;
 
+        // What is recorded about this call, so a later reader can find out who
+        // removed their keys. Written whether the clear takes one subtree or
+        // the whole board; a whole-board clear has no surviving path to hang a
+        // tombstone on, which is what the audit line is for (#681).
+        json event = {{"action", "clear"}, {"at_ms", now_ms}, {"path", path}};
+        if (request.author.has_value()) event["author"] = *request.author;
+        if (request.reason.has_value()) event["reason"] = *request.reason;
+
         if (parts.empty()) {
             removed_keys = countKeys(board.state);
             if (!request.dry_run) {
                 board.state = json::object();
                 board.meta = json::object();
+                board.cleared = json::object();
             }
         } else {
             const auto pointer = pointerFor(parts);
@@ -924,17 +1042,42 @@ Result<json> blackboardClear(const BlackboardClearRequest& request, BlackboardCl
                     }
                 }
                 for (const auto& entry_path : dead) board.meta.erase(entry_path);
+                for (const auto& entry_path : dead) {
+                    json record = {{"cleared_at_ms", now_ms}};
+                    if (request.author.has_value()) record["author"] = *request.author;
+                    if (request.reason.has_value()) record["reason"] = *request.reason;
+                    board.cleared[entry_path] = record;
+                    board.expired.erase(entry_path);
+                }
+                // The path itself, which may have carried no metadata of its
+                // own and so is not in `dead`.
+                json record = {{"cleared_at_ms", now_ms}};
+                if (request.author.has_value()) record["author"] = *request.author;
+                if (request.reason.has_value()) record["reason"] = *request.reason;
+                board.cleared[path] = std::move(record);
+                board.expired.erase(path);
+                trimTombstones(board.cleared, "cleared_at_ms", kBlackboardMaxClearedRecords);
             }
         }
 
+        event["removed_keys"] = removed_keys;
         json result = {
             {"board", request.board},
             {"path", path},
             {"found", true},
             {"removed_keys", removed_keys},
-            {"dry_run", request.dry_run}
+            {"dry_run", request.dry_run},
+            {"audit", event}
         };
-        if (request.dry_run) return result;
+        if (request.dry_run) {
+            result["revision"] = board.revision;
+            return result;
+        }
+
+        board.audit.push_back(std::move(event));
+        while (board.audit.size() > kBlackboardMaxAuditRecords) board.audit.erase(0);
+        ++board.revision;
+        result["revision"] = board.revision;
 
         auto saved = saveBoard(file, board);
         if (saved.isErr()) return saved.error();
@@ -1013,6 +1156,9 @@ Result<json> blackboardTaskCreate(const BlackboardTaskCreateRequest& request,
         task["task_id"] = task_id;
         task["title"] = request.title;
         task["description"] = request.description.has_value() ? json(*request.description) : json();
+        // Who asked for it, beside who should do it. The call that brings a
+        // task into existence could say neither (#681).
+        task["author"] = request.author.has_value() ? json(*request.author) : json();
         task["assigned_to"] = request.assigned_to.has_value() ? json(*request.assigned_to) : json();
         task["dependencies"] = request.dependencies;
         task["tags"] = request.tags;

@@ -64,8 +64,36 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   tests and ships on Windows, macOS and Linux, which of those the live editor
   harness covers in CI, and that testers on macOS and Linux are wanted.
 
+### Added
+
+- **A blackboard writer can say "only if this has not changed".** The board
+  exists because more than one client is expected, and the lease was the only
+  concurrency guard on it: it covers tasks. Keys had no version and nothing a
+  second writer could pin a write to, so two agents that both read 0, both
+  incremented and both wrote 1 left the board holding 1, with neither call an
+  error and nothing in either response saying a concurrent change had happened
+  (#682). `blackboard_write` takes `expected_updated_at_ms`, which a read now
+  returns for the path it was given, and `0` means the path must not exist yet.
+  `blackboard_patch` takes `expected_revision`, the board's, because a patch
+  spans paths. A mismatch is refused `409` with `reason_code` `stale_write` or
+  `stale_patch`, naming what the board holds and who last wrote it, which is
+  the shape a refused task claim already uses. A caller that passes neither
+  keeps last-writer-wins.
+
 ### Fixed
 
+- **The blackboard records who removed a value, not only who wrote one.**
+  `blackboard_clear` is the one destructive call on the board and was the only
+  one with no identity argument at all: an agent that came back to find its
+  keys gone could read `author` on every value still there and nothing about
+  the call that took the rest (#681). It takes `author` and `reason` now, and a
+  read of a cleared path answers `reason: "cleared"` naming them; a clear of
+  the whole board, which leaves no path to attach that to, writes a line in the
+  board's audit that the next unanswerable read reports.
+  `blackboard_task_create` takes `author` for who asked for the task, which is
+  not `assigned_to`. `author` and `agent_id` stay different names because they
+  are different things -- one is provenance, the other an identity a lease is
+  checked against -- and every one of those parameters now says so.
 - **A blackboard key that expired does not read like one nobody wrote.** Once a
   `ttl_seconds` lapsed, the value and its metadata were swept and the only tool
   that can ask about the key answered as if it had never existed -- identical

@@ -35,6 +35,17 @@ struct BlackboardWriteRequest {
     std::optional<std::string> author;
     std::optional<std::string> reason;
     std::optional<int64_t> ttl_seconds;
+    // "Only if this key has not changed since I read it."
+    //
+    // The lease was the only concurrency guard on this surface and it covers
+    // tasks. Keys had no version and nothing a second writer could pin a write
+    // to, so two agents that both read 0, both incremented and both wrote 1
+    // left the board holding 1, with neither call an error and nothing in
+    // either response saying a concurrent change had happened (#682). The value
+    // is the `updated_at_ms` a read reported for this path, or 0 for "this path
+    // must not exist yet". A caller that does not pass it keeps the old
+    // behaviour.
+    std::optional<int64_t> expected_updated_at_ms;
     bool dry_run{false};
 };
 
@@ -47,6 +58,10 @@ struct BlackboardReadRequest {
 
 struct BlackboardPatchRequest {
     std::string board{"default"};
+    // "Only if the board has not changed since I read it." A patch spans paths,
+    // so its unit is the board: the `revision` a read reported. See
+    // BlackboardWriteRequest::expected_updated_at_ms (#682).
+    std::optional<int64_t> expected_revision;
     // Copy-initialized, not braced: `json x{json::array()}` picks the
     // initializer-list constructor on GCC and yields an array holding one
     // array, which is not what any of this means.
@@ -66,6 +81,15 @@ struct BlackboardListKeysRequest {
 struct BlackboardClearRequest {
     std::string board{"default"};
     std::string path;              // Empty clears the whole board.
+    // Who removed it and why.
+    //
+    // This is the one destructive call on the board and the only one that had
+    // no identity argument at all: an agent that came back to find its keys
+    // gone could read `author` on every value still there and nothing about the
+    // call that removed the rest (#681). Recorded where a later reader can find
+    // it, since the keys themselves are gone.
+    std::optional<std::string> author;
+    std::optional<std::string> reason;
     bool dry_run{false};
 };
 
@@ -90,6 +114,9 @@ struct BlackboardTaskCreateRequest {
     std::string task_id;                    // Generated when empty.
     std::string title;
     std::optional<std::string> description;
+    // Who asked for this task. `assigned_to` is who should do it, which is a
+    // different question, and this call could answer neither (#681).
+    std::optional<std::string> author;
     std::optional<std::string> assigned_to;
     std::vector<std::string> dependencies;
     std::vector<std::string> tags;
