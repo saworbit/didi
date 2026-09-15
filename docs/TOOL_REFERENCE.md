@@ -914,7 +914,9 @@ At least one of `volume_db`, `mute` or `solo` must be given. A bus named by stri
 
 Live only, on purpose. Writing the layout file would change what the project loads next time and not what anyone is listening to now, which is the opposite of what someone chasing a silent bus wants. Offline the tool refuses and points at `audio_list_buses`, which still reads the layout.
 
-Classified as a mutation, so it takes `dry_run`. It needs no confirmation token: the change is reversible and destroys nothing. Bus state is not part of the edited scene, so the editor undo stack does not carry it, `undo_redo_registered` is `false`, and the result returns `before` and `revert_with` because those values are the only way back.
+**This tool writes no file, and in an attached editor the change reaches disk anyway.** The editor's own bus-layout autosave notices the `AudioServer` change and writes `res://default_bus_layout.tres` a moment later, with no further call from anybody, so a tracked project file appears in the working tree carrying whatever value was tried last. `persisted_by_editor` says whether that will happen, `layout_path` names the file, and `limitation` says it in words. A game session gets the opposite sentence: nothing writes the change down there and it is gone when the process exits. There is also a window, a few seconds wide, in which `audio_list_buses` answers differently depending on whether an editor is attached, and then the window closes and the two agree.
+
+Classified as a mutation, so it takes `dry_run`. It needs no confirmation token: the change is reversible and destroys nothing. Bus state is not part of the edited scene, so the editor undo stack does not carry it, `undo_redo_registered` is `false`, and the result returns `before` and `revert_with` because those values are the only way back. Those two read as stronger promises of impermanence than the editor actually keeps, which is what the fields above are for.
 
 ## 8. Runtime and debugging
 

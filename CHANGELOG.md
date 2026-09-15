@@ -66,6 +66,16 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`audio_configure_bus` says where the change ends up.** It writes the
+  running engine's `AudioServer` and reports `undo_redo_registered: false`
+  beside a `revert_with` block, which is the shape of "this lives in memory".
+  In an attached editor it is not: the editor's own bus-layout autosave picks
+  the change up and writes `res://default_bus_layout.tres` a moment later with
+  no call from anybody, so a tracked project file appears in the working tree
+  carrying whatever value was tried last (#622). The result now carries
+  `persisted_by_editor`, `layout_path` and a `limitation` saying which case it
+  is; a game session gets the opposite sentence, because nothing writes it
+  down there.
 - **`script_check_syntax` and `shader_check_compile` name the engine that
   answered.** Both spawn a Godot to answer "will the engine accept this?", and
   `resolveGodotExecutable` picks newest-first from `GODOT_BIN`, `GODOT_PATH` and

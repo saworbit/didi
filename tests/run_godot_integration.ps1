@@ -2984,6 +2984,23 @@ try {
     Assert-True ($configured.before.mute -eq $false) "Master bus was already muted before the harness muted it."
     Assert-True ($configured.after.mute -eq $true) "audio_configure_bus did not report the bus as muted."
     Assert-True (@($configured.applied) -contains "volume_db" -and @($configured.applied) -contains "mute") "audio_configure_bus did not report both changes."
+    # Where the change ends up. undo_redo_registered: false beside revert_with
+    # reads as "nothing was committed", and in an attached editor that is not
+    # true: the editor's own bus-layout autosave writes the project file a
+    # moment later with no call from anybody (#622).
+    Assert-True ($configured.persisted_by_editor -eq $true) "An editor session did not say the editor will persist the bus change."
+    Assert-True ($configured.layout_path -eq "res://default_bus_layout.tres") "audio_configure_bus did not name the file the change lands in."
+    Assert-True ($configured.limitation -match "default_bus_layout.tres") "audio_configure_bus did not say where the change reaches disk."
+    # And the claim is worth what the file proves it is worth. The fixture is
+    # deleted and recopied at the start of every run, and the source fixture
+    # carries no layout file, so its presence here is the editor's own doing.
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $sourceFixtureRoot "default_bus_layout.tres"))) "The fixture now ships a bus layout, so its presence in the copy proves nothing."
+    $layoutPath = Join-Path $fixtureRoot "default_bus_layout.tres"
+    $layoutDeadline = [DateTime]::UtcNow.AddSeconds(20)
+    while (-not (Test-Path -LiteralPath $layoutPath) -and [DateTime]::UtcNow -lt $layoutDeadline) {
+        Start-Sleep -Milliseconds 500
+    }
+    Assert-True (Test-Path -LiteralPath $layoutPath) "The editor did not write $layoutPath after a bus change, so the limitation overstates what happens."
     $afterMute = @((Tool-Payload $byId[932]).buses | Where-Object { $_.index -eq 0 })
     Assert-True ($afterMute[0].mute -eq $true) "A separate read did not see the mute, so the write did not reach the engine."
     Assert-True ([math]::Abs([double]$afterMute[0].volume_db + 12.5) -lt 0.01) "A separate read did not see the volume change."
