@@ -3,9 +3,12 @@
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/json_bounds.hpp"
 #include "didi/common/logger.hpp"
+#include <optional>
 #include <set>
+#include <string>
 #include <string_view>
 #include <tuple>
+#include <map>
 
 namespace didi {
 namespace mcp {
@@ -92,30 +95,71 @@ bool validateGridCells(const json& cells) {
     return true;
 }
 
-bool hasDuplicateTuple(const json& cells, const char* key, size_t dimensions) {
-    if (!cells.is_array()) return false;
-    std::set<std::vector<int64_t>> seen;
-    for (const auto& cell : cells) {
+std::string tupleText(const std::vector<int64_t>& tuple) {
+    std::string text = "[";
+    for (size_t index = 0; index < tuple.size(); ++index) {
+        if (index) text += ", ";
+        text += std::to_string(tuple[index]);
+    }
+    return text + "]";
+}
+
+// The two rules on these tools a JSON Schema cannot state, and so the two a
+// caller is most likely to trip: uniqueness across array entries, and a
+// constraint between two fields of one entry. The schema check answers
+// everything else with a sentence naming the entry and the value, and these
+// answered with a raw identifier that named neither the offending cell, nor the
+// rule, nor what to change (#619).
+std::optional<std::string> describeDuplicateTuple(const json& cells, const char* key,
+                                                  size_t dimensions) {
+    if (!cells.is_array()) return std::nullopt;
+    std::map<std::vector<int64_t>, size_t> seen;
+    for (size_t index = 0; index < cells.size(); ++index) {
+        const auto& cell = cells[index];
         if (!cell.is_object() || !cell.contains(key) || !cell[key].is_array() ||
-            cell[key].size() != dimensions) return false;
+            cell[key].size() != dimensions) return std::nullopt;
         std::vector<int64_t> tuple;
         for (const auto& component : cell[key]) {
             const auto number = jsonInt64(component);
-            if (!number.has_value()) return false;
+            if (!number.has_value()) return std::nullopt;
             tuple.push_back(*number);
         }
-        if (!seen.insert(std::move(tuple)).second) return true;
+        const auto found = seen.find(tuple);
+        if (found != seen.end()) {
+            return "Argument 'cells' entries " + std::to_string(found->second) + " and " +
+                   std::to_string(index) + " both write " + std::string(key) + " " +
+                   tupleText(tuple) + "; each one may appear once.";
+        }
+        seen.emplace(std::move(tuple), index);
     }
-    return false;
+    return std::nullopt;
+}
+
+std::optional<std::string> describeErasedCellWithOrientation(const json& cells) {
+    if (!cells.is_array()) return std::nullopt;
+    for (size_t index = 0; index < cells.size(); ++index) {
+        const auto& cell = cells[index];
+        if (!cell.is_object() || !cell.contains("item")) continue;
+        const auto item = jsonInt64(cell["item"]);
+        if (!item.has_value() || *item != -1) continue;
+        if (!cell.contains("orientation")) continue;
+        const auto orientation = jsonInt64(cell["orientation"]);
+        if (!orientation.has_value() || *orientation == 0) continue;
+        return "Argument 'cells' entry " + std::to_string(index) + " erases (item -1) and sets "
+               "orientation " + std::to_string(*orientation) +
+               "; an erased cell has no orientation. Drop orientation, or set an item to place.";
+    }
+    return std::nullopt;
 }
 
 } // namespace
 
 CallToolResult handleTilemapSetCells(const ResolvedToolBinding& binding, const json& args,
                          std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (args.is_object() && args.contains("cells") &&
-        hasDuplicateTuple(args["cells"], "coords", 2)) {
-        return requestError(binding, "duplicate_tilemap_coordinate", 409);
+    if (args.is_object() && args.contains("cells")) {
+        if (auto duplicate = describeDuplicateTuple(args["cells"], "coords", 2)) {
+            return requestError(binding, *duplicate, 409);
+        }
     }
     if (!hasOnlyKeys(args, {"tilemap_path", "cells"}) ||
         !args.contains("tilemap_path") || !boundedString(args["tilemap_path"]) ||
@@ -136,9 +180,15 @@ CallToolResult handleTilemapGetUsedRect(const ResolvedToolBinding& binding, cons
 
 CallToolResult handleGridmapSetCells(const ResolvedToolBinding& binding, const json& args,
                          std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (args.is_object() && args.contains("cells") &&
-        hasDuplicateTuple(args["cells"], "position", 3)) {
-        return requestError(binding, "duplicate_gridmap_position", 409);
+    if (args.is_object() && args.contains("cells")) {
+        if (auto duplicate = describeDuplicateTuple(args["cells"], "position", 3)) {
+            return requestError(binding, *duplicate, 409);
+        }
+        // The other rule the schema cannot state. Asked before the catch-all
+        // below, which named none of the several rules it stands for.
+        if (auto erased = describeErasedCellWithOrientation(args["cells"])) {
+            return requestError(binding, *erased);
+        }
     }
     if (!hasOnlyKeys(args, {"gridmap_path", "cells"}) ||
         !args.contains("gridmap_path") || !boundedString(args["gridmap_path"]) ||
