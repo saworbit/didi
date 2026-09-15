@@ -15,6 +15,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -109,6 +110,20 @@ REFUSED = [
 ]
 
 
+# Reading with a deadline, because the failure this guards against is a read
+# that never returns. A bare readline() on a hung server hangs the suite too.
+def _read_line_within(stream, seconds):
+    captured = {}
+
+    def read():
+        captured["line"] = stream.readline()
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    reader.join(seconds)
+    return captured.get("line")
+
+
 class CommandLineTests(unittest.TestCase):
     def test_accepted_forms_start_and_exit_cleanly(self):
         for name, arguments in ACCEPTED:
@@ -131,6 +146,33 @@ class CommandLineTests(unittest.TestCase):
         result = _run(["--project", FIXTURE_PROJECT, "--log-level", "VERBOSE"])
         self.assertIn("--log-level <level>   Set log level (DEBUG, INFO, WARN, ERROR, NONE)",
                       result.stderr)
+
+    def test_debug_logging_answers_a_client_that_ignores_stderr(self):
+        # The MCP stdio transport says a server MAY write logs to standard
+        # error and a client MAY ignore them. At DEBUG the startup log is one
+        # line per registered tool, which is past the pipe buffer, and writing
+        # it inline blocked the thread that would have answered initialize: a
+        # host that does not drain stderr saw no error, no exit and no output
+        # (#689). The log is now written off-thread and lines are dropped
+        # rather than the server.
+        process = subprocess.Popen(
+            [_executable(), "--log-level", "DEBUG", "--project", FIXTURE_PROJECT],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        try:
+            request = {
+                "jsonrpc": "2.0", "id": 0, "method": "initialize",
+                "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                           "clientInfo": {"name": "stderr-ignoring-host", "version": "1"}},
+            }
+            process.stdin.write(json.dumps(request).encode() + b"\n")
+            process.stdin.flush()
+            answer = _read_line_within(process.stdout, seconds=30)
+            self.assertIsNotNone(answer, "initialize was never answered")
+            self.assertEqual(json.loads(answer)["id"], 0)
+        finally:
+            process.kill()
+            process.communicate()
 
     def test_yolo_survives_a_preceding_value_option(self):
         # The failure that started this: --log-level ate --yolo and the server
