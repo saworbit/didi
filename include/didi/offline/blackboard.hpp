@@ -74,8 +74,12 @@ struct BlackboardClearRequest {
 // second record of the same fact, and two records drift.
 inline constexpr size_t kBlackboardMaxTasks = 2'000;
 inline constexpr size_t kBlackboardMaxTaskIdBytes = 128;
-inline constexpr size_t kBlackboardMaxTaskTitleBytes = 512;
-inline constexpr size_t kBlackboardMaxTaskTextBytes = 4'096;
+// Characters, not bytes, because these are the numbers the schema publishes
+// as maxLength for title and description, and JSON Schema defines that as a
+// character count. A byte cap here enforced a bound a third as generous as
+// the published one for anything outside ASCII (#663).
+inline constexpr size_t kBlackboardMaxTaskTitleCharacters = 512;
+inline constexpr size_t kBlackboardMaxTaskTextCharacters = 4'096;
 inline constexpr size_t kBlackboardMaxTaskDependencies = 64;
 inline constexpr size_t kBlackboardMaxTaskTags = 16;
 inline constexpr int64_t kBlackboardMaxLeaseSeconds = 24 * 60 * 60;

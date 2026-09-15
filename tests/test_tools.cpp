@@ -1810,6 +1810,96 @@ static void test_the_export_family_answers_with_an_envelope_and_previews_what_it
     ASSERT_EQ(envelope(missing_source)["error"]["code"], 404);
 }
 
+static void test_every_pinned_parameter_says_why_it_is_pinned() {
+    // A parameter whose schema pins it to exactly one value is pinned for a
+    // reason, and the reason belongs in the description, because discovery is
+    // where a caller finds out what a tool wants. viewport_toggle_debug_draw's
+    // wireframe was const false with the description "Draw geometry as
+    // wireframe": an assistant reading discovery was told the parameter exists,
+    // told what it does, sent the value that does it, and refused with a
+    // sentence that gave no reason (#654).
+    //
+    // Three of the four pinned parameters already said "this is pinned, and
+    // here is why", which is what makes this an invariant rather than one
+    // tool's slip. Nothing could catch it: the description tests count
+    // descriptions and the schema tests read keys, and no test compared one
+    // against the other -- which is #576's shape exactly.
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    size_t pinned_seen = 0;
+    for (const auto& tool : registry.listTools()) {
+        const auto schema = tool.inputSchema;
+        if (!schema.is_object() || !schema.contains("properties")) continue;
+        for (const auto& [name, property] : schema["properties"].items()) {
+            if (!property.is_object()) continue;
+            const bool single_enum = property.contains("enum") && property["enum"].is_array() &&
+                                     property["enum"].size() == 1;
+            if (!property.contains("const") && !single_enum) continue;
+            ++pinned_seen;
+            ASSERT_TRUE(property.contains("description"));
+            const auto description = property["description"].get<std::string>();
+            ASSERT_TRUE(!description.empty());
+            // The pin has to be in the words, not only in the keys beside them.
+            // "Always", "only" and "no second value" are how the three that got
+            // this right say it.
+            const auto mentions = [&description](const char* phrase) {
+                return description.find(phrase) != std::string::npos;
+            };
+            ASSERT_TRUE(mentions("Always") || mentions("always") || mentions("Only") ||
+                        mentions("only") || mentions("no second value") ||
+                        mentions("is accepted"));
+        }
+    }
+    // The count is asserted so a refactor that stops publishing const cannot
+    // turn this into a test of nothing.
+    ASSERT_TRUE(pinned_seen >= 4);
+}
+
+static void test_a_length_bound_counts_the_characters_it_publishes() {
+    // JSON Schema defines the length of a string as its number of characters.
+    // checkBounds measured std::string::size(), which is the UTF-8 byte count,
+    // so the server enforced a bound a third as generous as the one it
+    // published for anything outside ASCII and reported the refusal in the
+    // units it was not using (#663). A client that validates against the
+    // published inputSchema before sending accepted a call the server refused.
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    // project_search_text.query is capped at 256. A hundred copies of U+3042 is
+    // a hundred characters and three hundred bytes.
+    std::string japanese;
+    for (int index = 0; index < 100; ++index) japanese += "\xE3\x81\x82";
+    ASSERT_EQ(japanese.size(), 300u);
+
+    ScopedToolProject project("length-bound");
+    writeAuditFile("project.godot", "config_version=5\n");
+    const auto accepted =
+        registry.callTool("project_search_text", didi::json{{"query", japanese}});
+    // Not refused at all: the schema check and the handler check both have to
+    // count the same thing, or a client that validated against the published
+    // schema first still sends a call the server refuses, with a second message
+    // about a second bound.
+    ASSERT_TRUE(!accepted.isError);
+    ASSERT_TRUE(accepted.content[0].text.find("characters long") == std::string::npos);
+    ASSERT_TRUE(accepted.content[0].text.find("bytes and no NUL") == std::string::npos);
+
+    // And the bound still bites at the published number: 257 characters is over
+    // it whether they are one byte each or three.
+    const std::string too_long_ascii(257, 'a');
+    const auto refused_ascii =
+        registry.callTool("project_search_text", didi::json{{"query", too_long_ascii}});
+    ASSERT_TRUE(refused_ascii.isError);
+    ASSERT_TRUE(refused_ascii.content[0].text.find("characters long") != std::string::npos);
+
+    std::string too_long_japanese;
+    for (int index = 0; index < 257; ++index) too_long_japanese += "\xE3\x81\x82";
+    const auto refused_japanese =
+        registry.callTool("project_search_text", didi::json{{"query", too_long_japanese}});
+    ASSERT_TRUE(refused_japanese.isError);
+    ASSERT_TRUE(refused_japanese.content[0].text.find("characters long") != std::string::npos);
+}
+
 static void test_a_script_that_cannot_be_read_is_not_reported_as_bad_code() {
     // A file the process may not read answered as a syntax error at line 1
     // column 1 of a file whose bytes were never read, with rule
@@ -6279,6 +6369,10 @@ struct RegisterToolTests {
                      test_a_name_in_a_scene_is_not_a_code_reference);
         registerTest("Tools.ExportFamilyEnvelopesAndPreviews",
                      test_the_export_family_answers_with_an_envelope_and_previews_what_it_will_do);
+        registerTest("Tools.PinnedParametersSayWhy",
+                     test_every_pinned_parameter_says_why_it_is_pinned);
+        registerTest("Tools.LengthBoundCountsCharacters",
+                     test_a_length_bound_counts_the_characters_it_publishes);
         registerTest("Tools.UnreadableScriptIsNotBadCode",
                      test_a_script_that_cannot_be_read_is_not_reported_as_bad_code);
         registerTest("Tools.UndecodableNameIsNotACallerError",

@@ -133,9 +133,15 @@ Result<std::set<std::string>> validateExtensions(const std::vector<std::string>&
 }
 
 Result<void> validateCommon(const SearchOptions& options) {
-    if (options.query.empty() || options.query.size() > kSearchMaxQueryBytes ||
+    // Characters, matching the maxLength the schema publishes for this
+    // parameter. A byte cap here meant a hundred-character Japanese or Greek
+    // term was refused against a bound of 256, and a client that validated
+    // against the published schema first had already let it through (#663).
+    // 256 characters is at most a kilobyte, which is nothing to search for.
+    if (options.query.empty() ||
+        paths::codePointCount(options.query) > kSearchMaxQueryCharacters ||
         options.query.find('\0') != std::string::npos) {
-        return Error::invalidArgument("query must contain 1 to 256 bytes and no NUL");
+        return Error::invalidArgument("query must contain 1 to 256 characters and no NUL");
     }
     if (options.max_results < 1 || options.max_results > kSearchMaxResults) {
         return Error::invalidArgument("max_results must be from 1 to 500");

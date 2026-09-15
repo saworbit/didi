@@ -475,7 +475,7 @@ Updates an in-scene `Camera3D` in one editor UndoRedo action. `camera_path` and 
 
 ### `viewport_toggle_debug_draw` — Live (editor only)
 
-Sets the public SceneTree `collision_shapes` and `navigation_mesh` debug hints used by future games run from that editor. At least one is required. Omitted hints are preserved, both are reread after mutation, and both original values are restored if a setter or postcondition fails. The retained `wireframe` field accepts only `false` because Godot exposes no supported live wireframe control. The result returns `previous`, `observed`, `effective_scope: "future_games_run_from_editor"`, and `rollback: "explicit_restore"`.
+Sets the public SceneTree `collision_shapes` and `navigation_mesh` debug hints used by future games run from that editor. At least one is required. Omitted hints are preserved, both are reread after mutation, and both original values are restored if a setter or postcondition fails. The retained `wireframe` field accepts only `false` because Godot exposes no supported live wireframe control. That sentence is the parameter's own description now, and the refusal for `wireframe: true` carries it, so a caller learns the reason from discovery rather than from making a call go wrong. The result returns `previous`, `observed`, `effective_scope: "future_games_run_from_editor"`, and `rollback: "explicit_restore"`.
 
 ## 5. Physics, animation, and navigation
 
