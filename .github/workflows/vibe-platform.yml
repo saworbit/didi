@@ -1,0 +1,151 @@
+name: Vibe (macOS and Linux)
+
+# Twelve vibe sessions have run on Windows, because that is the machine the
+# harness lives on. README says macOS and Linux are the least-tested platforms
+# and asks for testers; this is the part of that a runner can do unattended.
+#
+# It is not a gate. Nothing here asserts, and a red run means a probe crashed,
+# not that the build is broken -- the output is the artefact, and the findings
+# come out of reading it. `continue-on-error` is on every probe step for that
+# reason.
+#
+# Triggered by pushing a `vibe/**` branch, which is how a session gets an
+# answer from a platform it does not have, and by hand from the default branch.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'vibe/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vibe-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          # Every other workflow in this repository sets it; this one pushes
+          # nothing, so leaving the token in .git/config only widens what a
+          # probe step could reach.
+          persist-credentials: false
+
+      - name: Install Build Tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build build-essential
+
+      - name: Install Build Tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Report What This Runner Is
+        run: |
+          set -x
+          uname -a
+          python3 --version
+          echo "TMPDIR=${TMPDIR:-<unset>}"
+          python3 -c "import tempfile; print('gettempdir', tempfile.gettempdir())"
+          echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-<unset>}"
+          # The AF_UNIX path limit is the one platform constant the session
+          # endpoint has to fit inside, and it is smaller on macOS than on
+          # Linux. The endpoint is built under the temporary directory, which
+          # on macOS is a per-user path forty-odd characters long.
+          python3 -c "import socket, tempfile, os; p=os.path.join(tempfile.gettempdir(), 'godot_didi_' + 'f'*16 + '_' + '9'*5 + '_' + 'a'*12 + '.sock'); print('endpoint would be', len(p), 'bytes:', p)"
+
+      - name: Configure and Build
+        run: |
+          cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+
+      - name: Native Suite
+        continue-on-error: true
+        run: ./build/didi_tests
+
+      - name: Make a Sandbox Project
+        run: python3 tools/vibe/sandbox.py "$RUNNER_TEMP/vibe-proj" --overwrite
+
+      - name: Probe -- POSIX platform states
+        continue-on-error: true
+        run: python3 tools/vibe/probes/posix_platform.py -p "$RUNNER_TEMP/vibe-proj"
+
+      - name: Probe -- project state census
+        continue-on-error: true
+        run: python3 tools/vibe/probes/project_state_census.py "$RUNNER_TEMP/vibe-proj"
+
+      - name: Probe -- which descriptor directory did it scan?
+        continue-on-error: true
+        run: |
+          # The server resolves one descriptor directory; the addon scans a list
+          # and its own comment says why. On macOS TMPDIR is a per-user
+          # /var/folders path that launchd sets and a bare environment does not
+          # have, so the two halves of the product can disagree about where a
+          # session is published. The two runs below should be distinguishable.
+          alt="$RUNNER_TEMP/elsewhere"
+          mkdir -p "$alt"
+          script='import json,os,sys; sys.path.insert(0,"tools/vibe"); from mcp_client import batch, call; r,_=batch([call("runtime_list_sessions",{},1)], project=os.environ["RUNNER_TEMP"]+"/vibe-proj"); print("TMPDIR=" + os.environ.get("TMPDIR","<unset>")); print(json.dumps(r[-1]))'
+          python3 -c "$script"
+          TMPDIR="$alt" python3 -c "$script"
+
+      - name: Probe -- surface census (unknown arguments, modes, envelopes)
+        continue-on-error: true
+        run: |
+          for question in unknown-arguments execution-modes error-envelopes identifier-messages; do
+            echo "::group::$question"
+            python3 tools/vibe/probes/surface_census.py "$RUNNER_TEMP/vibe-proj" --which "$question" || true
+            echo "::endgroup::"
+          done
+
+      - name: Probe -- error data census
+        continue-on-error: true
+        run: python3 tools/vibe/probes/error_data_census.py "$RUNNER_TEMP/vibe-proj"
+
+      - name: Probe -- path confinement
+        continue-on-error: true
+        run: python3 tools/vibe/probes/path_confinement.py "$RUNNER_TEMP/vibe-proj"
+
+      - name: Probe -- offline refusals
+        continue-on-error: true
+        run: python3 tools/vibe/probes/offline_refusals.py -p "$RUNNER_TEMP/vibe-proj"
+
+      - name: Probe -- the published archive for this platform
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -x
+          case "$RUNNER_OS" in
+            macOS) asset=didi-macos-arm64.tar.gz ;;
+            *)     asset=didi-linux-x64.tar.gz ;;
+          esac
+          cd "$RUNNER_TEMP"
+          gh release download --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir . --clobber
+          mkdir -p shipped && tar -xzf "$asset" -C shipped
+          root=$(find shipped -maxdepth 1 -mindepth 1 -type d)
+          file "$root/bin/didi" "$root/addons/didi/bin/"*
+          # What a browser download leaves behind. curl does not set it, so set
+          # it by hand: the question is what Gatekeeper does to the archive a
+          # user actually gets, not to the one a runner fetched.
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            xattr -w com.apple.quarantine "0083;00000000;Safari;" "$root/bin/didi"
+            xattr -w com.apple.quarantine "0083;00000000;Safari;" "$root/addons/didi/bin/libdidi_extension.dylib"
+            xattr -l "$root/bin/didi"
+            codesign -dvvv "$root/bin/didi" || true
+            spctl -a -vvv -t install "$root/bin/didi" || true
+          fi
+          "$root/bin/didi" --version || echo "the shipped binary did not run: $?"
