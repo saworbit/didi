@@ -127,16 +127,22 @@ TEST(Phase6, ExplicitProjectRootRequiresGodotProject) {
 }
 
 TEST(Phase6, ExplicitProjectRootRefusesBytesThatAreNotUtf8) {
-    // The refusal below was written for this case and could never be reached:
-    // on Windows the conversion to a native path throws std::system_error, not
-    // filesystem_error, so it escaped main and fast-failed the process with no
-    // output (#611). A caller must get the sentence instead.
-    std::string invalid = "C:/projects/pr";
+    // A root the platform cannot decode is answered, not thrown. On Windows the
+    // conversion to a native wide path throws std::system_error, which is not a
+    // filesystem_error, so the refusal written for this case was never reached
+    // and the exception escaped main and fast-failed the process with no output
+    // at all (#611). A POSIX path is a byte string and these bytes name a
+    // directory that is simply not there, which is the other error below.
+    std::string invalid = "projects/pr";
     invalid.push_back(static_cast<char>(0xF3));  // Latin-1 'o acute', not valid UTF-8
     invalid += "jekt";
     const auto resolved = didi::paths::resolveExplicitProjectRoot(invalid);
     ASSERT_TRUE(resolved.isErr());
+#if defined(_WIN32)
     ASSERT_TRUE(resolved.error().message.find("UTF-8") != std::string::npos);
+#else
+    ASSERT_TRUE(resolved.error().message.find("accessible directory") != std::string::npos);
+#endif
 }
 
 TEST(Phase6, ProjectEndpointKeysAreStableAndIsolated) {
