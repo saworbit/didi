@@ -68,6 +68,21 @@ struct ProjectRenameOptions {
     size_t max_impacts{500};
 };
 
+// What renameReferences would do, without doing any of it: which files change,
+// how many lines in each, and the references it will report and never rewrite.
+//
+// The confirmation preview calls this. project_rename_references is always
+// confirmed because the preview is the only chance to see which files it is
+// about to touch, and the preview had no probe, so it showed the two
+// identifiers the caller had just typed and nothing else (#662). It refuses
+// exactly what the real call refuses, so a preview does not mint a token for a
+// call that cannot run.
+//
+// The scan runs again on the confirm. That is the price of a preview that
+// means something, and the confirm insists on a fresh crawl anyway.
+Result<json> planRenameReferences(const std::string& root_dir,
+                                  const ProjectRenameOptions& options);
+
 Result<json> renameReferences(const std::string& root_dir, const ProjectRenameOptions& options);
 
 } // namespace didi::offline

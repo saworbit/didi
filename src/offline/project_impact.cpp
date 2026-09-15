@@ -327,7 +327,17 @@ void collectNameTargetImpacts(const ProjectTextScan& scan, const std::string& ta
                 out.push_back({source.path, "animation_track", number, detailFrom(line)});
                 return;
             }
-            out.push_back({source.path, "code_reference", number, detailFrom(line)});
+            // Which file the line came from, which the fallback never asked, so
+            // a [node name="health"] line in a .tscn and an ext_resource line
+            // in a .tres both came back as a source code reference (#665).
+            // counts_by_kind is what a caller branches on to decide whether a
+            // rename is safe, and it read as five script sites when one of them
+            // was a scene. collectNodePathImpacts a hundred lines up already
+            // makes this distinction.
+            const bool code = strings::endsWith(source.path, ".gd") ||
+                              strings::endsWith(source.path, ".cs");
+            out.push_back({source.path, code ? "code_reference" : "resource_reference", number,
+                           detailFrom(line)});
         });
     }
 }
@@ -668,9 +678,24 @@ std::string renameLine(const std::string& line, const SerializedNameForms& forms
     return updated;
 }
 
-} // namespace
+// The plan and the report, without writing anything.
+//
+// One code path, because the preview and the confirm have to be describing the
+// same work. project_rename_references is always confirmed on the grounds that
+// "the preview is the only chance to see which files it is about to touch", and
+// the preview had no probe at all, so it showed the two identifiers the caller
+// had just typed and nothing else (#662). Everything worth seeing -- which
+// files change, how many lines in each, what will be reported and not
+// rewritten -- is derived here, so the preview runs this and shows it.
+//
+// The refusals happen here too, so a preview fails the way the call would
+// rather than minting a token for a call that cannot run.
+struct RenamePlan {
+    json report;                       // every field of the answer but `applied`
+    std::vector<RenamedFile> planned;  // the rewritten contents, for the caller that writes
+};
 
-Result<json> renameReferences(const std::string& root_dir, const ProjectRenameOptions& options) {
+Result<RenamePlan> planRename(const std::string& root_dir, const ProjectRenameOptions& options) {
     const auto target = strings::trim(options.target);
     const auto new_name = strings::trim(options.new_name);
     if (!looksLikeIdentifier(target)) {
@@ -799,10 +824,15 @@ Result<json> renameReferences(const std::string& root_dir, const ProjectRenameOp
         {"code_reference_count", code_references.size()},
         {"scanned_files", scan.sources.size()},
         {"limitations", json::array({
-            "GDScript and C# references are reported, never rewritten. The language is "
+            "Every reference outside a [connection] and an animation track is reported and "
+            "never rewritten. Each carries a kind: code_reference for GDScript and C#, "
+            "resource_reference for a scene or resource line this does not rewrite. "
+            "script_patch_method is the tool for the code_reference entries and cannot touch "
+            "the others, so read the kind before acting on the list.",
+            "A code_reference is reported rather than rewritten because the language is "
             "dynamically typed, so a whole-word match may be this symbol or an unrelated local "
             "that shares the name, and rewriting on that evidence would be its own silent "
-            "breakage. Use script_patch_method for those.",
+            "breakage.",
             "Only the forms Godot serializes are rewritten: the signal and method attributes of "
             "a [connection], and the property segment of a NodePath in an animation track.",
             "A reference built at runtime cannot be followed, so an empty report is not proof "
@@ -811,6 +841,24 @@ Result<json> renameReferences(const std::string& root_dir, const ProjectRenameOp
             "and an editor holding unsaved changes will write over them."
         })}
     };
+
+    return RenamePlan{std::move(result), std::move(planned)};
+}
+
+} // namespace
+
+Result<json> planRenameReferences(const std::string& root_dir,
+                                  const ProjectRenameOptions& options) {
+    auto plan = planRename(root_dir, options);
+    if (plan.isErr()) return plan.error();
+    return plan.value().report;
+}
+
+Result<json> renameReferences(const std::string& root_dir, const ProjectRenameOptions& options) {
+    auto plan = planRename(root_dir, options);
+    if (plan.isErr()) return plan.error();
+    auto result = std::move(plan.value().report);
+    const auto planned = std::move(plan.value().planned);
 
     // Everything that can fail on the way to disk fails here, before any
     // destination is replaced. What is left after this loop is the renames, so a
