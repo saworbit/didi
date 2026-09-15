@@ -87,6 +87,18 @@ inline bool isDecodableUtf8(std::string_view value) {
     return true;
 }
 
+// How many characters a UTF-8 byte string holds, which is what JSON Schema
+// means by the length of a string: "the number of its characters as defined by
+// RFC 8259". Counting bytes instead enforced a bound a third as generous as the
+// one published for anything outside ASCII (#663).
+inline size_t codePointCount(std::string_view value) {
+    size_t count = 0;
+    for (const unsigned char byte : value) {
+        if ((byte & 0xC0) != 0x80) ++count;
+    }
+    return count;
+}
+
 // The same string with every byte that is not part of a well-formed sequence
 // replaced by U+FFFD, so it can be named in a response.
 inline std::string lossyUtf8(std::string_view value) {

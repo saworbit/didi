@@ -1,3 +1,4 @@
+#include "didi/common/project_path.hpp"
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/offline/blackboard.hpp"
@@ -19,16 +20,22 @@ struct ArgumentReader {
 
     bool ok() const { return failure.empty(); }
 
+    // Characters, matching the maxLength the schema publishes for these
+    // parameters. JSON Schema defines the length of a string as its number of
+    // characters, so a byte bound here was a third as generous as the published
+    // one for anything outside ASCII, and it said "bytes" about a number the
+    // schema calls characters (#663).
     std::string string(const char* key, const std::string& fallback = {},
-                       size_t max_bytes = 512) {
+                       size_t max_characters = 512) {
         if (!args.contains(key) || args[key].is_null()) return fallback;
         if (!args[key].is_string()) {
             failure = std::string(key) + " must be a string";
             return fallback;
         }
         auto value = args[key].get<std::string>();
-        if (value.size() > max_bytes) {
-            failure = std::string(key) + " must be at most " + std::to_string(max_bytes) + " bytes";
+        if (paths::codePointCount(value) > max_characters) {
+            failure = std::string(key) + " must be at most " + std::to_string(max_characters) +
+                      " characters";
             return fallback;
         }
         return value;
@@ -198,13 +205,13 @@ CallToolResult handleBlackboardTaskCreate(const json& args, std::shared_ptr<ipc:
     offline::BlackboardTaskCreateRequest request;
     request.board = reader.string("board", "default", offline::kBlackboardMaxBoardNameBytes);
     request.task_id = reader.string("task_id", {}, offline::kBlackboardMaxTaskIdBytes);
-    request.title = reader.string("title", {}, offline::kBlackboardMaxTaskTitleBytes);
+    request.title = reader.string("title", {}, offline::kBlackboardMaxTaskTitleCharacters);
     request.priority = reader.integer("priority", 0, -1000, 1000);
     if (!reader.ok()) return CallToolResult::error(reader.failure);
     if (request.title.empty()) return CallToolResult::error("title is required");
 
     if (args.contains("description") && !args["description"].is_null()) {
-        request.description = reader.string("description", {}, offline::kBlackboardMaxTaskTextBytes);
+        request.description = reader.string("description", {}, offline::kBlackboardMaxTaskTextCharacters);
     }
     if (args.contains("assigned_to") && !args["assigned_to"].is_null()) {
         request.assigned_to = reader.string("assigned_to", {}, offline::kBlackboardMaxTaskIdBytes);
@@ -262,7 +269,7 @@ CallToolResult handleBlackboardTaskUpdate(const json& args, std::shared_ptr<ipc:
         request.progress = reader.integer("progress", 0, 0, 100);
     }
     if (args.contains("note") && !args["note"].is_null()) {
-        request.note = reader.string("note", {}, offline::kBlackboardMaxTaskTextBytes);
+        request.note = reader.string("note", {}, offline::kBlackboardMaxTaskTextCharacters);
     }
     if (args.contains("status") && !args["status"].is_null()) {
         request.status = reader.string("status", {}, 32);

@@ -13,7 +13,10 @@
 
 namespace didi::offline {
 
-inline constexpr size_t kSearchMaxQueryBytes = 256;
+// Characters, not bytes: this is the number project_search_text.query and
+// project_search_symbols.query publish as maxLength, and JSON Schema defines
+// that as a character count (#663).
+inline constexpr size_t kSearchMaxQueryCharacters = 256;
 inline constexpr size_t kSearchMaxResults = 500;
 inline constexpr uintmax_t kSearchMaxFileBytes = 4u * 1024u * 1024u;
 inline constexpr size_t kSearchMaxFiles = 10000;

@@ -788,9 +788,11 @@ Result<json> blackboardClear(const BlackboardClearRequest& request, BlackboardCl
 Result<json> blackboardTaskCreate(const BlackboardTaskCreateRequest& request,
                                   BlackboardClock clock) {
     const int64_t now_ms = clock ? clock() : systemClockMs();
-    if (request.title.empty() || request.title.size() > kBlackboardMaxTaskTitleBytes) {
+    if (request.title.empty() ||
+        paths::codePointCount(request.title) > kBlackboardMaxTaskTitleCharacters) {
         return Error::invalidArgument("title must be 1 to " +
-                                      std::to_string(kBlackboardMaxTaskTitleBytes) + " bytes");
+                                      std::to_string(kBlackboardMaxTaskTitleCharacters) +
+                                      " characters");
     }
     if (!request.task_id.empty() && !isLegalTaskId(request.task_id)) {
         return Error::invalidArgument(
@@ -1043,9 +1045,9 @@ Result<json> blackboardTaskUpdate(const BlackboardTaskUpdateRequest& request,
     if (request.progress.has_value() && (*request.progress < 0 || *request.progress > 100)) {
         return Error::invalidArgument("progress must be between 0 and 100");
     }
-    if (request.note.has_value() && request.note->size() > kBlackboardMaxTaskTextBytes) {
+    if (request.note.has_value() && request.note->size() > kBlackboardMaxTaskTextCharacters) {
         return Error::invalidArgument("note must be at most " +
-                                      std::to_string(kBlackboardMaxTaskTextBytes) + " bytes");
+                                      std::to_string(kBlackboardMaxTaskTextCharacters) + " bytes");
     }
     if (request.status.has_value() && *request.status != kStatusNeedsReview &&
         *request.status != kStatusFailed && *request.status != kStatusPending) {

@@ -1,5 +1,7 @@
 #include "didi/mcp/schema_validation.hpp"
 
+#include "didi/common/project_path.hpp"
+
 #include <algorithm>
 #include <regex>
 #include <string>
@@ -110,10 +112,20 @@ std::optional<std::string> checkType(const json& schema, const json& value,
     return std::nullopt;
 }
 
+// JSON Schema defines the length of a string as its number of characters, and
+// checkBounds measured std::string::size(), which is the UTF-8 byte count. So
+// the server enforced a bound a third as generous as the one it published for
+// anything outside ASCII: a hundred-character Japanese or Greek search term
+// came back as "must be at most 256 characters long" (#663). A client that
+// validates arguments against the published inputSchema before sending -- which
+// is the point of publishing one -- accepted a call the server then refused.
+//
+// The value has already been parsed as JSON by the time this runs, so it is
+// well-formed UTF-8 and counting lead bytes is the whole job.
 std::optional<std::string> checkBounds(const json& schema, const json& value,
                                        const std::string& where) {
     if (value.is_string()) {
-        const auto length = value.get_ref<const std::string&>().size();
+        const auto length = paths::codePointCount(value.get_ref<const std::string&>());
         if (schema.contains("minLength") && schema["minLength"].is_number_integer() &&
             length < schema["minLength"].get<size_t>()) {
             return where + " must be at least " + schema["minLength"].dump() +
@@ -347,9 +359,19 @@ std::optional<std::string> checkValue(const json& schema, const json& value,
 
     // A fixed value, which is how a schema spells a discriminator: the erase
     // form of a tilemap cell is the one whose `erase` is const true.
+    // The reason, not only the rule. A parameter pinned to one value is pinned
+    // for a reason, and that reason is already written in the parameter's own
+    // description, so a caller who sent the other value is told why rather than
+    // having the constraint they just violated read back at them (#654).
+    const auto pinReason = [&schema]() {
+        const auto description = schema.find("description");
+        if (description == schema.end() || !description->is_string()) return std::string();
+        return " " + description->get<std::string>();
+    };
+
     const auto fixed = schema.find("const");
     if (fixed != schema.end() && *fixed != value) {
-        return where + " must be " + fixed->dump() + ".";
+        return where + " must be " + fixed->dump() + "." + pinReason();
     }
 
     const auto allowed = schema.find("enum");
@@ -357,7 +379,8 @@ std::optional<std::string> checkValue(const json& schema, const json& value,
         const bool found = std::any_of(allowed->begin(), allowed->end(),
                                        [&](const json& option) { return option == value; });
         if (!found) {
-            return where + " must be one of: " + allowed->dump() + ".";
+            return where + " must be one of: " + allowed->dump() + "." +
+                   (allowed->size() == 1 ? pinReason() : std::string());
         }
     }
 

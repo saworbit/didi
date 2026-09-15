@@ -209,7 +209,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "Defaults to 2000. symbol_count_total says how many the file holds either way, so a "
          "clipped answer can be told from a complete one."},
         {"project_search_text.query",
-         "The text to look for. At most 256 UTF-8 bytes."},
+         "The text to look for. At most 256 characters, which is the maxLength this parameter publishes."},
         {"project_search_text.case_sensitive",
          "Match case exactly. On by default; pass false to fold case."},
         {"project_search_text.whole_word",
@@ -221,7 +221,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"project_search_text.max_results",
          "Stop after this many matches and report truncated. 1 to 500, default 100."},
         {"project_search_symbols.query",
-         "The declaration name to look for. At most 256 UTF-8 bytes."},
+         "The declaration name to look for. At most 256 characters, which is the maxLength this parameter publishes."},
         {"project_search_symbols.case_sensitive",
          "Match case exactly. On by default; pass false to fold case."},
         {"project_search_symbols.match",
@@ -397,7 +397,8 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"viewport_set_camera_transform.fov",
          "Field of view in degrees."},
         {"viewport_toggle_debug_draw.wireframe",
-         "Draw geometry as wireframe."},
+         "Always false: Godot exposes no supported live wireframe control, so the field is "
+         "retained and only false is accepted. There is no second value."},
         {"viewport_toggle_debug_draw.collision_shapes",
          "Draw collision shapes."},
         {"viewport_toggle_debug_draw.navigation_mesh",
@@ -537,9 +538,11 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"blackboard_patch.reason",
          "Why the change is being made. Stored with the entry."},
         {"blackboard_task_create.title",
-         "Short name for the task."},
+         "Short name for the task. At most 512 characters, which is the maxLength this "
+         "parameter publishes."},
         {"blackboard_task_create.description",
-         "What the task involves, for whoever claims it."},
+         "What the task involves, for whoever claims it. At most 4096 characters, which is the "
+         "maxLength this parameter publishes."},
         {"blackboard_task_create.tags",
          "Labels to file the task under. blackboard_task_claim can claim by tag."},
         {"blackboard_task_claim.board",

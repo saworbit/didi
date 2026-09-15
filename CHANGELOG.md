@@ -66,6 +66,34 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`maxLength` counts what it says it counts.** JSON Schema defines the length
+  of a string as its number of characters, and `checkBounds` measured
+  `std::string::size()`, which is the UTF-8 byte count. So the server enforced a
+  bound a third as generous as the one it published for anything outside ASCII,
+  and reported the refusal in the units it was not using: a hundred-character
+  Japanese or Greek search term came back as "must be at most 256 characters
+  long" (#663). 140 string parameters carry a `maxLength`, and the ones people
+  put words in are the ones this bit. The schema check counts code points now,
+  and so do the handlers that had their own byte cap behind the same published
+  number -- the two search queries and the blackboard task title and
+  description -- so a client that validates against the published schema before
+  sending reaches the verdict the server reaches. Where a handler bounds bytes
+  for its own reason, its parameter description says so, which is what
+  `eval_gdscript.expression` and the node-path parameters already did.
+- **A parameter pinned to one value says why.**
+  `viewport_toggle_debug_draw.wireframe` is `const: false` and its description
+  read "Draw geometry as wireframe", so an assistant reading discovery was told
+  the parameter exists, told what it does, sent the value that does it, and was
+  refused with a sentence that restated the constraint and gave no reason
+  (#654). The reason was already written in `TOOL_REFERENCE`: Godot exposes no
+  supported live wireframe control. It is the description now, and every
+  refusal for a `const` or a single-value `enum` carries that parameter's
+  description with it. Three of the four pinned parameters on the surface
+  already said "this is pinned, and here is why", which is what made this an
+  invariant rather than one tool's slip, and there is a test for it now: the
+  description tests counted descriptions and the schema tests read keys, and
+  nothing compared one against the other.
+
 - **The export family answers with an envelope and previews what it will do.**
   Four failures in `project_list_export_presets` and `project_export` were bare
   prose strings with no code and nothing to branch on, which the error-envelope
