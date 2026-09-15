@@ -32,12 +32,17 @@ place rather than at each call site:
   `not_found`, `forbidden`, `conflict`, `gone`, `response_too_large`,
   `unprocessable`, `confirmation_required`, `rate_limited`, `unimplemented`,
   `not_connected`, `timeout`, `engine_refused`, `internal_error`,
-  `request_failed`. Branch on this rather than on the number beside it, which is
+  `request_failed`, `response_not_encodable`. Branch on this rather than on the number beside it, which is
   a transport convention. `not_connected` is a fact about the session: the route
   could not deliver. An engine that received the call and failed it answers
   `502` with `engine_refused` and the engine's own status under
   `data.upstream_code`, because reporting that as `503 not_connected` sent
   callers off to re-attach a session whose next call succeeded.
+  `response_not_encodable` is the server's own fault, not the call's: the answer
+  held bytes that are not valid UTF-8 and JSON cannot carry them. It used to
+  arrive as `invalid_arguments`, because the encoder and an argument read at the
+  wrong type raise the same C++ exception type, so a call with no arguments was
+  told an argument was wrong.
 - `tool`: the name that was called, alias included.
 - `canonical_tool`: the name it resolves to. The same as `tool` unless a legacy
   alias was used.
@@ -798,6 +803,8 @@ Reads the project and reports four things nothing in a single file can show: ass
 - `max_findings` (`integer`, 1-5000, default `500`).
 
 At least one of the four report switches must stay enabled.
+
+A file whose name is not valid UTF-8 is not in any of these answers and cannot be, because JSON is defined over Unicode. It is reported instead: `undecodable_path_count` and `undecodable_paths`, with the bytes that could not be decoded shown as U+FFFD, so the file can be renamed. `project_list_resources` reports the same two fields and `project_search_text` and `project_search_symbols` report the path under `diagnostics` with `reason: "undecodable_name"`. A POSIX filename is a byte string, so this is a Linux and Unix state; Windows names are UTF-16 and the default macOS volume refuses the name outright.
 
 Orphan detection covers asset types only: `Texture2D`, `AudioStream`, `MeshResource`, `Font`, and `Shader`. Scenes and scripts are excluded on purpose, because a scene that nothing references is usually a level you open by hand. `.import` and `.uid` sidecars are excluded too.
 

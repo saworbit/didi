@@ -52,6 +52,9 @@ public:
     // An index this large already exceeds anything an MCP client can usefully
     // read in one call, and a scan past it just stalls the stdio transport.
     static constexpr size_t kMaxIndexedResources = 20000;
+    // Enough to name what is there without turning the honesty field into a
+    // listing of its own, the same bound project_search puts on its own.
+    static constexpr size_t kMaxReportedUndecodablePaths = 16;
     static constexpr std::chrono::milliseconds kSharedIndexLifetime{2000};
 
     ResourceIndexer();
@@ -72,6 +75,12 @@ public:
 
     bool truncated() const { return m_truncated; }
 
+    // Files whose names are not valid UTF-8, so no response can carry them.
+    // Rendered with U+FFFD in place of the bytes that could not be decoded,
+    // because which file it is, is the one thing a caller needs (#650).
+    const std::vector<std::string>& undecodablePaths() const { return m_undecodable_paths; }
+    size_t undecodablePathCount() const { return m_undecodable_path_count; }
+
     json buildProjectTree(const std::string& root_dir = ".") const;
 
     // One scan per project root, reused for kSharedIndexLifetime. Mutating
@@ -87,6 +96,8 @@ private:
     std::vector<ResourceInfo> m_resources;
     std::unordered_map<std::string, std::string> m_uidMap;
     bool m_truncated{false};
+    std::vector<std::string> m_undecodable_paths;
+    size_t m_undecodable_path_count{0};
 };
 
 } // namespace offline

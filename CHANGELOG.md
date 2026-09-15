@@ -66,6 +66,25 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A file whose name JSON cannot carry is named, not blamed on the caller.**
+  A POSIX filename is a byte string, so a `.gd` copied off an old drive or
+  unpacked from a Latin-1 zip is a legal file with a name that is not UTF-8.
+  JSON is defined over Unicode, so serialising that path threw while building
+  the response, and the throw was caught as a caller having read an argument at
+  the wrong type: `project_list_resources` and `project_audit_assets` answered
+  `400 invalid_arguments` to calls that carried no arguments at all, and
+  `project_search_text`, `project_search_symbols` and `project_get_uid_map`
+  each behaved differently depending on the file's extension (#650). The
+  encoder failure is now its own code, `response_not_encodable` with a `500`,
+  because a response the server cannot encode is the server's fault; the
+  walkers skip such a file once, in the index and in the search walk, so they
+  all give the same answer about it; and they name it, with the undecodable
+  bytes rendered as U+FFFD, under `undecodable_paths` and
+  `undecodable_path_count` or as a `diagnostics` entry reading
+  `undecodable_name`. Windows names are UTF-16 and the default macOS volume
+  refuses the name outright, which is why eleven sessions of probing never met
+  this.
+
 - **`project_rename_references` previews the plan it is about to carry out.**
   It is in the always-confirmed list with the reason written beside it: it
   rewrites several files at once, there is no editor undo stack behind a file
