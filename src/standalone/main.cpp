@@ -9,6 +9,18 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <cstring>
+#include <limits>
+#include <optional>
+#include <string>
+#include <vector>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 static didi::mcp::McpServer* g_server = nullptr;
 static std::atomic<bool> g_stopRequested{false};
@@ -47,6 +59,50 @@ static const char* kUiAppHelpLine =
     "  --ui-app <mode>       MCP Apps dashboard: auto (default), always, or off";
 static const char* kHelpHint = "Run didi --help for the supported options.";
 
+#if defined(_WIN32)
+// Windows hands a process its command line and its environment as UTF-16. The
+// narrow main(argc, argv) the CRT synthesises converts both through the system
+// ANSI codepage, which is lossy for every character outside it: a project root
+// under C:/Users/Jose/... arrived with the accented byte mangled, the path no
+// longer parsed as UTF-8, and the process fast-failed with no output (#611).
+// Reading the wide forms and encoding them ourselves is the only way to get
+// the bytes the caller actually typed.
+static std::optional<std::string> wideToUtf8(const std::wstring& value) {
+    if (value.empty()) return std::string();
+    if (value.size() > static_cast<size_t>(std::numeric_limits<int>::max())) return std::nullopt;
+    const int required = WideCharToMultiByte(
+        CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
+        nullptr, 0, nullptr, nullptr);
+    if (required <= 0) return std::nullopt;
+    std::string utf8(static_cast<size_t>(required), '\0');
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+                            static_cast<int>(value.size()), utf8.data(), required,
+                            nullptr, nullptr) != required) {
+        return std::nullopt;
+    }
+    return utf8;
+}
+#endif
+
+// The environment reaches the process the same way the command line does, so
+// DIDI_PROJECT_ROOT needs the same treatment as --project.
+static std::optional<std::string> environmentValue(const char* name) {
+#if defined(_WIN32)
+    const std::wstring wide_name(name, name + std::strlen(name));
+    const DWORD required = GetEnvironmentVariableW(wide_name.c_str(), nullptr, 0);
+    if (required == 0) return std::nullopt;
+    std::wstring value(required, L'\0');
+    const DWORD length = GetEnvironmentVariableW(wide_name.c_str(), value.data(), required);
+    if (length == 0 || length >= required) return std::nullopt;
+    value.resize(length);
+    return wideToUtf8(value);
+#else
+    const char* value = std::getenv(name);
+    if (!value) return std::nullopt;
+    return std::string(value);
+#endif
+}
+
 static void refuse(const std::string& message, const char* help_line) {
     std::cerr << "Didi startup refused: " << message << std::endl;
     if (help_line) std::cerr << help_line << std::endl;
@@ -55,13 +111,13 @@ static void refuse(const std::string& message, const char* help_line) {
 // A value-taking option must actually be given a value, and that value must not
 // be another option. Without this check `--log-level --yolo` swallows the flag,
 // so a launch that asked for YOLO mode starts without it and says nothing.
-static bool takeValue(int argc, char* argv[], int& index, const std::string& option,
-                      const char* help_line, std::string& out) {
-    if (index + 1 >= argc) {
+static bool takeValue(const std::vector<std::string>& arguments, size_t& index,
+                      const std::string& option, const char* help_line, std::string& out) {
+    if (index + 1 >= arguments.size()) {
         refuse(option + " expects a value", help_line);
         return false;
     }
-    const std::string value = argv[index + 1];
+    const std::string& value = arguments[index + 1];
     if (value.empty()) {
         refuse(option + " expects a value and was given an empty one", help_line);
         return false;
@@ -76,14 +132,14 @@ static bool takeValue(int argc, char* argv[], int& index, const std::string& opt
     return true;
 }
 
-int main(int argc, char* argv[]) {
+// argv is already UTF-8 by the time it gets here, whichever entry point ran.
+static int runDidi(const std::vector<std::string>& arguments) {
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
 
     std::string project_root;
-    const char* env_root = std::getenv("DIDI_PROJECT_ROOT");
-    if (env_root && std::strlen(env_root) > 0) {
-        project_root = env_root;
+    if (const auto env_root = environmentValue("DIDI_PROJECT_ROOT")) {
+        project_root = *env_root;
     }
 
     // Confirmations can only be turned off from here -- the launch arguments,
@@ -92,13 +148,13 @@ int main(int argc, char* argv[]) {
     bool skip_confirmations = false;
     auto ui_app_mode = didi::mcp::McpServer::UiAppMode::Auto;
     std::string managed_editor, recovery_workspace;
-    if (const char* env_yolo = std::getenv("DIDI_YOLO")) {
-        const std::string value = env_yolo;
+    if (const auto env_yolo = environmentValue("DIDI_YOLO")) {
+        const std::string& value = *env_yolo;
         skip_confirmations = value == "1" || value == "true" || value == "TRUE";
     }
 
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
+    for (size_t i = 1; i < arguments.size(); ++i) {
+        const std::string& arg = arguments[i];
         if (arg == "--version" || arg == "-v") {
             // The build id as well as the version, because the version cannot
             // tell two builds apart and the GDExtension is a separate file a
@@ -145,14 +201,14 @@ int main(int argc, char* argv[]) {
                       << "  Connects to Godot 4.5+ editor via native named pipes.\n";
             return 0;
         } else if (arg == "--managed-editor") {
-            if (!takeValue(argc, argv, i, arg, kHelpHint, managed_editor)) return 2;
+            if (!takeValue(arguments, i, arg, kHelpHint, managed_editor)) return 2;
         } else if (arg == "--recovery-workspace") {
-            if (!takeValue(argc, argv, i, arg, kHelpHint, recovery_workspace)) return 2;
+            if (!takeValue(arguments, i, arg, kHelpHint, recovery_workspace)) return 2;
         } else if (arg == "--project" || arg == "-p") {
-            if (!takeValue(argc, argv, i, arg, kProjectHelpLine, project_root)) return 2;
+            if (!takeValue(arguments, i, arg, kProjectHelpLine, project_root)) return 2;
         } else if (arg == "--pipe-name") {
             std::string pipe_arg;
-            if (!takeValue(argc, argv, i, arg, kPipeNameHelpLine, pipe_arg)) return 2;
+            if (!takeValue(arguments, i, arg, kPipeNameHelpLine, pipe_arg)) return 2;
 #if defined(_WIN32)
             _putenv_s("DIDI_PIPE_NAME", pipe_arg.c_str());
 #else
@@ -160,7 +216,7 @@ int main(int argc, char* argv[]) {
 #endif
         } else if (arg == "--ui-app") {
             std::string mode;
-            if (!takeValue(argc, argv, i, arg, kUiAppHelpLine, mode)) return 2;
+            if (!takeValue(arguments, i, arg, kUiAppHelpLine, mode)) return 2;
             const auto parsed = didi::mcp::McpServer::parseUiAppMode(mode);
             if (!parsed.has_value()) {
                 refuse("--ui-app expects auto, always, or off, not " + mode, kUiAppHelpLine);
@@ -171,7 +227,7 @@ int main(int argc, char* argv[]) {
             skip_confirmations = true;
         } else if (arg == "--log-level") {
             std::string lvl;
-            if (!takeValue(argc, argv, i, arg, kLogLevelHelpLine, lvl)) return 2;
+            if (!takeValue(arguments, i, arg, kLogLevelHelpLine, lvl)) return 2;
             if (lvl == "DEBUG") didi::Logger::instance().setLevel(didi::LogLevel::Debug);
             else if (lvl == "INFO") didi::Logger::instance().setLevel(didi::LogLevel::Info);
             else if (lvl == "WARN") didi::Logger::instance().setLevel(didi::LogLevel::Warn);
@@ -208,12 +264,22 @@ int main(int argc, char* argv[]) {
     std::filesystem::path recovery_container;
     if (!managed_editor.empty()) {
         std::error_code ec;
-        const auto executable = didi::paths::projectPathFromUtf8(managed_editor);
+        std::filesystem::path executable;
+        // Same throw as the project root: building a path from bytes the
+        // platform cannot encode escapes main and kills the process without a
+        // line of output. Refuse instead.
+        try {
+            executable = didi::paths::projectPathFromUtf8(managed_editor);
+            recovery_container = std::filesystem::absolute(
+                didi::paths::projectPathFromUtf8(recovery_workspace));
+        } catch (const std::exception&) {
+            refuse("--managed-editor and --recovery-workspace must be valid UTF-8", kHelpHint);
+            return 2;
+        }
         if (!executable.is_absolute() || !std::filesystem::is_regular_file(executable, ec) || ec) {
             refuse("--managed-editor requires an absolute executable file", kHelpHint);
             return 2;
         }
-        recovery_container = std::filesystem::absolute(didi::paths::projectPathFromUtf8(recovery_workspace));
         const auto initialized = didi::runtime::CheckpointStore::initialize(resolved_project.value(), recovery_container);
         if (initialized.isErr()) { refuse(initialized.error().message, kHelpHint); return 2; }
         resolved_project = recovery_container / "project";
@@ -271,3 +337,27 @@ int main(int argc, char* argv[]) {
     }
     return 0;
 }
+
+#if defined(_WIN32) && defined(_MSC_VER)
+// MSVC links wmainCRTStartup when wmain is the entry point, so the command line
+// arrives as UTF-16 and nothing has been through the ANSI codepage yet. The
+// guard is on the compiler rather than the platform because MinGW needs
+// -municode to link a wmain, and this project builds Windows with MSVC.
+int wmain(int argc, wchar_t* argv[]) {
+    std::vector<std::string> arguments;
+    arguments.reserve(static_cast<size_t>(argc));
+    for (int i = 0; i < argc; ++i) {
+        auto encoded = wideToUtf8(argv[i]);
+        if (!encoded.has_value()) {
+            refuse("argument " + std::to_string(i) + " cannot be encoded as UTF-8", kHelpHint);
+            return 2;
+        }
+        arguments.push_back(std::move(*encoded));
+    }
+    return runDidi(arguments);
+}
+#else
+int main(int argc, char* argv[]) {
+    return runDidi(std::vector<std::string>(argv, argv + argc));
+}
+#endif
