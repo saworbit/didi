@@ -1331,7 +1331,7 @@ static void test_tools_call_enforces_the_published_input_schema() {
     const auto missing = call("project_get_setting", didi::json::object());
     ASSERT_TRUE(missing.result["isError"].get<bool>());
     ASSERT_TRUE(errorText(missing).find("setting") != std::string::npos);
-    ASSERT_TRUE(errorText(missing).find("atomic runtime route") == std::string::npos);
+    ASSERT_TRUE(errorText(missing).find("no_live_session") == std::string::npos);
 
     // A mutation never picks its own target. Without target_node this used to
     // reach the bridge and land the group on the edited scene root.

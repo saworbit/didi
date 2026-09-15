@@ -869,6 +869,11 @@ CallToolResult handleAudioConfigureBus(const json& args, std::shared_ptr<ipc::II
     // is listening to now, which is the opposite of what someone chasing a
     // silent bus wants.
     if (!ipc || !ipc->isConnected()) {
+        // Unreachable in practice: the registry's live-route check answers a
+        // live-only tool before the handler runs, and it now carries this
+        // tool's offline sibling in the shared refusal (#615). Kept as the
+        // handler's own floor, in the same words, for any path that reaches
+        // here without going through that check.
         return CallToolResult::error(
             "Godot Editor is offline. Audio bus state lives in the running engine, so launch "
             "Godot to change it. audio_list_buses still reads the project layout offline.");

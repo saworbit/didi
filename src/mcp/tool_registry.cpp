@@ -550,6 +550,46 @@ Error runtimeSessionMismatchError(const std::string& tool_name, const std::strin
     return error;
 }
 
+// The offline sibling a caller can reach for while no engine is attached, where
+// this server knows of one. Kept to pairs the code already names rather than
+// guessed at from tool names.
+const char* offlineSiblingFor(std::string_view tool) {
+    if (tool == "audio_configure_bus") {
+        return "audio_list_buses reads the project's bus layout offline.";
+    }
+    return nullptr;
+}
+
+// What a caller can act on when no engine is attached.
+//
+// This is the most common state a caller meets, and every live-only tool
+// answered it with "No atomic runtime route is available for live dispatch" --
+// internal vocabulary that names neither Godot, nor the editor, nor anything to
+// do about it (#615). Per-tool wording written for this case sat behind the
+// route check and could never ship, so the fact it carried is said here.
+Error liveOnlySessionMissing(const ResolvedToolBinding& binding) {
+    std::string message = std::string(binding.canonical_name) +
+        " runs only against a live Godot engine, and none is attached for this project root. "
+        "Open the project in the Godot editor with the Didi addon enabled, then call "
+        "runtime_list_sessions to see what is attachable and runtime_attach_session to select "
+        "it.";
+    const char* sibling = offlineSiblingFor(binding.canonical_name);
+    if (sibling) message += std::string(" ") + sibling;
+
+    auto error = Error::notConnected(message);
+    // What a caller branches on rather than reads. retryable stays true,
+    // because the published meaning is "the same call could succeed later with
+    // nothing about the request changed", and opening an editor is not a change
+    // to the request. blocked_on says what has to happen for that to be so.
+    error.data = json{{"blocked_on", "no_live_session"},
+                      {"needs_live_engine", true},
+                      {"offline_fallback", false},
+                      {"discover_with", "runtime_list_sessions"},
+                      {"attach_with", "runtime_attach_session"}};
+    if (sibling) error.data["offline_alternative"] = sibling;
+    return error;
+}
+
 CallToolResult structuredLiveToolError(const Error& error,
                                        const std::optional<runtime::SessionDescriptor>& session) {
     json data = error.data.is_object() ? error.data : json::object();
@@ -1679,8 +1719,9 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
             // This is the answer #527 and #536 are about. A live-only tool with
             // no route said the same sentence whether the editor had never
             // started, had crashed, or was up and held by another MCP client.
-            auto error = Error::notConnected("No atomic runtime route is available for live "
-                                             "dispatch");
+            // annotateRouteObstruction is what distinguishes the last two; the
+            // sentence now covers the first, which is the common one.
+            auto error = liveOnlySessionMissing(binding);
             runtime::annotateRouteObstruction(error);
             return structuredLiveToolError(error, std::nullopt);
         }
