@@ -769,6 +769,8 @@ Node-path targets match complete captured paths: `Player/Sprite` does not match 
 
 The results are evidence, not verdicts. A name or node path built at runtime cannot be followed, so an empty impact list is not proof that nothing depends on the target, and a local variable that happens to share a name is reported as a `code_reference`. These limits ship in a `limitations` array in the response.
 
+The project read behind this is bounded the way `project_search_text` is: 4 MiB per file, 64 MiB in total, 10000 files. A file a bound keeps out sets `truncated: true`, so a partial answer says it is partial rather than reading as a complete one.
+
 ### `project_rename_references` — Offline
 
 Renames a symbol in the places Godot serializes it, across every file at once, and reports the code references it deliberately does not touch.
@@ -781,7 +783,7 @@ Rewritten: the `signal` and `method` attributes of a `[connection]`, and the pro
 
 Every file is staged before any is replaced, so the change cannot stop half applied because the last file was the one that could not be written. If a replacement still fails, the error names `committed_files` and `unchanged_files` rather than reporting a failure that sounds total.
 
-Refused: a `new_name` a connection or track already uses, because that merges two symbols with no way back; a target and `new_name` that are the same; and any run against a truncated project scan, because renaming the files that were read and leaving the rest is the breakage this exists to prevent. Always requires a confirmation token. Run `project_analyze_impact` on the same target first to see every site; the mutation preview shows the arguments, not the file list. Save or close open scenes first, since an editor holding unsaved changes will write over the files.
+Refused: a `new_name` a connection or track already uses, because that merges two symbols with no way back; a target and `new_name` that are the same; and any run against a truncated project scan, because renaming the files that were read and leaving the rest is the breakage this exists to prevent. A scan is truncated either because the project holds more resources than the indexer will list or because a file was over the scan's size bounds; the refusal says which, and carries `skipped_files`. Always requires a confirmation token. Run `project_analyze_impact` on the same target first to see every site; the mutation preview shows the arguments, not the file list. Save or close open scenes first, since an editor holding unsaved changes will write over the files.
 
 ### `project_audit_assets` — Live or offline
 
@@ -797,6 +799,8 @@ Reads the project and reports four things nothing in a single file can show: ass
 At least one of the four report switches must stay enabled.
 
 Orphan detection covers asset types only: `Texture2D`, `AudioStream`, `MeshResource`, `Font`, and `Shader`. Scenes and scripts are excluded on purpose, because a scene that nothing references is usually a level you open by hand. `.import` and `.uid` sidecars are excluded too.
+
+The project read behind this is the same bounded one `project_analyze_impact` uses, and `scanned_text_files` and `skipped_text_files` say how much of the project the answer covers. A dead signal is one nothing emits, connects or wires; a member call written with the name and the `.connect` on different lines is not seen, which is stated in `limitations` beside the variable-name case.
 
 Files under `res://addons/` are excluded by default. That is a conventional Godot boundary: it holds third-party code a developer did not write and is not responsible for tidying, and an addon's own assets otherwise dominate the list in a small project. `excluded_addon_orphans` reports how many were left out and `addon_orphans_included` reports which way the switch was set, so the number is explainable; pass `include_addon_orphans` to count them.
 

@@ -2,6 +2,7 @@
 
 #include "didi/common/project_path.hpp"
 #include "didi/offline/project_text_scan.hpp"
+#include "didi/offline/project_search.hpp"
 #include "didi/common/atomic_write.hpp"
 #include <string_view>
 #include <vector>
@@ -303,6 +304,16 @@ void collectNameTargetImpacts(const ProjectTextScan& scan, const std::string& ta
     for (const auto& source : scan.sources) {
         if (source.contents.find(target) == std::string::npos) continue;
         forEachLine(source.contents, [&](const std::string& line, int number) {
+            // The same literal guard the file above gets, one level down. Every
+            // form built from the target embeds it literally, so a line without
+            // it cannot match any of them and the answer does not change.
+            //
+            // A Godot resource writes a packed array on one line, and an
+            // ArrayMesh or a baked Curve3D puts hundreds of kilobytes there.
+            // Handing that line to the regex engine costs time quadratic in its
+            // length, so a project holding one baked mesh took minutes here and
+            // past a megabyte on a line did not come back at all (#661).
+            if (line.find(target) == std::string::npos) return;
             if (!std::regex_search(line, whole_word)) return;
             if (std::regex_search(line, connection_signal)) {
                 out.push_back({source.path, "scene_connection", number, detailFrom(line)});
@@ -593,6 +604,9 @@ std::vector<Impact> declarationsOf(const ProjectTextScan& scan, const std::strin
     for (const auto& source : scan.sources) {
         if (source.contents.find(target) == std::string::npos) continue;
         forEachLine(source.contents, [&](const std::string& line, int number) {
+            // The declaration pattern embeds the target literally, so the same
+            // per-line guard applies here for the same reason (#661).
+            if (line.find(target) == std::string::npos) return;
             std::smatch match;
             if (!std::regex_search(line, match, declaration)) return;
             auto kind = match[1].str();
@@ -681,10 +695,23 @@ Result<json> renameReferences(const std::string& root_dir, const ProjectRenameOp
     // precisely the half-applied change this exists to prevent, and the caller
     // would be told it succeeded.
     if (scan.truncated) {
-        return Error(409,
-                     "The project scan was truncated, so some files were not read. Renaming now "
-                     "would update part of the project and leave the rest, which is the breakage "
-                     "this is meant to prevent.");
+        // Two causes now: more resources than the indexer will hold, and a file
+        // the scan's size bounds kept out (#664). A caller who is told only
+        // "truncated" cannot tell which, and the second one names a file they
+        // can do something about.
+        std::string reason =
+            "The project scan was truncated, so some files were not read. Renaming now "
+            "would update part of the project and leave the rest, which is the breakage "
+            "this is meant to prevent.";
+        if (scan.skipped_files > 0) {
+            reason += " " + std::to_string(scan.skipped_files) +
+                      " file(s) were over the scan's size limit of " +
+                      std::to_string(kSearchMaxFileBytes / (1024 * 1024)) + " MiB each or " +
+                      std::to_string(kSearchMaxTotalBytes / (1024 * 1024)) +
+                      " MiB in total. project_analyze_impact reports the same scan and will "
+                      "list the sites it can see.";
+        }
+        return Error(409, reason, {{"skipped_files", scan.skipped_files}});
     }
 
     // Renaming onto a name that is already serialized somewhere would merge two

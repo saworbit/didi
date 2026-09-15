@@ -2,10 +2,10 @@
 
 #include "didi/common/project_path.hpp"
 #include "didi/offline/import_health.hpp"
+#include "didi/offline/project_text_scan.hpp"
 #include "didi/offline/resource_indexer.hpp"
 
 #include <algorithm>
-#include <fstream>
 #include <map>
 #include <regex>
 #include <set>
@@ -24,12 +24,20 @@ struct Reference {
     bool is_uid{false};
 };
 
-std::string readFile(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input) return {};
-    std::ostringstream contents;
-    contents << input.rdbuf();
-    return contents.str();
+// Whether a pattern can match at all, asked of the shortest literal every one
+// of its matches must contain.
+//
+// A resource writes a packed array on one line, and running a pattern over one
+// of those costs time quadratic in its length. The dead-signal collector below
+// spent ten seconds on a single four-hundred-kilobyte line in a .tres that
+// mentions no signal at all (#661). A literal the pattern requires is a byte
+// comparison, so a file that cannot match is skipped for the price of one scan
+// of its bytes, and the answer does not change.
+bool mayContain(const std::string& text, std::initializer_list<const char*> literals) {
+    for (const auto* literal : literals) {
+        if (text.find(literal) != std::string::npos) return true;
+    }
+    return false;
 }
 
 void collectMatches(const std::string& text, const std::regex& pattern, bool is_uid,
@@ -53,11 +61,15 @@ std::vector<Reference> referencesIn(const std::string& text) {
     static const std::regex uid_literal(R"re("(uid://[a-z0-9]+)")re");
 
     std::vector<Reference> references;
-    collectMatches(text, ext_path, false, references);
-    collectMatches(text, ext_uid, true, references);
-    collectMatches(text, gd_load, false, references);
-    collectMatches(text, cs_load, false, references);
-    collectMatches(text, uid_literal, true, references);
+    if (mayContain(text, {"[ext_resource"})) {
+        collectMatches(text, ext_path, false, references);
+        collectMatches(text, ext_uid, true, references);
+    }
+    if (mayContain(text, {"res://"})) {
+        collectMatches(text, gd_load, false, references);
+        collectMatches(text, cs_load, false, references);
+    }
+    if (mayContain(text, {"uid://"})) collectMatches(text, uid_literal, true, references);
     return references;
 }
 
@@ -134,8 +146,7 @@ std::vector<SignalDeclaration> signalsDeclaredIn(const std::string& path,
 // the name, and a name like `changed` is in most of them, so a project with a
 // couple of thousand scripts spent tens of seconds here. One pass costs the
 // same whether the project declares one signal or a thousand.
-std::unordered_set<std::string> usedSignalNames(
-    const std::vector<std::pair<std::string, std::string>>& sources) {
+std::unordered_set<std::string> usedSignalNames(const std::vector<ProjectTextSource>& sources) {
     // is_connected is named on its own because `connect` inside it is not
     // followed by an open bracket, so the shorter alternative does not cover it.
     static const std::regex quoted_call(
@@ -153,12 +164,36 @@ std::unordered_set<std::string> usedSignalNames(
             used.insert((*it)[1].str());
         }
     };
+    // member_call is the one that costs, and the cost is quadratic in the
+    // length of the run it is scanning. A resource writes a packed array on one
+    // line, and this took ten seconds on a single four-hundred-kilobyte line
+    // (#661), so it is asked a line at a time and only of lines that carry the
+    // literal every one of its matches ends with. The other two are asked of
+    // the whole text as before: both need a run of letters the engine fails on
+    // immediately inside a numeric array, and quoted_call's `connect(` is
+    // regularly written across a line break.
+    //
+    // A member call is not, because GDScript continues a line only inside
+    // brackets, so `name` and `.connect(` are on one line in anything the
+    // parser accepts. That is stated in the payload's limitations.
+    const auto collectPerLine = [&used, &collect](const std::string& text,
+                                                  const std::regex& pattern,
+                                                  std::initializer_list<const char*> literals) {
+        size_t begin = 0;
+        while (begin <= text.size()) {
+            auto end = text.find('\n', begin);
+            if (end == std::string::npos) end = text.size();
+            const auto line = text.substr(begin, end - begin);
+            if (mayContain(line, literals)) collect(line, pattern);
+            begin = end + 1;
+        }
+    };
 
-    for (const auto& [path, text] : sources) {
-        (void)path;
-        collect(text, quoted_call);
-        collect(text, member_call);
-        collect(text, scene_wired);
+    for (const auto& source : sources) {
+        const auto& text = source.contents;
+        if (mayContain(text, {"connect", "emit_signal"})) collect(text, quoted_call);
+        if (mayContain(text, {"emit", "connect"})) collectPerLine(text, member_call, {"emit", "connect"});
+        if (mayContain(text, {"[connection"})) collect(text, scene_wired);
     }
     return used;
 }
@@ -166,31 +201,22 @@ std::unordered_set<std::string> usedSignalNames(
 } // namespace
 
 json auditProject(const std::string& root_dir, const ProjectAuditOptions& options) {
-    // Shared with the other read tools, so a run of resource_inspect,
-    // project_list_resources and project_analyze_bloat crawls the tree once.
-    const auto indexer = ResourceIndexer::sharedIndex(root_dir);
-    const auto resources = indexer->query("res://");
+    // One read of every text file in the project, reused by all three passes,
+    // through the shared scan rather than a second copy of the same loop. The
+    // copy this replaces had no bounds and its own list of which types carry
+    // text, so a file type added to one was invisible to the other (#664). The
+    // index underneath is still shared with the other read tools, so a run of
+    // resource_inspect, project_list_resources and project_analyze_bloat
+    // crawls the tree once.
+    const auto scan = scanProjectText(root_dir);
+    const auto& resources = scan.resources;
+    const auto& sources = scan.sources;
 
-    const auto root = paths::projectPathFromUtf8(root_dir);
-
-    // One read of every text file in the project, reused by all three passes.
-    std::vector<std::pair<std::string, std::string>> sources;
     std::unordered_map<std::string, const ResourceInfo*> by_path;
     std::unordered_map<std::string, const ResourceInfo*> by_uid;
     for (const auto& resource : resources) {
         by_path[resource.path] = &resource;
         if (!resource.uid.empty()) by_uid[resource.uid] = &resource;
-    }
-
-    for (const auto& resource : resources) {
-        const bool textual = resource.type == "PackedScene" || resource.type == "Resource" ||
-                             resource.type == "GDScript" || resource.type == "CSharpScript" ||
-                             resource.type == "Shader";
-        if (!textual) continue;
-        auto relative = resource.path;
-        if (strings::startsWith(relative, "res://")) relative.erase(0, 6);
-        auto text = readFile(root / paths::projectPathFromUtf8(relative));
-        if (!text.empty()) sources.emplace_back(resource.path, std::move(text));
     }
 
     // A uid reference is resolved to the path it names, so "referenced" has one
@@ -279,6 +305,7 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
     json result = {
         {"scanned_resources", resources.size()},
         {"scanned_text_files", sources.size()},
+        {"skipped_text_files", scan.skipped_files},
         {"orphans", orphans},
         {"orphan_bytes", orphan_bytes},
         {"excluded_addon_orphans", excluded_addon_orphans},
@@ -290,7 +317,7 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         {"import_issues", import_health["import_issues"]},
         {"import_issue_count", import_health["import_issue_count"]}
     };
-    if (indexer->truncated()) result["truncated"] = true;
+    if (scan.truncated) result["truncated"] = true;
     if (import_health.contains("import_scan_truncated")) {
         result["import_scan_truncated"] = true;
     }
@@ -305,7 +332,8 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         "out; pass include_addon_orphans to see them.",
         "A signal is reported as dead only when no file emits it, connects to "
         "it, or wires it in a scene. A connection made through a variable name "
-        "cannot be seen.",
+        "cannot be seen, and neither can a member call written with the name "
+        "and the .connect on different lines.",
         "source_newer_than_output compares filesystem modification times. It is "
         "evidence that reimport may be needed, not Godot's checksum, importer-version, "
         "or settings-validity verdict."
