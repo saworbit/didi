@@ -31,8 +31,13 @@ place rather than at each call site:
 - `code`: a stable string for the kind of failure. `invalid_arguments`,
   `not_found`, `forbidden`, `conflict`, `gone`, `response_too_large`,
   `unprocessable`, `confirmation_required`, `rate_limited`, `unimplemented`,
-  `not_connected`, `timeout`, `internal_error`, `request_failed`. Branch on this
-  rather than on the number beside it, which is a transport convention.
+  `not_connected`, `timeout`, `engine_refused`, `internal_error`,
+  `request_failed`. Branch on this rather than on the number beside it, which is
+  a transport convention. `not_connected` is a fact about the session: the route
+  could not deliver. An engine that received the call and failed it answers
+  `502` with `engine_refused` and the engine's own status under
+  `data.upstream_code`, because reporting that as `503 not_connected` sent
+  callers off to re-attach a session whose next call succeeded.
 - `tool`: the name that was called, alias included.
 - `canonical_tool`: the name it resolves to. The same as `tool` unless a legacy
   alias was used.
@@ -231,7 +236,17 @@ Arguments are checked against the signal's declared parameter types before
 anything is dispatched, so a type mismatch returns `400` without emitting. Bounds:
 at most 16 arguments, 8 levels of nesting, 64 entries per array or object, and
 4096 bytes per string or key. A request whose compact form exceeds the response
-budget returns `413`.
+budget returns `413`. The bounds run on the preview path as well as the write
+path, so a `dry_run` on arguments the call cannot accept refuses instead of
+signing them, and the refusal names the entry, the rule and the limit.
+
+Emitting a signal nothing is connected to is a no-op and reported as one:
+`emitted: false`, `connection_count: 0`, and a sentence saying nothing is
+listening. Godot keeps a signal in its object's signal map only once it has a
+connection, so the engine returns `ERR_UNAVAILABLE` for this, and it used to be
+reported as a refusal on a healthy session. A delivered emit reports
+`emitted: true` with the `connection_count` it reached, read before the emit
+because a one-shot connection disconnects itself on delivery.
 
 Like every mutation, all three write operations expose `dry_run` and require a
 `confirmation_token` bound to the exact arguments, project and route.
@@ -1340,7 +1355,7 @@ Requires finite viewport-space `point.x` and `point.y`. Optional `root_path` def
 
 Every implemented mutating tool schema includes `dry_run: boolean`. A true dry-run stops at the registry boundary and returns `dry_run: true` plus `mutation_preview`; no tool handler, subprocess, filesystem writer, or Godot main-thread command runs. The preview reports the exact tool/arguments, canonical project, execution mode, optional session ID, route generation, binding hash, and a change record.
 
-The preview opens its target where it can, and runs the argument checks the real call runs before it opens anything. A dry-run against a script, resource, node or setting that is not there returns the same failure the real call would, and so does one whose arguments the real call refuses: a parent-relative `..` node path, or a `new_definition` that declares a different kind of symbol from the one named. A preview that opens a node also runs that call's own checks on it, and refuses with the code and `data.code` the real call gives: a node the file cannot hold, a scene that would instance the edited scene into itself, a script whose base type the node cannot take, or a node that already has one. Those are properties of the argument rather than of the target, so they need nothing opened and are answered whether or not the tool has a probe. A preview cannot approve a call that can never execute. A tool with no target to read is still held to any precondition it shares with a read-only sibling: `project_apply_changes` runs the git work tree check `project_verify_changes` runs, so a project no repository holds is refused at the preview rather than handed a token that cannot be spent. The preview still reports `target_read: false` there, because the files the call would overwrite have not been opened. `target_read` and `preview_kind` say which happened: `target_state` with `changes[].kind: "planned_mutation"` and a `before` holding current state, or `argument_binding` with `changes[].kind: "unverified_mutation"` when the tool has no probe or the engine could not be reached. `changes[].target` names what the change is about, such as the resolved path and the symbol, rather than repeating the argument object that is already at `mutation_preview.arguments`; a tool that names no subject of its own says so and points there.
+The preview opens its target where it can, and runs the argument checks the real call runs before it opens anything. A dry-run against a script, resource, node or setting that is not there returns the same failure the real call would, and so does one whose arguments the real call refuses: a parent-relative `..` node path, or a `new_definition` that declares a different kind of symbol from the one named. A preview that opens a node also runs that call's own checks on it, and refuses with the code and `data.code` the real call gives: a node the file cannot hold, a scene that would instance the edited scene into itself, a script whose base type the node cannot take, or a node that already has one. Those are properties of the argument rather than of the target, so they need nothing opened and are answered whether or not the tool has a probe. A preview cannot approve a call that can never execute. A tool with no target to read is still held to any precondition it shares with a read-only sibling: `project_apply_changes` runs the git work tree check `project_verify_changes` runs, so a project no repository holds is refused at the preview rather than handed a token that cannot be spent. The preview still reports `target_read: false` there, because the files the call would overwrite have not been opened. `target_read` and `preview_kind` say which happened: `target_state` with `changes[].kind: "planned_mutation"` and a `before` holding current state, or `argument_binding` with `changes[].kind: "unverified_mutation"` when the tool has no probe or the engine could not be reached. A probe that resolved its node without reading anything the call will change reports `changes[].kind: "resolved_target"` instead, with `before.resolved: true`: `signal_emit` and the other tools that change no property of their target read `name` only to confirm the node is there, and reporting that as the before state of a planned mutation described a property the call will never touch. `changes[].target` names what the change is about, such as the resolved path and the symbol, rather than repeating the argument object that is already at `mutation_preview.arguments`; a tool that names no subject of its own says so and points there.
 
 Every preview publishes `max_response_bytes`, 8 MiB, and `truncated`. Every string argument carries a declared length, but a tool that takes a list of them can still sum past that, and a preview that cannot be delivered is worse than one that says what it left out. When the cap trips, values over 4 KiB are replaced with the byte count that stood there, and if that is not enough the argument block is replaced whole with a note naming its size. An elision always says it is one. The confirmation token is bound to the real arguments rather than to this copy of them, so nothing that is elided for reading can make a later confirm fail. Reading a live node sends one read-only property read and changes nothing.
 
