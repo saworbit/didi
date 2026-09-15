@@ -1,4 +1,5 @@
 #include "didi/mcp/tool_registry.hpp"
+#include "didi/tools/visual_test_lab_path.hpp"
 
 #include "didi/offline/gdscript_diagnostics.hpp"
 #include "didi/mcp/error_data.hpp"
@@ -1428,6 +1429,16 @@ struct FileTarget {
     // preview of an append read identically, which is the one fact that tells
     // them apart (#569).
     std::string_view symbol_argument{};
+    // The one place this tool writes, for a tool that writes to a constant
+    // rather than to a path the caller names. Empty otherwise, and `argument`
+    // is then what names the file.
+    //
+    // viewport_create_test_lab is the only one so far. It made the weak claim
+    // -- argument_binding, "this tool names no subject of its own" -- about a
+    // call whose subject is a fixed path the confirmation gate had just stat'd
+    // in order to decide to ask, while the preview showed the caller
+    // target_resource_path, a file the call reads and does not modify (#685).
+    std::string_view fixed_path{};
 };
 
 const std::unordered_map<std::string_view, FileTarget>& fileTargets() {
@@ -1437,6 +1448,10 @@ const std::unordered_map<std::string_view, FileTarget>& fileTargets() {
         {"script_create", {"script_path", false}},
         {"resource_create", {"save_path", false}},
         {"scene_pack_branch", {"scene_path", false}},
+        // No argument: the lab is written to one place whatever resource it is
+        // built around, and that place is the file at risk.
+        {"viewport_create_test_lab", {{}, false, {}, tools::kVisualTestLabScenePath}},
+        {"create_visual_test_lab", {{}, false, {}, tools::kVisualTestLabScenePath}},
     };
     return targets;
 }
@@ -1536,11 +1551,14 @@ std::string contentDigestOf(const std::filesystem::path& path) {
 
 std::optional<Error> probeFileTarget(const FileTarget& target, const json& arguments,
                                      json& before, json& subject) {
-    if (!arguments.is_object() || !arguments.contains(std::string(target.argument)) ||
-        !arguments[std::string(target.argument)].is_string()) {
-        return std::nullopt;
+    std::string path{target.fixed_path};
+    if (path.empty()) {
+        if (!arguments.is_object() || !arguments.contains(std::string(target.argument)) ||
+            !arguments[std::string(target.argument)].is_string()) {
+            return std::nullopt;
+        }
+        path = arguments[std::string(target.argument)].get<std::string>();
     }
-    const auto path = arguments[std::string(target.argument)].get<std::string>();
     auto resolved = paths::resolveProjectFileForWrite(path);
     if (resolved.isErr()) return resolved.error();
 
