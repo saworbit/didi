@@ -1695,6 +1695,121 @@ private:
 #endif
 };
 
+static void test_the_export_family_answers_with_an_envelope_and_previews_what_it_will_do() {
+    // Every failure in this family was a bare prose string with no code and
+    // nothing to branch on, which the error-envelope census could not reach
+    // because these need the project in a particular state rather than a
+    // particular argument (#651). And project_export's preview came back clean
+    // in all five states export_presets.cfg can be in, while the real call
+    // failed in every one, including for a preset the sibling tool in the same
+    // process could prove does not exist (#652).
+    ScopedToolProject project("export-family");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("main.tscn", "[gd_scene format=3]\n\n[node name=\"Root\" type=\"Node3D\"]\n");
+    writeAuditFile("lib.meshlib", "placeholder\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto envelope = [](const didi::mcp::CallToolResult& result) {
+        auto payload = didi::json::parse(result.content[0].text, nullptr, false);
+        ASSERT_TRUE(!payload.is_discarded());
+        ASSERT_TRUE(payload.is_object());
+        ASSERT_TRUE(payload.contains("error"));
+        ASSERT_TRUE(payload["error"]["data"].contains("code"));
+        return payload;
+    };
+
+    // No presets file: this project has no export presets, which is a normal
+    // state and the same fact whether or not the file is on disk.
+    const auto absent = registry.callTool("project_list_export_presets", didi::json::object());
+    ASSERT_TRUE(!absent.isError);
+    const auto absent_answer = didi::json::parse(absent.content[0].text);
+    ASSERT_EQ(absent_answer["preset_count"], 0u);
+    ASSERT_EQ(absent_answer["presets_file_exists"], false);
+
+    // A valid ini with no preset sections says the same thing, where it used to
+    // be an error. Two answers to one question is what that was.
+    writeAuditFile("export_presets.cfg", "[something]\nkey=1\n");
+    const auto empty = registry.callTool("project_list_export_presets", didi::json::object());
+    ASSERT_TRUE(!empty.isError);
+    const auto empty_answer = didi::json::parse(empty.content[0].text);
+    ASSERT_EQ(empty_answer["preset_count"], 0u);
+    ASSERT_EQ(empty_answer["presets_file_exists"], true);
+
+    // A file that is there and cannot be parsed is the separate state, with its
+    // own code, and project_export says the same thing rather than sending the
+    // reader off to add a preset the file already declares.
+    writeAuditFile("export_presets.cfg", "[preset.0]\nplatform=\"Linux\"\nrunnable=true\n");
+    const auto malformed = registry.callTool("project_list_export_presets", didi::json::object());
+    ASSERT_TRUE(malformed.isError);
+    ASSERT_EQ(envelope(malformed)["error"]["data"]["code"], "unprocessable");
+    const auto malformed_export = registry.callTool(
+        "project_export", didi::json{{"preset", "Linux"}, {"output_path", "res://out/g"}});
+    ASSERT_TRUE(malformed_export.isError);
+    const auto malformed_export_answer = envelope(malformed_export);
+    ASSERT_EQ(malformed_export_answer["error"]["data"]["code"], "unprocessable");
+    ASSERT_TRUE(malformed_export_answer["error"]["message"].get<std::string>().find(
+                    "preset not found") == std::string::npos);
+
+    // One complete preset, and the preview refuses a name that is provably not
+    // in the file rather than handing out a token for a call that cannot run.
+    writeAuditFile("export_presets.cfg",
+                   "[preset.0]\nname=\"Linux\"\nplatform=\"Linux\"\nrunnable=true\n"
+                   "export_path=\"out/game.x86_64\"\nexport_filter=\"all_resources\"\n");
+    const auto listed = registry.callTool("project_list_export_presets", didi::json::object());
+    ASSERT_TRUE(!listed.isError);
+    ASSERT_EQ(didi::json::parse(listed.content[0].text)["preset_count"], 1u);
+
+    const auto bogus = registry.callTool(
+        "project_export", didi::json{{"preset", "does not exist at all"},
+                                     {"output_path", "res://out/g"},
+                                     {"dry_run", true}});
+    ASSERT_TRUE(bogus.isError);
+    const auto bogus_answer = envelope(bogus);
+    ASSERT_EQ(bogus_answer["error"]["code"], 404);
+    // The names that are there, so the caller can see what they meant.
+    ASSERT_EQ(bogus_answer["error"]["data"]["available_presets"][0], "Linux");
+    ASSERT_TRUE(bogus.content[0].text.find("confirmation_token") == std::string::npos);
+
+    // A preset that is there previews, and the preview describes the file the
+    // call writes rather than only echoing the arguments.
+    const auto real = registry.callTool(
+        "project_export", didi::json{{"preset", "Linux"},
+                                     {"output_path", "res://out/game.x86_64"},
+                                     {"dry_run", true}});
+    ASSERT_TRUE(!real.isError);
+    const auto preview = didi::json::parse(real.content[0].text)["mutation_preview"];
+    ASSERT_EQ(preview["target_read"], true);
+    ASSERT_EQ(preview["preview_kind"], "target_state");
+    ASSERT_EQ(preview["changes"][0]["before"]["path"], "res://out/game.x86_64");
+    ASSERT_EQ(preview["changes"][0]["before"]["preset"], "Linux");
+
+    // And the gridmap preview describes the file it is about to replace, not
+    // the scene it reads and leaves alone.
+    const auto mesh = registry.callTool(
+        "gridmap_export_mesh_library", didi::json{{"source_scene", "res://main.tscn"},
+                                                  {"output_path", "res://lib.meshlib"},
+                                                  {"overwrite", true},
+                                                  {"dry_run", true}});
+    ASSERT_TRUE(!mesh.isError);
+    const auto mesh_preview = didi::json::parse(mesh.content[0].text)["mutation_preview"];
+    ASSERT_EQ(mesh_preview["preview_kind"], "target_state");
+    ASSERT_EQ(mesh_preview["changes"][0]["before"]["path"], "res://lib.meshlib");
+    ASSERT_EQ(mesh_preview["changes"][0]["before"]["exists"], true);
+    // The scene is context beside the change, not the change itself.
+    ASSERT_EQ(mesh_preview["changes"][0]["before"]["source_scene"], "res://main.tscn");
+    // A source that is not there is still refused, which was the one thing the
+    // old fileTargets entry did carry.
+    const auto missing_source = registry.callTool(
+        "gridmap_export_mesh_library", didi::json{{"source_scene", "res://no_such_scene.tscn"},
+                                                  {"output_path", "res://lib.meshlib"},
+                                                  {"overwrite", true},
+                                                  {"dry_run", true}});
+    ASSERT_TRUE(missing_source.isError);
+    ASSERT_EQ(envelope(missing_source)["error"]["code"], 404);
+}
+
 static void test_a_script_that_cannot_be_read_is_not_reported_as_bad_code() {
     // A file the process may not read answered as a syntax error at line 1
     // column 1 of a file whose bytes were never read, with rule
@@ -6162,6 +6277,8 @@ struct RegisterToolTests {
                      test_a_rename_preview_shows_the_files_it_will_change);
         registerTest("Tools.ImpactKindNamesTheFile",
                      test_a_name_in_a_scene_is_not_a_code_reference);
+        registerTest("Tools.ExportFamilyEnvelopesAndPreviews",
+                     test_the_export_family_answers_with_an_envelope_and_previews_what_it_will_do);
         registerTest("Tools.UnreadableScriptIsNotBadCode",
                      test_a_script_that_cannot_be_read_is_not_reported_as_bad_code);
         registerTest("Tools.UndecodableNameIsNotACallerError",

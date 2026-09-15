@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1015** |
+| Automated tests | **1017** |
 | Live-harness assertions | 1006 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**664 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**666 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -41,7 +41,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `JsonRpc` | 4 |
 | `ManagedProcess` | 6 |
 | `McpServer` | 41 |
-| `Phase5` | 16 |
+| `Phase5` | 17 |
 | `Phase6` | 22 |
 | `Phase7Contract` | 9 |
 | `Phase7Diagnostics` | 1 |
@@ -68,7 +68,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `SpeculativeVerify` | 8 |
 | `TestRunner` | 1 |
 | `ToolManifest` | 1 |
-| `Tools` | 101 |
+| `Tools` | 102 |
 | `UiListControls` | 6 |
 | `ViewportIsolation` | 2 |
 | `autoload_diagnostics` | 6 |
