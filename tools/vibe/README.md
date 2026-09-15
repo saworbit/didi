@@ -58,6 +58,8 @@ twice.
 | `probes/file_encodings.py` | A `.gd` that is not valid UTF-8 -- Latin-1, UTF-16, a truncated sequence, an embedded NUL -- asked of the script tools, with a plain-broken UTF-8 file as the control. |
 | `probes/preview_value_rules.py` | `signal_emit`'s `dry_run` against its confirm, for argument *values* rather than names. The third layer of the seam #399 and #571 opened. |
 | `probes/offline_refusals.py` | Not what a live-only tool answers offline -- what it *refuses* with. One message, fourteen tools. Run with no editor on the project. |
+| `probes/posix_platform.py` | The states only a POSIX host can create: a file the process may not read against one that is not there, a directory it may not write into, a symlink out of the project shown to the read path and the write path, a name that is not valid UTF-8, a name containing a newline, a FIFO where a `.gd` is expected, and whether the host folds case. Skips a row by name when the host cannot set it up; run it as a user who is not root, or the permission rows cannot exist. |
+| `probes/project_state_census.py` | The other half of `handler_error_census.py`. That one builds arguments from each tool's schema and so can only reach failures an argument can cause; this walks a *project file* through every state it can be in -- absent, unreadable bytes, structurally valid and empty, valid and incomplete, correct -- and asks the readers. Reports the bare strings and, separately, which states answer identically. |
 | `bind_census.py` | Not a probe against the server: every `(class, method, hash)` bind in `src/gdextension` checked against `--dump-extension-api` output from each installed engine, `hash_compatibility` included. A miss is a null bind that prints at startup or answers 501 at call time. |
 | `fixtures/` | What the ownership, game and domain probes need beyond the sandbox: a sub-scene, a scene inheriting `main.tscn`, a game scene with a ticking script and an AnimationPlayer, a `Node3D` script, and since session eleven a `domain.tscn` (TileMapLayer with a real TileSet over a generated atlas, a ShaderMaterial over a four-uniform shader, an AnimationPlayer) plus `domain3d.tscn` (a GridMap with a MeshLibrary). `sandbox.py --fixtures` copies them in. |
 | `report.py` | Files a directory of finding bodies as issues in one pass. |
@@ -552,6 +554,87 @@ the substring `utf` anywhere in the payload and matched `file_path:
 "res://utf16.gd"`, marking the worst case as passing. **Write the row that must
 stay green first, and make sure it is green for the reason you think.**
 
+**The platform was a variable and eleven sessions held it fixed.** The harness
+lives on Windows, so that is where every session ran, while README has been
+asking for macOS and Linux testers the whole time. Running the same probes
+elsewhere is cheap -- `.github/workflows/vibe-platform.yml` builds on
+`macos-latest` and `ubuntu-latest`, runs the probes and prints the output, and a
+push to a `vibe/**` branch is the whole trigger -- and it moves a surprising
+number of answers. A file the process may not read is a `chmod` on POSIX and an
+ACL nobody sets on Windows; a filename is bytes on Linux and UTF-16 on Windows;
+`temp_directory_path()` is stable on Windows, is `/tmp` on Linux and is a
+per-user `/var/folders` path on macOS that launchd sets and a bare environment
+does not have. **Ask which of your constants is a variable somewhere else.**
+
+**"POSIX" is not one platform, and the probe has to prove which one it met.**
+The strongest finding of this session -- four project walkers reporting `400
+invalid_arguments` because a filename would not serialise -- looked like a POSIX
+finding and is a Linux one: APFS refuses a non-UTF-8 name outright, with `[Errno
+92] Illegal byte sequence`, so a Mac cannot even be put in that state. The probe
+skips that row *by name* on macOS rather than passing it. A skipped row is not a
+passing row, and a row that passes because the precondition failed is worse than
+either.
+
+**A census of arguments is not a census of states.**
+`handler_error_census.py` reports zero bare strings on this build and two
+survive, both reachable only when a file on disk is present and wrong:
+`export_presets.cfg` that will not parse, and a preset name the file does not
+hold. That is #460's lesson -- "the argument check answers junk first" -- one
+layer further out: there, the key was an argument that was meaningful and wrong;
+here it is a *project* that is. `project_state_census.py` varies the project and
+asks two questions per row, and the second one is the one that keeps paying:
+which states answer identically. `project_export`'s `dry_run` cannot tell five
+states apart, and the real call fails in all five.
+
+**The probe's own argument names are part of the experiment.** Twice in one
+session a block of rows came back green because the call never reached the code
+under test: `script_create` takes `script_path` and `source_text`, not
+`file_path` and `content`, so every symlink-containment row was really the
+argument validator answering, and `overwrite: true` is confirmation-gated, so
+the case-folding row was a `428` printed as `observed=None`. Both read as
+"working" and "finding" respectively, and neither was either. The README has
+said "read the schema before believing a result" since the second session; this
+is what it costs when the probe is the one that did not.
+
+**Ask what a preview is about, not just whether it looked.**
+`gridmap_export_mesh_library` reads `source_scene` and writes `output_path`. Its
+preview reports `preview_kind: "target_state"` -- the strong claim -- with the
+`before` of `source_scene`, a file the call does not modify, while the file it
+is about to replace appears only in the echoed arguments. Its three siblings
+that take a source and an output get this right or say plainly that they did not
+look. #448 was this shape in a reader; this is the same shape inside the
+confirmation gate, which is where it costs the most.
+
+**Read the shipped archive, not the build tree.** Two findings came out of
+`tar -xzf` and sixteen bytes of Mach-O header: the macOS archive's
+`.gdextension` declares `x86_64` and `universal` for a thin arm64 dylib, and its
+deployment target is macOS 14.0, inherited from the runner's SDK and stated
+nowhere. A third came from running the published Linux binary in six distro
+containers: it needs `GLIBCXX_3.4.30`, so RHEL 9 -- whose glibc is exactly the
+floor `release.yml` chose its container to hold -- cannot start it. The release
+job's reasoning is about glibc; libstdc++ is the constraint that binds. **What
+the project builds and what it ships are different artefacts, and only one of
+them is what a user gets.**
+
+**Asked and green, so the thirteenth session can spend its budget elsewhere.**
+A symlink out of the project is refused by the reader, the preview and the
+writer, each naming the reason ("file path resolves outside the project root").
+Two servers over one Unix socket behave exactly as two over a named pipe: the
+second is told `bridge_held_by_another_client` with the holder's pid, and a
+project with no editor still gets the plain 503, so #527 has not come back on
+POSIX. Managed recovery runs on Linux -- workspace copy, `armed`, checkpoints,
+a live bridge to the owned editor -- which is the `fork` plus `PR_SET_PDEATHSIG`
+path no suite had executed. The unknown-argument, execution-mode and
+error-envelope censuses return the same numbers on Ubuntu as on Windows. #546's
+fix -- take the on-disk spelling from `std::filesystem::canonical` rather than
+trusting the argument -- holds on macOS, which is the *other* case-folding
+platform and the one it was never run on: the runner prints `host folds case:
+True`, the preview names `res://casecheck.gd` with its real size and digest for
+a call made as `res://CASECHECK.gd`, the write reports the same, and one file
+exists afterwards. And a Godot editor runs headless on Linux with the addon
+loaded and publishes a session, which makes live coverage on that platform a
+thing a container can do.
+
 ## Sessions so far
 
 | Date | Scope | Server | Findings |
@@ -576,6 +659,8 @@ stay green first, and make sure it is green for the reason you think.**
 | 2026-09-14 | The running game as a second kind of session (pause, step, injected input, invariants, explore, stop, and a fresh server beside two live sessions), Godot's own ownership rules asked of the scene tools (instanced and inherited nodes, a scene instanced into itself), the editor's own log read after every call, and every method bind checked against three engine API dumps. | `2.0.0+0ddfa3614b61` | #588-#603, sixteen findings. |
 
 | 2026-09-15 | The domain tools given something to bite on for the first time (a real TileSet, MeshLibrary, ShaderMaterial and AnimationPlayer), the project path before the server parses it, files that are not valid UTF-8, the preview path against the call path for argument *values*, and the refusal every live-only tool gives when no editor is running. | `2.0.0+e8999e1bd52f` | #611-#625, fifteen findings. One of them, #622, was filed wrong and corrected in place. |
+
+| 2026-09-15 | The other two supported platforms, for the first time: a Linux and a macOS runner beside a local Ubuntu container and a headless Godot editor on it. POSIX states Windows cannot make (unreadable files, symlinks, non-UTF-8 names, FIFOs), the shipped archives read as artefacts rather than as build output, a census of project *state* rather than of arguments, and the export and gridmap families, never swept. | `2.0.0+c3fcfb282883` and `2.0.0+nogit` (Linux) | #647-#657, eleven findings. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log
