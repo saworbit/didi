@@ -30,10 +30,6 @@ bool isCaptureId(const json& value) {
     });
 }
 
-CallToolResult invalidViewportDiff(const std::string& message) {
-    return CallToolResult::error("Invalid viewport diff request: " + message);
-}
-
 // A sentence naming what was wrong and what to send instead, which is the
 // standard the rest of this server holds. These two answered with a raw C++
 // identifier -- invalid_viewport_toggle_debug_draw_request -- which is neither
@@ -209,50 +205,25 @@ CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpc
     return CallToolResult::successImage(std::move(encoded), metadata.dump());
 }
 
-CallToolResult handleViewportDiffCapture(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (!args.is_object()) return invalidViewportDiff("arguments must be an object");
-    if (!args.contains("baseline_capture_id") || !isCaptureId(args["baseline_capture_id"])) {
-        return invalidViewportDiff("baseline_capture_id must be exactly 32 lowercase hexadecimal characters");
-    }
-    if (args.contains("threshold")) {
-        const auto& threshold = args["threshold"];
-        const bool valid = threshold.is_number_unsigned()
-            ? threshold.get<uint64_t>() <= 255u
-            : threshold.is_number_integer() && threshold.get<int64_t>() >= 0 &&
-              threshold.get<int64_t>() <= 255;
-        if (!valid) {
-            return invalidViewportDiff("threshold must be an integer from 0 to 255");
-        }
-    }
-    if (args.contains("camera_identifier") && !args["camera_identifier"].is_string()) {
-        return invalidViewportDiff("camera_identifier must be a string");
-    }
-    if (args.contains("node_isolation_path") && !args["node_isolation_path"].is_string()) {
-        return invalidViewportDiff("node_isolation_path must be a string");
-    }
-    if (args.contains("isolation_background")) {
-        if (!args["isolation_background"].is_string()) {
-            return invalidViewportDiff("isolation_background must be a string");
-        }
-        const auto background = args["isolation_background"].get<std::string>();
-        if (background != "original" && background != "transparent") {
-            return invalidViewportDiff("isolation_background must be original or transparent");
-        }
-    }
+CallToolResult handleViewportDiffCapture(const ResolvedToolBinding& binding, const json& args,
+                                         std::shared_ptr<ipc::IIpcClient> ipc) {
+    // The published schema types and bounds every argument this tool takes, and
+    // dispatchTool checks it before any handler runs, so the copies that used to
+    // stand here for threshold, camera_identifier, node_isolation_path,
+    // isolation_background, min_ssim and max_hamming_distance could not be
+    // reached (#628). What survives is the one rule the schema states and the
+    // checker does not model: the capture id's `pattern`. It answers with the
+    // envelope now rather than the bare string the removed checks used, which is
+    // the same correction #424 made to the two tools either side of this one.
+    //
     // Perceptual tolerances. A per-pixel threshold cannot tell shadow filtering
-    // or antialiasing jitter from a real regression; these let a caller say what
-    // "still looks the same" means for its own pipeline.
-    if (args.contains("min_ssim")) {
-        const auto& value = args["min_ssim"];
-        if (!value.is_number() || value.get<double>() < 0.0 || value.get<double>() > 1.0) {
-            return invalidViewportDiff("min_ssim must be a number from 0.0 to 1.0");
-        }
-    }
-    if (args.contains("max_hamming_distance")) {
-        const auto& value = args["max_hamming_distance"];
-        if (!value.is_number_integer() || value.get<int64_t>() < 0 || value.get<int64_t>() > 64) {
-            return invalidViewportDiff("max_hamming_distance must be an integer from 0 to 64");
-        }
+    // or antialiasing jitter from a real regression; min_ssim and
+    // max_hamming_distance let a caller say what "still looks the same" means
+    // for its own pipeline, and the schema bounds both.
+    if (!isCaptureId(args.value("baseline_capture_id", json()))) {
+        return viewportRequestError(
+            binding,
+            "baseline_capture_id must be exactly 32 lowercase hexadecimal characters.");
     }
     if (!ipc || !ipc->isConnected()) {
         return CallToolResult::error("Viewport diff capture requires a live Godot editor.");

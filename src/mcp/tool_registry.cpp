@@ -175,7 +175,7 @@ CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpc
 CallToolResult handleViewportCapturePasses(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleEditorRenderGhostPreview(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleEditorClearGhostPreviews(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
-CallToolResult handleViewportDiffCapture(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleViewportDiffCapture(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleViewportSetCameraTransform(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleViewportToggleDebugDraw(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -2563,7 +2563,9 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"baseline_capture_id"}}
         };
-        t.handler = [this](const json& args) { return handleViewportDiffCapture(args, m_ipcClient); };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleViewportDiffCapture(binding, args, m_ipcClient);
+        };
         registerTool(std::move(t));
     }
     {

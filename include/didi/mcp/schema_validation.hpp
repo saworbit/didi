@@ -23,6 +23,10 @@ namespace mcp {
 // line of defence. This is a contract check, not a JSON Schema engine: a value
 // it passes over is one a handler still has to validate.
 //
+// Arguments that are not a JSON object are refused outright when the schema
+// describes one, which every published schema does. Saying nothing about them
+// reported that a call had satisfied a contract it cannot satisfy.
+//
 // Returns a sentence naming the offending property, or nothing when the
 // arguments satisfy the schema.
 [[nodiscard]] std::optional<std::string> validateAgainstSchema(const json& schema,
