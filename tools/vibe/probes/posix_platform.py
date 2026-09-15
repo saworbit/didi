@@ -284,19 +284,34 @@ def case_rows(session: Session, project: Path) -> None:
     folds = (project / "CASECHECK.gd").exists()
     print(f"       host folds case: {folds}  ({platform.system()})")
 
+    # `overwrite: true` is confirmation-gated, so the interesting call cannot be
+    # made in one shot. The first version of this row sent it anyway, got
+    # `428 confirmation_required`, and printed `observed=None` for the reported
+    # path -- a row that looked like a finding and was the probe failing to
+    # reach the subject. Dry run first, carry the token; the token lives in this
+    # server process's memory, which is why this is a Session and not a batch.
+    arguments = {"script_path": "res://CASECHECK.gd", "source_text": "# replaced\n",
+                 "overwrite": True}
+    preview, _ = session.call("script_create", dict(arguments, dry_run=True))
+    token = None
+    if isinstance(preview, dict):
+        token = (preview.get("mutation_preview") or {}).get("confirmation_token")
+        before = ((preview.get("mutation_preview") or {}).get("changes") or [{}])[0]
+        print(f"       preview says before={before.get('before')!r}")
     payload, is_error = session.call(
-        "script_create",
-        {"script_path": "res://CASECHECK.gd", "source_text": "# replaced\n", "overwrite": True})
-    reported = payload.get("script_path") or payload.get("file_path") if isinstance(payload, dict) else None
+        "script_create", dict(arguments, **({"confirmation_token": token} if token else {})))
+    reported = payload.get("script_path") or payload.get("file_path") \
+        if isinstance(payload, dict) else None
+    landed = sorted(p.name for p in project.glob("*.gd") if p.name.lower() == "casecheck.gd")
     if folds:
         row("overwrite through the other spelling reports the file it wrote",
             "res://casecheck.gd", str(reported))
-        row("...and no second file appeared", "1 file",
-            f"{len(list(project.glob('[cC][aA][sS][eE]check.gd')))} file(s)")
+        row("...and no second file appeared", "['casecheck.gd']", str(landed))
     else:
         row("the other spelling is a different file", "isError=False", f"isError={is_error}")
         row("...and it is its own path", "res://CASECHECK.gd", str(reported))
-        (project / "CASECHECK.gd").unlink(missing_ok=True)
+    for name in landed:
+        (project / name).unlink(missing_ok=True)
     lower.unlink(missing_ok=True)
 
 
