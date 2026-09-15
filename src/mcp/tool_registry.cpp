@@ -847,7 +847,20 @@ static json outputSchemaForTool(const std::string& name) {
                               // rather than an error, so the flag is the
                               // answer and `value` may be anything or absent.
                               {"found", boolean_type},
-                              {"value", json::object()}},
+                              {"value", json::object()},
+                              // Which kind of nothing, when there is nothing.
+                              // "expired" means a ttl lapsed and the board
+                              // still remembers it; "no_record" means the
+                              // board has nothing to say, which covers never
+                              // written, cleared, and lapsed longer ago than
+                              // it remembers. The two used to answer
+                              // identically, and they lead opposite ways
+                              // (#680).
+                              {"reason", {{"type", "string"},
+                                          {"enum", json::array({"expired", "no_record"})}}},
+                              {"expired_at_ms", integer_type},
+                              {"expired_author", string_type},
+                              {"expired_reason", string_type}},
                              {"execution_mode", "found"});
     }
     if (name == "blackboard_task_list") {

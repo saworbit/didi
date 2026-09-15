@@ -66,6 +66,27 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A blackboard key that expired does not read like one nobody wrote.** Once a
+  `ttl_seconds` lapsed, the value and its metadata were swept and the only tool
+  that can ask about the key answered as if it had never existed -- identical
+  to a read of a path nobody has ever written, down to the field list, with
+  `include_metadata: true` returning nothing on either (#680). A ttl is written
+  by an agent that wants something to lapse, and the two explanations lead
+  opposite ways: take the claim again, or go and find the work filed under a
+  path with a typo in it. A read that finds nothing now says `reason:
+  "expired"` with `expired_at_ms`, and the author and reason the write
+  supplied, or `reason: "no_record"`. A board remembers its 256 most recent
+  expiries.
+- **`blackboard_patch` says which operation failed, in its own words.** Every
+  semantic failure answered with nlohmann's exception text and its internal
+  identifier: "[json.exception.parse_error.105] parse error" for a patch
+  document that parsed perfectly well, and a byte offset into a JSON pointer
+  rather than into anything the caller sent (#679). A three-operation batch was
+  rolled back with "key 'nope' not found" and no way to tell which of the three
+  did it. The shape of each operation is checked here now, so a refusal names
+  the entry, the field and what was expected; the failures that can only be
+  found by applying the patch are applied one at a time, so they name the entry
+  too, and a failed `test` says what the board actually holds.
 - **A headless editor is a state Didi can name.** `--headless` is the only way
   an editor runs on a build machine, in a container or over ssh, and Didi
   attached to one happily: the session published, the bridge green, 68 tools
