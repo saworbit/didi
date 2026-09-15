@@ -375,9 +375,17 @@ void stopWaitsForTheWholeTree() {
     // passed locally and failed on a loaded CI runner. The assertion is the
     // invariant rather than the race: when stop() returns, nothing it started
     // is left running.
-#if defined(__APPLE__)
-    // No job object and no PR_SET_PDEATHSIG here; see the note in the test
-    // below and in docs/MANAGED_RECOVERY.md.
+#if !defined(_WIN32)
+    // Windows only, because that is where the guarantee exists and where a
+    // harness can ask for it honestly. Jobs nest: a grandchild started by a
+    // ManagedProcess is in its own job and in its parent's, so terminating the
+    // outer one reaches it, exactly as Godot's launcher and its editor are
+    // reached. POSIX process groups do not nest -- a grandchild that makes its
+    // own group leaves its parent's -- so this harness cannot model a launcher
+    // there, and stop() on POSIX still only waits for the process it started.
+    // A wrapper script on Linux or macOS would leave its editor behind the
+    // same way the console build did here. That is recorded rather than
+    // pretended away, and it is not what #678 reported.
     return;
 #else
     Temp temp;
