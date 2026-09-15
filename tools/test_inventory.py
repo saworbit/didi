@@ -602,9 +602,11 @@ def main(argv: list[str] | None = None) -> int:
     # default would translate it to "\r\n" on Windows and rewrite every line of
     # the README on the way past, which .gitattributes then normalises back --
     # a whole-file diff in the working tree for no change at all.
-    INVENTORY_PATH.write_text(inventory, encoding="utf-8", newline="")
+    with INVENTORY_PATH.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(inventory)
     if readme != updated_readme:
-        README_PATH.write_text(updated_readme, encoding="utf-8", newline="")
+        with README_PATH.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(updated_readme)
     print(
         f"test_inventory: wrote {INVENTORY_PATH.relative_to(REPO_ROOT).as_posix()} "
         f"({test_total} tests)."

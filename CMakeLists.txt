@@ -1,7 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
 project(didi VERSION 2.0.0 LANGUAGES C CXX)
 
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
+# The floor is 3.9, because that is what a stock macOS ships through the Xcode
+# Command Line Tools and the build has to work there. It did not: the schema
+# generator runs as a build step and used Path.write_text(newline=...), which
+# is 3.10+, so a Mac with no Homebrew failed at 1/149 with a TypeError that
+# never mentioned Python. Naming the version here makes the next such slip fail
+# at configure, with a number, instead of inside a generator.
+find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
 
 # The build identity, which is not the version. Two installs can both be 1.6.0
 # and still be different builds, because the server binary and the GDExtension

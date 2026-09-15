@@ -226,8 +226,10 @@ def main() -> int:
     schemas = materialize_schemas(args.schema_dir.resolve())
     args.header.parent.mkdir(parents=True, exist_ok=True)
     args.source.parent.mkdir(parents=True, exist_ok=True)
-    args.header.write_text(_render_header(), encoding="utf-8", newline="\n")
-    args.source.write_text(_render_source(schemas), encoding="utf-8", newline="\n")
+    with args.header.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(_render_header())
+    with args.source.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(_render_source(schemas))
     return 0
 
 
