@@ -475,7 +475,13 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(
     // Recorded whatever the run does next, so a caller learns which engine was
     // asked even when it answered nothing (#617). The version comes out of the
     // banner below, once there is output to read it from.
-    if (engine) engine->executable = godot_exe;
+    if (engine) {
+        engine->executable = godot_exe;
+        std::error_code exists_error;
+        engine->executable_exists =
+            fs::is_regular_file(paths::projectPathFromUtf8(godot_exe), exists_error) &&
+            !exists_error;
+    }
 
 #if defined(_WIN32)
     const std::vector<std::string> arguments = {"--headless", "--check-only", "-s", actual_path};

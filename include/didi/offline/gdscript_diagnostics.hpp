@@ -73,6 +73,15 @@ public:
         bool ran{false};
         // Why it did not run, when it did not. Empty otherwise.
         std::string failure;
+        // Whether the executable that was tried is a file that exists.
+        //
+        // This is the line between the two states that both end in "no
+        // diagnostics". A machine with no Godot installed falls through to the
+        // bare name `godot`, nothing is there, and answering the lexer verdict
+        // is the documented contract for that. A path that names a real file
+        // which is not the engine is a misconfiguration, and reporting it as a
+        // clean script is the lie #677 is about.
+        bool executable_exists{false};
         std::optional<int> exit_code;
         double duration_seconds{0.0};
     };
