@@ -1029,15 +1029,14 @@ func _refresh_peers() -> void:
 	_peers.add_child(note)
 
 
-## Whether two recorded project paths are the same project. Descriptors record
-## the platform's own separators, and the editor reports forward slashes, so a
-## textual comparison has to normalise before it means anything.
+## Whether two recorded project paths are the same project.
+##
+## Through ClientConfig, so the two path comparisons in this addon fold case on
+## the same platforms. Folding on Windows only made a descriptor recorded
+## through one spelling and an editor reporting another read as a different
+## project on macOS, where the default volume folds exactly as NTFS does (#655).
 func _same_project(left: String, right: String) -> bool:
-	var a := left.replace("\\", "/").rstrip("/")
-	var b := right.replace("\\", "/").rstrip("/")
-	if OS.get_name() == "Windows":
-		return a.to_lower() == b.to_lower()
-	return a == b
+	return ClientConfig.comparable_path(left) == ClientConfig.comparable_path(right)
 
 
 func _refresh_connect() -> void:

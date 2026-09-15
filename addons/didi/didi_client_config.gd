@@ -113,6 +113,35 @@ static func _candidates() -> PackedStringArray:
 	return candidates
 
 
+## Whether this machine's filesystem calls two paths that differ only in case
+## the same file.
+##
+## NTFS folds, and so does the default macOS volume: APFS is case-insensitive
+## and case-preserving there. Linux and the other Unix filesystems do not. Both
+## comparisons below asked `OS.get_name() == "Windows"` and meant this, which is
+## right for two platforms out of three and wrong for the one that shares the
+## behaviour it was written for (#655). The C++ side settled the same question
+## in #546 by taking the on-disk spelling from `std::filesystem::canonical`
+## rather than trusting the argument.
+##
+## This is really a property of the volume rather than of the platform, so a
+## case-sensitive APFS volume folds here when it does not on disk. That is the
+## safe direction for both callers: the Peers list calls one session the same
+## project as another, and the binary notice is shown rather than withheld.
+static func filesystem_folds_case() -> bool:
+	return OS.get_name() == "Windows" or OS.get_name() == "macOS"
+
+
+## A path in the form this machine's filesystem compares. Descriptors record the
+## platform's own separators and the editor reports forward slashes, so a
+## textual comparison has to normalise before it means anything.
+static func comparable_path(path: String) -> String:
+	var value := path.replace("\\", "/").rstrip("/")
+	if filesystem_folds_case():
+		return value.to_lower()
+	return value
+
+
 ## Whether a chosen path lives inside this project.
 ##
 ## A person may legitimately keep the binary beside the addon; the console says
@@ -120,12 +149,7 @@ static func _candidates() -> PackedStringArray:
 static func is_inside_project(path: String) -> bool:
 	if path.is_empty():
 		return false
-	var root := project_root().replace("\\", "/").rstrip("/")
-	var candidate := path.replace("\\", "/")
-	if OS.get_name() == "Windows":
-		root = root.to_lower()
-		candidate = candidate.to_lower()
-	return candidate.begins_with(root + "/")
+	return comparable_path(path).begins_with(comparable_path(project_root()) + "/")
 
 
 ## The arguments the client should launch the server with.

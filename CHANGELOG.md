@@ -66,6 +66,18 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The addon folds path case where the filesystem does, not only on Windows.**
+  Its two path comparisons each asked `OS.get_name() == "Windows"` and meant
+  "does this filesystem fold case". The default macOS volume is APFS,
+  case-insensitive and case-preserving, and folds exactly as NTFS does, so the
+  branch was right for two platforms out of three and wrong for the one that
+  shares the behaviour it was written for (#655). On a Mac a descriptor recorded
+  through one spelling and an editor reporting another read as a different
+  project in the Peers list, and the notice saying a chosen binary sits
+  somewhere Didi own file tools can write was not shown. Both now go through one
+  helper in `didi_client_config.gd`. The C++ side settled the same question in
+  #546 by taking the on-disk spelling from `std::filesystem::canonical`.
+
 - **A `GODOT_BIN` that cannot be used is reported, not discarded in silence.**
   Resolution dropped it and fell through to the known locations, and
   `script_check_syntax` reported that fallthrough as `engine_executable`, so
