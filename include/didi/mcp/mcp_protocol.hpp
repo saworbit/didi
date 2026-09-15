@@ -346,6 +346,16 @@ struct ToolAnnotations {
 
 struct ToolDefinition {
     std::string name;
+    // The four-word version of `description`, for the person a confirmation
+    // ends in.
+    //
+    // Of the 126 entries tools/list returned, the number carrying one was
+    // zero, on either protocol revision, so a host that displays a title fell
+    // back to the identifier and someone approving a destructive mutation was
+    // shown `gridmap_export_mesh_library` (#686). Set by
+    // ToolRegistry::registerTool from one table, never by hand, so an alias
+    // cannot be titled differently from the tool it resolves to.
+    std::string title;
     std::string description;
     json inputSchema;
     ToolHandler handler;
@@ -381,6 +391,10 @@ struct ToolDefinition {
         }
         json definition = {
             {"name", name},
+            // Top level, which is where the specification puts the
+            // human-readable name: "Optional human-readable name of the tool
+            // for display purposes."
+            {"title", title},
             {"description", description},
             {"inputSchema", inputSchema},
             {"annotations", annotations.toJson()},
