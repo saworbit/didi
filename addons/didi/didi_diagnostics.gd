@@ -42,6 +42,50 @@ static func library_name() -> String:
 			return "libdidi_extension.so"
 
 
+## Whether a Mach-O file holds code this machine can run, or "" when the
+## question does not apply or cannot be answered.
+##
+## Existence is not the question on macOS. The release builds one thin arm64
+## dylib, and this page reported "Extension binary: OK" for it on an Intel Mac,
+## where the engine cannot load it at all -- and this page is what the README
+## asks macOS testers to paste into an issue (#648).
+##
+## Only the first eight bytes are read: the magic, then the CPU type. A fat
+## binary (0xCAFEBABE) holds several architectures and is accepted without
+## picking through its slices, because a fat file that does not hold this one is
+## a build mistake this check was not written for.
+static func _macho_mismatch(path: String) -> String:
+	if OS.get_name() != "macOS":
+		return ""
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return ""
+	if file.get_length() < 8:
+		return ""
+	var magic := file.get_32()
+	var cpu_type := file.get_32()
+	file.close()
+	# Fat, in either byte order. Both architectures are in there somewhere.
+	if magic == 0xCAFEBABE or magic == 0xBEBAFECA:
+		return ""
+	# Thin 64-bit Mach-O, little-endian, which is every Mac Godot supports.
+	if magic != 0xFEEDFACF:
+		return ""
+	var arm64 := 0x0100000C
+	var x86_64 := 0x01000007
+	var holds := ""
+	if cpu_type == arm64:
+		holds = "arm64"
+	elif cpu_type == x86_64:
+		holds = "x86_64"
+	else:
+		return ""
+	if OS.has_feature(holds):
+		return ""
+	var running := "arm64" if OS.has_feature("arm64") else "x86_64"
+	return "%s holds %s code and this editor is %s, so Godot cannot load it. The published macOS archive is arm64 only; build Didi from source for this machine." % [path, holds, running]
+
+
 ## Runs every check. `allow_process` gates the one check that starts a process,
 ## so a panel refreshing on a timer never spawns anything and a person pressing
 ## a button gets the full answer.
@@ -54,7 +98,11 @@ static func run(allow_process: bool) -> Array:
 
 	var library := LIBRARY_DIRECTORY.path_join(library_name())
 	if FileAccess.file_exists(library):
-		checks.append(Check.make("Extension binary", State.OK, library))
+		var mismatch := _macho_mismatch(library)
+		if mismatch.is_empty():
+			checks.append(Check.make("Extension binary", State.OK, library))
+		else:
+			checks.append(Check.make("Extension binary", State.FAIL, mismatch))
 	else:
 		checks.append(Check.make("Extension binary", State.FAIL,
 			"%s is missing. Build Didi for this platform, or copy the released library into %s."

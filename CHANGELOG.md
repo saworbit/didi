@@ -66,6 +66,38 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The Linux release starts on a distro whose glibc meets the stated floor.**
+  The archive is built in an Ubuntu 22.04 container so the release does not
+  raise its glibc floor, and `release.yml` says so at length. glibc was not the
+  constraint that bound: the binary linked libstdc++ dynamically, and Ubuntu
+  22.04's libstdc++ is GCC 12's, which needs `GLIBCXX_3.4.30`. Rocky, RHEL and
+  AlmaLinux 9 have glibc 2.34 -- exactly the floor the container was chosen to
+  hold -- and libstdc++ from GCC 11, one release short, so neither `bin/didi`
+  nor the addon's `.so` would start there (#647). The release leg links the C++
+  runtime statically, which is what Godot's own Linux builds do and costs about
+  a megabyte, and a new step reads the symbol versions off both binaries and
+  fails the release if either needs a libstdc++ symbol version or a glibc above
+  2.34. README's platform table names the distros rather than saying "older
+  glibc".
+- **The macOS archive's `.gdextension` declares only what the archive holds.**
+  It is one file copied into every platform's archive and it declared
+  `macos.*.x86_64` and `macos.*.universal` pointing at the one dylib the release
+  builds, which is a thin arm64 Mach-O. Godot's loader requires every tag in a
+  key to be a feature of the running engine, so on an Intel Mac
+  `macos.release.x86_64` matched, the file was found, and the dynamic loader was
+  handed a library for another architecture: the user saw a generic "can't open
+  dynamic library" about a file that is plainly there, rather than the honest
+  answer the release notes already knew (#648). Only arm64 is declared now, so
+  Apple Silicon still matches and Intel is told there is no library for it.
+  `OS::has_feature("universal")` is true on both macOS slices, which is why
+  those entries were a second name for the same mistake.
+- **The Diagnostics page checks the architecture, not the filename.** It
+  reported `Extension binary: OK` for a library the engine cannot load, and that
+  page is what README asks macOS testers to paste into an issue (#648). It reads
+  the Mach-O header now and says which architecture the file holds and which one
+  the editor is. README's platform table also states the minimum macOS version,
+  which nothing did.
+
 - **The addon folds path case where the filesystem does, not only on Windows.**
   Its two path comparisons each asked `OS.get_name() == "Windows"` and meant
   "does this filesystem fold case". The default macOS volume is APFS,
