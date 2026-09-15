@@ -147,9 +147,31 @@ class ManagedRecoveryLive(unittest.TestCase):
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copytree(self.root, destination)
                 print(f'Recovery failure artifacts: {destination}', file=sys.stderr)
-            self.temp.cleanup()
+            self._remove_fixture_tree()
         if cleanup_error:
             raise cleanup_error
+
+    def _remove_fixture_tree(self):
+        # The workspace is not free the moment the host is. A managed editor is
+        # killed when the job handle closes, which is asynchronous by
+        # construction: the process that owned it is already gone, so nothing
+        # in the product can wait for it. Windows refuses to delete a file
+        # another process still has open, and Godot's hot-reload shadow copy of
+        # the extension is the one it holds longest.
+        #
+        # Deleting immediately happened to win against one editor process and
+        # lost against two, so the console build turned four passing tests into
+        # four teardown errors (#678). Waiting is the honest answer; the
+        # deadline is what keeps a real leak a failure rather than a hang.
+        deadline = time.monotonic() + 60
+        while True:
+            try:
+                self.temp.cleanup()
+                return
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.25)
 
     def request(self, method, params):
         self.seq += 1
