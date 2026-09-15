@@ -248,6 +248,78 @@ static void test_the_published_cell_shape_is_enforced_by_the_schema() {
 // on which node, so the one thing the caller needed was the one thing missing.
 // #406 and #424 fixed the argument rejections; these sit underneath them
 // (#441).
+// Break caught: the two rules a JSON Schema cannot state -- uniqueness across
+// array entries, and a constraint between two fields of one entry -- answered
+// with a raw identifier. They are the rules a caller is most likely to trip,
+// precisely because no schema-aware client can pre-check them, and they named
+// neither the offending cell, nor the rule, nor what to change (#619).
+static void test_the_rules_a_schema_cannot_state_answer_with_sentences() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto refusal = [&](const char* tool, const didi::json& arguments) {
+        const auto result = registry.callTool(tool, arguments);
+        ASSERT_TRUE(result.isError);
+        ASSERT_TRUE(!result.content.empty());
+        return didi::json::parse(result.content[0].text, nullptr, false);
+    };
+
+    const auto duplicate_tiles = refusal(
+        "tilemap_set_cells",
+        didi::json{{"tilemap_path", "/root/Main/Tiles"},
+                   {"cells", didi::json::array({
+                        {{"coords", didi::json::array({0, 0})}, {"source_id", 0},
+                         {"atlas_coords", didi::json::array({0, 0})}},
+                        {{"coords", didi::json::array({0, 0})}, {"source_id", 0},
+                         {"atlas_coords", didi::json::array({1, 0})}}})}});
+    ASSERT_EQ(duplicate_tiles["error"]["code"], 409);
+    const auto tile_message = duplicate_tiles["error"]["message"].get<std::string>();
+    ASSERT_TRUE(tile_message.find("entries 0 and 1") != std::string::npos);
+    ASSERT_TRUE(tile_message.find("[0, 0]") != std::string::npos);
+    ASSERT_TRUE(tile_message.find("duplicate_tilemap_coordinate") == std::string::npos);
+
+    const auto duplicate_cells = refusal(
+        "gridmap_set_cells",
+        didi::json{{"gridmap_path", "/root/Main/Grid"},
+                   {"cells", didi::json::array({
+                        {{"position", didi::json::array({1, 1, 1})}, {"item", 0}},
+                        {{"position", didi::json::array({1, 1, 1})}, {"item", 0}}})}});
+    ASSERT_EQ(duplicate_cells["error"]["code"], 409);
+    const auto grid_message = duplicate_cells["error"]["message"].get<std::string>();
+    ASSERT_TRUE(grid_message.find("entries 0 and 1") != std::string::npos);
+    ASSERT_TRUE(grid_message.find("[1, 1, 1]") != std::string::npos);
+    ASSERT_TRUE(grid_message.find("duplicate_gridmap_position") == std::string::npos);
+
+    // The cross-field rule, which the catch-all used to stand for along with
+    // several others, so the refusal did not even say which one was broken.
+    const auto erased = refusal(
+        "gridmap_set_cells",
+        didi::json{{"gridmap_path", "/root/Main/Grid"},
+                   {"cells", didi::json::array({
+                        {{"position", didi::json::array({0, 0, 0})}, {"item", -1},
+                         {"orientation", 3}}})}});
+    ASSERT_EQ(erased["error"]["code"], 400);
+    const auto erased_message = erased["error"]["message"].get<std::string>();
+    ASSERT_TRUE(erased_message.find("entry 0") != std::string::npos);
+    ASSERT_TRUE(erased_message.find("item -1") != std::string::npos);
+    ASSERT_TRUE(erased_message.find("orientation 3") != std::string::npos);
+    ASSERT_TRUE(erased_message.find("invalid_gridmap_set_cells_request") == std::string::npos);
+
+    // An erase with no orientation, and one with orientation 0, are both fine
+    // and must not be caught by the rule above. Neither reaches an engine, so
+    // the refusal that follows is about the missing session and not the cells.
+    for (const auto& cell : std::vector<didi::json>{
+             {{"position", didi::json::array({0, 0, 0})}, {"item", -1}},
+             {{"position", didi::json::array({0, 0, 0})}, {"item", -1}, {"orientation", 0}}}) {
+        const auto allowed = refusal(
+            "gridmap_set_cells",
+            didi::json{{"gridmap_path", "/root/Main/Grid"},
+                       {"cells", didi::json::array({cell})}});
+        ASSERT_TRUE(allowed["error"]["message"].get<std::string>().find("orientation") ==
+                    std::string::npos);
+    }
+}
+
 static void test_every_bridge_identifier_says_a_sentence() {
     const auto& sentences = didi::godot::bridgeErrorSentenceTable();
     ASSERT_TRUE(!sentences.empty());
@@ -288,6 +360,8 @@ struct RegisterPhase7TileGridBehavior {
 
         registerTest("Phase7TileGrid.BridgeIdentifiersSaySentences",
                      test_every_bridge_identifier_says_a_sentence);
+        registerTest("Phase7TileGrid.NonSchemaRulesSaySentences",
+                     test_the_rules_a_schema_cannot_state_answer_with_sentences);
         registerTest("Phase7TileGrid.StrictBatchValidation", test_phase7_tile_grid_handlers_reject_invalid_batches_before_dispatch);
         registerTest("Phase7TileGrid.ExactForwarding", test_phase7_tile_grid_handlers_forward_exact_requests_once);
         registerTest("Phase7TileGrid.EditorOnlyAdmission", test_phase7_tile_grid_methods_are_editor_only_but_reach_the_bridge);
