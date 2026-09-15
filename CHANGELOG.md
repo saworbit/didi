@@ -66,6 +66,34 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A float shader uniform set to a whole number survives the save.**
+  `ShaderMaterial.set_shader_parameter` stores the Variant it is handed without
+  coercing it, and the bridge built an `int` Variant for a JSON integer, so a
+  `float` uniform set to `0` or `1` held an int the material could not
+  serialise and Godot dropped the parameter at save time (#612). The writing
+  tool, the reading tool and the save all reported success on the way there.
+  The Variant is now built for the type the shader declares.
+- **A colour or vector write that landed says it landed.** `applied` compared
+  composites exactly, so a Color channel that is not representable in the
+  float32 it is made of -- `0.1`, which reads back as `0.10000000149011612` --
+  and a colour sent as `{r,g,b}` with the alpha left off, which the tool's own
+  schema documents, both reported a write that had worked as one that had not
+  (#618). Members are compared one by one now, against the value as it was sent
+  to the engine, with a tolerance sized to that float32 round trip.
+- **`shader_list_uniforms` reports each uniform's declared hint, and
+  `shader_set_uniform` honours it.** The engine has the hint in the same
+  `PropertyInfo` the name and type are read from, and neither tool looked at
+  it, so a caller could not learn a declared range short of reading the shader
+  source and a value 2.5x a `hint_range` maximum persisted without comment
+  (#620). The list now carries `hint`, and a value outside a declared range is
+  refused by name, the way `audio_configure_bus` refuses a volume outside the
+  bus editor's own range. `or_greater` and `or_less` are honoured.
+- **`shader_set_uniform` says the change is not on disk yet.** It writes to the
+  same place as `scene_set_property`, `tilemap_set_cells` and
+  `gridmap_set_cells` and is discarded the same way if the editor closes
+  without saving, and it was the only one of the four that carried neither
+  `scene_saved` nor the `limitation` sentence, which read as "this one did not
+  need saving" (#623).
 - **The schema gate refuses arguments that are not an object.** The one place
   that reads a tool's published schema returned "no complaint" for an array, a
   number or a string, so the gate reported that a call had satisfied a contract
