@@ -1,5 +1,6 @@
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/gdextension_api.hpp"
+#include "didi/gdextension/editor_hook.hpp"
 #include "didi/gdextension/expression_sandbox.hpp"
 #include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/gdextension/viewport_renderer.hpp"
@@ -1149,6 +1150,35 @@ Result<GDExtensionObjectPtr> singleton(const std::string& name) {
     if (!object) return Error::notConnected("Godot singleton is unavailable: " + name);
     return object;
 }
+
+// Which display driver this engine came up on, as the engine names it.
+//
+// "headless" is the one every build machine, container and ssh session gets,
+// and it selects the dummy rendering backend: there is no device behind the
+// viewport, so nothing that ends in a picture can work for as long as the
+// editor is running. Didi attached to such an editor happily and then answered
+// every capture with `404 not_found`, which tells a caller to look again with a
+// better argument (#676).
+//
+// Read once. The display driver is chosen at startup and does not change, and
+// this is asked on paths that must not add an engine call per frame.
+const std::string& displayServerName() {
+    static const std::string name = [] {
+        auto server = singleton("DisplayServer");
+        if (server.isErr()) return std::string();
+        // get_name() -> String. The hash is the signature's, so it is the same
+        // on 4.5, 4.6 and 4.7; an engine that changes it simply answers nothing
+        // here and the reports fall back to saying they do not know.
+        auto value = callObject(server.value(), "DisplayServer", "get_name", 201670096LL);
+        if (value.isErr()) return std::string();
+        auto text = stringFromVariant(value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+        return text.isErr() ? std::string() : text.value();
+    }();
+    return name;
+}
+
+// Whether this engine has a rendering device behind its viewports.
+bool engineCanRender() { return displayServerName() != "headless"; }
 
 Result<void> validateSettingName(const std::string& setting) {
     if (setting.empty() || setting.front() == '/' || setting.back() == '/' ||
@@ -10035,6 +10065,16 @@ json GodotBridge::execute(const std::string& method, const json& params,
             // away from losing its changes (#557).
             json state = {{"status", "online"}, {"editor_connected", true},
                           {"active_scene_root", root_path.value()}};
+            // Whether this engine can draw. A headless editor is the only one a
+            // build machine, a container or an ssh session can run, and every
+            // tool whose answer is a picture fails on it for as long as it
+            // lives. The control room already knows how to report an engine
+            // limitation; it could not report this one because nothing told it
+            // (#676).
+            state["display_server"] = displayServerName().empty()
+                                          ? json(nullptr)
+                                          : json(displayServerName());
+            state["renders"] = engineCanRender();
             state.update(unsavedScenesReport(editor));
             return liveResult(state);
         }
@@ -11206,6 +11246,18 @@ json GodotBridge::execute(const std::string& method, const json& params,
     }
 
     if (method == "editor.saveScene") {
+        // Where the engine's own output stands before the save, so anything it
+        // prints during one can be attributed to this call.
+        //
+        // Against a headless editor every save produces `ERROR: Parameter "t"
+        // is null` from the dummy rendering backend: the save path asks for a
+        // scene thumbnail and there is no renderer to make one. The scene does
+        // save, the tool reported `saved` and nothing else, and the error
+        // landed only in the editor's log, which nothing in the response
+        // pointed at (#683). The thumbnail step belongs to Godot's save and
+        // cannot be switched off from here, so what is reported is that the
+        // save completed with an engine diagnostic, and what it was.
+        const auto before = EditorHook::instance().engineOutput().nextSequence();
         auto saved = callObject(editor, "EditorInterface", "save_scene", 166280745LL);
         if (saved.isErr()) return errorJson(saved.error().code, saved.error().message);
         auto code = scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT);
@@ -11215,7 +11267,27 @@ json GodotBridge::execute(const std::string& method, const json& params,
                              "Godot save_scene failed with " +
                                  ::didi::godot::describeGodotError(code.value()));
         }
-        return liveResult({{"status", "saved"}});
+        json result = {{"status", "saved"}};
+        constexpr size_t kMaxSaveDiagnostics = 8;
+        auto during = EditorHook::instance().engineOutput().read(before, kMaxSaveDiagnostics,
+                                                                 "error");
+        json diagnostics = json::array();
+        if (during.isOk()) {
+            const auto records = during.value().find("records");
+            if (records != during.value().end() && records->is_array()) {
+                for (const auto& record : *records) diagnostics.push_back(record);
+            }
+        }
+        if (!diagnostics.empty()) {
+            result["engine_diagnostics"] = std::move(diagnostics);
+            result["engine_diagnostics_note"] =
+                engineCanRender()
+                    ? "The scene saved. The engine printed these while saving it."
+                    : "The scene saved. This editor is headless, so Godot's save path could not "
+                      "render the scene thumbnail and printed these; they are about the "
+                      "thumbnail, not about the scene.";
+        }
+        return liveResult(result);
     }
 
     if (method == "editor.reloadProject") {
@@ -11240,9 +11312,28 @@ namespace {
 // picture of anything.
 constexpr int64_t kMinimumCaptureEdge = 8;
 
+// The refusal every capture makes on an engine that cannot draw.
+//
+// 409 rather than 404: nothing the caller named is missing, and no argument
+// they could send would help. It is the shape the far-plane refusal beside it
+// already uses -- a real sentence about a condition that will not change while
+// this editor is running (#676).
+Error headlessCaptureRefusal() {
+    return Error(409,
+                 "This editor is running headless (display driver '" + displayServerName() +
+                     "'), so there is no rendering device behind its viewports and no frame to "
+                     "capture. Nothing about the request can fix that. Run the editor with a "
+                     "display, or detach and call again with no editor attached to get the "
+                     "synthesised preview.");
+}
+
 Result<ViewportPixels> captureViewportObject(GDExtensionObjectPtr viewport_object,
                                              const std::string& described_target) {
     if (!viewport_object) return Error::notFound("Viewport is unavailable");
+    // Asked before the texture, because on this engine the answer is the same
+    // whatever the viewport turns out to be, and the texture route ends in
+    // "Viewport image is unavailable", which names nothing.
+    if (!engineCanRender()) return headlessCaptureRefusal();
     auto texture = callObject(viewport_object, "Viewport", "get_texture", 1746695840LL);
     if (texture.isErr()) return texture.error();
     auto texture_object = objectFromVariant(texture.value());
@@ -11550,6 +11641,11 @@ Result<MultipassCapture> GodotBridge::captureViewportPasses(const std::vector<st
                                                             const std::string& camera_identifier,
                                                             const std::string& session_kind,
                                                             double requested_depth_far) {
+    // Before the camera question. Without this the colour, depth and normal
+    // passes reached "No 3D camera is rendering this viewport", which is a real
+    // sentence about a different problem, and segmentation reached the bare 404
+    // (#676).
+    if (!engineCanRender()) return headlessCaptureRefusal();
     for (const auto& bind : {std::make_tuple("GeometryInstance3D", "get_material_override", 5934680LL),
                              std::make_tuple("GeometryInstance3D", "set_material_override", 2757459619LL),
                              std::make_tuple("Shader", "set_code", 83702148LL),

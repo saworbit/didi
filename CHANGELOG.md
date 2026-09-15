@@ -66,6 +66,28 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A headless editor is a state Didi can name.** `--headless` is the only way
+  an editor runs on a build machine, in a container or over ssh, and Didi
+  attached to one happily: the session published, the bridge green, 68 tools
+  live. Then every tool whose answer is a picture failed with `404 not_found`
+  and "Viewport image is unavailable", which names nothing and reads as "look
+  again with a better argument" for a condition that will not change while that
+  editor is running (#676). The same server with no editor at all answered
+  better, because the live route existed so the offline fallback never ran. Both
+  capture tools now refuse `409`, naming the display driver and saying nothing
+  about the request can fix it, in the shape the far-plane refusal beside them
+  already used. The editor reports `display_server` and `renders` with its
+  state, so `didi_control_room` names the limitation beside the Godot 4.7
+  dirty-state one. Reproduced identically on Windows, macOS and Ubuntu.
+- **`editor_save_scene` reports what the engine printed while saving.** Against
+  a headless editor every save made Godot print `ERROR: Parameter "t" is null`
+  from its dummy rendering backend -- the save path asks for a scene thumbnail
+  and there is no renderer to make one -- and the tool answered `saved` with no
+  mention of it, leaving the error in a log nothing pointed at (#683). Seven
+  accumulated in one probe run of a couple of dozen calls. The thumbnail step
+  belongs to Godot's save and cannot be switched off from here, so the answer
+  now carries `engine_diagnostics` and a note saying they are about the
+  thumbnail rather than about the scene. The scene still saves.
 - **`script_check_syntax` refuses when the compiler never ran.** It answered
   `has_errors: false` with no diagnostics when the Godot it was told to use
   could not be launched, so a caller asking "does this compile?" about a script
