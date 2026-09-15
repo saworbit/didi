@@ -756,8 +756,10 @@ static json outputSchemaForTool(const std::string& name) {
                               // produced a verdict is now an error instead of
                               // a clean answer, so these never describe one
                               // that did not happen (#677).
+                              {"engine_available", boolean_type},
                               {"engine_exit_code", {{"type", {"integer", "null"}}}},
-                              {"engine_duration_seconds", {{"type", "number"}}}},
+                              {"engine_duration_seconds", {{"type", "number"}}},
+                              {"engine_unavailable_reason", string_type}},
                              {"execution_mode", "has_errors"});
     }
     if (name == "project_search_text" || name == "project_search_symbols") {

@@ -166,12 +166,15 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   only trace and nothing said the pass had not happened. The one misconfigured
   value that gets this far is a real file that is not the engine, which is what
   a version-manager shim or the wrong file out of a bundle looks like; a
-  directory or a missing path was already discarded. A launch that fails, or a
-  process that runs and prints no Godot banner, is now `503` with
-  `code: "engine_unavailable"`, naming the executable it tried and what went
-  wrong, which is what `shader_check_compile` has always done. `engine_exit_code`
-  and `engine_duration_seconds` accompany a check that did run. A `source_text`
-  check spawns no engine by design and is unchanged.
+  directory or a missing path was already discarded. When the executable that
+  was tried is a file that exists and it prints no Godot banner, the call is
+  now `503` with `code: "engine_unavailable"`, naming what was tried and what
+  went wrong, which is what `shader_check_compile` has always done. A machine
+  with no Godot installed is a different state and answers as it always has:
+  the lexer verdict, with `engine_available: false` and
+  `engine_unavailable_reason` saying the compiler did not run.
+  `engine_exit_code` and `engine_duration_seconds` accompany a check that did.
+  A `source_text` check spawns no engine by design and is unchanged.
 - **The engine-mismatch check works without an explicit attach.**
   `attached_engine_version` and `matches_attached_engine` read the process
   selection, which only `runtime_attach_session` or an earlier live call sets,
