@@ -439,7 +439,18 @@ void ManagedProcess::stop() {
     if (!running())
         return;
 #if defined(_WIN32)
-    if (TerminateProcess(impl_->process.value, 1)) {
+    // The job first, because the process we launched is not always the whole
+    // tree: Godot's *_console.exe is a launcher that runs the editor as a
+    // child, and terminating only the launcher leaves that editor holding the
+    // workspace. Everything started inside the job goes together. The job is
+    // best effort -- a host that would not let us create one starts the child
+    // without it -- so the direct terminate still runs, and either of them
+    // succeeding is what makes the wait below safe to make unbounded.
+    const bool has_job =
+        impl_->job.value != INVALID_HANDLE_VALUE && impl_->job.value != nullptr;
+    const bool job_ended = has_job && TerminateJobObject(impl_->job.value, 1) != 0;
+    const bool process_ended = TerminateProcess(impl_->process.value, 1) != 0;
+    if (job_ended || process_ended) {
         WaitForSingleObject(impl_->process.value, INFINITE);
         running();
     }
