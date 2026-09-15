@@ -233,6 +233,15 @@ jobs:
           echo "$!" > "$RUNNER_TEMP/editor.pid"
           python3 -u tools/vibe/wait_for_session.py "$RUNNER_TEMP/live-proj" --timeout 150
 
+      - name: Probe -- does the editor exit cleanly, and is it the addon?
+        continue-on-error: true
+        run: |
+          # Both POSIX runners aborted on shutdown right after the plugin
+          # deactivated. The control is the same invocation with no addon in
+          # the project: without it, "Godot does this" is the other
+          # explanation and neither can be ruled out.
+          python3 -u tools/vibe/editor_exit_status.py --godot "$GODOT_BIN" --build-tree build
+
       - name: Probe -- the live surface with nothing to draw on
         continue-on-error: true
         run: python3 -u tools/vibe/probes/headless_editor.py -p "$RUNNER_TEMP/live-proj"
