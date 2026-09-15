@@ -1,7 +1,13 @@
 #include "didi/offline/deep_domain_support.hpp"
+
+#include "didi/common/project_path.hpp"
 #include <algorithm>
 #include <cctype>
 #include <regex>
+#include <fstream>
+#include <sstream>
+#include <optional>
+#include <filesystem>
 #include <set>
 
 namespace didi::offline {
@@ -107,13 +113,14 @@ std::vector<DomainDiagnostic> parseGodotDiagnostics(const std::string& output) {
     return diagnostics;
 }
 
-std::vector<json> parseExportPresets(const std::string& contents) {
+ExportPresetsFile readExportPresets(const std::string& contents) {
     static const std::regex preset_section(R"(^\[preset\.([0-9]+)\]$)");
     static const std::regex options_section(R"(^\[preset\.([0-9]+)\.options\]$)");
     std::vector<json> presets;
     std::optional<size_t> current;
     bool in_options = false;
     bool malformed = false;
+    bool seen_section = false;
 
     for (const auto& raw : strings::split(contents, '\n')) {
         const std::string line = strings::trim(raw);
@@ -125,20 +132,30 @@ std::vector<json> parseExportPresets(const std::string& contents) {
                                {"runnable", false}, {"export_filter", ""}, {"export_path", ""}});
             current = presets.size() - 1;
             in_options = false;
+            seen_section = true;
             continue;
         }
         if (std::regex_match(line, match, options_section)) {
             current.reset();
             in_options = true;
+            seen_section = true;
             continue;
         }
         if (!line.empty() && line.front() == '[') {
             current.reset();
-            in_options = false;
+            // Any other section is skipped the way [preset.N.options] is. Its
+            // keys are not about a preset, so they are not evidence that the
+            // file is broken: a valid ini with no preset sections used to be
+            // reported as malformed, which made "this project has no export
+            // presets" an error where the same fact with no file at all was a
+            // success (#651).
+            in_options = true;
+            seen_section = true;
             continue;
         }
         if (in_options) continue;
         const size_t equals = line.find('=');
+        // A key before any section at all is a file this cannot make sense of.
         if (!current.has_value() || equals == std::string::npos) {
             malformed = true;
             continue;
@@ -159,7 +176,62 @@ std::vector<json> parseExportPresets(const std::string& contents) {
         const std::string platform = preset.value("platform", "");
         if (name.empty() || platform.empty() || !names.insert(name).second) malformed = true;
     }
-    return malformed ? std::vector<json>{} : presets;
+    (void)seen_section;
+    ExportPresetsFile file;
+    file.section_count = presets.size();
+    file.malformed = malformed;
+    if (!malformed) file.presets = std::move(presets);
+    return file;
+}
+
+std::vector<json> parseExportPresets(const std::string& contents) {
+    return readExportPresets(contents).presets;
+}
+
+
+std::optional<Error> checkExportPreset(const std::string& preset) {
+    std::error_code error;
+    const auto root = std::filesystem::current_path(error);
+    if (error) return Error::internal("The project root could not be resolved");
+    const auto path = root / "export_presets.cfg";
+    if (!std::filesystem::exists(path, error) || error) {
+        return Error::notFound(
+            "This project has no export_presets.cfg, so it has no export presets. Add one in the "
+            "editor's Export dialog.");
+    }
+    // The same bound the Phase 5 readers apply, so this cannot pull in a file
+    // they would have refused.
+    constexpr uintmax_t kMaxPresetFileBytes = 1024u * 1024u;
+    const auto size = std::filesystem::file_size(path, error);
+    if (error) return Error(403, "export_presets.cfg is there and cannot be read");
+    if (size > kMaxPresetFileBytes) {
+        return Error::invalidArgument("export_presets.cfg exceeds the 1 MiB Phase 5 limit");
+    }
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        return Error(403, "export_presets.cfg is there and cannot be read");
+    }
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    const auto file = readExportPresets(buffer.str());
+    if (file.malformed) {
+        return Error(422,
+                     "export_presets.cfg is there and could not be parsed. Fix it in the "
+                     "editor's Export dialog, or delete it to start again.",
+                     {{"presets_file_exists", true},
+                      {"declared_preset_sections", file.section_count}});
+    }
+    json available = json::array();
+    for (const auto& item : file.presets) available.push_back(item.value("name", ""));
+    const bool found = std::any_of(file.presets.begin(), file.presets.end(),
+                                   [&](const json& item) {
+                                       return item.value("name", "") == preset;
+                                   });
+    if (!found) {
+        return Error(404, "Export preset not found: " + preset,
+                     {{"preset", preset}, {"available_presets", std::move(available)}});
+    }
+    return std::nullopt;
 }
 
 } // namespace didi::offline

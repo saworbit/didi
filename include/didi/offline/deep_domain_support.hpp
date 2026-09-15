@@ -76,6 +76,40 @@ struct DomainDiagnostic {
 
 std::vector<DomainDiagnostic> parseMsBuildDiagnostics(const std::string& output);
 std::vector<DomainDiagnostic> parseGodotDiagnostics(const std::string& output);
+// What export_presets.cfg holds, with the states a caller has to tell apart
+// kept apart.
+//
+// parseExportPresets returns an empty list for a file with no preset sections
+// and for one it could not parse, and the tools above it merged those with
+// "the file is not there" into one sentence with an "or" in it: a project that
+// has never configured an export was an error, and so was a file whose bytes
+// are unreadable, and project_export answered both with "Export preset not
+// found", sending a caller to add a preset that is already there (#651).
+struct ExportPresetsFile {
+    std::vector<json> presets;
+    // A line, a value or a name this could not make sense of. The presets
+    // vector is empty when this is set, because a partially understood export
+    // configuration is not one to act on.
+    bool malformed{false};
+    // How many [preset.N] sections the file declared, whether or not they
+    // parsed. Zero with malformed false is a project with no export presets,
+    // which is the same fact as having no file at all.
+    size_t section_count{0};
+};
+
+ExportPresetsFile readExportPresets(const std::string& contents);
+
+// The refusal project_export gives for this preset, or nothing when the file
+// declares it. Reads export_presets.cfg beneath the current project root.
+//
+// Exported so the confirmation preview asks the same question the call asks.
+// Without it the preview returned the same clean answer in all five states the
+// file can be in, and the call failed in every one, including for a preset name
+// the sibling tool in the same process could prove does not exist (#652).
+std::optional<Error> checkExportPreset(const std::string& preset);
+
+// The presets alone, empty when the file is malformed. Kept for callers that
+// only need the list.
 std::vector<json> parseExportPresets(const std::string& contents);
 std::vector<std::string> isolatedGodotArguments(std::vector<std::string> arguments);
 

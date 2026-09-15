@@ -1345,14 +1345,21 @@ Accepts no arguments and parses the project-root `export_presets.cfg` without la
 
 Godot writes `export_presets.cfg` the first time a preset is added, so a project that has never configured an export has no file. That is an empty list with `presets_file_exists: false`, not an error. A file that is there and cannot be read or parsed is still an error, so "no presets" and "the file is broken" stay different answers.
 
+
+A project with no export presets answers the same way whether or not `export_presets.cfg` is on disk: `preset_count: 0`, an empty `presets` list, and `presets_file_exists` saying which case it is. A file that is there and cannot be parsed is the separate state and is refused with `422` and `code: "unprocessable"`, carrying `declared_preset_sections` so "there is nothing here" and "there is something here I cannot read" are answerable. A valid ini holding sections that are not presets is the first case, not the second: its keys are skipped the way `[preset.N.options]` keys are.
+
 ### `project_export` — Offline
 
 Requires an existing `preset` and a normalized project-contained `output_path`. `mode` is `release` (default), `debug`, or `pack`; `timeout_seconds` is `1..900` (default `300`). The destination is preserved unless `overwrite: true`. Didi invokes the corresponding headless Godot export operation and verifies that a non-empty output artifact exists before reporting success. Installed export templates and platform SDKs remain Godot/operator prerequisites.
+
+`project_export` asks the same question through the same code, so the two cannot answer differently about the same file, and its confirmation preview asks it too: a preset the file does not declare is refused at the dry run with `404` and the names that are there under `available_presets`, rather than previewed cleanly and refused on the confirm. When Godot refuses the export, its console output is carried as `engine_output` under `error.data` with the terminal escapes removed, rather than concatenated into the message.
 
 ### `gridmap_export_mesh_library` — Offline
 
 Requires an existing `.tscn` `source_scene` and a normalized `.meshlib` `output_path`. Direct source-root children become deterministic item IDs in scene order. Each item uses itself or its first recursive `MeshInstance3D`; `generate_collisions` defaults to true and creates a trimesh shape when possible. A first recursive `NavigationRegion3D` contributes navigation data. `timeout_seconds` is `1..300` (default `60`), existing output requires `overwrite: true`, and success reloads the saved `MeshLibrary` to verify its item count.
 
+
+The confirmation preview describes `output_path`, which is the file the call writes and `overwrite` destroys, with its size and content digest when it is already there; `source_scene` appears beside it as context. A `source_scene` that does not exist is still refused at the preview. When the conversion fails, the reason is an envelope with `engine_output` under `error.data` rather than a message that ends in a colon with nothing after it.
 ### `ui_list_controls` — Live (editor or game)
 
 Lists the Control nodes under a root, with where each one is and what it says.

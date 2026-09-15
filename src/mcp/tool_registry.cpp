@@ -12,6 +12,7 @@
 #include "didi/tools/resolved_tool_binding.hpp"
 #include "didi/mcp/phase7_schemas.hpp"
 #include "didi/mcp/schema_validation.hpp"
+#include "didi/offline/deep_domain_support.hpp"
 #include "didi/offline/project_impact.hpp"
 #include "didi/offline/project_settings_file.hpp"
 #include "didi/offline/speculative_verify.hpp"
@@ -1254,7 +1255,6 @@ const std::unordered_map<std::string_view, FileTarget>& fileTargets() {
         {"script_create", {"script_path", false}},
         {"resource_create", {"save_path", false}},
         {"scene_pack_branch", {"scene_path", false}},
-        {"gridmap_export_mesh_library", {"source_scene", true}},
     };
     return targets;
 }
@@ -1772,6 +1772,82 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                         client = m_sourceIpcClient](const json& call_arguments, json& before,
                                                     json& subject) {
             return probeNodeTarget(tool, argument, call_arguments, client, before, subject);
+        };
+    } else if (binding.policy_source == "gridmap_export_mesh_library") {
+        // Both halves, which is why this is not a fileTargets entry: that names
+        // one argument, and it named source_scene. This tool reads the scene
+        // and writes the library, so the preview described the file the call
+        // does not touch -- with its size and content digest, under kind
+        // "planned_mutation" -- while the file overwrite was about to destroy
+        // appeared only in the echoed arguments (#657). preview_kind
+        // "target_state" is the strong claim: it says the preview opened the
+        // target and this is what it found, and it had opened the wrong one.
+        //
+        // The source still has to exist, so that refusal moves here rather than
+        // being dropped along with the entry that carried it.
+        target_probe = [](const json& call_arguments, json& before,
+                          json& subject) -> std::optional<Error> {
+            if (!call_arguments.is_object() || !call_arguments.contains("source_scene") ||
+                !call_arguments["source_scene"].is_string() ||
+                !call_arguments.contains("output_path") ||
+                !call_arguments["output_path"].is_string()) {
+                return std::nullopt;
+            }
+            const auto source_request = call_arguments["source_scene"].get<std::string>();
+            auto source = paths::resolveProjectFile(source_request);
+            if (source.isErr()) return source.error();
+
+            auto resolved =
+                paths::resolveProjectFileForWrite(call_arguments["output_path"].get<std::string>());
+            if (resolved.isErr()) return resolved.error();
+            const std::string reported = paths::resourcePathOf(resolved.value());
+            subject = {{"path", reported}, {"source_scene", paths::resourcePathOf(source.value())}};
+            std::error_code error;
+            const bool exists = std::filesystem::is_regular_file(resolved.value(), error) && !error;
+            before = {{"exists", exists},
+                      {"path", reported},
+                      {"source_scene", paths::resourcePathOf(source.value())}};
+            if (exists) {
+                const auto size = std::filesystem::file_size(resolved.value(), error);
+                before["size_bytes"] = error ? 0 : static_cast<uint64_t>(size);
+                before["content_digest"] = contentDigestOf(resolved.value());
+            }
+            return std::nullopt;
+        };
+    } else if (binding.policy_source == "project_export") {
+        // The preview came back clean in all five states export_presets.cfg can
+        // be in, and the real call failed in every one, including for a preset
+        // name the sibling tool in the same process could prove does not exist
+        // (#652). The check is free and local: reading the presets file is one
+        // file read, which project_list_export_presets already does.
+        //
+        // `before` describes the output path, because that is what the call
+        // writes and what overwrite destroys, and it names the preset it
+        // resolved so the confirm is bound to a plan rather than to a string.
+        target_probe = [](const json& call_arguments, json& before,
+                          json& subject) -> std::optional<Error> {
+            if (!call_arguments.is_object() || !call_arguments.contains("preset") ||
+                !call_arguments["preset"].is_string() || !call_arguments.contains("output_path") ||
+                !call_arguments["output_path"].is_string()) {
+                return std::nullopt;
+            }
+            const auto preset = call_arguments["preset"].get<std::string>();
+            auto refused = offline::checkExportPreset(preset);
+            if (refused.has_value()) return *refused;
+
+            auto resolved =
+                paths::resolveProjectFileForWrite(call_arguments["output_path"].get<std::string>());
+            if (resolved.isErr()) return resolved.error();
+            const std::string reported = paths::resourcePathOf(resolved.value());
+            subject = {{"path", reported}, {"preset", preset}};
+            std::error_code error;
+            const bool exists = std::filesystem::is_regular_file(resolved.value(), error) && !error;
+            before = {{"exists", exists}, {"path", reported}, {"preset", preset}};
+            if (exists) {
+                const auto size = std::filesystem::file_size(resolved.value(), error);
+                before["size_bytes"] = error ? 0 : static_cast<uint64_t>(size);
+            }
+            return std::nullopt;
         };
     } else if (binding.policy_source == "project_rename_references") {
         // This tool is always confirmed on the grounds that "the preview is the

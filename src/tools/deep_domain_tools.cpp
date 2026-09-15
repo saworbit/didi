@@ -379,6 +379,46 @@ CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::I
     return CallToolResult::successJson(result);
 }
 
+// Godot's console output with the terminal control sequences taken out.
+//
+// The export failure used to hand four kilobytes of this over concatenated into
+// a message, carriage returns and colour escapes and progress bars included,
+// with the one actionable line sixty lines down. A client that renders an error
+// message into a terminal would execute the escapes (#651).
+std::string withoutTerminalEscapes(const std::string& text) {
+    std::string out;
+    out.reserve(text.size());
+    for (size_t index = 0; index < text.size(); ++index) {
+        if (text[index] == '\r') continue;
+        if (text[index] != '\x1b') {
+            out += text[index];
+            continue;
+        }
+        // CSI and the two-character sequences alike: skip to the byte that ends
+        // the sequence rather than trying to understand it.
+        ++index;
+        if (index < text.size() && text[index] == '[') {
+            ++index;
+            while (index < text.size() && !(text[index] >= '@' && text[index] <= '~')) ++index;
+        }
+    }
+    return out;
+}
+
+// The refusal both export tools give for a presets file that is there and
+// cannot be parsed. One sentence in one place, because project_export used to
+// answer "Export preset not found" for it and send the reader off to add a
+// preset the file already declares.
+CallToolResult malformedPresetsRefusal(size_t section_count) {
+    return CallToolResult::errorJson(
+        422,
+        "export_presets.cfg is there and could not be parsed. Fix it in the editor's Export "
+        "dialog, or delete it to start again.",
+        json{{"code", "unprocessable"},
+             {"presets_file_exists", true},
+             {"declared_preset_sections", section_count}});
+}
+
 CallToolResult handleProjectListExportPresets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     (void)ipc;
     if (!args.is_object() || !args.empty()) return CallToolResult::error("Export preset list arguments must be an empty object");
@@ -399,11 +439,15 @@ CallToolResult handleProjectListExportPresets(const json& args, std::shared_ptr<
     }
     auto contents = readBounded(path, kMaxPresetFile);
     if (contents.isErr()) return CallToolResult::fromError(contents.error());
-    auto presets = offline::parseExportPresets(contents.value());
-    if (presets.empty() && !strings::trim(contents.value()).empty()) {
-        return CallToolResult::error("export_presets.cfg is malformed or contains no complete unique presets");
-    }
-    return CallToolResult::successJson({{"presets", presets}, {"preset_count", presets.size()},
+    const auto file = offline::readExportPresets(contents.value());
+    // A file that is there and declares no presets is the same fact about the
+    // project as having no file at all: this project has no export presets. It
+    // used to be an error while the absent case was a success, which are two
+    // answers to one question (#651). A file that cannot be parsed is the
+    // separate state, and has its own code now.
+    if (file.malformed) return malformedPresetsRefusal(file.section_count);
+    return CallToolResult::successJson({{"presets", file.presets},
+                                       {"preset_count", file.presets.size()},
                                        {"execution_mode", "offline_fallback"},
                                        {"sensitive_options_omitted", true},
                                        {"presets_file_exists", true}});
@@ -420,13 +464,15 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
     auto output = resolveOutputPath(root.value(), args["output_path"].get<std::string>());
     if (output.isErr()) return CallToolResult::fromError(output.error());
     const std::string preset = args["preset"].get<std::string>();
-    auto preset_file = readBounded(root.value() / "export_presets.cfg", kMaxPresetFile);
-    if (preset_file.isErr()) return CallToolResult::fromError(preset_file.error());
-    const auto presets = offline::parseExportPresets(preset_file.value());
-    const bool found = std::any_of(presets.begin(), presets.end(), [&](const json& item) {
-        return item.value("name", "") == preset;
-    });
-    if (!found) return CallToolResult::error("Export preset not found: " + preset);
+    // The same check the confirmation preview runs, called from one place, so
+    // the preview and the call cannot answer differently about the same file.
+    // The preview used to come back clean in all five states this file can be
+    // in while the call failed in every one (#652), and the call reported an
+    // unparseable file as a missing preset, sending the reader off to add one
+    // the file already declares (#651).
+    if (auto refused = offline::checkExportPreset(preset)) {
+        return CallToolResult::fromError(*refused);
+    }
     const std::string mode = args.value("mode", "release");
     if (mode != "release" && mode != "debug" && mode != "pack") {
         return CallToolResult::error("mode must be release, debug, or pack");
@@ -449,7 +495,18 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
          paths::projectPathToUtf8(output.value())}), timeout.value());
     if (run.isErr()) return CallToolResult::error("Failed to launch Godot export: " + run.error().message);
     if (run.value().timed_out) return CallToolResult::error("Project export timed out; output status is unknown");
-    if (run.value().exit_code != 0) return CallToolResult::error("Godot export failed: " + run.value().output);
+    if (run.value().exit_code != 0) {
+        // The console transcript as data under a key, with the escapes gone,
+        // rather than four kilobytes concatenated into a message (#651).
+        return CallToolResult::errorJson(
+            500, "Godot refused the export. engine_output holds what it printed.",
+            json{{"code", "internal_error"},
+                 {"preset", preset},
+                 {"mode", mode},
+                 {"exit_code", run.value().exit_code},
+                 {"engine_output", withoutTerminalEscapes(run.value().output)},
+                 {"output_truncated", run.value().output_truncated}});
+    }
     if (!std::filesystem::is_regular_file(output.value(), error) || error ||
         std::filesystem::file_size(output.value(), error) == 0 || error) {
         return CallToolResult::error("Godot exited successfully but did not create a non-empty export output");
@@ -506,7 +563,21 @@ CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<
          output_res, args.value("generate_collisions", true) ? "true" : "false"}), timeout.value());
     if (run.isErr()) return CallToolResult::error("Failed to launch MeshLibrary conversion: " + run.error().message);
     if (run.value().timed_out) return CallToolResult::error("MeshLibrary conversion timed out; output status is unknown");
-    if (run.value().exit_code != 0) return CallToolResult::error("MeshLibrary conversion failed: " + run.value().output);
+    if (run.value().exit_code != 0) {
+        // The old message ended in a colon with nothing after it: shaped to
+        // carry a reason and carrying none, so a caller could not tell "this
+        // scene has no MeshInstance children" from "the editor refused" (#657).
+        return CallToolResult::errorJson(
+            500,
+            "The MeshLibrary conversion failed. engine_output holds what Godot printed; a scene "
+            "with no MeshInstance3D children is the usual cause.",
+            json{{"code", "internal_error"},
+                 {"source_scene", source_request},
+                 {"output_path", output_res},
+                 {"exit_code", run.value().exit_code},
+                 {"engine_output", withoutTerminalEscapes(run.value().output)},
+                 {"output_truncated", run.value().output_truncated}});
+    }
     auto marker = parseMarker(run.value().output, "DIDI_PHASE5_RESULT:");
     if (marker.isErr()) return CallToolResult::fromError(marker.error());
     if (!std::filesystem::is_regular_file(output.value(), error) || error) {

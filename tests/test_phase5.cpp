@@ -28,6 +28,7 @@ void registerTest(const std::string& name, std::function<void()> fn);
 #define ASSERT_EQ(a, b) ASSERT_TRUE((a) == (b))
 
 using didi::offline::parseExportPresets;
+using didi::offline::readExportPresets;
 using didi::offline::parseGodotDiagnostics;
 using didi::offline::parseMsBuildDiagnostics;
 
@@ -201,6 +202,39 @@ TEST(Phase5, ExportPresetParserReturnsOnlyPublicFields) {
     ASSERT_EQ(presets[0].at("export_path"), "build/game.exe");
     ASSERT_TRUE(!presets[0].contains("codesign/identity"));
     ASSERT_TRUE(!presets[0].contains("application/icon"));
+}
+
+TEST(Phase5, ExportPresetParserKeepsTheThreeEmptyStatesApart) {
+    // parseExportPresets returned an empty list for a file with no preset
+    // sections and for one it could not parse alike, and the tools above it
+    // merged those with "the file is not there" into one sentence with an "or"
+    // in it. A project that has never configured an export was an error while
+    // the same fact with no file at all was a success (#651).
+    const auto empty = readExportPresets("");
+    ASSERT_TRUE(!empty.malformed);
+    ASSERT_EQ(empty.section_count, 0u);
+
+    // A valid ini with no preset sections is a project with no export presets,
+    // not a broken file. Its keys are skipped the way [preset.N.options] keys
+    // are, because they are not about a preset.
+    const auto other_sections = readExportPresets("[something]\nkey=1\n");
+    ASSERT_TRUE(!other_sections.malformed);
+    ASSERT_EQ(other_sections.section_count, 0u);
+    ASSERT_TRUE(other_sections.presets.empty());
+
+    // A declared preset that cannot be identified is the separate state, and it
+    // says how many sections it did see, so "there is nothing here" and "there
+    // is something here I cannot read" are answerable.
+    const auto nameless = readExportPresets("[preset.0]\nplatform=\"Linux\"\nrunnable=true\n");
+    ASSERT_TRUE(nameless.malformed);
+    ASSERT_EQ(nameless.section_count, 1u);
+    ASSERT_TRUE(nameless.presets.empty());
+
+    const auto complete =
+        readExportPresets("[preset.0]\nname=\"Linux\"\nplatform=\"Linux\"\nrunnable=true\n");
+    ASSERT_TRUE(!complete.malformed);
+    ASSERT_EQ(complete.section_count, 1u);
+    ASSERT_EQ(complete.presets.size(), 1u);
 }
 
 TEST(Phase5, ExportPresetParserRejectsMalformedAndDuplicateNames) {

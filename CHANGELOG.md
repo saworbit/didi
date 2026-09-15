@@ -66,6 +66,42 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The export family answers with an envelope and previews what it will do.**
+  Four failures in `project_list_export_presets` and `project_export` were bare
+  prose strings with no code and nothing to branch on, which the error-envelope
+  census could not reach because they need the project in a particular state
+  rather than a particular argument (#651). With them, three things they were
+  getting wrong. A project with no export presets is now the same answer
+  whether or not `export_presets.cfg` is on disk, where an absent file was a
+  success and a present empty one an error; a file that is there and cannot be
+  parsed is its own `422`, carrying how many preset sections it declared, rather
+  than one sentence with an "or" in it covering three states. `project_export`
+  reports what `project_list_export_presets` already knows about the file
+  instead of answering "Export preset not found" for an unparseable one and
+  sending the reader off to add a preset the file already declares. And Godot's
+  console output is carried as `engine_output` under `error.data` with the
+  terminal escapes removed, rather than four kilobytes concatenated into a
+  message with the actionable line sixty lines down and the colour escapes
+  still in it.
+- **`project_export`'s preview reads the presets file.** It came back clean in
+  all five states `export_presets.cfg` can be in, and the real call failed in
+  every one, including for a preset name the sibling tool in the same process
+  could prove does not exist (#652). The check is one local file read, so the
+  preview does it: a preset that is not declared is refused at the dry run with
+  the names that are there under `available_presets`. The preview and the call
+  go through one function, so they cannot answer differently about the same
+  file.
+- **`gridmap_export_mesh_library`'s preview describes the file it replaces.**
+  It claimed `preview_kind: "target_state"`, which means the preview opened the
+  target and this is what it found, and described `source_scene` -- a file the
+  call reads and does not modify -- with its size and content digest under
+  `kind: "planned_mutation"`, while the file `overwrite` was about to destroy
+  appeared only in the echoed arguments (#657). The preview now reads
+  `output_path` and keeps the source beside it as context, and still refuses a
+  `source_scene` that is not there. Its conversion failure carried a message
+  shaped to hold a reason and holding none, ending in a colon with nothing
+  after it; it is an envelope with the engine's output now.
+
 - **A script this process may not read is not reported as bad code.**
   `script_check_syntax` answered `isError: false`, `has_errors: true` and one
   diagnostic at line 1 column 1 of a file whose bytes were never read, under
