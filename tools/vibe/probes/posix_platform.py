@@ -96,7 +96,11 @@ def permission_rows(session: Session, project: Path) -> None:
     os.chmod(locked, 0)
     if os.access(locked, os.R_OK):
         skip("chmod 000", "the process can read it anyway (running as root?)")
-        os.chmod(locked, 0o644)
+        # Unlink rather than restore a mode: deleting a file needs write on the
+        # directory, not on the file, so there is nothing to put back. Every
+        # chmod here stays owner-only on purpose (CodeQL's py/overly-permissive-file
+        # is right about a probe that hands a scratch file to group and other).
+        locked.unlink()
         return
     for tool, arguments in (
         ("script_check_syntax", {"file_path": "res://locked.gd"}),
@@ -109,7 +113,6 @@ def permission_rows(session: Session, project: Path) -> None:
             "the same answer" if says(unreadable) == says(absent) else "two different answers")
         print(f"       unreadable: {says(unreadable, 'has_errors', 'symbol_count_total')}")
         print(f"       absent:     {says(absent, 'has_errors', 'symbol_count_total')}")
-    os.chmod(locked, 0o644)
     locked.unlink()
 
 
@@ -120,10 +123,10 @@ def unwritable_directory(session: Session, project: Path) -> None:
         return
     readonly = project / "readonly"
     readonly.mkdir(exist_ok=True)
-    os.chmod(readonly, 0o500)
+    os.chmod(readonly, stat.S_IRUSR | stat.S_IXUSR)
     if os.access(readonly, os.W_OK):
         skip("chmod 500 directory", "the process can write anyway (running as root?)")
-        os.chmod(readonly, 0o755)
+        os.chmod(readonly, stat.S_IRWXU)
         return
     payload, is_error = session.call(
         "script_create", {"script_path": "res://readonly/new.gd", "source_text": SOURCE})
@@ -131,7 +134,9 @@ def unwritable_directory(session: Session, project: Path) -> None:
     print(f"       {says(payload, 'script_path', 'status')}")
     landed = (readonly / "new.gd").exists()
     row("...and nothing was created", "created=False", f"created={landed}")
-    os.chmod(readonly, 0o755)
+    # Owner-only, not 0o755: this is a scratch directory in a throwaway project
+    # and nothing else needs to read it.
+    os.chmod(readonly, stat.S_IRWXU)
 
 
 def symlink_rows(session: Session, project: Path) -> None:
