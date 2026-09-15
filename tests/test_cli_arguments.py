@@ -11,7 +11,10 @@ behaviour of the process at startup and nothing smaller can prove it.
 """
 
 import json
+import os
+import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -30,11 +33,23 @@ except ImportError:
 _executable = _binary.resolve
 
 
-def _run(arguments):
+def _run(arguments, environment=None):
     return subprocess.run(
         [_executable(), *arguments],
         stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60,
+        env=environment,
     )
+
+
+# Names that a real user directory can hold. The first three are representable
+# in the Windows ANSI codepage and the last three are not, and before #611 the
+# two halves failed differently: cp1252 names crashed the process with
+# STATUS_STACK_BUFFER_OVERRUN and no output at all, and the rest were mangled
+# into question marks and refused as an inaccessible directory.
+NON_ASCII_PROJECT_NAMES = [
+    "pr\u00f3jekt", "gr\u00fcn", "a\u00f1o",
+    "\u043f\u0440\u043e\u0435\u043a\u0442", "\u65e5\u672c", "pro\U0001f600ject",
+]
 
 
 # (name, arguments) that must still be accepted exactly as before.
@@ -144,6 +159,28 @@ class CommandLineTests(unittest.TestCase):
         # Version, commit and configure stamp, so two binaries match only when
         # they were configured together.
         self.assertRegex(lines[1], r"^build \d+\.\d+\.\d+\+\S+\.\d{8}T\d{6}$")
+
+    def test_a_non_ascii_project_root_starts(self):
+        # A Windows username with an accent in it is ordinary, and a project
+        # under C:/Users/<name>/ inherits it. Both routes to the project root
+        # are checked, because both read the same mangled bytes.
+        for name in NON_ASCII_PROJECT_NAMES:
+            with self.subTest(name.encode("unicode_escape").decode("ascii")):
+                base = tempfile.mkdtemp(prefix="didi-cli-")
+                try:
+                    root = os.path.join(base, name)
+                    os.mkdir(root)
+                    shutil.copy(os.path.join(FIXTURE_PROJECT, "project.godot"), root)
+
+                    argument = _run(["--project", root])
+                    self.assertEqual(argument.returncode, 0, argument.stderr)
+
+                    environment = dict(os.environ)
+                    environment["DIDI_PROJECT_ROOT"] = root
+                    inherited = _run([], environment=environment)
+                    self.assertEqual(inherited.returncode, 0, inherited.stderr)
+                finally:
+                    shutil.rmtree(base, ignore_errors=True)
 
     def test_manifest_still_prints_json_without_a_project(self):
         result = _run(["--dump-tool-manifest"])

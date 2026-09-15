@@ -126,6 +126,19 @@ TEST(Phase6, ExplicitProjectRootRequiresGodotProject) {
     ASSERT_EQ(resolved.value(), std::filesystem::weakly_canonical(directory.root));
 }
 
+TEST(Phase6, ExplicitProjectRootRefusesBytesThatAreNotUtf8) {
+    // The refusal below was written for this case and could never be reached:
+    // on Windows the conversion to a native path throws std::system_error, not
+    // filesystem_error, so it escaped main and fast-failed the process with no
+    // output (#611). A caller must get the sentence instead.
+    std::string invalid = "C:/projects/pr";
+    invalid.push_back(static_cast<char>(0xF3));  // Latin-1 'o acute', not valid UTF-8
+    invalid += "jekt";
+    const auto resolved = didi::paths::resolveExplicitProjectRoot(invalid);
+    ASSERT_TRUE(resolved.isErr());
+    ASSERT_TRUE(resolved.error().message.find("UTF-8") != std::string::npos);
+}
+
 TEST(Phase6, ProjectEndpointKeysAreStableAndIsolated) {
     ScopedPhase6Directory first("endpoint-a");
     ScopedPhase6Directory second("endpoint-b");

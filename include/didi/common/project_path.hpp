@@ -63,7 +63,14 @@ inline Result<std::filesystem::path> resolveExplicitProjectRoot(const std::strin
     std::filesystem::path supplied;
     try {
         supplied = projectPathFromUtf8(value);
-    } catch (const std::filesystem::filesystem_error&) {
+    } catch (const std::exception&) {
+        // Wider than filesystem_error on purpose. On Windows the conversion
+        // from UTF-8 to the native wide path throws std::system_error ("No
+        // mapping for the Unicode character exists in the target multi-byte
+        // code page"), which is not a filesystem_error, so the narrower catch
+        // let it escape main and the process fast-failed with 0xC0000409 and
+        // no output at all (#611). The message below was written for this case
+        // and could never be reached.
         return Error::invalidArgument("The project root must be valid UTF-8");
     }
     std::error_code error;
