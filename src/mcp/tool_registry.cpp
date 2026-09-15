@@ -733,11 +733,20 @@ static json outputSchemaForTool(const std::string& name) {
     };
 
     if (name == "script_check_syntax") {
+        // The four engine fields are nullable because a check that spawned no
+        // Godot -- a source_text-only check, or a machine with none installed
+        // -- has no engine to name, and an unknown version is not a match
+        // (#617).
+        static const json nullable_string = {{"type", {"string", "null"}}};
         return object_schema({{"execution_mode", string_type},
                               {"has_errors", boolean_type},
                               {"diagnostics", {{"type", "array"}}},
                               {"diagnostics_count", integer_type},
-                              {"file_path", string_type}},
+                              {"file_path", string_type},
+                              {"engine_version", nullable_string},
+                              {"engine_executable", nullable_string},
+                              {"attached_engine_version", nullable_string},
+                              {"matches_attached_engine", {{"type", {"boolean", "null"}}}}},
                              {"execution_mode", "has_errors"});
     }
     if (name == "project_search_text" || name == "project_search_symbols") {
@@ -2492,12 +2501,17 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"source_text", {{"type", "string"}, {"description", "Optional unsaved script buffer"}}}
             }}
         };
-        t.handler = [this](const json& args) { return handleScriptCheckSyntax(args, m_ipcClient); };
+        // The source client, not the lease dispatch wrapper. This tool sends no
+        // request; it reads the selected session descriptor to say whether the
+        // Godot it spawned is the engine the caller is attached to, and the
+        // wrapper is not a session client. Same reason script_reflect_class
+        // takes it (#617).
+        t.handler = [this](const json& args) { return handleScriptCheckSyntax(args, m_sourceIpcClient); };
         registerTool(t);
 
         // Alias
         t.name = "analyze_script_diagnostics";
-        t.handler = [this](const json& args) { return handleScriptCheckSyntax(args, m_ipcClient); };
+        t.handler = [this](const json& args) { return handleScriptCheckSyntax(args, m_sourceIpcClient); };
         registerTool(t);
     }
     {
@@ -3954,7 +3968,8 @@ void ToolRegistry::registerAllDefaultTools() {
             {"shader_path", {{"type", "string"}}},
             {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 300}, {"default", 30}}}
         }}, {"required", {"shader_path"}}};
-        t.handler = [this](const json& args) { return handleShaderCheckCompile(args, m_ipcClient); };
+        // The source client, for the same reason script_check_syntax takes it.
+        t.handler = [this](const json& args) { return handleShaderCheckCompile(args, m_sourceIpcClient); };
         registerTool(std::move(t));
     }
     {

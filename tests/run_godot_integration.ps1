@@ -2387,6 +2387,11 @@ try {
         (Tool-Request 502 "project_list_export_presets" @{}),
         (Tool-Request 503 "shader_check_compile" @{ shader_path = "res://phase5_valid.gdshader"; timeout_seconds = 30 }),
         (Tool-Request 504 "shader_check_compile" @{ shader_path = "res://phase5_invalid.gdshader"; timeout_seconds = 30 }),
+        # Both checks spawn a Godot to answer "will the engine accept this?",
+        # and the one they spawn is whichever resolveGodotExecutable finds
+        # newest-first, not the one this session is attached to. Neither said
+        # which engine answered (#617).
+        (Tool-Request 517 "script_check_syntax" @{ file_path = "res://subject.gd" }),
         (Tool-Request 505 "project_export" @{ preset = "Phase5 Pack"; output_path = "res://phase5-output.pck"; mode = "pack"; timeout_seconds = 120 }),
         (Tool-Request 506 "gridmap_export_mesh_library" @{ source_scene = "res://phase5_mesh_source.tscn"; output_path = "res://phase5.meshlib"; generate_collisions = $true; timeout_seconds = 60 }),
         (Tool-Request 511 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
@@ -2815,6 +2820,19 @@ try {
     $phase5Presets = Tool-Payload $phase5ById[502]
     Assert-True (@($phase5Presets.presets).Count -eq 1 -and $phase5Presets.presets[0].name -eq "Phase5 Pack") "Phase 5 export preset was not listed."
     Assert-True ($phase5ById[502].result.content[0].text -notmatch "phase5-secret") "Export preset options leaked a secret value."
+    # Which engine answered, as a field rather than only inside raw_output, and
+    # whether it is the one this session is attached to (#617).
+    foreach ($named in @(503, 517)) {
+        $checked = Tool-Payload $phase5ById[$named]
+        Assert-True ($checked.engine_version -match "^Godot Engine v\d") "Request $named did not name the engine that ran: $($checked.engine_version)"
+        Assert-True ($null -ne $checked.engine_executable) "Request $named did not name the binary it ran."
+        Assert-True ($checked.attached_engine_version -match "$($engineVersion.Major)\.$($engineVersion.Minor)") "Request $named reported the attached engine as $($checked.attached_engine_version), which is not the $($engineVersion.Raw) this session is on."
+        # GODOT_BIN points at the engine this editor is running, so the check
+        # spawned that same line and must say so. Null would mean one of the two
+        # versions was unknown, and both are known here.
+        Assert-True ($checked.matches_attached_engine -eq $true) "Request $named ran $($checked.engine_version) against an attached $($checked.attached_engine_version) and reported matches_attached_engine=$($checked.matches_attached_engine)."
+    }
+
     $validShader = Tool-Payload $phase5ById[503]
     Assert-True ($validShader.success -eq $true -and $validShader.has_errors -eq $false) "Valid shader did not compile cleanly."
     $invalidShader = Tool-Payload $phase5ById[504]

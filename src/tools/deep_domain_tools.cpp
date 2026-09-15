@@ -5,6 +5,8 @@
 #include "didi/offline/deep_domain_support.hpp"
 #include "didi/offline/process_runner.hpp"
 #include "didi/offline/test_runner.hpp"
+#include "didi/common/engine_version.hpp"
+#include "didi/runtime/session_client.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cstdlib>
@@ -327,7 +329,6 @@ CallToolResult handleShaderGetVisualGraph(const ResolvedToolBinding& binding, co
 }
 
 CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    (void)ipc;
     if (!args.is_object() || !args.contains("shader_path") || !args["shader_path"].is_string()) {
         return CallToolResult::error("shader_path is required and must be a string");
     }
@@ -358,13 +359,24 @@ CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::I
         diagnostics.push_back({"error", "GODOT_SHADER", "Godot did not confirm shader compilation",
                                requested, 0, 0});
     }
-    return CallToolResult::successJson({
+    json result = {
         {"success", !has_errors}, {"has_errors", has_errors}, {"exit_code", run.value().exit_code},
         {"shader_path", requested}, {"diagnostics", diagnosticsJson(diagnostics)},
         {"diagnostics_count", diagnostics.size()}, {"duration_seconds", run.value().duration_seconds},
         {"output_truncated", run.value().output_truncated}, {"raw_output", run.value().output},
         {"execution_mode", "offline_fallback"}
-    });
+    };
+    // Which engine answered, as a field rather than only inside raw_output.
+    // Reading the selected session takes no route and changes no selection,
+    // which is what an offline-only tool is allowed to do.
+    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
+    const auto attached = sessions ? sessions->activeSession()
+                                   : std::optional<runtime::SessionDescriptor>{};
+    versions::annotateCheckEngine(
+        result, offline::engineVersionFromOutput(run.value().output),
+        offline::resolveGodotExecutable(),
+        attached.has_value() ? attached->engine_version : std::string());
+    return CallToolResult::successJson(result);
 }
 
 CallToolResult handleProjectListExportPresets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

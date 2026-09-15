@@ -42,7 +42,6 @@ std::optional<std::string> scriptEncodingRefusal(const std::filesystem::path& pa
 }
 
 CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    (void)ipc;
     std::string file_path = args.value("file_path", "");
     std::string source_text = args.value("source_text", "");
 
@@ -52,6 +51,7 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
     }
 
     std::string analysis_path = file_path;
+    offline::GDScriptDiagnostics::EngineCheck engine;
     std::optional<std::string> encoding_refusal;
     if (source_text.empty() && !file_path.empty()) {
         auto resolved = paths::resolveProjectFile(file_path);
@@ -78,7 +78,7 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
                                 {"line", 0},
                                 {"column", 0}});
     } else {
-        auto diags = offline::GDScriptDiagnostics::analyze(analysis_path, source_text);
+        auto diags = offline::GDScriptDiagnostics::analyze(analysis_path, source_text, &engine);
         diagnostics_count = diags.size();
         for (const auto& d : diags) {
             if (d.severity == "error") has_error = true;
@@ -92,6 +92,19 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
         {"has_errors", has_error},
         {"diagnostics", diag_arr}
     };
+
+    // Which engine answered. The whole question this tool exists for is "will
+    // the engine accept this?", and resolveGodotExecutable picks newest-first
+    // from a hardcoded list, so a 4.5 project could be answered about by 4.7
+    // with nothing in the response saying so, and no raw_output to hide it in
+    // (#617). Reading the selected session takes no route and changes no
+    // selection, which is what an offline-only tool is allowed to do.
+    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
+    const auto attached = sessions ? sessions->activeSession()
+                                   : std::optional<runtime::SessionDescriptor>{};
+    versions::annotateCheckEngine(result, engine.version, engine.executable,
+                                  attached.has_value() ? attached->engine_version
+                                                       : std::string());
 
     return CallToolResult::successJson(result);
 }

@@ -54,7 +54,20 @@ struct SymbolPatch {
 
 class GDScriptDiagnostics {
 public:
-    static std::vector<ScriptDiagnostic> analyze(const std::string& file_path, const std::string& source_text = "");
+    // Which engine the check spawned, and where it came from. Both empty when
+    // no engine ran: a source_text-only check, a path Godot never saw, or a
+    // machine with no Godot at all. `script_check_syntax` had no field for this
+    // and not even a raw_output to hide it in, so an answer from 4.7 about a 4.5
+    // project was indistinguishable from one the project's own engine gave
+    // (#617).
+    struct EngineCheck {
+        std::string version;
+        std::string executable;
+    };
+
+    static std::vector<ScriptDiagnostic> analyze(const std::string& file_path,
+                                                 const std::string& source_text = "",
+                                                 EngineCheck* engine = nullptr);
 
     // The kinds of symbol a patch can name, in the order the schema publishes
     // them. Anything outside this set is refused rather than passed through to
@@ -83,7 +96,8 @@ public:
                                            const std::string& symbol_type = "function",
                                            bool create_if_missing = false);
 
-    static std::vector<ScriptDiagnostic> runGodotCompilerCheck(const std::string& script_file_path);
+    static std::vector<ScriptDiagnostic> runGodotCompilerCheck(const std::string& script_file_path,
+                                                               EngineCheck* engine = nullptr);
 
     // The autoload singleton names project.godot registers, read from the
     // project root this process is running in.
