@@ -3304,6 +3304,74 @@ static void test_a_declared_hint_range_is_read_as_the_engine_spells_it() {
     ASSERT_TRUE(!parseShaderHintRange("0,1x").has_value());
 }
 
+static void test_a_script_the_engine_cannot_read_is_not_a_script_with_nothing_in_it() {
+    // Break caught: a .gd saved as UTF-16 or in a single-byte encoding reads as
+    // an empty script with no syntax errors, which is byte for byte the answer a
+    // correct empty script gets (#613, #614). project_search_text has always
+    // classified these files; the script tools did not.
+    ScopedToolProject project("script-encoding");
+    writeAuditFile("project.godot", "config_version=5\n");
+
+    const std::string source =
+        "extends Node\n\nvar label := \"creme\"\n\nfunc greet() -> String:\n\treturn label\n";
+    writeAuditFile("good.gd", source);
+
+    // UTF-16 LE with a BOM, which is what an editor that is not Godot writes.
+    std::string utf16;
+    utf16.push_back(static_cast<char>(0xFF));
+    utf16.push_back(static_cast<char>(0xFE));
+    for (const char character : source) {
+        utf16.push_back(character);
+        utf16.push_back('\0');
+    }
+    writeAuditFile("utf16.gd", utf16);
+
+    // Valid GDScript stored in Latin-1, so the accented byte is not UTF-8.
+    std::string latin1 = "extends Node\n\nvar label := \"cr";
+    latin1.push_back(static_cast<char>(0xE8));
+    latin1 += "me\"\n\nfunc greet() -> String:\n\treturn label\n";
+    writeAuditFile("latin1.gd", latin1);
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto payloadOf = [](const didi::mcp::CallToolResult& result) {
+        return didi::json::parse(result.content[0].text, nullptr, false);
+    };
+
+    for (const char* path : {"res://utf16.gd", "res://latin1.gd"}) {
+        const auto symbols = registry.callTool("script_get_symbols",
+                                               didi::json{{"file_path", path}});
+        ASSERT_TRUE(symbols.isError);
+        const auto payload = payloadOf(symbols);
+        ASSERT_EQ(payload["error"]["code"], 415);
+        ASSERT_EQ(payload["error"]["data"]["code"], "binary_or_invalid_utf8");
+        ASSERT_TRUE(payload["error"]["message"].get<std::string>().find("UTF-8") !=
+                    std::string::npos);
+
+        const auto syntax = registry.callTool("script_check_syntax",
+                                              didi::json{{"file_path", path}});
+        const auto checked = payloadOf(syntax);
+        ASSERT_EQ(checked["has_errors"], true);
+        ASSERT_EQ(checked["diagnostics_count"], 1);
+        ASSERT_EQ(checked["diagnostics"][0]["rule"], "invalid_encoding");
+    }
+
+    // The control, on the same two tools in the same project: a script the
+    // engine can read still answers about its contents.
+    const auto good_symbols = registry.callTool("script_get_symbols",
+                                                didi::json{{"file_path", "res://good.gd"}});
+    ASSERT_TRUE(!good_symbols.isError);
+    const auto listed = payloadOf(good_symbols);
+    ASSERT_EQ(listed["functions"].size(), 1u);
+    ASSERT_EQ(listed["variables"].size(), 1u);
+
+    const auto good_syntax = registry.callTool("script_check_syntax",
+                                               didi::json{{"file_path", "res://good.gd"}});
+    ASSERT_TRUE(!good_syntax.isError);
+    ASSERT_EQ(payloadOf(good_syntax)["has_errors"], false);
+}
+
 static void test_tool_capabilities_are_honest() {
     auto& reg = didi::mcp::ToolRegistry::instance();
     reg.registerAllDefaultTools();
@@ -5561,6 +5629,8 @@ struct RegisterToolTests {
                      test_a_write_is_applied_when_every_member_landed);
         registerTest("Tools.ShaderHintRangeIsReadAsTheEngineSpellsIt",
                      test_a_declared_hint_range_is_read_as_the_engine_spells_it);
+        registerTest("Tools.ScriptToolsRefuseAFileTheEngineCannotRead",
+                     test_a_script_the_engine_cannot_read_is_not_a_script_with_nothing_in_it);
         registerTest("McpServer.PreservesInjectedIpcClient", test_mcp_server_preserves_injected_ipc_client);
         registerTest("Tools.RuntimeSessionLocalAndValidated", test_runtime_get_session_is_local_and_attach_rejects_non_string_id);
         registerTest("Tools.RuntimeReadLogsInputValidation", test_runtime_read_logs_rejects_invalid_cursor_limit_and_level);

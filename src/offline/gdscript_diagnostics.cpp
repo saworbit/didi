@@ -625,7 +625,25 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const s
         }
         if (std::regex_match(line, match, message_line)) {
             pending_message = std::make_pair(match[1].str(), match[2].str());
-            if (pending_message->second.find("Failed to load script") != std::string::npos) {
+            // An ERROR: line is kept only when a res:// location can be found
+            // for it, inline or on the next line. A load failure has neither:
+            // its frames point at engine source, `load_source_code
+            // (modules/gdscript/gdscript.cpp:1151)`, so the message was
+            // dropped and the check answered clean about a script the engine
+            // will not load (#613). One phrasing was special-cased for this;
+            // the engine has several and they are all the same fact.
+            static const char* const kLoadFailures[] = {
+                "Failed to load script", "Failed loading resource", "Can't load script",
+                "contains invalid unicode",
+            };
+            bool load_failure = false;
+            for (const char* phrase : kLoadFailures) {
+                if (pending_message->second.find(phrase) != std::string::npos) {
+                    load_failure = true;
+                    break;
+                }
+            }
+            if (load_failure) {
                 ScriptDiagnostic diagnostic;
                 diagnostic.severity = pending_message->first.find("WARNING") != std::string::npos
                                           ? "warning" : "error";
