@@ -42,8 +42,8 @@ attestation beside them.
 | Platform | Release archive | On every push | Live editor coverage |
 | :--- | :--- | :--- | :--- |
 | **Windows x64** | `didi-windows-x64.zip` | MSVC build, native and Python suites | Godot 4.5.1 and 4.7.2 editors, in CI |
-| **Linux x64** | `didi-linux-x64.tar.gz`, built in an Ubuntu 22.04 container so it runs on older glibc | gcc build, native and Python suites, ASan and UBSan | Not in CI |
-| **macOS (Apple silicon)** | `didi-macos-arm64.tar.gz`; there is no Intel archive | clang build, native and Python suites | Not in CI |
+| **Linux x64** | `didi-linux-x64.tar.gz`, built in an Ubuntu 22.04 container and linked against a static C++ runtime, so glibc 2.34 is the whole floor: Ubuntu 22.04, Debian 12, Rocky, RHEL and AlmaLinux 9 and anything newer | gcc build, native and Python suites, ASan and UBSan | Not in CI |
+| **macOS (Apple silicon), macOS 14 or newer** | `didi-macos-arm64.tar.gz`; there is no Intel archive, and the `.gdextension` inside it declares only arm64, so an Intel Mac is told there is no library for it rather than handed one it cannot load | clang build, native and Python suites | Not in CI |
 
 **macOS and Linux are the least-tested platforms, and testers are wanted.**
 The live editor harness runs on Windows in CI, so a real editor session on

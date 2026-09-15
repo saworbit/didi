@@ -3,14 +3,27 @@ entry_symbol = "didi_library_init"
 compatibility_minimum = "4.5"
 reloadable = true
 
+; macOS is arm64 only, and the entries say so.
+;
+; This file is copied verbatim into every platform's archive, and it used to
+; declare macos.*.x86_64 and macos.*.universal pointing at the one dylib the
+; release builds, which is a thin arm64 Mach-O. Godot's loader requires every
+; tag in a key to be a feature of the running engine and takes the key with the
+; most tags, so on an Intel Mac macos.release.x86_64 matched, the file was
+; found, and the dynamic loader was handed a library for another architecture.
+; The user saw a generic "can't open dynamic library" about a file that is
+; plainly there, rather than the honest answer the release notes already knew:
+; this archive has no build for your machine (#648).
+;
+; OS::has_feature("universal") is true on both macOS slices, so the universal
+; entries were a second name for the same mistake. With only arm64 declared,
+; Apple Silicon still matches on has_feature("arm64") and Intel gets
+; "No GDExtension library found for current OS and architecture (macos.x86_64)".
+
 [libraries]
 windows.debug.x86_64 = "res://addons/didi/bin/didi_extension.dll"
 windows.release.x86_64 = "res://addons/didi/bin/didi_extension.dll"
 linux.debug.x86_64 = "res://addons/didi/bin/libdidi_extension.so"
 linux.release.x86_64 = "res://addons/didi/bin/libdidi_extension.so"
-macos.debug.x86_64 = "res://addons/didi/bin/libdidi_extension.dylib"
-macos.release.x86_64 = "res://addons/didi/bin/libdidi_extension.dylib"
 macos.debug.arm64 = "res://addons/didi/bin/libdidi_extension.dylib"
 macos.release.arm64 = "res://addons/didi/bin/libdidi_extension.dylib"
-macos.debug.universal = "res://addons/didi/bin/libdidi_extension.dylib"
-macos.release.universal = "res://addons/didi/bin/libdidi_extension.dylib"

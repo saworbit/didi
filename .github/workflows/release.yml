@@ -191,12 +191,72 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
+          set -euo pipefail
+          # The C++ runtime goes in statically on Linux.
+          #
+          # The container above keeps the glibc floor at 2.34, which is what the
+          # matrix comment is about. It is not the floor that binds: the binary
+          # also linked libstdc++ dynamically, and Ubuntu 22.04's libstdc++ is
+          # GCC 12's, which needs GLIBCXX_3.4.30. Rocky, RHEL and AlmaLinux 9
+          # have glibc 2.34 -- exactly the floor the container was chosen to
+          # hold -- and libstdc++ from GCC 11, one release short, so neither
+          # bin/didi nor the addon's .so would start there. libstdc++ was the
+          # binding constraint and nothing had picked it (#647).
+          #
+          # Godot's own Linux builds do this for the same reason. It costs about
+          # a megabyte. Both flags, and both linker variables, because the
+          # archive ships an executable and a shared library and a user runs
+          # both.
+          RUNTIME_LINK_FLAGS=""
+          if [ "${RUNNER_OS}" = "Linux" ]; then
+            RUNTIME_LINK_FLAGS="-static-libstdc++ -static-libgcc"
+          fi
           cmake -B build -S . -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXE_LINKER_FLAGS="${RUNTIME_LINK_FLAGS}" \
+            -DCMAKE_SHARED_LINKER_FLAGS="${RUNTIME_LINK_FLAGS}" \
             -DPython3_EXECUTABLE="$DIDI_RELEASE_PYTHON"
 
       - name: Build Release Binaries
         run: cmake --build build --config Release --parallel
+
+      # The check that would have caught #647, run on what was just built
+      # rather than on what a distro happens to have. A release that cannot
+      # start on a distro whose glibc meets the stated floor is the failure
+      # this exists to stop, and the archive's two halves -- the server the
+      # user runs and the library they drop into a project -- are both checked.
+      - name: Verify the Linux binaries stay on the stated floor
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 2.34 is Rocky, RHEL and AlmaLinux 9, and the oldest thing the
+          # release claims. Raising it is a decision about who can run Didi,
+          # so it is written here once and compared against, not inferred.
+          FLOOR="2.34"
+          status=0
+          for binary in build/didi build/addons/didi/bin/libdidi_extension.so; do
+            if [ ! -f "${binary}" ]; then
+              echo "missing: ${binary}"
+              status=1
+              continue
+            fi
+            # A dynamically linked libstdc++ is what broke this. Statically
+            # linked, the binary needs no GLIBCXX_ symbol version at all.
+            cxx="$(readelf -V "${binary}" | grep -oE 'GLIBCXX_[0-9.]+' | sort -uV || true)"
+            if [ -n "${cxx}" ]; then
+              echo "${binary} needs libstdc++ symbol versions, so it is not statically linked:"
+              echo "${cxx}"
+              status=1
+            fi
+            worst="$(readelf -V "${binary}" | grep -oE 'GLIBC_[0-9.]+' | sed 's/GLIBC_//' | sort -uV | tail -1 || true)"
+            if [ -n "${worst}" ] && [ "$(printf '%s\n%s\n' "${FLOOR}" "${worst}" | sort -V | tail -1)" != "${FLOOR}" ]; then
+              echo "${binary} needs glibc ${worst}, above the stated floor of ${FLOOR}"
+              status=1
+            fi
+            echo "${binary}: glibc <= ${worst:-none}, no libstdc++ symbol versions"
+          done
+          exit "${status}"
 
       # A tag used to package binaries without running anything. A broken build
       # could ship as a GitHub Release with nothing in the way of it.
