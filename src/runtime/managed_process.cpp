@@ -467,6 +467,10 @@ void ManagedProcess::stop() {
     // closed by the kernel, so zero is the signal. Bounded, because a stop
     // that never returns is worse than a rename that reports it could not
     // proceed -- which is what the caller does next if this times out.
+    //
+    // Windows only. POSIX has no launcher of this kind for Godot, and process
+    // groups do not nest the way jobs do, so the same guarantee there would be
+    // a different mechanism for a case nobody has reported.
     if (has_job) {
         constexpr int kTreeDrainTimeoutMs = 10000;
         constexpr int kTreeDrainPollMs = 20;
