@@ -68,7 +68,8 @@ def preview_of(payload: object) -> dict:
 
 
 def restore(target: Path, text: str = ORIGINAL) -> None:
-    target.write_text(text, encoding="utf-8", newline="")
+    with target.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
 
 
 def main() -> int:

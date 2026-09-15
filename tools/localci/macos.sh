@@ -20,6 +20,16 @@ HOST="${DIDI_MAC_HOST:-}"
 REMOTE_DIR="${DIDI_MAC_DIR:-didi-localci}"
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=8)
 
+# A dedicated key rather than whatever the agent happens to hold, so the lane
+# is unattended and the Mac can revoke exactly this access by deleting one line
+# from authorized_keys. DIDI_MAC_KEY overrides; ~/.ssh/config is used if
+# neither is set, which is the right answer for anyone who already manages
+# their hosts there.
+KEY="${DIDI_MAC_KEY:-$HOME/.ssh/didi_localci}"
+if [ -f "$KEY" ]; then
+    SSH_OPTS+=(-i "$KEY" -o IdentitiesOnly=yes)
+fi
+
 say() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 die() { printf '\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
 
@@ -57,7 +67,7 @@ say "toolchain"
 # .zprofile is only read by a login shell. Every remote command below sources
 # it, and this is where a missing one is named rather than failing later as
 # "cmake: command not found" from inside a build.
-BREW_PATH='export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH";'
+BREW_PATH='export PATH="$HOME/bin:/opt/homebrew/bin:/usr/local/bin:$PATH";'
 missing=$(ssh "${SSH_OPTS[@]}" "$HOST" "$BREW_PATH"' for t in cmake ninja python3 clang++; do command -v $t >/dev/null 2>&1 || echo $t; done')
 if [ -n "$missing" ]; then
     die "Missing on $HOST: $(echo $missing)
@@ -80,15 +90,38 @@ git ls-files -z --cached --others --exclude-standard \
 echo "  $(git ls-files --cached --others --exclude-standard | wc -l) files -> $HOST:$REMOTE_DIR/src"
 
 say "python dependency"
-ssh "${SSH_OPTS[@]}" "$HOST" "$BREW_PATH"' python3 -c "import jsonschema" 2>/dev/null' \
-    || ssh "${SSH_OPTS[@]}" "$HOST" "$BREW_PATH cd '$REMOTE_DIR/src' && python3 -m pip install --quiet --break-system-packages -r requirements-dev.txt"
+# Two pip eras, and a Mac can be either. --break-system-packages arrived in pip
+# 23 for PEP 668 environments; macOS ships a system python3 whose pip is older
+# than that and rejects the flag outright with "no such option". --user works
+# there and fails on a PEP 668 interpreter, so try that first and fall back.
+#
+# Either can still fail for a reason neither flag fixes: requirements-dev.txt
+# pins jsonschema 4.26.0, which dropped Python 3.9, and macOS 27 ships 3.9.6 as
+# its system python3. Without Homebrew there is no newer interpreter, and
+# installing one needs sudo. That is a gap in the Python suite only -- the
+# reason to run a Mac at all is Apple Clang, the real std::filesystem and the
+# .dylib, none of which care. So the lane degrades loudly instead of refusing.
+PYTHON_TESTS=1
+if ssh "${SSH_OPTS[@]}" "$HOST" "$BREW_PATH"' python3 -c "import jsonschema" 2>/dev/null'; then
+    echo "  jsonschema already present"
+elif ssh "${SSH_OPTS[@]}" "$HOST" "$BREW_PATH cd '$REMOTE_DIR/src' && { python3 -m pip install --quiet --user -r requirements-dev.txt || python3 -m pip install --quiet --break-system-packages -r requirements-dev.txt; }" 2>/dev/null; then
+    echo "  jsonschema installed"
+else
+    PYTHON_TESTS=0
+    version=$(ssh "${SSH_OPTS[@]}" "$HOST" "$BREW_PATH"' python3 -V 2>&1')
+    printf '\033[33m  SKIPPING the Python suite: cannot install requirements-dev.txt.\n'
+    printf '  %s is too old for the pinned jsonschema, and there is no other\n' "$version"
+    printf '  interpreter on this Mac. Install Python 3.10+ (brew install python,\n'
+    printf '  which needs sudo) to close this. The C++ half below still runs, and\n'
+    printf '  CI runs the Python suite on every push regardless.\033[0m\n'
+fi
 
 # Everything past here mirrors ci.yml's macos-latest (clang) job. The heredoc
 # is quoted so it is the Mac's shell that expands these, not this one.
 say "build and test on $HOST"
-ssh "${SSH_OPTS[@]}" "$HOST" "DIDI_REMOTE_DIR='$REMOTE_DIR' bash -s" <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "$HOST" "DIDI_REMOTE_DIR='$REMOTE_DIR' DIDI_PYTHON_TESTS='$PYTHON_TESTS' bash -s" <<'REMOTE'
 set -euo pipefail
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="$HOME/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 cd "$HOME/$DIDI_REMOTE_DIR/src"
 BUILD="$HOME/$DIDI_REMOTE_DIR/build"
 
@@ -106,7 +139,17 @@ fi
 echo "Staged addon verified"
 
 "$BUILD/didi_tests"
-ctest --test-dir "$BUILD" --output-on-failure
+
+if [ "${DIDI_PYTHON_TESTS:-1}" = "1" ]; then
+    ctest --test-dir "$BUILD" --output-on-failure
+else
+    # The native half is the whole reason this lane exists; excluding the
+    # Python suite by name keeps ctest's composition otherwise intact and makes
+    # the exclusion visible in its own output rather than silent.
+    ctest --test-dir "$BUILD" --output-on-failure -E didi_python_tests
+    echo
+    echo "NOTE: didi_python_tests was excluded -- see the dependency warning above."
+fi
 REMOTE
 
 say "lane 'macos' passed"

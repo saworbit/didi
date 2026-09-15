@@ -76,12 +76,28 @@ that cannot be automated — it is a toggle in System Settings on the Mac:
    xcode-select --install          # clang
    brew install cmake ninja python # the rest
    ```
-3. **Add a key** from this machine, so the lane can run unattended:
+3. **Check the firewall is not blocking everything.** A Mac can answer ARP and
+   still drop every packet, which looks from the network exactly like a machine
+   that is switched off — `nmap` reports every port `filtered` rather than
+   `closed`, and ICMP goes unanswered. Stealth mode alone does not do that to an
+   enabled Sharing service; "Block all incoming connections" does.
    ```bash
-   ssh-keygen -t ed25519 -C didi-localci     # if you have no key yet
-   ssh you@192.168.0.7 "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys" < ~/.ssh/id_ed25519.pub
+   /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate --getblockall --getstealthmode
+   sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setblockall off
+   sudo lsof -iTCP:22 -sTCP:LISTEN      # sshd should appear
    ```
-4. Optionally stop the Mac sleeping: System Settings → Energy → Prevent
+4. **Add a key** from the machine that will drive the lane, so it runs
+   unattended. A dedicated key means the Mac can revoke exactly this access by
+   deleting one line:
+   ```bash
+   ssh-keygen -t ed25519 -f ~/.ssh/didi_localci -N "" -C didi-localci
+   ssh you@MAC "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys" < ~/.ssh/didi_localci.pub
+   ```
+   `macos.sh` picks up `~/.ssh/didi_localci` automatically; `DIDI_MAC_KEY`
+   overrides it, and if neither exists it falls through to your `~/.ssh/config`.
+   The key has no passphrase, which is the usual trade for an unattended LAN
+   lane — it grants shell on that Mac to anyone who can read the file.
+5. Optionally stop the Mac sleeping: System Settings → Energy → Prevent
    automatic sleeping when the display is off. A sleeping Mac fails the lane
    with a connection timeout.
 

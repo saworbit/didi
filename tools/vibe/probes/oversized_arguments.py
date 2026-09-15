@@ -123,7 +123,8 @@ def main() -> int:
         body = "extends Node\n\n" + "".join(
             f"func m{index}() -> int:\n\treturn {index}\n\n" for index in range(20000)
         )
-        big.write_text(body, encoding="utf-8", newline="")
+        with big.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(body)
         print(f"    wrote {big.stat().st_size} bytes, 20000 methods")
         for name, arguments in [
             ("script_get_symbols", {"file_path": "res://huge.gd"}),
