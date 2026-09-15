@@ -35,5 +35,9 @@ class ManagedRecovery {
     std::string m_state{"starting"}, m_lastScene, m_attachedSession;
     bool m_restartUsed{false}, m_needsReconciliation{false};
     int m_launchCount{0};
+    // The process that published the session, which is not always the process
+    // didi launched: Godot's Windows *_console.exe is a launcher that starts
+    // the ordinary editor as a child, and the child is what loads the addon.
+    uint64_t m_editorPid{0};
 };
 } // namespace didi::runtime

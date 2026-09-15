@@ -1,7 +1,9 @@
 #include "didi/runtime/managed_recovery.hpp"
+#include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/secure_random.hpp"
 #include <fstream>
+#include <set>
 #include <thread>
 #include <unordered_set>
 #ifdef _WIN32
@@ -111,19 +113,37 @@ Result<void> ManagedRecovery::launchAndAttach() {
         return identity.error();
     }
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    // Every pid that published an editor session for the owned workspace, kept
+    // so a refusal can name them instead of sending the reader to a log.
+    std::set<uint64_t> publishers;
     while (std::chrono::steady_clock::now() < deadline && m_child.running()) {
         auto listed = m_sessions->listSessions(paths::nativePathToUtf8(m_store.project()));
         if (listed.isOk())
             for (const auto& item : listed.value().value("sessions", json::array())) {
-                if (item.value("pid", uint64_t{0}) != m_child.pid() ||
-                    item.value("kind", "") != "editor")
-                    continue;
+                if (item.value("kind", "") != "editor") continue;
+                // Matched by the workspace, not by the pid didi spawned.
+                // listSessions is already filtered to the owned workspace,
+                // which this run created and nothing else has open, so the
+                // workspace is the part that can be relied on. The pid could
+                // not: Godot's Windows *_console.exe is a launcher that starts
+                // the ordinary editor as a child, and the child is what loads
+                // the addon and publishes the descriptor, so managed mode
+                // waited thirty seconds for a pid that never appears next to a
+                // descriptor for its own workspace that arrived in four (#678).
+                const auto published = item.value("pid", uint64_t{0});
+                publishers.insert(published);
                 const auto started = item.value("started_at_ms", int64_t{0});
-                if (processInstanceState(m_child.pid(), started) != ProcessInstanceState::alive)
+                if (processInstanceState(published, started) != ProcessInstanceState::alive)
                     continue;
                 auto attached = m_sessions->attachSession(item.value("session_id", ""));
                 if (attached.isOk()) {
                     m_attachedSession = item.value("session_id", "");
+                    m_editorPid = published;
+                    if (published != m_child.pid()) {
+                        DIDI_LOG_INFO("MANAGED_RECOVERY", "Owned editor published its session as pid ",
+                                      published, ", a child of the launched pid ", m_child.pid(),
+                                      ": ", m_executable, " starts the editor as a separate process");
+                    }
                     // Session publication precedes initial import completion. A connected
                     // pipe is not a ready-to-edit project. Wait for scan completion and
                     // a stable saved-file snapshot before admitting the first mutation.
@@ -182,7 +202,18 @@ Result<void> ManagedRecovery::launchAndAttach() {
     }
     m_state = "attach_failed";
     journal();
-    return Error::notConnected("Owned editor did not attach within 30 seconds; inspect editor log");
+    std::string seen;
+    for (const auto pid : publishers) {
+        if (!seen.empty()) seen += ", ";
+        seen += std::to_string(pid);
+    }
+    const auto log = paths::projectPathToUtf8(
+        m_container / ("editor-" + std::to_string(m_launchCount) + ".log"));
+    return Error::notConnected(
+        "Owned editor did not attach within 30 seconds. Launched pid " +
+        std::to_string(m_child.pid()) + " on " + paths::projectPathToUtf8(m_store.project()) +
+        "; editor sessions published for that workspace: " + (seen.empty() ? "none" : seen) +
+        ". Inspect " + log);
 }
 Result<void> ManagedRecovery::ensureEditor() {
     if (m_state == "restore_failed")
@@ -223,6 +254,11 @@ json ManagedRecovery::status() {
             {"editor_running", running},
             {"checkpoints", points.isOk() ? points.value() : json::array()},
             {"pid", m_child.pid()},
+            // The launched process and the process holding the session are the
+            // same on every platform but one: a Windows *_console.exe launcher
+            // runs the editor as a child, so reporting only the first would
+            // name a process the bridge is not talking to.
+            {"editor_pid", m_editorPid == 0 ? json(nullptr) : json(m_editorPid)},
             {"session_id", m_attachedSession},
             {"workspace", paths::projectPathToUtf8(m_store.project())},
             {"journal", paths::projectPathToUtf8(m_container / "recovery.json")},

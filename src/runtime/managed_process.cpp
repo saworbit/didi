@@ -439,9 +439,51 @@ void ManagedProcess::stop() {
     if (!running())
         return;
 #if defined(_WIN32)
-    if (TerminateProcess(impl_->process.value, 1)) {
+    // The job first, because the process we launched is not always the whole
+    // tree: Godot's *_console.exe is a launcher that runs the editor as a
+    // child, and terminating only the launcher leaves that editor holding the
+    // workspace. Everything started inside the job goes together. The job is
+    // best effort -- a host that would not let us create one starts the child
+    // without it -- so the direct terminate still runs, and either of them
+    // succeeding is what makes the wait below safe to make unbounded.
+    const bool has_job =
+        impl_->job.value != INVALID_HANDLE_VALUE && impl_->job.value != nullptr;
+    const bool job_ended = has_job && TerminateJobObject(impl_->job.value, 1) != 0;
+    const bool process_ended = TerminateProcess(impl_->process.value, 1) != 0;
+    if (job_ended || process_ended) {
         WaitForSingleObject(impl_->process.value, INFINITE);
         running();
+    }
+    // Then wait for the rest of the tree, because the process we launched is
+    // not always the last one out. TerminateJobObject only starts the
+    // termination, and with a *_console.exe launcher the editor holding the
+    // project's files is the child: waiting on the launcher alone returned
+    // while that child was still exiting, and runtime_restore_checkpoint then
+    // renamed a directory another process still had open. It passed on a fast
+    // machine and failed on a loaded runner, which is what a race looks like
+    // (#678).
+    //
+    // A process that has left the job's active count has had its handles
+    // closed by the kernel, so zero is the signal. Bounded, because a stop
+    // that never returns is worse than a rename that reports it could not
+    // proceed -- which is what the caller does next if this times out.
+    //
+    // Windows only. POSIX has no launcher of this kind for Godot, and process
+    // groups do not nest the way jobs do, so the same guarantee there would be
+    // a different mechanism for a case nobody has reported.
+    if (has_job) {
+        constexpr int kTreeDrainTimeoutMs = 10000;
+        constexpr int kTreeDrainPollMs = 20;
+        for (int waited = 0; waited <= kTreeDrainTimeoutMs; waited += kTreeDrainPollMs) {
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting{};
+            DWORD returned = 0;
+            if (!QueryInformationJobObject(impl_->job.value, JobObjectBasicAccountingInformation,
+                                           &accounting, sizeof(accounting), &returned)) {
+                break;
+            }
+            if (accounting.ActiveProcesses == 0) break;
+            Sleep(kTreeDrainPollMs);
+        }
     }
 #else
     if (!impl_->owned_pid)
