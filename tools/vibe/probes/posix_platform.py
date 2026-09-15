@@ -101,7 +101,6 @@ def permission_rows(session: Session, project: Path) -> None:
     for tool, arguments in (
         ("script_check_syntax", {"file_path": "res://locked.gd"}),
         ("script_get_symbols", {"file_path": "res://locked.gd"}),
-        ("script_is_tool", {"file_path": "res://locked.gd"}),
     ):
         unreadable, _ = session.call(tool, dict(arguments))
         absent, _ = session.call(tool, {"file_path": "res://no_such_file.gd"})
@@ -127,9 +126,9 @@ def unwritable_directory(session: Session, project: Path) -> None:
         os.chmod(readonly, 0o755)
         return
     payload, is_error = session.call(
-        "script_create", {"file_path": "res://readonly/new.gd", "content": SOURCE})
+        "script_create", {"script_path": "res://readonly/new.gd", "source_text": SOURCE})
     row("script_create into an unwritable directory", "isError=True", f"isError={is_error}")
-    print(f"       {says(payload, 'file_path', 'status')}")
+    print(f"       {says(payload, 'script_path', 'status')}")
     landed = (readonly / "new.gd").exists()
     row("...and nothing was created", "created=False", f"created={landed}")
     os.chmod(readonly, 0o755)
@@ -170,16 +169,16 @@ def symlink_rows(session: Session, project: Path) -> None:
 
     payload, is_error = session.call(
         "script_create",
-        {"file_path": "res://escape.gd", "content": "# overwritten\n", "overwrite": True})
+        {"script_path": "res://escape.gd", "source_text": "# overwritten\n", "overwrite": True})
     row("overwrite a symlink out of the project", "isError=True", f"isError={is_error}")
-    print(f"       {says(payload, 'file_path', 'status')}")
+    print(f"       {says(payload, 'script_path', 'status')}")
     row("...and the target is untouched",
         "untouched", "untouched" if "outside" in secret.read_text() else "REWRITTEN")
 
     payload, is_error = session.call(
-        "script_create", {"file_path": "res://escape_dir/planted.gd", "content": SOURCE})
+        "script_create", {"script_path": "res://escape_dir/planted.gd", "source_text": SOURCE})
     row("create through a symlinked directory", "isError=True", f"isError={is_error}")
-    print(f"       {says(payload, 'file_path', 'status')}")
+    print(f"       {says(payload, 'script_path', 'status')}")
     row("...and nothing landed outside", "absent",
         "absent" if not (outside / "planted.gd").exists() else "PLANTED")
 
@@ -254,7 +253,7 @@ def fifo_row(session: Session, project: Path) -> None:
     except OSError as error:
         skip("mkfifo", f"cannot create: {error}")
         return
-    for tool in ("script_check_syntax", "script_get_symbols", "script_is_tool"):
+    for tool in ("script_check_syntax", "script_get_symbols"):
         try:
             payload, is_error = session.call(tool, {"file_path": "res://pipe.gd"})
             row(f"{tool} on a FIFO", "isError=True", f"isError={is_error}")
@@ -287,8 +286,8 @@ def case_rows(session: Session, project: Path) -> None:
 
     payload, is_error = session.call(
         "script_create",
-        {"file_path": "res://CASECHECK.gd", "content": "# replaced\n", "overwrite": True})
-    reported = payload.get("file_path") if isinstance(payload, dict) else None
+        {"script_path": "res://CASECHECK.gd", "source_text": "# replaced\n", "overwrite": True})
+    reported = payload.get("script_path") or payload.get("file_path") if isinstance(payload, dict) else None
     if folds:
         row("overwrite through the other spelling reports the file it wrote",
             "res://casecheck.gd", str(reported))

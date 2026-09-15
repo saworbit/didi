@@ -80,6 +80,24 @@ jobs:
         continue-on-error: true
         run: python3 tools/vibe/probes/posix_platform.py -p "$RUNNER_TEMP/vibe-proj"
 
+      - name: Probe -- project state census
+        continue-on-error: true
+        run: python3 tools/vibe/probes/project_state_census.py "$RUNNER_TEMP/vibe-proj"
+
+      - name: Probe -- which descriptor directory did it scan?
+        continue-on-error: true
+        run: |
+          # The server resolves one descriptor directory; the addon scans a list
+          # and its own comment says why. On macOS TMPDIR is a per-user
+          # /var/folders path that launchd sets and a bare environment does not
+          # have, so the two halves of the product can disagree about where a
+          # session is published. The two runs below should be distinguishable.
+          alt="$RUNNER_TEMP/elsewhere"
+          mkdir -p "$alt"
+          script='import json,os,sys; sys.path.insert(0,"tools/vibe"); from mcp_client import batch, call; r,_=batch([call("runtime_list_sessions",{},1)], project=os.environ["RUNNER_TEMP"]+"/vibe-proj"); print("TMPDIR=" + os.environ.get("TMPDIR","<unset>")); print(json.dumps(r[-1]))'
+          python3 -c "$script"
+          TMPDIR="$alt" python3 -c "$script"
+
       - name: Probe -- surface census (unknown arguments, modes, envelopes)
         continue-on-error: true
         run: |
