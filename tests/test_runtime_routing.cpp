@@ -984,8 +984,34 @@ void test_a_failure_with_no_route_is_still_coherent() {
     ASSERT_EQ(value["error"]["code"], 503);
     ASSERT_TRUE(value["error"]["data"].is_object());
     // It still says what went wrong, which is the whole job of an error that
-    // cannot say where.
-    ASSERT_TRUE(value["error"]["message"].get<std::string>().find("route") != std::string::npos);
+    // cannot say where -- and it says it in words a caller can act on. "No
+    // atomic runtime route is available for live dispatch" named neither Godot,
+    // nor the editor, nor anything to do about it, in the single most common
+    // state a caller meets (#615).
+    const auto message = value["error"]["message"].get<std::string>();
+    ASSERT_TRUE(message.find("runtime_get_tree") != std::string::npos);
+    ASSERT_TRUE(message.find("live Godot engine") != std::string::npos);
+    ASSERT_TRUE(message.find("Godot editor") != std::string::npos);
+    ASSERT_TRUE(message.find("runtime_list_sessions") != std::string::npos);
+
+    // And the part a caller branches on rather than reads.
+    const auto& data = value["error"]["data"];
+    ASSERT_EQ(data["code"], "not_connected");
+    ASSERT_EQ(data["blocked_on"], "no_live_session");
+    ASSERT_EQ(data["needs_live_engine"], true);
+    ASSERT_EQ(data["offline_fallback"], false);
+    ASSERT_EQ(data["discover_with"], "runtime_list_sessions");
+
+    // A tool with an offline sibling names it. audio_configure_bus had that
+    // sentence written for this case and it sat behind the route check, so it
+    // could never ship.
+    const auto audio = registry.callTool("audio_configure_bus",
+                                         didi::json{{"bus", "Master"}, {"mute", true}});
+    ASSERT_TRUE(audio.isError);
+    const auto audio_value = payload(audio);
+    ASSERT_TRUE(audio_value["error"]["message"].get<std::string>().find("audio_list_buses") !=
+                std::string::npos);
+    ASSERT_TRUE(audio_value["error"]["data"].contains("offline_alternative"));
 
     registry.setIpcClient(nullptr);
 }

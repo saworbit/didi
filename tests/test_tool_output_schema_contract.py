@@ -162,8 +162,8 @@ class ToolOutputSchemaContractTests(unittest.TestCase):
 class OfflineDispatchContractTests(unittest.TestCase):
     """A tool that advertises `offline_fallback` must answer without a session.
 
-    The standalone process refuses a live-only tool with `503 No atomic runtime
-    route is available for live dispatch` when nothing is attached. A tool that
+    The standalone process refuses a live-only tool with `503` and
+    `data.blocked_on: "no_live_session"` when nothing is attached. A tool that
     has a real offline path but forgets to advertise the mode therefore does
     not degrade -- it stops working at all outside an editor.
 
