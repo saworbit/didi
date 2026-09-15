@@ -335,6 +335,7 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
     auto start_time = std::chrono::steady_clock::now();
 
     std::string godot_exe = resolveGodotExecutable();
+    result.engine_executable = godot_exe;
 
     // One argument list for both platforms. POSIX hands it straight to execvp,
     // and Windows quotes each element with the same routine CreateProcessW
@@ -595,6 +596,10 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
 
     auto end_time = std::chrono::steady_clock::now();
     result.duration_seconds = std::chrono::duration<double>(end_time - start_time).count();
+    // Read from the banner the engine prints, which is the same place the two
+    // sibling tools read it from. Empty when the process printed none, which is
+    // a process that is not Godot.
+    result.engine_version = engineVersionFromOutput(full_output);
 
     // Parse output lines into structured logs
     std::vector<std::string> lines = strings::split(full_output, '\n');

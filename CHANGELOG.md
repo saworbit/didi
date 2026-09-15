@@ -66,6 +66,30 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`script_check_syntax` refuses when the compiler never ran.** It answered
+  `has_errors: false` with no diagnostics when the Godot it was told to use
+  could not be launched, so a caller asking "does this compile?" about a script
+  with four compile errors was told yes (#677). `engine_version: null` was the
+  only trace and nothing said the pass had not happened. The one misconfigured
+  value that gets this far is a real file that is not the engine, which is what
+  a version-manager shim or the wrong file out of a bundle looks like; a
+  directory or a missing path was already discarded. A launch that fails, or a
+  process that runs and prints no Godot banner, is now `503` with
+  `code: "engine_unavailable"`, naming the executable it tried and what went
+  wrong, which is what `shader_check_compile` has always done. `engine_exit_code`
+  and `engine_duration_seconds` accompany a check that did run. A `source_text`
+  check spawns no engine by design and is unchanged.
+- **The engine-mismatch check works without an explicit attach.**
+  `attached_engine_version` and `matches_attached_engine` read the process
+  selection, which only `runtime_attach_session` or an earlier live call sets,
+  so on a server that had made neither they came back `null` -- "there is
+  nothing to compare against" rather than "I did not look" -- beside a live
+  editor on the same project (#687). They are now filled in whenever one live
+  session on this project can be seen, which is the condition live routing
+  already selects on; the read takes no route and no lock. `runtime_launch`,
+  the tool whose whole answer is what happened when your project ran, gained
+  the same four fields: which build ran it appeared only in the banner Godot
+  prints into the captured logs.
 - **`--managed-editor` starts against Godot's Windows console build.** It
   refused after thirty seconds with "Owned editor did not attach", and pointed
   the reader at an editor log that shows a healthy editor (#678).

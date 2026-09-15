@@ -460,13 +460,18 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(
     }
 
     if (actual_path.find_first_of("&|;`$<>^%\"'\r\n") != std::string::npos) {
+        if (engine) engine->failure = "the script path contains characters a command line cannot carry";
         return diags; // Prevent command injection
     }
 
-    if (!fs::exists(paths::projectPathFromUtf8(actual_path))) return diags;
+    if (!fs::exists(paths::projectPathFromUtf8(actual_path))) {
+        if (engine) engine->failure = "the script is not on disk to compile";
+        return diags;
+    }
 
     std::string godot_exe = resolveGodotExecutable();
     std::string output;
+    const auto engine_started_at = std::chrono::steady_clock::now();
     // Recorded whatever the run does next, so a caller learns which engine was
     // asked even when it answered nothing (#617). The version comes out of the
     // banner below, once there is output to read it from.
@@ -475,7 +480,10 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(
 #if defined(_WIN32)
     const std::vector<std::string> arguments = {"--headless", "--check-only", "-s", actual_path};
     auto process_command = detail::makeWindowsProcessCommand(godot_exe, arguments);
-    if (!process_command) return diags;
+    if (!process_command) {
+        if (engine) engine->failure = "the Godot command line could not be prepared";
+        return diags;
+    }
 
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(SECURITY_ATTRIBUTES);
@@ -484,6 +492,7 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(
 
     HANDLE hReadPipe, hWritePipe;
     if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
+        if (engine) engine->failure = "a pipe for the engine's output could not be created";
         return diags;
     }
     SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
@@ -547,10 +556,20 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(
             }
         }
 
+        DWORD code = 0;
+        if (engine && GetExitCodeProcess(pi.hProcess, &code)) {
+            engine->exit_code = static_cast<int>(code);
+        }
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
         CloseHandle(hReadPipe);
     } else {
+        // The one misconfiguration that gets past path validation: a real file
+        // that is not an executable image, which is Windows error 193 (#677).
+        if (engine) {
+            engine->failure = "the process could not be launched (Windows error " +
+                              std::to_string(GetLastError()) + ")";
+        }
         CloseHandle(hWritePipe);
         CloseHandle(hReadPipe);
     }
@@ -595,6 +614,12 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(
                         buffer[bytes] = '\0';
                         output += buffer;
                     }
+                    // 127 is the exec that never happened, which is this
+                    // platform's spelling of Windows error 193.
+                    if (engine) {
+                        engine->exit_code = WIFEXITED(status) ? WEXITSTATUS(status)
+                                                              : 128 + WTERMSIG(status);
+                    }
                     break;
                 }
 
@@ -609,13 +634,29 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(
             }
             close(pipefd[0]);
         } else {
+            if (engine) engine->failure = "the process could not be forked";
             close(pipefd[0]);
             close(pipefd[1]);
         }
+    } else if (engine) {
+        engine->failure = "a pipe for the engine's output could not be created";
     }
 #endif
 
-    if (engine) engine->version = offline::engineVersionFromOutput(output);
+    if (engine) {
+        engine->duration_seconds =
+            std::chrono::duration_cast<std::chrono::duration<double>>(
+                std::chrono::steady_clock::now() - engine_started_at).count();
+        engine->version = offline::engineVersionFromOutput(output);
+        // The banner is the proof. A process that ran and printed no banner is
+        // not the engine, whatever the path said.
+        engine->ran = !engine->version.empty();
+        if (engine->ran) {
+            engine->failure.clear();
+        } else if (engine->failure.empty()) {
+            engine->failure = "the process produced no Godot version banner, so it is not an engine";
+        }
+    }
 
     static const std::regex inline_location(
         R"re(^\s*(SCRIPT ERROR|ERROR|WARNING):\s*(.*?)\s+at\s+(res:\/\/.+):(\d+)\s*$)re");

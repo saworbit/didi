@@ -10,8 +10,8 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1023** |
-| Live-harness assertions | 1006 |
+| Automated tests | **1027** |
+| Live-harness assertions | 1008 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
@@ -88,7 +88,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**352 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**356 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
@@ -100,6 +100,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_documentation_validator.py` | 85 |
 | `test_editor_console.py` | 9 |
 | `test_elicitation_confirmation.py` | 6 |
+| `test_engine_identity.py` | 4 |
 | `test_field_trial.py` | 137 |
 | `test_managed_recovery.py` | 2 |
 | `test_managed_recovery_adversarial.py` | 3 |
@@ -113,11 +114,11 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Live Godot harness (`tests/*.ps1`)
 
-**1006 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
+**1008 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
 
 | File | Assertions |
 | --- | ---: |
-| `run_godot_integration.ps1` | 1006 |
+| `run_godot_integration.ps1` | 1008 |
 
 ## What is not counted here
 

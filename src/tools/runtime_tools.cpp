@@ -2,6 +2,7 @@
 #include "didi/tools/phase7_live_forward.hpp"
 #include "didi/mcp/mutation_safety.hpp"
 #include "didi/common/ipc_channel.hpp"
+#include "didi/common/engine_version.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/version.hpp"
 #include "didi/gdextension/expression_sandbox.hpp"
@@ -452,7 +453,21 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
 
     offline::TestRunner runner;
     auto session_res = runner.runSession(scene_path, timeout_sec, headless, break_on_error, extra_args);
-    return CallToolResult::successJson(session_res.toJson());
+    json result = session_res.toJson();
+    // The same comparison the two tools that shell out to a discovered Godot
+    // have made since #617. This one had no engine fields at all, so a project
+    // run by 4.7 while its editor is 4.5 could only be spotted by reading the
+    // banner out of the captured logs (#687).
+    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
+    const auto attached = sessions ? sessions->observableSession()
+                                   : std::optional<runtime::SessionDescriptor>{};
+    versions::annotateCheckEngine(result, session_res.engine_version,
+                                  session_res.engine_executable,
+                                  attached.has_value() ? attached->engine_version : std::string());
+    const auto configured = offline::resolveGodotExecutableDetailed();
+    versions::annotateConfiguredEngine(result, configured.configured,
+                                       configured.configured_rejected);
+    return CallToolResult::successJson(result);
 }
 
 CallToolResult handleInjectInputEvent(const ResolvedToolBinding& binding, const json& args,
