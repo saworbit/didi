@@ -8,6 +8,7 @@
 #include <csignal>
 
 #include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -103,7 +104,16 @@ static std::optional<std::string> environmentValue(const char* name) {
 #endif
 }
 
+// How long a process on its way out waits for queued log lines to reach
+// standard error. A client that is reading takes them in microseconds; one that
+// is not is the case this bound exists for, and half a second of waiting is
+// cheaper than either losing the whole tail of the log or never exiting.
+constexpr auto kConsoleFlushTimeout = std::chrono::milliseconds(500);
+
 static void refuse(const std::string& message, const char* help_line) {
+    // The refusal is the last thing anyone sees, so whatever the log was about
+    // to say goes out in front of it rather than after it or not at all.
+    (void)didi::Logger::instance().flushConsole(kConsoleFlushTimeout);
     std::cerr << "Didi startup refused: " << message << std::endl;
     if (help_line) std::cerr << help_line << std::endl;
 }
@@ -252,13 +262,23 @@ static int runDidi(const std::vector<std::string>& arguments) {
         }
     }
 
+    // Everything above this line is argument parsing, which logs nothing and
+    // exits through refuse(). Everything below can log hundreds of lines before
+    // the first request is read -- at DEBUG, one per registered tool -- and a
+    // host that launched this server over stdio is allowed to ignore standard
+    // error entirely. Writing inline filled the pipe and blocked the thread
+    // that would have answered `initialize`, so from here the console is
+    // written off-thread and a full pipe costs log lines instead of the server
+    // (#689).
+    didi::Logger::instance().useBackgroundConsoleWriter();
+
     if (managed_editor.empty() != recovery_workspace.empty()) {
         refuse("--managed-editor and --recovery-workspace must be supplied together", kHelpHint);
         return 2;
     }
     auto resolved_project = didi::paths::resolveExplicitProjectRoot(project_root);
     if (resolved_project.isErr()) {
-        std::cerr << "Didi startup refused: " << resolved_project.error().message << std::endl;
+        refuse(resolved_project.error().message, nullptr);
         return 2;
     }
     std::filesystem::path recovery_container;
@@ -290,6 +310,7 @@ static int runDidi(const std::vector<std::string>& arguments) {
                       didi::paths::projectPathToUtf8(resolved_project.value()));
     } catch (const std::exception& e) {
         DIDI_LOG_ERROR("MAIN", "Failed to change working directory to project root: ", e.what());
+        (void)didi::Logger::instance().flushConsole(kConsoleFlushTimeout);
         return 2;
     }
 
@@ -326,6 +347,11 @@ static int runDidi(const std::vector<std::string>& arguments) {
     recovery.reset();
 
     DIDI_LOG_INFO("MAIN", "Didi MCP server exited cleanly.");
+
+    // Both ways out below skip the writer thread, one by exiting hard and one
+    // by leaving it detached, so the queue is emptied here while there is still
+    // someone to empty it.
+    (void)didi::Logger::instance().flushConsole(kConsoleFlushTimeout);
 
     // The session ended while a read of stdin was still outstanding, so the
     // reader thread is parked inside std::cin. Returning from main would run

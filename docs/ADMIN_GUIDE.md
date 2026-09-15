@@ -80,6 +80,22 @@ the operator asked for and without the warning that says confirmations are off.
 A launch that prints nothing on stderr and stays running got exactly the
 configuration you wrote.
 
+The log goes to stderr, and the MCP stdio transport lets a client capture,
+forward or ignore that stream. Didi does not depend on which it chose: once the
+server is past argument parsing the log is written on its own thread, so a
+client that never reads stderr costs log lines rather than the server. `DEBUG`
+is one line per registered tool at startup, which is more than a pipe buffer
+holds, and writing it inline used to block the thread that answers `initialize`.
+When the queue fills, the oldest lines go and the next line to reach a reader
+says how many were lost:
+
+```
+[LOGGER] 3988 log lines were dropped: standard error was not being read
+```
+
+A run that needs every line needs a client that reads the stream, or
+`--log-level` set no higher than what that client will take.
+
 ### Managed recovery operations
 
 The two recovery flags must be paired. Startup validates an absolute Godot executable file and a new workspace directory disjoint from the source project, with an existing parent. Enable the source addon first. Each invocation requires a fresh workspace; retained containers are salvage-only and cannot be reused as a new `--recovery-workspace`. See [Managed Recovery](MANAGED_RECOVERY.md) and the [client startup example](INTEGRATION_GUIDE.md#optional-managed-editor-startup).

@@ -66,6 +66,17 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`--log-level DEBUG` answers a client that does not read stderr.** The
+  startup log at `DEBUG` is one line per registered tool, which is past a pipe
+  buffer, and it was written inline on the thread that would have answered
+  `initialize`. A host that left stderr undrained saw no error, no exit and no
+  output: the server simply never answered (#689). The MCP stdio transport says
+  a server may write logs to stderr and a client may ignore them, so depending
+  on the client reading was depending on something the server was not promised,
+  and `DEBUG` is the level the field trial documents tell people to use. The
+  console is now written on its own thread behind a bounded queue: a full pipe
+  costs log lines, not the server, and the next line to reach a reader says how
+  many were dropped. The extension is unchanged and still writes inline.
 - **The editor exits cleanly on macOS and Linux.** Every editor exit on both
   platforms ended in `SIGABRT` with the addon installed, and exited 0 without
   it, whether the run was `--import` or `--editor --quit` (#688). macOS named
