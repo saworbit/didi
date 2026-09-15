@@ -1,3 +1,4 @@
+#include "didi/runtime/session_client.hpp"
 #include "didi/mcp/control_room.hpp"
 
 #include "didi/mcp/tool_availability.hpp"
@@ -129,8 +130,26 @@ json bridgeLight(const ControlRoomInputs& in) {
                      "open; attaching one of those would read and write that project, not this "
                      "one. Start Godot on this project with the Didi addon enabled.");
     }
-    return light("Bridge", "bad", "No session", "",
-                 "No published descriptor. Start Godot with the Didi addon enabled.");
+    // Where this server looked, because "Godot is not running" and "the editor
+    // published to a different directory" were the same sentence, and the
+    // second one instructs the reader to do the thing they have already done
+    // (#649). Every other input to this decision was already in the facts list;
+    // the one that was wrong was not.
+    const auto search = runtime::describeSessionDescriptorSearch();
+    std::string reason = "No published descriptor in " +
+                         (search.scanned.empty() ? std::string("the session directory")
+                                                 : search.scanned) +
+                         ". Start Godot with the Didi addon enabled, or set DIDI_SESSION_DIR if "
+                         "it is publishing elsewhere.";
+    if (!search.elsewhere.empty()) {
+        reason = "No published descriptor in " + search.scanned + ", but there are descriptors in ";
+        for (size_t index = 0; index < search.elsewhere.size(); ++index) {
+            if (index > 0) reason += ", ";
+            reason += search.elsewhere[index];
+        }
+        reason += ". Set DIDI_SESSION_DIR to that directory and restart this server.";
+    }
+    return light("Bridge", "bad", "No session", "", reason);
 }
 
 json safetyLight(const ControlRoomInputs& in) {

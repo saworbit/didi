@@ -66,6 +66,34 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A `GODOT_BIN` that cannot be used is reported, not discarded in silence.**
+  Resolution dropped it and fell through to the known locations, and
+  `script_check_syntax` reported that fallthrough as `engine_executable`, so
+  the one field that could have shown a user their variable was ignored named
+  something they never set (#656). On macOS the thing called Godot is
+  `/Applications/Godot.app`, a directory, so the obvious value to set is exactly
+  the one that got dropped, and `ADMIN_GUIDE` tells people to set this variable
+  when installations use another name or layout, which is the population that
+  will set it wrong. It now answers with `engine_executable_configured` and
+  `engine_executable_configured_rejected` beside the executable that ran
+  instead, and logs a WARN line; the rule is stated too, since "not a directory"
+  meant a non-executable file was kept and a bundle was dropped. The POSIX
+  `GODOT_PATH` directory search also looks for `Contents/MacOS/Godot`, so
+  pointing it at a bundle works wherever the bundle lives, including on a
+  case-sensitive volume where the bare `godot` candidate does not match `Godot`.
+- **`runtime_list_sessions` says which directory it read.** The server resolves
+  exactly one descriptor directory, and when the editor published somewhere
+  else there is nothing to find. "Nothing to find" came back in the same words
+  as "Godot is not running", down to the byte: the control room's Bridge light
+  named one cause and instructed the reader to do the thing they had already
+  done, and every input to that decision was in the facts list except the one
+  that was wrong (#649). `descriptor_directory` is now in the answer whether or
+  not anything was in it, and `descriptor_directories_with_sessions` names any
+  other candidate directory on the machine that does hold descriptors, which is
+  where to point `DIDI_SESSION_DIR`. The Bridge light's reason carries the same.
+  This bites hardest on macOS, where `TMPDIR` is a per-user path launchd sets
+  and a scrubbed environment does not have.
+
 - **`maxLength` counts what it says it counts.** JSON Schema defines the length
   of a string as its number of characters, and `checkBounds` measured
   `std::string::size()`, which is the UTF-8 byte count. So the server enforced a

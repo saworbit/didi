@@ -1900,6 +1900,73 @@ static void test_a_length_bound_counts_the_characters_it_publishes() {
     ASSERT_TRUE(refused_japanese.content[0].text.find("characters long") != std::string::npos);
 }
 
+static void test_a_godot_bin_that_cannot_be_used_is_reported() {
+    // A GODOT_BIN that is set and cannot be used was discarded in silence,
+    // resolution fell through to the known locations, and the one field that
+    // could have shown a user their variable was ignored named something they
+    // never set (#656). On macOS the thing called Godot is a directory --
+    // /Applications/Godot.app -- so the obvious value to set is exactly the one
+    // that gets dropped.
+    ScopedToolProject project("godot-bin-rejected");
+    const auto directory = std::filesystem::current_path();
+
+    struct ScopedGodotBin {
+        explicit ScopedGodotBin(const std::string& value) {
+#if defined(_WIN32)
+            _putenv_s("GODOT_BIN", value.c_str());
+#else
+            setenv("GODOT_BIN", value.c_str(), 1);
+#endif
+        }
+        ~ScopedGodotBin() {
+#if defined(_WIN32)
+            _putenv_s("GODOT_BIN", "");
+#else
+            unsetenv("GODOT_BIN");
+#endif
+        }
+    };
+
+    {
+        // A directory, which is what a macOS bundle is.
+        ScopedGodotBin bin(directory.string());
+        const auto resolved = didi::offline::resolveGodotExecutableDetailed();
+        ASSERT_EQ(resolved.configured, directory.string());
+        ASSERT_TRUE(!resolved.configured_rejected.empty());
+        // Why, not only that. "Not a directory" was the whole rule, so the
+        // reason has to name the rule it broke.
+        ASSERT_TRUE(resolved.configured_rejected.find("directory") != std::string::npos);
+        // And the fallback is still chosen, so nothing stops working.
+        ASSERT_TRUE(!resolved.executable.empty());
+        ASSERT_TRUE(resolved.executable != directory.string());
+    }
+    {
+        // A path with nothing behind it is the other way to set it wrong.
+        const auto missing = (directory / "no_such_godot_binary").string();
+        ScopedGodotBin bin(missing);
+        const auto resolved = didi::offline::resolveGodotExecutableDetailed();
+        ASSERT_EQ(resolved.configured, missing);
+        ASSERT_TRUE(resolved.configured_rejected.find("exists") != std::string::npos);
+    }
+    {
+        // A usable value is reported as configured and not rejected, so a
+        // normal answer carries neither field.
+        const auto usable = (directory / "stand_in_godot").string();
+        std::ofstream out(usable, std::ios::binary);
+        out << "not really an engine\n";
+        out.close();
+        ScopedGodotBin bin(usable);
+        const auto resolved = didi::offline::resolveGodotExecutableDetailed();
+        ASSERT_EQ(resolved.executable, usable);
+        ASSERT_TRUE(resolved.configured_rejected.empty());
+
+        didi::json answer = didi::json::object();
+        didi::versions::annotateConfiguredEngine(answer, resolved.configured,
+                                                 resolved.configured_rejected);
+        ASSERT_TRUE(!answer.contains("engine_executable_configured"));
+    }
+}
+
 static void test_a_script_that_cannot_be_read_is_not_reported_as_bad_code() {
     // A file the process may not read answered as a syntax error at line 1
     // column 1 of a file whose bytes were never read, with rule
@@ -6373,6 +6440,8 @@ struct RegisterToolTests {
                      test_every_pinned_parameter_says_why_it_is_pinned);
         registerTest("Tools.LengthBoundCountsCharacters",
                      test_a_length_bound_counts_the_characters_it_publishes);
+        registerTest("Tools.RejectedGodotBinIsReported",
+                     test_a_godot_bin_that_cannot_be_used_is_reported);
         registerTest("Tools.UnreadableScriptIsNotBadCode",
                      test_a_script_that_cannot_be_read_is_not_reported_as_bad_code);
         registerTest("Tools.UndecodableNameIsNotACallerError",

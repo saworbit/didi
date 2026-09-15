@@ -174,19 +174,47 @@ std::string engineVersionFromOutput(const std::string& output) {
     return std::string(kPrefix) + trimmed;
 }
 
-std::string resolveGodotExecutable() {
+GodotExecutableResolution resolveGodotExecutableDetailed() {
+    GodotExecutableResolution resolution;
+    // Why it was discarded, not only that it was. "Not a directory" was the
+    // whole rule, so a non-executable file was kept and a bundle was dropped,
+    // and neither outcome was reported (#656).
+    const auto rejectConfigured = [&resolution](std::string value, std::string reason) {
+        resolution.configured = std::move(value);
+        resolution.configured_rejected = std::move(reason);
+    };
 #if defined(_WIN32)
     const auto env_bin = detail::windowsEnvironmentPath(L"GODOT_BIN");
-    if (env_bin && std::filesystem::exists(*env_bin) &&
-        !std::filesystem::is_directory(*env_bin)) {
-        if (auto utf8 = detail::pathToUtf8(*env_bin)) return *utf8;
+    if (env_bin) {
+        const auto shown = detail::pathToUtf8(*env_bin).value_or(std::string());
+        if (!std::filesystem::exists(*env_bin)) {
+            rejectConfigured(shown, "nothing exists at that path");
+        } else if (std::filesystem::is_directory(*env_bin)) {
+            rejectConfigured(shown, "that path is a directory, and GODOT_BIN names an executable");
+        } else if (auto utf8 = detail::pathToUtf8(*env_bin)) {
+            resolution.configured = shown;
+            resolution.executable = *utf8;
+            return resolution;
+        } else {
+            rejectConfigured(shown, "that path could not be read as UTF-8");
+        }
     }
 
     const auto env_path = detail::windowsEnvironmentPath(L"GODOT_PATH");
 #else
     const char* env_bin = std::getenv("GODOT_BIN");
-    if (env_bin && std::filesystem::exists(env_bin) && !std::filesystem::is_directory(env_bin)) {
-        return std::string(env_bin);
+    if (env_bin && *env_bin) {
+        if (!std::filesystem::exists(env_bin)) {
+            rejectConfigured(env_bin, "nothing exists at that path");
+        } else if (std::filesystem::is_directory(env_bin)) {
+            rejectConfigured(env_bin,
+                             "that path is a directory, and GODOT_BIN names an executable. On "
+                             "macOS the executable inside Godot.app is Contents/MacOS/Godot");
+        } else {
+            resolution.configured = env_bin;
+            resolution.executable = std::string(env_bin);
+            return resolution;
+        }
     }
 
     const char* env_path = std::getenv("GODOT_PATH");
@@ -209,6 +237,13 @@ std::string resolveGodotExecutable() {
                 "godot.exe",
                 "godot.cmd",
 #else
+                // A macOS bundle is a directory, and GODOT_PATH is documented
+                // as "directory or path containing Godot executable", so
+                // pointing it at Godot.app found none of the Linux names below
+                // and fell through. It works wherever the bundle lives now,
+                // including a case-sensitive volume, where the bare "godot"
+                // entry does not match "Godot" (#656).
+                "Contents/MacOS/Godot",
                 "Godot_v4.7.2-stable_linux.x86_64",
                 "Godot_v4.6.2-stable_linux.x86_64",
                 "Godot_v4.5.1-stable_linux.x86_64",
@@ -224,17 +259,19 @@ std::string resolveGodotExecutable() {
 #endif
                 if (std::filesystem::exists(p)) {
 #if defined(_WIN32)
-                    if (auto utf8 = detail::pathToUtf8(p)) return *utf8;
+                    if (auto utf8 = detail::pathToUtf8(p)) { resolution.executable = *utf8; return resolution; }
 #else
-                    return p.string();
+                    resolution.executable = p.string();
+                    return resolution;
 #endif
                 }
             }
         } else {
 #if defined(_WIN32)
-            if (auto utf8 = detail::pathToUtf8(*env_path)) return *utf8;
+            if (auto utf8 = detail::pathToUtf8(*env_path)) { resolution.executable = *utf8; return resolution; }
 #else
-            return std::string(env_path);
+            resolution.executable = std::string(env_path);
+            return resolution;
 #endif
         }
     }
@@ -252,7 +289,8 @@ std::string resolveGodotExecutable() {
     };
     for (const auto& loc : known_locations) {
         if (std::filesystem::exists(loc)) {
-            return loc;
+            resolution.executable = loc;
+            return resolution;
         }
     }
 #else
@@ -266,11 +304,26 @@ std::string resolveGodotExecutable() {
     };
     for (const auto& loc : known_locations) {
         if (std::filesystem::exists(loc) && !std::filesystem::is_directory(loc)) {
-            return loc;
+            resolution.executable = loc;
+            return resolution;
         }
     }
 #endif
-    return "godot";
+    resolution.executable = "godot";
+    return resolution;
+}
+
+std::string resolveGodotExecutable() {
+    const auto resolution = resolveGodotExecutableDetailed();
+    // At WARN, on the default level, because a discarded GODOT_BIN is the
+    // difference between the engine the user chose and whichever one was found
+    // instead, and nothing said so (#656).
+    if (!resolution.configured_rejected.empty()) {
+        DIDI_LOG_WARN("ENGINE", "GODOT_BIN is set to '", resolution.configured,
+                      "' and was not used: ", resolution.configured_rejected,
+                      ". Running '", resolution.executable, "' instead.");
+    }
+    return resolution.executable;
 }
 
 TestSessionResult TestRunner::runSession(const std::string& scene_path,
