@@ -213,7 +213,8 @@ jobs:
           if [ "$RUNNER_OS" = "macOS" ]; then
             echo "GODOT_BIN=$RUNNER_TEMP/godot/Godot.app/Contents/MacOS/Godot" >> "$GITHUB_ENV"
           else
-            echo "GODOT_BIN=$RUNNER_TEMP/godot/$(ls godot | head -1)" >> "$GITHUB_ENV"
+            binary=$(find godot -maxdepth 1 -type f -name 'Godot_v*' -print -quit)
+            echo "GODOT_BIN=$RUNNER_TEMP/$binary" >> "$GITHUB_ENV"
           fi
           ls -la godot
 
