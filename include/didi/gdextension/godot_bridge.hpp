@@ -11,6 +11,40 @@
 namespace didi {
 namespace godot {
 
+// Did a property end up holding what the caller asked for?
+//
+// Compares by value rather than by JSON type, because Godot legitimately
+// changes the type on the way in: an integer written to a float property reads
+// back as a real, and reporting that as "not applied" would be a false alarm on
+// a write that worked perfectly.
+//
+// Composites are compared member by member for the same reason. A Color or a
+// Vector arrives as a JSON object and used to take an exact-equality branch, so
+// a colour whose components are not exactly representable in the float32 the
+// type is made of -- 0.1, say, which reads back as 0.10000000149011612 -- was
+// reported as a write that did not land, and so was one sent without its
+// optional alpha (#618). The tolerance is sized to that float32 round trip
+// rather than to a double, because that is the narrowest storage the engine
+// actually uses for these types; two values closer than that cannot be told
+// apart once stored.
+[[nodiscard]] bool jsonValuesEquivalent(const json& observed, const json& requested);
+
+// A shader uniform's declared hint_range, as the engine spells it.
+//
+// Godot puts the range a shader author wrote in the uniform's PropertyInfo as
+// PROPERTY_HINT_RANGE with a hint_string of "min,max" and an optional step,
+// followed by flags. or_greater and or_less are the two that matter here: they
+// say the author meant the range as a slider bound rather than as a limit.
+struct ShaderHintRange {
+    double minimum{0.0};
+    double maximum{0.0};
+    std::optional<double> step;
+    bool or_greater{false};
+    bool or_less{false};
+};
+
+[[nodiscard]] std::optional<ShaderHintRange> parseShaderHintRange(const std::string& hint_string);
+
 struct ViewportPixels {
     int width{0};
     int height{0};

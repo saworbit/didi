@@ -1524,6 +1524,21 @@ try {
         (Tool-Request 2308 "shader_set_uniform" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override"; uniform_name = "offset"; value = @{ x = 9; y = 9; z = 9 } }),
         (Tool-Request 2309 "editor_undo" @{}),
         (Tool-Request 2310 "shader_list_uniforms" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override" }),
+        # A declared hint_range is a statement by the shader author, so a value
+        # outside it is refused by name the way audio_configure_bus refuses a
+        # volume outside the bus editor's own range.
+        (Tool-Request 2311 "shader_set_uniform" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override"; uniform_name = "bounded"; value = 2.5 }),
+        (Tool-Request 2312 "shader_set_uniform" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override"; uniform_name = "bounded"; value = 0.75 }),
+        # A colour sent the way the tool's own schema documents it, with the
+        # alpha left off, and channels that are not exactly representable in the
+        # float32 a Color is made of.
+        (Tool-Request 2313 "shader_set_uniform" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override"; uniform_name = "tint"; value = @{ r = 0.1; g = 0.2; b = 0.3 } }),
+        # A JSON integer into a float uniform. set_shader_parameter stores the
+        # Variant as handed to it, so this used to leave an int where the shader
+        # declares a float and the save below dropped it.
+        (Tool-Request 2314 "shader_set_uniform" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override"; uniform_name = "bounded"; value = 1 }),
+        (Tool-Request 2315 "editor_save_scene" @{}),
+        (Tool-Request 2316 "shader_list_uniforms" @{ target_node = "/root/SmokeRoot/ShaderProbe"; property_name = "material_override" }),
         # Signals are delivered, so this now exercises the real cycle: list, connect,
         # observe the connection, disconnect, observe it gone. The target method is a
         # harmless zero-arg Node method -- queue_free here would free a node the rest
@@ -3058,6 +3073,41 @@ try {
     Assert-True (-not $byId[2309].result.isError) "The write over a shader default could not be undone."
     $restored = @((Tool-Payload $byId[2310]).uniforms | Where-Object { $_.name -eq "offset" })
     Assert-True ([Math]::Abs($restored[0].value.x - 1) -lt 0.01 -and [Math]::Abs($restored[0].value.z - 3) -lt 0.01) "Undo did not put the uniform back on the shader default ($($restored[0].value | ConvertTo-Json -Compress))."
+
+    # The hint a shader author wrote is reported, so a caller can send a value
+    # the shader will accept without reading the shader source (#620).
+    $bounded = @($uniforms.uniforms | Where-Object { $_.name -eq "bounded" })
+    Assert-True ($bounded.Count -eq 1) "A uniform with a declared range was left out of the list."
+    Assert-True ($bounded[0].hint.kind -eq "range") "A declared hint_range was not reported as a range hint ($($bounded[0].hint | ConvertTo-Json -Compress))."
+    Assert-True ([Math]::Abs($bounded[0].hint.minimum - 0) -lt 0.001 -and [Math]::Abs($bounded[0].hint.maximum - 1) -lt 0.001) "The reported range is not the one the shader declares ($($bounded[0].hint | ConvertTo-Json -Compress))."
+    Assert-True ($bounded[0].hint.or_greater -eq $false -and $bounded[0].hint.or_less -eq $false) "A closed range was reported as open at one end."
+    # A uniform with no hint says so rather than leaving the key out, so a
+    # caller can branch on one shape.
+    Assert-True ($null -eq $strength[0].hint) "A uniform with no declared hint carried one ($($strength[0].hint | ConvertTo-Json -Compress))."
+
+    Assert-True $byId[2311].result.isError "A value outside the shader's declared hint_range was accepted."
+    Assert-True ($byId[2311].result.content[0].text -match "hint_range") "The out-of-range refusal does not name the hint it enforces."
+    Assert-True (-not $byId[2312].result.isError) "A value inside the declared hint_range was refused."
+
+    # A colour whose alpha was left off and whose channels are not exactly
+    # representable in float32 still landed, and saying otherwise sent a caller
+    # off to retry a write that worked (#618).
+    $colour = Tool-Payload $byId[2313]
+    Assert-True ($colour.applied -eq $true) "A colour write without alpha reported applied: $($colour.applied) for $($colour.value | ConvertTo-Json -Compress)."
+    Assert-True ([Math]::Abs($colour.value.r - 0.1) -lt 0.001 -and [Math]::Abs($colour.value.b - 0.3) -lt 0.001) "The colour write did not land ($($colour.value | ConvertTo-Json -Compress))."
+    Assert-True ([Math]::Abs($colour.value.a - 1) -lt 0.001) "The omitted alpha did not default to opaque ($($colour.value.a))."
+    # Every other open-scene mutator says the change is not on disk yet, and the
+    # absence of that read as "this one did not need saving" (#623).
+    Assert-True ($colour.scene_saved -eq $false) "A shader uniform write did not say the change is unsaved."
+    Assert-True ($colour.limitation -match "editor_save_scene") "A shader uniform write did not say how to persist the change."
+
+    # A JSON integer is the ordinary spelling of a whole number, and a float
+    # uniform set to 1 used to hold an int Variant that the save discarded (#612).
+    $wholeNumber = Tool-Payload $byId[2314]
+    Assert-True ($wholeNumber.applied -eq $true) "A whole number written to a float uniform was not applied."
+    Assert-True ((Tool-Payload $byId[2315]).status -eq "saved") "The scene holding the shader uniform write could not be saved."
+    $afterSave = @((Tool-Payload $byId[2316]).uniforms | Where-Object { $_.name -eq "bounded" })
+    Assert-True ([Math]::Abs($afterSave[0].value - 1) -lt 0.001) "A float uniform set to a whole number was discarded by the save ($($afterSave[0].value))."
 
     # An empty slot is not a shader with no uniforms, and neither is a missing
     # property or a missing node.
