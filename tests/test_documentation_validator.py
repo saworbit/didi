@@ -2014,26 +2014,54 @@ Phase 7A-7C define the approved contracts for editor authoring. Their implementa
 
         self.assertTrue(any("missing target" in error for error in errors), errors)
 
-    def test_gdextension_declares_explicit_macos_architectures(self):
+    def test_gdextension_declares_the_macos_architecture_the_release_builds(self):
+        """The manifest names arm64, and nothing the release does not build.
+
+        This started as `macos.debug` with no architecture at all, and was made
+        explicit in e4c00d9 -- rightly, but it became explicit about three
+        architectures while the release builds one. The file is copied verbatim
+        into every platform's archive, and Godot's loader requires every tag in
+        a key to be a feature of the running engine and takes the key with the
+        most tags, so on an Intel Mac `macos.release.x86_64` matched, the dylib
+        was found, and the dynamic loader was handed a library for another
+        architecture. The user got "can't open dynamic library" about a file
+        that is plainly there (#648).
+
+        So both halves are pinned. Explicit, which is what the original test
+        was for, and honest, which is what it was missing.
+        `OS::has_feature("universal")` is true on both macOS slices, so a
+        universal entry is a second name for the x86_64 claim.
+        """
         required_keys = {
-            "macos.debug.x86_64",
-            "macos.release.x86_64",
             "macos.debug.arm64",
             "macos.release.arm64",
+        }
+        # Only while the release builds arm64 alone. A universal dylib, or a
+        # second runner, makes these declarable again -- and this test is
+        # where that decision is written down.
+        forbidden_keys = {
+            "macos.debug.x86_64",
+            "macos.release.x86_64",
             "macos.debug.universal",
             "macos.release.universal",
+            # No architecture at all matches every Mac, which is where this
+            # started.
+            "macos.debug",
+            "macos.release",
         }
         for relative_path in (
             "addons/didi/didi.gdextension",
+            "demo/addons/didi/didi.gdextension",
             "tests/godot_smoke/addons/didi/didi.gdextension",
         ):
             text = (REPOSITORY_ROOT / relative_path).read_text(encoding="utf-8")
             declared_keys = {
                 line.split("=", 1)[0].strip()
                 for line in text.splitlines()
-                if "=" in line
+                if "=" in line and not line.lstrip().startswith(";")
             }
             self.assertTrue(required_keys <= declared_keys, relative_path)
+            self.assertEqual(set(), forbidden_keys & declared_keys, relative_path)
 
 
 if __name__ == "__main__":
