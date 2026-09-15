@@ -40,6 +40,33 @@ inline void annotateApiVersion(json& target,
     }
 }
 
+// What a caller needs to weigh a verdict a spawned Godot produced.
+//
+// script_check_syntax and shader_check_compile both launch an engine to answer
+// "will the engine accept this?", and resolveGodotExecutable picks newest-first
+// from a hardcoded list, so on a machine with 4.5, 4.6 and 4.7 installed both
+// answered about a 4.5 project using 4.7 and neither said so (#617). The same
+// shape #466 gave script_reflect_class: name the version, and say whether it is
+// the engine in front of the caller. An unknown version is not a match, and
+// saying nothing would read as one.
+inline void annotateCheckEngine(json& target,
+                                const std::string& engine_version,
+                                const std::string& engine_executable,
+                                const std::string& attached_engine_version) {
+    target["engine_version"] = engine_version.empty() ? json(nullptr) : json(engine_version);
+    target["engine_executable"] =
+        engine_executable.empty() ? json(nullptr) : json(engine_executable);
+    target["attached_engine_version"] =
+        attached_engine_version.empty() ? json(nullptr) : json(attached_engine_version);
+    const auto ran_line = majorMinorOf(engine_version);
+    const auto attached_line = majorMinorOf(attached_engine_version);
+    if (ran_line.empty() || attached_line.empty()) {
+        target["matches_attached_engine"] = nullptr;
+    } else {
+        target["matches_attached_engine"] = ran_line == attached_line;
+    }
+}
+
 // The engine line a project declares for itself. project.godot carries
 // config/features=PackedStringArray("4.5", "Forward Plus"), written by the
 // editor that last saved the project, and the first quoted entry that reads as

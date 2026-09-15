@@ -127,6 +127,53 @@ std::optional<WindowsProcessCommand> makeWindowsProcessCommand(
 } // namespace detail
 #endif
 
+std::string engineVersionFromOutput(const std::string& output) {
+    // Found rather than assumed to be the first line: a wrapper or a warning
+    // can print before the engine does.
+    static constexpr std::string_view kPrefix = "Godot Engine v";
+    const auto start = output.find(kPrefix);
+    if (start == std::string::npos) return {};
+    const auto after = start + kPrefix.size();
+    const auto end = output.find_first_of(" \t\r\n", after);
+    const auto token =
+        output.substr(after, (end == std::string::npos ? output.size() : end) - after);
+
+    // The numeric parts, then the channel and its source. The build hash after
+    // them is dropped: two binaries of one version differ by it, and the
+    // question here is which engine line answered.
+    std::vector<std::string> parts;
+    std::string current;
+    for (const char character : token) {
+        if (character == '.') {
+            parts.push_back(current);
+            current.clear();
+            continue;
+        }
+        current.push_back(character);
+    }
+    parts.push_back(current);
+    if (parts.empty() || parts.front().empty() ||
+        !std::isdigit(static_cast<unsigned char>(parts.front().front()))) {
+        return {};
+    }
+
+    std::string trimmed;
+    size_t named = 0;
+    for (const auto& part : parts) {
+        if (part.empty()) break;
+        const bool numeric = std::all_of(part.begin(), part.end(), [](unsigned char c) {
+            return std::isdigit(c) != 0;
+        });
+        if (!numeric) {
+            if (named == 2) break;  // the channel and its source, and no more
+            ++named;
+        }
+        if (!trimmed.empty()) trimmed += '.';
+        trimmed += part;
+    }
+    return std::string(kPrefix) + trimmed;
+}
+
 std::string resolveGodotExecutable() {
 #if defined(_WIN32)
     const auto env_bin = detail::windowsEnvironmentPath(L"GODOT_BIN");

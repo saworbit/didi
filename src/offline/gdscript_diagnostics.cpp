@@ -95,7 +95,9 @@ std::string codeOutsideGdscriptLiterals(std::string_view line,
 
 } // namespace
 
-std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& file_path, const std::string& source_text) {
+std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& file_path,
+                                                           const std::string& source_text,
+                                                           EngineCheck* engine) {
     std::vector<ScriptDiagnostic> diagnostics;
     std::string content = source_text;
 
@@ -256,7 +258,7 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& fi
 
     // Also run godot compiler check if file exists on disk and no source_text override
     if (source_text.empty() && !file_path.empty()) {
-        auto godot_diags = runGodotCompilerCheck(file_path);
+        auto godot_diags = runGodotCompilerCheck(file_path, engine);
         diagnostics.insert(diagnostics.end(), godot_diags.begin(), godot_diags.end());
     }
 
@@ -443,7 +445,8 @@ void GDScriptDiagnostics::demoteAutoloadDiagnostics(
     }
 }
 
-std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const std::string& script_file_path) {
+std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(
+    const std::string& script_file_path, EngineCheck* engine) {
     std::vector<ScriptDiagnostic> diags;
     std::string actual_path = script_file_path;
     if (strings::startsWith(actual_path, "res://")) {
@@ -458,6 +461,10 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const s
 
     std::string godot_exe = resolveGodotExecutable();
     std::string output;
+    // Recorded whatever the run does next, so a caller learns which engine was
+    // asked even when it answered nothing (#617). The version comes out of the
+    // banner below, once there is output to read it from.
+    if (engine) engine->executable = godot_exe;
 
 #if defined(_WIN32)
     const std::vector<std::string> arguments = {"--headless", "--check-only", "-s", actual_path};
@@ -601,6 +608,8 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(const s
         }
     }
 #endif
+
+    if (engine) engine->version = offline::engineVersionFromOutput(output);
 
     static const std::regex inline_location(
         R"re(^\s*(SCRIPT ERROR|ERROR|WARNING):\s*(.*?)\s+at\s+(res:\/\/.+):(\d+)\s*$)re");

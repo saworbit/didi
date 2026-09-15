@@ -11,6 +11,19 @@ namespace offline {
 
 std::string resolveGodotExecutable();
 
+// The engine that answered, read out of what it printed.
+//
+// Every Godot process announces itself first: "Godot Engine
+// v4.5.1.stable.official.f62fdbde1 - https://godotengine.org". The two tools
+// that spawn one to answer "will the engine accept this?" said nothing about
+// which engine that was, while resolveGodotExecutable picks newest-first from a
+// hardcoded list, so a 4.5 project could be answered about by 4.7 (#617).
+//
+// Returns the banner without its build hash, in the spelling
+// script_reflect_class already uses for api_version -- "Godot Engine
+// v4.5.1.stable.official" -- or empty when the output carries no banner.
+[[nodiscard]] std::string engineVersionFromOutput(const std::string& output);
+
 #if defined(_WIN32)
 namespace detail {
 

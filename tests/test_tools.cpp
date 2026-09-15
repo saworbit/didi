@@ -1,4 +1,5 @@
 #include "didi/common/engine_version.hpp"
+#include "didi/offline/test_runner.hpp"
 #include <algorithm>
 #include <cctype>
 #include "didi/mcp/tool_registry.hpp"
@@ -3372,6 +3373,56 @@ static void test_a_script_the_engine_cannot_read_is_not_a_script_with_nothing_in
     ASSERT_EQ(payloadOf(good_syntax)["has_errors"], false);
 }
 
+static void test_a_spawned_check_names_the_engine_that_answered() {
+    // Break caught: script_check_syntax and shader_check_compile answer "will
+    // the engine accept this?" using whichever Godot resolveGodotExecutable
+    // found newest-first, and say nothing about which one that was (#617).
+    using didi::offline::engineVersionFromOutput;
+
+    // The banner every Godot process prints, with its build hash dropped: two
+    // binaries of one version differ by it and the question is the engine line.
+    ASSERT_EQ(engineVersionFromOutput(
+                  "Godot Engine v4.5.1.stable.official.f62fdbde1 - https://godotengine.org\n"),
+              "Godot Engine v4.5.1.stable.official");
+    ASSERT_EQ(engineVersionFromOutput(
+                  "Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org"),
+              "Godot Engine v4.7.2.stable.official");
+    // A two-part version, which is the spelling the shipped API dump carries.
+    ASSERT_EQ(engineVersionFromOutput("Godot Engine v4.7.stable.official"),
+              "Godot Engine v4.7.stable.official");
+    // Found rather than assumed to be the first line.
+    ASSERT_EQ(engineVersionFromOutput(
+                  "warning: something\nGodot Engine v4.6.2.stable.official.abc - https://x\n"),
+              "Godot Engine v4.6.2.stable.official");
+    // No banner is not a version, and neither is a line that only looks like one.
+    ASSERT_EQ(engineVersionFromOutput(""), "");
+    ASSERT_EQ(engineVersionFromOutput("SCRIPT ERROR: something at res://a.gd:1"), "");
+    ASSERT_EQ(engineVersionFromOutput("Godot Engine vnext"), "");
+
+    // And the comparison, which is the half a caller acts on. Major and minor
+    // decide it, the same rule script_reflect_class uses, so a patch difference
+    // is not a mismatch worth shouting about.
+    const auto checked = [](const char* ran, const char* attached) {
+        didi::json target = didi::json::object();
+        didi::versions::annotateCheckEngine(target, ran, "C:/Godot/godot.exe", attached);
+        return target;
+    };
+    ASSERT_EQ(checked("Godot Engine v4.5.1.stable.official",
+                      "Godot Engine v4.5.1.stable.official")["matches_attached_engine"], true);
+    ASSERT_EQ(checked("Godot Engine v4.5.2.stable.official",
+                      "Godot Engine v4.5.1.stable.official")["matches_attached_engine"], true);
+    ASSERT_EQ(checked("Godot Engine v4.7.2.stable.official",
+                      "Godot Engine v4.5.1.stable.official")["matches_attached_engine"], false);
+    // Unknown on either side is not a match, and saying nothing would read as one.
+    ASSERT_TRUE(checked("Godot Engine v4.7.2.stable.official", "")["matches_attached_engine"]
+                    .is_null());
+    ASSERT_TRUE(checked("", "Godot Engine v4.5.1.stable.official")["matches_attached_engine"]
+                    .is_null());
+    ASSERT_TRUE(checked("", "")["engine_version"].is_null());
+    ASSERT_EQ(checked("Godot Engine v4.7.2.stable.official", "")["engine_executable"],
+              "C:/Godot/godot.exe");
+}
+
 static void test_tool_capabilities_are_honest() {
     auto& reg = didi::mcp::ToolRegistry::instance();
     reg.registerAllDefaultTools();
@@ -5631,6 +5682,8 @@ struct RegisterToolTests {
                      test_a_declared_hint_range_is_read_as_the_engine_spells_it);
         registerTest("Tools.ScriptToolsRefuseAFileTheEngineCannotRead",
                      test_a_script_the_engine_cannot_read_is_not_a_script_with_nothing_in_it);
+        registerTest("Tools.SpawnedCheckNamesTheEngineThatAnswered",
+                     test_a_spawned_check_names_the_engine_that_answered);
         registerTest("McpServer.PreservesInjectedIpcClient", test_mcp_server_preserves_injected_ipc_client);
         registerTest("Tools.RuntimeSessionLocalAndValidated", test_runtime_get_session_is_local_and_attach_rejects_non_string_id);
         registerTest("Tools.RuntimeReadLogsInputValidation", test_runtime_read_logs_rejects_invalid_cursor_limit_and_level);
