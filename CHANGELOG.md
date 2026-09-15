@@ -66,6 +66,20 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The editor exits cleanly on macOS and Linux.** Every editor exit on both
+  platforms ended in `SIGABRT` with the addon installed, and exited 0 without
+  it, whether the run was `--import` or `--editor --quit` (#688). macOS named
+  it: an uncaught `std::system_error`, "mutex lock failed: Invalid argument".
+  Linux reported `malloc_consolidate(): invalid chunk size` for the same thing.
+  The runtime IPC singleton's destructor calls `stop()`, which asks
+  `EditorHook` to cancel pending commands, and the hook was constructed inside
+  `start()` -- after the IPC object. Statics are destroyed in reverse order of
+  construction, so at exit the hook went first and `stop()` then locked a mutex
+  and swapped a queue that no longer existed. The hook is now built by the IPC
+  constructor, which puts the whole chain in an order whose reverse is safe.
+  Windows survived the same code because a destroyed `std::mutex` there does
+  not refuse a lock, which is why thirteen sessions of Windows testing never
+  saw it.
 - **The Linux release starts on a distro whose glibc meets the stated floor.**
   The archive is built in an Ubuntu 22.04 container so the release does not
   raise its glibc floor, and `release.yml` says so at length. glibc was not the
