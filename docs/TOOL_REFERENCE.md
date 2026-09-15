@@ -279,7 +279,10 @@ Runs Didi's string/comment-aware lightweight GDScript diagnostics. When an in-pr
 - At least one is required.
 - Legacy alias: `analyze_script_diagnostics`.
 
-A file whose bytes are not valid UTF-8 is reported as `has_errors: true` with one diagnostic under `rule: "invalid_encoding"`, and Godot is not spawned for it. The engine does refuse such a file — "contains invalid unicode (UTF-8), so it was not loaded" — but its refusal points at engine source rather than at a `res://` line, so there was no location to hang a diagnostic on and the check came back clean about a script the engine will not load. Engine load failures that name no `res://` line are now kept as diagnostics rather than dropped.
+A file whose bytes are not valid UTF-8 is reported as `has_errors: true` with one diagnostic under `rule: "invalid_encoding"`, and Godot is not spawned for it.
+
+A file that exists and this process cannot open is refused with `403`, `code: "forbidden"` and `reason: "unreadable"`, naming the `res://` path. That is `project_search_text`'s word for the same state, and it is deliberately not a diagnostic: reported as a syntax error at line 1 of a file whose bytes were never read, it sent readers to edit a line that is fine. An absent path is `404` on this tool and `script_get_symbols`, so the two states no longer read as each other's opposite. On Unix the state is a mode with no read bit; on Windows it is a file another program is holding open without sharing.
+ The engine does refuse such a file — "contains invalid unicode (UTF-8), so it was not loaded" — but its refusal points at engine source rather than at a `res://` line, so there was no location to hang a diagnostic on and the check came back clean about a script the engine will not load. Engine load failures that name no `res://` line are now kept as diagnostics rather than dropped.
 
 Both this tool and `shader_check_compile` spawn a Godot to answer, and both say
 which one. `engine_version` is the engine that ran, read from the banner it
@@ -320,7 +323,7 @@ Extracts functions, variables, signals, enums, and inner classes from GDScript t
 - `source_text` (`string`, optional).
 - `max_symbols` (`integer`, `1..100000`, default `2000`): stop after this many declarations, counted across all six kinds rather than per kind, because the response is one thing.
 
-A file whose bytes are not valid UTF-8 is refused with `415` and `code: "binary_or_invalid_utf8"`, the same classification `project_search_text` reports for it. Godot will not load such a script at all, and returning an empty symbol list for one was byte for byte the answer a correct empty script gets, so an agent asking where a method lives was told there is no such method. A `.gd` saved as UTF-16 or in a single-byte encoding is what happens when a script is opened and saved by an editor that is not Godot.
+A file that exists and this process cannot open is refused with `403`, `code: "forbidden"` and `reason: "unreadable"`, naming the `res://` path, the same way `script_check_syntax` refuses it; it used to answer `400 invalid_arguments` about arguments that were fine. A file whose bytes are not valid UTF-8 is refused with `415` and `code: "binary_or_invalid_utf8"`, the same classification `project_search_text` reports for it. Godot will not load such a script at all, and returning an empty symbol list for one was byte for byte the answer a correct empty script gets, so an agent asking where a method lives was told there is no such method. A `.gd` saved as UTF-16 or in a single-byte encoding is what happens when a script is opened and saved by an editor that is not Godot.
 
 The result always says what it left out: `symbol_count_total` is how many declarations the file holds, `returned_count` how many came back, and `truncated` whether those differ. The scan reads the whole file either way, so the total is the real total and not a count of what fitted. Declarations are returned in file order, so the budget is not spent entirely on whichever kind happens to come first in the response.
 

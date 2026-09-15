@@ -1,5 +1,14 @@
 #include "didi/common/engine_version.hpp"
 #include "didi/offline/test_runner.hpp"
+#if defined(_WIN32)
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
+#endif
 #include "didi/offline/project_search.hpp"
 #include "didi/offline/resource_indexer.hpp"
 #include "didi/offline/project_impact.hpp"
@@ -1621,6 +1630,128 @@ static void test_a_name_in_a_scene_is_not_a_code_reference() {
         const auto kind = impact["kind"].get<std::string>();
         ASSERT_EQ(kind, path == "res://scripts/player.gd" ? "code_reference" : "resource_reference");
     }
+}
+
+// A file that exists and this process cannot open, for as long as the object
+// lives.
+//
+// Expressed differently per platform because the state itself is: on Unix it is
+// a mode with no read bit, which root ignores, and on Windows it is a handle
+// held without read sharing, which is what a file open in another program looks
+// like. held() is false when the state could not be created, and the test says
+// so rather than asserting against a file it can read after all.
+class UnreadableFile final {
+public:
+    explicit UnreadableFile(std::filesystem::path path) : m_path(std::move(path)) {
+#if defined(_WIN32)
+        m_handle = CreateFileW(m_path.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+                               FILE_ATTRIBUTE_NORMAL, nullptr);
+        m_held = m_handle != INVALID_HANDLE_VALUE;
+#else
+        std::error_code error;
+        m_original = std::filesystem::status(m_path, error).permissions();
+        std::filesystem::permissions(m_path, std::filesystem::perms::none,
+                                     std::filesystem::perm_options::replace, error);
+        m_held = !error;
+#endif
+        if (m_held) {
+            // Whatever the mechanism, the state is only real if a read of the
+            // file now fails. Running as root on Unix is the case that matters.
+            std::ifstream probe(m_path, std::ios::binary);
+            if (probe.is_open()) {
+                release();
+                m_held = false;
+            }
+        }
+    }
+
+    ~UnreadableFile() { release(); }
+
+    UnreadableFile(const UnreadableFile&) = delete;
+    UnreadableFile& operator=(const UnreadableFile&) = delete;
+
+    bool held() const { return m_held; }
+
+private:
+    void release() {
+#if defined(_WIN32)
+        if (m_handle != INVALID_HANDLE_VALUE) {
+            CloseHandle(m_handle);
+            m_handle = INVALID_HANDLE_VALUE;
+        }
+#else
+        std::error_code error;
+        std::filesystem::permissions(m_path, m_original, std::filesystem::perm_options::replace,
+                                     error);
+#endif
+    }
+
+    std::filesystem::path m_path;
+    bool m_held{false};
+#if defined(_WIN32)
+    HANDLE m_handle{INVALID_HANDLE_VALUE};
+#else
+    std::filesystem::perms m_original{std::filesystem::perms::none};
+#endif
+};
+
+static void test_a_script_that_cannot_be_read_is_not_reported_as_bad_code() {
+    // A file the process may not read answered as a syntax error at line 1
+    // column 1 of a file whose bytes were never read, with rule
+    // "file_not_found" about a file that is found; script_get_symbols answered
+    // 400 invalid_arguments about arguments that were fine. Both were the
+    // inverse of the absent case, which answers 404, so the state a chmod fixes
+    // was the one that read like a code problem (#653).
+    ScopedToolProject project("unreadable-script");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("locked.gd", "extends Node\n\nfunc greet() -> String:\n\treturn \"hi\"\n");
+    writeAuditFile("open.gd", "extends Node\n\nfunc greet() -> String:\n\treturn \"hi\"\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    // The control first: an absent path is a 404 on both, and that has to stay
+    // the case, because the whole finding is that the two states were inverted.
+    const auto absent_syntax = registry.callTool(
+        "script_check_syntax", didi::json{{"file_path", "res://no_such_file.gd"}});
+    ASSERT_TRUE(absent_syntax.isError);
+    ASSERT_EQ(didi::json::parse(absent_syntax.content[0].text)["error"]["code"], 404);
+    const auto absent_symbols = registry.callTool(
+        "script_get_symbols", didi::json{{"file_path", "res://no_such_file.gd"}});
+    ASSERT_TRUE(absent_symbols.isError);
+    ASSERT_EQ(didi::json::parse(absent_symbols.content[0].text)["error"]["code"], 404);
+
+    // A readable script still answers, so the guard cannot be passing by
+    // refusing everything.
+    const auto readable = registry.callTool("script_check_syntax",
+                                            didi::json{{"file_path", "res://open.gd"}});
+    ASSERT_TRUE(!readable.isError);
+
+    const auto locked = std::filesystem::current_path() / "locked.gd";
+    UnreadableFile lock(locked);
+    // Root can read a chmod 000 file, so the state cannot be created at all
+    // there, and a skipped row is not a passing row: say so rather than assert
+    // nothing.
+    if (!lock.held()) return;
+
+    const auto syntax = registry.callTool("script_check_syntax",
+                                          didi::json{{"file_path", "res://locked.gd"}});
+    ASSERT_TRUE(syntax.isError);
+    const auto syntax_answer = didi::json::parse(syntax.content[0].text);
+    ASSERT_EQ(syntax_answer["error"]["code"], 403);
+    ASSERT_EQ(syntax_answer["error"]["data"]["reason"], "unreadable");
+    // The res:// spelling, not the absolute host path the old message printed.
+    ASSERT_EQ(syntax_answer["error"]["data"]["file_path"], "res://locked.gd");
+    // And no fabricated diagnostic at line 1 of a file nobody read.
+    ASSERT_TRUE(syntax.content[0].text.find("file_not_found") == std::string::npos);
+
+    const auto symbols = registry.callTool("script_get_symbols",
+                                           didi::json{{"file_path", "res://locked.gd"}});
+    ASSERT_TRUE(symbols.isError);
+    const auto symbols_answer = didi::json::parse(symbols.content[0].text);
+    ASSERT_EQ(symbols_answer["error"]["code"], 403);
+    ASSERT_EQ(symbols_answer["error"]["data"]["reason"], "unreadable");
+    ASSERT_TRUE(symbols_answer["error"]["data"]["code"] != "invalid_arguments");
 }
 
 static void test_a_name_json_cannot_carry_is_named_rather_than_blamed_on_the_caller() {
@@ -6031,6 +6162,8 @@ struct RegisterToolTests {
                      test_a_rename_preview_shows_the_files_it_will_change);
         registerTest("Tools.ImpactKindNamesTheFile",
                      test_a_name_in_a_scene_is_not_a_code_reference);
+        registerTest("Tools.UnreadableScriptIsNotBadCode",
+                     test_a_script_that_cannot_be_read_is_not_reported_as_bad_code);
         registerTest("Tools.UndecodableNameIsNotACallerError",
                      test_a_name_json_cannot_carry_is_named_rather_than_blamed_on_the_caller);
         registerTest("Tools.ProjectImpactPackedArrayLine",

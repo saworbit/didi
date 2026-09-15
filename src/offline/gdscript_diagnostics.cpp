@@ -114,9 +114,15 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& fi
             ss << file.rdbuf();
             content = ss.str();
         } else {
+            // No line and no column, because neither was derived from the
+            // file: its bytes were never read. Reported as line 1 column 1,
+            // this sent an assistant to go and edit line 1 of a file that is
+            // fine (#653). The readers refuse an unreadable file before they
+            // get here now, so what is left is a file that went away between
+            // the resolve and the read.
             ScriptDiagnostic d;
-            d.line = 1;
-            d.column = 1;
+            d.line = 0;
+            d.column = 0;
             d.severity = "error";
             d.message = "File not found or cannot be opened: " + file_path;
             d.rule = "file_not_found";
