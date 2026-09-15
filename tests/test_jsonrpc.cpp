@@ -1,5 +1,6 @@
 #include "didi/mcp/jsonrpc.hpp"
 #include "didi/mcp/mcp_server.hpp"
+#include "didi/mcp/schema_validation.hpp"
 #include "didi/runtime/session_client.hpp"
 #include "didi/common/logger.hpp"
 #include <cassert>
@@ -448,6 +449,37 @@ static void test_mcp_rejects_non_object_arguments() {
     const auto prompt_response = server.handleRequest(prompt_request);
     ASSERT_TRUE(prompt_response.error.has_value());
     ASSERT_EQ(prompt_response.error->code, didi::mcp::JsonRpcErrorCode::InvalidParams);
+}
+
+static void test_the_schema_gate_refuses_arguments_that_are_not_an_object() {
+    // The gate answered "no complaint" for anything that was not an object, so
+    // the one place that reads a published schema reported that a call had
+    // satisfied a contract it cannot satisfy (#629). Two doors ahead of it --
+    // the tools/call parameter check and MutationSafety::evaluate -- refuse a
+    // non-object first, so no handler was ever handed one; this is the gate
+    // saying so in its own right.
+    const didi::json schema = {{"type", "object"},
+                               {"properties", {{"board", {{"type", "string"}}}}},
+                               {"required", didi::json::array({"board"})}};
+    const std::vector<didi::json> not_objects = {
+        didi::json::array({1, 2, 3}), didi::json(7), didi::json("text"),
+        didi::json(true), didi::json(nullptr),
+    };
+    for (const auto& arguments : not_objects) {
+        const auto refusal = didi::mcp::validateAgainstSchema(schema, arguments);
+        ASSERT_TRUE(refusal.has_value());
+        ASSERT_TRUE(refusal->find("must be an object") != std::string::npos);
+    }
+
+    // An object the schema accepts still passes, and one it does not is still
+    // refused for the reason it was refused before.
+    ASSERT_TRUE(!didi::mcp::validateAgainstSchema(schema, didi::json{{"board", "notes"}}));
+    ASSERT_TRUE(didi::mcp::validateAgainstSchema(schema, didi::json::object()).has_value());
+
+    // A schema that describes something other than an object is passed over,
+    // the way every keyword this checker does not model is.
+    const didi::json untyped = didi::json::object();
+    ASSERT_TRUE(!didi::mcp::validateAgainstSchema(untyped, didi::json::array()));
 }
 
 static void registerCountingResourceCreate(int& call_count) {
@@ -1598,6 +1630,8 @@ struct RegisterJsonRpcTests {
                      test_a_prompt_has_one_description);
         registerTest("McpServer.RejectsWrongParameterTypes", test_mcp_rejects_wrong_parameter_types);
         registerTest("McpServer.RejectsNonObjectArguments", test_mcp_rejects_non_object_arguments);
+        registerTest("McpServer.SchemaGateRefusesNonObjectArguments",
+                     test_the_schema_gate_refuses_arguments_that_are_not_an_object);
         registerTest("McpServer.RequestNotificationDoesNotExecuteTool",
                      test_mcp_request_notification_does_not_execute_tool);
         registerTest("McpServer.ContentLengthCannotSmuggleRequest",

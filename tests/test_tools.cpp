@@ -3209,7 +3209,18 @@ static void test_viewport_diff_public_validation_and_schema() {
         didi::json{{"baseline_capture_id", std::string(32, 'a')}, {"threshold", 1.5}}
     }) {
         const auto result = reg.callTool("viewport_diff_capture", args);
-        ASSERT_TRUE(refusedTheArguments(result, "Invalid viewport diff request"));
+        ASSERT_TRUE(refusedTheArguments(
+            result, "baseline_capture_id must be exactly 32 lowercase hexadecimal characters"));
+        // The refusal is the envelope, not a sentence. A capture id of the
+        // right length in the wrong case is the one of these the schema check
+        // passes over -- it states a `pattern` the checker does not model -- so
+        // it is the one that reached the handler and came back as bare text
+        // with no code to branch on (#628).
+        const auto payload = didi::json::parse(result.content[0].text, nullptr, false);
+        ASSERT_TRUE(!payload.is_discarded());
+        ASSERT_EQ(payload["error"]["code"], 400);
+        ASSERT_EQ(payload["error"]["data"]["code"], "invalid_arguments");
+        ASSERT_EQ(payload["error"]["data"]["canonical_tool"], "viewport_diff_capture");
     }
 }
 

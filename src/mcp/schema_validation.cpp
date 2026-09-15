@@ -471,7 +471,22 @@ void boundRequiredStrings(std::string_view schema_source, json& schema) {
 }
 
 std::optional<std::string> validateAgainstSchema(const json& schema, const json& arguments) {
-    if (!schema.is_object() || !arguments.is_object()) return std::nullopt;
+    if (!schema.is_object()) return std::nullopt;
+    if (!arguments.is_object()) {
+        // An array, a number or a string satisfies no schema that describes an
+        // object, and saying nothing here told dispatchTool the call had passed
+        // its contract check. The handler behind it reads keys out of what it
+        // was handed (#629). tools/call refuses a non-object one layer up, so
+        // this closes the gate in its own right rather than a reachable crash.
+        // A schema that describes something else, or nothing, is passed over
+        // the way every other keyword this checker does not model is.
+        const auto type = schema.find("type");
+        const bool describes_an_object =
+            (type != schema.end() && type->is_string() && type->get<std::string>() == "object") ||
+            schema.contains("properties") || schema.contains("required");
+        if (!describes_an_object) return std::nullopt;
+        return "Arguments must be an object, not " + typeNameOf(arguments) + ".";
+    }
     return checkObject(schema, arguments, "", 0, schema);
 }
 
