@@ -4,10 +4,18 @@ Run the parts of `ci.yml` that a Windows developer machine cannot otherwise
 run, in the container image the CI matrix runs on.
 
 ```bash
-bash tools/localci/run.sh              # gcc, clang and asan
+bash tools/localci/run.sh              # every lane this machine is set up for
 bash tools/localci/run.sh gcc          # one lane
 bash tools/localci/run.sh --shell gcc  # a shell in that lane's container
 bash tools/localci/run.sh --clean      # drop the per-lane build volumes
+```
+
+A bare run does `gcc`, `clang` and `asan`, and adds `macos` when `DIDI_MAC_HOST`
+is set — the difference between "a Mac is configured here" and "there is no Mac
+here". Set it once and the Mac is in every run:
+
+```bash
+export DIDI_MAC_HOST=shane@192.168.0.184   # in your shell profile
 ```
 
 Needs Docker with Linux containers. Nothing else — no submodules, no fetched
@@ -65,6 +73,24 @@ case-insensitive filesystem. It sends your working tree (tracked files plus
 untracked ones git is not ignoring — so no `build/`, no artifacts), then runs
 the same steps as CI's `macos-latest (clang)` job: configure, build, the
 staged-addon check with the `.dylib` name, `didi_tests`, `ctest`.
+
+Three things it does that are worth knowing about:
+
+- **It creates a git repository from the synced tree.** Parts of the suite shell
+  out to `git rev-parse HEAD` and `git ls-files`, and sending the real history is
+  not worth it — even packed this repository is 5.7 MiB, and it was 73 MiB of
+  loose objects before a `git gc`. The tests assert the commit matches
+  `^[0-9a-f]{7,40}$`, not that it is any particular commit, so the lane makes one
+  and prints the real source commit beside it.
+- **It shims `python`.** `tools/field-trial/cycle.py` spawns the interpreter by
+  that name and macOS has only `python3` (#635). The symlink lives inside
+  `~/didi-localci/shim/`, so nothing is installed on the Mac. Delete the shim
+  when #635 lands.
+- **It skips the Python suite on a pre-3.10 Mac**, and says so. A stock macOS has
+  Python 3.9.6 and this tooling needs 3.10 — not only for the pinned `jsonschema`
+  but for PEP 604 unions in ten-plus files (#634). That costs no coverage: those
+  tests are platform-independent and run on Windows, both Linux lanes and CI.
+  The C++ half is what a Mac is for, and it runs in full.
 
 One-time setup, and the first step is the only thing in this whole directory
 that cannot be automated — it is a toggle in System Settings on the Mac:

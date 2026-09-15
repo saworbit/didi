@@ -89,6 +89,26 @@ git ls-files -z --cached --others --exclude-standard \
     | ssh "${SSH_OPTS[@]}" "$HOST" "tar -xf - -C '$REMOTE_DIR/src'"
 echo "  $(git ls-files --cached --others --exclude-standard | wc -l) files -> $HOST:$REMOTE_DIR/src"
 
+# Parts of the suite shell out to git -- the field-trial tests run
+# `git -C <root> rev-parse HEAD` and the docs validator runs `git ls-files` --
+# so an extracted tree with no repository fails nine tests with exit 128.
+#
+# The real history is not worth sending. This repository carries 10,218 loose
+# objects (73 MiB); packing them into a bundle to send the 4.3 MiB version took
+# six minutes of pure I/O on the Windows filesystem, per run.
+#
+# What those tests need is a repository, not this repository: the field-trial
+# assertion is `assertRegex(commit, r"^[0-9a-f]{7,40}$")`. So the lane makes one
+# from the tree it just sent, and prints the real commit beside the synthetic
+# one so nobody reads a trial record as pointing at upstream history.
+say "git repository for the tests that need one"
+source_commit=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+ssh "${SSH_OPTS[@]}" "$HOST" "cd '$REMOTE_DIR/src' && \
+    git init -q && git add -A && \
+    git -c user.email=localci@invalid -c user.name='didi localci' \
+        commit -qm 'working tree synced by tools/localci, from $source_commit'"
+echo "  synthetic repo; the tree came from $source_commit"
+
 say "python dependency"
 # Two pip eras, and a Mac can be either. --break-system-packages arrived in pip
 # 23 for PEP 668 environments; macOS ships a system python3 whose pip is older
@@ -101,19 +121,34 @@ say "python dependency"
 # installing one needs sudo. That is a gap in the Python suite only -- the
 # reason to run a Mac at all is Apple Clang, the real std::filesystem and the
 # .dylib, none of which care. So the lane degrades loudly instead of refusing.
-PYTHON_TESTS=1
-if ssh "${SSH_OPTS[@]}" "$HOST" "$BREW_PATH"' python3 -c "import jsonschema" 2>/dev/null'; then
-    echo "  jsonschema already present"
-elif ssh "${SSH_OPTS[@]}" "$HOST" "$BREW_PATH cd '$REMOTE_DIR/src' && { python3 -m pip install --quiet --user -r requirements-dev.txt || python3 -m pip install --quiet --break-system-packages -r requirements-dev.txt; }" 2>/dev/null; then
-    echo "  jsonschema installed"
+# The gate is the interpreter version, not whether a package imports.
+#
+# jsonschema was only the first wall: requirements-dev.txt pins 4.26.0, which
+# dropped 3.9. Installing 4.25.1 gets past it and straight into the second,
+# which is that the Python tree uses PEP 604 unions (`int | None`) in more than
+# ten files without `from __future__ import annotations`, so 3.9 raises
+# TypeError at class-body evaluation. 3.10 is a hard floor for this tooling
+# whatever pip is persuaded to install.
+#
+# The C++ half is the entire reason to run a Mac -- Apple Clang, the real
+# std::filesystem, the .dylib. The Python suite is platform-independent and
+# already runs on Windows, both Linux lanes and CI, so skipping it here costs
+# no coverage that exists anywhere else.
+PYTHON_TESTS=0
+version=$(ssh "${SSH_OPTS[@]}" "$HOST" "$BREW_PATH"' python3 -V 2>&1')
+if ssh "${SSH_OPTS[@]}" "$HOST" "$BREW_PATH"' python3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"'; then
+    if ssh "${SSH_OPTS[@]}" "$HOST" "$BREW_PATH"' python3 -c "import jsonschema" 2>/dev/null' \
+        || ssh "${SSH_OPTS[@]}" "$HOST" "$BREW_PATH cd '$REMOTE_DIR/src' && { python3 -m pip install --quiet --user -r requirements-dev.txt || python3 -m pip install --quiet --break-system-packages -r requirements-dev.txt; }" 2>/dev/null; then
+        PYTHON_TESTS=1
+        echo "  $version, jsonschema available -- running the full suite"
+    else
+        printf '\033[33m  %s is new enough, but requirements-dev.txt would not install.\033[0m\n' "$version"
+    fi
 else
-    PYTHON_TESTS=0
-    version=$(ssh "${SSH_OPTS[@]}" "$HOST" "$BREW_PATH"' python3 -V 2>&1')
-    printf '\033[33m  SKIPPING the Python suite: cannot install requirements-dev.txt.\n'
-    printf '  %s is too old for the pinned jsonschema, and there is no other\n' "$version"
-    printf '  interpreter on this Mac. Install Python 3.10+ (brew install python,\n'
-    printf '  which needs sudo) to close this. The C++ half below still runs, and\n'
-    printf '  CI runs the Python suite on every push regardless.\033[0m\n'
+    printf '\033[33m  SKIPPING the Python suite: %s, and this tooling needs 3.10+.\n' "$version"
+    printf '  Not just the pinned jsonschema -- PEP 604 unions in 10+ files raise\n'
+    printf '  TypeError on 3.9. See #634. The C++ half below is what the Mac is\n'
+    printf '  for, and the Python suite runs on every other lane and in CI.\033[0m\n'
 fi
 
 # Everything past here mirrors ci.yml's macos-latest (clang) job. The heredoc
@@ -124,6 +159,19 @@ set -euo pipefail
 export PATH="$HOME/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 cd "$HOME/$DIDI_REMOTE_DIR/src"
 BUILD="$HOME/$DIDI_REMOTE_DIR/build"
+
+# tools/field-trial/cycle.py spawns the interpreter as `python`, and macOS has
+# no such command -- only python3 (#635). A shim inside this lane's own
+# workspace fixes the run without installing anything on the Mac: `rm -rf
+# ~/didi-localci` still removes every trace of the lane. Remove this once #635
+# lands, and the lane will then be testing the fixed behaviour rather than
+# hiding it.
+SHIM="$HOME/$DIDI_REMOTE_DIR/shim"
+if ! command -v python >/dev/null 2>&1; then
+    mkdir -p "$SHIM"
+    ln -sf "$(command -v python3)" "$SHIM/python"
+    export PATH="$SHIM:$PATH"
+fi
 
 cmake -S . -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build "$BUILD" --parallel

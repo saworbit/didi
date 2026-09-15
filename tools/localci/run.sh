@@ -38,6 +38,22 @@ if [ -n "${MSYSTEM:-}" ]; then
     REPO_ROOT=$(cd "$REPO_ROOT_UNIX" && pwd -W)
 fi
 
+# Machine-local settings, so the Mac does not have to be remembered as an
+# environment variable on every invocation. Gitignored: it names one developer's
+# host, which is not a fact about the project.
+#
+#   echo 'DIDI_MAC_HOST=you@192.168.0.184' > tools/localci/local.env
+#
+# An already-exported value wins, so a one-off override still works.
+LOCAL_ENV="$REPO_ROOT_UNIX/tools/localci/local.env"
+if [ -f "$LOCAL_ENV" ]; then
+    while IFS='=' read -r name value; do
+        case "$name" in ''|\#*) continue ;; esac
+        name=${name%% *}
+        [ -n "${!name:-}" ] || export "$name=${value}"
+    done < "$LOCAL_ENV"
+fi
+
 SHELL_MODE=0
 LANES=()
 for argument in "$@"; do
@@ -61,9 +77,18 @@ for argument in "$@"; do
         ;;
     esac
 done
-# macos is opt-in: it needs a Mac on the network and DIDI_MAC_HOST set, so the
-# bare invocation stays the three that need nothing but Docker.
-[ ${#LANES[@]} -eq 0 ] && LANES=(gcc clang asan)
+# With no lane named, run everything this machine is actually set up for. The
+# three container lanes always qualify; macos joins them when DIDI_MAC_HOST is
+# set, because that is the difference between "a Mac is configured" and "there
+# is no Mac here". Naming a lane explicitly still overrides all of this.
+#
+# The first version left macos out of the default entirely, which meant a bare
+# run silently skipped the only lane that covers Darwin -- on a machine where
+# the Mac was configured and working.
+if [ ${#LANES[@]} -eq 0 ]; then
+    LANES=(gcc clang asan)
+    [ -n "${DIDI_MAC_HOST:-}" ] && LANES+=(macos)
+fi
 
 # The macos lane is SSH, not Docker, so the image build is skipped when that is
 # all that was asked for.

@@ -87,3 +87,7 @@ demo/addons/didi/test_lab_sandbox.tscn
 Thumbs.db
 Desktop.ini
 .venv-dev/
+
+# Machine-local settings for tools/localci -- names one developer's Mac, which
+# is not a fact about the project. See tools/localci/README.md.
+tools/localci/local.env
