@@ -10,14 +10,26 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
+<<<<<<< HEAD
 | Automated tests | **1029** |
+||||||| abcf43c
+| Automated tests | **1027** |
+=======
+| Automated tests | **1028** |
+>>>>>>> fix/headless-editor-render
 | Live-harness assertions | 1008 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
+<<<<<<< HEAD
 **673 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+||||||| abcf43c
+**671 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+=======
+**672 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+>>>>>>> fix/headless-editor-render
 
 | Suite | Tests |
 | --- | ---: |
@@ -39,7 +51,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `ImportHealth` | 15 |
 | `InvariantWatch` | 4 |
 | `JsonRpc` | 4 |
-| `ManagedProcess` | 6 |
+| `ManagedProcess` | 7 |
 | `McpServer` | 41 |
 | `Phase5` | 17 |
 | `Phase6` | 22 |
