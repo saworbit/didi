@@ -66,6 +66,17 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Added
 
+- **Every tool publishes a title.** Of the 126 entries `tools/list` returns,
+  the number carrying a human-readable title was zero, on either protocol
+  revision, so a host that displays one fell back to the identifier and
+  somebody approving a destructive mutation was shown
+  `gridmap_export_mesh_library` (#686). Every other field on the entry is
+  filled in with care: the four annotation hints take seven distinct
+  combinations across the surface, and a contract test keeps a description on
+  every parameter. The one field that exists solely for what a person reads was
+  the one nobody filled in, and it matters here because Didi's confirmation
+  story ends in a person. Titles come from one table, so a legacy alias cannot
+  be titled differently from the tool it resolves to.
 - **A blackboard writer can say "only if this has not changed".** The board
   exists because more than one client is expected, and the lease was the only
   concurrency guard on it: it covers tasks. Keys had no version and nothing a
@@ -82,6 +93,17 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`--yolo` shows up where a client reads before it calls.** The flag removes
+  the confirmation gate, and the only difference it made to the published
+  surface was one fact inside a `didi_control_room` call: `initialize`, the
+  annotations and every tool's `_meta.didi` block were byte-identical in both
+  modes, and the per-result `confirmation: skipped` arrives after the mutation
+  (#684). `server/discover` did carry the flag, but that is a method a
+  2024-11-05 client never calls. `initialize` reports it now, and so does every
+  tool entry beside `currentMode` -- that block is already state rather than a
+  static fact about the tool, and whether this server will stop and ask is the
+  same kind of fact. The behaviour is unchanged; only its visibility was
+  missing.
 - **The blackboard records who removed a value, not only who wrote one.**
   `blackboard_clear` is the one destructive call on the board and was the only
   one with no identity argument at all: an agent that came back to find its

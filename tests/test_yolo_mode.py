@@ -145,6 +145,69 @@ class YoloModeTests(unittest.TestCase):
                 finally:
                     server.close()
 
+    def test_a_2024_client_can_see_it_too(self):
+        # server/discover is a method a 2024-11-05 client never calls, so for
+        # every such host the whole published surface was identical in both
+        # modes and the only difference was one fact inside a tool call (#684).
+        for args, expected in ((("--yolo",), True), ((), False)):
+            with self.subTest(yolo=expected):
+                server = _Server(*args)
+                try:
+                    result = server.request("initialize", {
+                        "protocolVersion": "2024-11-05", "capabilities": {},
+                        "clientInfo": {"name": "old-host", "version": "1"}})["result"]
+                    self.assertEqual(
+                        result["_meta"]["didi"]["confirmationsSkipped"], expected, result["_meta"])
+                finally:
+                    server.close()
+
+    def test_each_tool_says_whether_it_will_be_asked_about(self):
+        # _meta.didi is already state rather than a static fact about the tool,
+        # and whether this server will stop and ask is the same kind of fact: a
+        # host deciding whether to put its own guard in front of a destructive
+        # call reads it before calling, not after (#684).
+        for args, expected in ((("--yolo",), True), ((), False)):
+            with self.subTest(yolo=expected):
+                server = _Server(*args)
+                try:
+                    server.request("initialize", {
+                        "protocolVersion": "2024-11-05", "capabilities": {},
+                        "clientInfo": {"name": "x", "version": "1"}})
+                    tools = server.request("tools/list", {})["result"]["tools"]
+                    self.assertTrue(tools)
+                    for tool in tools:
+                        self.assertEqual(tool["_meta"]["didi"]["confirmationsSkipped"], expected,
+                                         tool["name"])
+                finally:
+                    server.close()
+
+    def test_every_tool_publishes_a_title(self):
+        # The one field on the entry that exists solely for what a person reads
+        # was the one nobody filled in, so a host that displays a title showed
+        # someone approving a destructive mutation the identifier instead
+        # (#686).
+        server = _Server()
+        try:
+            server.request("initialize", {
+                "protocolVersion": "2024-11-05", "capabilities": {},
+                "clientInfo": {"name": "x", "version": "1"}})
+            tools = server.request("tools/list", {})["result"]["tools"]
+            self.assertTrue(tools)
+            untitled = [t["name"] for t in tools if not t.get("title")]
+            self.assertEqual(untitled, [], "tools with no title")
+            # A title is a short noun phrase for a person, not the identifier
+            # with the underscores taken out.
+            for tool in tools:
+                self.assertNotEqual(tool["title"].lower().replace(" ", "_"), tool["name"])
+                self.assertLessEqual(len(tool["title"]), 48, tool["name"])
+            # An alias shows the same words as the tool it stands for, so the
+            # two cannot drift.
+            by_name = {t["name"]: t for t in tools}
+            self.assertEqual(by_name["capture_viewport"]["title"],
+                             by_name["viewport_capture_frame"]["title"])
+        finally:
+            server.close()
+
     def test_yolo_still_refuses_what_would_have_failed_anyway(self):
         # Skipping confirmation is not skipping validation. A call that cannot
         # run must still say why rather than be waved through.

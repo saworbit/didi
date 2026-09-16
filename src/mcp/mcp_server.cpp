@@ -619,7 +619,12 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             {"serverInfo", {
                 {"name", kServerName},
                 {"version", kServerVersion}
-            }}
+            }},
+            // The same fact server/discover has carried since --yolo existed.
+            // A 2024-11-05 client never calls that method, so for every such
+            // host the whole published surface was identical in both modes
+            // (#684).
+            {"_meta", {{kDidiMetaKey, {{"confirmationsSkipped", m_skipConfirmations}}}}}
         };
         return JsonRpcResponse::makeSuccess(req.id, complete(std::move(result)));
     }
@@ -676,6 +681,18 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             addCurrentAvailability(definition, t.capability, connected, session_kind, false,
                                    managed_unavailable,
                                    ToolRegistry::instance().managedRecoveryEnabled());
+            // Whether this server will stop and ask before a destructive call.
+            //
+            // --yolo changes what the server will do and published nothing a
+            // host reads before calling: the whole difference on the discovery
+            // surface was one fact inside didi_control_room, and the
+            // per-result `confirmation: skipped` arrives after the mutation
+            // (#684). This block is already state rather than a static fact
+            // about the tool -- currentMode, editorConnected and liveAvailable
+            // all track what the server can do right now -- and this is the
+            // same kind of fact, needed by a host deciding whether to put its
+            // own guard in front of a destructive call.
+            definition["_meta"]["didi"]["confirmationsSkipped"] = m_skipConfirmations;
             // The host preloads the page from the tool that opens it. Declared
             // only to a client that negotiated MCP Apps, so a host that cannot
             // render it is not handed a URI it would have to guess about.

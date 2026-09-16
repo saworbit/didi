@@ -22,6 +22,7 @@
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -1034,11 +1035,161 @@ static json outputSchemaForTool(const std::string& name) {
     return json();
 }
 
+namespace {
+
+// One short noun phrase per tool, for the person at the end of a confirmation.
+//
+// Of the 126 entries tools/list returned, the number carrying a title was zero
+// on either protocol revision, so a host that displays one fell back to the
+// identifier: someone approving a destructive mutation was shown
+// `gridmap_export_mesh_library` (#686). Every other field on the entry is
+// filled in with care -- the four annotation hints take seven distinct
+// combinations across the surface, and a contract test keeps a description on
+// every parameter -- and the one field that exists solely for what a person
+// reads was the one nobody filled in.
+//
+// Canonical names only. A legacy alias resolves to its canonical title below,
+// so the ten aliases cannot drift from the tools they stand for.
+const std::unordered_map<std::string_view, std::string_view> kToolTitles = {
+    {"anim_list_tracks", "List animation tracks"},
+    {"anim_play_track", "Play an animation"},
+    {"asset_reimport", "Reimport assets"},
+    {"audio_configure_bus", "Configure an audio bus"},
+    {"audio_list_buses", "List audio buses"},
+    {"blackboard_clear", "Clear a blackboard"},
+    {"blackboard_list_keys", "List blackboard keys"},
+    {"blackboard_patch", "Patch a blackboard"},
+    {"blackboard_read", "Read from a blackboard"},
+    {"blackboard_task_claim", "Claim a task"},
+    {"blackboard_task_complete", "Complete a task"},
+    {"blackboard_task_create", "Create a task"},
+    {"blackboard_task_list", "List tasks"},
+    {"blackboard_task_update", "Update a task"},
+    {"blackboard_write", "Write to a blackboard"},
+    {"csharp_check_build", "Build the C# project"},
+    {"didi_control_room", "Open the control room"},
+    {"editor_clear_ghost_previews", "Clear ghost previews"},
+    {"editor_redo", "Redo in the editor"},
+    {"editor_reload_project", "Reload the project"},
+    {"editor_render_ghost_preview", "Draw a ghost preview"},
+    {"editor_save_scene", "Save the open scene"},
+    {"editor_undo", "Undo in the editor"},
+    {"eval_gdscript", "Evaluate GDScript"},
+    {"gridmap_export_mesh_library", "Export a mesh library"},
+    {"gridmap_set_cells", "Set gridmap cells"},
+    {"instantiate_asset", "Instance an asset"},
+    {"mutate_scene_tree", "Mutate the scene tree"},
+    {"nav_bake_mesh", "Bake a navigation mesh"},
+    {"nav_query_path", "Find a navigation path"},
+    {"physics_raycast_query", "Cast a physics ray"},
+    {"physics_simulate_step", "Step the physics world"},
+    {"project_analyze_impact", "Analyse a change's impact"},
+    {"project_apply_changes", "Apply a verified change set"},
+    {"project_audit_assets", "Audit project assets"},
+    {"project_export", "Export the project"},
+    {"project_get_setting", "Read a project setting"},
+    {"project_get_uid_map", "Resolve resource UIDs"},
+    {"project_list_autoloads", "List autoload singletons"},
+    {"project_list_export_presets", "List export presets"},
+    {"project_list_input_actions", "List input actions"},
+    {"project_list_resources", "List project resources"},
+    {"project_remove_autoload", "Remove an autoload"},
+    {"project_remove_input_action", "Remove an input action"},
+    {"project_rename_references", "Rename a resource everywhere"},
+    {"project_search_symbols", "Search for symbols"},
+    {"project_search_text", "Search project text"},
+    {"project_set_autoload", "Register an autoload"},
+    {"project_set_input_action", "Define an input action"},
+    {"project_set_setting", "Write a project setting"},
+    {"project_verify_changes", "Verify a change set"},
+    {"resource_create", "Create a resource"},
+    {"resource_inspect", "Inspect a resource"},
+    {"runtime_attach_session", "Attach to a Godot session"},
+    {"runtime_checkpoint", "Take a recovery checkpoint"},
+    {"runtime_detach_session", "Detach from the session"},
+    {"runtime_explore_scene", "Explore the running scene"},
+    {"runtime_get_call_stack", "Read the call stack"},
+    {"runtime_get_session", "Describe the attached session"},
+    {"runtime_get_tree", "Read the running scene tree"},
+    {"runtime_inject_input", "Inject input events"},
+    {"runtime_launch", "Run the project"},
+    {"runtime_list_sessions", "List Godot sessions"},
+    {"runtime_read_logs", "Read Didi's own log"},
+    {"runtime_read_output", "Read the engine's output"},
+    {"runtime_read_profiler", "Read the profiler"},
+    {"runtime_recover_editor", "Restart the owned editor"},
+    {"runtime_recovery_status", "Report recovery state"},
+    {"runtime_restore_checkpoint", "Restore a checkpoint"},
+    {"runtime_set_paused", "Pause or resume the game"},
+    {"runtime_step", "Step one frame"},
+    {"runtime_stop", "Stop the running game"},
+    {"runtime_watch_invariants", "Watch for a broken invariant"},
+    {"scene_add_to_group", "Add a node to a group"},
+    {"scene_call_method", "Call a method on a node"},
+    {"scene_close", "Close an open scene"},
+    {"scene_create", "Create a scene"},
+    {"scene_duplicate_node", "Duplicate a node"},
+    {"scene_get_group_members", "List a group's members"},
+    {"scene_get_hierarchy", "Read the scene tree"},
+    {"scene_get_property", "Read a node property"},
+    {"scene_get_selection", "Read the editor selection"},
+    {"scene_instantiate_node", "Add a node"},
+    {"scene_list_groups", "List scene groups"},
+    {"scene_open", "Open a scene"},
+    {"scene_pack_branch", "Pack a branch into a scene"},
+    {"scene_remove_from_group", "Remove a node from a group"},
+    {"scene_remove_node", "Remove a node"},
+    {"scene_reparent_node", "Reparent a node"},
+    {"scene_set_property", "Write a node property"},
+    {"script_attach_to_node", "Attach a script to a node"},
+    {"script_check_syntax", "Check a script compiles"},
+    {"script_create", "Create a script"},
+    {"script_detach_from_node", "Detach a script from a node"},
+    {"script_get_symbols", "List a script's symbols"},
+    {"script_patch_method", "Patch a script symbol"},
+    {"script_reflect_class", "Reflect an engine class"},
+    {"shader_check_compile", "Check a shader compiles"},
+    {"shader_get_visual_graph", "Read a visual shader graph"},
+    {"shader_list_uniforms", "List shader uniforms"},
+    {"shader_set_uniform", "Set a shader uniform"},
+    {"signal_connect", "Connect a signal"},
+    {"signal_disconnect", "Disconnect a signal"},
+    {"signal_emit", "Emit a signal"},
+    {"signal_list_connections", "List signal connections"},
+    {"spatial_query_clearance", "Measure clearance around a point"},
+    {"spatial_query_frustum", "Query the camera frustum"},
+    {"spatial_query_raycast_batch", "Cast a batch of rays"},
+    {"tilemap_get_used_rect", "Read a tilemap's used area"},
+    {"tilemap_set_cells", "Set tilemap cells"},
+    {"ui_hit_test", "Find the control under a point"},
+    {"ui_list_controls", "List controls in a scene"},
+    {"viewport_capture_frame", "Capture a viewport frame"},
+    {"viewport_capture_passes", "Capture render passes"},
+    {"viewport_create_test_lab", "Build the visual test lab"},
+    {"viewport_diff_capture", "Compare two captures"},
+    {"viewport_set_camera_transform", "Move the editor camera"},
+    {"viewport_toggle_debug_draw", "Switch the debug draw mode"},
+};
+
+// The title a registration publishes, resolved through the alias table so an
+// alias shows the same words as the tool it is a name for.
+std::string toolTitleFor(std::string_view name, std::string_view canonical) {
+    if (const auto found = kToolTitles.find(name); found != kToolTitles.end()) {
+        return std::string(found->second);
+    }
+    if (const auto found = kToolTitles.find(canonical); found != kToolTitles.end()) {
+        return std::string(found->second);
+    }
+    return {};
+}
+}  // namespace
+
 void ToolRegistry::registerTool(ToolDefinition tool) {
     std::string name = tool.name;
     tool.legacy = isLegacyToolName(name);
     const auto binding = resolveAliasBinding(name, json::object());
     tool.canonical_name = std::string(binding.canonical_name);
+    tool.title = toolTitleFor(name, binding.canonical_name);
     tool.capability = capabilityForTool(std::string(binding.capability_source));
     const auto phase7_names = phase7::canonicalNames();
     if (std::find(phase7_names.begin(), phase7_names.end(), binding.schema_source) !=

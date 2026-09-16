@@ -190,12 +190,18 @@ What it does *not* change: the explicit project root, session authentication,
 mutation classification and `annotations`, or validation. Skipping confirmation
 is not skipping checks -- a call that could not run still reports why.
 
-It is visible in three places, because a gate that is open quietly is worse than
+It is visible in four places, because a gate that is open quietly is worse than
 one that is closed:
 
 - A warning at startup.
-- `server/discover` reports `_meta.didi.confirmationsSkipped`, so a client can
-  see the gate is open *before* it acts rather than after.
+- `initialize` and `server/discover` both report
+  `_meta.didi.confirmationsSkipped`, so a client can see the gate is open
+  *before* it acts rather than after. Both, because `server/discover` is a
+  method a 2024-11-05 client never calls, and for such a host the whole
+  published surface used to be identical in either mode.
+- Every tool entry in `tools/list` carries `_meta.didi.confirmationsSkipped`
+  beside `currentMode`, which is where a host looks when it is deciding whether
+  to put its own guard in front of a destructive call.
 - Every affected result records `_meta.didi.confirmation` as `skipped` --
   distinct from `human` and `agent`, because nobody confirmed anything.
 
