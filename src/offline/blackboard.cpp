@@ -10,10 +10,12 @@
 #include <chrono>
 #include <fstream>
 #include <functional>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <thread>
 #include <unordered_set>
+#include <vector>
 
 namespace didi::offline {
 namespace {
@@ -151,7 +153,22 @@ struct Board {
     // Tasks live here rather than in `state`, so a blackboard_write can never
     // reach them by choosing a colliding path.
     json tasks = json::object();
+    // What lapsed, so a read of an expired key does not answer exactly like a
+    // read of a key nobody ever wrote.
+    //
+    // A ttl is written by an agent that wants something to lapse -- a soft
+    // claim, a cached answer -- and when it reads back `found: false` the two
+    // explanations lead opposite ways: take the claim again, or go and find the
+    // work it filed under a path with a typo in it. Nothing in the answer chose
+    // between them (#680). Bounded, because a board that remembers every expiry
+    // forever is a board that fills up with the past.
+    json expired = json::object();
 };
+
+// How many lapsed keys a board remembers. Enough that an agent coming back to
+// its own claim finds out what happened to it, few enough that the record
+// cannot crowd out the board.
+constexpr size_t kBlackboardMaxExpiredRecords = 256;
 
 Result<std::filesystem::path> boardDirectory() {
     std::error_code error;
@@ -173,6 +190,14 @@ bool sweepExpired(Board& board, int64_t now_ms) {
     }
     if (expired.empty()) return false;
     for (const auto& path : expired) {
+        // Recorded before the metadata is dropped, because the metadata is
+        // where the author and the expiry time are.
+        json record = {{"expired_at_ms", board.meta[path].value("expires_at_ms", now_ms)}};
+        const auto author = board.meta[path].find("author");
+        if (author != board.meta[path].end()) record["author"] = *author;
+        const auto reason = board.meta[path].find("reason");
+        if (reason != board.meta[path].end()) record["reason"] = *reason;
+        board.expired[path] = std::move(record);
         const auto segments = blackboardSplitPath(path);
         if (segments.isOk() && !segments.value().empty()) {
             const auto pointer = pointerFor(segments.value());
@@ -184,6 +209,18 @@ bool sweepExpired(Board& board, int64_t now_ms) {
             }
         }
         board.meta.erase(path);
+    }
+    // Oldest first, so what a board remembers is the recent past rather than
+    // an arbitrary slice of everything that ever lapsed.
+    if (board.expired.size() > kBlackboardMaxExpiredRecords) {
+        std::vector<std::pair<int64_t, std::string>> by_age;
+        by_age.reserve(board.expired.size());
+        for (const auto& entry : board.expired.items()) {
+            by_age.emplace_back(entry.value().value("expired_at_ms", int64_t{0}), entry.key());
+        }
+        std::sort(by_age.begin(), by_age.end());
+        const size_t drop = board.expired.size() - kBlackboardMaxExpiredRecords;
+        for (size_t index = 0; index < drop; ++index) board.expired.erase(by_age[index].second);
     }
     return true;
 }
@@ -220,6 +257,9 @@ Result<Board> loadBoard(const std::filesystem::path& file) {
     if (document.contains("state") && document["state"].is_object()) board.state = document["state"];
     if (document.contains("meta") && document["meta"].is_object()) board.meta = document["meta"];
     if (document.contains("tasks") && document["tasks"].is_object()) board.tasks = document["tasks"];
+    if (document.contains("expired") && document["expired"].is_object()) {
+        board.expired = document["expired"];
+    }
     return board;
 }
 
@@ -228,7 +268,8 @@ Result<bool> saveBoard(const std::filesystem::path& file, const Board& board) {
         {"version", kBoardFormatVersion},
         {"state", board.state},
         {"meta", board.meta},
-        {"tasks", board.tasks}
+        {"tasks", board.tasks},
+        {"expired", board.expired}
     };
     const std::string serialized = document.dump();
     if (serialized.size() > kBlackboardMaxBoardBytes) {
@@ -550,6 +591,9 @@ Result<json> blackboardWrite(const BlackboardWriteRequest& request, BlackboardCl
 
         board.state = candidate_state;
         board.meta[path] = entry;
+        // The path exists again, so the record of its last lapse is history
+        // nobody should be shown in place of the value now sitting there.
+        board.expired.erase(path);
         auto saved = saveBoard(file, board);
         if (saved.isErr()) return saved.error();
         return result;
@@ -586,6 +630,23 @@ Result<json> blackboardRead(const BlackboardReadRequest& request, BlackboardCloc
             const auto pointer = pointerFor(parts);
             if (!board.state.contains(pointer)) {
                 result["found"] = false;
+                // Which kind of nothing. A claim that lapsed and a path with a
+                // typo in it are opposite problems, and both used to answer
+                // with the same three fields (#680).
+                const auto lapsed = board.expired.find(path);
+                if (lapsed != board.expired.end()) {
+                    result["reason"] = "expired";
+                    result["expired_at_ms"] = lapsed->value("expired_at_ms", int64_t{0});
+                    const auto author = lapsed->find("author");
+                    if (author != lapsed->end()) result["expired_author"] = *author;
+                    const auto why = lapsed->find("reason");
+                    if (why != lapsed->end()) result["expired_reason"] = *why;
+                } else {
+                    // Never written, cleared, or lapsed longer ago than this
+                    // board remembers. The three are not separable from here,
+                    // and claiming one of them would be worse than saying so.
+                    result["reason"] = "no_record";
+                }
                 return result;
             }
             value = &board.state.at(pointer);
@@ -605,6 +666,93 @@ Result<json> blackboardRead(const BlackboardReadRequest& request, BlackboardCloc
         }
         return result;
     });
+}
+
+// The shape RFC 6902 requires of one operation, checked here so a refusal
+// names the entry and the argument rather than passing through the JSON
+// library's own words.
+//
+// Every semantic failure used to answer with nlohmann's exception text and its
+// internal identifier: "[json.exception.parse_error.105] parse error:
+// operation value 'frobnicate' is invalid" for a patch document that parsed
+// perfectly well, and a byte offset into a JSON pointer rather than into
+// anything the caller sent (#679). The control was inside the same tool: the
+// one case this server checked itself reads "Argument 'operations' entry 0
+// must be an object, not an integer."
+std::optional<std::string> patchOperationProblem(const json& operation, size_t index) {
+    const std::string where = "Argument 'operations' entry " + std::to_string(index);
+    if (!operation.is_object()) {
+        return where + " must be an object, not " + std::string(operation.type_name()) + ".";
+    }
+    const auto op = operation.find("op");
+    if (op == operation.end()) {
+        return where + " has no 'op'. Every operation names one of add, remove, replace, move, "
+                       "copy or test.";
+    }
+    if (!op->is_string()) {
+        return where + " has an 'op' that is " + std::string(op->type_name()) +
+               ", not one of the strings add, remove, replace, move, copy or test.";
+    }
+    const auto name = op->get<std::string>();
+    static const std::vector<std::string> known = {"add", "remove", "replace",
+                                                   "move", "copy", "test"};
+    if (std::find(known.begin(), known.end(), name) == known.end()) {
+        return where + " names the operation '" + name +
+               "', which is not one of add, remove, replace, move, copy or test.";
+    }
+    const auto pointerProblem = [&](const char* field) -> std::optional<std::string> {
+        const auto value = operation.find(field);
+        if (value == operation.end()) {
+            return where + " names '" + name + "' and has no '" + field + "'.";
+        }
+        if (!value->is_string()) {
+            return where + "'s '" + field + "' is " + std::string(value->type_name()) +
+                   ", not a JSON pointer string.";
+        }
+        const auto text = value->get<std::string>();
+        if (!text.empty() && text.front() != '/') {
+            return where + "'s '" + field + "' is '" + text +
+                   "', which is not a JSON pointer. A pointer is empty or begins with '/', so a "
+                   "board path like 'doc.items' is written '/doc/items'.";
+        }
+        return std::nullopt;
+    };
+    if (auto problem = pointerProblem("path")) return problem;
+    if (name == "move" || name == "copy") {
+        if (auto problem = pointerProblem("from")) return problem;
+    }
+    if ((name == "add" || name == "replace" || name == "test") && !operation.contains("value")) {
+        return where + " names '" + name + "' and has no 'value'.";
+    }
+    return std::nullopt;
+}
+
+// What went wrong when the operation was well formed and the board disagreed.
+// These can only be found by applying the patch, which is why they were the
+// ones still answering in the library's voice.
+std::string describePatchFailure(const json& operation, size_t index,
+                                 const json& state, const json::exception& failure) {
+    const std::string where = "operations entry " + std::to_string(index);
+    const auto name = operation.value("op", std::string("?"));
+    const auto path = operation.value("path", std::string("?"));
+    if (failure.id == 403) {
+        return where + " is a '" + name + "' on '" + path +
+               "', and the board has nothing at that location. The patch was rolled back and the "
+               "board is unchanged.";
+    }
+    if (failure.id == 501) {
+        std::string held = "nothing";
+        try {
+            const json::json_pointer pointer(path);
+            if (state.contains(pointer)) held = state.at(pointer).dump();
+        } catch (const json::exception&) {
+        }
+        return where + " tests '" + path + "' against " + operation.value("value", json()).dump() +
+               " and the board holds " + held +
+               ". The patch was rolled back and the board is unchanged.";
+    }
+    return where + " ('" + name + "' on '" + path + "') could not be applied: " + failure.what() +
+           ". The patch was rolled back and the board is unchanged.";
 }
 
 Result<json> blackboardPatch(const BlackboardPatchRequest& request, BlackboardClock clock) {
@@ -627,14 +775,24 @@ Result<json> blackboardPatch(const BlackboardPatchRequest& request, BlackboardCl
         Board board = loaded.value();
         sweepExpired(board, now_ms);
 
-        // All or nothing. The patch is applied to a copy and the board is only
-        // replaced once every operation has succeeded.
-        json patched;
-        try {
-            patched = board.state.patch(request.operations);
-        } catch (const json::exception& failure) {
-            return Error::invalidArgument(
-                std::string("patch failed and the board is unchanged: ") + failure.what());
+        // All or nothing, one operation at a time. The patch is applied to a
+        // copy and the board is only replaced once every operation has
+        // succeeded; applying them singly is what lets a refusal say which one
+        // stopped the batch, which the whole-document call could not (#679).
+        json patched = board.state;
+        for (size_t index = 0; index < request.operations.size(); ++index) {
+            const auto& operation = request.operations[index];
+            if (auto problem = patchOperationProblem(operation, index)) {
+                return Error::invalidArgument(*problem +
+                                              " The patch was rolled back and the board is "
+                                              "unchanged.");
+            }
+            try {
+                patched = patched.patch(json::array({operation}));
+            } catch (const json::exception& failure) {
+                return Error::invalidArgument(
+                    describePatchFailure(operation, index, patched, failure));
+            }
         }
         if (!patched.is_object()) {
             return Error::invalidArgument("patch would replace the board root with a non-object");

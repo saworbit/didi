@@ -315,6 +315,111 @@ void test_blackboard_expiry_removes_entries() {
     ASSERT_EQ(blackboardRead(kept, fixedClock(&now_ms)).value()["value"].get<int>(), 2);
 }
 
+// Break caught: a key that expired read exactly like a key nobody ever wrote,
+// down to the field list. A ttl is written by an agent that wants something to
+// lapse, and the two explanations lead opposite ways -- take the claim again,
+// or go and find the work filed under a path with a typo in it (#680).
+void test_blackboard_expiry_is_not_a_missing_key() {
+    BoardFixture fixture("expiry-vs-absent");
+    int64_t now_ms = 2'000'000;
+
+    BlackboardWriteRequest claim;
+    claim.path = "claims.level_design";
+    claim.value = json{{"working", true}};
+    claim.ttl_seconds = 30;
+    claim.author = std::string("agent-a");
+    claim.reason = std::string("soft claim");
+    ASSERT_TRUE(blackboardWrite(claim, fixedClock(&now_ms)).isOk());
+
+    now_ms += 31 * 1000;
+    BlackboardReadRequest lapsed;
+    lapsed.path = "claims.level_design";
+    const auto after = blackboardRead(lapsed, fixedClock(&now_ms));
+    ASSERT_TRUE(after.isOk());
+    ASSERT_TRUE(!after.value()["found"].get<bool>());
+    ASSERT_EQ(after.value()["reason"].get<std::string>(), "expired");
+    ASSERT_EQ(after.value()["expired_author"].get<std::string>(), "agent-a");
+    ASSERT_EQ(after.value()["expired_reason"].get<std::string>(), "soft claim");
+    ASSERT_TRUE(after.value()["expired_at_ms"].get<int64_t>() > 0);
+
+    BlackboardReadRequest never;
+    never.path = "claims.never_written";
+    const auto absent = blackboardRead(never, fixedClock(&now_ms));
+    ASSERT_TRUE(absent.isOk());
+    ASSERT_TRUE(!absent.value()["found"].get<bool>());
+    ASSERT_EQ(absent.value()["reason"].get<std::string>(), "no_record");
+    ASSERT_TRUE(!absent.value().contains("expired_at_ms"));
+
+    // Writing the path again makes it a live key, so the record of its last
+    // lapse stops being the answer.
+    BlackboardWriteRequest again;
+    again.path = "claims.level_design";
+    again.value = json{{"working", false}};
+    ASSERT_TRUE(blackboardWrite(again, fixedClock(&now_ms)).isOk());
+    const auto live = blackboardRead(lapsed, fixedClock(&now_ms));
+    ASSERT_TRUE(live.value()["found"].get<bool>());
+    ASSERT_TRUE(!live.value().contains("reason"));
+}
+
+// Break caught: every semantic patch failure answered with nlohmann's own
+// exception text and its internal identifier, and the three-operation case did
+// not say which of the three rolled the batch back (#679).
+void test_blackboard_patch_failures_name_the_operation() {
+    BoardFixture fixture("patch-messages");
+    const auto refusal = [&](const json& operations) {
+        BlackboardPatchRequest request;
+        request.operations = operations;
+        const auto answer = blackboardPatch(request);
+        ASSERT_TRUE(answer.isErr());
+        return answer.error().message;
+    };
+
+    // A board path where a JSON pointer belongs. The library called this a
+    // parse error at byte 1, which is an offset into the pointer rather than
+    // into anything the caller sent.
+    const auto pointer = refusal(json::array({{{"op", "add"}, {"path", "doc.items"},
+                                               {"value", json::array()}}}));
+    ASSERT_TRUE(pointer.find("entry 0") != std::string::npos);
+    ASSERT_TRUE(pointer.find("doc.items") != std::string::npos);
+    ASSERT_TRUE(pointer.find("/doc/items") != std::string::npos);
+    ASSERT_TRUE(pointer.find("json.exception") == std::string::npos);
+
+    const auto unknown = refusal(json::array({{{"op", "frobnicate"}, {"path", "/x"},
+                                               {"value", 1}}}));
+    ASSERT_TRUE(unknown.find("frobnicate") != std::string::npos);
+    ASSERT_TRUE(unknown.find("json.exception") == std::string::npos);
+
+    const auto missing = refusal(json::array({{{"op", "add"}}}));
+    ASSERT_TRUE(missing.find("'path'") != std::string::npos);
+    ASSERT_TRUE(missing.find("json.exception") == std::string::npos);
+
+    // The sharpest one: which of three operations stopped the batch.
+    const auto batch = refusal(json::array({
+        {{"op", "add"}, {"path", "/a"}, {"value", 1}},
+        {{"op", "remove"}, {"path", "/nope/deep"}},
+        {{"op", "add"}, {"path", "/b"}, {"value", 2}}}));
+    ASSERT_TRUE(batch.find("entry 1") != std::string::npos);
+    ASSERT_TRUE(batch.find("/nope/deep") != std::string::npos);
+    ASSERT_TRUE(batch.find("unchanged") != std::string::npos);
+
+    BlackboardPatchRequest seed;
+    seed.operations = json::array({{{"op", "add"}, {"path", "/a"}, {"value", 1}}});
+    ASSERT_TRUE(blackboardPatch(seed).isOk());
+    const auto tested = refusal(json::array({{{"op", "test"}, {"path", "/a"}, {"value", 99}}}));
+    ASSERT_TRUE(tested.find("entry 0") != std::string::npos);
+    ASSERT_TRUE(tested.find("99") != std::string::npos);
+    // What the board actually holds, which the library's message never said.
+    ASSERT_TRUE(tested.find("holds 1") != std::string::npos);
+
+    // The board is still what it was before any of those.
+    BlackboardReadRequest read;
+    read.path = "a";
+    ASSERT_EQ(blackboardRead(read).value()["value"].get<int>(), 1);
+    BlackboardReadRequest absent;
+    absent.path = "b";
+    ASSERT_TRUE(!blackboardRead(absent).value()["found"].get<bool>());
+}
+
 void test_blackboard_bounds_refuse_oversize_input() {
     BoardFixture fixture("bounds");
 
@@ -902,6 +1007,10 @@ struct Register {
                      test_blackboard_save_never_deletes_the_board);
 #endif
         registerTest("Blackboard.PatchIsAtomic", test_blackboard_patch_is_atomic);
+        registerTest("Blackboard.ExpiryIsNotAMissingKey",
+                     test_blackboard_expiry_is_not_a_missing_key);
+        registerTest("Blackboard.PatchFailuresNameTheOperation",
+                     test_blackboard_patch_failures_name_the_operation);
         registerTest("Blackboard.ConcurrentWritersDoNotLose",
                      test_blackboard_concurrent_writers_do_not_lose);
         registerTest("Blackboard.ExpiryRemovesEntries", test_blackboard_expiry_removes_entries);
