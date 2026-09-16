@@ -16,9 +16,16 @@ on:
 permissions:
   contents: read
 
+# A pull request cancels its own older runs, because only the newest head
+# matters. A push to main does not. Merge order is the only thing that decides
+# whether two pull requests that were both green against an older base still
+# agree, and the run on main is the only place that gets checked -- the branch
+# rule does not require a pull request to be up to date before it merges. When
+# the next merge cancelled the previous one, that check reported nothing at
+# all, which it did for 29% of the runs on main.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # One cheap job decides what the expensive ones do. Before this, a change to
@@ -950,11 +957,23 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends ninja-build build-essential
 
+      # Its own key. The sanitizer flags are part of every compile command, so
+      # ccache hashes them and cannot hand this job an object built without
+      # them; sharing a key with the release build would only mean two sets of
+      # objects evicting each other out of one 500M cache.
+      - name: Setup Compiler Cache (ccache)
+        uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+        with:
+          key: ubuntu-asan-ubsan
+          max-size: 500M
+
       - name: Configure With Sanitizers
         run: |
           cmake -B build -S . -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DDIDI_ENABLE_SANITIZERS=ON
+            -DDIDI_ENABLE_SANITIZERS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build build --parallel
