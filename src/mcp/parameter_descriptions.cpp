@@ -520,8 +520,9 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
 
         // -- C# ----------------------------------------------------------------
         {"csharp_check_build.project_file",
-         "A normalized project-contained .csproj to build. When omitted, exactly one .csproj "
-         "must sit at the project root."},
+         "A normalized project-contained .sln or .csproj to build. When omitted, exactly one of "
+         "either must sit at the project root, and a .sln there is built in preference to a "
+         ".csproj beside it. The answer's project_file names the one that was built."},
         {"csharp_check_build.configuration",
          "Which MSBuild configuration to build: Debug or Release."},
         {"csharp_check_build.timeout_seconds",

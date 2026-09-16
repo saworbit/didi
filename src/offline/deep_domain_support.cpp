@@ -47,15 +47,32 @@ std::vector<DomainDiagnostic> parseMsBuildDiagnostics(const std::string& output)
     // Roslyn emits both (line,col) and four part (startLine,startCol,endLine,
     // endCol) spans, and diagnostic codes are not always letters then digits:
     // NETSDK1004, MSB3073 and analyzer ids all turn up here.
+    //
+    // The code is optional. MSBuild documents the shape as
+    // "[Origin:] [Subcategory] category [Code]: [Text]", and NuGet uses the
+    // codeless form for the one that matters most here:
+    // "NuGet.targets(196,5): warning : Unable to find a project to restore!".
+    // Requiring a code dropped it, so a build that compiled nothing reported
+    // zero diagnostics (#702).
     static const std::regex pattern(
-        R"(^(.+)\(([0-9]+),([0-9]+)(?:,[0-9]+,[0-9]+)?\):\s*(error|warning)\s+([A-Za-z][A-Za-z0-9_.-]*[0-9][A-Za-z0-9_.-]*):\s*(.*?)(?:\s+\[[^\]]+\])?\s*$)",
+        R"(^(.+)\(([0-9]+),([0-9]+)(?:,[0-9]+,[0-9]+)?\):\s*(error|warning)\s+(?:([A-Za-z][A-Za-z0-9_.-]*[0-9][A-Za-z0-9_.-]*)\s*)?:\s*(.*?)(?:\s+\[[^\]]+\])?\s*$)",
         std::regex::icase);
     std::vector<DomainDiagnostic> diagnostics;
+    // The console logger prints every diagnostic twice: once as it happens and
+    // once in the Summary block it appends by default, so every count was
+    // doubled (#702). The two printings are the same line, byte for byte,
+    // project suffix included, so the trimmed line is the identity. Keying on
+    // that rather than on the parsed fields keeps the genuinely distinct pair a
+    // shared source file compiled by two projects produces, which differ only
+    // in that suffix. Matching on text also means no reliance on the wording of
+    // "Build FAILED.", which is localised.
+    std::set<std::string> seen;
     for (const auto& raw : strings::split(output, '\n')) {
         if (diagnostics.size() >= kMaxDiagnostics) break;
         std::smatch match;
         const std::string line = strings::trim(raw);
         if (!std::regex_match(line, match, pattern)) continue;
+        if (!seen.insert(line).second) continue;
         std::string severity = match[4].str();
         std::transform(severity.begin(), severity.end(), severity.begin(),
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -63,6 +80,25 @@ std::vector<DomainDiagnostic> parseMsBuildDiagnostics(const std::string& output)
                                match[1].str(), std::stoi(match[2].str()), std::stoi(match[3].str())});
     }
     return diagnostics;
+}
+
+int parseMsBuildProjectOutputCount(const std::string& output) {
+    // "  Game -> D:\game\bin\Debug\net8.0\Game.dll". A diagnostic can carry an
+    // arrow in its message text, so the diagnostic shape is excluded first
+    // rather than trusted not to collide.
+    static const std::regex diagnostic_shape(
+        R"(^.+\([0-9]+,[0-9]+(?:,[0-9]+,[0-9]+)?\):\s*(?:error|warning)\b.*$)", std::regex::icase);
+    static const std::regex output_line(R"(^([^>]+?)\s->\s(\S.*)$)");
+    std::set<std::string> projects;
+    for (const auto& raw : strings::split(output, '\n')) {
+        const std::string line = strings::trim(raw);
+        if (line.empty()) continue;
+        if (std::regex_match(line, diagnostic_shape)) continue;
+        std::smatch match;
+        if (!std::regex_match(line, match, output_line)) continue;
+        projects.insert(strings::trim(match[1].str()) + " -> " + strings::trim(match[2].str()));
+    }
+    return static_cast<int>(projects.size());
 }
 
 std::vector<DomainDiagnostic> parseGodotDiagnostics(const std::string& output) {

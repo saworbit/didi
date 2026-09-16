@@ -17,6 +17,7 @@
 #include <mutex>
 #include <optional>
 #include <cmath>
+#include <regex>
 #include <set>
 #include <sstream>
 
@@ -90,6 +91,40 @@ json diagnosticsJson(const std::vector<offline::DomainDiagnostic>& diagnostics) 
     return output;
 }
 
+// The same list, with every path that lives in the project spelled res://.
+//
+// MSBuild names the file in host terms, so diagnostics[].path carried an
+// absolute path beside a project_file the same object had already converted --
+// the one field naming the file the caller has to go and fix was the one field
+// no path-taking tool would accept, and it carried the home directory of
+// whoever ran the server into the host's transcript (#703). Paths outside the
+// project are SDK and NuGet targets; those have no res:// name and are left as
+// they came.
+json msBuildDiagnosticsJson(const std::filesystem::path& root,
+                            const std::vector<offline::DomainDiagnostic>& diagnostics) {
+    json output = json::array();
+    for (const auto& diagnostic : diagnostics) {
+        json value = diagnostic.toJson();
+        if (!diagnostic.path.empty()) {
+            std::error_code error;
+            std::filesystem::path candidate;
+            try {
+                candidate = paths::projectPathFromUtf8(diagnostic.path);
+            } catch (const std::filesystem::filesystem_error&) {
+                output.push_back(std::move(value));
+                continue;
+            }
+            if (candidate.is_relative()) candidate = root / candidate;
+            const auto resolved = std::filesystem::weakly_canonical(candidate, error);
+            if (!error && paths::isWithinProject(root, resolved)) {
+                value["path"] = asResPath(root, resolved);
+            }
+        }
+        output.push_back(std::move(value));
+    }
+    return output;
+}
+
 Result<int> timeoutSeconds(const json& args, int fallback, int maximum) {
     if (!args.contains("timeout_seconds")) return fallback;
     if (!args["timeout_seconds"].is_number_integer()) {
@@ -102,9 +137,98 @@ Result<int> timeoutSeconds(const json& args, int fallback, int maximum) {
     return value;
 }
 
-std::string dotnetExecutable() {
+// What DOTNET_BIN resolved to, and what was discarded on the way.
+//
+// The same shape resolveGodotExecutableDetailed has carried since #656, for
+// the same reason: a variable that is set and cannot be used was dropped in
+// silence, so the answer named a toolchain the user never chose, or no
+// toolchain at all (#704).
+struct DotnetResolution {
+    std::string executable{"dotnet"};   // what will actually be run
+    std::string configured;             // what DOTNET_BIN held, empty when unset
+    std::string configured_rejected;    // why it was not used, empty when it was
+};
+
+DotnetResolution resolveDotnet() {
+    DotnetResolution resolution;
     const char* configured = std::getenv("DOTNET_BIN");
-    return configured && *configured ? configured : "dotnet";
+    if (!configured || !*configured) return resolution;
+    resolution.configured = configured;
+    std::filesystem::path path;
+    try {
+        path = paths::projectPathFromUtf8(configured);
+    } catch (const std::filesystem::filesystem_error&) {
+        resolution.configured_rejected = "that path could not be read as UTF-8";
+        return resolution;
+    }
+    std::error_code error;
+    if (!std::filesystem::exists(path, error) || error) {
+        resolution.configured_rejected = "nothing exists at that path";
+        return resolution;
+    }
+    if (std::filesystem::is_directory(path, error)) {
+        resolution.configured_rejected =
+            "that path is a directory, and DOTNET_BIN names an executable";
+        return resolution;
+    }
+    resolution.executable = configured;
+    return resolution;
+}
+
+// Whether the thing we are about to run is a .NET SDK, and which one.
+//
+// csharp_check_build published nothing about which dotnet ran, so "the SDK is
+// not installed" and "your C# does not compile" arrived as the same answer:
+// exit 2 on Windows, exit 127 and isError: false on POSIX, zero diagnostics in
+// both (#704). One `dotnet --version` separates them, and the SDK version is
+// worth having anyway because the target framework a Godot project needs
+// depends on it.
+struct DotnetProbe {
+    bool available{false};
+    std::string version;
+    std::string unavailable_reason;
+};
+
+DotnetProbe probeDotnet(const std::string& executable,
+                        const std::filesystem::path& working_directory) {
+    DotnetProbe probe;
+    offline::ProcessRequest request;
+    request.executable = executable;
+    request.arguments = {"--version"};
+    request.working_directory = working_directory;
+    request.timeout = std::chrono::seconds(30);
+    request.max_output_bytes = 64 * 1024;
+    auto run = offline::runProcess(request);
+    if (run.isErr()) {
+        probe.unavailable_reason = run.error().message;
+        return probe;
+    }
+    if (run.value().timed_out) {
+        probe.unavailable_reason = "'--version' did not answer within 30 seconds";
+        return probe;
+    }
+    const auto first_line = strings::trim(strings::split(run.value().output, '\n').empty()
+                                              ? std::string{}
+                                              : strings::split(run.value().output, '\n').front());
+    if (run.value().exit_code != 0) {
+        probe.unavailable_reason = "'--version' exited " +
+                                   std::to_string(run.value().exit_code) +
+                                   (first_line.empty() ? std::string{}
+                                                       : " and printed '" + first_line + "'");
+        return probe;
+    }
+    // A DOTNET_BIN that names a real file which is not dotnet runs, exits 0 and
+    // prints something else. Reporting that as an SDK version would put the
+    // misconfiguration back where #704 found it.
+    static const std::regex sdk_version(R"(^[0-9]+\.[0-9]+\.[0-9]+.*$)");
+    if (!std::regex_match(first_line, sdk_version)) {
+        probe.unavailable_reason = "'--version' printed '" + first_line +
+                                   "', which is not a .NET SDK version";
+        return probe;
+    }
+    probe.version = first_line;
+    probe.available = true;
+    return probe;
 }
 
 Result<std::filesystem::path> selectCSharpProject(const std::filesystem::path& root,
@@ -291,26 +415,85 @@ CallToolResult handleCSharpCheckBuild(const json& args, std::shared_ptr<ipc::IIp
     auto timeout = timeoutSeconds(args, 60, 300);
     if (timeout.isErr()) return CallToolResult::fromError(timeout.error());
 
+    const auto dotnet = resolveDotnet();
+    const auto probe = probeDotnet(dotnet.executable, root.value());
+    // A build that never ran is not C# with no errors.
+    //
+    // The same sentence #677 wrote for script_check_syntax, owed to the one
+    // member of the family it was never asked of. A missing SDK exited 2 on
+    // Windows and 127 on POSIX with isError: false, which is exactly what a
+    // failed build looks like, and nothing in the payload separated them
+    // (#704). The launch failure also answered with a bare string (#705).
+    if (!probe.available) {
+        json data = {{"code", "toolchain_unavailable"},
+                     {"tool", "csharp_check_build"},
+                     {"dotnet_executable", dotnet.executable},
+                     {"retryable", false}};
+        if (!dotnet.configured.empty() && !dotnet.configured_rejected.empty()) {
+            data["dotnet_executable_configured"] = dotnet.configured;
+            data["dotnet_executable_configured_rejected"] = dotnet.configured_rejected;
+        }
+        return CallToolResult::errorJson(
+            503,
+            "No .NET SDK answered, so whether this project's C# compiles is unknown: '" +
+                dotnet.executable + "' " + probe.unavailable_reason +
+                ". Install the .NET SDK, or set DOTNET_BIN to a dotnet executable.",
+            std::move(data));
+    }
+
     offline::ProcessRequest request;
-    request.executable = dotnetExecutable();
+    request.executable = dotnet.executable;
     request.arguments = {"build", paths::projectPathToUtf8(project.value()), "--nologo",
                          "--verbosity:minimal", "--configuration", configuration};
     request.working_directory = root.value();
     request.timeout = std::chrono::seconds(timeout.value());
     request.max_output_bytes = kMaxProcessOutput;
     auto run = offline::runProcess(request);
-    if (run.isErr()) return CallToolResult::error("Failed to run dotnet build: " + run.error().message);
-    if (run.value().timed_out) return CallToolResult::error("dotnet build timed out before completion");
+    if (run.isErr()) {
+        return CallToolResult::errorJson(
+            500, "Failed to run dotnet build: " + run.error().message,
+            {{"code", "internal_error"}, {"tool", "csharp_check_build"},
+             {"dotnet_executable", dotnet.executable}, {"retryable", false}});
+    }
+    if (run.value().timed_out) {
+        return CallToolResult::errorJson(
+            504, "dotnet build timed out before completion",
+            {{"code", "timeout"}, {"tool", "csharp_check_build"},
+             {"timeout_seconds", timeout.value()}, {"retryable", true}});
+    }
     auto diagnostics = offline::parseMsBuildDiagnostics(run.value().output);
     const bool has_errors = run.value().exit_code != 0 || std::any_of(
         diagnostics.begin(), diagnostics.end(), [](const auto& value) { return value.severity == "error"; });
-    return CallToolResult::successJson({
-        {"success", !has_errors}, {"has_errors", has_errors}, {"exit_code", run.value().exit_code},
+    // How many projects the compiler actually produced an assembly for. A
+    // solution whose project paths do not resolve, and one MSBuild skips
+    // because it carries no configuration mapping, both exit 0 having compiled
+    // nothing, and calling that success was the tool saying the C# compiles
+    // about code it never looked at (#706).
+    const int projects_built = offline::parseMsBuildProjectOutputCount(run.value().output);
+    const bool built_nothing = run.value().exit_code == 0 && projects_built == 0;
+    json result = {
+        {"success", !has_errors && !built_nothing}, {"has_errors", has_errors},
+        {"exit_code", run.value().exit_code},
         {"project_file", asResPath(root.value(), project.value())}, {"configuration", configuration},
-        {"diagnostics", diagnosticsJson(diagnostics)}, {"diagnostics_count", diagnostics.size()},
+        {"projects_built", projects_built},
+        {"diagnostics", msBuildDiagnosticsJson(root.value(), diagnostics)},
+        {"diagnostics_count", diagnostics.size()},
+        {"dotnet_executable", dotnet.executable}, {"dotnet_version", probe.version},
         {"duration_seconds", run.value().duration_seconds}, {"output_truncated", run.value().output_truncated},
         {"raw_output", run.value().output}, {"execution_mode", "offline_fallback"}
-    });
+    };
+    if (built_nothing) {
+        result["nothing_built_reason"] =
+            "dotnet exited 0 without building any project, so whether this project's C# "
+            "compiles is unknown. A solution builds nothing when its project paths do not "
+            "resolve, or when it carries no configuration mapping for them. Point "
+            "project_file at the .csproj, or fix the solution.";
+    }
+    if (!dotnet.configured.empty() && !dotnet.configured_rejected.empty()) {
+        result["dotnet_executable_configured"] = dotnet.configured;
+        result["dotnet_executable_configured_rejected"] = dotnet.configured_rejected;
+    }
+    return CallToolResult::successJson(result);
 }
 
 CallToolResult handleShaderListUniforms(const ResolvedToolBinding& binding, const json& args,
