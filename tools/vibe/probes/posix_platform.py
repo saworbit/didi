@@ -239,17 +239,30 @@ def odd_filenames(session: Session, project: Path) -> None:
                 "an answer", f"the client lost the server: {error}")
             continue
         text = str(payload)
-        control, latin1, newline = ("plaincontrol" in text, "caf" in text, "two" in text)
+        control = "plaincontrol" in text
         if not control:
             # It does not enumerate plain scripts, so it cannot be asked about
-            # oddly named ones. Say that, rather than scoring it as a miss.
-            row(f"{tool} with an undecodable name present",
-                "the control listed first",
-                "does not name plaincontrol.gd either, so it cannot be asked")
+            # oddly named ones. That is a skipped row, not a failed one, and it
+            # goes in the skipped list the summary prints -- `row` would report
+            # DIFF, which is how this read as a finding in the first place.
+            skip(f"{tool} with an undecodable name present",
+                 "does not name plaincontrol.gd either, so it cannot be asked")
             continue
-        row(f"{tool} with an undecodable name present",
-            "every odd name, since the control was named",
-            f"isError={is_error} control={control} latin1={latin1} newline={newline}")
+        # Only the names that got created are in evidence. APFS refuses the
+        # Latin-1 one outright with `[Errno 92] Illegal byte sequence`, so on
+        # macOS expecting it back makes the row DIFF because the *precondition*
+        # failed -- which reads exactly like the walker having hidden it.
+        wanted = {marker: any(marker.encode() in target for target in made)
+                  for marker in ("caf", "two")}
+        absent = sorted(m for m, created in wanted.items() if created and m not in text)
+        # `row` compares the two strings exactly, so the good case has to be
+        # spelled the same on both sides.
+        expected = "every created odd name is named"
+        row(f"{tool} with an undecodable name present", expected,
+            expected if not absent else f"created but not named: {absent}")
+        skipped_here = sorted(m for m, created in wanted.items() if not created)
+        if skipped_here:
+            print(f"       (not created on this host, so not asked: {skipped_here})")
         print(f"       {says(payload, 'total_matches', 'resource_count', 'asset_count', 'entry_count')}")
     for target in made:
         os.unlink(target)
