@@ -682,7 +682,7 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     // caller gets what script_reflect_class already gives them, so they can
     // weigh the verdict (#466).
     const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
-    const auto attached = sessions ? sessions->activeSession()
+    const auto attached = sessions ? sessions->observableSession()
                                    : std::optional<runtime::SessionDescriptor>{};
     const auto note_engine = [&](json& check) {
         if (!attached.has_value() || !check.value("checked", false)) return;

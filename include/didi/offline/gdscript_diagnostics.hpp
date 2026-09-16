@@ -63,6 +63,27 @@ public:
     struct EngineCheck {
         std::string version;
         std::string executable;
+        // Whether the compiler pass actually produced a verdict.
+        //
+        // A launch that fails, and a real file that is not Godot, both leave
+        // no output and no banner, and the check returned no diagnostics --
+        // which the tool reported as has_errors: false on a script nobody
+        // compiled (#677). The engine always prints its banner, so a run with
+        // no version is a run that did not happen.
+        bool ran{false};
+        // Why it did not run, when it did not. Empty otherwise.
+        std::string failure;
+        // Whether the executable that was tried is a file that exists.
+        //
+        // This is the line between the two states that both end in "no
+        // diagnostics". A machine with no Godot installed falls through to the
+        // bare name `godot`, nothing is there, and answering the lexer verdict
+        // is the documented contract for that. A path that names a real file
+        // which is not the engine is a misconfiguration, and reporting it as a
+        // clean script is the lie #677 is about.
+        bool executable_exists{false};
+        std::optional<int> exit_code;
+        double duration_seconds{0.0};
     };
 
     static std::vector<ScriptDiagnostic> analyze(const std::string& file_path,

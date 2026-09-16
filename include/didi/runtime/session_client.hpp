@@ -350,6 +350,20 @@ public:
         return Error::notConnected("Fresh runtime session state is unavailable");
     }
     virtual std::optional<SessionDescriptor> activeSession() const = 0;
+
+    // The session this process should report about, selected or not.
+    //
+    // activeSession() is the process selection, and only an explicit
+    // runtime_attach_session or an earlier live call sets it. The honesty
+    // fields that answer "is this the engine you are editing in?" were reading
+    // it, so on a server that had only made offline calls they came back null
+    // -- "there is nothing to compare against" rather than "I did not look" --
+    // beside a live editor on the same project (#687). This observes on the
+    // same condition live routing selects on. Read only: it never attaches,
+    // opens a route, or takes a lock.
+    virtual std::optional<SessionDescriptor> observableSession() const {
+        return activeSession();
+    }
     std::optional<RuntimeRouteLease> acquireRouteLease() override { return std::nullopt; }
     bool quarantineRoute(const RuntimeRouteLease&) override { return false; }
 };

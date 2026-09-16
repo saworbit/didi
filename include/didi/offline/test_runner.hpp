@@ -82,6 +82,15 @@ struct TestSessionResult {
     std::vector<std::string> errors;
     std::vector<std::string> warnings;
     std::string summary;
+    // Which engine ran the project.
+    //
+    // This is the tool whose whole answer is "here is what happened when your
+    // project ran", and which build ran it is part of that. It appeared only
+    // because Godot prints its own banner into the captured logs, so a caller
+    // had to string-match the game's stdout to find out that a 4.5 project had
+    // been run by 4.7 (#687). Its two siblings have published it since #617.
+    std::string engine_executable;
+    std::string engine_version;
 
     json toJson() const {
         json log_arr = json::array();
@@ -94,7 +103,10 @@ struct TestSessionResult {
             {"logs", log_arr},
             {"errors", errors},
             {"warnings", warnings},
-            {"summary", summary}
+            {"summary", summary},
+            {"engine_executable",
+             engine_executable.empty() ? json(nullptr) : json(engine_executable)},
+            {"engine_version", engine_version.empty() ? json(nullptr) : json(engine_version)}
         };
     }
 };

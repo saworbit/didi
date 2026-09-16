@@ -123,12 +123,68 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
         }
     }
 
+    // A compiler pass that did not happen is not a script with no errors.
+    //
+    // The whole question this tool answers is "does this compile?", and the
+    // answer came back `has_errors: false, diagnostics: []` when the engine it
+    // was told to use never launched -- a GODOT_BIN pointing at a real file
+    // that is not Godot, which is what a version-manager shim or the wrong file
+    // out of a bundle looks like (#677). engine_version was the only trace, and
+    // nothing said the compiler had not run. shader_check_compile, the same
+    // idea on the shader half, already refuses this; so does this now. A check
+    // given source_text runs no engine by design and is left alone.
+    const bool engine_was_asked = source_text.empty() && !file_path.empty();
+    // Only when an engine was actually there to be wrong about.
+    //
+    // A machine with no Godot installed falls through to the bare name
+    // `godot`, the exec fails with 127, and answering the lexer verdict is
+    // what this tool has always done and what the output schema documents.
+    // Refusing there would take the tool away from a supported configuration
+    // for a misconfiguration it does not have. The value #677 is about is a
+    // path that names a real file which is not the engine -- a version-manager
+    // shim, the wrong file out of a bundle -- and that is the one this catches.
+    const bool engine_was_wrong = engine_was_asked && engine.executable_exists && !engine.ran;
+    if (engine_was_wrong && !encoding_refusal.has_value()) {
+        json data = {{"code", "engine_unavailable"},
+                     {"tool", "script_check_syntax"},
+                     {"engine_executable", engine.executable.empty() ? json(nullptr)
+                                                                     : json(engine.executable)},
+                     {"engine_exit_code", engine.exit_code.has_value() ? json(*engine.exit_code)
+                                                                       : json(nullptr)},
+                     {"retryable", false}};
+        const auto configured_engine = offline::resolveGodotExecutableDetailed();
+        json error_body = {{"code", 503},
+                           {"message", "Godot did not compile this script, so whether it has "
+                                       "errors is unknown: " + engine.failure +
+                                       ". Engine tried: " +
+                                       (engine.executable.empty() ? std::string("none found")
+                                                                  : engine.executable) +
+                                       ". Set GODOT_BIN to a Godot executable."},
+                           {"data", data}};
+        versions::annotateConfiguredEngine(error_body["data"], configured_engine.configured,
+                                           configured_engine.configured_rejected);
+        return CallToolResult::error(json{{"error", error_body}}.dump());
+    }
+
     json result = {
         {"file_path", file_path},
         {"diagnostics_count", diagnostics_count},
         {"has_errors", has_error},
         {"diagnostics", diag_arr}
     };
+    // Published so a caller can see whether the subprocess ran at all, which
+    // is what the shader half already reports and this one did not. False is
+    // the honest answer on a machine with no Godot: the lexer found what it
+    // found, and nothing compiled the script.
+    if (engine_was_asked) {
+        result["engine_available"] = engine.ran;
+        result["engine_exit_code"] =
+            engine.exit_code.has_value() ? json(*engine.exit_code) : json(nullptr);
+        result["engine_duration_seconds"] = engine.duration_seconds;
+        if (!engine.ran && !engine.failure.empty()) {
+            result["engine_unavailable_reason"] = engine.failure;
+        }
+    }
 
     // Which engine answered. The whole question this tool exists for is "will
     // the engine accept this?", and resolveGodotExecutable picks newest-first
@@ -137,7 +193,7 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
     // (#617). Reading the selected session takes no route and changes no
     // selection, which is what an offline-only tool is allowed to do.
     const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
-    const auto attached = sessions ? sessions->activeSession()
+    const auto attached = sessions ? sessions->observableSession()
                                    : std::optional<runtime::SessionDescriptor>{};
     const auto configured = offline::resolveGodotExecutableDetailed();
     versions::annotateConfiguredEngine(result, configured.configured, configured.configured_rejected);
@@ -258,7 +314,7 @@ CallToolResult handleScriptReflectClass(const json& args, std::shared_ptr<ipc::I
     // selected session's descriptor takes no route and changes no selection,
     // which is what an offline-only tool is allowed to do.
     const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
-    const auto attached = sessions ? sessions->activeSession()
+    const auto attached = sessions ? sessions->observableSession()
                                    : std::optional<runtime::SessionDescriptor>{};
     if (doc.contains("api_version") && doc["api_version"].is_string()) {
         const auto api_version = doc["api_version"].get<std::string>();

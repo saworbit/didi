@@ -393,6 +393,15 @@ jobs:
           # could ask for a mode and quietly start without it.
           "$DIDI_PYTHON" -m unittest tests.test_cli_arguments -v
 
+      - name: Verify a verdict names the engine that produced it
+        shell: bash
+        run: |
+          # script_check_syntax answered has_errors: false when the Godot it was
+          # told to use never launched, so a caller asking whether a script with
+          # four compile errors compiles was told yes. No Godot is needed here:
+          # the point is that nothing runs.
+          "$DIDI_PYTHON" -m unittest tests.test_engine_identity -v
+
       - name: Verify the tests drive the build that was just made
         shell: bash
         run: |

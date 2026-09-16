@@ -2415,6 +2415,12 @@ try {
 
     $phase5Requests = @(
         (@{ jsonrpc = "2.0"; id = 500; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        # Deliberately before the attach below. The honesty fields read the
+        # process selection, which only an explicit attach or an earlier live
+        # call sets, so on a server that had made neither they came back null --
+        # "there is nothing to compare against" rather than "I did not look" --
+        # beside a live editor on the same project (#687).
+        (Tool-Request 518 "script_check_syntax" @{ file_path = "res://subject.gd" }),
         (Tool-Request 501 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 502 "project_list_export_presets" @{}),
         (Tool-Request 503 "shader_check_compile" @{ shader_path = "res://phase5_valid.gdshader"; timeout_seconds = 30 }),
@@ -2864,6 +2870,12 @@ try {
         # versions was unknown, and both are known here.
         Assert-True ($checked.matches_attached_engine -eq $true) "Request $named ran $($checked.engine_version) against an attached $($checked.attached_engine_version) and reported matches_attached_engine=$($checked.matches_attached_engine)."
     }
+
+    # The same two fields with nothing attached, which is the state every
+    # offline-only caller is in (#687). Request 518 runs before 501's attach.
+    $unattachedCheck = Tool-Payload $phase5ById[518]
+    Assert-True ($unattachedCheck.attached_engine_version -match "^Godot Engine v\d") "script_check_syntax before any attach reported attached_engine_version=$($unattachedCheck.attached_engine_version) beside a live editor."
+    Assert-True ($null -ne $unattachedCheck.engine_exit_code) "script_check_syntax did not report the exit code of the engine it ran."
 
     $validShader = Tool-Payload $phase5ById[503]
     Assert-True ($validShader.success -eq $true -and $validShader.has_errors -eq $false) "Valid shader did not compile cleanly."
