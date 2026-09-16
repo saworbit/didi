@@ -93,6 +93,35 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **Three semantic failures answer with the error envelope rather than a bare
+  string.** #420 put a code on eighteen of these, #460 on eight more, #492 on the
+  five unimplemented registrations and #548 on four behind valid arguments. Each
+  pass found what its census could reach, and these three sat behind a different
+  precondition again (#705): `project_export`'s overwrite refusal needs an output
+  path that **exists**, so the wrongness is in the filesystem rather than in the
+  arguments; `gridmap_export_mesh_library`'s extension check needs a valid
+  `source_scene` first, so a census generating junk gets that tool's other error;
+  and `csharp_check_build`'s launch failure needs a broken environment variable,
+  which no census varies. The export one was the sharpest: its whole message is an
+  instruction to retry with a different argument, and nothing said so in a way a
+  caller could branch on. It now answers `409` with `data.code: "conflict"`, the
+  `res://` output path and `retry_with: {"overwrite": true}`, the same shape
+  `script_create` gives the same collision. The extension check answers `400`
+  `invalid_arguments` naming the parameter and the extensions it takes. The
+  `csharp_check_build` one was fixed with the rest of that tool.
+
+- **Every unbound name in `eval_gdscript` is refused by its own name.** A typo in
+  `node`, a singleton a caller reasonably expected, a name of the caller's own --
+  each reached Godot and came back as "Expression execution failed: self can't be
+  used because instance is null (not passed)", a sentence about a word the
+  expression did not contain (#712). #488 diagnosed exactly this and fixed it for
+  the literal string `self`; the common case is not `self`. A bare identifier that
+  is not `node`, a literal, a letter-spelled operator or one of Expression's own
+  numeric constants is now refused with its own name in the message, saying that
+  `node` is what is bound and pointing at `node.get(...)` and
+  `scene_get_property`. The nineteen containment refusals are unchanged, and a
+  forbidden or reserved name keeps the sentence it already had.
+
 - **Two parameter descriptions stop offering a value their own enum refuses.**
   `blackboard_task_list.status` read "such as pending, claimed or blocked", and
   `claimed` is not a near miss for one of the six the enum holds -- it is the

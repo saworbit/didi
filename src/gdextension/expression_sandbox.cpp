@@ -541,6 +541,44 @@ Result<void> validateTokens(const std::vector<Token>& tokens) {
         if (token.kind == TokenKind::Identifier && token.text.rfind("__didi_", 0) == 0) {
             return Error::invalidArgument("Expression contains a reserved sandbox identifier");
         }
+        // #488 with a wider aperture. Every unbound name, not only `self`,
+        // reached Godot and came back as "self can't be used because instance
+        // is null (not passed)" -- a sentence about a word the expression did
+        // not contain. The common case is not `self`: it is a typo in `node`,
+        // or a singleton a caller reasonably expected to be there (#712).
+        //
+        // Only a bare name gets here, and every other position keeps the
+        // sentence it already had. A name after a `.` is a member read and a
+        // name before one is the receiver of that read, both of which the rule
+        // at the top of this loop answers, and it answers them better: it names
+        // node.get(...) as the way through for exactly that shape. A name
+        // before a `(` is a call and the rules below answer it. A forbidden or
+        // reserved name was answered two checks up.
+        if (token.kind == TokenKind::Identifier &&
+            !(index > 0 && tokens[index - 1].text == ".") &&
+            !(index + 1 < tokens.size() &&
+              (tokens[index + 1].text == "." || tokens[index + 1].text == "("))) {
+            // Everything a bare word is allowed to be: the two names Expression
+            // is given as inputs, the literals, the operators GDScript spells
+            // with letters, and the numeric constants Expression resolves for
+            // itself. `tree` is bound and is refused later, on the ground that
+            // returning it is an unsupported non-Node Object, which is a
+            // different and true sentence.
+            static const std::unordered_set<std::string> bound_bare_identifiers = {
+                "node", "tree",
+                "true", "false", "null",
+                "and", "or", "not", "in", "if", "else",
+                "INF", "NAN", "PI", "TAU"
+            };
+            if (bound_bare_identifiers.count(token.text) == 0) {
+                return Error::invalidArgument(
+                    "'" + token.text + "' is not bound in a read-only expression. The context "
+                    "node is bound as node, and that is the only name: read a native property "
+                    "with node.get(\"position\"), call one of the allowed node methods, or use "
+                    "scene_get_property. Engine singletons and project globals are not reachable "
+                    "here.");
+            }
+        }
         if (token.kind == TokenKind::Identifier && index + 1 < tokens.size() &&
             tokens[index + 1].text == "(") {
             const auto receiver = receiverKind(tokens, index);
