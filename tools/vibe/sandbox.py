@@ -173,7 +173,11 @@ def main() -> int:
     )
     if args.fixtures:
         for fixture in sorted((Path(__file__).resolve().parent / "fixtures").iterdir()):
-            if fixture.is_file():
+            # `.py` in there is a fixture *writer*, not a fixture: the C# one
+            # takes arguments and is run by hand, because a .csproj changes what
+            # Godot does with the directory and every other probe wants the
+            # GDScript sandbox.
+            if fixture.is_file() and fixture.suffix != ".py":
                 shutil.copy(fixture, project / fixture.name)
     print(project)
     if args.launch:

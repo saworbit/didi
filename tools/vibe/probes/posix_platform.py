@@ -200,6 +200,14 @@ def odd_filenames(session: Session, project: Path) -> None:
     bytes that are newlines. A response is JSON, which is text. The walkers
     that enumerate the project are the ones that have to reconcile that, and
     they have never met a name they could not decode.
+
+    A plain-named control file is written beside the odd ones. Two of the four
+    walkers here do not enumerate scripts at all -- `project_audit_assets` names
+    no `.gd`, and `project_get_uid_map` answers from the import cache, so a file
+    dropped in after the last import is legitimately absent from both. Session
+    fourteen read that silence as two walkers hiding an oddly named file until
+    the control was added. A row that fails because the control fails is not a
+    finding.
     """
     print("\nFilenames a POSIX filesystem allows and a JSON response may not")
     if not POSIX:
@@ -207,7 +215,7 @@ def odd_filenames(session: Session, project: Path) -> None:
         return
     made: list[bytes] = []
     root = os.fsencode(str(project))
-    for raw in (b"latin1_caf\xe9.gd", b"two\nlines.gd"):
+    for raw in (b"plaincontrol.gd", b"latin1_caf\xe9.gd", b"two\nlines.gd"):
         target = root + b"/" + raw
         try:
             with open(target, "wb") as handle:
@@ -231,9 +239,30 @@ def odd_filenames(session: Session, project: Path) -> None:
                 "an answer", f"the client lost the server: {error}")
             continue
         text = str(payload)
-        names = ("caf" in text, "two" in text)
-        row(f"{tool} with an undecodable name present",
-            "an answer that names both files", f"isError={is_error} latin1={names[0]} newline={names[1]}")
+        control = "plaincontrol" in text
+        if not control:
+            # It does not enumerate plain scripts, so it cannot be asked about
+            # oddly named ones. That is a skipped row, not a failed one, and it
+            # goes in the skipped list the summary prints -- `row` would report
+            # DIFF, which is how this read as a finding in the first place.
+            skip(f"{tool} with an undecodable name present",
+                 "does not name plaincontrol.gd either, so it cannot be asked")
+            continue
+        # Only the names that got created are in evidence. APFS refuses the
+        # Latin-1 one outright with `[Errno 92] Illegal byte sequence`, so on
+        # macOS expecting it back makes the row DIFF because the *precondition*
+        # failed -- which reads exactly like the walker having hidden it.
+        wanted = {marker: any(marker.encode() in target for target in made)
+                  for marker in ("caf", "two")}
+        absent = sorted(m for m, created in wanted.items() if created and m not in text)
+        # `row` compares the two strings exactly, so the good case has to be
+        # spelled the same on both sides.
+        expected = "every created odd name is named"
+        row(f"{tool} with an undecodable name present", expected,
+            expected if not absent else f"created but not named: {absent}")
+        skipped_here = sorted(m for m, created in wanted.items() if not created)
+        if skipped_here:
+            print(f"       (not created on this host, so not asked: {skipped_here})")
         print(f"       {says(payload, 'total_matches', 'resource_count', 'asset_count', 'entry_count')}")
     for target in made:
         os.unlink(target)
