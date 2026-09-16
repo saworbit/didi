@@ -256,6 +256,16 @@ Result<void> SessionHost::prepare(const std::string& kind, const std::string& pr
     descriptor.endpoint = (temp_directory /
                            ("godot_didi_" + project_key + "_" + std::to_string(descriptor.pid) +
                             "_" + descriptor.session_id.substr(0, 12) + ".sock")).string();
+    // Before the socket, so the reason travels with the failure instead of
+    // being a bare `return false` three layers down. The endpoint shape is
+    // fixed -- the server validates the filename it derives for itself -- so
+    // the temporary directory is the only part a user can change, and saying
+    // so is the whole difference between "didi does not see my editor" and a
+    // one-line fix (#711).
+    if (const auto rejected = ipc::endpointPathRejection(descriptor.endpoint);
+        rejected.has_value()) {
+        return Error::internal("Cannot publish a runtime session here: " + *rejected);
+    }
 #endif
     descriptor.started_at_ms = process_identity.value().started_at_ms;
     descriptor.protocol_version = "1.3";

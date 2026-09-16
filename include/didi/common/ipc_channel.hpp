@@ -113,6 +113,22 @@ public:
 std::unique_ptr<IIpcClient> createIpcClient();
 std::unique_ptr<IIpcServer> createIpcServer();
 
+// Why this transport cannot use this endpoint, before anything tries.
+//
+// On POSIX the endpoint is a filesystem path that has to fit in
+// sockaddr_un::sun_path, which holds 104 bytes on macOS and 108 on Linux. The
+// session endpoint is built under the temporary directory, and a stock
+// macos-latest runner's is 48 bytes, so a session there has five bytes of
+// headroom. Both ends answered the overflow with a bare `return false`: the
+// plugin reported itself active, no descriptor was published, every live tool
+// gave the ordinary "no editor is running" refusal, and nothing anywhere named
+// a path length -- which is indistinguishable from the editor not running,
+// the most common state in the world (#711).
+//
+// Empty on Windows, whose named pipes are not paths and have their own,
+// separate limit.
+std::optional<std::string> endpointPathRejection(const std::string& endpoint);
+
 namespace testing {
 // Drives the idle-recycle contract in milliseconds instead of seconds, so a
 // test can sit on the boundary without taking seconds to do it, and can invert

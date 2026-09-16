@@ -1182,7 +1182,14 @@ private:
         m_pipeName = pipe_name;
 
         sockaddr_un addr{};
-        if (m_pipeName.size() >= sizeof(addr.sun_path)) return false;
+        // The other half of #711. A server that could not bind publishes no
+        // descriptor, so this branch is usually unreachable -- but a descriptor
+        // written by a build with a different endpoint shape reaches it, and a
+        // connect that gave up for a reason nobody can read is the same fault.
+        if (const auto rejected = endpointPathRejection(m_pipeName); rejected.has_value()) {
+            DIDI_LOG_ERROR("IPC", "Cannot connect to the runtime IPC endpoint: ", *rejected);
+            return false;
+        }
 
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, m_pipeName.c_str(), sizeof(addr.sun_path) - 1);
@@ -1254,7 +1261,12 @@ public:
         }
 
         sockaddr_un addr{};
-        if (m_pipeName.size() >= sizeof(addr.sun_path)) {
+        // Silence here was the whole of #711: the bind never happened, the
+        // plugin reported itself active, and no log line anywhere named a
+        // length. Five bytes of headroom on a stock macOS temporary directory
+        // is not a margin.
+        if (const auto rejected = endpointPathRejection(m_pipeName); rejected.has_value()) {
+            DIDI_LOG_ERROR("IPC_SERVER", "Refusing to bind the runtime IPC endpoint: ", *rejected);
             close(m_listenSock);
             m_listenSock = -1;
             return false;
@@ -1427,6 +1439,21 @@ private:
 };
 
 #endif
+
+std::optional<std::string> endpointPathRejection(const std::string& endpoint) {
+#if defined(_WIN32)
+    (void)endpoint;
+    return std::nullopt;
+#else
+    sockaddr_un addr{};
+    const size_t limit = sizeof(addr.sun_path);
+    if (endpoint.size() < limit) return std::nullopt;
+    return "the endpoint path is " + std::to_string(endpoint.size()) +
+           " bytes and sockaddr_un holds " + std::to_string(limit) +
+           ", so AF_UNIX cannot address it. The endpoint is built under the temporary "
+           "directory, so a shorter TMPDIR is what buys the room: " + endpoint;
+#endif
+}
 
 std::unique_ptr<IIpcClient> createIpcClient() {
 #if defined(_WIN32)
