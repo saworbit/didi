@@ -99,7 +99,7 @@ Creates a built-in ClassDB node, or an instance of a packed scene, under the act
 
 - `node_type` (`string`). One of `node_type` or `scene_path` is required; there is no default, because an empty request must not add a node. Ignored when `scene_path` is given.
 - `parent_path` (`string`, default `"/root"`).
-- `name` (`string`, optional).
+- `name` (`string`, optional). Godot forbids `.`, `:`, `@`, `/`, `%` and `"` in a node name and substitutes rather than refusing, and it uniquifies a name a sibling already has. When a name was given, the result reports `node_name`, the name the engine used; when that is not the name asked for, it also reports `requested_name` and `name_substituted: true`, so a caller building its next `NodePath` from the name it chose finds out here rather than from the `404` four calls later. Omitting `name`, or passing an empty one, asks the engine to name the node after its class and is not a substitution.
 - `properties` (`object`, optional): Initial property values. Each value is a JSON null, boolean, signed integer, real, string, or a vector/colour object compatible with that property's Godot type, the same contract as `scene_set_property`'s `value`.
 - `scene_path` (`string`, optional): a `res://` `.tscn` to instance rather than a type to construct. The instance is made with `GEN_EDIT_STATE_INSTANCE`, which is what the editor's own scene drop uses, so the scene file records an instance of that scene and not a copy of its nodes. `properties` still applies, to the instance root. The result reports the instance's own class in `node_type` and echoes `scene_path`. A missing scene is `404`, a resource that is not a PackedScene is `422`, and so is one whose dependencies did not load, because instantiating that returns nothing and puts the reason in a console the caller cannot read.
 
@@ -242,6 +242,8 @@ Mutations. Both require `emitter_node`, `signal_name`, `target_node` and
 Connecting an already-connected callable returns `409`, as does disconnecting one
 that is not connected. Both run through `UndoRedo`, so an editor undo removes the
 exact callable a connect added, and redo restores it.
+
+Whether the target method can accept the arguments the signal carries is a precondition for `signal_connect` only. A disconnect never calls the method, so an incompatible pair is answered the same way any other pair that is not connected is answered: `409`, no such connection. `signal_disconnect` never reports a method signature problem.
 
 ### `signal_emit` — Live
 
@@ -428,6 +430,8 @@ Draws wireframe boxes in the open editor viewport to show where a proposed mutat
 Every shape in one call shares one dimension. A 2D rectangle and a 3D box are drawn by different servers into different worlds, and a call that split across both would be drawing in two places at once.
 
 **Nothing here reaches the scene.** The shapes go to the rendering server directly rather than into the scene tree, so the tree, the scene dock and the file on disk are untouched and the editor does not become dirty. That is why there is no `dry_run` on these tools and nothing to undo afterwards: `scene_modified` is `false` on both responses because it is a fact about the design, not a hope.
+
+A refused call leaves the screen as it found it. The world the shapes would be drawn in is resolved before anything already on screen is replaced, so a 2D preview asked for in a 3D scene is refused with the earlier proposal still up. If a refusal does follow a replace -- the on-screen shape cap, or a rendering server call that fails mid-draw -- the error's `data` carries `previews_were_replaced`, `cleared_previews` and `cleared_shapes`, because a bare code would leave the caller believing a proposal is on screen that is not.
 
 The cost of that is that nothing in the editor owns these shapes, so they stay until they are cleared or the editor closes. That persistence is the point during a proposal, and `live_shapes` on every response says how many are up. At most 256 can be on screen at once.
 

@@ -93,6 +93,43 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A refused ghost preview leaves the screen as it found it.** These are
+  on-screen gizmos an agent draws to show a human what it is about to do.
+  `editor_render_ghost_preview` replaces by default, and the teardown ran before
+  the engine had been asked whether the new shapes could be drawn at all, so a
+  2D preview asked for in a 3D scene reported `409` -- which reads as "nothing
+  happened" -- having already freed the proposal that was on screen. Neither the
+  agent nor the user could tell: the agent's bookkeeping still said the preview
+  was up, and the next clear answered `cleared_previews: 0`, which is what
+  "nothing was there" looks like (#707). The target world is now resolved before
+  anything is replaced, and when a refusal does follow a replace -- the shape cap,
+  or a rendering server call that fails mid-draw -- the error's `data` carries
+  `previews_were_replaced`, `cleared_previews` and `cleared_shapes`.
+  `tools/vibe/probes/ghost_preview_survival.py` holds the four rows, with the
+  argument-check refusal as the control that was always safe.
+
+- **`signal_disconnect` stops reporting a method signature problem.** Arity
+  compatibility is a precondition for making a connection and cannot be one for
+  removing it: a disconnect never calls the method. One validation helper served
+  both handlers, so tearing down a connection that is not there was answered
+  with "the target method cannot accept the arguments that signal carries" --
+  telling an agent that had changed a method's arguments, and was now cleaning
+  up the connections it made, to go and edit a signature to satisfy a check for
+  a connection it is trying to delete (#714). The true answer is the one the
+  same tool already gave for a compatible pair that was never connected: no such
+  connection. The three refusals `signal_connect` owns are unchanged.
+
+- **`scene_instantiate_node` says when the engine did not use the name it was
+  given.** Godot forbids `.`, `:`, `@`, `/`, `%` and `"` in a node name and
+  substitutes rather than refusing, and it uniquifies a name a sibling already
+  has. Reporting the real path was already right; what was missing was any field
+  saying a substitution had happened, so an agent that named a node after a
+  `class_name`, a filename or a JSON key built its next `NodePath` from the name
+  it chose, and the reason for the `404` that followed was four responses back
+  (#710). A call that gave a name now gets `node_name` back, and when that is not
+  the name asked for, `requested_name` and `name_substituted: true` beside it.
+  Omitting the name asks the engine to name the node and is not a substitution.
+
 - **A runtime endpoint too long for `sockaddr_un` says so.** On macOS the
   session endpoint is built under the temporary directory and `sun_path` holds
   104 bytes, so a stock `macos-latest` runner has five bytes of headroom.

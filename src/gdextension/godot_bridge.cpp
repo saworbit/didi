@@ -6399,18 +6399,46 @@ json ghostPreviewRender(const json& params) {
     auto server = renderingServer();
     if (server.isErr()) return errorJson(server.error().code, server.error().message);
 
+    // The world the shapes go in, resolved before anything already on screen is
+    // torn down.
+    //
+    // A 2D preview asked for on a Node3D root is refused by the engine, and the
+    // refusal used to arrive after the replace had already freed the preview the
+    // caller could see. It reported 409, which reads as "nothing happened", and
+    // said nothing about what it had destroyed: the agent's own bookkeeping
+    // still said the proposal was up, and the next clear answered
+    // cleared_previews: 0, which is what "nothing was there" looks like (#707).
+    // The argument validation in front of this is why a malformed call was
+    // always safe and this one was not.
+    Result<VariantValue> world = flat ? editedSceneCanvas() : editedSceneScenario();
+    if (world.isErr()) return errorJson(world.error().code, world.error().message);
+
+    size_t cleared_previews = 0;
     size_t cleared_shapes = 0;
     if (request.replace) {
         for (auto& entry : ghostBatches()) {
             cleared_shapes += entry.second.shape_count;
+            ++cleared_previews;
             (void)freeGhostRids(entry.second);
         }
         ghostBatches().clear();
     }
+    // What a refusal after the teardown has to say. Everything reachable from
+    // here has already changed the viewport, so a bare code would leave the
+    // caller believing a proposal is on screen that is not.
+    const auto lost = [&](json data) {
+        if (cleared_previews > 0) {
+            data["cleared_previews"] = static_cast<int64_t>(cleared_previews);
+            data["cleared_shapes"] = static_cast<int64_t>(cleared_shapes);
+            data["previews_were_replaced"] = true;
+        }
+        return data;
+    };
     if (liveGhostShapes() + request.shapes.size() > runtime::kMaxLiveGhostShapes) {
         return errorJson(409, "This would leave more than " +
                                   std::to_string(runtime::kMaxLiveGhostShapes) +
-                                  " preview shapes on screen; clear some first");
+                                  " preview shapes on screen; clear some first",
+                         lost(json::object()));
     }
 
     GhostBatch batch;
@@ -6419,12 +6447,11 @@ json ghostPreviewRender(const json& params) {
     // does not leave half a proposal drawn over the scene.
     const auto abandon = [&](const Error& error) {
         (void)freeGhostRids(batch);
-        return errorJson(error.code, error.message);
+        return errorJson(error.code, error.message, lost(json::object()));
     };
 
     if (flat) {
-        auto canvas = editedSceneCanvas();
-        if (canvas.isErr()) return abandon(canvas.error());
+        auto& canvas = world;
         for (const auto& shape : request.shapes) {
             auto item = callObject(server.value(), "RenderingServer", "canvas_item_create",
                                    529393457LL);
@@ -6467,8 +6494,7 @@ json ghostPreviewRender(const json& params) {
             ++batch.shape_count;
         }
     } else {
-        auto scenario = editedSceneScenario();
-        if (scenario.isErr()) return abandon(scenario.error());
+        auto& scenario = world;
         for (const auto& shape : request.shapes) {
             auto mesh = makeGhostBoxMesh(server.value());
             if (mesh.isErr()) return abandon(mesh.error());
@@ -8026,9 +8052,19 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             const int64_t signal_arity = static_cast<int64_t>(
                 signal.value().arguments.size());
-            if (signal_arity < target_metadata.value().required_arguments ||
-                (!target_metadata.value().vararg &&
-                 signal_arity > target_metadata.value().total_arguments)) {
+            // Connect only. Arity compatibility is a precondition for making a
+            // connection and cannot be one for removing it: a disconnect never
+            // calls the method, so whether the method could accept the signal's
+            // arguments is not a fact about whether the disconnect can proceed.
+            // Running it here told an agent tearing down the connections it made
+            // that its signature was wrong, by the call whose whole purpose is
+            // to stop the connection existing -- and the true answer, which the
+            // same tool already gives for a compatible pair that was never
+            // connected, is that no such connection exists (#714).
+            if (is_connect &&
+                (signal_arity < target_metadata.value().required_arguments ||
+                 (!target_metadata.value().vararg &&
+                  signal_arity > target_metadata.value().total_arguments))) {
                 return bridgeError(409, "signal_target_arity_incompatible");
             }
             auto callable = make_callable(target.value(), target_method);
@@ -11003,6 +11039,28 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                          ? actual_path.value()
                                          : logical_parent.value() + "/" + logical_name},
                        {"undo_redo_registered", true}};
+        // Say when the engine did not use the name it was given.
+        //
+        // Godot forbids . : @ / % and " in a node name and substitutes rather
+        // than refusing, and it uniquifies a duplicate. Reporting the real path
+        // is the important half and was already right; what was missing was any
+        // field saying a substitution happened, so an agent that named a node
+        // after a class_name, a filename or a JSON key then built its next
+        // NodePath from the name it chose, and the 404 that followed had its
+        // reason four responses back (#710). An empty or absent name asks the
+        // engine to name the node, so it is not a substitution.
+        const std::string requested_name = params.value("name", "");
+        if (actual_path.isOk() && !requested_name.empty()) {
+            const auto slash = actual_path.value().find_last_of('/');
+            const std::string engine_name = slash == std::string::npos
+                                                ? actual_path.value()
+                                                : actual_path.value().substr(slash + 1);
+            result["node_name"] = engine_name;
+            if (engine_name != requested_name) {
+                result["requested_name"] = requested_name;
+                result["name_substituted"] = true;
+            }
+        }
         // Which scene this is an instance of, so the caller can tell an
         // instance apart from a node of the same class that merely looks like
         // one in the tree.
