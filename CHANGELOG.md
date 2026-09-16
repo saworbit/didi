@@ -93,6 +93,20 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A session test reads its own directory, not the machine's.**
+  `RuntimeSessions.ListingNamesTheDirectoryItRead` made an empty descriptor
+  directory and then never pointed the client at it, so it listed whatever
+  `DIDI_SESSION_DIR` happened to hold: an earlier test's value, or nothing, in
+  which case the real one under the system temp directory. Any Godot running
+  anywhere on the machine put a live descriptor in the answer and failed it.
+  It sets the directory it created, compares the reported path exactly rather
+  than for the substring `didi`, and no longer asserts that no other directory
+  holds sessions -- the candidates come from the environment, so an editor
+  running for any reason puts a correct entry there, which is the thing the
+  field exists to say. The sibling test beside it goes through the same
+  helpers rather than writing the environment by hand, so isolation is visible
+  at a glance.
+
 - **`viewport_create_test_lab`'s preview names the file it replaces.** It made
   the weak claim -- `argument_binding`, "this tool names no subject of its own
   beyond the arguments it was given" -- about a call whose subject is a

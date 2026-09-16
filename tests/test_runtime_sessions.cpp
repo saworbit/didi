@@ -555,6 +555,14 @@ void test_session_listing_names_the_directory_it_read() {
     // Every input to that decision was in the answer except the one that was
     // wrong.
     const auto directory = makeSessionDirectory();
+    // Point the client at the empty directory this test just made. Without
+    // this the listing read whatever DIDI_SESSION_DIR happened to hold -- an
+    // earlier test's value, or nothing, in which case the real one under the
+    // system temp directory -- so any Godot running anywhere on the machine
+    // put a live descriptor in the answer and failed an assertion about a
+    // directory the test had created and never used.
+    setSessionDirectory(directory);
+
     auto client = didi::runtime::createRuntimeSessionClient(
         std::filesystem::current_path().string(), [] { return std::make_unique<FakeIpcClient>(); });
     const auto listed = client->listSessions(std::nullopt);
@@ -562,15 +570,34 @@ void test_session_listing_names_the_directory_it_read() {
     ASSERT_TRUE(listed.value()["sessions"].empty());
     // The one directory this server reads, named whether or not anything was in
     // it, so two empty answers about different directories are different
-    // answers.
+    // answers. Compared exactly, because "contains didi" was also true of the
+    // directory this test was accidentally reading instead.
     ASSERT_TRUE(listed.value().contains("descriptor_directory"));
     ASSERT_TRUE(listed.value()["descriptor_directory"].is_string());
-    const auto named = listed.value()["descriptor_directory"].get<std::string>();
-    ASSERT_TRUE(named.find("didi") != std::string::npos);
+    ASSERT_EQ(std::filesystem::path(listed.value()["descriptor_directory"].get<std::string>()),
+              directory);
     // An empty directory is not a fault, so diagnostics stays for faults.
     ASSERT_TRUE(listed.value()["diagnostics"].empty());
-    // And nothing claims a divergence when there is none.
-    ASSERT_TRUE(!listed.value().contains("descriptor_directories_with_sessions"));
+    // The divergence list never names the directory that was read: that is the
+    // whole point of it, and it is the part this test can assert without
+    // owning the machine.
+    //
+    // It deliberately does not assert the field is absent. The candidates come
+    // from TMPDIR, TMP, TEMP and the rest of the environment, so a Godot
+    // running on this machine for any reason puts a real entry there, and that
+    // entry is correct -- it is exactly what #649 added the field to say. A
+    // test cannot call that a fault without first owning every one of those
+    // variables, which would be asserting something about the harness rather
+    // than about the answer.
+    if (listed.value().contains("descriptor_directories_with_sessions")) {
+        const auto& elsewhere = listed.value()["descriptor_directories_with_sessions"];
+        ASSERT_TRUE(elsewhere.is_array());
+        ASSERT_TRUE(!elsewhere.empty());
+        for (const auto& entry : elsewhere) {
+            ASSERT_TRUE(entry.is_string());
+            ASSERT_TRUE(std::filesystem::path(entry.get<std::string>()) != directory);
+        }
+    }
 
     clearSessionDirectory();
     std::filesystem::remove_all(directory);
@@ -759,21 +786,16 @@ void test_session_attach_rejects_semantically_invalid_handshakes_without_replaci
 void test_session_discovery_rejects_non_regular_json_entries() {
     const auto directory = makeSessionDirectory();
     std::filesystem::create_directories(directory / "not-a-file.json");
-#if defined(_WIN32)
-    _putenv_s("DIDI_SESSION_DIR", directory.string().c_str());
-#else
-    setenv("DIDI_SESSION_DIR", directory.string().c_str(), 1);
-#endif
+    // Through the helper, like every other test here. Writing the environment
+    // by hand made this look like a test that had not isolated itself, which
+    // is what the one above actually was.
+    setSessionDirectory(directory);
     auto client = didi::runtime::createRuntimeSessionClient(std::filesystem::current_path().string());
     const auto listed = client->listSessions(std::nullopt);
     ASSERT_TRUE(listed.isOk());
     ASSERT_EQ(listed.value()["sessions"].size(), 0u);
     ASSERT_EQ(listed.value()["diagnostics"][0]["error"], "Descriptor must be a regular file");
-#if defined(_WIN32)
-    _putenv_s("DIDI_SESSION_DIR", "");
-#else
-    unsetenv("DIDI_SESSION_DIR");
-#endif
+    clearSessionDirectory();
     std::filesystem::remove_all(directory);
 }
 
