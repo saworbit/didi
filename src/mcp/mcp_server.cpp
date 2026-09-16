@@ -523,9 +523,16 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                 {"tools", json::object()},
                 {"resources", json::object()},
                 {"prompts", json::object()},
-                // Declared unconditionally. Whether the UI surface is then
-                // advertised depends on the client declaring it too.
-                {"extensions", uiExtensionDeclaration()}
+                // Declared when the surface can exist. For `auto` the surface
+                // is opt-in on both sides, so a static server declaration plus
+                // a client declaration is the negotiation. `off` is not a
+                // negotiation: the operator has decided, no client declaration
+                // can change the answer, and declaring it anyway made a host
+                // walk the whole sequence -- declare, read it back, look for
+                // the app resource -- to a 400 on the only resource the
+                // extension exists for (#717).
+                {"extensions", m_uiAppMode == UiAppMode::Off ? json::object()
+                                                             : uiExtensionDeclaration()}
             }},
             {"_meta", {
                 {kServerInfoMetaKey, {{"name", kServerName}, {"version", kServerVersion}}},
@@ -611,10 +618,23 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         json result = {
             {"protocolVersion", isSupportedProtocolVersion(asked) ? asked : kProtocolVersion},
             {"capabilities", {
-                {"tools", {{"listChanged", false}}},
-                {"resources", {{"subscribe", true}, {"listChanged", false}}},
+                // True, and meant. Every entry tools/list returns carries
+                // bridge state -- currentMode, liveAvailable, editorConnected,
+                // sessionKind -- which is what a host has read since #503 to
+                // decide whether to offer a tool. Publishing false told a
+                // conforming host that one listing at startup was enough, so a
+                // host that listed before the editor opened cached
+                // currentMode: "unavailable" for 59 live tools and never
+                // offered them again, for the whole session (#701).
+                {"tools", {{"listChanged", true}}},
+                // The resource listing carries the same bridge state from the
+                // same computation, so the same claim has to be true of it.
+                // This is not resources/updated, which is per URI and already
+                // works: this is the listing itself moving.
+                {"resources", {{"subscribe", true}, {"listChanged", true}}},
                 {"prompts", {{"listChanged", false}}},
-                {"extensions", uiExtensionDeclaration()}
+                {"extensions", m_uiAppMode == UiAppMode::Off ? json::object()
+                                                             : uiExtensionDeclaration()}
             }},
             {"serverInfo", {
                 {"name", kServerName},
@@ -1207,12 +1227,19 @@ void McpServer::runStdio() {
                 }
             }
             if (!responses.empty()) sendBatchResponse(responses);
+            announceListingsIfChanged();
             continue;
         }
 
         if (auto response = dispatchPayload(payload); response.has_value()) {
             sendResponse(*response);
         }
+        // After the reply, not before, so the notification never lands in the
+        // middle of the response a client is waiting on. Every route change
+        // this server can make is made by a request -- attach, detach, and a
+        // live call meeting a dead editor -- so checking here sees all of them
+        // without a poll.
+        announceListingsIfChanged();
     }
 
     // Nothing wants lines any more. A reader whose input has already ended is
@@ -1325,6 +1352,43 @@ void McpServer::watchBoards() {
             std::this_thread::sleep_for(std::chrono::milliseconds(kBoardPollSliceMs));
         }
     }
+}
+
+std::string McpServer::listingFingerprint() const {
+    // Reads only, and only the cheap ones. A route lease is what tools/list
+    // takes, and taking one after every request would put lease acquisition on
+    // a path that does not need it; isConnected() is worse still, because with
+    // nothing selected it tries to auto-attach. activeSession() is the process
+    // selection with no attach, no lock and no discovery scan, and the last
+    // route obstruction is a recorded fact, so a route that died between two
+    // requests moves this string without anyone asking the engine anything.
+    std::string state = ToolRegistry::instance().managedRecoveryEnabled() ? "m" : "-";
+    state += m_skipConfirmations ? "y" : "-";
+    const auto sessions =
+        std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(m_ipcClient);
+    const auto selected = sessions ? sessions->activeSession()
+                                   : std::optional<runtime::SessionDescriptor>{};
+    if (selected.has_value()) {
+        state += "|" + selected->session_id + "|" + selected->kind;
+    }
+    if (const auto obstruction = runtime::lastRouteObstruction(); obstruction.has_value()) {
+        state += "|x" + std::to_string(obstruction->at_ms) + "|" + obstruction->session_id;
+    }
+    return state;
+}
+
+void McpServer::announceListingsIfChanged() {
+    if (!m_initialized) return;
+    auto current = listingFingerprint();
+    if (!m_listingFingerprint.has_value()) {
+        m_listingFingerprint = std::move(current);
+        return;
+    }
+    if (*m_listingFingerprint == current) return;
+    m_listingFingerprint = std::move(current);
+    DIDI_LOG_DEBUG("MCP_SERVER", "Bridge state moved; announcing the listings changed");
+    sendNotification("notifications/tools/list_changed", json::object());
+    sendNotification("notifications/resources/list_changed", json::object());
 }
 
 // Hands back any attached runtime session before the process goes away, so the

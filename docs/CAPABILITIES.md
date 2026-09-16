@@ -71,8 +71,8 @@ The current source / Unreleased surface registers 116 canonical tool names. 113 
 ## MCP Apps
 
 Didi declares the `io.modelcontextprotocol/ui` extension in `server/discover`
-and `initialize`. The declaration is unconditional; the *surface* is not.
-Extensions are bilateral, so the `ui://didi/control-room` resource and the
+and `initialize` whenever the surface can exist; the *surface* is a further
+step. Extensions are bilateral, so the `ui://didi/control-room` resource and the
 `_meta.ui` link on `didi_control_room` are advertised only to a client that
 declared the extension too -- in `initialize` capabilities for `2024-11-05`, or
 in per-request `_meta` for `2026-07-28`. An unaware host is not handed a page it
@@ -80,8 +80,13 @@ would read as text.
 
 `--ui-app <auto|always|off>` overrides that. `always` advertises regardless, for
 a host whose declaration Didi does not recognise. `off` withdraws the resource
-and the link, and also refuses a `resources/read` of the page by URI, leaving
-`didi_control_room` a plain read-only tool.
+and the link, refuses a `resources/read` of the page by URI, and declares no
+extensions at all in the handshake, leaving `didi_control_room` a plain
+read-only tool. `auto` is the mode the bilateral rule describes and the only one
+the declaration is a negotiation in: under `off` the operator has decided, and
+no client declaration can change the answer, so declaring the extension anyway
+sent a host the whole way to a `400` on the only resource the extension exists
+for.
 
 The page is self-contained -- no external script, style, font or image -- so no
 `csp` domains are declared and the host's default `default-src 'none'` policy

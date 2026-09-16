@@ -138,8 +138,28 @@ class Session:
             env=environment,
         )
         self._next_id = 0
+        # Every server notification this session has seen, in order. The server
+        # sends `notifications/resources/updated` for a subscribed board and
+        # `notifications/tools/list_changed` when the bridge state a listing
+        # carries has moved, both unsolicited and both interleaved with the
+        # replies. A client that reads one line per request would take the
+        # first of those as an answer; this one keeps them instead, so a probe
+        # can assert on what arrived.
+        self.notifications: list[dict] = []
         self.initialize_result = self.request("initialize", INITIALIZE["params"])
         self.notify("notifications/initialized")
+
+    def take_notifications(self, method: str | None = None) -> list[dict]:
+        """Notifications received so far, removed from the queue.
+
+        Pass `method` to take only those, leaving the rest where they are.
+        """
+        if method is None:
+            taken, self.notifications = self.notifications, []
+            return taken
+        taken = [n for n in self.notifications if n.get("method") == method]
+        self.notifications = [n for n in self.notifications if n.get("method") != method]
+        return taken
 
     def _write(self, message: dict) -> None:
         assert self.process.stdin is not None
@@ -148,13 +168,20 @@ class Session:
 
     def _read(self) -> dict:
         assert self.process.stdout is not None
-        line = self.process.stdout.readline()
-        if not line:
-            raise RuntimeError(
-                "The server closed stdout without answering. Its stderr is on "
-                "this object's `stderr()` once it has exited."
-            )
-        return json.loads(line.decode())
+        while True:
+            line = self.process.stdout.readline()
+            if not line:
+                raise RuntimeError(
+                    "The server closed stdout without answering. Its stderr is on "
+                    "this object's `stderr()` once it has exited."
+                )
+            message = json.loads(line.decode())
+            # A notification carries a method and no id. It is not the answer to
+            # anything, so it is kept and the read continues.
+            if isinstance(message, dict) and "id" not in message and "method" in message:
+                self.notifications.append(message)
+                continue
+            return message
 
     def notify(self, method: str, params: dict | None = None) -> None:
         message: dict = {"jsonrpc": "2.0", "method": method}
@@ -212,6 +239,19 @@ class Session:
         self.close()
 
 
+class _Responses(list):
+    """A list of responses that also carries the notifications that arrived.
+
+    A plain list cannot hold an attribute, and every caller unpacks exactly two
+    values from `batch`, so the notifications ride here rather than widening
+    the return.
+    """
+
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+        self.notifications: list[dict] = []
+
+
 def batch(
     requests: Iterable[dict],
     project: str | os.PathLike[str] | None = None,
@@ -223,10 +263,17 @@ def batch(
 ) -> tuple[list[dict], str]:
     """Send a whole list of requests to one short-lived server, then read.
 
-    Returns every parsed line of stdout and the collected stderr. A line that
-    is not JSON is returned as `{"__raw__": line}` rather than dropped: a
-    server that prints something unexpected onto its own protocol stream is
-    itself a finding, and swallowing it hides that.
+    Returns the responses and the collected stderr. A line that is not JSON is
+    returned as `{"__raw__": line}` rather than dropped: a server that prints
+    something unexpected onto its own protocol stream is itself a finding, and
+    swallowing it hides that.
+
+    Server notifications are separated out rather than mixed in, and hang off
+    the returned list as `.notifications`. They are unsolicited and interleaved
+    with the replies -- `notifications/resources/updated` for a subscribed
+    board, `notifications/tools/list_changed` when the bridge state a listing
+    carries has moved -- so a caller reading `responses[-1]` for the answer to
+    its last request would otherwise get whichever of those landed after it.
 
     The handshake is prepended, so callers pass only what they are testing --
     unless a request in the list is itself an `initialize`, which is a fair
@@ -258,13 +305,20 @@ def batch(
         out, err = process.communicate()
         err += b"\n[vibe] the server did not exit within the timeout and was killed"
 
-    responses: list[dict] = []
+    responses = _Responses()
     for line in out.decode(errors="replace").splitlines():
         line = line.strip()
         if not line:
             continue
         try:
-            responses.append(json.loads(line))
+            message = json.loads(line)
         except ValueError:
             responses.append({"__raw__": line})
+            continue
+        # A notification carries a method and no id; it is not the answer to
+        # anything in the list that was sent.
+        if isinstance(message, dict) and "id" not in message and "method" in message:
+            responses.notifications.append(message)
+            continue
+        responses.append(message)
     return responses, err.decode(errors="replace")
