@@ -822,6 +822,11 @@ Result<RenamePlan> planRename(const std::string& root_dir, const ProjectRenameOp
         {"code_references_not_updated",
          impactsToJson(code_references, options.max_impacts, code_truncated)},
         {"code_reference_count", code_references.size()},
+        // The list is capped at max_impacts and the cap was computed and
+        // dropped, so a caller comparing it against code_reference_count had to
+        // infer by subtraction that entries were missing -- the same inference
+        // the preview forced about the list itself (#716).
+        {"code_references_truncated", code_truncated},
         {"scanned_files", scan.sources.size()},
         {"limitations", json::array({
             "Every reference outside a [connection] and an animation track is reported and "
