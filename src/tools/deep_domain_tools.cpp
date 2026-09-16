@@ -666,7 +666,21 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
     }
     std::error_code error;
     if (std::filesystem::exists(output.value(), error) && !args.value("overwrite", false)) {
-        return CallToolResult::error("Export output already exists; pass overwrite: true to replace it");
+        // The same envelope, and the same 409, script_create gives the same
+        // collision. The whole message is an instruction to retry with a
+        // different argument, and as a bare string there was no machine-readable
+        // way to know that is what it said (#705). It sits behind a filesystem
+        // state rather than behind an argument, which is why the error censuses
+        // never reached it.
+        return CallToolResult::errorJson(
+            409,
+            "Export output already exists; pass overwrite: true to replace it: " +
+                asResPath(root.value(), output.value()),
+            {{"code", "conflict"},
+             {"tool", "project_export"},
+             {"output_path", asResPath(root.value(), output.value())},
+             {"retry_with", {{"overwrite", true}}},
+             {"retryable", false}});
     }
     auto timeout = timeoutSeconds(args, 300, 900);
     if (timeout.isErr()) return CallToolResult::fromError(timeout.error());
@@ -722,7 +736,16 @@ CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<
     if (output.isErr()) return CallToolResult::fromError(output.error());
     const auto extension = lower(output.value().extension().string());
     if (extension != ".meshlib" && extension != ".tres") {
-        return CallToolResult::error("output_path must end in .meshlib or .tres");
+        // Reached only once source_scene is valid, which is why a census
+        // generating junk arguments always got this tool's other error and
+        // never this one (#705).
+        return CallToolResult::errorJson(
+            400, "output_path must end in .meshlib or .tres",
+            {{"code", "invalid_arguments"},
+             {"tool", "gridmap_export_mesh_library"},
+             {"parameter", "output_path"},
+             {"allowed_extensions", json::array({".meshlib", ".tres"})},
+             {"retryable", false}});
     }
     if (args.contains("overwrite") && !args["overwrite"].is_boolean()) {
         return CallToolResult::error("overwrite must be a boolean");
