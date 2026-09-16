@@ -77,6 +77,7 @@ twice.
 | `probes/call_method_reach.py` | What `scene_call_method` will call, against the script-declared-only rule it publishes. Walks the confirmation gate properly, because the outer gate refuses every row before the method rule is reached. Green. |
 | `probes/signal_lifecycle.py` | Connect, list, disconnect, and every way each can be wrong, with the saved `.tscn` as the witness rather than `signal_list_connections`. Counts *its own* connection line, because a sandbox accumulates state and an earlier probe's leftover read as a failed teardown. |
 | `probes/rename_disclosure.py` | `project_rename_references`'s preview against its confirm, field by field, over call sites the probe wrote itself so the arithmetic is known before either call. Needs no editor. |
+| `probes/ui_app_modes.py` | The three `--ui-app` modes diffed before any tool is called: the handshake's `extensions`, the `ui://` resource in the listing and on a read, and `didi_control_room`'s own `_meta`. Needs no editor. |
 | `fixtures/write_csharp_fixture.py` | A `.csproj` with one error and one warning in it. Kept out of `sandbox.py` because a C# project changes what Godot does with the directory. |
 | `editor_exit_status.py` | Not a probe against the server: the same editor invocation with and without the built addon installed, exit statuses side by side. The control for a crash on shutdown. |
 | `wait_for_session.py` | Polls `runtime_list_sessions` through the same binary the probes use, so a slow first import reads as a slow import rather than as an absent session. |
@@ -835,6 +836,18 @@ the preview; the list is not, and the list is the fact the caller is deciding
 about. **Diff the preview against the confirm key by key, not value by value:
 the finding can be a key that is only on one side.**
 
+**A flag every consumer honours except the one that speaks first.**
+`--ui-app off` hides the `ui://` resource from the listing, refuses it on a read
+with a message that names the flag, and shrinks `didi_control_room`'s `_meta`
+from 277 bytes to 196. `initialize` declares the MCP Apps extension anyway, byte
+for byte the same in all three modes (#717). The comment above the declaration
+explains why it is unconditional -- the surface is opt-in on both sides, so the
+client's declaration is the other half of the negotiation -- and that argument
+holds for `auto` and does not for `off`, where the operator has already decided
+and no client declaration can change the answer. **When a flag has three values,
+check the consumers against all three: a guard written for the negotiated case
+can be correct there and wrong at the ends.**
+
 **Asked and green this session, so the fifteenth can spend its budget
 elsewhere.** `resources/subscribe` works end to end: a board written by a
 *separate process* produces `notifications/resources/updated` in about 0.6
@@ -898,7 +911,7 @@ perfect.**
 
 | 2026-09-16 | A headless editor, the only kind a runner can have and the only kind no session had probed, on Windows and -- for the first time anywhere -- on live macOS and Linux runners. Then the modes and the processes around the surface: `--yolo` and `--log-level DEBUG`, `--managed-editor` on Windows, a project over UNC, two servers writing one blackboard, the engines the subprocess tools shell out to, and what the editor does on the way out. | `2.0.0+0aadad99005d`, and `2.0.0+408a953f8f37` on the runners | #676-#689, fourteen findings. |
 
-| 2026-09-16 | The handshake's own claims rather than the tools': `listChanged: false` against a listing that moves with the bridge, and every parameter description against the schema keys beside it. Then `csharp_check_build` given a real `.csproj` for the first time in fourteen sessions, `project_export` and the ghost previews on Windows, the macOS `sun_path` overflow the twelfth session measured and never forced, the expression sandbox and the method channel walked for containment, and the old censuses re-run. | `2.0.0+28d1c2193b37`, and `2.0.0+5349d27e5f59` on the runners | #701-#716, fifteen findings. |
+| 2026-09-16 | The handshake's own claims rather than the tools': `listChanged: false` against a listing that moves with the bridge, and every parameter description against the schema keys beside it. Then `csharp_check_build` given a real `.csproj` for the first time in fourteen sessions, `project_export` and the ghost previews on Windows, the macOS `sun_path` overflow the twelfth session measured and never forced, the expression sandbox and the method channel walked for containment, and the old censuses re-run. | `2.0.0+28d1c2193b37`, and `2.0.0+5349d27e5f59` on the runners | #701-#717, sixteen findings. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log
