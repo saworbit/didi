@@ -93,6 +93,25 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The live Godot jobs cache their compile instead of repeating it.** Both
+  engine versions built the same Windows Release tree from scratch, and the
+  `windows-latest (msvc)` job beside them built it a third time: about 11 minutes
+  of each 17-minute job, and the longest thing in CI once the sanitizer build was
+  cached. Sharing one build between the three jobs was the obvious move and the
+  wrong one. The msvc build is 9m40s against the Godot jobs' 11m38s, so making
+  them wait on it trades two parallel builds for one serial build plus an
+  artifact download and leaves the critical path where it was; it saves runner
+  minutes, which are free on a public repository, and spends latency, which is
+  not. These jobs now compile through sccache instead. That needs Ninja, because
+  the Visual Studio generator ignores `CMAKE_<LANG>_COMPILER_LAUNCHER`, and Ninja
+  needs the MSVC environment on PATH. Both engine versions share one cache key,
+  since they compile a byte-identical tree and differ only in the editor they
+  then drive. Ninja is single-config, so the binary moves from
+  `build/Release/didi.exe` to `build/didi.exe`; the build tree stays at `build/`,
+  which is where the harness writes its engine logs and where the failure
+  artifact upload looks for them, and the harness already resolved
+  `build\didi.exe` among its candidates.
+
 - **CI's critical path was a cold compile of a tree that was already cached.**
   The sanitizer job builds on `ubuntu-latest` and had no compiler cache, so every
   run compiled the whole tree from scratch: 21m45s of a 23m run. The
