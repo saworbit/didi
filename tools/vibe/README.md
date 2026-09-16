@@ -76,6 +76,7 @@ twice.
 | `probes/eval_containment.py` | Nineteen things a "read-only expression" might reach -- the filesystem, the environment, the process, the network -- each printed with its refusal. Green, and the refusals are the interesting output. |
 | `probes/call_method_reach.py` | What `scene_call_method` will call, against the script-declared-only rule it publishes. Walks the confirmation gate properly, because the outer gate refuses every row before the method rule is reached. Green. |
 | `probes/signal_lifecycle.py` | Connect, list, disconnect, and every way each can be wrong, with the saved `.tscn` as the witness rather than `signal_list_connections`. Counts *its own* connection line, because a sandbox accumulates state and an earlier probe's leftover read as a failed teardown. |
+| `probes/rename_disclosure.py` | `project_rename_references`'s preview against its confirm, field by field, over call sites the probe wrote itself so the arithmetic is known before either call. Needs no editor. |
 | `fixtures/write_csharp_fixture.py` | A `.csproj` with one error and one warning in it. Kept out of `sandbox.py` because a C# project changes what Godot does with the directory. |
 | `editor_exit_status.py` | Not a probe against the server: the same editor invocation with and without the built addon installed, exit statuses side by side. The control for a crash on shutdown. |
 | `wait_for_session.py` | Polls `runtime_list_sessions` through the same binary the probes use, so a slow first import reads as a slow import rather than as an absent session. |
@@ -824,6 +825,16 @@ result is: plugin reports itself active, no descriptor published,
 ends of the bridge answer it with a bare `return false`. **A number a workflow
 has been printing for three sessions is a measurement nobody has acted on.**
 
+**A preview can know something and not say it.** #571 is a preview that
+resolves less than the call, and #572 is a token that binds to the call and not
+to the world. `project_rename_references` is the third: its preview and its
+confirm agree on every shared field, and only the confirm carries
+`code_references_not_updated` -- the list of call sites, the declaration
+included, that the rename will leave saying the old name (#716). The count is in
+the preview; the list is not, and the list is the fact the caller is deciding
+about. **Diff the preview against the confirm key by key, not value by value:
+the finding can be a key that is only on one side.**
+
 **Asked and green this session, so the fifteenth can spend its budget
 elsewhere.** `resources/subscribe` works end to end: a board written by a
 *separate process* produces `notifications/resources/updated` in about 0.6
@@ -887,7 +898,7 @@ perfect.**
 
 | 2026-09-16 | A headless editor, the only kind a runner can have and the only kind no session had probed, on Windows and -- for the first time anywhere -- on live macOS and Linux runners. Then the modes and the processes around the surface: `--yolo` and `--log-level DEBUG`, `--managed-editor` on Windows, a project over UNC, two servers writing one blackboard, the engines the subprocess tools shell out to, and what the editor does on the way out. | `2.0.0+0aadad99005d`, and `2.0.0+408a953f8f37` on the runners | #676-#689, fourteen findings. |
 
-| 2026-09-16 | The handshake's own claims rather than the tools': `listChanged: false` against a listing that moves with the bridge, and every parameter description against the schema keys beside it. Then `csharp_check_build` given a real `.csproj` for the first time in fourteen sessions, `project_export` and the ghost previews on Windows, the macOS `sun_path` overflow the twelfth session measured and never forced, the expression sandbox and the method channel walked for containment, and the old censuses re-run. | `2.0.0+28d1c2193b37`, and `2.0.0+5349d27e5f59` on the runners | #701-#714, fourteen findings. |
+| 2026-09-16 | The handshake's own claims rather than the tools': `listChanged: false` against a listing that moves with the bridge, and every parameter description against the schema keys beside it. Then `csharp_check_build` given a real `.csproj` for the first time in fourteen sessions, `project_export` and the ghost previews on Windows, the macOS `sun_path` overflow the twelfth session measured and never forced, the expression sandbox and the method channel walked for containment, and the old censuses re-run. | `2.0.0+28d1c2193b37`, and `2.0.0+5349d27e5f59` on the runners | #701-#716, fifteen findings. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log
