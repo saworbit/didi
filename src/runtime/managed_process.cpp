@@ -471,6 +471,15 @@ void ManagedProcess::stop() {
     // Windows only. POSIX has no launcher of this kind for Godot, and process
     // groups do not nest the way jobs do, so the same guarantee there would be
     // a different mechanism for a case nobody has reported.
+    //
+    // Best effort, and deliberately not asserted by a unit test: a host that
+    // will not let this process create a job starts the child without one, and
+    // then there is no tree to wait for and no promise to make. What proves
+    // this works is the live Godot integration job, which restores a
+    // checkpoint against the launcher build -- it failed on the rename before
+    // this and passes after. A unit test that asserted the guarantee
+    // unconditionally was flaky on the runner for exactly the reason above,
+    // and a flaky test in a gating job is worse than none.
     if (has_job) {
         constexpr int kTreeDrainTimeoutMs = 10000;
         constexpr int kTreeDrainPollMs = 20;
