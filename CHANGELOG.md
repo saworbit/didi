@@ -93,6 +93,34 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The listings say they move, and say when.** `initialize` published
+  `capabilities.tools.listChanged: false`, which in MCP is the server telling a
+  host that one `tools/list` at startup is enough. Every entry in that listing
+  then changed when the bridge changed: 68 move `currentMode`, and the other 58
+  move anyway because `editorConnected` and `sessionKind` are published per
+  tool. Both cannot be true. A host that listed before the user opened Godot
+  cached `currentMode: "unavailable"` for 59 live tools and never offered them
+  again, for the whole session (#701). Both listings now declare
+  `listChanged: true` and mean it: `notifications/tools/list_changed` and
+  `notifications/resources/list_changed` are sent when the state those entries
+  carry has moved -- a session attaching or detaching, a route obstruction
+  appearing or clearing. The check is one string comparison after each request,
+  taken from reads that attach nothing and scan nothing, so a quiet session
+  sends nothing and ten listings in a row send nothing. The resource listing
+  gets the same treatment because it carries the same state from the same
+  computation; this is separate from `notifications/resources/updated`, which is
+  per URI and already worked.
+
+- **`--ui-app off` stops declaring the MCP Apps extension.** The flag turned the
+  Control Room off everywhere except the handshake, which still told the client
+  the server serves it -- byte-identical `extensions` in all three modes. The
+  sequence a host then walked was: declare the UI extension, read the server
+  declaring it back, look for the app resource, and get a `400` on the only
+  resource the extension exists for (#717). Unconditional declaration is right
+  for `auto`, where the surface is opt-in on both sides and the two declarations
+  are the negotiation. `off` is not a negotiation: the operator has decided, and
+  no client declaration can change the answer. `auto` and `always` are unchanged.
+
 - **A refused ghost preview leaves the screen as it found it.** These are
   on-screen gizmos an agent draws to show a human what it is about to do.
   `editor_render_ghost_preview` replaces by default, and the teardown ran before

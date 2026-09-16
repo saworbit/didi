@@ -1317,6 +1317,15 @@ Every tool definition carries specification `annotations`. `readOnlyHint` descri
 
 A tool's published `inputSchema` is what the server checks arguments against, and it is checked in full: `type`, `enum`, `const`, the string, number and array bounds, `required`, unknown properties, positional `prefixItems`, `items`, `oneOf`, and same-document `$ref`s into `$defs`. That last group matters because the Phase 7 schemas are generated with their shared shapes under `$defs`: `tilemap_set_cells` publishes `coords` as a two-element array through `$defs/vector2i`, and until the validator resolved a reference that shape was enforced nowhere. A `oneOf` reports against the one branch whose required properties are all present, which is the shape the caller was reaching for; when no single branch stands out it lists what each shape demands. A violation is a 400 naming the field, before the handler runs.
 
+`capabilities.tools.listChanged` and `capabilities.resources.listChanged` are
+both `true`, and both listings carry live bridge state in `_meta.didi`:
+`currentMode`, `liveAvailable`, `editorConnected`, `sessionKind`. The server
+sends `notifications/tools/list_changed` and
+`notifications/resources/list_changed` when that state moves -- an editor
+attaching or detaching, or a route obstruction appearing or clearing -- so a
+host that caches a listing is told when to take it again. Nothing else changes
+the listings; a quiet session produces no notifications.
+
 Tools whose result shape has been observed also publish an `outputSchema`, and CI validates each of those tools' real `structuredContent` against the schema the server published for it, so the promise cannot drift from the implementation. A schema is declared only where the shape is known: a tool that cannot be exercised, and every unimplemented name, publishes none rather than asserting a shape nobody has seen. `required` lists only fields present in every execution mode, and additional properties are permitted, so the extra members a live result carries never invalidate it.
 
 A live result and a live failure both name the session they ran on, and they name it differently. A success carries the full public descriptor, `endpoint` included, because that is a client's own record of the route it used. A failure carries `session_id`, `kind`, `pid`, `project_path`, `protocol_version`, `started_at_ms` and `schema_version`, and omits `endpoint`. The error already identifies the session, the caller is attached to it, and an error string is the payload most likely to be quoted onward into a model's context; the address to connect to a local pipe does not need to travel with it. Neither form has ever carried the token. Session discovery through `runtime_list_sessions` still reports `endpoint`, because choosing a session to attach to is what that tool is for.
