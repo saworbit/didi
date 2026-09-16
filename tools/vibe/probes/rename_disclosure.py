@@ -8,7 +8,9 @@ conservatism is fine and the tool says so, in a `code_references_not_updated`
 list naming every site it skipped, the declaration included.
 
 The question is *when* it says so. A preview is what a caller reads to decide
-whether to confirm, and the list is the fact that decides it (#716).
+whether to confirm, and the list is the fact that decides it (#716). So the
+comparison the probe makes is the list itself, entry for entry, not whether a
+count reconciles.
 
 The probe writes its own call sites and its own connection, so the arithmetic is
 known before either call is made: three calls plus one declaration that will not
@@ -50,7 +52,14 @@ script = ExtResource("1_p")
 [connection signal="died" from="P" to="." method="take_damage"]
 """
 
-SHARED = ("changed_lines", "code_reference_count", "updated_file_count", "updated_files")
+SHARED = ("changed_lines", "code_reference_count", "code_references_truncated",
+          "updated_file_count", "updated_files")
+
+
+def sites(payload: dict) -> list[str]:
+    """Each skipped site as one comparable line."""
+    return [f"{e['path']}:{e['line']} {e['detail']}"
+            for e in (payload.get("code_references_not_updated") or [])]
 
 
 def main() -> int:
@@ -101,16 +110,23 @@ def main() -> int:
         for key in SHARED:
             print(f"{key:<32} {json.dumps(before.get(key))[:42]:<44} "
                   f"{json.dumps(real.get(key))[:42]}")
-        not_updated = real.get("code_references_not_updated") or []
-        in_preview = "code_references_not_updated" in json.dumps(mutation)
+        previewed, confirmed = sites(before), sites(real)
         print(f"{'code_references_not_updated':<32} "
-              f"{('present' if in_preview else 'ABSENT'):<44} {len(not_updated)} entries")
-        for entry in not_updated:
-            print(f"{'':<32} {'':<44} {entry['path']}:{entry['line']} "
-                  f"{entry['detail'][:40]}")
-        print("\nThe two calls agree on every field they share. The list of sites the")
-        print("rename will leave behind -- the declaration among them -- appears only")
-        print("after the mutation, which is the wrong side of the gate to learn it on.")
+              f"{(str(len(previewed)) + ' entries') if previewed else 'ABSENT':<44} "
+              f"{len(confirmed)} entries")
+        for index in range(max(len(previewed), len(confirmed))):
+            left = previewed[index] if index < len(previewed) else "<not shown>"
+            right = confirmed[index] if index < len(confirmed) else "<not shown>"
+            mark = " " if left == right else "!"
+            print(f"{mark:<32} {left[:42]:<44} {right[:42]}")
+
+        agree = previewed == confirmed
+        print(f"\nThe two calls agree on every field they share: "
+              f"{all(before.get(k) == real.get(k) for k in SHARED)}")
+        print(f"The preview names every site the rename will leave behind: {agree}")
+        print("That list is the promise the caller is deciding about, and the")
+        print("declaration being in it is what makes the consequence obvious.")
+        return 0 if agree else 1
     return 0
 
 

@@ -93,6 +93,21 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`project_rename_references`'s preview names the sites it will leave
+  behind.** The tool's behaviour and its post-hoc honesty are unusually good: it
+  updates the scene connection, leaves GDScript alone, and names every site it
+  skipped, the function's own declaration included. It just named them after the
+  mutation. The `dry_run` preview -- the thing a caller reads to decide whether
+  to confirm -- carried every other field the confirm did and withheld that one
+  list, leaving the caller to notice that `code_reference_count: 4` beside
+  `updated_files: [one .tscn]` does not reconcile, and to infer by subtraction
+  that the declaration was among the sites being skipped (#716). The field was
+  already computed by the same call for the same arguments. It is now in the
+  preview, which also puts it in the confirmation fingerprint, so a token is
+  spent against the sites the caller was shown rather than against a list that
+  moved underneath them. The list is capped at `max_impacts` and the cap was
+  computed and dropped; `code_references_truncated` now says when it bit.
+
 - **Three semantic failures answer with the error envelope rather than a bare
   string.** #420 put a code on eighteen of these, #460 on eight more, #492 on the
   five unimplemented registrations and #548 on four behind valid arguments. Each

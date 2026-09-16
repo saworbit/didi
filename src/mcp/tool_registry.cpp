@@ -2089,6 +2089,17 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         // rewritten, which makes target_read true and binds the confirm to what
         // the preview saw: a project that changes in between no longer spends
         // the token against a different plan.
+        //
+        // And the list itself, not only its count. The preview is the promise
+        // the caller is deciding about, and it showed code_reference_count: 4
+        // beside updated_files: [one .tscn] and left them to notice that 4 and
+        // 1 do not reconcile, and to infer by subtraction that the function's
+        // own declaration was among the sites being skipped. The field that
+        // states it in words was already computed by this same call for these
+        // same arguments, and was withheld until the mutation had happened
+        // (#716). Carrying it here also puts it in the fingerprint, so a token
+        // is spent against the sites the caller was shown rather than against a
+        // list that moved underneath them.
         target_probe = [](const json& call_arguments, json& before,
                           json& subject) -> std::optional<Error> {
             if (!call_arguments.is_object() || !call_arguments.contains("target") ||
@@ -2114,7 +2125,10 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
             before = {{"updated_files", plan.value()["updated_files"]},
                       {"updated_file_count", plan.value()["updated_file_count"]},
                       {"changed_lines", plan.value()["changed_lines"]},
+                      {"code_references_not_updated",
+                       plan.value()["code_references_not_updated"]},
                       {"code_reference_count", plan.value()["code_reference_count"]},
+                      {"code_references_truncated", plan.value()["code_references_truncated"]},
                       {"scanned_files", plan.value()["scanned_files"]}};
             return std::nullopt;
         };
