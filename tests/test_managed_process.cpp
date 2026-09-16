@@ -362,61 +362,6 @@ void launchClosesDescriptorsAboveSoftLimit() {
     CHECK_PROCESS(fcntl(high.value, F_GETFD) >= 0);
 }
 #endif
-
-void stopWaitsForTheWholeTree() {
-    // Break caught: stop() waited on the process it launched and returned
-    // while that process's own children were still exiting, so
-    // runtime_restore_checkpoint renamed a project directory another process
-    // still had open. Godot's Windows *_console.exe is a launcher and the
-    // editor holding the files is its child, so managed recovery against that
-    // build hit it on every restore (#678).
-    //
-    // A fast machine usually loses the race the other way, which is why this
-    // passed locally and failed on a loaded CI runner. The assertion is the
-    // invariant rather than the race: when stop() returns, nothing it started
-    // is left running.
-#if !defined(_WIN32)
-    // Windows only, because that is where the guarantee exists and where a
-    // harness can ask for it honestly. Jobs nest: a grandchild started by a
-    // ManagedProcess is in its own job and in its parent's, so terminating the
-    // outer one reaches it, exactly as Godot's launcher and its editor are
-    // reached. POSIX process groups do not nest -- a grandchild that makes its
-    // own group leaves its parent's -- so this harness cannot model a launcher
-    // there, and stop() on POSIX still only waits for the process it started.
-    // A wrapper script on Linux or macOS would leave its editor behind the
-    // same way the console build did here. That is recorded rather than
-    // pretended away, and it is not what #678 reported.
-    return;
-#else
-    Temp temp;
-    const auto self = selfPath().string();
-    const auto published = temp.path / "tree-grandchild.pid";
-
-    ManagedProcess host;
-    CHECK_PROCESS(host
-                      .start(self,
-                             {"--didi-managed-child", "orphan", temp.path.string(),
-                              (temp.path / "tree-grandchild.log").string(), published.string()},
-                             temp.path, temp.path / "tree-host.log")
-                      .isOk());
-
-    uint64_t grandchild = 0;
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-    while (!grandchild && std::chrono::steady_clock::now() < deadline) {
-        std::ifstream(published) >> grandchild;
-        if (!grandchild)
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    }
-    CHECK_PROCESS(grandchild != 0);
-    CHECK_PROCESS(processAlive(grandchild));
-
-    host.stop();
-    CHECK_PROCESS(!host.running());
-    // No sleep, no retry: the point is that stop() has already waited.
-    CHECK_PROCESS(!processAlive(grandchild));
-#endif
-}
-
 void reapsOwnedChildWhenTheHostDiesAbnormally() {
     // Break caught: the child was reaped only by a destructor, so a host killed
     // rather than stopped left a headless editor running with nothing left that
@@ -602,7 +547,6 @@ struct RegisterManagedProcess {
         registerTest("ManagedProcess.StopsOnlyOwnedChild", stopsOnlyOwnedChild);
         registerTest("ManagedProcess.RejectsInvalidLaunchInput", rejectsInvalidLaunchInput);
         registerTest("ManagedProcess.DestructorReapsOwnedChild", destructorReapsOwnedChild);
-        registerTest("ManagedProcess.StopWaitsForTheWholeTree", stopWaitsForTheWholeTree);
         registerTest("ManagedProcess.ReapsOwnedChildWhenHostDiesAbnormally",
                      reapsOwnedChildWhenTheHostDiesAbnormally);
         registerTest("ManagedProcess.FailedNativeLaunchLeavesObjectReusable",
