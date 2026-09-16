@@ -93,6 +93,16 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`viewport_create_test_lab`'s preview names the file it replaces.** It made
+  the weak claim -- `argument_binding`, "this tool names no subject of its own
+  beyond the arguments it was given" -- about a call whose subject is a
+  constant, and showed the reader `target_resource_path`, a file the call reads
+  and does not modify (#685). The confirmation gate had already resolved
+  `res://didi_test_lab.tscn` and stat'd it, which is the only reason it fired
+  at all. The preview now reports that path with its size and content digest,
+  the way `script_create` does, `target_read` and `target_checked_on_confirm`
+  are true, and a token approved against one lab scene is refused if that file
+  changes inside the window.
 - **`--yolo` shows up where a client reads before it calls.** The flag removes
   the confirmation gate, and the only difference it made to the published
   surface was one fact inside a `didi_control_room` call: `initialize`, the

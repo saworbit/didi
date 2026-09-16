@@ -1810,6 +1810,55 @@ static void test_the_export_family_answers_with_an_envelope_and_previews_what_it
     ASSERT_EQ(envelope(missing_source)["error"]["code"], 404);
 }
 
+static void test_the_test_lab_preview_names_the_file_it_replaces() {
+    // Break caught: the lab is written to one fixed path whatever resource it
+    // is built around, the confirmation gate resolves that path, and the gate
+    // only fires because it found a file there. The preview said the tool
+    // "names no subject of its own beyond the arguments it was given", and
+    // showed the reader res://sub.tscn -- a file this call reads and does not
+    // modify (#685).
+    ScopedToolProject project("test-lab-preview-subject");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("subject.tscn",
+                   "[gd_scene format=3]\n\n[node name=\"Subject\" type=\"Node3D\"]\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const didi::json arguments = {{"target_resource_path", "res://subject.tscn"}};
+    // Creating it is what puts a file at the fixed path for the next call to
+    // be about.
+    const auto created = registry.callTool("viewport_create_test_lab", arguments);
+    ASSERT_TRUE(!created.isError);
+
+    auto replacing = arguments;
+    replacing["overwrite"] = true;
+    replacing["dry_run"] = true;
+    const auto previewed = registry.callTool("viewport_create_test_lab", replacing);
+    ASSERT_TRUE(!previewed.isError);
+    const auto preview = didi::json::parse(previewed.content[0].text)["mutation_preview"];
+
+    ASSERT_EQ(preview["preview_kind"], "target_state");
+    ASSERT_EQ(preview["target_read"], true);
+    // The gate stats this path to decide whether to ask at all, so the confirm
+    // can compare it too.
+    ASSERT_EQ(preview["target_checked_on_confirm"], true);
+    ASSERT_EQ(preview["changes"][0]["kind"], "planned_mutation");
+    ASSERT_EQ(preview["changes"][0]["target"]["path"], "res://didi_test_lab.tscn");
+    ASSERT_EQ(preview["changes"][0]["before"]["path"], "res://didi_test_lab.tscn");
+    ASSERT_EQ(preview["changes"][0]["before"]["exists"], true);
+    ASSERT_TRUE(preview["changes"][0]["before"].contains("content_digest"));
+    // The resource the lab is built around is an argument, not the subject.
+    ASSERT_EQ(preview["arguments"]["target_resource_path"], "res://subject.tscn");
+
+    // The token still spends, which is the half a preview change can break.
+    auto confirmed = arguments;
+    confirmed["overwrite"] = true;
+    confirmed["confirmation_token"] = preview["confirmation_token"];
+    const auto applied = registry.callTool("viewport_create_test_lab", confirmed);
+    ASSERT_TRUE(!applied.isError);
+}
+
 static void test_every_pinned_parameter_says_why_it_is_pinned() {
     // A parameter whose schema pins it to exactly one value is pinned for a
     // reason, and the reason belongs in the description, because discovery is
@@ -6434,6 +6483,8 @@ struct RegisterToolTests {
                      test_a_rename_preview_shows_the_files_it_will_change);
         registerTest("Tools.ImpactKindNamesTheFile",
                      test_a_name_in_a_scene_is_not_a_code_reference);
+        registerTest("Tools.TestLabPreviewNamesTheFileItReplaces",
+                     test_the_test_lab_preview_names_the_file_it_replaces);
         registerTest("Tools.ExportFamilyEnvelopesAndPreviews",
                      test_the_export_family_answers_with_an_envelope_and_previews_what_it_will_do);
         registerTest("Tools.PinnedParametersSayWhy",

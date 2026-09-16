@@ -494,6 +494,8 @@ The lab lives at the project root, not under `addons/didi`, so `project_audit_as
 - `overwrite` (`boolean`, default `false`); an existing sandbox is preserved unless explicitly set to `true`.
 - Legacy alias: `create_visual_test_lab`.
 
+The confirmation preview is about `res://didi_test_lab.tscn`, the one file this call replaces, and not about `target_resource_path`, which it reads and leaves alone. It reports `preview_kind: "target_state"` with the file's size and content digest, and `target_checked_on_confirm: true`, so a token approved against one lab scene is refused if that file changes inside the window.
+
 ### `viewport_set_camera_transform` — Live (editor only)
 
 Updates an in-scene `Camera3D` in one editor UndoRedo action. `camera_path` and an exact finite `{x,y,z}` `position` are required; optional `rotation_degrees` uses the same shape and optional `fov` is from 1 through 179. Position components are bounded to ±1,000,000 and rotation components to ±360,000. The result contains observed `old` and `new` state plus `undo_redo_registered: true`; it does not claim control of the editor navigation camera.
