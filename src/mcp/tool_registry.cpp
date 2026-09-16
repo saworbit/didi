@@ -161,6 +161,19 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         return found == local_vocabulary.end() ? std::string{"local"} : found->second;
     };
 
+    // The two whose live work depends on the arguments rather than on the
+    // route. #504 gave both an answer of "local" for the call that had no
+    // live work to do -- a uid map with no resolve queries, an audit whose
+    // scan produced nothing an engine could verify -- because calling that
+    // an offline fallback told a caller to reattach an editor that would
+    // change nothing. The advertisement never learned the third word, so
+    // the entry declared a set the answer was not a member of (#713).
+    static const std::unordered_set<std::string> live_offline_or_local = {
+        "project_get_uid_map", "project_audit_assets"
+    };
+    if (live_offline_or_local.count(name)) {
+        return {{"live", "offline_fallback", local_name()}, true, {}, local_name()};
+    }
     if (live_and_offline.count(name)) {
         return {{"live", "offline_fallback"}, true, {}, local_name()};
     }
@@ -1281,6 +1294,19 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
         tool.description += " Legacy name for " + tool.canonical_name +
                             ", which is listed separately and is the same tool. Prefer the "
                             "canonical name: it is what error data reports as canonical_tool.";
+    } else if (tool.legacy) {
+        // The other two. A host that routes legacy: true entries by
+        // _meta.didi.canonical handled eight and fell through on these
+        // with nothing in the entry saying why (#709). The reason is not
+        // that the canonical tool is unimplemented: there is no canonical
+        // tool. This capability was never re-registered under a canonical
+        // name, so the legacy name is the only name and canonical_tool in
+        // error data correctly reports it.
+        tool.description +=
+            " This legacy name has no canonical replacement: the capability was never "
+            "re-registered under a canonical name, so this name is the only one and is "
+            "what error data reports as canonical_tool. _meta.didi carries no canonical "
+            "for that reason rather than by omission.";
     }
     m_tools[name] = std::move(tool);
     DIDI_LOG_DEBUG("TOOL_REG", "Registered tool: ", name);

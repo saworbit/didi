@@ -8,8 +8,23 @@ is worth offering, and to explain to a person why it is greyed out.
 
 Nothing checks the two against each other, and they are produced by different
 code. This probe calls every read-only tool with no arguments and lines the
-advertised mode up beside the reported one. A row where they differ is a tool
-whose discovery entry describes a mode the tool never enters.
+advertised mode up beside the reported one.
+
+Two findings, not one, because they are not the same fault:
+
+* **undeclared** -- the answer's mode is not in the entry's own
+  `executionModes`. The entry states a set and the tool answered outside it,
+  which no argument can excuse.
+* **conditional** -- the answer's mode is a declared one, just not
+  `currentMode`. `currentMode` is a fact about the route and cannot know the
+  arguments, and two tools do live work only for some of them: a uid map with
+  no `resolve` queries and an audit whose scan found nothing an engine could
+  verify have no live work to do, so `local` is the right answer with an editor
+  attached (#504, #713).
+
+The first is the finding. The second is printed because a tool moving into it
+is worth seeing, and because a check that reports only what it was written to
+find is not a census.
 
 Read-only tools only, on purpose. A census that calls all 126 is a batch of
 mutations wearing a survey's clothes -- see #471, and the note about diffing
@@ -42,6 +57,10 @@ from mcp_client import Session  # noqa: E402
 # already excludes them; kept named here because the cost of being wrong is a
 # whole census.
 SEVERS_THE_BRIDGE = {"runtime_detach_session"}
+
+
+def declared_modes(tool: dict) -> list[str]:
+    return list((tool.get("_meta", {}).get("didi") or {}).get("executionModes") or [])
 
 
 def reported_mode(payload: object) -> str | None:
@@ -79,14 +98,23 @@ def main() -> int:
                 continue
             advertised = tool["_meta"]["didi"].get("currentMode")
             payload, _ = session.call(tool["name"], {})
-            rows.append((tool["name"], advertised, reported_mode(payload)))
+            rows.append((tool["name"], advertised, reported_mode(payload),
+                         declared_modes(tool)))
     finally:
         session.close()
 
     differ = [r for r in rows if r[2] is not None and r[1] != r[2]]
-    print(f"{len(rows)} tools asked, {len(differ)} advertise a mode they do not report\n")
-    for name, advertised, actual in differ:
-        print(f"  {name:34} list={advertised:20} answer={actual}")
+    undeclared = [r for r in differ if r[2] not in r[3]]
+    conditional = [r for r in differ if r[2] in r[3]]
+
+    print(f"{len(rows)} tools asked, {len(undeclared)} answer a mode their own "
+          f"executionModes does not list\n")
+    for name, advertised, actual, declared in undeclared:
+        print(f"  {name:34} list={advertised:20} answer={actual:20} declared={declared}")
+
+    print(f"\n{len(conditional)} answer a declared mode other than currentMode")
+    for name, advertised, actual, declared in conditional:
+        print(f"  {name:34} list={advertised:20} answer={actual:20} declared={declared}")
 
     pairs = collections.Counter((r[1], r[2]) for r in differ)
     print("\npairs:")

@@ -200,6 +200,8 @@ Refused with `409 node_not_owned` or `409 node_inherited` the way `scene_remove_
 
 Use the focused `scene_*` tools instead.
 
+This is one of the two legacy names with no canonical replacement. The other eight resolve to a canonical tool and publish it as `_meta.didi.canonical`; these two were never re-registered under a canonical name, so the legacy name is the only name, `_meta.didi` carries no `canonical` for that reason rather than by omission, and error data correctly reports this name as `canonical_tool`.
+
 ## 2. Signals and events
 
 All four signal tools are **live**, editor sessions only. Delivered in the Phase 7
@@ -922,6 +924,8 @@ Each entry carries `node_path` relative to the edited scene root, plus `class` a
 ### `instantiate_asset` — Unimplemented legacy name
 
 Not implemented. To put a packed scene in the edited scene, pass `scene_path` to `scene_instantiate_node`.
+
+This is one of the two legacy names with no canonical replacement. The other eight resolve to a canonical tool and publish it as `_meta.didi.canonical`; these two were never re-registered under a canonical name, so the legacy name is the only name, `_meta.didi` carries no `canonical` for that reason rather than by omission, and error data correctly reports this name as `canonical_tool`.
 
 ### `project_search_text` and `project_search_symbols` — Offline
 

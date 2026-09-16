@@ -93,6 +93,46 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **Two parameter descriptions stop offering a value their own enum refuses.**
+  `blackboard_task_list.status` read "such as pending, claimed or blocked", and
+  `claimed` is not a near miss for one of the six the enum holds -- it is the
+  word the sibling tool uses, and `blackboard_task_claim` puts a task in
+  `in_progress`. `project_export.mode` read "whether to export a debug or a
+  release build" and left out `pack`, which is not a variation on the other two:
+  it writes a `.pck` and is the only mode that works on a machine with no export
+  templates installed, which is every CI runner and most fresh checkouts (#708).
+  Since #462 every parameter carries a description precisely so a caller does not
+  have to make a call go wrong to learn the argument names; a description that
+  offers a value the enum rejects spends that budget backwards. Nothing could
+  catch these: the description tests count descriptions and the schema tests read
+  keys, and `probes/description_vs_schema.py` is the check that compares one
+  against the other.
+
+- **The two legacy names with no canonical replacement say so.** Eight of the ten
+  legacy aliases publish `_meta.didi.canonical` and a description naming the tool
+  they stand for. `mutate_scene_tree` and `instantiate_asset` published neither,
+  so a host routing `legacy: true` entries by their canonical name handled eight
+  and fell through on two with nothing in the entry saying why (#709). The reason
+  is not that their canonical tool is unimplemented: there is no canonical tool.
+  Neither capability was ever re-registered under a canonical name, so the legacy
+  name is the only name and `canonical_tool` in error data correctly reports it.
+  Both entries now say that, and say that the absent `canonical` is the reason
+  rather than an omission.
+
+- **Two tools stop advertising a set the answer is not a member of.** With an
+  editor attached, `project_audit_assets` and `project_get_uid_map` publish
+  `currentMode: "live"` and can answer `execution_mode: "local"`, while declaring
+  `executionModes: ["live", "offline_fallback"]` -- a claim that `local` is not
+  one of the things they do (#713). The answer is right and deliberate: #504 gave
+  both `local` for the call with no live work to do, because calling that an
+  offline fallback told a caller to reattach an editor that would change nothing.
+  The advertisement never learned the third word, and now does. The live path was
+  not removed from either: a uid map with `resolve` queries and an audit whose
+  scan produced findings both take it. `probes/advertised_vs_reported_mode.py`
+  now separates the two questions -- a mode the entry never declared, which no
+  argument can excuse, from a declared mode that is not `currentMode`, which is
+  what a tool whose live work depends on its arguments looks like.
+
 - **The listings say they move, and say when.** `initialize` published
   `capabilities.tools.listChanged: false`, which in MCP is the server telling a
   host that one `tools/list` at startup is enough. Every entry in that listing
