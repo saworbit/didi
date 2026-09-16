@@ -93,6 +93,28 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **CI's critical path was a cold compile of a tree that was already cached.**
+  The sanitizer job builds on `ubuntu-latest` and had no compiler cache, so every
+  run compiled the whole tree from scratch: 21m45s of a 23m run. The
+  `ubuntu-latest (gcc)` job beside it compiled the same sources on the same
+  runner in 8 seconds, off a ccache the sanitizer job never got. Nothing else in
+  the workflow ran past minute 17, so one missing cache step was the whole of
+  CI's latency, and it had been paid on every pull request that touched the
+  engine. The job now takes the same pinned `ccache-action` under a key of its
+  own. The sanitizer flags are part of every compile command, so ccache hashes
+  them and cannot hand this build an object compiled without them; a separate key
+  also keeps two sets of objects from evicting each other out of one 500M cache.
+
+- **A push to main no longer cancels the run that was checking the last merge.**
+  `cancel-in-progress` applied to every ref, and main is the one ref where the
+  older run is not obsolete. The branch rule does not require a pull request to be
+  up to date before it merges, so two of them can both be green against an older
+  base, both merge, and disagree only once they are both on main -- and the run on
+  main is the only place that disagreement gets caught. The next merge cancelled
+  that run 29% of the time, and a cancelled run reports nothing at all.
+  Cancellation is now scoped to `pull_request`, where a newer head does genuinely
+  obsolete the run before it.
+
 - **`project_rename_references`'s preview names the sites it will leave
   behind.** The tool's behaviour and its post-hoc honesty are unusually good: it
   updates the scene connection, leaves GDScript alone, and names every site it
