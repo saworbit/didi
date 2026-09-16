@@ -86,6 +86,19 @@ private:
     void stopBoardWatcher();
     void watchBoards();
 
+    // The bridge facts every tools/list and resources/list entry carries.
+    //
+    // `_meta.didi`'s currentMode, liveAvailable, editorConnected, sessionKind
+    // and confirmationsSkipped are all state, and tool_availability.cpp derives
+    // every one of them from these few inputs. Cheap to read -- the selected
+    // descriptor and a connection flag, no route lease and no IPC -- so it can
+    // be taken after every request.
+    std::string listingFingerprint() const;
+    // Sends the two list_changed notifications when that string has moved.
+    // Primes silently on its first call: announcing at the moment a client
+    // connects would be telling it something changed that did not.
+    void announceListingsIfChanged();
+
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_stopRequested{false};
     // Shared because the reader can finish after the server is destroyed.
@@ -106,6 +119,7 @@ private:
     mutable std::mutex m_subscriptionMutex;
     std::set<std::string> m_subscriptions;
     std::thread m_boardWatcher;
+    std::optional<std::string> m_listingFingerprint;
     std::atomic<bool> m_watching{false};
 
 public:
