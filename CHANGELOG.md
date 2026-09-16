@@ -93,6 +93,24 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A runtime endpoint too long for `sockaddr_un` says so.** On macOS the
+  session endpoint is built under the temporary directory and `sun_path` holds
+  104 bytes, so a stock `macos-latest` runner has five bytes of headroom.
+  `TMPDIR` twelve bytes longer and both ends of the bridge answered the
+  overflow with a bare `return false`: the plugin reported itself active, no
+  descriptor was published, every live tool gave the ordinary "no editor is
+  running" refusal, and nothing anywhere -- the editor log, the server log,
+  `runtime_list_sessions`, the control room -- mentioned a path length. That is
+  indistinguishable from the editor genuinely not running, which is the most
+  common state in the world (#711). The session now refuses before it builds
+  the socket, naming the byte length, the limit and the endpoint, and saying
+  that the temporary directory is the part a user can change. The two bridge
+  failures the extension already logged also go through Godot's own
+  `print_error`, so they reach the editor's Output panel and its `--log-file`
+  rather than only this process's stderr and a log ring that is read over the
+  route that just failed to exist. That is where the addon's Diagnostics page
+  has been telling people to look.
+
 - **`csharp_check_build` now reports the build it actually ran.** Four things
   were wrong in the one payload. The MSBuild console logger prints every
   diagnostic twice, once as it happens and once in the summary block it appends
