@@ -569,6 +569,60 @@ void test_project_light_reports_unsaved_scenes() {
     }
 }
 
+// Break caught: a headless editor is the only editor a build machine, a
+// container or an ssh session can run, and every tool whose answer is a picture
+// fails on it for as long as it lives. This page reported a connected editor
+// and three green lights beside that, and said nothing at all about why the
+// captures were refusing (#676). The engine limitation is named the way the
+// 4.7 dirty-state one above it is.
+void test_a_headless_editor_is_reported_as_a_limitation() {
+    const auto attached_editor = [] {
+        ControlRoomInputs in;
+        in.addon_present = true;
+        in.addon_enabled = true;
+        in.connected = true;
+        in.session_kind = "editor";
+        return in;
+    };
+    {
+        auto in = attached_editor();
+        in.renders = false;
+        in.display_server = "headless";
+        const auto model = buildControlRoomModel(in, {});
+        const auto reported = factValue(model, "Rendering");
+        ASSERT_TRUE(reported.find("headless") != std::string::npos);
+        ASSERT_TRUE(reported.find("409") != std::string::npos);
+        // The page is not a failure report. A headless editor is a working
+        // editor for everything that is not a picture.
+        ASSERT_EQ(lightState(model, "Bridge"), "ok");
+    }
+    // An editor that can draw says nothing, because a row that is true of every
+    // ordinary desktop session is a row nobody reads.
+    {
+        auto in = attached_editor();
+        in.display_server = "windows";
+        const auto model = buildControlRoomModel(in, {});
+        ASSERT_EQ(factValue(model, "Rendering"), "<missing>");
+    }
+    // An extension older than the field publishes neither, and the safe guess
+    // is that it can draw: every engine before this could.
+    {
+        auto in = attached_editor();
+        const auto model = buildControlRoomModel(in, {});
+        ASSERT_EQ(factValue(model, "Rendering"), "<missing>");
+    }
+    // Nothing attached, so the question was never asked.
+    {
+        ControlRoomInputs in;
+        in.addon_present = true;
+        in.addon_enabled = true;
+        in.renders = false;
+        in.display_server = "headless";
+        const auto model = buildControlRoomModel(in, {});
+        ASSERT_EQ(factValue(model, "Rendering"), "<missing>");
+    }
+}
+
 void test_safety_and_project_and_work_lights() {
     {
         ControlRoomInputs in;
@@ -875,6 +929,8 @@ struct Register {
         registerTest("ControlRoom.DroppedRecordsAreDisclosed", test_dropped_records_are_disclosed);
         registerTest("ControlRoom.ProjectLightReportsUnsavedScenes",
                      test_project_light_reports_unsaved_scenes);
+        registerTest("ControlRoom.HeadlessEditorIsReportedAsALimitation",
+                     test_a_headless_editor_is_reported_as_a_limitation);
     }
 } g_registerControlRoomTests;
 

@@ -431,6 +431,19 @@ json buildControlRoomModel(const ControlRoomInputs& in,
             unsaved = unsavedScenesSummary(in);
         }
         facts.push_back(fact("Unsaved scenes", unsaved));
+        // Reported the way the 4.7 limitation above is: an engine limitation
+        // named rather than hidden. Only when it bites, because "Rendering:
+        // available" on every ordinary desktop session is a row nobody reads.
+        if (!in.renders) {
+            facts.push_back(fact(
+                "Rendering",
+                "none; this editor is headless" +
+                    (in.display_server.empty() ? std::string()
+                                               : " (display driver '" + in.display_server + "')") +
+                    ". The viewport capture tools refuse 409 while it is running, and are still "
+                    "counted in the live surface below: they do reach the engine, and the "
+                    "refusal is the engine's answer."));
+        }
     }
     facts.push_back(fact("Route", in.connected
                                       ? ("connected " + in.session_kind.value_or("unknown"))
