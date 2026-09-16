@@ -75,6 +75,17 @@ struct DomainDiagnostic {
 };
 
 std::vector<DomainDiagnostic> parseMsBuildDiagnostics(const std::string& output);
+
+// How many projects MSBuild says it produced an assembly for.
+//
+// dotnet exits 0 for a solution that builds nothing -- one whose project paths
+// do not resolve, and one MSBuild's solution parser skips because it carries no
+// configuration mapping -- so the tool reported success: true for code it never
+// looked at (#706). MSBuild prints one "Name -> path" line per project it
+// builds, on a fresh build and on an up-to-date one alike, and the line is not
+// localised. Zero of them beside exit code 0 is the state that has no other
+// name.
+int parseMsBuildProjectOutputCount(const std::string& output);
 std::vector<DomainDiagnostic> parseGodotDiagnostics(const std::string& output);
 // What export_presets.cfg holds, with the states a caller has to tell apart
 // kept apart.

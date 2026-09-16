@@ -31,6 +31,7 @@ using didi::offline::parseExportPresets;
 using didi::offline::readExportPresets;
 using didi::offline::parseGodotDiagnostics;
 using didi::offline::parseMsBuildDiagnostics;
+using didi::offline::parseMsBuildProjectOutputCount;
 
 namespace {
 
@@ -145,6 +146,77 @@ TEST(Phase5, ParsesRoslynFourPartSpansAndVariedDiagnosticCodes) {
     ASSERT_EQ(diagnostics[3].code, "NU1605");
     ASSERT_EQ(diagnostics[4].code, "IDE0051");
     ASSERT_EQ(diagnostics[4].line, 3);
+}
+
+TEST(Phase5, CountsTheSummaryEchoOnceAndKeepsCodelessDiagnostics) {
+    // Break caught: the console logger prints every diagnostic once as it
+    // happens and again in the Summary block it appends by default, and nothing
+    // de-duplicated them, so a build MSBuild called 1 warning and 1 error was
+    // reported as four. The codeless form MSBuild documents -- "warning :" with
+    // no code -- was dropped entirely, so a solution that compiled nothing
+    // reported zero diagnostics beside its own "1 Warning(s)" (#702).
+    const auto diagnostics = parseMsBuildDiagnostics(
+        "D:\\game\\Player.cs(9,9): error CS0103: The name 'Healht' does not exist [D:\\game\\Game.csproj]\n"
+        "D:\\game\\Player.cs(14,13): warning CS0219: The variable is assigned but never used [D:\\game\\Game.csproj]\n"
+        "\n"
+        "Build FAILED.\n"
+        "\n"
+        "D:\\game\\Player.cs(14,13): warning CS0219: The variable is assigned but never used [D:\\game\\Game.csproj]\n"
+        "D:\\game\\Player.cs(9,9): error CS0103: The name 'Healht' does not exist [D:\\game\\Game.csproj]\n"
+        "    1 Warning(s)\n"
+        "    1 Error(s)\n"
+        "C:\\sdk\\NuGet.targets(196,5): warning : Unable to find a project to restore! [D:\\game\\Game.sln]\n");
+
+    ASSERT_EQ(diagnostics.size(), 3u);
+    ASSERT_EQ(diagnostics[0].code, "CS0103");
+    ASSERT_EQ(diagnostics[1].code, "CS0219");
+    ASSERT_EQ(diagnostics[2].severity, "warning");
+    ASSERT_TRUE(diagnostics[2].code.empty());
+    ASSERT_EQ(diagnostics[2].line, 196);
+    ASSERT_EQ(diagnostics[2].column, 5);
+    ASSERT_EQ(diagnostics[2].message, "Unable to find a project to restore!");
+}
+
+TEST(Phase5, CountsTheProjectsMsBuildSaysItBuilt) {
+    // Break caught: a solution that compiled nothing exited 0 and was reported
+    // as success: true, with the broken C# still broken (#706). MSBuild prints
+    // one "Name -> path" line per project it built and none for a solution it
+    // built nothing from, which is the only fact that separates the two.
+    ASSERT_EQ(parseMsBuildProjectOutputCount(
+                  "  Determining projects to restore...\n"
+                  "  All projects are up-to-date for restore.\n"
+                  "  Game -> D:\\game\\bin\\Debug\\net8.0\\Game.dll\n"
+                  "\nBuild succeeded.\n    0 Warning(s)\n    0 Error(s)\n"),
+              1);
+    ASSERT_EQ(parseMsBuildProjectOutputCount(
+                  "  Determining projects to restore...\n"
+                  "C:\\sdk\\NuGet.targets(196,5): warning : Unable to find a project to restore! [D:\\game\\Game.sln]\n"
+                  "\nBuild succeeded.\n    1 Warning(s)\n    0 Error(s)\n"),
+              0);
+    // A diagnostic that carries an arrow in its own message is not a project.
+    ASSERT_EQ(parseMsBuildProjectOutputCount(
+                  "D:\\game\\Player.cs(4,1): error CS1503: cannot convert int -> string [D:\\game\\Game.csproj]\n"),
+              0);
+    // One line per target framework, and the summary echo of each counted once.
+    ASSERT_EQ(parseMsBuildProjectOutputCount(
+                  "  Game -> D:\\game\\bin\\Debug\\net8.0\\Game.dll\n"
+                  "  Game -> D:\\game\\bin\\Debug\\net9.0\\Game.dll\n"
+                  "  Game -> D:\\game\\bin\\Debug\\net8.0\\Game.dll\n"),
+              2);
+}
+
+TEST(Phase5, KeepsTheSameDiagnosticFromTwoProjectsApart) {
+    // The identity is the printed line, project suffix included, so a shared
+    // source file compiled by two projects stays two diagnostics while the
+    // Summary echo of each stays one.
+    const auto diagnostics = parseMsBuildDiagnostics(
+        "D:\\game\\Shared.cs(4,1): warning CS0168: unused [D:\\game\\A.csproj]\n"
+        "D:\\game\\Shared.cs(4,1): warning CS0168: unused [D:\\game\\B.csproj]\n"
+        "Build succeeded.\n"
+        "D:\\game\\Shared.cs(4,1): warning CS0168: unused [D:\\game\\A.csproj]\n"
+        "D:\\game\\Shared.cs(4,1): warning CS0168: unused [D:\\game\\B.csproj]\n");
+
+    ASSERT_EQ(diagnostics.size(), 2u);
 }
 
 TEST(Phase5, ShaderLocationsPreferTheUserShaderOverEngineFrames) {

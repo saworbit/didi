@@ -93,6 +93,34 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`csharp_check_build` now reports the build it actually ran.** Four things
+  were wrong in the one payload. The MSBuild console logger prints every
+  diagnostic twice, once as it happens and once in the summary block it appends
+  by default, and nothing de-duplicated them, so a build MSBuild called `1
+  Warning(s)` and `1 Error(s)` was reported as `diagnostics_count: 4` beside
+  that summary in its own `raw_output`; the diagnostic code is optional in the
+  format MSBuild documents, and requiring one dropped `warning : Unable to find
+  a project to restore!` entirely, so a build that compiled nothing reported
+  zero diagnostics (#702). `diagnostics[].path` carried an absolute host path
+  beside a `project_file` the same object had already converted, so the one
+  field naming the file to go and fix was the one field no path-taking tool
+  accepts, and it carried the home directory of whoever ran the server; paths
+  inside the project are now `res://` and paths outside it, which are SDK and
+  NuGet targets, are left as they came (#703). Nothing said which `dotnet` ran,
+  so a missing SDK arrived as `exit_code: 2` on Windows and `127` with no error
+  at all on POSIX, wearing the costume of "your C# does not compile"; the
+  answer now names `dotnet_executable` and `dotnet_version`, a `DOTNET_BIN`
+  that does not exist or is a directory is passed over and reported in
+  `dotnet_executable_configured_rejected` the way `GODOT_BIN` has been since
+  #656, and an executable that is not a .NET SDK is a `503` naming what it
+  printed rather than a build verdict (#704). And `project_file` accepted a
+  `.sln` its description did not mention and preferred it over the `.csproj`
+  beside it, which is the exact shape a Godot C# project has, while a solution
+  that compiled nothing exited `0` and was reported as `success: true`; the
+  description names both and states the preference, `projects_built` counts the
+  projects MSBuild produced an assembly for, and a `dotnet` that exits `0`
+  having built none is no longer a success (#706).
+
 - **A session test reads its own directory, not the machine's.**
   `RuntimeSessions.ListingNamesTheDirectoryItRead` made an empty descriptor
   directory and then never pointed the client at it, so it listed whatever
