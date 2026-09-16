@@ -7,6 +7,24 @@
 namespace didi {
 namespace godot {
 
+namespace {
+
+// A bridge failure the person at the editor can actually see.
+//
+// Every failure below is fatal to every live tool, and every one of them went
+// only to this process's stderr and to a log ring that is read over the IPC
+// route that just failed to exist. A user launching Godot from a desktop icon
+// has neither. The addon's own diagnostics already tell them to "check the
+// Output panel for GDEXT_IPC errors", and print_error is what puts one there
+// and in the engine's --log-file (#711).
+void reportToEditor(const std::string& message) {
+    const auto& api = GodotApi::instance();
+    if (!api.print_error) return;
+    api.print_error(message.c_str(), "GDExtensionIpc::start", __FILE__, __LINE__, 1);
+}
+
+} // namespace
+
 GDExtensionIpc& GDExtensionIpc::instance() {
     static GDExtensionIpc s_instance;
     return s_instance;
@@ -45,6 +63,8 @@ bool GDExtensionIpc::start(const std::string& kind, const std::string& project_p
                                                 GodotApi::instance().engineVersionString());
     if (prepared.isErr()) {
         DIDI_LOG_ERROR("GDEXT_IPC", "Unable to prepare runtime session: ", prepared.error().message);
+        reportToEditor("Didi: unable to prepare a runtime session. " + prepared.error().message +
+                       " Live Didi tools have nothing to reach until this is fixed.");
         return false;
     }
     const auto descriptor = m_sessionHost.descriptor();
@@ -101,6 +121,8 @@ bool GDExtensionIpc::start(const std::string& kind, const std::string& project_p
     const auto started = m_sessionHost.startServer(*m_server);
     if (started.isErr()) {
         DIDI_LOG_ERROR("GDEXT_IPC", "Unable to bind and publish runtime session: ", started.error().message);
+        reportToEditor("Didi: unable to bind and publish a runtime session. " + started.error().message +
+                       " Live Didi tools have nothing to reach until this is fixed.");
         return false;
     }
     DIDI_LOG_INFO("GDEXT_IPC", "Published authenticated runtime session at ", descriptor->endpoint);

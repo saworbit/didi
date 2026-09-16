@@ -1269,8 +1269,43 @@ static void test_a_client_does_not_reuse_a_connection_the_server_may_be_recyclin
     server->stop();
 }
 
+static void test_endpoint_path_limit_is_reported_rather_than_returned_false() {
+    // Break caught: both ends answered a sun_path overflow with a bare
+    // `return false`. The plugin reported itself active, no descriptor was
+    // published, and nothing anywhere named a path length -- which reads as
+    // "the editor is not running", the most common state in the world (#711).
+    const std::string ordinary =
+        (std::filesystem::temp_directory_path() / "godot_didi_probe.sock").string();
+    ASSERT_TRUE(!didi::ipc::endpointPathRejection(ordinary).has_value());
+
+#if defined(_WIN32)
+    // Named pipes are not paths; a long one is not this failure.
+    ASSERT_TRUE(!didi::ipc::endpointPathRejection(
+        "\\.\pipe\\" + std::string(400, 'x')).has_value());
+#else
+    sockaddr_un addr{};
+    const std::string overflowing =
+        (std::filesystem::temp_directory_path() /
+         (std::string(sizeof(addr.sun_path), 'x') + ".sock")).string();
+    const auto rejected = didi::ipc::endpointPathRejection(overflowing);
+    ASSERT_TRUE(rejected.has_value());
+    // The two numbers a reader needs, and the one thing they can change.
+    ASSERT_TRUE(rejected->find(std::to_string(overflowing.size())) != std::string::npos);
+    ASSERT_TRUE(rejected->find(std::to_string(sizeof(addr.sun_path))) != std::string::npos);
+    ASSERT_TRUE(rejected->find("TMPDIR") != std::string::npos);
+
+    // And a server told to use it refuses rather than pretending to listen.
+    auto server = didi::ipc::createIpcServer();
+    server->setHandler([](const didi::json&) { return didi::json::object(); });
+    ASSERT_TRUE(!server->start(overflowing));
+    ASSERT_TRUE(!server->isRunning());
+#endif
+}
+
 struct RegisterIpcTests {
     RegisterIpcTests() {
+        registerTest("IPC.EndpointPathLimitReported",
+                     test_endpoint_path_limit_is_reported_rather_than_returned_false);
         registerTest("IPC.Framing", test_ipc_framing);
         registerTest("IPC.FramingRejectsHostileLengths",
                      test_ipc_framing_rejects_hostile_lengths);
