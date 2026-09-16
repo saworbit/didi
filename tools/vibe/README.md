@@ -64,6 +64,18 @@ twice.
 | `probes/blackboard_two_writers.py` | Two servers writing one board, interleaved by hand rather than by luck: the same key, two different keys, an interleaved patch, and a clear while the other holds a task. |
 | `probes/empty_versus_absent.py` | "Nothing there" beside "no such thing", for nine readers at once, printing whether the two answers differ at all. The oldest lesson in this file, asked as a census instead of one tool at a time. |
 | `probes/yolo_mode.py` | `--yolo`, the mode where the confirmation gate is not there. Diffs what each mode publishes about itself before any call, then walks the three gate kinds in both. |
+| `probes/list_changed_promise.py` | `tools/list` hashed either side of an attach and a detach, against the `listChanged: false` the handshake publishes. The one claim on the surface that is about the surface not moving. |
+| `probes/csharp_build.py` | `csharp_check_build` given a real `.csproj` to build, and given a broken toolchain. Prints MSBuild's own `N Warning(s)` summary beside the tool's `diagnostics_count`, because the payload carries both and nothing compares them. |
+| `probes/long_temp_endpoint.py` | The one platform constant the session endpoint must fit inside. Launches its own editors under temporary directories of chosen lengths, and does a raw `AF_UNIX` bind at the same length as its control so a row that could not be set up is visible as such. POSIX only. |
+| `probes/description_vs_schema.py` | Every parameter's prose read against the schema keys beside it: a stated default against `default`, a listed value against `enum`, a stated range against `minimum`/`maximum`. #576 said this was "worth grepping for as a class"; this is the grep. |
+| `probes/legacy_alias_parity.py` | Each legacy alias's published entry diffed against its canonical tool's. An alias is supposed to be the same tool under an older name, which makes every difference a claim a host reads differently depending on which name it picked. |
+| `probes/output_schema_honesty.py` | Every published `outputSchema` against the payload it describes: required properties present, declared types matching, and how much of the answer the schema covers at all. Green; kept as the regression probe. |
+| `probes/resource_subscriptions.py` | `resources/subscribe` driven by a second process that actually writes, with the write's own result printed as the control. Green: notifications arrive in about half a second and stop on unsubscribe. |
+| `probes/blackboard_patch_parity.py` | `blackboard_patch`'s path handling against the rules `blackboard_write` enforces on the same board. |
+| `probes/node_name_sanitising.py` | A node name the caller chose against the node name Godot allowed. The `#525` seam where the conversion is the engine. |
+| `probes/eval_containment.py` | Nineteen things a "read-only expression" might reach -- the filesystem, the environment, the process, the network -- each printed with its refusal. Green, and the refusals are the interesting output. |
+| `probes/call_method_reach.py` | What `scene_call_method` will call, against the script-declared-only rule it publishes. Walks the confirmation gate properly, because the outer gate refuses every row before the method rule is reached. Green. |
+| `fixtures/write_csharp_fixture.py` | A `.csproj` with one error and one warning in it. Kept out of `sandbox.py` because a C# project changes what Godot does with the directory. |
 | `editor_exit_status.py` | Not a probe against the server: the same editor invocation with and without the built addon installed, exit statuses side by side. The control for a crash on shutdown. |
 | `wait_for_session.py` | Polls `runtime_list_sessions` through the same binary the probes use, so a slow first import reads as a slow import rather than as an absent session. |
 | `bind_census.py` | Not a probe against the server: every `(class, method, hash)` bind in `src/gdextension` checked against `--dump-extension-api` output from each installed engine, `hash_compatibility` included. A miss is a null bind that prints at startup or answers 501 at call time. |
@@ -756,6 +768,95 @@ unimplemented set, and `spatial_query_raycast_batch`, `project_set_input_action`
 and `shader_get_visual_graph` answered correctly. Eight of nine reader pairs in
 `empty_versus_absent.py` are distinguishable; the ninth is #680.
 
+**The handshake makes claims too, and one of them is about the surface holding
+still.** Every session has read `tools/list` -- for modes, for annotations, for
+schemas, for `outputSchema` -- and none had read the sentence in `initialize`
+that says a host need only read it once. `capabilities.tools.listChanged: false`
+is that sentence, and all 126 entries change when the bridge does: 68 change
+`currentMode`, and the other 58 change anyway because `editorConnected` and
+`sessionKind` are published per tool (#701). Nothing sends
+`notifications/tools/list_changed`; `grep -rn "list_changed" src/` finds nothing.
+#35 is the same shape resolved the other way, by withdrawing an over-claim.
+**Read what the handshake promises before reading what the tools say.**
+
+**The fourth tool in a family is the one nobody wrote.**
+`script_check_syntax` and `shader_check_compile` have been probed for three
+sessions and publish `engine_executable`, `engine_version`, `engine_available`
+and `matches_attached_engine` between them. `csharp_check_build` sat unswept for
+fourteen sessions for one reason -- no sandbox had a `.csproj` -- and the fixture
+is five lines. It publishes none of those four (#704), counts every MSBuild
+diagnostic twice while dropping the codeless ones (#702), reports absolute host
+paths beside its own `res://` (#703), and prefers an undocumented `.sln` whose
+empty build reports `success: true` (#706). Four findings from one fixture.
+**A tool that has never been called is not a tool that works; find out what the
+fixture costs before assuming it is expensive.**
+
+**A refusal that reaches the engine is not the same as a refusal that does not.**
+`editor_render_ghost_preview` validates arguments in the server and dimensions in
+the editor. An argument-level refusal leaves the live preview alone; an
+engine-level one tears it down and reports `409`, and the clear afterwards says
+`cleared_previews: 0` (#707). The two refusals are indistinguishable to a caller
+and the control is one row apart in the same probe. **When a tool validates in
+two places, ask what each refusal costs, not only what each one says.**
+
+**Run the old probes; a green number is a claim with a date on it.**
+`advertised_vs_reported_mode.py` was written for #503 and recorded green at the
+end of session thirteen. Re-run on `28d1c2193b37` it reports two tools
+advertising `live` and answering `local` -- a value their own `executionModes`
+array does not contain (#713). The probe cost a minute and the finding was not
+reachable any other way, because both tools answer correctly in isolation.
+**A regression probe only earns its keep if somebody runs it.**
+
+**The fix that was scoped to one identifier.** #488 special-cased `self` in the
+expression sandbox because Godot's `self can't be used because instance is null`
+"reads like a fault in the caller's expression rather than a fact about the
+sandbox". Every *other* unbound identifier still gets it: `Time`, `Performance`,
+and a typo like `nodee` (#712). The comment in the source states the diagnosis
+correctly and the guard matches one string. This is #547's shape -- a fix applied
+to the case that was in front of it -- inside a message rather than across modes.
+
+**Five bytes is not a margin.** The macOS AF_UNIX `sun_path` is 104 bytes and the
+runner's temporary directory is 48 of them, which the platform workflow has been
+printing since session twelve without anyone forcing the overflow. Forced, the
+result is: plugin reports itself active, no descriptor published,
+`runtime_list_sessions` empty, and nothing anywhere naming a length (#711). Both
+ends of the bridge answer it with a bare `return false`. **A number a workflow
+has been printing for three sessions is a measurement nobody has acted on.**
+
+**Asked and green this session, so the fifteenth can spend its budget
+elsewhere.** `resources/subscribe` works end to end: a board written by a
+*separate process* produces `notifications/resources/updated` in about 0.6
+seconds, on the registered `default` board and on one `resources/list` does not
+carry, and the stream goes quiet on unsubscribe -- the refusals for
+un-notifiable URIs name the reason. Every published `outputSchema` is honest:
+zero required properties absent and zero type mismatches across twenty tools.
+`eval_gdscript`'s sandbox refused all nineteen escape attempts -- the
+filesystem, the environment, `OS.execute`, `shell_open`, a network client,
+`queue_free`, every singleton not on the denylist, and assignment -- each by
+name, because the gate for calls is an allowlist rather than the denylist the
+error message suggests. `scene_call_method` is genuinely script-declared-only:
+`queue_free`, `free`, `set_script`, `set_owner`, `emit_signal`, `call`,
+`connect` and `set` are each refused as "not a method this node's script
+declares", with a `@tool` script attached so the control passes.
+`scene_instantiate_node` reports the engine's own spelling for a name Godot
+sanitises, which is #546 handled correctly. Attaching to a session belonging to
+another project is refused with both roots in `data`. `blackboard_patch` and
+`blackboard_write` agree on path rules, and the board's `.`-or-`/` separator is
+documented. The C# findings and the unknown-argument, execution-mode and
+error-envelope censuses are identical on Windows, macOS and Ubuntu.
+
+**A control that is missing is worse than a control that fails.** Two rows this
+session read as findings until a control was added, and one of them was in a
+probe from session twelve. `posix_platform.py` asked four project walkers about
+a file whose name contains a newline; `project_audit_assets` names no script at
+all and `project_get_uid_map` answers from the import cache, so their silence was
+about `.gd` files rather than about the name. It writes a `plaincontrol.gd`
+beside the odd ones now and says "cannot be asked" where it used to score a
+miss. The other was `output_schema_honesty.py` reporting nineteen type
+mismatches, all booleans "answered as number", because `bool` is a subclass of
+`int` in Python. **Before filing, ask what the row would say if the subject were
+perfect.**
+
 ## Sessions so far
 
 | Date | Scope | Server | Findings |
@@ -784,6 +885,8 @@ and `shader_get_visual_graph` answered correctly. Eight of nine reader pairs in
 | 2026-09-15 | The other two supported platforms, for the first time: a Linux and a macOS runner beside a local Ubuntu container and a headless Godot editor on it. POSIX states Windows cannot make (unreadable files, symlinks, non-UTF-8 names, FIFOs), the shipped archives read as artefacts rather than as build output, a census of project *state* rather than of arguments, and the export and gridmap families, never swept. | `2.0.0+c3fcfb282883` and `2.0.0+nogit` (Linux) | #647-#657, eleven findings. |
 
 | 2026-09-16 | A headless editor, the only kind a runner can have and the only kind no session had probed, on Windows and -- for the first time anywhere -- on live macOS and Linux runners. Then the modes and the processes around the surface: `--yolo` and `--log-level DEBUG`, `--managed-editor` on Windows, a project over UNC, two servers writing one blackboard, the engines the subprocess tools shell out to, and what the editor does on the way out. | `2.0.0+0aadad99005d`, and `2.0.0+408a953f8f37` on the runners | #676-#689, fourteen findings. |
+
+| 2026-09-16 | The handshake's own claims rather than the tools': `listChanged: false` against a listing that moves with the bridge, and every parameter description against the schema keys beside it. Then `csharp_check_build` given a real `.csproj` for the first time in fourteen sessions, `project_export` and the ghost previews on Windows, the macOS `sun_path` overflow the twelfth session measured and never forced, the expression sandbox and the method channel walked for containment, and the old censuses re-run. | `2.0.0+28d1c2193b37`, and `2.0.0+5349d27e5f59` on the runners | #701-#713, thirteen findings. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log

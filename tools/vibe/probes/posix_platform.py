@@ -200,6 +200,14 @@ def odd_filenames(session: Session, project: Path) -> None:
     bytes that are newlines. A response is JSON, which is text. The walkers
     that enumerate the project are the ones that have to reconcile that, and
     they have never met a name they could not decode.
+
+    A plain-named control file is written beside the odd ones. Two of the four
+    walkers here do not enumerate scripts at all -- `project_audit_assets` names
+    no `.gd`, and `project_get_uid_map` answers from the import cache, so a file
+    dropped in after the last import is legitimately absent from both. Session
+    fourteen read that silence as two walkers hiding an oddly named file until
+    the control was added. A row that fails because the control fails is not a
+    finding.
     """
     print("\nFilenames a POSIX filesystem allows and a JSON response may not")
     if not POSIX:
@@ -207,7 +215,7 @@ def odd_filenames(session: Session, project: Path) -> None:
         return
     made: list[bytes] = []
     root = os.fsencode(str(project))
-    for raw in (b"latin1_caf\xe9.gd", b"two\nlines.gd"):
+    for raw in (b"plaincontrol.gd", b"latin1_caf\xe9.gd", b"two\nlines.gd"):
         target = root + b"/" + raw
         try:
             with open(target, "wb") as handle:
@@ -231,9 +239,17 @@ def odd_filenames(session: Session, project: Path) -> None:
                 "an answer", f"the client lost the server: {error}")
             continue
         text = str(payload)
-        names = ("caf" in text, "two" in text)
+        control, latin1, newline = ("plaincontrol" in text, "caf" in text, "two" in text)
+        if not control:
+            # It does not enumerate plain scripts, so it cannot be asked about
+            # oddly named ones. Say that, rather than scoring it as a miss.
+            row(f"{tool} with an undecodable name present",
+                "the control listed first",
+                "does not name plaincontrol.gd either, so it cannot be asked")
+            continue
         row(f"{tool} with an undecodable name present",
-            "an answer that names both files", f"isError={is_error} latin1={names[0]} newline={names[1]}")
+            "every odd name, since the control was named",
+            f"isError={is_error} control={control} latin1={latin1} newline={newline}")
         print(f"       {says(payload, 'total_matches', 'resource_count', 'asset_count', 'entry_count')}")
     for target in made:
         os.unlink(target)
