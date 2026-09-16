@@ -547,18 +547,25 @@ Result<void> validateTokens(const std::vector<Token>& tokens) {
         // not contain. The common case is not `self`: it is a typo in `node`,
         // or a singleton a caller reasonably expected to be there (#712).
         //
-        // Only a bare name gets here. A name after a `.` is a member read and
-        // the rule above has already answered it; a name before a `(` is a call
-        // and the rules below answer that; a forbidden or reserved name was
-        // answered two checks up, so those keep their own sentences.
+        // Only a bare name gets here, and every other position keeps the
+        // sentence it already had. A name after a `.` is a member read and a
+        // name before one is the receiver of that read, both of which the rule
+        // at the top of this loop answers, and it answers them better: it names
+        // node.get(...) as the way through for exactly that shape. A name
+        // before a `(` is a call and the rules below answer it. A forbidden or
+        // reserved name was answered two checks up.
         if (token.kind == TokenKind::Identifier &&
             !(index > 0 && tokens[index - 1].text == ".") &&
-            !(index + 1 < tokens.size() && tokens[index + 1].text == "(")) {
-            // Everything a bare word is allowed to be: the one bound name, the
-            // literals, the operators GDScript spells with letters, and the
-            // numeric constants Expression resolves itself.
+            !(index + 1 < tokens.size() &&
+              (tokens[index + 1].text == "." || tokens[index + 1].text == "("))) {
+            // Everything a bare word is allowed to be: the two names Expression
+            // is given as inputs, the literals, the operators GDScript spells
+            // with letters, and the numeric constants Expression resolves for
+            // itself. `tree` is bound and is refused later, on the ground that
+            // returning it is an unsupported non-Node Object, which is a
+            // different and true sentence.
             static const std::unordered_set<std::string> bound_bare_identifiers = {
-                "node",
+                "node", "tree",
                 "true", "false", "null",
                 "and", "or", "not", "in", "if", "else",
                 "INF", "NAN", "PI", "TAU"
