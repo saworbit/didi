@@ -123,6 +123,20 @@ jobs:
         continue-on-error: true
         run: python3 tools/vibe/probes/offline_refusals.py -p "$RUNNER_TEMP/vibe-proj"
 
+      - name: Probe -- csharp_check_build, given something to build
+        continue-on-error: true
+        run: |
+          # Fourteen sessions listed this tool as unswept because no sandbox has
+          # ever held a .csproj. Both runners ship a dotnet SDK, so the fixture
+          # is five lines. One error and one warning, so MSBuild's own summary
+          # inside the same payload is the control for the tool's own counts.
+          set -x
+          dotnet --version || true
+          cs="$RUNNER_TEMP/vibe-csharp"
+          python3 tools/vibe/sandbox.py "$cs" --overwrite
+          python3 tools/vibe/fixtures/write_csharp_fixture.py "$cs"
+          python3 -u tools/vibe/probes/csharp_build.py "$cs"             --plain-project "$RUNNER_TEMP/vibe-proj" --not-dotnet "$(command -v python3)"
+
       - name: Probe -- the published archive for this platform
         continue-on-error: true
         env:
@@ -250,6 +264,20 @@ jobs:
       - name: Probe -- the whole live surface, as a table to diff
         continue-on-error: true
         run: python3 -u tools/vibe/probes/engine_versions.py -p "$RUNNER_TEMP/live-proj"
+
+      - name: Probe -- does tools/list stay still, as initialize promises?
+        continue-on-error: true
+        run: python3 -u tools/vibe/probes/list_changed_promise.py -p "$RUNNER_TEMP/live-proj"
+
+      - name: Probe -- a temporary directory too long for sun_path
+        continue-on-error: true
+        run: |
+          # macOS holds 104 bytes of sun_path and its temporary directory is a
+          # per-user /var/folders path, which the step above has been measuring
+          # at 100 bytes since the twelfth session: four bytes of headroom, and
+          # no run has ever forced the overflow. Both ends of the bridge answer
+          # it with a bare `return false`.
+          python3 -u tools/vibe/probes/long_temp_endpoint.py             -p "$RUNNER_TEMP/live-proj" --godot "$GODOT_BIN" --wait 45
 
       - name: Probe -- the editor's own log, per call
         continue-on-error: true
