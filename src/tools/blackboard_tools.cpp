@@ -3,6 +3,8 @@
 #include "didi/common/ipc_channel.hpp"
 #include "didi/offline/blackboard.hpp"
 
+#include <limits>
+
 #include <memory>
 #include <string>
 
@@ -95,6 +97,10 @@ CallToolResult handleBlackboardWrite(const json& args, std::shared_ptr<ipc::IIpc
     if (args.contains("ttl_seconds") && !args["ttl_seconds"].is_null()) {
         request.ttl_seconds = reader.integer("ttl_seconds", 0, 1, offline::kBlackboardMaxTtlSeconds);
     }
+    if (args.contains("expected_updated_at_ms") && !args["expected_updated_at_ms"].is_null()) {
+        request.expected_updated_at_ms =
+            reader.integer("expected_updated_at_ms", 0, 0, std::numeric_limits<int64_t>::max());
+    }
     if (!reader.ok()) return CallToolResult::error(reader.failure);
 
     return finish(offline::blackboardWrite(request));
@@ -134,6 +140,10 @@ CallToolResult handleBlackboardPatch(const json& args, std::shared_ptr<ipc::IIpc
     if (args.contains("reason") && !args["reason"].is_null()) {
         request.reason = reader.string("reason", {}, 512);
     }
+    if (args.contains("expected_revision") && !args["expected_revision"].is_null()) {
+        request.expected_revision =
+            reader.integer("expected_revision", 0, 0, std::numeric_limits<int64_t>::max());
+    }
     if (!reader.ok()) return CallToolResult::error(reader.failure);
 
     return finish(offline::blackboardPatch(request));
@@ -163,6 +173,12 @@ CallToolResult handleBlackboardClear(const json& args, std::shared_ptr<ipc::IIpc
     offline::BlackboardClearRequest request;
     request.board = reader.string("board", "default", offline::kBlackboardMaxBoardNameBytes);
     request.path = reader.string("path", {}, offline::kBlackboardMaxPathBytes);
+    if (args.contains("author") && !args["author"].is_null()) {
+        request.author = reader.string("author", {}, 128);
+    }
+    if (args.contains("reason") && !args["reason"].is_null()) {
+        request.reason = reader.string("reason", {}, 512);
+    }
     if (!reader.ok()) return CallToolResult::error(reader.failure);
 
     return finish(offline::blackboardClear(request));
@@ -212,6 +228,9 @@ CallToolResult handleBlackboardTaskCreate(const json& args, std::shared_ptr<ipc:
 
     if (args.contains("description") && !args["description"].is_null()) {
         request.description = reader.string("description", {}, offline::kBlackboardMaxTaskTextCharacters);
+    }
+    if (args.contains("author") && !args["author"].is_null()) {
+        request.author = reader.string("author", {}, 128);
     }
     if (args.contains("assigned_to") && !args["assigned_to"].is_null()) {
         request.assigned_to = reader.string("assigned_to", {}, offline::kBlackboardMaxTaskIdBytes);
