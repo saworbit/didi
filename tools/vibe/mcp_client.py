@@ -239,6 +239,19 @@ class Session:
         self.close()
 
 
+class _Responses(list):
+    """A list of responses that also carries the notifications that arrived.
+
+    A plain list cannot hold an attribute, and every caller unpacks exactly two
+    values from `batch`, so the notifications ride here rather than widening
+    the return.
+    """
+
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+        self.notifications: list[dict] = []
+
+
 def batch(
     requests: Iterable[dict],
     project: str | os.PathLike[str] | None = None,
@@ -250,10 +263,17 @@ def batch(
 ) -> tuple[list[dict], str]:
     """Send a whole list of requests to one short-lived server, then read.
 
-    Returns every parsed line of stdout and the collected stderr. A line that
-    is not JSON is returned as `{"__raw__": line}` rather than dropped: a
-    server that prints something unexpected onto its own protocol stream is
-    itself a finding, and swallowing it hides that.
+    Returns the responses and the collected stderr. A line that is not JSON is
+    returned as `{"__raw__": line}` rather than dropped: a server that prints
+    something unexpected onto its own protocol stream is itself a finding, and
+    swallowing it hides that.
+
+    Server notifications are separated out rather than mixed in, and hang off
+    the returned list as `.notifications`. They are unsolicited and interleaved
+    with the replies -- `notifications/resources/updated` for a subscribed
+    board, `notifications/tools/list_changed` when the bridge state a listing
+    carries has moved -- so a caller reading `responses[-1]` for the answer to
+    its last request would otherwise get whichever of those landed after it.
 
     The handshake is prepended, so callers pass only what they are testing --
     unless a request in the list is itself an `initialize`, which is a fair
@@ -285,13 +305,20 @@ def batch(
         out, err = process.communicate()
         err += b"\n[vibe] the server did not exit within the timeout and was killed"
 
-    responses: list[dict] = []
+    responses = _Responses()
     for line in out.decode(errors="replace").splitlines():
         line = line.strip()
         if not line:
             continue
         try:
-            responses.append(json.loads(line))
+            message = json.loads(line)
         except ValueError:
             responses.append({"__raw__": line})
+            continue
+        # A notification carries a method and no id; it is not the answer to
+        # anything in the list that was sent.
+        if isinstance(message, dict) and "id" not in message and "method" in message:
+            responses.notifications.append(message)
+            continue
+        responses.append(message)
     return responses, err.decode(errors="replace")
