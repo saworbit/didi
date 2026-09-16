@@ -1327,7 +1327,7 @@ All Phase 5 subprocess tools launch an executable with an argv array, never thro
 
 ### `csharp_check_build` — Offline
 
-Runs `dotnet build` with `configuration` (`Debug` or `Release`, default `Debug`) and `timeout_seconds` (`1..300`, default `60`). Optional `project_file` must be a normalized project-contained `.csproj`; when omitted, exactly one project-root `.csproj` must exist. The result includes exit/timeout/output metadata and bounded structured MSBuild diagnostics. This is a real build and may update normal `bin`/`obj` outputs.
+Runs `dotnet build` with `configuration` (`Debug` or `Release`, default `Debug`) and `timeout_seconds` (`1..300`, default `60`). Optional `project_file` must be a normalized project-contained `.sln` or `.csproj`; when omitted, exactly one of either must sit at the project root, and a `.sln` there is built in preference to a `.csproj` beside it. The result includes exit/timeout/output metadata and bounded structured MSBuild diagnostics, whose `path` is `res://` for any file inside the project. `dotnet_executable` and `dotnet_version` name the toolchain that answered, and `DOTNET_BIN` redirects it; a value that cannot be used is passed over and reported in `dotnet_executable_configured_rejected`, and an executable that is not a .NET SDK is a `503` rather than a build verdict. `projects_built` counts the projects MSBuild produced an assembly for, and `success` is false when `dotnet` exits `0` having built none, which is what a solution with unresolvable project paths or no configuration mapping does. This is a real build and may update normal `bin`/`obj` outputs.
 
 ### `shader_get_visual_graph` — Live
 
