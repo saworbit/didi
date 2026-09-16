@@ -249,7 +249,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"project_export.output_path",
          "Where to write the exported build."},
         {"project_export.mode",
-         "Whether to export a debug or a release build."},
+         "Which kind of export to run: release, debug, or pack. release and debug need the export templates for the preset's platform to be installed; pack writes a .pck and is the one that works without them, which is the usual state of a fresh checkout or a CI runner."},
         {"project_export.timeout_seconds",
          "How long the export may take before it is abandoned."},
         {"project_export.overwrite",
@@ -558,7 +558,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "The task to complete. Only the lease holder may, because completing someone else's "
          "releases its dependents on work that is still half done."},
         {"blackboard_task_list.status",
-         "Keep only tasks in this state, such as pending, claimed or blocked."},
+         "Keep only tasks in this state: pending, in_progress, blocked, needs_review, completed or failed. A claimed task is in_progress; there is no claimed state."},
         {"blackboard_task_list.assigned_to",
          "Keep only tasks held by this agent."},
         {"blackboard_task_list.tag",
