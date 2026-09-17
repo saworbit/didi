@@ -144,6 +144,22 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      # Every platform builds with Ninja now, so every platform can cache. This
+      # job was the exception, on the Visual Studio generator, which ignores
+      # CMAKE_<LANG>_COMPILER_LAUNCHER -- so it was the last build in this
+      # workflow still compiling from scratch after #725 and #726 cached the
+      # others, and on its own the whole of CI's critical path at about twelve
+      # minutes. Ninja needs the MSVC environment on PATH; sccache is the
+      # variant that understands cl.exe.
+      #
+      # This step sits above the tap cleanup rather than below it because the
+      # cleanup has to be the step immediately before the cache action, which
+      # validate_documentation.py enforces. The two never both run anyway: one
+      # is Windows only and the other macOS only.
+      - name: Set Up MSVC Environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
       - name: Remove Unused Homebrew Tap (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -152,13 +168,10 @@ jobs:
             brew untap aws/tap
           fi
 
-      # POSIX only. The Windows job uses the Visual Studio generator, which
-      # ignores CMAKE_<LANG>_COMPILER_LAUNCHER, and its configure step never set
-      # one, so installing ccache there cached nothing and only cost time.
-      - name: Setup Compiler Cache (ccache)
-        if: runner.os != 'Windows'
+      - name: Setup Compiler Cache
         uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         with:
+          variant: ${{ runner.os == 'Windows' && 'sccache' || 'ccache' }}
           key: ${{ matrix.os }}-${{ matrix.compiler }}
           max-size: 500M
 
@@ -246,23 +259,23 @@ jobs:
         run: |
           "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_phase7_schema_contract tests.test_phase7_plan_ownership tests.test_phase7_signal_admission -v
 
-      - name: Configure CMake (Windows)
-        if: runner.os == 'Windows'
+      # One step for all three platforms, now that Windows is on Ninja too. The
+      # launcher is the only thing that differs, because ccache does not handle
+      # cl.exe and sccache does.
+      - name: Configure CMake
         shell: bash
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="$DIDI_CMAKE_PYTHON"
-
-      - name: Configure CMake (POSIX Ninja)
-        if: runner.os != 'Windows'
-        shell: bash
+        env:
+          DIDI_COMPILER_LAUNCHER: ${{ runner.os == 'Windows' && 'sccache' || 'ccache' }}
         run: |
           cmake -B build -S . -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_COMPILER_LAUNCHER="$DIDI_COMPILER_LAUNCHER" \
+            -DCMAKE_CXX_COMPILER_LAUNCHER="$DIDI_COMPILER_LAUNCHER" \
             -DPython3_EXECUTABLE="$DIDI_CMAKE_PYTHON"
 
+      # Ninja is single-config, so there is no --config to pass.
       - name: Compile Targets in Parallel
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --parallel
 
       - name: Verify the staged addon is complete and clean
         shell: bash
@@ -290,7 +303,7 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            ./build/Release/didi_tests.exe
+            ./build/didi_tests.exe
           else
             ./build/didi_tests
           fi
@@ -327,7 +340,7 @@ jobs:
           # a failure, so the gate is kept in one place rather than split
           # between here and an `if:` condition.
           if [ "$RUNNER_OS" = "Windows" ]; then
-            export DIDI_TEST_BINARY="$PWD/build/Release/didi_tests.exe"
+            export DIDI_TEST_BINARY="$PWD/build/didi_tests.exe"
           else
             export DIDI_TEST_BINARY="$PWD/build/didi_tests"
           fi
@@ -337,7 +350,7 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            ./build/Release/didi.exe --dump-tool-manifest > build/tool_manifest.json
+            ./build/didi.exe --dump-tool-manifest > build/tool_manifest.json
           else
             ./build/didi --dump-tool-manifest > build/tool_manifest.json
           fi
@@ -347,7 +360,7 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            export DIDI_TEST_BINARY="$PWD/build/Release/didi.exe"
+            export DIDI_TEST_BINARY="$PWD/build/didi.exe"
           else
             export DIDI_TEST_BINARY="$PWD/build/didi"
           fi
@@ -386,7 +399,7 @@ jobs:
           # half drives the binary, because the bilateral extension gate is a
           # property of what a given client is actually served.
           if [ "$RUNNER_OS" = "Windows" ]; then
-            export DIDI_TEST_BINARY="$PWD/build/Release/didi.exe"
+            export DIDI_TEST_BINARY="$PWD/build/didi.exe"
           else
             export DIDI_TEST_BINARY="$PWD/build/didi"
           fi
@@ -537,7 +550,7 @@ jobs:
           import json
           import os
 
-          exe = './build/Release/didi.exe' if os.name == 'nt' else './build/didi'
+          exe = './build/didi.exe' if os.name == 'nt' else './build/didi'
           project_root = os.path.abspath('tests/godot_smoke')
           proc = subprocess.Popen([exe, '--project', project_root], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
