@@ -93,6 +93,27 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The last uncached build in CI is cached, and every platform now configures
+  the same way.** After the sanitizer job and the two live Godot jobs were given
+  a compiler cache, `windows-latest (msvc)` was the only build left compiling
+  from scratch, and on its own it was the entire critical path: a 12m28s run in
+  which every other job finished inside six minutes. It was the exception
+  because it used the Visual Studio generator, which ignores
+  `CMAKE_<LANG>_COMPILER_LAUNCHER`, so a cache could not be attached to it
+  without moving it to Ninja. It is on Ninja and sccache now, which collapses the
+  two configure steps into one -- the launcher is the only thing that still
+  differs across the three platforms, because ccache does not handle `cl.exe`
+  and sccache does. `--config Release` goes with it, since a single-config
+  generator has no configuration to select.
+
+  The Windows binaries move from `build/Release/` to `build/` in the six places
+  that named them, two of which hand the test runner `didi_tests` and four of
+  which hand it the server `didi`; the distinction is preserved. `ctest -C
+  Release` is left alone deliberately: CTest ignores `-C` on a single-config
+  generator and still finds both tests. The staged addon is unchanged, verified
+  by running the workflow's own file-list check against a real Ninja tree rather
+  than trusting that it would be.
+
 - **The live Godot jobs cache their compile instead of repeating it.** Both
   engine versions built the same Windows Release tree from scratch, and the
   `windows-latest (msvc)` job beside them built it a third time: about 11 minutes
