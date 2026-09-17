@@ -879,10 +879,37 @@ jobs:
           7z x godot.zip -ogodot-bin
           ls godot-bin
 
+      # This job compiled the same Release tree the msvc job had just compiled,
+      # from scratch, twice over, once per engine version: about 11 minutes of
+      # each 17-minute run. Sharing one build between the three was the obvious
+      # move and the wrong one -- the msvc build is 9m40s, so making these jobs
+      # wait for it buys nothing and costs a download. Caching the compile is
+      # what actually moves the number, the way it already does on Linux and
+      # macOS.
+      #
+      # The Visual Studio generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER,
+      # which is why the launcher lives here with Ninja rather than beside the
+      # msvc job. Ninja in turn needs the MSVC environment on PATH. Both engine
+      # versions compile a byte-identical tree, so they share one key: the two
+      # differ only in the editor they then drive.
+      - name: Set Up MSVC Environment
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+      - name: Setup Compiler Cache (sccache)
+        uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+        with:
+          variant: sccache
+          key: windows-release-ninja
+          max-size: 500M
+
       - name: Configure and Build
+        shell: bash
         run: |
-          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --config Release --parallel
+          cmake -B build -S . -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          cmake --build build --parallel
 
       - name: Run Live Godot Integration Harness
         shell: pwsh
@@ -915,7 +942,11 @@ jobs:
                      Where-Object { $_.Name -notlike "*console*" } | Select-Object -First 1
           }
           if (-not $godot) { throw "Godot executable not found under godot-bin" }
-          $env:DIDI_TEST_BINARY = (Resolve-Path build/Release/didi.exe).Path
+          # Ninja is single-config, so the binary is at build/didi.exe rather
+          # than under a per-configuration directory. The build tree stays at
+          # build/, which is where the harness writes its engine logs and where
+          # the artifact upload below looks for them.
+          $env:DIDI_TEST_BINARY = (Resolve-Path build/didi.exe).Path
           $env:DIDI_RECOVERY_GODOT = $godot.FullName
           $env:DIDI_RECOVERY_ARTIFACT_DIR = Join-Path $PWD 'build/recovery-artifacts'
           $env:PYTHONPATH = Join-Path $PWD 'tests'
