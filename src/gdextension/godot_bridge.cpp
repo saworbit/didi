@@ -168,6 +168,10 @@ const std::map<std::string, std::string>& bridgeErrorSentences() {
      "The change could not be registered with the editor's undo history, so it was not made."},
     {"target_method_not_found",
      "The target node has no method by that name."},
+    {"target_script_not_compiled",
+     "The script on the target node declares this method and the engine does not have it, which "
+     "is what a script that failed to compile looks like. This is not a problem with the method "
+     "name."},
     {"tilemap_layer_has_no_tileset",
      "That TileMapLayer has no TileSet, so no cell can be placed on it."},
     {"tilemap_postcondition_mismatch",
@@ -1576,6 +1580,155 @@ Result<std::string> nodeString(GDExtensionObjectPtr node, const char* method, in
     auto type = GodotApi::instance().variant_get_type(result.value().ptr());
     return stringFromVariant(result.value(), type);
 }
+
+// Why a method the caller can see in the file is not on the node.
+//
+// A GDScript that will not compile still gets assigned to the node -- the
+// scene loader sets the Script resource whether or not it parsed -- but no
+// script instance is created, so Object.has_method answers false for every
+// method the file declares. The refusal that produced named the method and
+// pointed the caller at a name that was already right (#729).
+//
+// The commonest cause by far is the one project_set_autoload creates: the
+// singleton is registered and persisted, and the editor does not know it until
+// it restarts, so every script that names it fails to compile in the meantime.
+// script_check_syntax already carries a note for this exact condition; the
+// connect path carried nothing.
+struct UncompiledScript {
+    bool found{false};
+    std::string path;
+    std::vector<std::string> unresolved_autoloads;
+};
+
+// The autoload names this project has registered, read from ProjectSettings.
+// Empty when the settings cannot be read, which makes the caller fall back to
+// the plain "did not compile" answer rather than inventing a cause.
+std::vector<std::string> registeredAutoloadNames() {
+    std::vector<std::string> names;
+    auto project_settings = singleton("ProjectSettings");
+    if (project_settings.isErr()) return names;
+    auto properties = callObject(project_settings.value(), "Object", "get_property_list", 3995934104LL);
+    if (properties.isErr()) return names;
+    auto size_value = callVariant(properties.value(), "size");
+    if (size_value.isErr()) return names;
+    auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (size.isErr()) return names;
+    auto name_key = makeString("name");
+    if (name_key.isErr()) return names;
+    for (int64_t index = 0; index < size.value(); ++index) {
+        auto position = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (position.isErr()) continue;
+        auto descriptor = callVariant(properties.value(), "get", {&position.value()});
+        if (descriptor.isErr()) continue;
+        auto property_name_value = callVariant(descriptor.value(), "get", {&name_key.value()});
+        if (property_name_value.isErr()) continue;
+        const auto type = GodotApi::instance().variant_get_type(property_name_value.value().ptr());
+        if (type != GDEXTENSION_VARIANT_TYPE_STRING && type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+            continue;
+        }
+        auto property_name = stringFromVariant(property_name_value.value(), type);
+        if (property_name.isErr()) continue;
+        if (!strings::startsWith(property_name.value(), "autoload/") ||
+            property_name.value().size() <= 9) {
+            continue;
+        }
+        names.push_back(property_name.value().substr(9));
+    }
+    return names;
+}
+
+// Whether `name` appears in `source` as an identifier rather than inside a
+// longer word. Deliberately textual: it is used to name a likely cause in a
+// refusal, not to decide anything.
+bool sourceNamesIdentifier(const std::string& source, const std::string& name) {
+    if (name.empty()) return false;
+    const auto is_word = [](unsigned char character) {
+        return std::isalnum(character) != 0 || character == '_';
+    };
+    size_t at = source.find(name);
+    while (at != std::string::npos) {
+        const bool left_clear = at == 0 || !is_word(static_cast<unsigned char>(source[at - 1]));
+        const size_t after = at + name.size();
+        const bool right_clear =
+            after >= source.size() || !is_word(static_cast<unsigned char>(source[after]));
+        if (left_clear && right_clear) return true;
+        at = source.find(name, at + 1);
+    }
+    return false;
+}
+
+// Whether `source` declares `func <name>(`, allowing `static func` and any
+// spacing. Textual, like the autoload scan above, and used for the same
+// purpose: to say which of two causes a refusal has.
+bool sourceDeclaresFunction(const std::string& source, const std::string& name) {
+    if (name.empty()) return false;
+    size_t at = source.find("func");
+    while (at != std::string::npos) {
+        const bool left_clear =
+            at == 0 || !(std::isalnum(static_cast<unsigned char>(source[at - 1])) ||
+                         source[at - 1] == '_');
+        size_t cursor = at + 4;
+        if (left_clear && cursor < source.size() &&
+            (source[cursor] == ' ' || source[cursor] == '\t')) {
+            while (cursor < source.size() && (source[cursor] == ' ' || source[cursor] == '\t')) {
+                ++cursor;
+            }
+            if (source.compare(cursor, name.size(), name) == 0) {
+                cursor += name.size();
+                while (cursor < source.size() && (source[cursor] == ' ' || source[cursor] == '\t')) {
+                    ++cursor;
+                }
+                if (cursor < source.size() && source[cursor] == '(') return true;
+            }
+        }
+        at = source.find("func", at + 4);
+    }
+    return false;
+}
+
+// Whether the node's script declares this method while the engine does not have
+// it, which is what a script that did not compile looks like from outside.
+//
+// can_instantiate is not the test, and is the obvious wrong one: in the editor
+// it is false for every script that is not @tool, because editor scripting is
+// off, so it would call a perfectly healthy script uncompiled. Script has no
+// bound is_valid either. The file is the witness -- which is exactly the
+// finding: the method is right there in the source, and the engine does not
+// have it.
+UncompiledScript uncompiledScriptOn(GDExtensionObjectPtr node, const std::string& method) {
+    UncompiledScript report;
+    auto script_value = callObject(node, "Object", "get_script", 1214101251LL);
+    if (script_value.isErr()) return report;
+    auto script = objectFromVariant(script_value.value());
+    if (script.isErr() || !script.value()) return report;
+
+    auto source_value = callObject(script.value(), "Script", "get_source_code", 201670096LL);
+    if (source_value.isErr()) return report;
+    auto source = stringFromVariant(source_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+    if (source.isErr()) return report;
+    if (!sourceDeclaresFunction(source.value(), method)) return report;
+
+    report.found = true;
+    auto path = callObject(script.value(), "Resource", "get_path", 201670096LL);
+    if (path.isOk()) {
+        auto text = stringFromVariant(path.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+        if (text.isOk()) report.path = text.value();
+    }
+    for (const auto& autoload : registeredAutoloadNames()) {
+        if (sourceNamesIdentifier(source.value(), autoload)) {
+            report.unresolved_autoloads.push_back(autoload);
+        }
+    }
+    return report;
+}
+
+// The sentence script_check_syntax already carries for this condition, so the
+// same fact reads the same way whichever tool the caller met it through.
+const char* const kAutoloadRestartNote =
+    "A newly registered autoload does not exist in the editor that registered it until that "
+    "editor restarts, and a script naming one cannot compile until then, so its methods are not "
+    "on the node yet. The engine resolves the identifier at run time. Do not rewrite the script "
+    "for this: restart the editor, or call editor_reload_project.";
 
 Result<std::string> logicalPathFromEditedRoot(GDExtensionObjectPtr root,
                                                GDExtensionObjectPtr target) {
@@ -8091,6 +8244,39 @@ json GodotBridge::execute(const std::string& method, const json& params,
                         params["emitter_node"].get<std::string>() + ".");
             }
             if (!has_method.value()) {
+                // Before blaming the name. A script that did not compile is
+                // still assigned to the node and has no instance behind it, so
+                // has_method answers false for every method the file declares
+                // and the refusal sent the caller to rename something that was
+                // already right (#729).
+                const auto uncompiled = uncompiledScriptOn(target.value(), target_method);
+                if (uncompiled.found) {
+                    json data = {{"target_node", params["target_node"].get<std::string>()},
+                                 {"target_method", target_method},
+                                 {"script_path",
+                                  uncompiled.path.empty() ? json(nullptr) : json(uncompiled.path)},
+                                 {"unresolved_autoloads", uncompiled.unresolved_autoloads}};
+                    std::string detail = "The script is ";
+                    detail += uncompiled.path.empty() ? "attached to " + params["target_node"].get<std::string>()
+                                                      : uncompiled.path;
+                    detail += ", it declares '" + target_method +
+                              "', and the engine does not have that method on the node.";
+                    if (!uncompiled.unresolved_autoloads.empty()) {
+                        detail += " It names ";
+                        for (size_t index = 0; index < uncompiled.unresolved_autoloads.size(); ++index) {
+                            if (index > 0) detail += ", ";
+                            detail += "'" + uncompiled.unresolved_autoloads[index] + "'";
+                        }
+                        detail += uncompiled.unresolved_autoloads.size() == 1
+                                      ? ", which is an autoload registered in this project. "
+                                      : ", which are autoloads registered in this project. ";
+                        detail += kAutoloadRestartNote;
+                        data["note"] = kAutoloadRestartNote;
+                    } else {
+                        detail += " Check it with script_check_syntax.";
+                    }
+                    return bridgeError(409, "target_script_not_compiled", std::move(data), detail);
+                }
                 return bridgeError(
                     404, "target_method_not_found",
                     {{"target_node", params["target_node"].get<std::string>()},

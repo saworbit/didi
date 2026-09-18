@@ -247,6 +247,8 @@ exact callable a connect added, and redo restores it.
 
 Whether the target method can accept the arguments the signal carries is a precondition for `signal_connect` only. A disconnect never calls the method, so an incompatible pair is answered the same way any other pair that is not connected is answered: `409`, no such connection. `signal_disconnect` never reports a method signature problem.
 
+A method the file declares and the engine does not have is `409` with `code: "target_script_not_compiled"`, not `404 target_method_not_found`. A GDScript that will not compile is still assigned to the node, and no script instance stands behind it, so every method the file declares is absent as far as the engine is concerned; reported as a missing method it sends a caller to rename something that was already right. The refusal carries `script_path`, and `unresolved_autoloads` naming any singleton this project has registered that the script mentions, with the same `note` `script_check_syntax` carries for that condition: a newly registered autoload does not exist in the editor that registered it until that editor restarts, so nothing naming it compiles until then. A method that is in no file is still `404`.
+
 ### `signal_emit` — Live
 
 Mutation, and the one that runs game code: emitting a signal invokes whatever is

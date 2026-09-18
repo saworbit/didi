@@ -128,6 +128,21 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   first and it named the timeout, while the cause sat in `errors` one key away
   (#744). A run that times out with errors captured now names the count, the
   timeout and the first message.
+- **A handler on a script that did not compile is reported as that, not as a
+  missing method.** Register an autoload, write the scripts that use it, wire
+  the signals: that is the order every Godot project is built in, and
+  `project_set_autoload` says `requires_editor_restart: true` for a reason. What
+  it does not say is what the restart costs every other tool. Until it happens,
+  a script naming the new singleton will not compile in that editor, no script
+  instance stands behind it, and every method the file declares is absent as far
+  as the engine is concerned. `signal_connect` answered "The target node has no
+  method by that name" and named the method -- correct, and the one thing that
+  was not wrong -- so the repair a caller reaches for is to rename a handler
+  that is already right (#729). That is now `409` with
+  `code: "target_script_not_compiled"`, carrying `script_path`,
+  `unresolved_autoloads` naming any registered singleton the script mentions,
+  and the same `note` `script_check_syntax` already carries for this condition.
+  A method that is in no file is still `404 target_method_not_found`.
 
 - **A raycast in the editor asks the edited scene's own world, and answers with
   a path the surface takes.** Every spatial query resolved its world from the
