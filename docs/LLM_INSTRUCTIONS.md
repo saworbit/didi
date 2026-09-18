@@ -76,7 +76,7 @@ Project-wide mutations are persisted immediately. Re-read the corresponding list
 
 ### Create, pack, open, and close scenes
 
-- Use `scene_create` for empty Node2D, Node3D, or Control scenes.
+- Use `scene_create` for an empty scene, with `root_type` set to whatever the scene is: `CharacterBody2D` for a player, `Area2D` for a pickup, `CanvasLayer` for a HUD, any class that inherits `Node`. It defaults to `Node2D`.
 - Use `scene_pack_branch` to serialize an owned duplicate of a live branch without detaching the source.
 - Use `scene_open` and verify with `scene_get_hierarchy`.
 - `scene_close` needs `discard_unsaved: true` unless the engine can prove the scene is clean. Godot 4.7 exposes `get_unsaved_scenes()` and Didi reads it, so a clean scene closes with no flag and answers `dirty_state: "clean"`. Godot 4.5 and 4.6 expose no dirty state, so every close there needs the flag, and so does a scene the engine reports as unsaved or one that has never been saved. Read `dirty_state_readable` in the result rather than assuming; ask for or infer discard intent only when discarding is genuinely authorized.

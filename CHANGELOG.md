@@ -157,6 +157,18 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   validator drops branches whose declared type cannot hold the value, and
   describes an array branch by its length rather than as "no required
   properties", which is #489's finding in the shape this change produces.
+- **`scene_create` makes the scene you meant.** `root_type` was an enum of
+  `Node2D`, `Node3D` and `Control`, and almost every scene in a real project has
+  a root outside it: a player or an enemy is a `CharacterBody2D`, a pickup or a
+  trigger an `Area2D`, terrain a `StaticBody2D`, a HUD a `CanvasLayer`. The
+  route that worked was to create a throwaway `Node2D` scene, instantiate the
+  type you wanted under it, build the subtree there and `scene_pack_branch` it
+  to the real path -- four calls, nothing on the surface saying so, and a
+  scratch scene left on disk the caller then has to remember to delete (#740).
+  `root_type` is any Godot class that inherits `Node` now, which is the set
+  `scene_instantiate_node` has always taken. A class the engine does not know
+  and a class that is not a `Node` are refused separately, each naming the
+  class, and neither writes a file.
 
 - **A syntax check says whether it asked a compiler.** `script_check_syntax`
   takes either a `file_path` or a `source_text`, and only the first runs

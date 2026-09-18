@@ -4423,7 +4423,13 @@ void ToolRegistry::registerAllDefaultTools() {
         "scene_create", "Creates, saves, and opens an empty Node2D, Node3D, or Control scene.",
         {{"type", "object"}, {"properties", {
             {"scene_path", {{"type", "string"}}},
-            {"root_type", {{"type", "string"}, {"enum", {"Node2D", "Node3D", "Control"}}, {"default", "Node2D"}}},
+            {"root_type", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128},
+                           {"default", "Node2D"},
+                           {"description",
+                            "Any Godot class that inherits Node, the same set scene_instantiate_node "
+                            "takes: CharacterBody2D for a player, Area2D for a pickup, CanvasLayer "
+                            "for a HUD. A class the engine does not know, or one that is not a Node, "
+                            "is refused naming it."}}},
             {"root_name", {{"type", "string"}, {"default", "Root"}}},
             {"overwrite", {{"type", "boolean"}, {"default", false}}}
         }}, {"required", {"scene_path"}}},
