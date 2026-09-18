@@ -9,6 +9,12 @@
 #include "didi/offline/test_runner.hpp"
 #include "didi/runtime/session_client.hpp"
 
+// Both are used directly by the detached-launch wait below. MSVC hands them
+// over through another header and libc++ does not, so a clean Windows build
+// says nothing about this: the macOS clang job is where it shows up.
+#include <chrono>
+#include <thread>
+
 namespace didi {
 namespace mcp {
 
