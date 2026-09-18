@@ -3573,7 +3573,11 @@ void ToolRegistry::registerAllDefaultTools() {
                      "matters: Godot applies indexed sub-properties in file order, so tracks/0/type "
                      "has to come before the rest of track 0. A value is a string, number, boolean, "
                      "array, or an object. An object with x/y, x/y/z, x/y/z/w or r/g/b(/a) numbers "
-                     "becomes the matching Vector or Color; any other object is a Dictionary. To "
+                     "becomes whichever Vector or Color the property is declared as, and the "
+                     "matching one by shape when the class reference does not carry the property; "
+                     "any other object is a Dictionary. So tile_size on a TileSet takes {x, y} and "
+                     "is written Vector2i, and a fractional component in an integer vector is "
+                     "refused rather than truncated. To "
                      "choose the type yourself, give the object a \"type\": Vector2i, Vector3i, "
                      "Vector4i, Quaternion and Color take their components; NodePath and StringName "
                      "take their text under \"value\"; the packed arrays take their elements under "
@@ -3622,7 +3626,12 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"save_path"}}
         };
-        t.handler = [this](const json& args) { return handleResourceCreate(args, m_ipcClient); };
+        // The source client, not the lease dispatch wrapper. This tool sends no
+        // request; it reads the selected session descriptor to say whether the
+        // pinned class reference its property_check used matches the attached
+        // engine, and the wrapper is not a session client, so the two fields were
+        // never emitted (#735). Same reason script_reflect_class takes it.
+        t.handler = [this](const json& args) { return handleResourceCreate(args, m_sourceIpcClient); };
         registerTool(std::move(t));
     }
     {

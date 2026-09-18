@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <initializer_list>
 #include <map>
@@ -169,8 +170,13 @@ struct ReferenceScope {
     std::vector<std::string> visible_sub_ids;
 };
 
+// `declared` is the component type the class reference says this property has,
+// when it has one. It is passed at the top level of a property only: the shape
+// of the JSON decides everything nested inside an array or a dictionary, as it
+// always has.
 Result<std::string> tresLiteral(const json& value, const std::string& property,
-                                ReferenceScope* scope = nullptr);
+                                ReferenceScope* scope = nullptr,
+                                const ComponentType* declared = nullptr);
 
 Result<std::string> tresComponentLiteral(const ComponentType& type, const json& value,
                                          const std::string& property) {
@@ -339,7 +345,7 @@ Result<std::string> tresNamedTypeLiteral(const json& value, const std::string& p
 // reading. A refusal costs the caller one call. A silent wrong write costs
 // them the time they spend debugging the animation instead of the file.
 Result<std::string> tresLiteral(const json& value, const std::string& property,
-                                ReferenceScope* scope) {
+                                ReferenceScope* scope, const ComponentType* declared) {
     if (value.is_string()) return "\"" + escapeTresString(value.get<std::string>()) + "\"";
     if (value.is_boolean()) return std::string(value.get<bool>() ? "true" : "false");
     if (value.is_number()) return value.dump();
@@ -362,9 +368,39 @@ Result<std::string> tresLiteral(const json& value, const std::string& property,
         return Error::invalidArgument("Property \"" + property +
                                       "\" holds a value resource_create cannot write");
     }
-    if (asksForANamedType(value)) return tresNamedTypeLiteral(value, property, scope);
+    if (asksForANamedType(value)) {
+        // A type the caller named that the property does not have is the same
+        // silent loss as a property the type does not declare: Godot drops a
+        // Vector2 written into a Vector2i slot on load, so the file the caller
+        // was told about is not the file they get (#730).
+        const auto named = value["type"].is_string() ? value["type"].get<std::string>()
+                                                     : std::string();
+        if (declared && !named.empty() && named != declared->name) {
+            return Error::invalidArgument(
+                "Property \"" + property + "\" is declared " + declared->name + " by " +
+                offline::ClassReference::instance().apiVersion() + ", and a " + named +
+                " written into it is dropped when Godot loads the file. Send it as " +
+                declared->name + ", or leave the type out and it will be written as one.");
+        }
+        return tresNamedTypeLiteral(value, property, scope);
+    }
 
-    // No named type, so the shape decides, as it always has.
+    // The property's declared type beats the shape of the JSON. `{x, y}` used
+    // to become Vector2(..) wherever it appeared, including in the Vector2i
+    // slots a TileSet's tile_size and an atlas source's texture_region_size
+    // are, and Godot drops the wrong one on load (#730). The components are
+    // checked against the declared type here, so a fractional value in an
+    // integer vector is refused rather than truncated.
+    if (declared && value.is_object() && !value.empty()) {
+        if (std::strcmp(declared->name, "Color") == 0 && !value.contains("a")) {
+            json with_alpha = value;
+            with_alpha["a"] = 1.0;
+            return tresComponentLiteral(*declared, with_alpha, property);
+        }
+        return tresComponentLiteral(*declared, value, property);
+    }
+
+    // No named type and nothing declared, so the shape decides, as it always has.
     if (value.size() == 4 && hasNumericKeys(value, {"r", "g", "b", "a"})) {
         return "Color(" + value["r"].dump() + ", " + value["g"].dump() + ", " +
                value["b"].dump() + ", " + value["a"].dump() + ")";
@@ -490,7 +526,12 @@ Result<std::vector<std::pair<std::string, json>>> orderedProperties(const json& 
 // which is the case for a script class, a type from another extension, or a
 // reference file that is not installed. Those cannot be checked and must not be
 // refused.
-bool declaredPropertyNames(const std::string& resource_type, std::set<std::string>& names) {
+// The properties a type has, with the type the class reference declares for
+// each. The name half refuses a property the type does not have; the type half
+// decides which literal a `{x, y}` is written as, because the JSON cannot say
+// and the shape of it guesses wrong for every integer vector (#730).
+bool declaredPropertyNames(const std::string& resource_type, std::set<std::string>& names,
+                           std::map<std::string, std::string>* types = nullptr) {
     const auto& reference = offline::ClassReference::instance();
     std::string current = resource_type;
     std::set<std::string> visited;
@@ -501,6 +542,12 @@ bool declaredPropertyNames(const std::string& resource_type, std::set<std::strin
             for (auto it = (*record)["properties"].begin();
                  it != (*record)["properties"].end(); ++it) {
                 names.insert(it.key());
+                // A base class declaring the same name does not override the
+                // derived one, which was inserted first.
+                if (types && it.value().is_object() && it.value().contains("type") &&
+                    it.value()["type"].is_string()) {
+                    types->emplace(it.key(), it.value()["type"].get<std::string>());
+                }
             }
         }
         const std::string parent = record->value("inherits", std::string());
@@ -520,6 +567,36 @@ bool isStorageOnlyPropertyName(const std::string& name) {
     return name.empty() || name.front() == '_' || name.find('/') != std::string::npos;
 }
 
+// The component type each property of this type is declared as, for the ones
+// that have one. Empty for a type the class reference does not carry, which is
+// the same condition checkPropertiesAgainstType reports as unchecked.
+std::map<std::string, const ComponentType*> declaredComponentTypes(
+    const std::string& resource_type) {
+    std::map<std::string, const ComponentType*> found;
+    std::set<std::string> names;
+    std::map<std::string, std::string> types;
+    if (!declaredPropertyNames(resource_type, names, &types)) return found;
+    for (const auto& entry : types) {
+        if (const auto* component = findComponentType(entry.second)) {
+            found.emplace(entry.first, component);
+        }
+    }
+    return found;
+}
+
+// The literal the shape of this JSON would have produced on its own, or empty
+// when the shape decides nothing. Only used to say whether naming the declared
+// type changed the answer, so a caller can see the correction happen.
+const char* shapeDerivedComponentName(const json& value) {
+    if (!value.is_object()) return nullptr;
+    if (value.size() == 4 && hasNumericKeys(value, {"r", "g", "b", "a"})) return "Color";
+    if (value.size() == 3 && hasNumericKeys(value, {"r", "g", "b"})) return "Color";
+    if (hasNumericKeys(value, {"x", "y", "z", "w"})) return "Vector4";
+    if (hasNumericKeys(value, {"x", "y", "z"})) return "Vector3";
+    if (hasNumericKeys(value, {"x", "y"})) return "Vector2";
+    return nullptr;
+}
+
 // Refuses property names the type does not have. Godot drops them silently on
 // load, so the file was well formed, the caller was told they were written, and
 // nothing in the surface would ever show the loss.
@@ -529,7 +606,8 @@ Result<json> checkPropertiesAgainstType(
     const std::string& where,
     bool allow_unknown_type) {
     std::set<std::string> declared;
-    if (!declaredPropertyNames(resource_type, declared)) {
+    std::map<std::string, std::string> declared_types;
+    if (!declaredPropertyNames(resource_type, declared, &declared_types)) {
         // Godot does not drop one property for a type it does not have; it
         // fails to instantiate the resource at all, so the file this would
         // write cannot be loaded. Refusing it is the same rule the property
@@ -551,13 +629,27 @@ Result<json> checkPropertiesAgainstType(
     }
     std::vector<std::string> unknown;
     json unverified = json::array();
+    json retyped = json::object();
     for (const auto& [name, value] : properties) {
-        (void)value;
         // `script` is how a resource gets properties of its own, and it is the
         // one case where names the type does not declare are expected. The API
         // dump does not list it as a property of Object, so it is named here.
         if (name == "script") continue;
-        if (declared.count(name)) continue;
+        if (declared.count(name)) {
+            // The declared type is about to be used for the literal instead of
+            // the shape of the JSON. Where the two disagree the caller's file
+            // changes, so it is reported rather than corrected in silence.
+            const auto declaration = declared_types.find(name);
+            if (declaration != declared_types.end() && !asksForANamedType(value)) {
+                if (const auto* component = findComponentType(declaration->second)) {
+                    const char* guess = shapeDerivedComponentName(value);
+                    if (guess && std::strcmp(guess, component->name) != 0) {
+                        retyped[name] = component->name;
+                    }
+                }
+            }
+            continue;
+        }
         if (isStorageOnlyPropertyName(name)) {
             unverified.push_back(name);
             continue;
@@ -579,6 +671,7 @@ Result<json> checkPropertiesAgainstType(
     json report = {{"checked", true},
                    {"api_version", offline::ClassReference::instance().apiVersion()}};
     if (!unverified.empty()) report["not_declared_but_written"] = std::move(unverified);
+    if (!retyped.empty()) report["written_as_declared_type"] = std::move(retyped);
     return report;
 }
 
@@ -778,8 +871,12 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         std::ostringstream block;
         block << "\n[sub_resource type=\"" << sub.resource_type << "\" id=\"" << sub.id << "\"]\n";
         json names = json::array();
+        const auto sub_declared = declaredComponentTypes(sub.resource_type);
         for (const auto& [name, value] : sub.properties) {
-            auto literal = tresLiteral(value, sub.id + "." + name, &scope);
+            const auto declaration = sub_declared.find(name);
+            auto literal = tresLiteral(
+                value, sub.id + "." + name, &scope,
+                declaration == sub_declared.end() ? nullptr : declaration->second);
             if (literal.isErr()) return CallToolResult::fromError(literal.error());
             block << name << " = " << literal.value() << "\n";
             names.push_back(name);
@@ -795,8 +892,13 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     std::ostringstream body;
     body << "\n[resource]\n";
     json written_order = json::array();
+    const auto root_declared = declaredComponentTypes(resource_type);
     for (const auto& [name, value] : ordered.value()) {
-        auto literal = tresLiteral(value, name, &scope);
+        const auto declaration = root_declared.find(name);
+        auto literal = tresLiteral(value, name, &scope,
+                                   declaration == root_declared.end()
+                                       ? nullptr
+                                       : declaration->second);
         if (literal.isErr()) return CallToolResult::fromError(literal.error());
         body << name << " = " << literal.value() << "\n";
         written_order.push_back(name);
