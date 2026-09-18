@@ -573,6 +573,72 @@ static void testSessionTimeoutKillsTheWholeProcessTree() {
 #endif
 }
 
+#if defined(_WIN32)
+static void detachedSessionDoesNotInheritServerHandles() {
+    // Break found running the live harness on #760: a detached launch spawns
+    // with bInheritHandles=TRUE, which hands the child every inheritable handle
+    // this process holds and not merely the ones STARTUPINFO names. A blocking
+    // run hides it, because the parent waits and the child's copies die first.
+    // A detached game outlives the call, so it keeps the server's own MCP
+    // stdout open and the client never sees end of input: the harness sat for
+    // nine minutes reading a pipe whose server had already exited cleanly, on
+    // all three engines.
+    //
+    // A pipe of our own stands in for that stdout. Any inheritable handle will
+    // do, because what is wrong is that the inheritance is unrestricted, and
+    // observing the handle directly is the only way to tell the fix from a
+    // child that happened to exit.
+    Temp temp;
+    const auto self = selfPath().string();
+    const auto wrapper = temp.path / "godot.cmd";
+    {
+        std::ofstream script(wrapper);
+        script << "@echo off\n"
+               << "\"" << self << "\" --didi-managed-child hold_long\n";
+    }
+    _putenv_s("GODOT_BIN", wrapper.string().c_str());
+
+    SECURITY_ATTRIBUTES sa;
+    ZeroMemory(&sa, sizeof(sa));
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    HANDLE read_end = INVALID_HANDLE_VALUE;
+    HANDLE write_end = INVALID_HANDLE_VALUE;
+    CHECK_PROCESS(CreatePipe(&read_end, &write_end, &sa, 0) != 0);
+
+    const auto result =
+        didi::offline::TestRunner::runSession("res://none.tscn", 6, true, true, {}, true);
+    CHECK_PROCESS(result.detached);
+    CHECK_PROCESS(result.pid != 0);
+
+    // After this the only copy that can still exist is one the spawn leaked.
+    CloseHandle(write_end);
+
+    // PeekNamedPipe rather than a read, because a read on a pipe nobody closed
+    // is exactly the hang this is about.
+    bool broken = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!broken && std::chrono::steady_clock::now() < deadline) {
+        DWORD available = 0;
+        if (!PeekNamedPipe(read_end, nullptr, 0, nullptr, &available, nullptr)) {
+            broken = GetLastError() == ERROR_BROKEN_PIPE;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    CloseHandle(read_end);
+
+    // The game is detached by design, so nothing else will end it.
+    if (HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, static_cast<DWORD>(result.pid))) {
+        TerminateProcess(h, 1);
+        CloseHandle(h);
+    }
+    _putenv_s("GODOT_BIN", "");
+
+    CHECK_PROCESS(broken);
+}
+#endif
+
 struct RegisterManagedProcess {
     RegisterManagedProcess() {
         registerTest("ManagedProcess.ReportsArgumentsAndExit", reportsArgumentsAndExit);
@@ -587,6 +653,10 @@ struct RegisterManagedProcess {
                      offlineRunnerDoesNotHandChildrenTheServerStdin);
         registerTest("TestRunner.TimeoutKillsTheWholeProcessTree",
                      testSessionTimeoutKillsTheWholeProcessTree);
+#if defined(_WIN32)
+        registerTest("TestRunner.DetachedSessionDoesNotInheritServerHandles",
+                     detachedSessionDoesNotInheritServerHandles);
+#endif
 #if !defined(_WIN32)
         registerTest("ManagedProcess.LaunchClosesDescriptorsAboveSoftLimit",
                      launchClosesDescriptorsAboveSoftLimit);

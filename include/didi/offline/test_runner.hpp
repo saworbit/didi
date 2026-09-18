@@ -155,6 +155,10 @@ struct TestSessionResult {
     // nothing under it. False on POSIX, where the process group does that job
     // and always works.
     bool contained{false};
+    // The process this call started, for a run that was left running. Zero for
+    // an ordinary run, where the process is gone by the time anyone reads this.
+    uint64_t pid{0};
+    bool detached{false};
 
     json toJson() const {
         json log_arr = json::array();
@@ -165,7 +169,9 @@ struct TestSessionResult {
         return {
             {"success", success},
             {"timed_out", timed_out},
-            {"exit_code", exit_code},
+            {"detached", detached},
+            {"pid", pid == 0 ? json(nullptr) : json(pid)},
+            {"exit_code", detached ? json(nullptr) : json(exit_code)},
             {"duration_seconds", duration_seconds},
             {"logs", log_arr},
             {"errors", errors},
@@ -181,11 +187,18 @@ struct TestSessionResult {
 
 class TestRunner {
 public:
+    // `detach` starts the game and returns as soon as it is running, leaving
+    // it there. Nothing is captured and nothing is killed: there is no exit
+    // code to report and no output to classify, because the point is a game
+    // that is still going when the call answers. The child's output goes to
+    // the null device, never to a pipe this call would have to keep draining
+    // and never to the server's own stdout, which is the MCP channel.
     static TestSessionResult runSession(const std::string& scene_path,
                                         int timeout_seconds = 10,
                                         bool headless = true,
                                         bool break_on_error = true,
-                                        const std::vector<std::string>& extra_args = {});
+                                        const std::vector<std::string>& extra_args = {},
+                                        bool detach = false);
 };
 
 } // namespace offline
