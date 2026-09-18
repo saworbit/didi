@@ -409,8 +409,10 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
                                          int timeout_seconds,
                                          bool headless,
                                          bool break_on_error,
-                                         const std::vector<std::string>& extra_args) {
+                                         const std::vector<std::string>& extra_args,
+                                         bool detach) {
     TestSessionResult result;
+    result.detached = detach;
     auto start_time = std::chrono::steady_clock::now();
 
     std::string godot_exe = resolveGodotExecutable();
@@ -438,13 +440,27 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
     sa.bInheritHandle = TRUE;
     sa.lpSecurityDescriptor = NULL;
 
-    HANDLE hReadPipe, hWritePipe;
-    if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
+    // A detached game outlives this call, so there is nobody left to drain a
+    // pipe and a full one would block the game forever. Its output goes to the
+    // null device -- never to the server's own stdout, which is the MCP
+    // channel. runtime_read_output is how a caller reads a running game.
+    HANDLE hReadPipe = INVALID_HANDLE_VALUE;
+    HANDLE hWritePipe = INVALID_HANDLE_VALUE;
+    if (detach) {
+        hWritePipe = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
+                                 OPEN_EXISTING, 0, nullptr);
+        if (hWritePipe == INVALID_HANDLE_VALUE) {
+            result.success = false;
+            result.summary = "Failed to open the null device for the detached game's output";
+            return result;
+        }
+    } else if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
         result.success = false;
         result.summary = "Failed to create stdout pipe";
         return result;
+    } else {
+        SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
     }
-    SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
 
     STARTUPINFOW si;
     ZeroMemory(&si, sizeof(STARTUPINFOW));
@@ -469,7 +485,7 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
     if (!CreateProcessW(application_name, cmd_writable.data(), NULL, NULL, TRUE,
                         CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
         CloseHandle(hWritePipe);
-        CloseHandle(hReadPipe);
+        if (hReadPipe != INVALID_HANDLE_VALUE) CloseHandle(hReadPipe);
         result.success = false;
         result.summary = "Failed to spawn Godot process. Ensure 'godot' is in system PATH.";
         return result;
@@ -508,13 +524,32 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
         CloseHandle(hWritePipe);
-        CloseHandle(hReadPipe);
+        if (hReadPipe != INVALID_HANDLE_VALUE) CloseHandle(hReadPipe);
         result.success = false;
         result.summary = "Failed to resume the Godot process after launch.";
         return result;
     }
 
     CloseHandle(hWritePipe); // Close parent's copy of write handle so ReadFile hits EOF when child exits
+
+    // The whole point of a detached launch: the game is running, and this call
+    // is done with it. The job's KILL_ON_JOB_CLOSE has to go before the handle
+    // does, or closing it takes the game with it.
+    if (detach) {
+        result.pid = static_cast<uint64_t>(pi.dwProcessId);
+        if (job) {
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+            limits.BasicLimitInformation.LimitFlags = 0;
+            SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits,
+                                    sizeof(limits));
+            CloseHandle(job);
+        }
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        result.duration_seconds = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - start_time).count();
+        return result;
+    }
 
     std::string full_output;
     char buffer[1024];
@@ -615,7 +650,7 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
-    CloseHandle(hReadPipe);
+    if (hReadPipe != INVALID_HANDLE_VALUE) CloseHandle(hReadPipe);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
     // Last: closing this kills anything still in the job, which is the point.
@@ -645,9 +680,22 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
         // helpers; killing the parent alone orphans them.
         setpgid(0, 0);
         close(pipefd[0]);
-        dup2(pipefd[1], STDOUT_FILENO);
-        dup2(pipefd[1], STDERR_FILENO);
-        close(pipefd[1]);
+        if (detach) {
+            // Nobody will drain the pipe once this call returns, and a full one
+            // would block the game forever. The null device takes it instead,
+            // and never the server's own stdout, which is the MCP channel.
+            close(pipefd[1]);
+            const int null_fd = open("/dev/null", O_WRONLY);
+            if (null_fd >= 0) {
+                dup2(null_fd, STDOUT_FILENO);
+                dup2(null_fd, STDERR_FILENO);
+                if (null_fd > STDERR_FILENO) close(null_fd);
+            }
+        } else {
+            dup2(pipefd[1], STDOUT_FILENO);
+            dup2(pipefd[1], STDERR_FILENO);
+            close(pipefd[1]);
+        }
 
         std::vector<std::string> args_list;
         args_list.push_back(godot_exe);
@@ -665,6 +713,16 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
 
     // Parent process
     close(pipefd[1]);
+    if (detach) {
+        // No wait, no kill, no reap: the game is running and this call is done
+        // with it. It is in its own process group, so nothing here can take it
+        // down by accident either.
+        close(pipefd[0]);
+        result.pid = static_cast<uint64_t>(pid);
+        result.duration_seconds = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - start_time).count();
+        return result;
+    }
     int flags = fcntl(pipefd[0], F_GETFL, 0);
     fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
 
