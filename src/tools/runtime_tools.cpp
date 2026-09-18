@@ -437,10 +437,14 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
         !integerInRange(args["timeout_seconds"], 1, 120)) {
         return CallToolResult::error("timeout_seconds must be an integer from 1 to 120");
     }
+    if (args.contains("detach") && !args["detach"].is_boolean()) {
+        return CallToolResult::error("detach must be a boolean");
+    }
     std::string scene_path = args.value("scene_path", "");
     int timeout_sec = args.value("timeout_seconds", 10);
     bool headless = args.value("headless", true);
     bool break_on_error = args.value("break_on_error", true);
+    const bool detach = args.value("detach", false);
 
     std::vector<std::string> extra_args;
     if (args.contains("extra_args") && args["extra_args"].is_array()) {
@@ -451,9 +455,79 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
         }
     }
 
+    // Taken before the spawn, so a session published by the game we are about
+    // to start can be told from one that was already there.
+    const int64_t launched_at_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
     offline::TestRunner runner;
-    auto session_res = runner.runSession(scene_path, timeout_sec, headless, break_on_error, extra_args);
+    auto session_res =
+        runner.runSession(scene_path, timeout_sec, headless, break_on_error, extra_args, detach);
     json result = session_res.toJson();
+
+    // A detached game is only useful once it has published a session, because
+    // that is what every runtime tool routes through. Returning the moment the
+    // process exists would hand the caller a pid and a race; this waits for the
+    // descriptor, bounded by the same timeout the blocking mode uses, and says
+    // plainly if it never appeared.
+    const auto sessions_for_detach =
+        detach ? std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc) : nullptr;
+    if (detach && session_res.pid != 0) {
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(timeout_sec);
+        json published;
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (sessions_for_detach) {
+                auto listed = sessions_for_detach->listSessions(std::nullopt);
+                if (listed.isOk() && listed.value().is_object() &&
+                    listed.value()["sessions"].is_array()) {
+                    for (const auto& entry : listed.value()["sessions"]) {
+                        if (entry.value("kind", std::string()) != "game") continue;
+                        // The pid when it is ours, which it is for a direct
+                        // launch. It is not for a Godot that launches the
+                        // engine and waits -- a godot.cmd wrapper, or Godot's
+                        // own Windows console build -- where the game is a
+                        // grandchild with a pid of its own. A game session on
+                        // this project that started after this call did is the
+                        // one this call started.
+                        if (entry.value("pid", uint64_t{0}) == session_res.pid ||
+                            entry.value("started_at_ms", int64_t{0}) >= launched_at_ms) {
+                            published = entry;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!published.is_null()) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        if (!published.is_null()) {
+            // The pid that matters is the game's, not the launcher's.
+            result["pid"] = published["pid"];
+        }
+        result["session_published"] = !published.is_null();
+        result["game_session"] = published.is_null() ? json(nullptr) : published;
+        result["success"] = !published.is_null();
+        result["limitation"] =
+            "This game is running and this call is not watching it. Nothing was captured, so "
+            "logs, errors and exit_code are empty: read a running game with runtime_read_output, "
+            "drive it with runtime_attach_session and the other runtime tools, and end it with "
+            "runtime_stop.";
+        if (published.is_null()) {
+            result["summary"] =
+                "The game was started as process " + std::to_string(session_res.pid) +
+                " and published no session within " + std::to_string(timeout_sec) +
+                " seconds. It may still be starting, or the Didi addon may not be enabled in "
+                "this project. It is still running; stop it yourself if it should not be.";
+        } else {
+            result["summary"] = "The game is running as process " +
+                                std::to_string(session_res.pid) +
+                                " and has published a session to attach to.";
+        }
+    } else if (detach) {
+        result["session_published"] = false;
+        result["game_session"] = nullptr;
+    }
     // The same comparison the two tools that shell out to a discovered Godot
     // have made since #617. This one had no engine fields at all, so a project
     // run by 4.7 while its editor is 4.5 could only be spotted by reading the

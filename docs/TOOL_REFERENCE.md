@@ -1004,7 +1004,20 @@ Launches a separate Godot process, optionally headless, captures stdout/stderr, 
 - `break_on_error` (`boolean`, default `true`): marks captured `ERROR:`/`SCRIPT ERROR:` lines as failure after the child exits; it does not stop the child early.
 - The timeout kills the whole process tree, and the call does not return until it has. Godot is not always the process that was started -- a `godot.cmd` wrapper, or Godot's own Windows console build, launches the engine and waits on it -- so the tool terminates the job the child was spawned into rather than the child alone, and waits for the job to empty. That matters for what comes next: `runtime_list_sessions` reports a session as alive when the process behind it is alive, so a game still shutting down would be listed as attachable and then refuse the connection.
 - `extra_args` (`array` of strings, optional; unsafe shell metacharacters are rejected).
+- `detach` (`boolean`, default `false`): start the game and leave it running.
 - Legacy alias: `execute_test_session`.
+
+#### Detached: a game you can still drive
+
+Blocking is the default and is right for a test: run the project, see what it printed, get the exit code. It is the wrong shape for playing one. A game that runs is reported `success: false`, `exit_code: 124`, "timed out", and is gone by the time the answer arrives, which left the interactive half of the runtime surface -- `runtime_inject_input`, `runtime_step`, `runtime_set_paused`, `runtime_read_output`, `runtime_get_tree`, `runtime_explore_scene`, `runtime_watch_invariants`, `runtime_checkpoint` -- reachable only for a game somebody else had started.
+
+`detach: true` starts the game, waits for it to publish a session, and answers with that session under `game_session`. `runtime_attach_session` takes its `session_id` and the rest of the runtime tools follow; `runtime_stop` ends it. `timeout_seconds` bounds the wait for the session rather than the life of the game.
+
+Nothing is captured. The game's output goes to the null device, because no one is left to drain a pipe once the call returns and a full one would block the game; `logs`, `errors` and `exit_code` are empty and `limitation` says so and points at `runtime_read_output`. `session_published` is the field to branch on: `false` means the process started and never published, which is a project without the Didi addon enabled, and the game is still running.
+
+The pid reported is the game's own. On Windows that is often not the process this tool started: Godot's console build, like a `godot.cmd` wrapper, launches the engine and waits on it, so the game is a grandchild with a pid of its own and the session it publishes is what identifies it.
+
+Godot is discovered newest-first unless `GODOT_BIN` says otherwise, so a detached game can be running a different engine line from the editor you are authoring in. `matches_attached_engine` says whether it is.
 
 The answer carries `engine_executable` and `engine_version` for the build that
 ran the project, and `attached_engine_version` and `matches_attached_engine`

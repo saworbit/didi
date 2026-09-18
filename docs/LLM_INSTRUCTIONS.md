@@ -46,6 +46,7 @@ When live, use focused tools:
 - `editor_undo` and `editor_redo` to verify reversibility.
 - `editor_save_scene` only when persistence is intended.
 - `editor_reload_project` to request a resource-filesystem source rescan.
+- `runtime_launch` with `detach: true` to start the game and leave it running. It answers with `game_session`; pass its `session_id` to `runtime_attach_session` and the runtime tools answer on the running game. End it with `runtime_stop`. Without `detach` the call blocks and kills the game at the timeout, which is what you want for a test and not for playing one.
 
 Before executing any implemented mutation, call the exact tool and arguments with `dry_run: true`, inspect `mutation_preview`, and verify the intended project and route. Dry-runs do not enter handlers. If the preview includes `confirmation_token`, repeat the exact original arguments without `dry_run` and add that token only after the destructive intent is authorized. Never combine `dry_run: true` and `confirmation_token`, alter arguments between preview and execution, persist a token, or retry it: tokens are 64 lowercase hex characters, expire after 120 seconds, and are consumed by the mutation they authorise. An attempt refused for not matching its own binding leaves the token usable, so retry it with the arguments you previewed rather than taking a fresh preview.
 

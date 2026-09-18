@@ -3738,6 +3738,65 @@ try {
     Assert-True (-not $wholeNumberById[350].result.isError) "An integer was refused for a float property: $($wholeNumberById[350].result.content[0].text)"
     Assert-True ((Tool-Payload $wholeNumberById[351]).value -eq 1) "The integer did not reach the float property."
 
+    # A game this surface started and can still drive. runtime_launch blocks and
+    # kills its child at the timeout, so a game that runs -- the normal outcome
+    # when you launch one to play it -- was reported as a timeout and was gone
+    # before a caller could do anything with it. That left the whole interactive
+    # half of the runtime surface reachable only for a game somebody else had
+    # started, and this repository's own harness starts one by hand for exactly
+    # that reason (#733).
+    #
+    # Every call after the launch runs against the detached game, and the stop
+    # comes before the assertions so a failure cannot leave a game behind.
+    $detachRequests = @(
+        (@{ jsonrpc = "2.0"; id = 5640; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 5641 "runtime_launch" @{ scene_path = "res://runtime_main.tscn"; timeout_seconds = 30; headless = $true; detach = $true }),
+        (Tool-Request 5642 "runtime_list_sessions" @{}),
+        (Tool-Request 5643 "runtime_get_tree" @{ max_depth = 2 }),
+        (Tool-Request 5644 "runtime_set_paused" @{ paused = $true }),
+        (Tool-Request 5645 "runtime_step" @{ frames = 2 }),
+        (Tool-Request 5646 "runtime_stop" @{ exit_code = 0 })
+    )
+    $rawDetachResponses = Invoke-Didi -Requests $detachRequests -Arguments @("--project", $fixtureRoot)
+    $detachResponses = @($rawDetachResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
+    Assert-True ($LASTEXITCODE -eq 0) "Detached-launch MCP process exited with $LASTEXITCODE."
+    $detachById = @{}
+    foreach ($response in $detachResponses) { $detachById[[int]$response.id] = $response }
+
+    $detached = Tool-Payload $detachById[5641]
+    Assert-True ($detached.detached -eq $true) "runtime_launch did not report the launch as detached."
+    Assert-True ($detached.session_published -eq $true) "A detached launch published no session: $($detached.summary)"
+    Assert-True ($detached.success -eq $true) "A detached launch that published a session reported failure."
+    # Not a timeout and not an exit code, because nothing waited for either.
+    Assert-True ($detached.timed_out -eq $false) "A detached launch reported a timeout it never waited for."
+    Assert-True ($null -eq $detached.exit_code) "A detached launch reported an exit code for a game that is still running."
+    Assert-True ($detached.limitation -match "runtime_read_output") "A detached launch does not say where to read the running game."
+    $detachedPid = $detached.game_session.pid
+    Assert-True ($detachedPid -gt 0) "The detached launch named no process."
+    Assert-True ($detached.pid -eq $detachedPid) "The reported pid is not the game's own."
+    # The game the harness started by hand is still there too, so this is the
+    # right session and not merely a session.
+    Assert-True ($detached.game_session.session_id -ne $gameSessionId) "The detached launch reported the game this harness started by hand."
+
+    # It is a real game session: the runtime half of the surface answers on it.
+    Assert-True (-not $detachById[5643].result.isError) "The detached game could not be read: $($detachById[5643].result.content[0].text)"
+    Assert-True ((Tool-Payload $detachById[5643]).node_count -ge 1) "The detached game reported an empty tree."
+    Assert-True ((Tool-Payload $detachById[5644]).paused -eq $true) "The detached game could not be paused."
+    Assert-True ((Tool-Payload $detachById[5645]).frames -eq 2) "The detached game could not be stepped."
+    Assert-True ((Tool-Payload $detachById[5646]).shutdown_requested -eq $true) "The detached game did not accept a stop."
+
+    # And it is gone, which is the other half of leaving a process running: this
+    # tool has to be able to end what it starts.
+    $detachedStartedAt = [int64]$detached.game_session.started_at_ms
+    $detachDeadline = (Get-Date).AddSeconds(20)
+    $detachedStillThere = $true
+    while ((Get-Date) -lt $detachDeadline -and $detachedStillThere) {
+        Start-Sleep -Milliseconds 250
+        # Identity bound, so a recycled pid is not read as the game still going.
+        $detachedStillThere = Exact-ProcessAlive ([uint64]$detachedPid) $detachedStartedAt
+    }
+    Assert-True (-not $detachedStillThere) "The detached game was still running after runtime_stop."
+
     # A method the file declares and the engine does not have. res://signal_uses_autoload.gd
     # names a singleton, so it cannot compile in this editor and none of its
     # methods land on the node. signal_connect answered "The target node has no

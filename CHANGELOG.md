@@ -91,6 +91,28 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   the shape a refused task claim already uses. A caller that passes neither
   keeps last-writer-wins.
 
+### Added
+
+- **`runtime_launch` can leave the game running.** The tool is a batch runner:
+  it blocks, captures, classifies and terminates the child at the timeout. So a
+  game that runs -- the normal outcome when you launch one to play it -- was
+  reported `success: false`, `exit_code: 124`, "timed out", and was gone before
+  a caller could do anything with it. There was no other way to start one: no
+  `editor_play`, no `runtime_start`, and `runtime_stop` with no counterpart that
+  starts what it stops. That left the interactive half of the runtime surface --
+  inject input, step, pause, read output, get tree, explore, watch invariants,
+  checkpoint -- reachable only for a game somebody else had started, and this
+  repository's own harness starts one by hand for exactly that reason (#733).
+  `detach: true` starts the game, waits for it to publish a session, and answers
+  with that session; `runtime_attach_session` takes it from there and
+  `runtime_stop` ends it. An author can write code, run it, look at it and fix
+  it without asking a person to press F5. Nothing is captured -- the game's
+  output goes to the null device, because nobody is left to drain a pipe and a
+  full one would block the game -- so `limitation` says so and points at
+  `runtime_read_output`, and `session_published` is the field to branch on. The
+  pid reported is the game's own, which on Windows is often not the process this
+  tool started: Godot's console build launches the engine and waits on it.
+
 ### Fixed
 
 - **One InputEvent vocabulary, spelled the engine's way, and published.**
