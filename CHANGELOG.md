@@ -111,7 +111,14 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   full one would block the game -- so `limitation` says so and points at
   `runtime_read_output`, and `session_published` is the field to branch on. The
   pid reported is the game's own, which on Windows is often not the process this
-  tool started: Godot's console build launches the engine and waits on it.
+  tool started: Godot's console build launches the engine and waits on it. Two
+  things a game that outlives its launcher makes load-bearing, both of which a
+  blocking run hid: the child inherits nothing but its own null output, because
+  `bInheritHandles` would otherwise hand it a copy of the server's MCP stdout
+  and a client would wait for an end of input that never came while the game
+  ran; and the launch selects the session it just waited for, because a caller
+  that starts a game means to drive that game and the process may well still be
+  pointed at the editor it was launched from.
 
 ### Fixed
 

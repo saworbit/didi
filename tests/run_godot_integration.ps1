@@ -257,6 +257,9 @@ $shutdownGameSessionToken = ""
 $editorSessionId = ""
 $gameSessionId = ""
 $shutdownGameSessionId = ""
+# The game a detached launch starts publishes a session of its own, and so a
+# lock of its own, which teardown has to recognise as one of ours.
+$detachedGameSessionId = ""
 $integrationSucceeded = $false
 $editorForcedTeardown = $false
 $retryForEngineCrash = $false
@@ -3771,6 +3774,7 @@ try {
     Assert-True ($detached.timed_out -eq $false) "A detached launch reported a timeout it never waited for."
     Assert-True ($null -eq $detached.exit_code) "A detached launch reported an exit code for a game that is still running."
     Assert-True ($detached.limitation -match "runtime_read_output") "A detached launch does not say where to read the running game."
+    $detachedGameSessionId = [string]$detached.game_session.session_id
     $detachedPid = $detached.game_session.pid
     Assert-True ($detachedPid -gt 0) "The detached launch named no process."
     Assert-True ($detached.pid -eq $detachedPid) "The reported pid is not the game's own."
@@ -4313,7 +4317,7 @@ finally {
         }
     }
 
-    $knownSessionIds = @($editorSessionId, $gameSessionId, $shutdownGameSessionId) | Where-Object { $_ -match '^[0-9a-f]{32}$' }
+    $knownSessionIds = @($editorSessionId, $gameSessionId, $shutdownGameSessionId, $detachedGameSessionId) | Where-Object { $_ -match '^[0-9a-f]{32}$' }
     $descriptorEntries = @(Get-ChildItem -LiteralPath $sessionDirectory -Force -ErrorAction SilentlyContinue | Where-Object { $_.Extension -ne '.json' })
     foreach ($entry in $descriptorEntries) {
         $entryPath = [IO.Path]::GetFullPath($entry.FullName)

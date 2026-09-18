@@ -1,5 +1,6 @@
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/offline/test_runner.hpp"
+#include "didi/runtime/session_client.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -355,6 +356,74 @@ void test_a_crash_keeps_its_location_and_names_itself_in_the_summary() {
     ASSERT_EQ(diagnostic.frames[1].function, std::string("_run"));
 }
 
+// Answers with one live game session and remembers what was attached to.
+class LaunchAttachFake final : public didi::runtime::IRuntimeSessionClient,
+                               public std::enable_shared_from_this<LaunchAttachFake> {
+public:
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override {}
+    bool isConnected() const override { return true; }
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json&,
+                                         int) override {
+        return didi::json{{"status", "ok"}, {"method", method}};
+    }
+    didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
+        return didi::json{{"sessions", didi::json::array({game})},
+                          {"diagnostics", didi::json::array()}};
+    }
+    didi::Result<didi::json> attachSession(const std::string& session_id) override {
+        attached = session_id;
+        return didi::json::object();
+    }
+    didi::Result<didi::json> detachSession() override { return didi::json::object(); }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override {
+        return std::nullopt;
+    }
+    std::optional<didi::runtime::RuntimeRouteLease> acquireRouteLease() override {
+        return std::nullopt;
+    }
+    bool quarantineRoute(const didi::runtime::RuntimeRouteLease&) override { return false; }
+
+    // Far enough ahead that it is unambiguously "started after this call did".
+    didi::json game{{"kind", "game"},
+                    {"pid", 4242},
+                    {"session_id", "aaaabbbbccccddddeeeeffff00001111"},
+                    {"started_at_ms", int64_t{4102444800000}}};
+    std::string attached;
+};
+
+void test_detached_launch_selects_the_game_it_started() {
+    // Break found running the live harness on #760. A detached launch waits for
+    // the game to publish a session and reports it, but never selects it, so
+    // every runtime call after the launch still goes wherever the process was
+    // already pointed. In the harness that was the editor -- auto-attached a
+    // moment earlier, because at that instant it was the only live session on
+    // the project -- and `runtime_set_paused` came back 409 "unavailable for
+    // the selected session kind" on 4.5.1, 4.6.2 and 4.7.2 alike.
+    //
+    // Launching a game and then having to attach to it by hand is not the
+    // documented flow, and the tool already knows which session is the right
+    // one: it just waited for it.
+    ScopedEnvironmentVariable godot_bin("GODOT_BIN");
+    godot_bin.set(commandShell());
+    auto fake = std::make_shared<LaunchAttachFake>();
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(fake);
+
+    const auto result = registry.callTool(
+        "runtime_launch",
+        {{"scene_path", "res://none.tscn"},
+         {"timeout_seconds", 2},
+         {"headless", false},
+         {"detach", true},
+         {"extra_args", successfulShellArguments()}});
+
+    registry.setIpcClient(nullptr);
+    ASSERT_TRUE(!result.isError);
+    ASSERT_EQ(fake->attached, std::string("aaaabbbbccccddddeeeeffff00001111"));
+}
+
 struct RegisterTestRunnerTests {
     RegisterTestRunnerTests() {
         registerTest("RuntimeLaunch.CrashKeepsItsLocation",
@@ -369,6 +438,8 @@ struct RegisterTestRunnerTests {
         registerTest("RuntimeLaunch.WindowsUnicodeBatchWrapper", test_windows_batch_wrapper_supports_non_ascii_path);
         registerTest("RuntimeLaunch.WindowsArgumentsAreQuoted", test_windows_arguments_are_quoted_rather_than_dropped);
         registerTest("RuntimeLaunch.BatchWrapperRefusesMetacharacters", test_batch_wrapper_refuses_shell_metacharacters);
+        registerTest("RuntimeLaunch.DetachedLaunchSelectsTheGameItStarted",
+                     test_detached_launch_selects_the_game_it_started);
 #endif
     }
 } g_register_test_runner_tests;

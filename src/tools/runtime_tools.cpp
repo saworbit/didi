@@ -504,6 +504,15 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
         if (!published.is_null()) {
             // The pid that matters is the game's, not the launcher's.
             result["pid"] = published["pid"];
+            // And it is the session the calls after this one mean. Publishing
+            // it without selecting it left them going wherever the process was
+            // already pointed, which is the editor this game was launched
+            // from, so runtime_set_paused came back 409 "unavailable for the
+            // selected session kind" on a game that was running and reachable.
+            const auto session_id = published.value("session_id", std::string());
+            if (sessions_for_detach && !session_id.empty()) {
+                sessions_for_detach->attachSession(session_id);
+            }
         }
         result["session_published"] = !published.is_null();
         result["game_session"] = published.is_null() ? json(nullptr) : published;

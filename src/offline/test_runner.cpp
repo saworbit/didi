@@ -462,12 +462,40 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
         SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
     }
 
-    STARTUPINFOW si;
-    ZeroMemory(&si, sizeof(STARTUPINFOW));
-    si.cb = sizeof(STARTUPINFOW);
-    si.hStdError = hWritePipe;
-    si.hStdOutput = hWritePipe;
-    si.dwFlags |= STARTF_USESTDHANDLES;
+    STARTUPINFOEXW six;
+    ZeroMemory(&six, sizeof(six));
+    six.StartupInfo.cb = sizeof(STARTUPINFOW);
+    six.StartupInfo.hStdError = hWritePipe;
+    six.StartupInfo.hStdOutput = hWritePipe;
+    six.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
+
+    // bInheritHandles is TRUE below, which hands the child every inheritable
+    // handle this process holds and not just the ones named above. A blocking
+    // run never notices: it waits, so the child's copies die before anyone
+    // could read past them. A detached game outlives this call, so a copy of
+    // the server's own MCP stdout would keep that pipe open for as long as the
+    // game runs and the client would never see end of input -- the harness sat
+    // on an exited server for nine minutes (#760). Naming the one handle the
+    // child may inherit is the only way to bound it, because the server's
+    // stdio is not ours to mark uninheritable.
+    DWORD creation_flags = CREATE_SUSPENDED;
+    std::vector<char> attribute_storage;
+    LPPROC_THREAD_ATTRIBUTE_LIST attribute_list = nullptr;
+    HANDLE inheritable[1] = {hWritePipe};
+    if (detach) {
+        SIZE_T attribute_size = 0;
+        InitializeProcThreadAttributeList(nullptr, 1, 0, &attribute_size);
+        attribute_storage.resize(attribute_size);
+        auto* candidate = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attribute_storage.data());
+        if (InitializeProcThreadAttributeList(candidate, 1, 0, &attribute_size) &&
+            UpdateProcThreadAttribute(candidate, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                      inheritable, sizeof(inheritable), nullptr, nullptr)) {
+            attribute_list = candidate;
+            six.lpAttributeList = candidate;
+            six.StartupInfo.cb = sizeof(STARTUPINFOEXW);
+            creation_flags |= EXTENDED_STARTUPINFO_PRESENT;
+        }
+    }
 
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof(PROCESS_INFORMATION));
@@ -482,8 +510,10 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
     // Suspended, so the process can be put in a job before it runs anything.
     // Assigning after launch leaves a window in which the child is outside the
     // job, and a child that spawns during that window escapes it permanently.
-    if (!CreateProcessW(application_name, cmd_writable.data(), NULL, NULL, TRUE,
-                        CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
+    const BOOL spawned = CreateProcessW(application_name, cmd_writable.data(), NULL, NULL, TRUE,
+                                        creation_flags, NULL, NULL, &six.StartupInfo, &pi);
+    if (attribute_list) DeleteProcThreadAttributeList(attribute_list);
+    if (!spawned) {
         CloseHandle(hWritePipe);
         if (hReadPipe != INVALID_HANDLE_VALUE) CloseHandle(hReadPipe);
         result.success = false;
