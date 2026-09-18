@@ -250,8 +250,115 @@ void test_batch_wrapper_refuses_shell_metacharacters() {
 }
 #endif
 
+// A script that prints a Godot-shaped crash and then outlives the timeout, so
+// the run ends the way a real crashing game does. Written per platform because
+// a shell script and a batch file are the two things GODOT_BIN can name here.
+class ScopedCrashingEngine {
+public:
+    ScopedCrashingEngine() {
+        m_root = std::filesystem::temp_directory_path() /
+                 ("didi-crash-runner-" +
+                  std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::filesystem::create_directories(m_root);
+#if defined(_WIN32)
+        m_path = m_root / "fake_engine.bat";
+        std::ofstream out(m_path, std::ios::binary);
+        out << "@echo off\r\n"
+               "echo Godot Engine v4.7.2.stable.official - https://godotengine.org\r\n"
+               "echo about to fail\r\n"
+               "echo SCRIPT ERROR: Invalid access to property or key 'name' on a base object of type 'Nil'.\r\n"
+               "echo    at: _ready (res://crasher.gd:6)\r\n"
+               "echo GDScript backtrace (most recent call first):\r\n"
+               "echo    [0] _ready (res://crasher.gd:6)\r\n"
+               "echo    [1] _run (res://level.gd:12)\r\n"
+               "ping -n 30 127.0.0.1 >nul\r\n";
+#else
+        m_path = m_root / "fake_engine.sh";
+        std::ofstream out(m_path, std::ios::binary);
+        out << "#!/bin/sh\n"
+               "echo 'Godot Engine v4.7.2.stable.official - https://godotengine.org'\n"
+               "echo 'about to fail'\n"
+               "echo \"SCRIPT ERROR: Invalid access to property or key 'name' on a base object of type 'Nil'.\"\n"
+               "echo '   at: _ready (res://crasher.gd:6)'\n"
+               "echo 'GDScript backtrace (most recent call first):'\n"
+               "echo '   [0] _ready (res://crasher.gd:6)'\n"
+               "echo '   [1] _run (res://level.gd:12)'\n"
+               "sleep 30\n";
+        out.close();
+        std::filesystem::permissions(m_path, std::filesystem::perms::owner_all,
+                                     std::filesystem::perm_options::add);
+#endif
+    }
+
+    ~ScopedCrashingEngine() {
+        std::error_code ignored;
+        std::filesystem::remove_all(m_root, ignored);
+    }
+
+    std::string path() const { return m_path.string(); }
+
+private:
+    std::filesystem::path m_root;
+    std::filesystem::path m_path;
+};
+
+void test_a_crash_keeps_its_location_and_names_itself_in_the_summary() {
+    // Break caught: Godot prints an error across several lines -- the message,
+    // then `at: _ready (res://crasher.gd:6)`, then the GDScript backtrace --
+    // and each line was classified on its own text. Every frame of a crash
+    // landed under INFO, the level print() gets, so a caller filtering logs on
+    // ERROR kept the message and dropped the whole stack. errors[] held a bare
+    // string with no file or line, and summary named the timeout while the
+    // cause sat one key away (#744).
+    ScopedCrashingEngine engine;
+    ScopedEnvironmentVariable godot_bin("GODOT_BIN");
+    godot_bin.set(engine.path());
+
+    const auto result = didi::offline::TestRunner::runSession("res://crash.tscn", 1, true, true, {});
+    ASSERT_TRUE(result.timed_out);
+    ASSERT_EQ(result.exit_code, 124);
+    ASSERT_TRUE(!result.success);
+
+    // The summary names the crash, not only the timeout that followed it.
+    ASSERT_TRUE(result.summary.find("timeout") != std::string::npos);
+    ASSERT_TRUE(result.summary.find("Invalid access to property") != std::string::npos);
+
+    // Every line of the error carries the error's level, and says it is a
+    // continuation rather than an error of its own.
+    size_t error_lines = 0;
+    size_t continuations = 0;
+    for (const auto& entry : result.logs) {
+        if (entry.level == "ERROR") ++error_lines;
+        if (entry.continuation) ++continuations;
+        // The game's own print() is not swept up with them.
+        if (entry.message.find("about to fail") != std::string::npos) {
+            ASSERT_EQ(entry.level, std::string("INFO"));
+            ASSERT_TRUE(!entry.continuation);
+        }
+    }
+    // The message, the at: line, the backtrace header and two frames.
+    ASSERT_EQ(error_lines, static_cast<size_t>(5));
+    ASSERT_EQ(continuations, static_cast<size_t>(4));
+
+    // errors[] is unchanged: one message line, no continuations folded in.
+    ASSERT_EQ(result.errors.size(), static_cast<size_t>(1));
+
+    // And the structured half has somewhere to go.
+    ASSERT_EQ(result.diagnostics.size(), static_cast<size_t>(1));
+    const auto& diagnostic = result.diagnostics.front();
+    ASSERT_EQ(diagnostic.file, std::string("res://crasher.gd"));
+    ASSERT_EQ(diagnostic.line, 6);
+    ASSERT_EQ(diagnostic.function, std::string("_ready"));
+    ASSERT_EQ(diagnostic.frames.size(), static_cast<size_t>(2));
+    ASSERT_EQ(diagnostic.frames[1].file, std::string("res://level.gd"));
+    ASSERT_EQ(diagnostic.frames[1].line, 12);
+    ASSERT_EQ(diagnostic.frames[1].function, std::string("_run"));
+}
+
 struct RegisterTestRunnerTests {
     RegisterTestRunnerTests() {
+        registerTest("RuntimeLaunch.CrashKeepsItsLocation",
+                     test_a_crash_keeps_its_location_and_names_itself_in_the_summary);
         registerTest("RuntimeLaunch.TimeoutSchema", test_runtime_launch_schema_bounds_timeout);
         registerTest("RuntimeLaunch.TimeoutValidation", test_runtime_launch_rejects_timeout_outside_public_range);
         registerTest("RuntimeLaunch.Godot451Discovery", test_resolver_finds_documented_godot_451_layout);

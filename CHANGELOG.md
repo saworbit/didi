@@ -110,6 +110,24 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   `project_verify_changes`, which compiles unsaved source in an isolated copy
   of the project. The parameter description, `TOOL_REFERENCE` and
   `LLM_INSTRUCTIONS` say it too.
+- **A crash comes back with somewhere to go.** `runtime_launch` captured a
+  script error correctly and then filed the only part a caller can act on under
+  `INFO`. Godot prints an error across several lines -- the message, then
+  `at: _ready (res://crasher.gd:6)`, then the GDScript backtrace -- and each
+  line was classified on its own text, so every frame of a crash got the level
+  `print()` gets and a caller filtering `logs` on `ERROR` kept the message and
+  dropped the whole stack (#744). A continuation now carries the level of the
+  error it belongs to and says so with `continuation: true`. `errors` stays a
+  list of message lines, and a `diagnostics` list beside it carries
+  `severity`, `message`, `file`, `line`, `function`, `rule` and `frames` --
+  the shape `script_check_syntax` and `script_create` already return for the
+  offline half.
+- **A run that crashed says so in its summary.** A script error aborts the rest
+  of the frame, so a game that throws in `_ready` never reaches its own exit
+  path and always runs to the timeout. `summary` is the field a reader reads
+  first and it named the timeout, while the cause sat in `errors` one key away
+  (#744). A run that times out with errors captured now names the count, the
+  timeout and the first message.
 
 - **A raycast in the editor asks the edited scene's own world, and answers with
   a path the surface takes.** Every spatial query resolved its world from the
