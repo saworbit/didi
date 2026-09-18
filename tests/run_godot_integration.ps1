@@ -3698,6 +3698,56 @@ try {
     Assert-True (-not $wholeNumberById[350].result.isError) "An integer was refused for a float property: $($wholeNumberById[350].result.content[0].text)"
     Assert-True ((Tool-Payload $wholeNumberById[351]).value -eq 1) "The integer did not reach the float property."
 
+    # A method the file declares and the engine does not have. res://signal_uses_autoload.gd
+    # names a singleton, so it cannot compile in this editor and none of its
+    # methods land on the node. signal_connect answered "The target node has no
+    # method by that name" and named the method, which is correct and is the one
+    # thing that is not wrong, so the repair a caller reaches for is to rename a
+    # method that is already right (#729). res://signal_plain.gd is the control:
+    # same handler, no singleton, connects.
+    $compileRequests = @(
+        (@{ jsonrpc = "2.0"; id = 380; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 381 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 382 "scene_open" @{ scene_path = "res://signal_compile.tscn" }),
+        # Registered now, so the editor has never had it and every script naming
+        # it is uncompilable until that editor restarts. This is the state
+        # project_set_autoload's own requires_editor_restart is about.
+        (Tool-Request 383 "project_set_autoload" @{ name = "SignalProbeState"; path = "res://signal_state.gd" }),
+        (Tool-Request 384 "script_get_symbols" @{ file_path = "res://signal_uses_autoload.gd" }),
+        (Tool-Request 385 "signal_connect" @{ emitter_node = "/root/SignalCompile/Plain"; signal_name = "tree_entered"; target_node = "/root/SignalCompile/Plain"; target_method = "_on_probe" }),
+        (Tool-Request 386 "signal_connect" @{ emitter_node = "/root/SignalCompile/Uses"; signal_name = "tree_entered"; target_node = "/root/SignalCompile/Uses"; target_method = "_on_probe" }),
+        (Tool-Request 387 "signal_connect" @{ emitter_node = "/root/SignalCompile/Plain"; signal_name = "tree_entered"; target_node = "/root/SignalCompile/Plain"; target_method = "_not_in_the_file" }),
+        (Tool-Request 388 "project_remove_autoload" @{ name = "SignalProbeState" }),
+        (Tool-Request 389 "scene_open" @{ scene_path = "res://main.tscn" })
+    )
+    $rawCompileResponses = Invoke-Didi -Requests $compileRequests -Arguments @("--project", $fixtureRoot)
+    $compileResponses = @($rawCompileResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
+    Assert-True ($LASTEXITCODE -eq 0) "Uncompiled-script signal MCP process exited with $LASTEXITCODE."
+    $compileById = @{}
+    foreach ($response in $compileResponses) { $compileById[[int]$response.id] = $response }
+
+    # Didi's own reader sees the handler, which is what made the old refusal
+    # read as a naming problem.
+    $declared = @((Tool-Payload $compileById[384]).functions | Where-Object { $_.name -eq "_on_probe" })
+    Assert-True ($declared.Count -eq 1) "The probe script does not declare the handler this block is about."
+
+    Assert-True (-not $compileById[385].result.isError) "The control connect failed: $($compileById[385].result.content[0].text)"
+
+    Assert-True $compileById[386].result.isError "Connecting to a method on an uncompiled script reported success."
+    $refusal = ($compileById[386].result.content[0].text | ConvertFrom-Json)
+    Assert-True ($refusal.error.data.code -eq "target_script_not_compiled") "The uncompiled-script refusal is $($refusal.error.data.code), not the compile answer."
+    Assert-True ($refusal.error.data.script_path -eq "res://signal_uses_autoload.gd") "The refusal did not name the script."
+    Assert-True (@($refusal.error.data.unresolved_autoloads) -contains "SignalProbeState") "The refusal did not name the autoload the script cannot resolve."
+    Assert-True ($refusal.error.data.note -match "restart") "The refusal carries no note about the editor restart."
+
+    # The other half has to keep working: a method that is genuinely not in the
+    # file is still a plain not-found, not a compile story.
+    Assert-True $compileById[387].result.isError "Connecting to a method that is in no file reported success."
+    $absent = ($compileById[387].result.content[0].text | ConvertFrom-Json)
+    Assert-True ($absent.error.data.code -eq "target_method_not_found") "A method absent from the file is reported as $($absent.error.data.code)."
+
+    Assert-True (-not $compileById[388].result.isError) "The probe autoload was left registered."
+
     # An editor raycast against a scene that actually holds a body. The edited
     # scene is parented into a SubViewport under the editor's docks, so the
     # root viewport's World2D is a different, empty space: a 2D ray asked of it
