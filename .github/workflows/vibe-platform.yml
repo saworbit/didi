@@ -285,6 +285,17 @@ jobs:
           python3 -u tools/vibe/probes/editor_log_delta.py \
             -p "$RUNNER_TEMP/live-proj" --log "$RUNNER_TEMP/editor.log"
 
+      - name: Probe -- a game built through the surface, end to end
+        continue-on-error: true
+        run: |
+          # Fifteen sessions probed the surface adversarially. This one asks
+          # whether a game can be *built* with it, and runs last because it
+          # opens scenes, registers an autoload and launches an engine, any of
+          # which would perturb a probe sitting after it. Everything it writes
+          # is prefixed vibe_, so it overwrites its own leavings and not the
+          # sandbox fixtures.
+          python3 -u tools/vibe/probes/game_authoring.py -p "$RUNNER_TEMP/live-proj"
+
       - name: What the Editor Printed
         if: always()
         continue-on-error: true
