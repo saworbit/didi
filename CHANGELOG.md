@@ -93,6 +93,29 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A raycast in the editor asks the edited scene's own world, and answers with
+  a path the surface takes.** Every spatial query resolved its world from the
+  root viewport. In a game that is where the scene lives, so it was right; in an
+  editor the edited scene is parented into a SubViewport under the editor's own
+  docks, and a Viewport carries its own World2D. A 2D ray was asked of a
+  different, empty space and reported `hit: false` through a floor that was
+  standing in its path, which is exactly what a ray through empty space returns
+  (#743). The 3D case only looked healthy by accident, because a SubViewport
+  inherits the root's World3D -- it hit, and then named the collider with a
+  370-character absolute path through the editor's dock tree and its volatile
+  instance ids, which every reader and writer on the surface refuses (#742).
+  Both now go through `Viewport.find_world_2d`/`find_world_3d` from the edited
+  scene's own viewport, and a collider is reported as `/root/<scene-root>/Child`
+  like everything else. `spatial_query_clearance`, `nav_query_path` and the
+  frustum query's sightline rays were reading the same wrong world and are
+  fixed with them; the sightline self-hit check compared a logical path against
+  an editor one and never matched, so it works now too.
+- **`collision_mask` takes Godot's whole 32-bit range.** The ceiling was
+  `2147483647`, so layer 32 and the natural "every layer" value `4294967295`
+  were both refused by a surface whose engine defines the mask as unsigned
+  32-bit (#743). `physics_raycast_query` also published no bounds at all where
+  its three siblings published theirs; it does now.
+
 - **The last uncached build in CI is cached, and every platform now configures
   the same way.** After the sanitizer job and the two live Godot jobs were given
   a compiler cache, `windows-latest (msvc)` was the only build left compiling

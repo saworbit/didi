@@ -57,7 +57,8 @@ const std::unordered_map<std::string, std::string>& sharedDescriptions() {
          "screen is showing, so without this an unattended agent cannot capture one at all. "
          "Editor sessions only."},
         {"collision_mask",
-         "Physics layers to test against, as a bit mask. Defaults to 1, layer one only."},
+         "Physics layers to test against, as a 32-bit bit mask, 1 to 4294967295. Defaults to 1, "
+         "layer one only; 4294967295 tests every layer."},
         {"board",
          "Which blackboard to read or write. Defaults to the default board, so a single-agent "
          "session never needs to pass it."},
@@ -488,13 +489,13 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"nav_query_path.end_point",
          "Where the path ends, in the same shape as start_point. Equal points are allowed."},
         {"nav_query_path.navigation_layers",
-         "Navigation layers the path may use, as a bit mask. Defaults to 1."},
+         "Navigation layers the path may use, as a 32-bit bit mask, 1 to 4294967295. Defaults to 1."},
         {"nav_query_path.optimize",
          "Simplify the returned path. On by default."},
         {"nav_bake_mesh.nav_node_path",
          "The navigation region whose mesh to bake."},
         {"spatial_query_clearance.collision_mask",
-         "Physics layers the shape is tested against, as a bit mask. Defaults to 1."},
+         "Physics layers the shape is tested against, as a 32-bit bit mask, 1 to 4294967295. Defaults to 1."},
         {"spatial_query_frustum.max_results",
          "How many nodes to return."},
 

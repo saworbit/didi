@@ -1566,8 +1566,9 @@ try {
         (Tool-Request 942 "runtime_read_profiler" @{ categories = @("gpu") }),
         # Game only. An editor route must be refused before anything reaches Input.
         (Tool-Request 943 "runtime_inject_input" @{ events = @(@{ type = "action"; action_name = "ui_accept"; pressed = $true }) }),
-        # Editor or game. The editor root viewport's world is the editor's own, so
-        # the honest editor result is a miss with every detail field null.
+        # Editor or game. main.tscn holds no physics bodies, so this ray is a
+        # genuine miss and the control for the raycast block further down, which
+        # casts against a scene that does hold one.
         (Tool-Request 944 "physics_raycast_query" @{ from = @{ x = 0; y = 0; z = 0 }; to = @{ x = 4; y = 0; z = 0 } }),
         (Tool-Request 945 "nav_query_path" @{ start_point = @{ x = -1; y = 0; z = 0 }; end_point = @{ x = 1; y = 0; z = 0 } }),
         # The list works in the editor against the edited scene; the play is game-only.
@@ -3696,6 +3697,57 @@ try {
     Assert-True ((Tool-Payload $wholeNumberById[349]).value -eq 1) "The whole number did not reach the float property."
     Assert-True (-not $wholeNumberById[350].result.isError) "An integer was refused for a float property: $($wholeNumberById[350].result.content[0].text)"
     Assert-True ((Tool-Payload $wholeNumberById[351]).value -eq 1) "The integer did not reach the float property."
+
+    # An editor raycast against a scene that actually holds a body. The edited
+    # scene is parented into a SubViewport under the editor's docks, so the
+    # root viewport's World2D is a different, empty space: a 2D ray asked of it
+    # reported a clean miss through a floor that was right there (#743). The 3D
+    # case hit, because a SubViewport inherits the root's World3D, but answered
+    # with the collider's absolute path through the editor's own dock tree,
+    # which no reader on the surface accepts (#742). Each answer is asserted
+    # against the logical path a reader takes, and that same literal is then
+    # handed to scene_get_property, so the pair proves the path is usable and
+    # not merely well shaped.
+    $rayRequests = @(
+        (@{ jsonrpc = "2.0"; id = 360; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 361 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 362 "scene_open" @{ scene_path = "res://raycast_probe_2d.tscn" }),
+        (Tool-Request 363 "physics_raycast_query" @{ from = @{ x = 0; y = 0 }; to = @{ x = 0; y = 300 } }),
+        (Tool-Request 364 "physics_raycast_query" @{ from = @{ x = 0; y = 0 }; to = @{ x = 0; y = 300 }; collision_mask = 4294967295 }),
+        (Tool-Request 365 "spatial_query_raycast_batch" @{ rays = @(@{ from = @{ x = 0; y = 0 }; to = @{ x = 0; y = 300 } }) }),
+        (Tool-Request 366 "physics_raycast_query" @{ from = @{ x = 500; y = 0 }; to = @{ x = 500; y = 300 } }),
+        (Tool-Request 367 "scene_get_property" @{ target_node = "/root/RayProbe2D/Floor"; property_name = "position" }),
+        (Tool-Request 368 "scene_open" @{ scene_path = "res://raycast_probe_3d.tscn" }),
+        (Tool-Request 369 "physics_raycast_query" @{ from = @{ x = 0; y = 5; z = 0 }; to = @{ x = 0; y = -5; z = 0 } }),
+        (Tool-Request 370 "scene_open" @{ scene_path = "res://main.tscn" })
+    )
+    $rawRayResponses = Invoke-Didi -Requests $rayRequests -Arguments @("--project", $fixtureRoot)
+    $rayResponses = @($rawRayResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
+    Assert-True ($LASTEXITCODE -eq 0) "Editor raycast MCP process exited with $LASTEXITCODE."
+    $rayById = @{}
+    foreach ($response in $rayResponses) { $rayById[[int]$response.id] = $response }
+
+    $ray2d = Tool-Payload $rayById[363]
+    Assert-True ($ray2d.hit -eq $true) "A 2D editor raycast missed a StaticBody2D standing in its path."
+    Assert-True ($ray2d.collider_class -eq "StaticBody2D") "The 2D editor raycast hit $($ray2d.collider_class), not the floor."
+    Assert-True ($ray2d.collider_path -eq "/root/RayProbe2D/Floor") "The 2D editor raycast answered with $($ray2d.collider_path), which is not a path the surface takes."
+    Assert-True ([math]::Abs([double]$ray2d.position.y - 90) -lt 0.01) "The 2D editor raycast hit the floor at y=$($ray2d.position.y), not its top edge."
+
+    $rayMask = Tool-Payload $rayById[364]
+    Assert-True ($rayMask.hit -eq $true) "A 32-bit every-layer collision_mask was not honoured."
+
+    $rayBatch = Tool-Payload $rayById[365]
+    Assert-True ($rayBatch.hit_count -eq 1) "The batch answered a different world from the single ray."
+    Assert-True (@($rayBatch.results)[0].collider_path -eq "/root/RayProbe2D/Floor") "The batch reported a collider path the single ray did not."
+
+    $rayMiss = Tool-Payload $rayById[366]
+    Assert-True ($rayMiss.hit -eq $false -and $null -eq $rayMiss.collider_path) "A 2D ray through empty space reported a hit."
+
+    Assert-True (-not $rayById[367].result.isError) "The path the raycast reported was refused by scene_get_property."
+
+    $ray3d = Tool-Payload $rayById[369]
+    Assert-True ($ray3d.hit -eq $true -and $ray3d.collider_class -eq "StaticBody3D") "A 3D editor raycast missed a StaticBody3D standing in its path."
+    Assert-True ($ray3d.collider_path -eq "/root/RayProbe3D/Block") "The 3D editor raycast answered with $($ray3d.collider_path), which is not a path the surface takes."
 
     $stopRequests = @(
         (@{ jsonrpc = "2.0"; id = 330; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),

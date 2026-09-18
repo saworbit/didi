@@ -519,7 +519,7 @@ Lists the 3D nodes inside a camera frustum, nearest first, in either an editor o
 - `camera_node` (`string`): a `Camera3D` already in the scene. Its global transform, projection mode, field of view and near and far planes are read from the node.
 - `camera` (`object`): a frustum written out by hand, with `position`, `look_at`, `fov_degrees`, `near`, `far` and `aspect` all required, and `up` defaulting to `{0,1,0}`. `fov_degrees` is vertical, matching a Godot camera's default. A frustum is a 3D shape, so 2D points are refused rather than lifted.
 - Exactly one of `camera_node` and `camera` is required. Two would be two answers to one question.
-- `sightline` (`boolean`, default `false`), `collision_mask` (`integer`, default `1`) and `max_results` (`integer`, 1 to 256, default `64`).
+- `sightline` (`boolean`, default `false`), `collision_mask` (`integer`, 1..4294967295, default `1`) and `max_results` (`integer`, 1 to 256, default `64`).
 
 Both forms build the same six planes, so a node one form calls visible is never a node the other calls hidden. The response echoes the frustum that answered under `camera`: position, the three basis axes, near, far, aspect, projection mode and the field of view or orthogonal size. Nothing about the frustum is left to be assumed by the caller.
 
@@ -535,7 +535,7 @@ Sweeps a shape along a path and reports how far it gets. A raycast answers wheth
 
 - `shape` (`object`, required): `kind` is `box` (with `size`), `sphere` (with `radius`), or `capsule` (with `radius` and `height`). `sphere` is a circle in 2D, so one request shape works in both dimensions.
 - `from`, `to` (`object`, required): `{x,y}` or `{x,y,z}`. Equal values ask whether the shape fits where it stands, which is accepted here even though a ray of no length is not.
-- `collision_mask` (`integer`, default `1`).
+- `collision_mask` (`integer`, 1..4294967295, default `1`).
 
 Returns `safe_fraction` and `unsafe_fraction` exactly as the engine returned them, `clear` when the safe fraction reaches 1, and `safe_position`, which is the start plus the motion scaled by the safe fraction. Nothing interprets what a particular pair of fractions means beyond that.
 
@@ -557,21 +557,23 @@ RID exclusion is not offered. A RID is a process-local handle a caller has no wa
 
 ### `physics_raycast_query` — Live (editor or game)
 
-Fires one ray segment through the attached session's root viewport World2D or World3D and reports what it hit. Delivered under the Phase 7B contract.
+Fires one ray segment through the attached session's physics world and reports what it hit. Delivered under the Phase 7B contract.
 
 - `from`, `to` (required): `{x, y}` or `{x, y, z}`, both the same dimension, every coordinate finite and within -1000000..1000000, and not the same point.
-- `collision_mask` (`integer`, 1..2147483647, default 1).
+- `collision_mask` (`integer`, 1..4294967295, default 1). Godot's masks are 32-bit, so `4294967295` is every layer.
 
-Query flags are fixed by the contract: bodies and areas are both hit, hit-from-inside is off, and back faces are hit in 3D. The result is `{dimension, hit, collider_path, collider_class, position, normal, collision_layer}`; on a miss every detail field is `null`. A collider that is not a Node in the tree reports `collider_path: null` with a bounded class name, never an object id. In the editor the root viewport's world is the editor's own, not the edited scene's, so bodies in the open scene are not what this ray sees; a game session sees its scene.
+Query flags are fixed by the contract: bodies and areas are both hit, hit-from-inside is off, and back faces are hit in 3D. The result is `{dimension, hit, collider_path, collider_class, position, normal, collision_layer}`; on a miss every detail field is `null`. A collider that is not a Node in the tree reports `collider_path: null` with a bounded class name, never an object id.
 
-Errors: `400` malformed request, `409` no world or direct space state, `501` missing bind. Read only; `dry_run` and `confirmation_token` are rejected.
+Which world is asked depends on the session. A game session uses its root viewport's, where the running scene lives. An editor session uses the edited scene's own, found with `Viewport.find_world_2d`/`find_world_3d` from the viewport the editor parents that scene into, so the bodies in the open scene are what the ray sees. `collider_path` is reported in the same `/root/<edited-scene-root>/Child` form every other editor answer uses, so it can be handed straight to a reader or a writer; a collider the edited scene does not own reports `null`.
+
+Errors: `400` malformed request, `404` no scene open in an editor session, `409` no world or direct space state, `501` missing bind. Read only; `dry_run` and `confirmation_token` are rejected.
 
 ### `nav_query_path` — Live (editor or game)
 
 Asks the root viewport world's navigation map for a path. Delivered under the Phase 7B contract.
 
 - `start_point`, `end_point` (required): same shape and bounds as the ray endpoints; equal points are allowed.
-- `navigation_layers` (`integer`, 1..2147483647, default 1).
+- `navigation_layers` (`integer`, 1..4294967295, default 1). Godot's layer masks are 32-bit, the same as `collision_mask`.
 - `optimize` (`boolean`, default true).
 
 Calls `NavigationServer2D/3D.map_get_path` on the existing map and never bakes. The result is `{dimension, reachable, points, truncated, navigation_layers, optimize}` with points in path order, capped at 256 points and 256 KiB; an empty path is `reachable: false`.

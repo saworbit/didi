@@ -1,0 +1,12 @@
+[gd_scene load_steps=2 format=3]
+
+[sub_resource type="RectangleShape2D" id="floor_shape"]
+size = Vector2(200, 20)
+
+[node name="RayProbe2D" type="Node2D"]
+
+[node name="Floor" type="StaticBody2D" parent="."]
+position = Vector2(0, 100)
+
+[node name="FloorShape" type="CollisionShape2D" parent="Floor"]
+shape = SubResource("floor_shape")

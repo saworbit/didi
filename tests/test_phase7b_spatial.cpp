@@ -58,6 +58,16 @@ void test_raycast_parses_both_dimensions_with_defaults() {
     ASSERT_EQ(two.value().collision_mask, 5);
     ASSERT_EQ(two.value().to.toJson(), v2(0, 4));
     ASSERT_EQ(three.value().from.toJson(), v3(0, 0, 0));
+    // Godot's masks are 32 bits unsigned, so layer 32 and "every layer" are
+    // both above INT32_MAX and both have to be takeable (#743).
+    auto every_layer =
+        parseRaycastRequest({{"from", v2(0, 0)}, {"to", v2(0, 4)}, {"collision_mask", 4294967295LL}});
+    ASSERT_TRUE(every_layer.isOk());
+    ASSERT_EQ(every_layer.value().collision_mask, 4294967295LL);
+    auto layer_thirty_two =
+        parseRaycastRequest({{"from", v2(0, 0)}, {"to", v2(0, 4)}, {"collision_mask", 2147483648LL}});
+    ASSERT_TRUE(layer_thirty_two.isOk());
+    ASSERT_EQ(layer_thirty_two.value().collision_mask, 2147483648LL);
 }
 
 void test_raycast_rejects_contract_violations() {
@@ -73,7 +83,7 @@ void test_raycast_rejects_contract_violations() {
         {{"from", v3(0, 0, 0)}, {"to", {{"x", 1}, {"y", 0}, {"z", 0}, {"w", 0}}}},
         {{"from", v3(0, 0, 0)}, {"to", {{"x", "1"}, {"y", 0}, {"z", 0}}}},
         {{"from", v3(0, 0, 0)}, {"to", v3(1, 0, 0)}, {"collision_mask", 0}},
-        {{"from", v3(0, 0, 0)}, {"to", v3(1, 0, 0)}, {"collision_mask", 2147483648LL}},
+        {{"from", v3(0, 0, 0)}, {"to", v3(1, 0, 0)}, {"collision_mask", 4294967296LL}},
         {{"from", v3(0, 0, 0)}, {"to", v3(1, 0, 0)}, {"collision_mask", 1.5}},
         {{"from", v3(0, 0, 0)}, {"to", v3(1, 0, 0)}, {"exclude", json::array()}},
         {{"from", json::array({0, 0, 0})}, {"to", v3(1, 0, 0)}},

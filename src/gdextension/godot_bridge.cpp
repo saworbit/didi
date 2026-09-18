@@ -4131,21 +4131,74 @@ Result<json> pointVariantToJson(VariantValue& value, int dimension) {
     return output;
 }
 
-// The root viewport's World2D or World3D as a Variant, or the object behind it.
-Result<VariantValue> rootWorld(int dimension) {
-    auto tree = liveSceneTree();
-    if (tree.isErr()) return tree.error();
-    auto root = liveSceneTreeRoot(tree.value());
-    if (root.isErr()) return root.error();
-    auto world = dimension == 2
-                     ? callObject(root.value(), "Viewport", "get_world_2d", 2339128592LL)
-                     : callObject(root.value(), "Viewport", "get_world_3d", 317588385LL);
+// The world a spatial query asks its question of.
+//
+// In a game the running scene is under the root viewport, so the root
+// viewport's world is the one holding the colliders. In an editor it is not:
+// the edited scene is parented into a SubViewport inside the editor's own
+// docks, and a Viewport carries its own World2D, so the root viewport's World2D
+// is a different, empty space. A 2D ray asked of it passed through the level
+// and reported a clean miss, indistinguishable from empty space (#743). The 3D
+// case only looked healthy by accident -- a SubViewport has no World3D of its
+// own, so it inherits the root's, which is where the edited scene's 3D bodies
+// register.
+//
+// Viewport.find_world_2d and find_world_3d are the engine's own answer to
+// "which world does this viewport actually use": each walks from the viewport
+// up its ancestors to the first valid one. Asked of the SubViewport the edited
+// scene sits in, that is the scene's own World2D and the shared World3D, which
+// is right in both dimensions and on 4.5.1, 4.6.2 and 4.7.2, where both binds
+// carry the same hash.
+Result<VariantValue> queriedWorld(int dimension, const std::string& session_kind) {
+    const char* method = dimension == 2 ? "find_world_2d" : "find_world_3d";
+    const int64_t hash = dimension == 2 ? 2339128592LL : 317588385LL;
+    Result<GDExtensionObjectPtr> viewport = Error::internal("unresolved");
+    if (session_kind == "editor") {
+        auto editor = editorInterface();
+        if (editor.isErr()) return editor.error();
+        auto root = editedSceneRoot(editor.value());
+        if (root.isErr()) return root.error();
+        auto owning = callObject(root.value(), "Node", "get_viewport", 3596683776LL);
+        if (owning.isErr()) return owning.error();
+        auto object = objectFromVariant(owning.value());
+        if (object.isErr() || !object.value()) {
+            return Error(409, "The edited scene is not inside a viewport");
+        }
+        viewport = object.value();
+    } else {
+        auto tree = liveSceneTree();
+        if (tree.isErr()) return tree.error();
+        viewport = liveSceneTreeRoot(tree.value());
+    }
+    if (viewport.isErr()) return viewport.error();
+    auto world = callObject(viewport.value(), "Viewport", method, hash);
     if (world.isErr()) return world.error();
     auto object = objectFromVariant(world.value());
     if (object.isErr() || !object.value()) {
-        return Error(409, dimension == 2 ? "Root viewport has no World2D" : "Root viewport has no World3D");
+        return Error(409, dimension == 2 ? "The queried viewport has no World2D"
+                                         : "The queried viewport has no World3D");
     }
     return std::move(world.value());
+}
+
+// The collider's path in the form the rest of the surface takes.
+//
+// Node.get_path answers absolutely, and in an editor that path runs through the
+// editor's own dock tree and its volatile instance ids -- 370 characters that
+// no reader or writer on the surface accepts (#742). logicalPathFromEditedRoot
+// is the same reduction every other editor answer uses. A collider the edited
+// scene does not own cannot be reduced, and that is reported as a null path
+// rather than as a path a caller would then fail to use.
+Result<std::string> colliderLogicalPath(GDExtensionObjectPtr collider,
+                                        const std::string& session_kind) {
+    if (session_kind != "editor") {
+        return nodeString(collider, "get_path", 4075236667LL);
+    }
+    auto editor = editorInterface();
+    if (editor.isErr()) return editor.error();
+    auto root = editedSceneRoot(editor.value());
+    if (root.isErr()) return root.error();
+    return logicalPathFromEditedRoot(root.value(), collider);
 }
 
 // The binds and the space state a ray needs, resolved once. A batch pays for
@@ -4154,12 +4207,12 @@ Result<VariantValue> rootWorld(int dimension) {
 // The direct space state of the root viewport's world, which every physics
 // query in this file asks its question of. Shared so a ray and a shape sweep
 // cannot end up reading two different worlds.
-Result<GDExtensionObjectPtr> openDirectSpaceState(int dimension) {
+Result<GDExtensionObjectPtr> openDirectSpaceState(int dimension, const std::string& session_kind) {
     const int64_t state_hash = dimension == 2 ? 2506717822LL : 2069328350LL;
     auto required = requireMethodBind(dimension == 2 ? "World2D" : "World3D",
                                       "get_direct_space_state", state_hash);
     if (required.isErr()) return Error(501, required.error().message);
-    auto world = rootWorld(dimension);
+    auto world = queriedWorld(dimension, session_kind);
     if (world.isErr()) return world.error();
     auto world_object = objectFromVariant(world.value());
     if (world_object.isErr()) return Error::internal(world_object.error().message);
@@ -4168,7 +4221,7 @@ Result<GDExtensionObjectPtr> openDirectSpaceState(int dimension) {
     if (state.isErr()) return Error::internal(state.error().message);
     auto state_object = objectFromVariant(state.value());
     if (state_object.isErr() || !state_object.value()) {
-        return Error(409, "Root viewport world has no direct space state");
+        return Error(409, "The queried world has no direct space state");
     }
     return state_object.value();
 }
@@ -4182,7 +4235,7 @@ struct RaycastSpace {
     GDExtensionObjectPtr state{nullptr};
 };
 
-Result<RaycastSpace> openRaycastSpace(int dimension) {
+Result<RaycastSpace> openRaycastSpace(int dimension, const std::string& session_kind) {
     RaycastSpace space;
     space.dimension = dimension;
     space.params_class = dimension == 2 ? "PhysicsRayQueryParameters2D" : "PhysicsRayQueryParameters3D";
@@ -4199,7 +4252,7 @@ Result<RaycastSpace> openRaycastSpace(int dimension) {
         if (required.isErr()) return Error(501, required.error().message);
     }
 
-    auto state = openDirectSpaceState(dimension);
+    auto state = openDirectSpaceState(dimension, session_kind);
     if (state.isErr()) return state.error();
     space.state = state.value();
     return space;
@@ -4208,7 +4261,8 @@ Result<RaycastSpace> openRaycastSpace(int dimension) {
 // One ray against an already-open space. The record is the same one
 // physics_raycast_query returns, so a batch entry and a single call cannot
 // describe the same hit differently.
-Result<json> castOneRay(const RaycastSpace& space, const runtime::RaycastRequest& request) {
+Result<json> castOneRay(const RaycastSpace& space, const runtime::RaycastRequest& request,
+                        const std::string& session_kind) {
     const int dimension = space.dimension;
     const char* params_class = space.params_class;
     auto from = makePoint(request.from);
@@ -4300,7 +4354,7 @@ Result<json> castOneRay(const RaycastSpace& space, const runtime::RaycastRequest
             if (is_node.isOk()) {
                 auto node_flag = scalarFromVariant<GDExtensionBool>(is_node.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
                 if (node_flag.isOk() && node_flag.value()) {
-                    auto path = nodeString(collider_object.value(), "get_path", 4075236667LL);
+                    auto path = colliderLogicalPath(collider_object.value(), session_kind);
                     if (path.isOk() && !path.value().empty() && path.value().size() <= 1024) {
                         result["collider_path"] = path.value();
                     }
@@ -4420,7 +4474,7 @@ constexpr int64_t kSetShapeHash = 968641751LL;
 constexpr int64_t kSetCollisionMaskHash = 1286410249LL;
 constexpr int64_t kSetBoolHash = 2586408642LL;
 
-json physicsClearance(const json& params) {
+json physicsClearance(const json& params, const std::string& session_kind) {
     auto parsed = runtime::parseClearanceRequest(params);
     if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
     const auto& request = parsed.value();
@@ -4449,7 +4503,7 @@ json physicsClearance(const json& params) {
         if (required.isErr()) return errorJson(501, required.error().message);
     }
 
-    auto state = openDirectSpaceState(dimension);
+    auto state = openDirectSpaceState(dimension, session_kind);
     if (state.isErr()) return errorJson(state.error().code, state.error().message);
 
     auto shape = makeClearanceShape(request);
@@ -5136,7 +5190,7 @@ json visionFrustumQuery(const json& params, const std::string& session_kind) {
     int64_t rays_cast = 0;
     bool sightline_truncated = false;
     if (request.sightline && reported > 0) {
-        auto opened = openRaycastSpace(3);
+        auto opened = openRaycastSpace(3, session_kind);
         if (opened.isErr()) return errorJson(opened.error().code, opened.error().message);
         space = opened.value();
     }
@@ -5175,7 +5229,7 @@ json visionFrustumQuery(const json& params, const std::string& session_kind) {
                     ++clear;
                     continue;
                 }
-                auto cast = castOneRay(space.value(), ray);
+                auto cast = castOneRay(space.value(), ray, session_kind);
                 if (cast.isErr()) return errorJson(cast.error().code, cast.error().message);
                 ++rays_cast;
                 const json& hit = cast.value();
@@ -5222,17 +5276,17 @@ json visionFrustumQuery(const json& params, const std::string& session_kind) {
     return liveResult(result);
 }
 
-json physicsRaycastBatch(const json& params) {
+json physicsRaycastBatch(const json& params, const std::string& session_kind) {
     auto parsed = runtime::parseRaycastBatchRequest(params);
     if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
     const auto& request = parsed.value();
-    auto space = openRaycastSpace(request.dimension());
+    auto space = openRaycastSpace(request.dimension(), session_kind);
     if (space.isErr()) return errorJson(space.error().code, space.error().message);
 
     json results = json::array();
     size_t hits = 0;
     for (size_t index = 0; index < request.rays.size(); ++index) {
-        auto cast = castOneRay(space.value(), request.rays[index]);
+        auto cast = castOneRay(space.value(), request.rays[index], session_kind);
         // One ray that cannot be answered fails the batch. A partial batch that
         // looked complete would be read as fifty clear sightlines when it was
         // forty-nine and a silence.
@@ -5251,7 +5305,7 @@ json physicsRaycastBatch(const json& params) {
                        {"results", std::move(results)}});
 }
 
-json physicsRaycast(const json& params) {
+json physicsRaycast(const json& params, const std::string& session_kind) {
     auto parsed = runtime::parseRaycastRequest(params);
     if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
     const auto& request = parsed.value();
@@ -5269,7 +5323,7 @@ json physicsRaycast(const json& params) {
         if (required.isErr()) return errorJson(501, required.error().message);
     }
 
-    auto world = rootWorld(dimension);
+    auto world = queriedWorld(dimension, session_kind);
     if (world.isErr()) return errorJson(world.error().code, world.error().message);
     auto world_object = objectFromVariant(world.value());
     if (world_object.isErr()) return errorJson(500, world_object.error().message);
@@ -5278,7 +5332,7 @@ json physicsRaycast(const json& params) {
     if (state.isErr()) return errorJson(500, state.error().message);
     auto state_object = objectFromVariant(state.value());
     if (state_object.isErr() || !state_object.value()) {
-        return errorJson(409, "Root viewport world has no direct space state");
+        return errorJson(409, "The queried world has no direct space state");
     }
 
     auto from = makePoint(request.from);
@@ -5365,7 +5419,7 @@ json physicsRaycast(const json& params) {
             if (is_node.isOk()) {
                 auto node_flag = scalarFromVariant<GDExtensionBool>(is_node.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
                 if (node_flag.isOk() && node_flag.value()) {
-                    auto path = nodeString(collider_object.value(), "get_path", 4075236667LL);
+                    auto path = colliderLogicalPath(collider_object.value(), session_kind);
                     if (path.isOk() && !path.value().empty() && path.value().size() <= 1024) {
                         result["collider_path"] = path.value();
                     }
@@ -5383,7 +5437,7 @@ json physicsRaycast(const json& params) {
     return liveResult(result);
 }
 
-json navQueryPath(const json& params) {
+json navQueryPath(const json& params, const std::string& session_kind) {
     auto parsed = runtime::parseNavPathRequest(params);
     if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
     const auto& request = parsed.value();
@@ -5395,7 +5449,7 @@ json navQueryPath(const json& params) {
     auto map_bind = requireMethodBind(dimension == 2 ? "World2D" : "World3D", "get_navigation_map", 2944877500LL);
     if (map_bind.isErr()) return errorJson(501, map_bind.error().message);
 
-    auto world = rootWorld(dimension);
+    auto world = queriedWorld(dimension, session_kind);
     if (world.isErr()) return errorJson(world.error().code, world.error().message);
     auto world_object = objectFromVariant(world.value());
     if (world_object.isErr()) return errorJson(500, world_object.error().message);
@@ -6757,13 +6811,13 @@ json GodotBridge::execute(const std::string& method, const json& params,
     if (method == "runtime.missingInputActions") {
         return inputMapMissingActions(params, session_kind);
     }
-    if (method == "physics.raycast") return physicsRaycast(params);
-    if (method == "physics.raycastBatch") return physicsRaycastBatch(params);
-    if (method == "physics.clearance") return physicsClearance(params);
+    if (method == "physics.raycast") return physicsRaycast(params, session_kind);
+    if (method == "physics.raycastBatch") return physicsRaycastBatch(params, session_kind);
+    if (method == "physics.clearance") return physicsClearance(params, session_kind);
     if (method == "vision.frustumQuery") return visionFrustumQuery(params, session_kind);
     if (method == "preview.renderGhost") return ghostPreviewRender(params);
     if (method == "preview.clearGhosts") return ghostPreviewClear(params);
-    if (method == "nav.queryPath") return navQueryPath(params);
+    if (method == "nav.queryPath") return navQueryPath(params, session_kind);
     if (method == "ui.listControls") return uiListControls(params, session_kind);
     if (method == "ui.hitTest") return uiHitTest(params, session_kind);
     if (method == "anim.listTracks") return animListTracks(params, session_kind);
