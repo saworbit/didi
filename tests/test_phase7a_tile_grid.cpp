@@ -192,23 +192,63 @@ static void test_the_published_cell_shape_is_enforced_by_the_schema() {
         return result.content.empty() ? std::string() : result.content[0].text;
     };
 
-    // The object form most of the rest of the surface takes is a violation
-    // here, and it is now named rather than tokenised.
-    const auto tilemap = message("tilemap_set_cells",
-        didi::json{{"tilemap_path", "/root/Main/Branch"},
-                   {"cells", didi::json::array({{{"coords", {{"x", 0}, {"y", 0}}},
-                                                 {"source_id", 0},
-                                                 {"atlas_coords", {{"x", 0}, {"y", 0}}}}})}});
-    ASSERT_TRUE(tilemap.find("must be an array, not an object") != std::string::npos);
-    ASSERT_TRUE(tilemap.find("\"code\":400") != std::string::npos);
-    ASSERT_TRUE(tilemap.find("invalid_tilemap_set_cells_request") == std::string::npos);
+    // The object form the rest of the surface takes is accepted here now.
+    //
+    // This assertion used to run the other way, and it was right about the
+    // contract and wrong about the contract being a good one: a vector is an
+    // object in scene_set_property, resource_create, physics_raycast_query and
+    // nav_query_path, LLM_INSTRUCTIONS states that rule with no exception, and
+    // the two cell writers took arrays, so an agent following its own
+    // instructions met two refusals in a row on the tool whose job is painting
+    // a level (#738). A malformed object is still a refusal, below.
+    const auto objectForms = {
+        std::make_pair("tilemap_set_cells",
+                       didi::json{{"tilemap_path", "/root/Main/Branch"},
+                                  {"cells", didi::json::array(
+                                       {{{"coords", {{"x", 0}, {"y", 0}}},
+                                         {"source_id", 0},
+                                         {"atlas_coords", {{"x", 0}, {"y", 0}}}}})}}),
+        std::make_pair("gridmap_set_cells",
+                       didi::json{{"gridmap_path", "/root/Main/Branch"},
+                                  {"cells", didi::json::array(
+                                       {{{"position", {{"x", 0}, {"y", 0}, {"z", 0}}},
+                                         {"item", 0}}})}}),
+        // And each writer takes the other's name for the same thing.
+        std::make_pair("gridmap_set_cells",
+                       didi::json{{"gridmap_path", "/root/Main/Branch"},
+                                  {"cells", didi::json::array(
+                                       {{{"coords", {{"x", 0}, {"y", 0}, {"z", 0}}},
+                                         {"item", 0}}})}}),
+        std::make_pair("tilemap_set_cells",
+                       didi::json{{"tilemap_path", "/root/Main/Branch"},
+                                  {"cells", didi::json::array(
+                                       {{{"position", didi::json::array({0, 0})},
+                                         {"source_id", 0},
+                                         {"atlas_coords", didi::json::array({0, 0})}}})}})};
+    for (const auto& form : objectForms) {
+        const auto accepted = registry.callTool(form.first, form.second);
+        const auto text = accepted.content.empty() ? std::string() : accepted.content[0].text;
+        ASSERT_TRUE(text.find("must be an array") == std::string::npos);
+        ASSERT_TRUE(text.find("does not match any accepted shape") == std::string::npos);
+        ASSERT_TRUE(text.find("invalid_tilemap_set_cells_request") == std::string::npos);
+        ASSERT_TRUE(text.find("invalid_gridmap_set_cells_request") == std::string::npos);
+    }
 
-    // Which is what the same mistake has always got from gridmap_set_cells.
-    const auto gridmap = message("gridmap_set_cells",
-        didi::json{{"gridmap_path", "/root/Main/Branch"},
-                   {"cells", didi::json::array({{{"position", {{"x", 0}, {"y", 0}, {"z", 0}}},
-                                                 {"item", 0}}})}});
-    ASSERT_TRUE(gridmap.find("must be an array, not an object") != std::string::npos);
+    // An object that is not a coordinate still is a violation, and the schema
+    // is what says so: a missing axis, and one that is not a whole number.
+    const auto shortObject = message("tilemap_set_cells",
+        didi::json{{"tilemap_path", "/root/Main/Branch"},
+                   {"cells", didi::json::array({{{"coords", {{"x", 0}}},
+                                                 {"source_id", 0},
+                                                 {"atlas_coords", didi::json::array({0, 0})}}})}});
+    ASSERT_TRUE(shortObject.find("\"code\":400") != std::string::npos);
+    ASSERT_TRUE(shortObject.find("invalid_tilemap_set_cells_request") == std::string::npos);
+    const auto fractional = message("tilemap_set_cells",
+        didi::json{{"tilemap_path", "/root/Main/Branch"},
+                   {"cells", didi::json::array({{{"coords", {{"x", 0.5}, {"y", 0}}},
+                                                 {"source_id", 0},
+                                                 {"atlas_coords", didi::json::array({0, 0})}}})}});
+    ASSERT_TRUE(fractional.find("\"code\":400") != std::string::npos);
 
     // prefixItems is what says a coordinate is a pair, and const is what tells
     // the erase shape from the placement shape.

@@ -185,6 +185,38 @@ std::optional<std::string> checkBounds(const json& schema, const json& value,
     return std::nullopt;
 }
 
+// Whether a branch's declared `type` can hold this value at all.
+//
+// Only a statement about the JSON type, so it never decides a call on its own;
+// it is used to drop branches that could not have been meant before the
+// required-property guess runs.
+bool branchTypeAccepts(const json& branch, const json& value, const json& root) {
+    const json* schema = &branch;
+    if (branch.find("type") == branch.end()) {
+        if (const json* referenced = resolveLocalRef(branch, root)) schema = referenced;
+    }
+    const auto declared = schema->find("type");
+    if (declared == schema->end()) return true;
+    const auto matches = [&value](const std::string& name) {
+        if (name == "object") return value.is_object();
+        if (name == "array") return value.is_array();
+        if (name == "string") return value.is_string();
+        if (name == "boolean") return value.is_boolean();
+        if (name == "null") return value.is_null();
+        if (name == "integer") return value.is_number_integer();
+        if (name == "number") return value.is_number();
+        return true;
+    };
+    if (declared->is_string()) return matches(declared->get<std::string>());
+    if (declared->is_array()) {
+        for (const auto& name : *declared) {
+            if (name.is_string() && matches(name.get<std::string>())) return true;
+        }
+        return false;
+    }
+    return true;
+}
+
 // The accepted shapes, when a schema publishes more than one.
 //
 // A tilemap cell is either a placement or an erase, so the published schema is
@@ -267,6 +299,8 @@ std::optional<std::string> checkOneOf(const json& schema, const json& value,
         if (!branch.is_object()) continue;
         if (!checkValue(branch, value, where, depth + 1, root)) return std::nullopt;
 
+
+
         // What the branch demands is behind the $ref when the branch is one.
         // A $ref object carries no `required` of its own, so both branches of
         // physics_raycast_query.from reported as empty and the message read
@@ -293,7 +327,34 @@ std::optional<std::string> checkOneOf(const json& schema, const json& value,
                 if (!value.is_object() || !value.contains(name)) required_present = false;
             }
         }
-        if (required_present) candidates.push_back(&branch);
+        // A branch whose declared type cannot hold this value is not the shape
+        // the caller was reaching for, whatever its required properties say. A
+        // coordinate taken as either [x, y] or {x, y} has an array branch that
+        // declares no required properties at all, so every malformed object
+        // counted it as the one candidate and was answered "must be an array,
+        // not an object" -- about a form the tool accepts (#738). The branch
+        // still contributes what it demands to the list below, because a value
+        // matching no branch has to be told about all of them.
+        if (required_present && branchTypeAccepts(branch, value, root)) {
+            candidates.push_back(&branch);
+        }
+        // An array branch has no required properties and never will, so
+        // "no required properties" is the one thing it must not say -- that is
+        // #489's finding, in the shape a coordinate taken as either [x, y] or
+        // {x, y} produces. Described by its length instead, which is what an
+        // array branch actually demands.
+        if (names.empty()) {
+            const auto declared_type = demanded->find("type");
+            const bool is_array = declared_type != demanded->end() &&
+                                  declared_type->is_string() &&
+                                  declared_type->get<std::string>() == "array";
+            const auto minimum = demanded->find("minItems");
+            if (is_array && minimum != demanded->end() && minimum->is_number_integer()) {
+                demands.push_back("an array of " + std::to_string(minimum->get<int64_t>()) +
+                                  " entries");
+                continue;
+            }
+        }
         demands.push_back(names.empty() ? std::string("no required properties")
                                         : joinNames(names));
     }
