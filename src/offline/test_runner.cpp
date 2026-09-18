@@ -567,8 +567,43 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
 
         auto elapsed = std::chrono::steady_clock::now() - start_time;
         if (elapsed > timeout_dur) {
+            // The job, not the process, and then wait for the job to empty.
+            //
+            // TerminateProcess kills what pi.hProcess points at. That is not
+            // the game whenever Godot resolves to something that launches the
+            // engine and waits -- a .cmd wrapper, or Godot's own Windows
+            // console build, which starts the GUI binary and pipes its output.
+            // The job caught that already, but only on the way out:
+            // KILL_ON_JOB_CLOSE terminates asynchronously when the last handle
+            // closes, so runtime_launch returned while its own game was still
+            // dying. The documented discovery flow is launch, then list, then
+            // attach, and that call sequence lands squarely in the window:
+            // runtime_list_sessions reported the game alive and not stale --
+            // truthfully -- and the attach one call later found it gone (#732).
+            //
+            // Terminating the job and waiting for its process count to reach
+            // zero makes the kill finished by the time the tool answers, which
+            // is what a caller reading `alive` is entitled to assume. Bounded,
+            // because a process that will not die must not hang the tool; the
+            // wait on pi.hProcess below is the same bound this always had.
+            if (job) TerminateJobObject(job, 1);
             TerminateProcess(pi.hProcess, 1);
             WaitForSingleObject(pi.hProcess, 5000);
+            if (job) {
+                const auto deadline =
+                    std::chrono::steady_clock::now() + std::chrono::seconds(5);
+                for (;;) {
+                    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting{};
+                    DWORD returned = 0;
+                    if (!QueryInformationJobObject(job, JobObjectBasicAccountingInformation,
+                                                   &accounting, sizeof(accounting), &returned)) {
+                        break;
+                    }
+                    if (accounting.ActiveProcesses == 0) break;
+                    if (std::chrono::steady_clock::now() >= deadline) break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                }
+            }
             result.exit_code = 124; // Timeout exit code
             result.timed_out = true;
             result.summary = "Test session timed out after " + std::to_string(timeout_seconds) + " seconds.";

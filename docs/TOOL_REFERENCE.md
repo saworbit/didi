@@ -998,6 +998,7 @@ Launches a separate Godot process, optionally headless, captures stdout/stderr, 
 - `timeout_seconds` (`integer`, `1`–`120`, default `10`).
 - `headless` (`boolean`, default `true`).
 - `break_on_error` (`boolean`, default `true`): marks captured `ERROR:`/`SCRIPT ERROR:` lines as failure after the child exits; it does not stop the child early.
+- The timeout kills the whole process tree, and the call does not return until it has. Godot is not always the process that was started -- a `godot.cmd` wrapper, or Godot's own Windows console build, launches the engine and waits on it -- so the tool terminates the job the child was spawned into rather than the child alone, and waits for the job to empty. That matters for what comes next: `runtime_list_sessions` reports a session as alive when the process behind it is alive, so a game still shutting down would be listed as attachable and then refuse the connection.
 - `extra_args` (`array` of strings, optional; unsafe shell metacharacters are rejected).
 - Legacy alias: `execute_test_session`.
 

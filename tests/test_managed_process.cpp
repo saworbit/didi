@@ -526,12 +526,30 @@ static void testSessionTimeoutKillsTheWholeProcessTree() {
     // is that the grandchild never started.
     CHECK_PROCESS(grandchild != 0);
 
-    // The tree, not just the interpreter. Give the kernel a moment: a job
-    // closing kills asynchronously.
+    // The tree, not just the interpreter.
+#if defined(_WIN32)
+    // And gone by the time runSession returns, with no wait here at all.
+    //
+    // The generous wait this used to do is the thing that hid #732: a job with
+    // KILL_ON_JOB_CLOSE terminates asynchronously when the last handle closes,
+    // so the tree did die -- a moment after the tool had already answered. The
+    // documented flow is launch, then runtime_list_sessions, then
+    // runtime_attach_session, and that sequence lands inside the window every
+    // time: the list reported the game alive and not stale, truthfully, and the
+    // attach a call later could not connect to it. A caller reading `alive` is
+    // entitled to assume the tool has finished what it started, so the timeout
+    // path terminates the job and waits for it to empty, and this asserts that
+    // rather than waiting for it.
+    CHECK_PROCESS(!processAlive(grandchild));
+#else
+    // POSIX kills the process group in the timeout path, and the group members
+    // are reaped by init rather than by the runner, so a moment of slack is the
+    // honest bound here. The Windows assertion above is the one about #732.
     deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
     while (processAlive(grandchild) && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     CHECK_PROCESS(!processAlive(grandchild));
+#endif
 
 #if defined(_WIN32)
     _putenv_s("GODOT_BIN", "");
