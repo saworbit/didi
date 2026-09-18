@@ -781,6 +781,13 @@ static json outputSchemaForTool(const std::string& name) {
                               // those are different states with different
                               // repairs (#728).
                               {"engine_checked", boolean_type},
+                              // Both added together by annotateConfiguredEngine,
+                              // and only when GODOT_BIN was set and could not be
+                              // used. Returned and undeclared, which the output
+                              // schema contract catches wherever a run happens
+                              // to have a rejected GODOT_BIN.
+                              {"engine_executable_configured", string_type},
+                              {"engine_executable_configured_rejected", string_type},
                               // Present exactly when engine_checked is false,
                               // saying what the verdict does and does not
                               // cover and where to get the other half.
@@ -4059,9 +4066,20 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"timeout_seconds", {{"type", "integer"}, {"default", 10}, {"minimum", 1}, {"maximum", 120}}},
                 {"headless", {{"type", "boolean"}, {"default", true}}},
                 {"break_on_error", {{"type", "boolean"}, {"default", true}, {"description", "Classify captured ERROR lines as failure after process exit; does not terminate the child early"}}},
-                {"extra_args", {{"type", "array"}, {"items", {{"type", "string"}}}}}
+                {"extra_args", {{"type", "array"}, {"items", {{"type", "string"}}}}},
+                {"detach", {{"type", "boolean"}, {"default", false},
+                            {"description",
+                             "Start the game and leave it running instead of watching it to "
+                             "completion. The call returns once the game has published a session, "
+                             "which is what runtime_attach_session and the rest of the runtime "
+                             "tools route through, so an author can write code, run it, look at "
+                             "it and fix it without asking a person to press F5. Nothing is "
+                             "captured: read a running game with runtime_read_output and end it "
+                             "with runtime_stop. Without this the call blocks, terminates the game "
+                             "at the timeout, and reports what it saw."}}}
             }}
         };
+        t.description = "Starts a separate Godot process. Blocking by default: captures stdout/stderr, classifies errors after exit, and enforces a 1-120 second timeout. With detach: true it leaves the game running and answers with the session to drive it through.";
         // The source client, not the lease dispatcher: this tool spawns its own
         // Godot and takes no live route, and the wrapper is not a session
         // client, so reading the session through it answered "no session" next

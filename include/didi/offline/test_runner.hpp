@@ -148,6 +148,13 @@ struct TestSessionResult {
     // been run by 4.7 (#687). Its two siblings have published it since #617.
     std::string engine_executable;
     std::string engine_version;
+    // Whether the child was placed in a job object, which on Windows is the only
+    // thing that can reach a grandchild. It normally succeeds; a host that runs
+    // this process inside a job of its own with breakaway restricted can refuse
+    // the assignment, and then a kill reaches the process this call started and
+    // nothing under it. False on POSIX, where the process group does that job
+    // and always works.
+    bool contained{false};
 
     json toJson() const {
         json log_arr = json::array();
