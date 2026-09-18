@@ -10147,9 +10147,20 @@ json GodotBridge::execute(const std::string& method, const json& params,
 
         GDExtensionObjectPtr packed_root = nullptr;
         if (method == "scene.create") {
+            // Any ClassDB type that inherits Node, which is what
+            // scene_instantiate_node has always taken.
+            //
+            // The enum was Node2D, Node3D and Control, and almost every scene
+            // in a real project has a root outside it: a player is a
+            // CharacterBody2D, a pickup an Area2D, terrain a StaticBody2D, a
+            // HUD a CanvasLayer. The route that worked was to create a throwaway
+            // Node2D scene, instantiate the type you wanted under it, build the
+            // subtree there and scene_pack_branch it to the real path -- four
+            // calls, nothing saying so, and a scratch scene left on disk that
+            // the caller then has to remember to delete (#740).
             const std::string root_type = params.value("root_type", "Node2D");
-            if (root_type != "Node2D" && root_type != "Node3D" && root_type != "Control") {
-                return errorJson(400, "root_type must be Node2D, Node3D, or Control");
+            if (root_type.empty() || root_type.size() > 128) {
+                return errorJson(400, "root_type must be a Godot class name that inherits Node");
             }
             const std::string root_name = params.value("root_name", "Root");
             if (root_name.empty() || root_name.find('/') != std::string::npos || root_name.find('\\') != std::string::npos) {
@@ -10157,7 +10168,29 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             NativeName native_type(root_type);
             packed_root = constructObject(native_type.ptr());
-            if (!packed_root) return errorJson(500, "Godot could not construct scene root type: " + root_type);
+            if (!packed_root) {
+                return errorJson(400, "Godot ClassDB could not instantiate scene root type: " +
+                                          root_type);
+            }
+            {
+                // A Variant type or a RefCounted resource constructs and is not
+                // a node, and a .tscn whose root is not a Node cannot be
+                // instanced into anything. Same check, same words, as the
+                // sibling that instantiates one.
+                auto node_class = makeString("Node");
+                auto is_node_variant = node_class.isOk()
+                    ? callObject(packed_root, "Object", "is_class", 3927539163LL, {&node_class.value()})
+                    : Result<VariantValue>(node_class.error());
+                auto is_node = is_node_variant.isOk()
+                    ? scalarFromVariant<GDExtensionBool>(is_node_variant.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+                    : Result<GDExtensionBool>(is_node_variant.error());
+                if (is_node.isErr() || !is_node.value()) {
+                    GodotApi::instance().object_destroy(packed_root);
+                    return is_node.isErr()
+                        ? errorJson(is_node.error().code, is_node.error().message)
+                        : errorJson(400, "Godot ClassDB type does not inherit Node: " + root_type);
+                }
+            }
             auto name = makeStringName(root_name);
             auto named = name.isOk()
                 ? callObject(packed_root, "Node", "set_name", 3304788590LL, {&name.value()})

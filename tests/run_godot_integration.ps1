@@ -3852,6 +3852,44 @@ try {
     Assert-True ((Tool-Payload $coordById[5619]).applied -eq $true) "A Color written without alpha reported that it did not apply."
     Assert-True ((Tool-Payload $coordById[5620]).applied -eq $true) "A Color written as a hex string reported that it did not apply."
 
+    # The roots a real project needs. root_type was Node2D, Node3D or Control,
+    # and almost every scene in a game has a root outside that: a player is a
+    # CharacterBody2D, a pickup an Area2D, a HUD a CanvasLayer. The route that
+    # worked was a throwaway scene, an instantiate, and a pack branch -- four
+    # calls, nothing saying so, and a scratch file left behind (#740).
+    $rootRequests = @(
+        (@{ jsonrpc = "2.0"; id = 5630; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 5631 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 5632 "scene_create" @{ scene_path = "res://root_type_player.tscn"; root_type = "CharacterBody2D"; root_name = "Player" }),
+        (Tool-Request 5633 "scene_create" @{ scene_path = "res://root_type_hud.tscn"; root_type = "CanvasLayer"; root_name = "Hud" }),
+        # A class that constructs and is not a Node cannot be a scene root, and
+        # a class the engine does not know is a different mistake. Both are
+        # named rather than tokenised, the way scene_instantiate_node names them.
+        (Tool-Request 5634 "scene_create" @{ scene_path = "res://root_type_bad.tscn"; root_type = "CircleShape2D"; root_name = "Bad" }),
+        (Tool-Request 5635 "scene_create" @{ scene_path = "res://root_type_bad.tscn"; root_type = "NotARealClass"; root_name = "Bad" }),
+        (Tool-Request 5636 "scene_open" @{ scene_path = "res://main.tscn" })
+    )
+    $rawRootResponses = Invoke-Didi -Requests $rootRequests -Arguments @("--project", $fixtureRoot)
+    $rootResponses = @($rawRootResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
+    Assert-True ($LASTEXITCODE -eq 0) "Scene root-type MCP process exited with $LASTEXITCODE."
+    $rootById = @{}
+    foreach ($response in $rootResponses) { $rootById[[int]$response.id] = $response }
+
+    Assert-True (-not $rootById[5632].result.isError) "A physics root type was refused by scene_create: $($rootById[5632].result.content[0].text)"
+    Assert-True (-not $rootById[5633].result.isError) "A CanvasLayer root type was refused by scene_create."
+    # The file is the proof, not the answer: a scene whose root is the wrong
+    # class is a scene nothing can instance as what it claims to be.
+    $playerScene = Get-Content -LiteralPath (Join-Path $fixtureRoot "root_type_player.tscn") -Raw
+    Assert-True ($playerScene -match 'type="CharacterBody2D"') "The created scene's root is not the type that was asked for."
+    $hudScene = Get-Content -LiteralPath (Join-Path $fixtureRoot "root_type_hud.tscn") -Raw
+    Assert-True ($hudScene -match 'type="CanvasLayer"') "The created HUD scene's root is not a CanvasLayer."
+
+    Assert-True $rootById[5634].result.isError "A class that is not a Node was accepted as a scene root."
+    Assert-True ($rootById[5634].result.content[0].text -match "does not inherit Node") "The non-Node refusal does not say why."
+    Assert-True $rootById[5635].result.isError "A class the engine does not know was accepted as a scene root."
+    Assert-True ($rootById[5635].result.content[0].text -match "NotARealClass") "The unknown-class refusal does not name the class."
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot "root_type_bad.tscn"))) "A refused scene root left a file behind."
+
     # An editor raycast against a scene that actually holds a body. The edited
     # scene is parented into a SubViewport under the editor's docks, so the
     # root viewport's World2D is a different, empty space: a 2D ray asked of it
