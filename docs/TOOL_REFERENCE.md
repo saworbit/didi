@@ -1007,6 +1007,14 @@ newest-first, so the build that ran your project is not necessarily the one your
 editor is, and before this the only trace of it was the banner Godot prints into
 the captured `logs`.
 
+#### What a run-time error comes back as
+
+Godot prints an error across several lines: the message, then `at: <function> (<file>:<line>)`, then a GDScript backtrace with one frame per line. Each entry of `logs` carries the `level` of the error it belongs to rather than one worked out from its own text, so filtering on `level == "ERROR"` keeps the location and the whole stack. A line that continues the entry above it says so with `continuation: true`.
+
+`errors` is a list of the message lines and stays that. `diagnostics` is the structured half, in the shape `script_check_syntax` and `script_create` already return: `severity`, `message`, `file`, `line`, `function`, `rule` and `frames`, one entry per error, with `file`, `line` and `function` read out of the `at:` line and each backtrace frame kept in order under `frames`. They are `null` when Godot printed no location, because a guessed line number sends a reader to the wrong place.
+
+A script error aborts the rest of the frame, so a game that throws in `_ready` never reaches its own exit path and always runs to the timeout. When a run times out with errors captured, `summary` names both: the count, the timeout, and the first message. The timeout is true and it is not the thing the reader needs first.
+
 ### `runtime_watch_invariants` — Live (game only)
 
 Watches declared conditions every frame of a running game and stops the game on the frame that breaks one. This is not `eval_gdscript` in a loop: sampling happens in the engine at frame rate, and the pause lands on the violating frame, which is what makes the result a reproduction rather than a description.

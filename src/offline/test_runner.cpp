@@ -127,6 +127,85 @@ std::optional<WindowsProcessCommand> makeWindowsProcessCommand(
 } // namespace detail
 #endif
 
+// The three shapes Godot prints under an error, and nothing else.
+//
+// A narrow rule on purpose. "Indented" would be the obvious test, and it would
+// also swallow a game's own print("  something") whenever it followed an error.
+// These are the lines the engine emits after print_error: the location, the
+// backtrace header, and one numbered frame per line.
+bool isEngineContinuationLine(const std::string& trimmed) {
+    if (strings::startsWith(trimmed, "at: ")) return true;
+    if (trimmed.find("backtrace (most recent call first)") != std::string::npos) return true;
+    if (trimmed.size() > 2 && trimmed.front() == '[') {
+        const auto close = trimmed.find(']');
+        if (close != std::string::npos && close > 1) {
+            bool digits = true;
+            for (size_t index = 1; index < close; ++index) {
+                if (!std::isdigit(static_cast<unsigned char>(trimmed[index]))) {
+                    digits = false;
+                    break;
+                }
+            }
+            if (digits) return true;
+        }
+    }
+    return false;
+}
+
+// `<function> (<file>:<line>)` out of a location or a frame, in the fixed
+// format Godot prints. Anything else leaves the fields empty rather than
+// guessing, because a wrong line number sends a reader to the wrong place.
+void parseEngineLocation(const std::string& text, std::string& function, std::string& file,
+                         int& line) {
+    const auto open = text.rfind(" (");
+    const auto close = text.rfind(')');
+    if (open == std::string::npos || close == std::string::npos || close < open) return;
+    const auto inside = text.substr(open + 2, close - open - 2);
+    const auto colon = inside.rfind(':');
+    if (colon == std::string::npos || colon + 1 >= inside.size()) return;
+    const auto number = inside.substr(colon + 1);
+    for (const char character : number) {
+        if (!std::isdigit(static_cast<unsigned char>(character))) return;
+    }
+    try {
+        line = std::stoi(number);
+    } catch (const std::exception&) {
+        return;
+    }
+    file = inside.substr(0, colon);
+    function = strings::trim(text.substr(0, open));
+}
+
+// Files the location onto the error it belongs to: the `at:` line becomes the
+// diagnostic's own file, line and function, and each backtrace frame is kept in
+// order beneath it.
+void attachContinuation(TestSessionDiagnostic& diagnostic, const std::string& trimmed) {
+    if (strings::startsWith(trimmed, "at: ")) {
+        if (diagnostic.line == 0) {
+            parseEngineLocation(trimmed.substr(4), diagnostic.function, diagnostic.file,
+                                diagnostic.line);
+        }
+        return;
+    }
+    if (trimmed.empty() || trimmed.front() != '[') return;
+    const auto close = trimmed.find(']');
+    if (close == std::string::npos || close + 1 >= trimmed.size()) return;
+    TestSessionFrame frame;
+    parseEngineLocation(strings::trim(trimmed.substr(close + 1)), frame.function, frame.file,
+                        frame.line);
+    if (frame.file.empty() && frame.function.empty()) return;
+    diagnostic.frames.push_back(std::move(frame));
+}
+
+// The first error, short enough to sit inside a summary sentence.
+std::string boundedSummaryError(const std::string& message) {
+    constexpr size_t kMaximum = 200;
+    if (message.size() <= kMaximum) return message;
+    size_t cut = kMaximum;
+    while (cut > 0 && (static_cast<unsigned char>(message[cut]) & 0xC0u) == 0x80u) --cut;
+    return message.substr(0, cut) + "...";
+}
+
 std::string engineVersionFromOutput(const std::string& output) {
     // Found rather than assumed to be the first line: a wrapper or a warning
     // can print before the engine does.
@@ -491,6 +570,7 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
             TerminateProcess(pi.hProcess, 1);
             WaitForSingleObject(pi.hProcess, 5000);
             result.exit_code = 124; // Timeout exit code
+            result.timed_out = true;
             result.summary = "Test session timed out after " + std::to_string(timeout_seconds) + " seconds.";
             break;
         }
@@ -585,6 +665,7 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
             if (kill(-pid, SIGKILL) != 0) kill(pid, SIGKILL);
             waitpid(pid, &status, 0);
             result.exit_code = 124;
+            result.timed_out = true;
             result.summary = "Test session timed out after " + std::to_string(timeout_seconds) + " seconds.";
             break;
         }
@@ -601,26 +682,55 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
     // a process that is not Godot.
     result.engine_version = engineVersionFromOutput(full_output);
 
-    // Parse output lines into structured logs
+    // Parse output lines into structured logs.
+    //
+    // Godot prints an error across several lines: the message, then an indented
+    // `at: <function> (<file>:<line>)`, then a GDScript backtrace with one
+    // indented frame per line. Classifying each line on its own text put every
+    // one of those under INFO, which is the level print() gets, so a caller
+    // filtering logs on ERROR -- the obvious move -- kept the message and
+    // dropped the whole stack (#744). A continuation carries the level of the
+    // entry it belongs to, and the location it names is lifted into a
+    // diagnostic with somewhere to go.
     std::vector<std::string> lines = strings::split(full_output, '\n');
+    std::string open_level;
     for (const auto& line : lines) {
         std::string trimmed = strings::trim(line);
-        if (trimmed.empty()) continue;
+        if (trimmed.empty()) {
+            open_level.clear();
+            continue;
+        }
 
         TestSessionLog log_entry;
         log_entry.message = trimmed;
 
-        if (trimmed.find("ERROR:") != std::string::npos || trimmed.find("SCRIPT ERROR:") != std::string::npos) {
+        const bool is_error = trimmed.find("ERROR:") != std::string::npos ||
+                              trimmed.find("SCRIPT ERROR:") != std::string::npos;
+        const bool is_warning = !is_error && trimmed.find("WARNING:") != std::string::npos;
+
+        if (is_error) {
             log_entry.level = "ERROR";
+            open_level = "ERROR";
             result.errors.push_back(trimmed);
+            TestSessionDiagnostic diagnostic;
+            diagnostic.message = trimmed;
+            result.diagnostics.push_back(std::move(diagnostic));
             if (break_on_error) {
                 result.success = false;
             }
-        } else if (trimmed.find("WARNING:") != std::string::npos) {
+        } else if (is_warning) {
             log_entry.level = "WARN";
+            open_level = "WARN";
             result.warnings.push_back(trimmed);
+        } else if (!open_level.empty() && isEngineContinuationLine(trimmed)) {
+            log_entry.level = open_level;
+            log_entry.continuation = true;
+            if (open_level == "ERROR" && !result.diagnostics.empty()) {
+                attachContinuation(result.diagnostics.back(), trimmed);
+            }
         } else {
             log_entry.level = "INFO";
+            open_level.clear();
         }
 
         result.logs.push_back(std::move(log_entry));
@@ -630,7 +740,15 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
         result.success = false;
     }
 
-    if (result.summary.empty()) {
+    // A script error aborts the rest of the frame, so a game that throws in
+    // _ready never reaches its own exit path and always runs to the timeout.
+    // The timeout is true, and it is not the thing the reader needs: the
+    // summary named it while the cause sat in errors[] one key away (#744).
+    if (result.timed_out && !result.errors.empty()) {
+        result.summary = "Test session reported " + std::to_string(result.errors.size()) +
+                         " error(s) and then ran to the " + std::to_string(timeout_seconds) +
+                         " second timeout. First error: " + boundedSummaryError(result.errors.front());
+    } else if (result.summary.empty()) {
         if (result.success) {
             result.summary = "Test session completed successfully in " +
                              std::to_string(result.duration_seconds) + "s.";

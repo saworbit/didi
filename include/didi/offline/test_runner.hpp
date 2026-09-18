@@ -64,22 +64,79 @@ struct TestSessionLog {
     std::string level; // "INFO", "WARN", "ERROR", "SCRIPT_ERROR"
     std::string message;
     std::string timestamp;
+    // Whether this line continues the entry above it rather than standing on
+    // its own. Godot prints an error's location and its GDScript backtrace as
+    // separate indented lines, and classifying each of those on its own text
+    // filed every frame of a crash under INFO -- the level print() gets -- so a
+    // caller filtering on ERROR kept the message and dropped the whole stack
+    // (#744). A continuation carries the level of the error it belongs to, and
+    // says so here.
+    bool continuation{false};
 
     json toJson() const {
         return {
             {"level", level},
             {"message", message},
-            {"timestamp", timestamp}
+            {"timestamp", timestamp},
+            {"continuation", continuation}
         };
+    }
+};
+
+// One frame of a GDScript backtrace.
+struct TestSessionFrame {
+    std::string function;
+    std::string file;
+    int line{0};
+
+    json toJson() const {
+        return {{"function", function.empty() ? json(nullptr) : json(function)},
+                {"file", file.empty() ? json(nullptr) : json(file)},
+                {"line", line > 0 ? json(line) : json(nullptr)}};
+    }
+};
+
+// A run-time error with somewhere to go.
+//
+// errors[] is a list of bare strings and stays one, because it is published.
+// This is the structured half: the message, the res:// file and line Godot
+// printed on the `at:` line after it, the function, and every frame of the
+// GDScript backtrace. It is the shape script_check_syntax and script_create
+// already return for the offline half, so a caller that can read one can read
+// the other (#744).
+struct TestSessionDiagnostic {
+    std::string severity{"error"};
+    std::string message;
+    std::string file;
+    int line{0};
+    std::string function;
+    std::vector<TestSessionFrame> frames;
+
+    json toJson() const {
+        json frame_arr = json::array();
+        for (const auto& frame : frames) frame_arr.push_back(frame.toJson());
+        return {{"severity", severity},
+                {"message", message},
+                {"file", file.empty() ? json(nullptr) : json(file)},
+                {"line", line > 0 ? json(line) : json(nullptr)},
+                {"function", function.empty() ? json(nullptr) : json(function)},
+                {"rule", "engine_runtime"},
+                {"frames", std::move(frame_arr)}};
     }
 };
 
 struct TestSessionResult {
     bool success{true};
+    // Whether this run was stopped by the timeout rather than ending on its
+    // own. exit_code 124 is the runner's marker for that, but a child is free
+    // to exit 124 by itself, so the two are not the same claim and the summary
+    // branches on this one.
+    bool timed_out{false};
     int exit_code{0};
     double duration_seconds{0.0};
     std::vector<TestSessionLog> logs;
     std::vector<std::string> errors;
+    std::vector<TestSessionDiagnostic> diagnostics;
     std::vector<std::string> warnings;
     std::string summary;
     // Which engine ran the project.
@@ -95,13 +152,17 @@ struct TestSessionResult {
     json toJson() const {
         json log_arr = json::array();
         for (const auto& l : logs) log_arr.push_back(l.toJson());
+        json diagnostic_arr = json::array();
+        for (const auto& d : diagnostics) diagnostic_arr.push_back(d.toJson());
 
         return {
             {"success", success},
+            {"timed_out", timed_out},
             {"exit_code", exit_code},
             {"duration_seconds", duration_seconds},
             {"logs", log_arr},
             {"errors", errors},
+            {"diagnostics", std::move(diagnostic_arr)},
             {"warnings", warnings},
             {"summary", summary},
             {"engine_executable",
