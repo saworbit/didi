@@ -5,7 +5,8 @@ a path that resolves to nothing. This one asks a different question -- can you
 actually *build a game* with it? -- and walks the arc a 2D platformer needs: a
 player scene with a physics root, a collision shape as a real resource, a
 script, a level that instances the player, an autoload singleton, input actions,
-a signal wired from a coin to a handler, and the game run.
+a signal wired from a coin to a handler, a 3D arena with a raycast, and the
+game run -- including one that crashes.
 
 Most of it works, and that is worth saying, because a probe with no green rows
 proves nothing: `resource_create` writes a real `.tres`, `scene_set_property`
@@ -47,6 +48,11 @@ subject is the subject and not the probe.
   every reader and writer refuses; attached to a game the same tool answers
   `/root/Level/Floor`. And a 2D ray in an editor never hits at all, while the 3D
   ray one call earlier does -- the clean miss is the whole finding.
+* **A crash is reported with its location filed under `INFO`.** `runtime_launch`
+  captures a script error correctly, and the `at: _ready (res://x.gd:6)` line and
+  every backtrace frame after it are classified `INFO` -- the level `print()`
+  gets -- while `errors[]` holds a bare string with no file or line. A caller
+  filtering `logs` on `ERROR` keeps the message and drops the whole stack.
 * **`resource_create` checks properties against a pinned 4.7 class reference**
   and never says so. Its sibling `script_reflect_class`, reading the same file
   through the same helper, reports `attached_engine_version` and
@@ -64,13 +70,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mcp_client import Session  # noqa: E402
+
+# Some artefacts cannot be rewritten without the confirmation gate, and a 409 on
+# the second run returns an error envelope that reads like the finding it sits
+# next to. Those get a per-run name.
+RUN = "%04x" % (int(time.time()) & 0xFFFF)
 
 # Each one is a real GDScript compile error with balanced brackets and plausible
 # structure, so Didi's own lexical rules cannot reach it and only the engine can.
@@ -117,15 +130,20 @@ def build_the_player(session: Session) -> None:
     # Every physics root a 2D game needs is outside the enum, so the only route
     # to one is a Node2D scene, a child of the type you wanted, and a pack.
     row("scene_create refuses a CharacterBody2D root", True, bool(err))
-    session.call("scene_create", {
+    # A refused scene_create does not open the scene, so on a second run every
+    # path below resolves to whatever was already edited and the green rows go
+    # red for a reason that is about this probe.
+    _, existed = session.call("scene_create", {
         "scene_path": "res://vibe_player.tscn", "root_type": "Node2D", "root_name": "Player"})
+    if existed:
+        session.call("scene_open", {"scene_path": "res://vibe_player.tscn"})
     session.call("scene_instantiate_node", {
         "node_type": "CharacterBody2D", "parent_path": "/root", "name": "Body"})
     session.call("scene_instantiate_node", {
         "node_type": "CollisionShape2D", "parent_path": "/root/Player/Body", "name": "Collider"})
     session.call("resource_create", {
         "resource_type": "RectangleShape2D", "save_path": "res://vibe_shape.tres",
-        "properties": {"size": {"x": 32, "y": 64}}})
+        "properties": {"size": {"x": 32, "y": 64}}})  # 409 on a re-run is fine
     payload, _ = session.call("scene_set_property", {
         "target_node": "/root/Player/Body/Collider",
         "property_name": "shape", "value": "res://vibe_shape.tres"})
@@ -136,13 +154,18 @@ def build_the_player(session: Session) -> None:
         "value": {"x": 100, "y": 50}})
     row("a Vector2 sent as {x, y}", True,
         isinstance(payload, dict) and payload.get("applied") is True)
+    # Persist, so a second run meets a scene that holds what this one built.
+    session.call("editor_save_scene", {})
 
 
 def api_version_disclosure(session: Session) -> None:
     """One pinned class reference, two readers, one of them silent about it."""
     print("\n== the pinned class reference, asked of both its readers ==")
+    # A 409 here would return an error envelope with no property_check at all,
+    # which reads exactly like the missing-disclosure finding. Fresh path per run.
     payload, _ = session.call("resource_create", {
-        "resource_type": "CircleShape2D", "save_path": "res://vibe_disclosure.tres",
+        "resource_type": "CircleShape2D",
+        "save_path": "res://vibe_disclosure_%s.tres" % RUN,
         "properties": {"radius": 4.0}})
     check = payload.get("property_check", {}) if isinstance(payload, dict) else {}
     reflect, _ = session.call("script_reflect_class", {"class_name": "Node2D"})
@@ -197,21 +220,29 @@ def input_event_vocabulary(session: Session) -> None:
 def autoload_then_signal(session: Session) -> None:
     """The singleton and the handler, with the no-singleton control beside it."""
     print("\n== an autoload, then a signal to a method that uses it ==")
-    session.call("scene_create", {
+    _, existed = session.call("scene_create", {
         "scene_path": "res://vibe_level.tscn", "root_type": "Node2D", "root_name": "Lvl"})
+    if existed:
+        session.call("scene_open", {"scene_path": "res://vibe_level.tscn"})
+    # The condition under test is "registered *since this editor started*", so
+    # the name has to be new on every run. Reuse it and the editor already knows
+    # the singleton, the script compiles, and the subject row connects -- the
+    # finding reproducing correctly, read as its own absence.
+    singleton = "vibe_singleton_%s.gd" % RUN
     session.call("script_create", {
-        "script_path": "res://vibe_singleton.gd",
+        "script_path": "res://" + singleton,
         "source_text": "extends Node\n\nvar score := 0\n\nfunc add(n: int) -> void:\n\tscore += n\n"})
     autoload, _ = session.call("project_set_autoload", {
-        "name": "VibeState", "path": "res://vibe_singleton.gd", "replace": True})
+        "name": "VibeState%s" % RUN, "path": "res://" + singleton, "replace": True})
     print("  project_set_autoload: requires_editor_restart=%s"
           % autoload.get("requires_editor_restart"))
     session.call("scene_instantiate_node", {
         "node_type": "Area2D", "parent_path": "/root", "name": "Coin"})
 
     for label, script, node, body in (
-        ("CONTROL names no autoload", "vibe_plain.gd", "Plain", 'print("hit")'),
-        ("SUBJECT names the autoload", "vibe_uses.gd", "Uses", "VibeState.add(1)"),
+        ("CONTROL names no autoload", "vibe_plain_%s.gd" % RUN, "Plain" + RUN, 'print("hit")'),
+        ("SUBJECT names the autoload", "vibe_uses_%s.gd" % RUN, "Uses" + RUN,
+         "VibeState%s.add(1)" % RUN),
     ):
         session.call("script_create", {
             "script_path": "res://" + script,
@@ -234,6 +265,7 @@ def autoload_then_signal(session: Session) -> None:
         message = payload.get("error", {}).get("message", "") if isinstance(payload, dict) else ""
         print("  %-28s script_get_symbols declares _on_hit=%-5s  signal_connect=%s"
               % (label, declared, ("refused -- " + message) if err else "connected"))
+    session.call("editor_save_scene", {})
 
 
 def spatial_queries(session: Session) -> None:
@@ -336,6 +368,40 @@ def launch_and_attach(session: Session) -> None:
     row("a session listed alive can be attached", True, not err)
 
 
+def crash_report(session: Session) -> None:
+    """A game that throws, and what the report of it can be acted on."""
+    print("\n== a game that crashes, and how the crash is reported ==")
+    session.call("script_create", {
+        "script_path": "res://vibe_crasher.gd", "source_text":
+        'extends Node2D\n\nfunc _ready() -> void:\n\tprint("about to fail")\n'
+        "\tvar n: Node = null\n\tprint(n.name)\n"})
+    _, created = session.call("scene_create", {
+        "scene_path": "res://vibe_crash.tscn", "root_type": "Node2D", "root_name": "Crash"})
+    if created:
+        session.call("scene_open", {"scene_path": "res://vibe_crash.tscn"})
+    session.call("script_attach_to_node", {
+        "target_node": "/root", "script_path": "res://vibe_crasher.gd"})
+    session.call("editor_save_scene", {})
+    payload, _ = session.call("runtime_launch", {
+        "scene_path": "res://vibe_crash.tscn", "timeout_seconds": 12, "headless": True})
+    print("  success=%s exit_code=%s summary=%r"
+          % (payload.get("success"), payload.get("exit_code"), payload.get("summary")))
+    for entry in payload.get("errors", []):
+        print("  errors[]: %r" % (entry,))
+    for record in payload.get("logs", []):
+        print("    [%-5s] %s" % (record.get("level"), str(record.get("message"))[:78]))
+    # The location Godot prints on the line after the error is the only part a
+    # caller can open. Asking whether it survives an ERROR filter is the finding.
+    errors_only = [r for r in payload.get("logs", []) if r.get("level") == "ERROR"]
+    # Not "does an ERROR line mention res://" -- an engine error names the path it
+    # could not open, so that matched a run where the scene was missing and the
+    # row went green for the wrong reason. The location is a `.gd:<line>`.
+    located = any(re.search(r"\.gd:\d+", str(r.get("message", ""))) for r in errors_only)
+    row("a caller filtering logs on ERROR keeps the location", True, located)
+    structured = any(isinstance(e, dict) and "line" in e for e in payload.get("errors", []))
+    row("errors[] carries a file and line", True, structured)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("-p", "--project", required=True)
@@ -344,6 +410,32 @@ def main() -> int:
     args = parser.parse_args()
 
     with Session(project=args.project) as session:
+        # Without a live editor every scene_* and signal_* call below answers
+        # 503, and the rows still print -- which is how one run of this probe
+        # reported a crash scene that had never been written. A probe whose
+        # precondition failed is not a probe that found something.
+        listing, _ = session.call("runtime_list_sessions", {})
+        root = str(Path(args.project).resolve())
+        editors = [s for s in listing.get("sessions", [])
+                   if s.get("kind") == "editor" and s.get("alive")
+                   and str(Path(s.get("project_path", "")).resolve()) == root]
+        if not editors:
+            print("No live editor session on %s. Open one first; every authoring "
+                  "call below needs it and would otherwise answer 503." % root)
+            return 1
+        # Auto-attach only fires when discovery yields one session, so a second
+        # editor anywhere on the machine leaves this server detached and every
+        # live call below answers 503 while the preflight above still passes.
+        # Name the one we mean.
+        attached, attach_err = session.call(
+            "runtime_attach_session", {"session_id": editors[0]["session_id"]})
+        print("editor: pid=%s %s attached=%s"
+              % (editors[0]["pid"], editors[0]["engine_version"], not attach_err))
+        if attach_err:
+            print("  could not attach: %s"
+                  % attached.get("error", {}).get("message", attached))
+            return 1
+
         build_the_player(session)
         api_version_disclosure(session)
         syntax_check_paths(session)
@@ -351,6 +443,7 @@ def main() -> int:
         autoload_then_signal(session)
         spatial_queries(session)
         if not args.skip_launch:
+            crash_report(session)
             launch_and_attach(session)
     return 0
 

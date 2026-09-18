@@ -79,7 +79,7 @@ twice.
 | `probes/ghost_preview_survival.py` | What a refused `editor_render_ghost_preview` leaves on the user's screen. A refusal the argument check made is the control, and a refusal the engine made is the row that mattered: the teardown used to run before the engine was asked whether the new shapes could be drawn, so a `409` spent the proposal on its way out. |
 | `probes/rename_disclosure.py` | `project_rename_references`'s preview against its confirm, field by field and entry for entry over `code_references_not_updated`, on call sites the probe wrote itself so the arithmetic is known before either call. Exits non-zero when the two lists differ. Needs no editor. |
 | `probes/ui_app_modes.py` | The three `--ui-app` modes diffed before any tool is called: the handshake's `extensions`, the `ui://` resource in the listing and on a read, and `didi_control_room`'s own `_meta`. Needs no editor. |
-| `probes/game_authoring.py` | A small platformer built through the surface end to end, as a game author would: a physics root, a collision shape as a real resource, a script, a level instancing the player, an autoload, input actions, a signal, a 3D arena and a raycast, and the game run. Half of it is green on purpose -- that half is the control for the rest. Needs an empty project; everything it writes is prefixed `vibe_` so a second run overwrites its own leavings. |
+| `probes/game_authoring.py` | A small platformer built through the surface end to end, as a game author would: a physics root, a collision shape as a real resource, a script, a level instancing the player, an autoload, input actions, a signal, a 3D arena and a raycast, and the game run -- including one that crashes. Half of it is green on purpose -- that half is the control for the rest. It attaches explicitly and refuses to run without a live editor on the project, because every authoring row still prints when the calls behind it answered 503. Needs an empty project; everything it writes is prefixed `vibe_` so a second run overwrites its own leavings. |
 | `fixtures/write_csharp_fixture.py` | A `.csproj` with one error and one warning in it. Kept out of `sandbox.py` because a C# project changes what Godot does with the directory. |
 | `editor_exit_status.py` | Not a probe against the server: the same editor invocation with and without the built addon installed, exit statuses side by side. The control for a crash on shutdown. |
 | `wait_for_session.py` | Polls `runtime_list_sessions` through the same binary the probes use, so a slow first import reads as a slow import rather than as an absent session. |
@@ -957,6 +957,40 @@ path and does not open it, so the 3D control missed too, `expected=False` matche
 the row it compares against; make the control's precondition explicit, not
 incidental.**
 
+**The crash report is a deliverable, and its most useful line is filed as
+chatter.** `runtime_launch` captures a script error correctly and then classifies
+`at: _ready (res://x.gd:6)` and every backtrace frame as `INFO` -- the level
+`print()` gets -- while `errors[]` holds a bare string with no file or line
+(#744). Filtering `logs` on `ERROR`, which is what a caller does, keeps the
+message and drops the whole stack. Didi already returns `line` and `column` from
+`script_check_syntax`; the run-time path returns prose. The neighbouring half is
+narrower than it first looked and the control is why: `break_on_error` works
+exactly as documented when the game exits, and a script error in `_ready` aborts
+the path to `quit()`, so the classification is unreachable for the one shape
+that needs it most and the summary names the timeout instead.
+
+**Four ways this session's own probe lied, all of them the same bug.** Worth
+listing because each read as a finding first:
+
+* It filtered game sessions on `kind` alone, so a game another *project* left
+  running answered the launch rows. The server's cross-project refusal was
+  correct and the probe should never have asked.
+* `scene_create` refuses an existing path **without opening it**, so every second
+  run operated on whichever scene was already edited. That made the 3D control
+  miss, which made the 2D row's `expected=False` match its `observed=False`, and
+  a finding printed as `ok`.
+* It asked "does an `ERROR` line mention `res://`" to test whether a location
+  survives an error filter. An engine error names the path it could not open, so
+  the row went green on a run where the scene did not exist at all. It matches
+  `\.gd:\d+` now.
+* It reused one autoload name, so the second run met an editor that already knew
+  the singleton -- and #729, whose whole condition is *registered since this
+  editor started*, reported itself as fixed. The name carries a per-run token now.
+
+The common cause is that a probe's fixtures outlive the probe, and the second run
+is a different experiment from the first. **Run every probe twice before filing
+anything from it, and read the green rows as carefully as the red ones.**
+
 **The platform was not a variable this time, and that is the result.** Every one
 of the thirteen findings reproduces byte for byte on Windows, macOS and Ubuntu,
 run by `game_authoring.py` in the platform workflow's live job -- with one
@@ -998,7 +1032,7 @@ fallback path. **A row that differs on one platform is a diagnosis, not noise.**
 
 | 2026-09-16 | The handshake's own claims rather than the tools': `listChanged: false` against a listing that moves with the bridge, and every parameter description against the schema keys beside it. Then `csharp_check_build` given a real `.csproj` for the first time in fourteen sessions, `project_export` and the ghost previews on Windows, the macOS `sun_path` overflow the twelfth session measured and never forced, the expression sandbox and the method channel walked for containment, and the old censuses re-run. | `2.0.0+28d1c2193b37`, and `2.0.0+5349d27e5f59` on the runners | #701-#717, sixteen findings. |
 
-| 2026-09-18 | A game rather than a census: a 2D platformer built end to end through the surface -- a physics root, a collision shape as a real resource, a TileSet over an atlas, an autoload, input actions, a signal, a HUD, a script patch, and the game launched, attached, paused, injected and stepped; then a 3D arena and the raycast tools, the only ones whose answer is a node. The first session to walk a whole authoring workflow in order rather than asking each tool one question. | `2.0.0+6393d1435a6a`, and the same on the runners | #728-#743, fifteen findings. The thirteen from the 2D arc reproduced on macOS and Ubuntu as well as Windows; #732 is Windows only and the difference diagnosed it. |
+| 2026-09-18 | A game rather than a census: a 2D platformer built end to end through the surface -- a physics root, a collision shape as a real resource, a TileSet over an atlas, an autoload, input actions, a signal, a HUD, a script patch, and the game launched, attached, paused, injected and stepped; then a 3D arena and the raycast tools, the only ones whose answer is a node, and a game that crashes. The first session to walk a whole authoring workflow in order rather than asking each tool one question. | `2.0.0+6393d1435a6a`, and the same on the runners | #728-#744, sixteen findings. The thirteen from the 2D arc reproduced on macOS and Ubuntu as well as Windows; #732 is Windows only and the difference diagnosed it. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log
