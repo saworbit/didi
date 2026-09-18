@@ -654,9 +654,11 @@ Like every mutating Phase 7 live tool, these setters return `504 unknown_outcome
 
 ### `resource_create` — Offline
 
-Writes a textual `.tres` file under the project root. Strings, booleans, numbers, arrays and objects are rendered as Godot literals: `{x,y}`, `{x,y,z}`, `{x,y,z,w}` and `{r,g,b(,a)}` become Vector2, Vector3, Vector4 and Color, and any other object becomes a Dictionary. Nested values go through the same writer, so an array of `{r,g,b}` objects comes out as an array of `Color(...)`.
+Writes a textual `.tres` file under the project root. Strings, booleans, numbers, arrays and objects are rendered as Godot literals. An object with `x,y`, `x,y,z`, `x,y,z,w` or `r,g,b(,a)` numbers becomes a vector or a colour, and any other object becomes a Dictionary. Nested values go through the same writer, so an array of `{r,g,b}` objects comes out as an array of `Color(...)`.
 
-Give an object a `"type"` to choose the literal yourself, which is the only way to say what the JSON cannot: `Vector2i`, `Vector3i`, `Vector4i`, `Quaternion` and `Color` take their components, `NodePath` and `StringName` take their text under `"value"`, and the packed arrays take their elements under `"values"`. A capitalised type this writer does not know is refused. Nothing falls through to JSON: a value that cannot be written refuses the call naming the property, because a resource reported as created with a field thrown away costs more than a refusal does.
+Which vector it becomes is the property's decision, not the JSON's. The pinned API dump declares a type for every property it carries, so `tile_size` on a TileSet takes `{x, y}` and is written `Vector2i(..)` while `size` on a RectangleShape2D takes the same `{x, y}` and is written `Vector2(..)`. JSON has no way to tell them apart and the shape of the object used to decide, which put a `Vector2` in every integer-vector slot on the surface; Godot drops one of those when it loads the file, so the caller was told about a resource they did not get. A component that will not fit the declared type -- a fraction in an integer vector -- is refused rather than truncated. Where the class reference does not carry the property, the shape still decides.
+
+Give an object a `"type"` to choose the literal yourself: `Vector2i`, `Vector3i`, `Vector4i`, `Quaternion` and `Color` take their components, `NodePath` and `StringName` take their text under `"value"`, and the packed arrays take their elements under `"values"`. A type that contradicts what the property is declared as is refused, naming both, since the engine would drop it on load. A capitalised type this writer does not know is refused. Nothing falls through to JSON: a value that cannot be written refuses the call naming the property, because a resource reported as created with a field thrown away costs more than a refusal does.
 
 Order is the caller's to set. Godot applies indexed sub-properties in file order and `tracks/0/type` is what creates track 0, so pass `properties` as an array of `{name, value}` entries when that matters; a JSON object cannot carry an order and its keys are written sorted. The result lists `properties_written` in file order.
 
@@ -671,7 +673,7 @@ A property can point at another resource, which is what every composite Godot re
 - Only an id declared **above** the point that names it can be used. Godot resolves a `SubResource` against the blocks it has already read, so a reference to one declared further down loads as null rather than failing, and the writer refuses it instead.
 - `load_steps` is computed from the external references, the sub-resources and the resource itself. Do not pass it.
 
-#### Property names are checked against the type
+#### Property names and types are checked against the type
 
 Every property name is checked against what the pinned API dump declares for `resource_type` and its ancestors, before anything is rendered or written. A name the type does not declare is refused naming it, because Godot drops such a property when it loads the file and nothing in the surface would show the loss: `resource_inspect` reports type, size, uid and dependencies, and no properties.
 
@@ -679,7 +681,7 @@ Two things are not refused. `script`, which is how a resource gets properties of
 
 A `resource_type` the reference does not carry is refused, not skipped. Godot does not drop one property for a type it does not know; it fails to instantiate the resource at all, so the file would not load. A script class or a type from another extension is not in the dump either, so `allow_unknown_type: true` writes it anyway and the result reports `property_check.checked: false` with `allowed_by: "allow_unknown_type"`, because there is nothing to check the names against.
 
-The result carries `property_check` with `checked` (whether the check ran at all), `api_version`, and `not_declared_but_written` listing the storage-only names that were written unverified. With an editor attached it also carries `attached_engine_version` and `api_version_matches_attached_engine`: the dump is pinned to one engine line and CI covers three, so `checked: true` means verified against the dump rather than against the engine in front of you. `sub_resource_property_checks` carries the same per sub-resource id. Use `script_reflect_class` to see what a type declares.
+The result carries `property_check` with `checked` (whether the check ran at all), `api_version`, `not_declared_but_written` listing the storage-only names that were written unverified, and `written_as_declared_type` naming each property whose literal came from its declaration rather than from the shape of the JSON, so a correction is visible rather than silent. The last two are absent when there is nothing to report. With an editor attached it also carries `attached_engine_version` and `api_version_matches_attached_engine`: the dump is pinned to one engine line and CI covers three, so `checked: true` means verified against the dump rather than against the engine in front of you. `sub_resource_property_checks` carries the same per sub-resource id. Use `script_reflect_class` to see what a type declares.
 
 The result adds `external_references` (path, resource type, id and uid for each header entry), `sub_resources_written` (id, type and the properties each got, in file order) and `load_steps`. 
 

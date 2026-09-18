@@ -1245,6 +1245,70 @@ static void test_api_version_note_compares_the_engine_line() {
                     ["api_version_matches_attached_engine"].is_null());
 }
 
+namespace {
+
+// Reports one attached editor, so a tool that reads the selected descriptor
+// has something to read. It answers no request: the tools under test here send
+// none, which is the point.
+class FixedEditorSessionClient final : public didi::runtime::IRuntimeSessionClient {
+public:
+    bool connect(const std::string&, int) override { return false; }
+    void disconnect() override {}
+    bool isConnected() const override { return true; }
+    didi::Result<didi::json> sendRequest(const std::string&, const didi::json&, int) override {
+        return didi::Error::notConnected();
+    }
+    didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
+        return didi::json::array();
+    }
+    didi::Result<didi::json> attachSession(const std::string&) override {
+        return didi::Error::notConnected();
+    }
+    didi::Result<didi::json> detachSession() override { return didi::json::object(); }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override {
+        return didi::runtime::SessionDescriptor{
+            1, "0123456789abcdef0123456789abcdef", std::string(64, 'a'), 1,
+            "editor", "C:/project", "\\\\.\\pipe\\godot_didi_1", 1, "1.3", "",
+            "Godot Engine v4.5.1.stable.official"};
+    }
+};
+
+} // namespace
+
+static void test_property_check_names_the_engine_it_was_not_checked_against() {
+    // Break caught: resource_create was handed the lease dispatch wrapper, which
+    // is not a session client, so the dynamic_cast that reads the attached
+    // descriptor produced nothing and the two fields were never emitted. The
+    // comment above the call site said the caller gets what script_reflect_class
+    // gives them; they did not, on the same server one call apart (#735).
+    //
+    // This goes through the registry rather than the handler, because the
+    // handler was never the broken part: which client it is given is.
+    ScopedToolProject project("property-check-engine");
+    writeAuditFile("project.godot", "config_version=5\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(std::make_shared<FixedEditorSessionClient>());
+
+    const auto created = didi::json::parse(
+        registry.callTool("resource_create",
+                          didi::json{{"save_path", "res://engine_note.tres"},
+                                     {"resource_type", "CircleShape2D"},
+                                     {"properties", {{"radius", 4.0}}}})
+            .content[0].text);
+
+    const auto& check = created["property_check"];
+    ASSERT_EQ(check["checked"], true);
+    ASSERT_EQ(check["attached_engine_version"], "Godot Engine v4.5.1.stable.official");
+    // The dump is pinned to 4.7 and the engine says 4.5.1, so the answer is a
+    // mismatch rather than an absent field that reads like a match.
+    ASSERT_EQ(check["api_version_matches_attached_engine"], false);
+
+    registry.setIpcClient(nullptr);
+    registry.setRuntimeSessionClient(nullptr);
+}
+
 static void test_instantiate_refuses_a_request_that_names_no_target() {
     // Break caught: scene_instantiate_node declared no required arguments and
     // sits behind no confirmation gate, so an empty argument object added a
@@ -6465,6 +6529,8 @@ struct RegisterToolTests {
                      test_resource_inspect_reads_the_type_out_of_the_file);
         registerTest("Tools.ApiVersionNoteComparesEngineLine",
                      test_api_version_note_compares_the_engine_line);
+        registerTest("Tools.PropertyCheckNamesAttachedEngine",
+                     test_property_check_names_the_engine_it_was_not_checked_against);
         registerTest("Tools.InstantiateRefusesNoTarget",
                      test_instantiate_refuses_a_request_that_names_no_target);
         registerTest("Tools.OfflineSettingWriteAdmitsUncheckedName",

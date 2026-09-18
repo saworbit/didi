@@ -382,8 +382,96 @@ void writes_storage_only_names_and_gates_an_unknown_type() {
     ASSERT_EQ(payloadOf(allowed)["property_check"]["allowed_by"], "allow_unknown_type");
 }
 
+// JSON has one shape for a vector and Godot has two types for it, so the shape
+// of the object used to pick the literal. Every integer-vector slot on the
+// surface got a Vector2, and Godot drops one of those when it loads the file:
+// resource_create reported created_offline, property_check reported checked,
+// and the TileSet painted nothing (#730).
+void writes_a_vector_as_the_type_the_property_declares() {
+    ProjectFixture project("declared-types");
+
+    // tile_size is Vector2i. The same {x, y} on a RectangleShape2D is a
+    // Vector2, which is the control: the type decides, not the shape.
+    const auto integer_vector = create({
+        {"save_path", "res://art/tiles.tres"},
+        {"resource_type", "TileSet"},
+        {"properties", {{"tile_size", {{"x", 16}, {"y", 16}}}}}
+    });
+    ASSERT_TRUE(!integer_vector.isError);
+    ASSERT_TRUE(project.read("art/tiles.tres").find("tile_size = Vector2i(16, 16)") !=
+                std::string::npos);
+    // The correction is reported, because a file that is not what the caller
+    // described is worth one line of the answer.
+    ASSERT_EQ(payloadOf(integer_vector)["property_check"]["written_as_declared_type"]["tile_size"],
+              "Vector2i");
+
+    const auto real_vector = create({
+        {"save_path", "res://art/box.tres"},
+        {"resource_type", "RectangleShape2D"},
+        {"properties", {{"size", {{"x", 32}, {"y", 8}}}}}
+    });
+    ASSERT_TRUE(!real_vector.isError);
+    ASSERT_TRUE(project.read("art/box.tres").find("size = Vector2(32, 8)") != std::string::npos);
+    ASSERT_TRUE(!payloadOf(real_vector)["property_check"].contains("written_as_declared_type"));
+
+    // A sub-resource is written by the same writer against its own type.
+    const auto nested = create({
+        {"save_path", "res://art/atlas.tres"},
+        {"resource_type", "TileSet"},
+        {"sub_resources", json::array({
+            {{"id", "Atlas_1"},
+             {"resource_type", "TileSetAtlasSource"},
+             {"properties", json::array({
+                 {{"name", "texture_region_size"}, {"value", {{"x", 16}, {"y", 16}}}}
+             })}}
+        })},
+        {"properties", json::array({
+            {{"name", "sources/0"}, {"value", {{"type", "SubResource"}, {"id", "Atlas_1"}}}}
+        })}
+    });
+    ASSERT_TRUE(!nested.isError);
+    ASSERT_TRUE(project.read("art/atlas.tres").find("texture_region_size = Vector2i(16, 16)") !=
+                std::string::npos);
+    ASSERT_EQ(payloadOf(nested)["sub_resource_property_checks"]["Atlas_1"]
+                        ["written_as_declared_type"]["texture_region_size"],
+              "Vector2i");
+}
+
+// The two ways a caller can still end up with a value the property cannot hold.
+void refuses_a_value_the_declared_type_cannot_hold() {
+    ProjectFixture project("declared-type-refusals");
+
+    // Naming the wrong type explicitly. The refusal names the property, the
+    // declared type and what to send instead.
+    const auto contradiction = create({
+        {"save_path", "res://art/wrong.tres"},
+        {"resource_type", "TileSet"},
+        {"properties", {{"tile_size", {{"type", "Vector2"}, {"x", 16}, {"y", 16}}}}}
+    });
+    ASSERT_TRUE(contradiction.isError);
+    const auto message = textOf(contradiction);
+    ASSERT_TRUE(message.find("tile_size") != std::string::npos);
+    ASSERT_TRUE(message.find("Vector2i") != std::string::npos);
+    ASSERT_TRUE(!project.exists("art/wrong.tres"));
+
+    // A fraction in an integer vector. Truncating it would be a second silent
+    // difference between what was asked for and what was written.
+    const auto fractional = create({
+        {"save_path", "res://art/fraction.tres"},
+        {"resource_type", "TileSet"},
+        {"properties", {{"tile_size", {{"x", 16.5}, {"y", 16}}}}}
+    });
+    ASSERT_TRUE(fractional.isError);
+    ASSERT_TRUE(textOf(fractional).find("whole number") != std::string::npos);
+    ASSERT_TRUE(!project.exists("art/fraction.tres"));
+}
+
 struct Register {
     Register() {
+        registerTest("resource_references.writes_declared_vector_type",
+                     writes_a_vector_as_the_type_the_property_declares);
+        registerTest("resource_references.refuses_wrong_declared_type",
+                     refuses_a_value_the_declared_type_cannot_hold);
         registerTest("resource_references.refuses_undeclared_properties",
                      refuses_properties_the_type_does_not_declare);
         registerTest("resource_references.storage_only_names_still_write",

@@ -115,6 +115,33 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   were both refused by a surface whose engine defines the mask as unsigned
   32-bit (#743). `physics_raycast_query` also published no bounds at all where
   its three siblings published theirs; it does now.
+- **A vector is written as the type the property is declared, not the type its
+  JSON looks like.** JSON has one shape for a vector and Godot has two types for
+  it, so `{"x": 16, "y": 16}` became `Vector2(16, 16)` wherever it appeared --
+  including in every integer-vector slot on the surface. Godot drops a `Vector2`
+  written into a `Vector2i`, so a TileSet built the obvious way was unloadable
+  while `resource_create` reported `created_offline`, `property_check` reported
+  `checked: true`, `scene_set_property` reported `applied: true` and
+  `tilemap_set_cells` reported six changed cells. The only witness that nothing
+  had been painted was the game's own stderr (#730). The pinned class reference
+  already carried each property's declared type and the check was using it for
+  names only; it now picks the literal too, so `tile_size` on a TileSet takes
+  `{x, y}` and gets a `Vector2i` while `size` on a RectangleShape2D takes the
+  same `{x, y}` and gets a `Vector2`. A component that will not fit -- a
+  fraction in an integer vector -- is refused rather than truncated, a `"type"`
+  that contradicts the declaration is refused naming both, and
+  `property_check.written_as_declared_type` names each property whose literal
+  came from the declaration, so the correction is visible rather than silent.
+- **`resource_create` says which engine its property check was not run
+  against.** The comment above the call site said the caller gets what
+  `script_reflect_class` gives them, and the code called the same helper, and
+  the documentation promised the two fields. They were never emitted: the tool
+  was handed the lease dispatch wrapper rather than the session client, so the
+  cast that reads the attached session's descriptor produced nothing and the
+  annotation returned early (#735). `property_check` and every entry of
+  `sub_resource_property_checks` now carry `attached_engine_version` and
+  `api_version_matches_attached_engine`, which matters because the dump is
+  pinned to one engine line and CI covers three.
 
 - **The last uncached build in CI is cached, and every platform now configures
   the same way.** After the sanitizer job and the two live Godot jobs were given
