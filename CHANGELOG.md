@@ -141,6 +141,21 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   `project_verify_changes`, which compiles unsaved source in an isolated copy
   of the project. The parameter description, `TOOL_REFERENCE` and
   `LLM_INSTRUCTIONS` say it too.
+- **`runtime_launch` finishes its own kill before it answers.** The timeout
+  terminated the process it started and left the job object to clean up the
+  rest on the way out, and `KILL_ON_JOB_CLOSE` terminates asynchronously when
+  the last handle closes. Godot is often not the process that was started --
+  a `godot.cmd` wrapper, or Godot's own Windows console build, launches the
+  engine and waits on it -- so the game outlived the call that had just killed
+  it. The documented discovery flow is `runtime_launch`, then
+  `runtime_list_sessions`, then `runtime_attach_session`, and that sequence
+  lands inside the window every time: the list reported the game alive and not
+  stale, which was true, and the attach one call later could not connect to it
+  (#732). The timeout now terminates the job and waits for it to empty, so a
+  caller reading `alive` is reading a settled answer. The test that covers this
+  waited twenty seconds for the tree to go, which is exactly what hid it; on
+  Windows it now asserts with no wait at all.
+
 - **A crash comes back with somewhere to go.** `runtime_launch` captured a
   script error correctly and then filed the only part a caller can act on under
   `INFO`. Godot prints an error across several lines -- the message, then
