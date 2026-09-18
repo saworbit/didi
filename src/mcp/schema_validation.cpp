@@ -204,6 +204,63 @@ std::optional<std::string> checkOneOf(const json& schema, const json& value,
     }
     if (depth >= kMaxDepth) return std::nullopt;
 
+    // A tagged union answers this on its own.
+    //
+    // When every branch pins one shared property to a `const`, that property is
+    // the caller's declaration of which shape they meant, and it beats guessing
+    // from which required properties happen to be present. Without it, an event
+    // of an unsupported type matched the one branch whose only required
+    // property is `type`, and the refusal complained about a property of the
+    // wrong shape rather than about the type (#736): a mouse_motion event sent
+    // to project_set_input_action was answered "unknown property 'position'".
+    if (value.is_object()) {
+        std::string tag;
+        std::vector<std::string> tag_values;
+        bool every_branch_tags = true;
+        for (const auto& branch : *branches) {
+            const auto properties = branch.find("properties");
+            if (!branch.is_object() || properties == branch.end() || !properties->is_object()) {
+                every_branch_tags = false;
+                break;
+            }
+            std::string branch_tag;
+            std::string branch_value;
+            for (auto it = properties->begin(); it != properties->end(); ++it) {
+                const auto constant = it.value().is_object() ? it.value().find("const")
+                                                             : it.value().end();
+                if (it.value().is_object() && constant != it.value().end() &&
+                    constant->is_string()) {
+                    branch_tag = it.key();
+                    branch_value = constant->get<std::string>();
+                    break;
+                }
+            }
+            if (branch_tag.empty() || (!tag.empty() && branch_tag != tag)) {
+                every_branch_tags = false;
+                break;
+            }
+            tag = branch_tag;
+            tag_values.push_back(branch_value);
+        }
+        if (every_branch_tags && !tag.empty()) {
+            const auto declared = value.find(tag);
+            if (declared != value.end() && declared->is_string()) {
+                const auto wanted = declared->get<std::string>();
+                for (size_t index = 0; index < tag_values.size(); ++index) {
+                    if (tag_values[index] != wanted) continue;
+                    return checkValue((*branches)[index], value, where, depth + 1, root);
+                }
+                std::string known;
+                for (size_t index = 0; index < tag_values.size(); ++index) {
+                    if (index > 0) known += ", ";
+                    known += tag_values[index];
+                }
+                return where + " has " + tag + " \"" + wanted +
+                       "\", which is not one of: " + known + ".";
+            }
+        }
+    }
+
     std::vector<const json*> candidates;
     std::vector<std::string> demands;
     for (const auto& branch : *branches) {

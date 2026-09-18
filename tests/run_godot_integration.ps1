@@ -1730,6 +1730,22 @@ try {
         (Tool-Request 80 "project_list_input_actions" @{}),
         (Tool-Request 81 "project_remove_input_action" @{ action = "phase_two_jump" }),
         (Tool-Request 82 "project_list_input_actions" @{}),
+        # Godot's own name for the modifier, which this tool refused while
+        # writing it into project.godot under that very name (#737).
+        (Tool-Request 5600 "project_set_input_action" @{ action = "engine_spelling"; events = @(
+            @{ type = "key"; keycode = 32; shift_pressed = $true }
+        ) }),
+        (Tool-Request 5601 "project_list_input_actions" @{}),
+        # Two spellings that disagree, which is the mistake worth catching, and
+        # a property no event shape has.
+        (Tool-Request 5602 "project_set_input_action" @{ action = "contradiction"; events = @(
+            @{ type = "key"; keycode = 32; shift_pressed = $true; shift = $false }
+        ) }),
+        (Tool-Request 5603 "project_set_input_action" @{ action = "wrong_property"; events = @(
+            @{ type = "key"; keycode = 32 },
+            @{ type = "key"; keycode = 33; wobble = $true }
+        ) }),
+        (Tool-Request 5604 "project_remove_input_action" @{ action = "engine_spelling" }),
         (Tool-Request 83 "project_set_input_action" @{ action = "bad_event"; events = @(@{ type = "touch" }) }),
         (Tool-Request 84 "project_set_input_action" @{ action = "bad_deadzone"; deadzone = 1.5; events = @() }),
         (Tool-Request 85 "project_set_input_action" @{ action = "empty_key"; events = @(@{ type = "key" }) }),
@@ -3401,6 +3417,30 @@ try {
     Assert-True ((Tool-Payload $byId[81]).deadzone -eq 0.1) "Input action removal echoed a default deadzone rather than the action's."
     Assert-True (-not (@((Tool-Payload $byId[82]).actions.action) -contains "phase_two_jump")) "Removed input action remained persisted."
     Assert-True $byId[83].result.isError "Unknown input event type was accepted."
+    # The type is what the caller got wrong, so the type is what the refusal
+    # names. It used to match the one branch whose only required property is
+    # type and complain about a property of the wrong shape instead (#736).
+    Assert-True ($byId[83].result.content[0].text -match "has type .{0,3}touch") "An unsupported event type was not named in the refusal."
+    Assert-True ($byId[83].result.content[0].text -match "which is not one of: key, mouse_button, joypad_button, joypad_motion") "The refusal did not list the event types this tool accepts."
+
+    # Godot's own spelling, accepted and read back both ways.
+    Assert-True (-not $byId[5600].result.isError) "The engine's own modifier spelling was refused: $($byId[5600].result.content[0].text)"
+    $engineSpelling = @((Tool-Payload $byId[5601]).actions | Where-Object action -eq "engine_spelling")[0]
+    Assert-True ($engineSpelling.events[0].shift_pressed -eq $true) "A read-back event does not carry the engine's spelling."
+    Assert-True ($engineSpelling.events[0].shift -eq $true) "A read-back event lost the short spelling it used to publish."
+
+    # Two names for one modifier disagreeing is the mistake; agreeing is a
+    # descriptor read straight back from the reader above, which has to work.
+    Assert-True $byId[5602].result.isError "Two spellings of one modifier set to different values were accepted."
+    Assert-True ($byId[5602].result.content[0].text -match "shift_pressed") "The contradiction refusal did not name the property."
+
+    # Which entry, and which property. Both were missing from a message that
+    # said only that something was unknown (#737).
+    Assert-True $byId[5603].result.isError "An unknown event property was accepted."
+    Assert-True ($byId[5603].result.content[0].text -match "entry 1") "The refusal did not say which events entry was wrong."
+    Assert-True ($byId[5603].result.content[0].text -match "wobble") "The refusal did not name the offending property."
+
+    Assert-True ((Tool-Payload $byId[5604]).removed -eq $true) "The engine-spelling probe action was left registered."
     Assert-True $byId[84].result.isError "Out-of-range InputMap deadzone was accepted."
     Assert-True $byId[85].result.isError "Empty key event was accepted."
 

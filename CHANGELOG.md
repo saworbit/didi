@@ -93,6 +93,37 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **One InputEvent vocabulary, spelled the engine's way, and published.**
+  `project_set_input_action` and `runtime_inject_input` both describe their
+  `events` as objects "in Godot's InputEvent shape" and did not agree on what
+  that shape is: the first read `shift`, the second `shift_pressed`, and Godot's
+  own property -- the one `project_set_input_action` itself writes into
+  `project.godot` -- is `shift_pressed`. So the tool accepted `shift`, stored it
+  as `shift_pressed`, and refused `shift_pressed` (#737). The engine spelling is
+  the answer now on both tools, the short form stays as an alias, and
+  `project_list_input_actions` reports both so a descriptor read from it can be
+  written straight back.
+- **The InputEvent vocabulary is published, not just enforced.**
+  `project_set_input_action`'s handler is closed -- it refuses an unknown
+  property, an unsupported type, a missing type and a non-integer keycode, every
+  time -- and its schema said `items: {"type": "object"}`, which is any object at
+  all. A host validating against the published schema sent whatever the model
+  invented and learned the vocabulary one round trip at a time (#736). It now
+  publishes a `oneOf` over the four shapes with `additionalProperties: false`,
+  per-field bounds and `required` on each branch, the way `runtime_inject_input`
+  already did.
+- **A refusal about an event says which entry and which property.** "Key event
+  contains an unknown property" named neither, on a tool taking up to 64 events,
+  where every other argument refusal on this surface names the property and
+  lists what the tool takes (#737). And a `oneOf` where every branch pins one
+  property to a `const` is a tagged union, so the validator reads the tag
+  instead of guessing from which required properties happen to be present: an
+  event with an unsupported `type` used to match the branch whose only required
+  property is `type` and be refused for a property of the wrong shape. That is
+  the shared validator, so `runtime_inject_input` and `tilemap_set_cells` get it
+  too. `keycode` now says in the schema that it is a `Key` enum value, which
+  nothing said before.
+
 - **A syntax check says whether it asked a compiler.** `script_check_syntax`
   takes either a `file_path` or a `source_text`, and only the first runs
   `godot --headless --check-only`. Nothing in the result, the published schema
