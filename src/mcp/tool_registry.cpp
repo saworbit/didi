@@ -4294,7 +4294,84 @@ void ToolRegistry::registerAllDefaultTools() {
         {{"type", "object"}, {"properties", {
             {"action", {{"type", "string"}}},
             {"deadzone", {{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}, {"default", 0.2}}},
-            {"events", {{"type", "array"}, {"items", {{"type", "object"}}}}},
+            // The handler is closed: it refuses an unknown property, an
+            // unsupported type, a missing type and a non-integer keycode, every
+            // time. None of that was published -- items was {"type": "object"},
+            // which says an event is any object at all -- so a host validating
+            // against the schema sent whatever the model invented and learned
+            // the vocabulary one round trip at a time (#736). runtime_inject_input
+            // publishes a oneOf over its own event shapes; this is the same
+            // thing for the four this tool takes. They are different lists on
+            // purpose: an InputMap binding has no pressed state and no mouse
+            // motion, and an injected event has no persistence.
+            {"events", {{"type", "array"}, {"minItems", 0}, {"maxItems", 64},
+                {"description",
+                 "The input events bound to the action, each a closed object in Godot's "
+                 "InputEvent shape."},
+                {"items", {{"oneOf", json::array({
+                    json{{"type", "object"}, {"additionalProperties", false},
+                         {"properties", {
+                             {"type", {{"const", "key"}}},
+                             {"keycode", {{"type", "integer"}, {"minimum", 1},
+                                          {"maximum", 4294967295},
+                                          {"description",
+                                           "A Godot Key enum value, not an ASCII code or a "
+                                           "character. Space is 32, Escape is 4194305, A is 65, "
+                                           "F1 is 4194332; script_reflect_class on Key lists "
+                                           "them all."}}},
+                             {"physical_keycode", {{"type", "integer"}, {"minimum", 1},
+                                                   {"maximum", 4294967295},
+                                                   {"description",
+                                                    "The same Key enum, read by physical position "
+                                                    "rather than by the active layout."}}},
+                             {"unicode", {{"type", "integer"}, {"minimum", 1},
+                                          {"maximum", 1114111}}},
+                             {"shift_pressed", {{"type", "boolean"}}},
+                             {"alt_pressed", {{"type", "boolean"}}},
+                             {"ctrl_pressed", {{"type", "boolean"}}},
+                             {"meta_pressed", {{"type", "boolean"}}},
+                             {"shift", {{"type", "boolean"},
+                                        {"description", "Alias for shift_pressed. Send one."}}},
+                             {"alt", {{"type", "boolean"},
+                                      {"description", "Alias for alt_pressed. Send one."}}},
+                             {"ctrl", {{"type", "boolean"},
+                                       {"description", "Alias for ctrl_pressed. Send one."}}},
+                             {"meta", {{"type", "boolean"},
+                                       {"description", "Alias for meta_pressed. Send one."}}},
+                             {"device", {{"type", "integer"}, {"minimum", -1}}}
+                         }},
+                         {"required", json::array({"type"})},
+                         {"anyOf", json::array({
+                             json{{"required", json::array({"keycode"})}},
+                             json{{"required", json::array({"physical_keycode"})}},
+                             json{{"required", json::array({"unicode"})}}
+                         })}},
+                    json{{"type", "object"}, {"additionalProperties", false},
+                         {"properties", {
+                             {"type", {{"const", "mouse_button"}}},
+                             {"button_index", {{"type", "integer"}, {"minimum", 1},
+                                               {"maximum", 9}}},
+                             {"device", {{"type", "integer"}, {"minimum", -1}}}
+                         }},
+                         {"required", json::array({"type", "button_index"})}},
+                    json{{"type", "object"}, {"additionalProperties", false},
+                         {"properties", {
+                             {"type", {{"const", "joypad_button"}}},
+                             {"button_index", {{"type", "integer"}, {"minimum", 0},
+                                               {"maximum", 127}}},
+                             {"device", {{"type", "integer"}, {"minimum", -1}}}
+                         }},
+                         {"required", json::array({"type", "button_index"})}},
+                    json{{"type", "object"}, {"additionalProperties", false},
+                         {"properties", {
+                             {"type", {{"const", "joypad_motion"}}},
+                             {"axis", {{"type", "integer"}, {"minimum", 0}, {"maximum", 9}}},
+                             {"axis_value", {{"type", "number"}, {"minimum", -1},
+                                             {"maximum", 1}}},
+                             {"device", {{"type", "integer"}, {"minimum", -1}}}
+                         }},
+                         {"required", json::array({"type", "axis", "axis_value"})}}
+                })}}}}},
             {"replace", {{"type", "boolean"}, {"default", false}}}
         }}, {"required", {"action"}}},
         [this](const json& args) { return handleProjectSetInputAction(args, m_ipcClient); });

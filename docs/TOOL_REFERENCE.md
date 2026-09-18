@@ -1137,17 +1137,23 @@ Mutations use Godot's `autoload/<name>` representation, call `ProjectSettings.sa
 ### InputMap
 
 - `project_list_input_actions`: returns sorted `{action, deadzone, events}` entries, including editor defaults exposed by Godot.
-- `project_set_input_action`: requires `action`; `deadzone` defaults to `0.2`, `events` to an empty array, and existing actions require `replace: true`.
+- `project_set_input_action`: requires `action`; `deadzone` defaults to `0.2`, `events` to an empty array, and existing actions require `replace: true`. Up to 64 events.
 - `project_remove_input_action`: requires `action` and rejects missing entries. It also refuses an action the project does not define. `ProjectSettings.has_setting` answers true for an engine default such as `ui_accept`, because the engine registers the built-in map as settings, so removing one used to leave the running editor's InputMap without the action, write nothing to `project.godot`, and report `persisted: true`. The refusal is a `409` carrying `engine_default: true`. Give the project its own events for that name with `project_set_input_action` instead. A removal that goes ahead reports the deadzone and event count the action actually had.
 
-Supported event descriptors are closed objects:
+Supported event descriptors are closed objects, and the published schema says so: `events.items` is a `oneOf` over these four shapes with `additionalProperties: false`, per-field bounds and `required` on each branch, the same way `runtime_inject_input` publishes its own vocabulary. The two lists differ on purpose -- an InputMap binding has no pressed state and no mouse motion, an injected event has no persistence -- but a descriptor that works in one works in the other.
 
 ```json
-{ "type": "key", "keycode": 32, "shift": true }
+{ "type": "key", "keycode": 32, "shift_pressed": true }
 { "type": "mouse_button", "button_index": 1, "device": 0 }
 { "type": "joypad_button", "button_index": 0, "device": 0 }
 { "type": "joypad_motion", "axis": 0, "axis_value": -1.0, "device": 0 }
 ```
+
+The modifiers are `shift_pressed`, `alt_pressed`, `ctrl_pressed` and `meta_pressed`, which is Godot's own name for each and what this tool writes into `project.godot`. `shift`, `alt`, `ctrl` and `meta` are accepted as aliases, and `project_list_input_actions` reports both spellings, so a descriptor read from it can be written straight back. Setting the two names of one modifier to different values is refused.
+
+`keycode` and `physical_keycode` are Godot `Key` enum values, not ASCII codes and not characters: `Space` is `32`, `Escape` is `4194305`, `F1` is `4194332`. `script_reflect_class` on `Key` lists them.
+
+A refusal names the `events` entry it is about and the property or type that is wrong, the way every other argument refusal on this surface does.
 
 Key events may use `keycode`, `physical_keycode`, or `unicode` and optional `shift`, `alt`, `ctrl`, and `meta`. Writes construct real `InputEvent` resources, persist them, and call `InputMap.load_from_project_settings()`.
 
