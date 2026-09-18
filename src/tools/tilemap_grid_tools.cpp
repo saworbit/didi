@@ -52,6 +52,61 @@ bool integerTuple(const json& value, size_t dimensions, int64_t minimum,
     return true;
 }
 
+// A coordinate written as an object, turned into the array this file and the
+// bridge already speak.
+//
+// Vectors are objects everywhere else on the surface -- scene_set_property,
+// scene_instantiate_node, resource_create, physics_raycast_query, nav_query_path
+// -- and LLM_INSTRUCTIONS states the object rule flatly with no exception. The
+// two cell writers took arrays, so an agent following its own instructions got
+// two refusals in a row on the tool whose whole job is painting a level (#738).
+// Both forms are taken now; the array stays because it is published and callers
+// use it.
+std::optional<json> arrayFromVectorObject(const json& value, size_t dimensions) {
+    if (!value.is_object()) return std::nullopt;
+    static const char* const kAxes[] = {"x", "y", "z"};
+    if (dimensions > 3 || value.size() != dimensions) return std::nullopt;
+    json array = json::array();
+    for (size_t index = 0; index < dimensions; ++index) {
+        const auto found = value.find(kAxes[index]);
+        if (found == value.end() || !found->is_number_integer()) return std::nullopt;
+        array.push_back(*found);
+    }
+    return array;
+}
+
+// Every coordinate in a cell list, rewritten to the array form once, before
+// anything validates or forwards it. One place, so the local check, the wire
+// and the bridge cannot disagree about what a caller sent.
+json withNormalizedCoordinates(const json& args) {
+    if (!args.is_object() || !args.contains("cells") || !args["cells"].is_array()) return args;
+    json normalized = args;
+    for (auto& cell : normalized["cells"]) {
+        if (!cell.is_object()) continue;
+        // gridmap_set_cells calls it position and tilemap_set_cells calls it
+        // coords, for the same thing. Each takes the other's name.
+        if (cell.contains("coords") && !cell.contains("position") &&
+            normalized.contains("gridmap_path")) {
+            cell["position"] = cell["coords"];
+            cell.erase("coords");
+        } else if (cell.contains("position") && !cell.contains("coords") &&
+                   normalized.contains("tilemap_path")) {
+            cell["coords"] = cell["position"];
+            cell.erase("position");
+        }
+        for (const auto& field : {std::make_pair("coords", size_t{2}),
+                                  std::make_pair("atlas_coords", size_t{2}),
+                                  std::make_pair("position", size_t{3})}) {
+            const auto found = cell.find(field.first);
+            if (found == cell.end()) continue;
+            if (auto array = arrayFromVectorObject(*found, field.second)) {
+                *found = std::move(*array);
+            }
+        }
+    }
+    return normalized;
+}
+
 bool validateTileCells(const json& cells) {
     if (!cells.is_array() || cells.empty() || cells.size() > 256) return false;
     std::set<std::pair<int64_t, int64_t>> coordinates;
@@ -156,17 +211,18 @@ std::optional<std::string> describeErasedCellWithOrientation(const json& cells) 
 
 CallToolResult handleTilemapSetCells(const ResolvedToolBinding& binding, const json& args,
                          std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (args.is_object() && args.contains("cells")) {
-        if (auto duplicate = describeDuplicateTuple(args["cells"], "coords", 2)) {
+    const json request = withNormalizedCoordinates(args);
+    if (request.is_object() && request.contains("cells")) {
+        if (auto duplicate = describeDuplicateTuple(request["cells"], "coords", 2)) {
             return requestError(binding, *duplicate, 409);
         }
     }
-    if (!hasOnlyKeys(args, {"tilemap_path", "cells"}) ||
-        !args.contains("tilemap_path") || !boundedString(args["tilemap_path"]) ||
-        !args.contains("cells") || !validateTileCells(args["cells"])) {
+    if (!hasOnlyKeys(request, {"tilemap_path", "cells"}) ||
+        !request.contains("tilemap_path") || !boundedString(request["tilemap_path"]) ||
+        !request.contains("cells") || !validateTileCells(request["cells"])) {
         return requestError(binding, "invalid_tilemap_set_cells_request");
     }
-    return sendPhase7LiveRequest(binding, args, ipc);
+    return sendPhase7LiveRequest(binding, request, ipc);
 }
 
 CallToolResult handleTilemapGetUsedRect(const ResolvedToolBinding& binding, const json& args,
@@ -180,22 +236,23 @@ CallToolResult handleTilemapGetUsedRect(const ResolvedToolBinding& binding, cons
 
 CallToolResult handleGridmapSetCells(const ResolvedToolBinding& binding, const json& args,
                          std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (args.is_object() && args.contains("cells")) {
-        if (auto duplicate = describeDuplicateTuple(args["cells"], "position", 3)) {
+    const json request = withNormalizedCoordinates(args);
+    if (request.is_object() && request.contains("cells")) {
+        if (auto duplicate = describeDuplicateTuple(request["cells"], "position", 3)) {
             return requestError(binding, *duplicate, 409);
         }
         // The other rule the schema cannot state. Asked before the catch-all
         // below, which named none of the several rules it stands for.
-        if (auto erased = describeErasedCellWithOrientation(args["cells"])) {
+        if (auto erased = describeErasedCellWithOrientation(request["cells"])) {
             return requestError(binding, *erased);
         }
     }
-    if (!hasOnlyKeys(args, {"gridmap_path", "cells"}) ||
-        !args.contains("gridmap_path") || !boundedString(args["gridmap_path"]) ||
-        !args.contains("cells") || !validateGridCells(args["cells"])) {
+    if (!hasOnlyKeys(request, {"gridmap_path", "cells"}) ||
+        !request.contains("gridmap_path") || !boundedString(request["gridmap_path"]) ||
+        !request.contains("cells") || !validateGridCells(request["cells"])) {
         return requestError(binding, "invalid_gridmap_set_cells_request");
     }
-    return sendPhase7LiveRequest(binding, args, ipc);
+    return sendPhase7LiveRequest(binding, request, ipc);
 }
 
 } // namespace mcp

@@ -3787,6 +3787,70 @@ try {
     Assert-True ($absent.error.data.code -eq "target_method_not_found") "A method absent from the file is reported as $($absent.error.data.code)."
 
     Assert-True (-not $compileById[388].result.isError) "The probe autoload was left registered."
+    # A coordinate written the way every other vector on this surface is
+    # written. LLM_INSTRUCTIONS states the object rule with no exception and the
+    # two cell writers took arrays, so an agent following its own instructions
+    # met two refusals in a row on the tool whose job is painting a level, and
+    # tilemap_get_used_rect answered with objects the caller then had to
+    # transform before feeding them back (#738).
+    $coordRequests = @(
+        (@{ jsonrpc = "2.0"; id = 5610; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 5611 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 5612 "scene_open" @{ scene_path = "res://main.tscn" }),
+        (Tool-Request 5613 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/TileLayer"; cells = @(
+            @{ coords = @{ x = 7; y = 8 }; source_id = 0; atlas_coords = @{ x = 0; y = 0 } }
+        ) }),
+        (Tool-Request 5614 "tilemap_get_used_rect" @{ tilemap_path = "/root/SmokeRoot/TileLayer" }),
+        # The used rect is objects, so this is the reader's own answer handed
+        # straight back to the writer.
+        (Tool-Request 5615 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/TileLayer"; cells = @(
+            @{ coords = @{ x = 9; y = 8 }; erase = $true }
+        ) }),
+        # And the writers take each other's field name for the same thing.
+        (Tool-Request 5616 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/TileLayer"; cells = @(
+            @{ position = @{ x = 7; y = 9 }; source_id = 0; atlas_coords = @(0, 0) }
+        ) }),
+        (Tool-Request 5617 "gridmap_set_cells" @{ gridmap_path = "/root/SmokeRoot/Grid"; cells = @(
+            @{ coords = @{ x = 1; y = 0; z = 1 }; item = 0 }
+        ) }),
+        # A coordinate that is not one still is a refusal, naming both shapes
+        # rather than only the array it used to demand.
+        (Tool-Request 5618 "tilemap_set_cells" @{ tilemap_path = "/root/SmokeRoot/TileLayer"; cells = @(
+            @{ coords = @{ x = 7 }; source_id = 0; atlas_coords = @(0, 0) }
+        ) }),
+        # Colour written the documented way. applied is what a caller reads to
+        # decide whether the write landed, and a Color sent without alpha came
+        # back with four keys and reported false (#638 one call site over).
+        (Tool-Request 5619 "scene_set_property" @{ target_node = "/root/SmokeRoot/TileLayer"; property_name = "modulate"; value = @{ r = 1; g = 0.5; b = 0.25 } }),
+        (Tool-Request 5620 "scene_set_property" @{ target_node = "/root/SmokeRoot/TileLayer"; property_name = "modulate"; value = "#ffffff" }),
+        (Tool-Request 5621 "editor_undo" @{}),
+        (Tool-Request 5622 "editor_undo" @{}),
+        (Tool-Request 5623 "editor_undo" @{}),
+        (Tool-Request 5624 "editor_undo" @{}),
+        (Tool-Request 5625 "editor_undo" @{}),
+        (Tool-Request 5626 "editor_undo" @{})
+    )
+    $rawCoordResponses = Invoke-Didi -Requests $coordRequests -Arguments @("--project", $fixtureRoot)
+    $coordResponses = @($rawCoordResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
+    Assert-True ($LASTEXITCODE -eq 0) "Coordinate-shape MCP process exited with $LASTEXITCODE."
+    $coordById = @{}
+    foreach ($response in $coordResponses) { $coordById[[int]$response.id] = $response }
+
+    Assert-True (-not $coordById[5613].result.isError) "An object coordinate was refused by tilemap_set_cells: $($coordById[5613].result.content[0].text)"
+    Assert-True ((Tool-Payload $coordById[5613]).changed_cells -eq 1) "The object coordinate did not paint a cell."
+    $usedRect = Tool-Payload $coordById[5614]
+    Assert-True ($usedRect.position.x -eq 7 -and $usedRect.position.y -eq 8) "The cell painted with an object coordinate is not where it was asked for."
+    Assert-True (-not $coordById[5615].result.isError) "An object coordinate was refused by an erase."
+    Assert-True (-not $coordById[5616].result.isError) "tilemap_set_cells refused gridmap's field name for the same thing."
+    Assert-True (-not $coordById[5617].result.isError) "gridmap_set_cells refused tilemap's field name for the same thing: $($coordById[5617].result.content[0].text)"
+
+    Assert-True $coordById[5618].result.isError "A coordinate object missing an axis was accepted."
+    $badCoord = $coordById[5618].result.content[0].text
+    Assert-True ($badCoord -match "an array of 2 entries") "The refusal did not describe the array shape by its length."
+    Assert-True ($badCoord -match "or x, y") "The refusal did not name the object shape the tool now takes."
+
+    Assert-True ((Tool-Payload $coordById[5619]).applied -eq $true) "A Color written without alpha reported that it did not apply."
+    Assert-True ((Tool-Payload $coordById[5620]).applied -eq $true) "A Color written as a hex string reported that it did not apply."
 
     # An editor raycast against a scene that actually holds a body. The edited
     # scene is parented into a SubViewport under the editor's docks, so the

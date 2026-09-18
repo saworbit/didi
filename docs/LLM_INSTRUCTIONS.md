@@ -42,7 +42,7 @@ When live, use focused tools:
 - `scene_instantiate_node` for built-in ClassDB node types, and for instancing a packed scene through `scene_path`.
 - `scene_remove_node`, `scene_reparent_node`, and `scene_duplicate_node` for structural changes.
 - `scene_set_property` for existing properties. Its `value` is the property read back after the commit, not the argument you sent. Check `applied`: a successful call with `applied: false` means Godot discarded the write, and the scene is not what you asked for.
-- Send `{"x": .., "y": ..}` or `{"x": .., "y": .., "z": ..}` for a Vector2/Vector3, whole numbers for the integer versions, `{"r": .., "g": .., "b": ..}` with an optional `a` or a `"#rrggbb"` string for a Color, and a `res://` path for a Resource slot. `null` clears a resource slot. An extra or missing member is refused rather than dropped.
+- Send `{"x": .., "y": ..}` or `{"x": .., "y": .., "z": ..}` for a Vector2/Vector3, whole numbers for the integer versions, `{"r": .., "g": .., "b": ..}` with an optional `a` or a `"#rrggbb"` string for a Color, and a `res://` path for a Resource slot. `null` clears a resource slot. An extra or missing member is refused rather than dropped. The same object shape works for a coordinate in `tilemap_set_cells` and `gridmap_set_cells`, which also still take `[x, y]` and `[x, y, z]`; each of those two takes the other's field name, `coords` or `position`, for the same thing.
 - `editor_undo` and `editor_redo` to verify reversibility.
 - `editor_save_scene` only when persistence is intended.
 - `editor_reload_project` to request a resource-filesystem source rescan.
@@ -53,7 +53,7 @@ Follow the actual preview token and runtime annotations. The [exact always-confi
 
 Use logical paths shaped like `/root/<edited-scene-root>/Child`. `/root` by itself resolves to the active edited-scene root.
 
-Property values are limited to JSON null, boolean, signed integer, real, and string values compatible with the existing Godot property type. Do not send Vector, Transform, Color, Resource, Object, array, or dictionary values in Phase 1.
+A property value is JSON null, a boolean, an integer, a real, a string, or an object in one of the shapes above, and it has to suit the property's own Godot type. What is refused, rather than dropped: an array, an object that is not one of those shapes, and a Transform, Basis or Object value, which this surface does not write. The refusal names the property and its Godot type and shows the shape it wants.
 
 Pass `scene_path` to `scene_instantiate_node` to put an instance of a `.tscn` in the edited scene, which is what `scene_pack_branch` output is for. Do not use the legacy `mutate_scene_tree` or `instantiate_asset` names.
 

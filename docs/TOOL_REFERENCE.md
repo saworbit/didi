@@ -632,9 +632,11 @@ Writes or erases cells on a `TileMapLayer` in one undoable batch.
 
 - `tilemap_path` (`string`, required): the layer to edit.
 - `cells` (`array`, required): 1 to 256 records. Each is either a write or an erase, and nothing else is accepted.
-  - A write carries `coords` (`[x, y]`, each `-1048576..1048576`), `source_id` (`integer`, `0..2147483647`), `atlas_coords` (`[x, y]`, each `0..1048576`), and optionally `alternative_tile` (`integer`, `0..65535`, default `0`).
+  - A write carries `coords` (each component `-1048576..1048576`), `source_id` (`integer`, `0..2147483647`), `atlas_coords` (each component `0..1048576`), and optionally `alternative_tile` (`integer`, `0..65535`, default `0`).
   - An erase carries `coords` and `erase: true`.
 - `dry_run` (`boolean`, default `false`).
+
+A coordinate is `[x, y]` or `{"x": .., "y": ..}`, whichever you have. Vectors are objects everywhere else on this surface and `tilemap_get_used_rect` answers with objects, so a used rect can be fed straight back into a write. `coords` and `position` are the same field: this tool and `gridmap_set_cells` each take the other's name.
 
 ### `tilemap_get_used_rect` — Live
 
@@ -649,8 +651,10 @@ The response carries exact integer `position`, `size`, and end fields.
 Places or clears `MeshLibrary` items in a `GridMap` in one undoable batch.
 
 - `gridmap_path` (`string`, required).
-- `cells` (`array`, required): 1 to 256 records, each carrying `position` (`[x, y, z]`, each `-1048576..1048576`) and `item` (`integer`, `-1..2147483647`, where `-1` clears the cell), and optionally `orientation` (`integer`, `0..23`, default `0`).
+- `cells` (`array`, required): 1 to 256 records, each carrying `position` (each component `-1048576..1048576`) and `item` (`integer`, `-1..2147483647`, where `-1` clears the cell), and optionally `orientation` (`integer`, `0..23`, default `0`).
 - `dry_run` (`boolean`, default `false`).
+
+A position is `[x, y, z]` or `{"x": .., "y": .., "z": ..}`, and `coords` is accepted for it, so the two cell writers take the same spellings.
 
 Two of these rules are ones a JSON Schema cannot state, so no schema-aware client can pre-check them and they are the ones a caller is most likely to trip. Both name the offending entry, the rule and the values: a coordinate or position that appears twice is refused with `409` naming both entry indices and the tuple, and a cell that erases (`item: -1`) while setting a non-zero `orientation` is refused with `400` naming the entry and both values.
 

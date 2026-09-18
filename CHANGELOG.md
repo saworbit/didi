@@ -123,6 +123,40 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   the shared validator, so `runtime_inject_input` and `tilemap_set_cells` get it
   too. `keycode` now says in the schema that it is a `Key` enum value, which
   nothing said before.
+- **A coordinate is an object anywhere a vector is.** Vectors are objects on
+  this surface -- `scene_set_property`, `scene_instantiate_node`,
+  `resource_create`, `physics_raycast_query`, `nav_query_path` -- and
+  `LLM_INSTRUCTIONS` states that rule with no exception. The two cell writers
+  took arrays, so an agent following its own instructions met two refusals in a
+  row on the tool whose whole job is painting a level, and
+  `tilemap_get_used_rect` answered with objects a caller then had to transform
+  before feeding them back (#738). `tilemap_set_cells` and `gridmap_set_cells`
+  take `{x, y}` and `{x, y, z}` now, the array forms still work, and each takes
+  the other's field name, `coords` or `position`, for the same thing.
+- **`LLM_INSTRUCTIONS` no longer forbids what the surface does.** One section
+  said to send `{x, y}` for a Vector2, a `#rrggbb` string for a Color and a
+  `res://` path for a Resource slot, and eleven lines later said not to send
+  Vector, Color or Resource values "in Phase 1" (#739). All three work, the
+  phase they name finished long ago, and an agent reading top to bottom met the
+  prohibition last. The sentence is now the exception list it should always have
+  been: arrays, objects that are not one of those shapes, and Transform, Basis
+  and Object values are refused, and the refusal names the property, its Godot
+  type and the shape it wants.
+- **A property write that landed says so.** `scene_set_property` compared what
+  the property holds against the raw JSON argument, so a Color sent as
+  `{r, g, b}` -- the spelling the instructions document -- came back with four
+  keys and was reported `applied: false`, and a `"#rrggbb"` string never matched
+  an object at all. `applied: false` is documented to mean Godot discarded the
+  write, so an agent following the instructions would undo or retry a write that
+  was perfect. #638 fixed exactly this for `shader_set_uniform` and this call
+  site kept the raw argument; it compares against the Variant actually sent now.
+- **A `oneOf` refusal picks the branch by type.** A coordinate taken as either
+  `[x, y]` or `{x, y}` has an array branch with no required properties, so every
+  malformed object counted it as the one shape the caller meant and was answered
+  "must be an array, not an object" -- about a form the tool accepts. The
+  validator drops branches whose declared type cannot hold the value, and
+  describes an array branch by its length rather than as "no required
+  properties", which is #489's finding in the shape this change produces.
 
 - **A syntax check says whether it asked a compiler.** `script_check_syntax`
   takes either a `file_path` or a `source_text`, and only the first runs

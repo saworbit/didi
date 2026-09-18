@@ -11103,6 +11103,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
         // returns observed state rather than the values it was handed.
         auto observed = callObject(node.value(), "Object", "get", 2760726917LL, {&property_name.value()});
         if (observed.isErr()) return errorJson(observed.error().code, observed.error().message);
+        auto requested_json = variantToJson(new_value.value(), 0, true);
+        const json& requested_payload =
+            requested_json.isOk() ? requested_json.value() : params["value"];
         auto observed_json = variantToJson(observed.value());
         if (observed_json.isErr()) return errorJson(observed_json.error().code, observed_json.error().message);
         auto old_json = variantToJson(old_value.value());
@@ -11110,7 +11113,17 @@ json GodotBridge::execute(const std::string& method, const json& params,
         return liveSceneMutation({{"status", "success"}, {"target_node", params.value("target_node", "")},
                                   {"property_name", property}, {"value", observed_json.value()},
                                   {"requested_value", params["value"]}, {"old_value", old_json.value()},
-                                  {"applied", jsonValuesEquivalent(observed_json.value(), params["value"])},
+                                  // Against the Variant that was actually sent,
+                                  // not the JSON it was built from. A Color
+                                  // written as {r,g,b} -- the spelling the
+                                  // instructions document -- comes back with
+                                  // four keys, and comparing four observed
+                                  // against three requested reported a write
+                                  // that landed perfectly as one that did not.
+                                  // #638 fixed exactly this for
+                                  // shader_set_uniform and this call site kept
+                                  // the raw argument.
+                                  {"applied", jsonValuesEquivalent(observed_json.value(), requested_payload)},
                                   {"undo_redo_registered", true}});
     }
 
