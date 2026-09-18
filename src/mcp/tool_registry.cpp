@@ -3174,7 +3174,7 @@ void ToolRegistry::registerAllDefaultTools() {
                 }},
                 {"from", {{"type", "object"}, {"description", "{x,y} for 2D or {x,y,z} for 3D."}}},
                 {"to", {{"type", "object"}, {"description", "Where the shape is sweeping to. Equal to from asks whether it fits where it stands."}}},
-                {"collision_mask", {{"type", "integer"}, {"minimum", 1}, {"maximum", 2147483647}, {"default", 1}}}
+                {"collision_mask", {{"type", "integer"}, {"minimum", 1}, {"maximum", 4294967295}, {"default", 1}}}
             }},
             {"required", json::array({"shape", "from", "to"})},
             {"additionalProperties", false}
@@ -3358,7 +3358,7 @@ void ToolRegistry::registerAllDefaultTools() {
                 }},
                 {"sightline", {{"type", "boolean"}, {"default", false},
                                {"description", "Sample rays from the camera to each node. Rays see physics colliders only, so geometry without one does not block."}}},
-                {"collision_mask", {{"type", "integer"}, {"minimum", 1}, {"maximum", 2147483647}, {"default", 1},
+                {"collision_mask", {{"type", "integer"}, {"minimum", 1}, {"maximum", 4294967295}, {"default", 1},
                                     {"description", "Applies to the sightline rays only."}}},
                 {"max_results", {{"type", "integer"}, {"minimum", 1}, {"maximum", 256}, {"default", 64}}}
             }},
@@ -3384,7 +3384,7 @@ void ToolRegistry::registerAllDefaultTools() {
                         {"properties", {
                             {"from", {{"type", "object"}, {"description", "{x,y} for 2D or {x,y,z} for 3D."}}},
                             {"to", {{"type", "object"}, {"description", "{x,y} for 2D or {x,y,z} for 3D."}}},
-                            {"collision_mask", {{"type", "integer"}, {"minimum", 1}, {"maximum", 2147483647}, {"default", 1}}}
+                            {"collision_mask", {{"type", "integer"}, {"minimum", 1}, {"maximum", 4294967295}, {"default", 1}}}
                         }},
                         {"required", json::array({"from", "to"})},
                         {"additionalProperties", false}
@@ -3408,7 +3408,7 @@ void ToolRegistry::registerAllDefaultTools() {
             {"properties", {
                 {"from", {{"type", "object"}, {"description", "Ray start position"}}},
                 {"to", {{"type", "object"}, {"description", "Ray end position"}}},
-                {"collision_mask", {{"type", "integer"}, {"default", 1}}}
+                {"collision_mask", {{"type", "integer"}, {"minimum", 1}, {"maximum", 4294967295}, {"default", 1}}}
             }},
             {"required", {"from", "to"}}
         };

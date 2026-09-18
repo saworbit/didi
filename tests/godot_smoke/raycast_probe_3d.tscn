@@ -1,0 +1,11 @@
+[gd_scene load_steps=2 format=3]
+
+[sub_resource type="BoxShape3D" id="block_shape"]
+size = Vector3(2, 2, 2)
+
+[node name="RayProbe3D" type="Node3D"]
+
+[node name="Block" type="StaticBody3D" parent="."]
+
+[node name="BlockShape" type="CollisionShape3D" parent="Block"]
+shape = SubResource("block_shape")

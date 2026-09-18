@@ -84,13 +84,16 @@ Result<int64_t> layerField(const json& params, const char* field) {
     if (!value.is_number_integer() && !value.is_number_unsigned()) {
         return Error::invalidArgument(std::string(field) + " must be an integer");
     }
+    // Godot's collision layers and masks are 32 bits unsigned, so layer 32 and
+    // the natural "every layer" value 4294967295 both sit above INT32_MAX. The
+    // old ceiling refused them (#743).
     if (value.is_number_unsigned() &&
-        value.get<uint64_t>() > static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
-        return Error::invalidArgument(std::string(field) + " must be from 1 to 2147483647");
+        value.get<uint64_t>() > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) {
+        return Error::invalidArgument(std::string(field) + " must be from 1 to 4294967295");
     }
     const auto number = value.get<int64_t>();
-    if (number < 1 || number > std::numeric_limits<int32_t>::max()) {
-        return Error::invalidArgument(std::string(field) + " must be from 1 to 2147483647");
+    if (number < 1 || number > static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
+        return Error::invalidArgument(std::string(field) + " must be from 1 to 4294967295");
     }
     return number;
 }
