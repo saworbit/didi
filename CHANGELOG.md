@@ -198,6 +198,25 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   `scene_instantiate_node` has always taken. A class the engine does not know
   and a class that is not a `Node` are refused separately, each naming the
   class, and neither writes a file.
+||||||| parent of 3449745 (Import an asset the editor has never seen, and say whether it did)
+- **An asset the editor has never seen gets imported, and the answer says
+  whether it did.** Adding art is step one of building a game and there was no
+  way to do it through the surface. `asset_reimport` sends a path with no
+  `.import` sidecar to `EditorFileSystem.update_file`, which announces a file
+  to the editor and does not import one, so no sidecar was written, nothing
+  appeared under `.godot/imported`, and the asset stayed unusable -- loading as
+  a null texture -- while the call answered `accepted_count: 1`,
+  `refreshed: [path]`, `idle: true`, which reads as "done, nothing was stale"
+  (#731). A path with no sidecar now also triggers `EditorFileSystem.scan`,
+  the walk that finds new files and runs the importer over them;
+  `editor_reload_project`'s `scan_sources` only re-examines files the editor
+  already knows about, which a new file is not. The result reports the outcome
+  rather than the call: `imported` for paths that carry a sidecar now and did
+  not before, `announced` for the ones that still carry none, which is the
+  ordinary answer for a script and a real problem for an image. The scanning
+  flag clears before the importer has written the sidecars, so a scan-driven
+  call asks the editor whether its work on each path is finished instead of
+  watching the flag.
 
 - **A syntax check says whether it asked a compiler.** `script_check_syntax`
   takes either a `file_path` or a `source_text`, and only the first runs

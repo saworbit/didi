@@ -3952,6 +3952,47 @@ try {
     Assert-True $rootById[5635].result.isError "A class the engine does not know was accepted as a scene root."
     Assert-True ($rootById[5635].result.content[0].text -match "NotARealClass") "The unknown-class refusal does not name the class."
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot "root_type_bad.tscn"))) "A refused scene root left a file behind."
+    # An asset the editor has never seen. Adding art is step one of building a
+    # game and there was no way to do it through the surface: update_file
+    # announces a file, it does not import one, so no .import was written and
+    # nothing appeared under .godot/imported while asset_reimport answered
+    # accepted_count 1, refreshed [path], idle true -- which reads as "done,
+    # nothing was stale" for an asset that loads as null (#731). The png is
+    # written now, after the editor started, so it is genuinely unscanned.
+    $freshAsset = Join-Path $fixtureRoot "fresh_asset.png"
+    [System.IO.File]::WriteAllBytes($freshAsset, [System.Convert]::FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIBAMAAABGfrPvAAAAD1BMVEX/AAAA/wAAAP//AAD///9c1kzTAAAAFklEQVQI12NgYGBgZGBgYGRgYGBgAAAAFAAB2rGYwgAAAABJRU5ErkJggg=="))
+    Assert-True (Test-Path -LiteralPath $freshAsset) "The fresh asset was not written into the fixture."
+    Assert-True (-not (Test-Path -LiteralPath "$freshAsset.import")) "The fresh asset already carried an import sidecar before the tool ran."
+
+    $importRequests = @(
+        (@{ jsonrpc = "2.0"; id = 400; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 401 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 402 "asset_reimport" @{ paths = @("res://fresh_asset.png", "res://subject.gd"); timeout_ms = 10000 }),
+        (Tool-Request 403 "asset_reimport" @{ paths = @("res://fresh_asset.png"); timeout_ms = 10000 })
+    )
+    $rawImportResponses = Invoke-Didi -Requests $importRequests -Arguments @("--project", $fixtureRoot)
+    $importResponses = @($rawImportResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
+    Assert-True ($LASTEXITCODE -eq 0) "Fresh-asset import MCP process exited with $LASTEXITCODE."
+    $importById = @{}
+    foreach ($response in $importResponses) { $importById[[int]$response.id] = $response }
+
+    $firstImport = Tool-Payload $importById[402]
+    Assert-True ($firstImport.idle -eq $true) "The fresh-asset import did not reach a stable idle state."
+    # The asset is on disk as an import now, which is the only thing that makes
+    # it usable, and the tool says which of the two things happened to it.
+    Assert-True (Test-Path -LiteralPath "$freshAsset.import") "asset_reimport did not import an asset the editor had never scanned."
+    Assert-True (@($firstImport.imported) -contains "res://fresh_asset.png") "asset_reimport imported the asset and did not say so."
+    # The control, in the same call: a script never gets a sidecar, and calling
+    # that imported would be the same overclaim in the other direction.
+    Assert-True (@($firstImport.announced) -contains "res://subject.gd") "A script was not reported as announced."
+    Assert-True (@($firstImport.imported) -notcontains "res://subject.gd") "A script was reported as imported."
+
+    # And once it is imported it is an ordinary reimport, through the path that
+    # reads the importer out of the sidecar.
+    $secondImport = Tool-Payload $importById[403]
+    Assert-True (@($secondImport.reimported) -contains "res://fresh_asset.png") "An imported asset was not routed to reimport_files on the second call."
+    Assert-True (@($secondImport.announced).Count -eq 0) "An imported asset was still reported as announced."
 
     # An editor raycast against a scene that actually holds a body. The edited
     # scene is parented into a SubViewport under the editor's docks, so the

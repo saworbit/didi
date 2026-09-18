@@ -961,6 +961,12 @@ Accepts `paths` containing 1–256 unique normalized `res://` source files and `
 
 Godot's import system owns only the files that carry a `.import` sidecar. `EditorFileSystem.reimport_files` reads the importer name out of that sidecar, so a path without one reaches the engine as `importer for type '' not found` in the editor output while the call itself returns nothing to report. The batch is split by what each path needs: files with a sidecar go to `reimport_files`, and the rest go to `EditorFileSystem.update_file`, which Godot documents for a file a program outside the editor has changed. The result carries both lists as `reimported` and `refreshed`, so a caller reads which one happened rather than assuming.
 
+A path with no sidecar is two different things, and this tool is the one that tells them apart. A `.gd`, a `.tscn` or a `.tres` never gets a sidecar and `update_file` is all it needs. An asset the editor has never scanned -- a `.png` written into the project by something other than Godot -- needs importing before anything can use it, and `update_file` does not import: it announces. So whenever any path lacks a sidecar the call also runs `EditorFileSystem.scan`, which is the walk that finds new files and runs the importer over them. `editor_reload_project` uses `scan_sources`, which only re-examines files the editor already knows about, and a file it has never seen is not one of those.
+
+The answer then reports what happened rather than what was asked for. `imported` lists the paths that carry a sidecar now and did not before, and `announced` lists the ones that still carry none. `refreshed` keeps its old meaning -- everything that went through `update_file` -- so the two new lists partition it. `announced` is the ordinary and correct answer for a script; for an image, an audio file or a font it means the editor did not import it and anything referencing it will load nothing, and the result says so in `limitation`.
+
+The scanning flag clears before the importer has finished writing sidecars, so a scan-driven call does not answer on the flag. It asks the editor whether its work on each path is finished -- `EditorFileSystemDirectory.get_file_import_is_valid`, which is false while an import is outstanding and true for a file that needs none -- and is bounded by `timeout_ms` like everything else.
+
 ### `audio_list_buses` — Live and offline
 
 Lists the audio buses with `index`, `name`, `volume_db`, `mute`, `solo`, `bypass_effects` and `send`. Takes no arguments.
