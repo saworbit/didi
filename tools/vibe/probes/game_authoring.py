@@ -41,6 +41,12 @@ subject is the subject and not the probe.
   `project.godot` is `shift_pressed`. The refusal for the wrong one names no
   property, where every other argument refusal on the surface lists what the
   tool accepts.
+* **A raycast answers with a path nothing can use.** Attached to an editor,
+  `physics_raycast_query` and `spatial_query_raycast_batch` report the node they
+  hit as a 370-character absolute path through the editor's own dock tree, which
+  every reader and writer refuses; attached to a game the same tool answers
+  `/root/Level/Floor`. And a 2D ray in an editor never hits at all, while the 3D
+  ray one call earlier does -- the clean miss is the whole finding.
 * **`resource_create` checks properties against a pinned 4.7 class reference**
   and never says so. Its sibling `script_reflect_class`, reading the same file
   through the same helper, reports `attached_engine_version` and
@@ -230,6 +236,71 @@ def autoload_then_signal(session: Session) -> None:
               % (label, declared, ("refused -- " + message) if err else "connected"))
 
 
+def spatial_queries(session: Session) -> None:
+    """Cast a ray, then try to use what it hit -- the second half of the query loop."""
+    print("\n== a 3D arena, raycast, and what the answer can be passed to ==")
+    # scene_create refuses an existing path without `overwrite`, and a refusal
+    # here does not open the scene -- so on a second run the rays below query
+    # whichever world was already current, the 3D control misses, and the 2D row
+    # then goes green against a broken control. Open it explicitly either way.
+    _, created = session.call("scene_create", {
+        "scene_path": "res://vibe_arena.tscn", "root_type": "Node3D", "root_name": "Arena"})
+    if created:
+        session.call("scene_open", {"scene_path": "res://vibe_arena.tscn"})
+    session.call("scene_instantiate_node", {
+        "node_type": "CharacterBody3D", "parent_path": "/root", "name": "Hero",
+        "properties": {"position": {"x": 0, "y": 1, "z": 0}}})
+    session.call("scene_instantiate_node", {
+        "node_type": "CollisionShape3D", "parent_path": "/root/Arena/Hero", "name": "Col"})
+    session.call("resource_create", {
+        "resource_type": "BoxShape3D", "save_path": "res://vibe_box.tres",
+        # Spelled out, because {"x": ..} here is a Vector3 and the slot is a
+        # Vector3 too -- unlike the TileSet case this one needs no type key, and
+        # saying so keeps the two rows from reading as the same question.
+        "properties": {"size": {"x": 1.0, "y": 2.0, "z": 1.0}}})
+    session.call("scene_set_property", {
+        "target_node": "/root/Arena/Hero/Col", "property_name": "shape",
+        "value": "res://vibe_box.tres"})
+    session.call("editor_save_scene", {})
+
+    hit, _ = session.call("physics_raycast_query", {
+        "from": {"x": 0, "y": 5, "z": 0}, "to": {"x": 0, "y": -5, "z": 0}})
+    path = hit.get("collider_path")
+    print("  3D ray: hit=%s class=%s path_length=%s"
+          % (hit.get("hit"), hit.get("collider_class"),
+             len(path) if isinstance(path, str) else None))
+    if isinstance(path, str):
+        print("    %s ... %s" % (path[:72], path[-18:]))
+        back, err = session.call("scene_get_property", {
+            "target_node": path, "property_name": "position"})
+        control, control_err = session.call("scene_get_property", {
+            "target_node": "/root/Arena/Hero", "property_name": "position"})
+        row("the path the raycast returned can be read back", not control_err, not err)
+
+    # The 2D half. The level built above holds a StaticBody2D floor at y=300
+    # with an 800x32 box, so a ray from (0,0) to (0,400) goes through it.
+    session.call("scene_open", {"scene_path": "res://vibe_level.tscn"})
+    session.call("scene_remove_node", {"target_node": "/root/Lvl/Slab"})
+    session.call("scene_instantiate_node", {
+        "node_type": "StaticBody2D", "parent_path": "/root", "name": "Slab",
+        "properties": {"position": {"x": 0, "y": 300}}})
+    session.call("scene_instantiate_node", {
+        "node_type": "CollisionShape2D", "parent_path": "/root/Lvl/Slab", "name": "Col"})
+    session.call("resource_create", {
+        "resource_type": "RectangleShape2D", "save_path": "res://vibe_slab.tres",
+        "properties": {"size": {"x": 800, "y": 32}}})
+    session.call("scene_set_property", {
+        "target_node": "/root/Lvl/Slab/Col", "property_name": "shape",
+        "value": "res://vibe_slab.tres"})
+    session.call("editor_save_scene", {})
+    flat, _ = session.call("physics_raycast_query", {
+        "from": {"x": 0, "y": 0}, "to": {"x": 0, "y": 400}})
+    print("  2D ray through a StaticBody2D slab: hit=%s collider=%r"
+          % (flat.get("hit"), flat.get("collider_path")))
+    # The 3D row above is the control: same session, same route, and it hits.
+    row("a 2D ray through a body reports a hit", hit.get("hit"), flat.get("hit"))
+
+
 def launch_and_attach(session: Session) -> None:
     """Start the game, then try to use it -- the loop the runtime tools exist for."""
     print("\n== runtime_launch, and the session it leaves behind ==")
@@ -241,7 +312,15 @@ def launch_and_attach(session: Session) -> None:
     print("  launch: success=%s exit_code=%s summary=%r" % (
         payload.get("success"), payload.get("exit_code"), payload.get("summary")))
     listing, _ = session.call("runtime_list_sessions", {})
-    games = [s for s in listing.get("sessions", []) if s.get("kind") == "game"]
+    # Filtering on `kind` alone is not enough: runtime_list_sessions reports
+    # every engine on the machine, so a game another project left running is in
+    # this list and answering questions about it reads as a finding here. The
+    # server refuses to attach across projects and says so clearly; the probe
+    # should never have asked.
+    root = str(Path(session.argv[session.argv.index("--project") + 1]).resolve())
+    games = [s for s in listing.get("sessions", [])
+             if s.get("kind") == "game"
+             and str(Path(s.get("project_path", "")).resolve()) == root]
     if not games:
         print("  no game session listed, so there is nothing to ask")
         return
@@ -270,6 +349,7 @@ def main() -> int:
         syntax_check_paths(session)
         input_event_vocabulary(session)
         autoload_then_signal(session)
+        spatial_queries(session)
         if not args.skip_launch:
             launch_and_attach(session)
     return 0

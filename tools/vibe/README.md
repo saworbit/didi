@@ -79,7 +79,7 @@ twice.
 | `probes/ghost_preview_survival.py` | What a refused `editor_render_ghost_preview` leaves on the user's screen. A refusal the argument check made is the control, and a refusal the engine made is the row that mattered: the teardown used to run before the engine was asked whether the new shapes could be drawn, so a `409` spent the proposal on its way out. |
 | `probes/rename_disclosure.py` | `project_rename_references`'s preview against its confirm, field by field and entry for entry over `code_references_not_updated`, on call sites the probe wrote itself so the arithmetic is known before either call. Exits non-zero when the two lists differ. Needs no editor. |
 | `probes/ui_app_modes.py` | The three `--ui-app` modes diffed before any tool is called: the handshake's `extensions`, the `ui://` resource in the listing and on a read, and `didi_control_room`'s own `_meta`. Needs no editor. |
-| `probes/game_authoring.py` | A small platformer built through the surface end to end, as a game author would: a physics root, a collision shape as a real resource, a script, a level instancing the player, an autoload, input actions, a signal, and the game run. Half of it is green on purpose -- that half is the control for the rest. Needs an empty project; everything it writes is prefixed `vibe_` so a second run overwrites its own leavings. |
+| `probes/game_authoring.py` | A small platformer built through the surface end to end, as a game author would: a physics root, a collision shape as a real resource, a script, a level instancing the player, an autoload, input actions, a signal, a 3D arena and a raycast, and the game run. Half of it is green on purpose -- that half is the control for the rest. Needs an empty project; everything it writes is prefixed `vibe_` so a second run overwrites its own leavings. |
 | `fixtures/write_csharp_fixture.py` | A `.csproj` with one error and one warning in it. Kept out of `sandbox.py` because a C# project changes what Godot does with the directory. |
 | `editor_exit_status.py` | Not a probe against the server: the same editor invocation with and without the built addon installed, exit statuses side by side. The control for a crash on shutdown. |
 | `wait_for_session.py` | Polls `runtime_list_sessions` through the same binary the probes use, so a slow first import reads as a slow import rather than as an absent session. |
@@ -936,6 +936,27 @@ or Resource values "in Phase 1" (#739). Both sentences are in the same section;
 the false one is the more absolute and comes last. Nothing tests prose against
 prose. **Read the agent instructions end to end, in order, as the agent does.**
 
+**A tool that answers with a handle has to answer with one the caller can hold.**
+`physics_raycast_query` and `spatial_query_raycast_batch` are the only tools here
+whose output is a *node* rather than a value, and attached to an editor both
+report it as a 370-character absolute path through the editor's dock tree --
+`/root/@EditorNode@20438/.../@SubViewport@10523/Arena/Hero` -- which every reader
+and writer refuses with "Scene node not found" (#742). Attached to a game the
+same tool answers `/root/Level/Floor`, so the right shape is already there and
+the editor path is simply not reduced to it. **When a tool returns an identifier,
+pass it straight back to another tool before believing it.**
+
+**A miss and an inability to look are the same answer.** In the same editor
+session, a 3D ray through a `CharacterBody3D` hits and a 2D ray through a
+`StaticBody2D` returns `hit: false` with every field null (#743) -- and the
+identical 2D ray against a game hits the floor at exactly the top of its box. The
+2D row only became a finding once the 3D row sat beside it, which is also how the
+probe nearly hid it: on a second run `scene_create` refuses the existing arena
+path and does not open it, so the 3D control missed too, `expected=False` matched
+`observed=False`, and the row went green. **A comparison row is only as good as
+the row it compares against; make the control's precondition explicit, not
+incidental.**
+
 **The platform was not a variable this time, and that is the result.** Every one
 of the thirteen findings reproduces byte for byte on Windows, macOS and Ubuntu,
 run by `game_authoring.py` in the platform workflow's live job -- with one
@@ -977,7 +998,7 @@ fallback path. **A row that differs on one platform is a diagnosis, not noise.**
 
 | 2026-09-16 | The handshake's own claims rather than the tools': `listChanged: false` against a listing that moves with the bridge, and every parameter description against the schema keys beside it. Then `csharp_check_build` given a real `.csproj` for the first time in fourteen sessions, `project_export` and the ghost previews on Windows, the macOS `sun_path` overflow the twelfth session measured and never forced, the expression sandbox and the method channel walked for containment, and the old censuses re-run. | `2.0.0+28d1c2193b37`, and `2.0.0+5349d27e5f59` on the runners | #701-#717, sixteen findings. |
 
-| 2026-09-18 | A game rather than a census: a 2D platformer built end to end through the surface -- a physics root, a collision shape as a real resource, a TileSet over an atlas, an autoload, input actions, a signal, a HUD, a script patch, and the game launched, attached, paused, injected and stepped. The first session to walk a whole authoring workflow in order rather than asking each tool one question. | `2.0.0+6393d1435a6a`, and the same on the runners | #728-#740, thirteen findings, every one of them reproduced on macOS and Ubuntu as well as Windows. |
+| 2026-09-18 | A game rather than a census: a 2D platformer built end to end through the surface -- a physics root, a collision shape as a real resource, a TileSet over an atlas, an autoload, input actions, a signal, a HUD, a script patch, and the game launched, attached, paused, injected and stepped; then a 3D arena and the raycast tools, the only ones whose answer is a node. The first session to walk a whole authoring workflow in order rather than asking each tool one question. | `2.0.0+6393d1435a6a`, and the same on the runners | #728-#743, fifteen findings. The thirteen from the 2D arc reproduced on macOS and Ubuntu as well as Windows; #732 is Windows only and the difference diagnosed it. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log
