@@ -1309,6 +1309,52 @@ static void test_property_check_names_the_engine_it_was_not_checked_against() {
     registry.setRuntimeSessionClient(nullptr);
 }
 
+static void test_source_text_check_says_the_compiler_was_not_asked() {
+    // Break caught: a source_text check runs Didi's lexical rules and nothing
+    // else, and nothing in the result, the schema or the agent instructions
+    // said so. Six scripts with real compile errors came back
+    // has_errors: false, which is the answer a clean script gets, and the
+    // engine fields came back all-null, which is what a GODOT_BIN that cannot
+    // be launched returns. One response shape stood for three states (#728).
+    //
+    // This asserts the field a caller branches on rather than the prose, and
+    // it deliberately uses a script Didi's own rules cannot reach: balanced
+    // brackets, plausible structure, and an identifier that is not declared.
+    ScopedToolProject project("source-text-verdict");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("clean.gd", "extends Node\n\nfunc greet() -> String:\n\treturn \"hi\"\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto unsaved = didi::json::parse(
+        registry.callTool(
+                    "script_check_syntax",
+                    didi::json{{"source_text",
+                                "extends Node2D\n\nfunc _ready() -> void:\n\tprint(nope)\n"}})
+            .content[0].text);
+    ASSERT_EQ(unsaved["engine_checked"], false);
+    // The lexical rules found nothing, which is true and is exactly why the
+    // verdict needs the qualifier beside it.
+    ASSERT_EQ(unsaved["has_errors"], false);
+    ASSERT_TRUE(unsaved.contains("limitation"));
+    // It has to name the way out, not just the gap.
+    ASSERT_TRUE(unsaved["limitation"].get<std::string>().find("project_verify_changes") !=
+                std::string::npos);
+    // engine_available answers a question nobody asked here, so it is absent
+    // rather than false: that is the distinction #677 needs kept.
+    ASSERT_TRUE(!unsaved.contains("engine_available"));
+
+    // The control. A file check asked an engine, whatever the engine said, so
+    // the two states cannot be told apart by the nullable engine fields alone.
+    const auto saved = didi::json::parse(
+        registry.callTool("script_check_syntax", didi::json{{"file_path", "res://clean.gd"}})
+            .content[0].text);
+    ASSERT_EQ(saved["engine_checked"], true);
+    ASSERT_TRUE(!saved.contains("limitation"));
+    ASSERT_TRUE(saved.contains("engine_available"));
+}
+
 static void test_instantiate_refuses_a_request_that_names_no_target() {
     // Break caught: scene_instantiate_node declared no required arguments and
     // sits behind no confirmation gate, so an empty argument object added a
@@ -6531,6 +6577,8 @@ struct RegisterToolTests {
                      test_api_version_note_compares_the_engine_line);
         registerTest("Tools.PropertyCheckNamesAttachedEngine",
                      test_property_check_names_the_engine_it_was_not_checked_against);
+        registerTest("Tools.SourceTextCheckSaysCompilerNotAsked",
+                     test_source_text_check_says_the_compiler_was_not_asked);
         registerTest("Tools.InstantiateRefusesNoTarget",
                      test_instantiate_refuses_a_request_that_names_no_target);
         registerTest("Tools.OfflineSettingWriteAdmitsUncheckedName",

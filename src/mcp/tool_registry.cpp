@@ -773,8 +773,19 @@ static json outputSchemaForTool(const std::string& name) {
                               {"engine_available", boolean_type},
                               {"engine_exit_code", {{"type", {"integer", "null"}}}},
                               {"engine_duration_seconds", {{"type", "number"}}},
-                              {"engine_unavailable_reason", string_type}},
-                             {"execution_mode", "has_errors"});
+                              {"engine_unavailable_reason", string_type},
+                              // Always returned, and the field to branch on.
+                              // The four nullable engine fields above read the
+                              // same for a check that never asked a compiler
+                              // and one whose compiler would not start, and
+                              // those are different states with different
+                              // repairs (#728).
+                              {"engine_checked", boolean_type},
+                              // Present exactly when engine_checked is false,
+                              // saying what the verdict does and does not
+                              // cover and where to get the other half.
+                              {"limitation", string_type}},
+                             {"execution_mode", "has_errors", "engine_checked"});
     }
     if (name == "project_search_text" || name == "project_search_symbols") {
         // The two positions carry prose because the guess is load-bearing:
@@ -2881,7 +2892,13 @@ void ToolRegistry::registerAllDefaultTools() {
             {"type", "object"},
             {"properties", {
                 {"file_path", {{"type", "string"}, {"description", "Path to script file"}}},
-                {"source_text", {{"type", "string"}, {"description", "Optional unsaved script buffer"}}}
+                {"source_text", {{"type", "string"}, {"description",
+                    "An unsaved script buffer to check instead of a file. This runs Didi's own "
+                    "lexical rules only: there is no file for the Godot compiler to open, so "
+                    "has_errors does not cover type errors, undeclared identifiers, absent "
+                    "methods or unknown base classes. The result says so in engine_checked and "
+                    "limitation. Use project_verify_changes for a compiler verdict on unsaved "
+                    "source."}}}
             }}
         };
         // The source client, not the lease dispatch wrapper. This tool sends no
