@@ -276,12 +276,18 @@ Like every mutation, all three write operations expose `dry_run` and require a
 
 ### `script_check_syntax` — Offline
 
-Runs Didi's string/comment-aware lightweight GDScript diagnostics. When an in-project `file_path` is supplied, it also attempts `godot --headless --check-only`; `source_text`-only checks do not invoke Godot.
+Runs Didi's string/comment-aware lightweight GDScript diagnostics. When an in-project `file_path` is supplied, it also attempts `godot --headless --check-only`.
 
 - `file_path` (`string`, optional).
 - `source_text` (`string`, optional).
 - At least one is required.
 - Legacy alias: `analyze_script_diagnostics`.
+
+The two modes do not give the same strength of verdict, and the result says which one it gave. `engine_checked` is on every answer: `true` when a compiler was asked, `false` when none was. A `source_text` check has no file for `--check-only` to open, so it runs the lexical rules and nothing else, and `has_errors` there covers unbalanced brackets, bad indentation and a tab and space mix, and not type errors, undeclared identifiers, absent methods or unknown base classes. That answer carries a `limitation` sentence saying so.
+
+Branch on `engine_checked` rather than on the engine fields. `engine_version`, `engine_executable`, `attached_engine_version` and `matches_attached_engine` are all null both for a check that asked no compiler and for one whose compiler could not be launched, and those are different states with different repairs. `engine_available` is present only when a compiler was asked, and answers whether it replied.
+
+For a compiler verdict on source that is not on disk, `project_verify_changes` compiles it in an isolated copy of the project. For one on a file, write it with `script_create`, which runs the same check on what it wrote, and check it by `file_path` after that.
 
 A file whose bytes are not valid UTF-8 is reported as `has_errors: true` with one diagnostic under `rule: "invalid_encoding"`, and Godot is not spawned for it.
 

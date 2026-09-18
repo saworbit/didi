@@ -172,6 +172,54 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
         {"has_errors", has_error},
         {"diagnostics", diag_arr}
     };
+    // Whether the compiler was asked at all, which is a different fact from
+    // whether it answered.
+    //
+    // A source_text check runs Didi's own lexical rules and nothing else, by
+    // design: there is no file for `--check-only` to open. Nothing in the
+    // result said so, so six scripts with real compile errors -- a typed
+    // variable assigned the wrong type, a mistyped keyword, an undeclared
+    // identifier, an absent method, an unknown base class, a wrong constructor
+    // arity -- each came back has_errors: false, which is the same answer a
+    // clean script gets (#728). Worse, the engine fields came back all-null,
+    // which is byte for byte what a GODOT_BIN that cannot be launched returns,
+    // so one shape stood for three states. This field separates them: false
+    // means nobody asked, and engine_available answers whether an engine that
+    // was asked replied.
+    result["engine_checked"] = engine_was_asked;
+    if (!engine_was_asked) {
+        result["limitation"] =
+            "The Godot compiler was not run. A source_text check has no file to compile, so "
+            "has_errors covers only Didi's own lexical rules -- unbalanced brackets, bad "
+            "indentation, a tab and space mix -- and not type errors, undeclared identifiers, "
+            "absent methods or unknown base classes. For a compiler verdict on unsaved source, "
+            "send it to project_verify_changes, which compiles it in an isolated copy of the "
+            "project; for one on a file, write it with script_create and check it by file_path.";
+    }
+    // Whether the compiler was asked at all, which is a different fact from
+    // whether it answered.
+    //
+    // A source_text check runs Didi's own lexical rules and nothing else, by
+    // design: there is no file for `--check-only` to open. Nothing in the
+    // result said so, so six scripts with real compile errors -- a typed
+    // variable assigned the wrong type, a mistyped keyword, an undeclared
+    // identifier, an absent method, an unknown base class, a wrong constructor
+    // arity -- each came back has_errors: false, which is the same answer a
+    // clean script gets (#728). Worse, the engine fields came back all-null,
+    // which is byte for byte what a GODOT_BIN that cannot be launched returns,
+    // so one shape stood for three states. This field separates them: false
+    // means nobody asked, and engine_available answers whether an engine that
+    // was asked replied.
+    result["engine_checked"] = engine_was_asked;
+    if (!engine_was_asked) {
+        result["limitation"] =
+            "The Godot compiler was not run. A source_text check has no file to compile, so "
+            "has_errors covers only Didi's own lexical rules -- unbalanced brackets, bad "
+            "indentation, a tab and space mix -- and not type errors, undeclared identifiers, "
+            "absent methods or unknown base classes. For a compiler verdict on unsaved source, "
+            "send it to project_verify_changes, which compiles it in an isolated copy of the "
+            "project; for one on a file, write it with script_create and check it by file_path.";
+    }
     // Published so a caller can see whether the subprocess ran at all, which
     // is what the shader half already reports and this one did not. False is
     // the honest answer on a machine with no Godot: the lexer found what it

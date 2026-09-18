@@ -93,6 +93,24 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A syntax check says whether it asked a compiler.** `script_check_syntax`
+  takes either a `file_path` or a `source_text`, and only the first runs
+  `godot --headless --check-only`. Nothing in the result, the published schema
+  or the agent instructions said so, and checking a draft before writing it to
+  disk is what `source_text` is for. Six scripts with real GDScript compile
+  errors -- a typed variable assigned the wrong type, a mistyped keyword, an
+  undeclared identifier, an absent method, an unknown base class, a wrong
+  constructor arity -- each came back `has_errors: false`, which is the answer
+  a clean script gets, and the same bytes checked by `file_path` reported every
+  one (#728). The engine fields made it worse: all four come back null for a
+  check that asked no compiler, which is byte for byte what a `GODOT_BIN` that
+  cannot be launched returns, so one response shape stood for three states.
+  Every answer now carries `engine_checked`, and one that is `false` carries a
+  `limitation` naming what the verdict covers and pointing at
+  `project_verify_changes`, which compiles unsaved source in an isolated copy
+  of the project. The parameter description, `TOOL_REFERENCE` and
+  `LLM_INSTRUCTIONS` say it too.
+
 - **A raycast in the editor asks the edited scene's own world, and answers with
   a path the surface takes.** Every spatial query resolved its world from the
   root viewport. In a game that is where the scene lives, so it was right; in an
