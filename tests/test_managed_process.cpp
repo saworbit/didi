@@ -540,7 +540,21 @@ static void testSessionTimeoutKillsTheWholeProcessTree() {
     // entitled to assume the tool has finished what it started, so the timeout
     // path terminates the job and waits for it to empty, and this asserts that
     // rather than waiting for it.
-    CHECK_PROCESS(!processAlive(grandchild));
+    //
+    // The job is what makes that reachable, and a host that runs this process
+    // inside a job of its own with breakaway restricted can refuse the
+    // assignment. Nothing can reach a grandchild then, so asserting it would be
+    // asserting something the code cannot do rather than something it failed to
+    // do. The bounded wait below is what is left to check there, and `contained`
+    // says which of the two ran.
+    if (result.contained) {
+        CHECK_PROCESS(!processAlive(grandchild));
+    } else {
+        deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        while (processAlive(grandchild) && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        CHECK_PROCESS(!processAlive(grandchild));
+    }
 #else
     // POSIX kills the process group in the timeout path, and the group members
     // are reaped by init rather than by the runner, so a moment of slack is the

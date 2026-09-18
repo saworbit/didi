@@ -496,6 +496,8 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
         }
     }
 
+    result.contained = job != nullptr;
+
     // Resume whether or not the job was established. Failing to contain the
     // child is worse than not running it, but refusing to run a test session
     // because a job object could not be created would be a new failure mode in
