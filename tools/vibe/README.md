@@ -80,6 +80,10 @@ twice.
 | `probes/rename_disclosure.py` | `project_rename_references`'s preview against its confirm, field by field and entry for entry over `code_references_not_updated`, on call sites the probe wrote itself so the arithmetic is known before either call. Exits non-zero when the two lists differ. Needs no editor. |
 | `probes/ui_app_modes.py` | The three `--ui-app` modes diffed before any tool is called: the handshake's `extensions`, the `ui://` resource in the listing and on a read, and `didi_control_room`'s own `_meta`. Needs no editor. |
 | `probes/game_authoring.py` | A small platformer built through the surface end to end, as a game author would: a physics root, a collision shape as a real resource, a script, a level instancing the player, an autoload, input actions, a signal, a 3D arena and a raycast, and the game run -- including one that crashes. Half of it is green on purpose -- that half is the control for the rest. It attaches explicitly and refuses to run without a live editor on the project, because every authoring row still prints when the calls behind it answered 503. Needs an empty project; everything it writes is prefixed `vibe_` so a second run overwrites its own leavings. |
+| `probes/ui_authoring.py` | The other half of a game: a menu with anchors and a theme override, a Button wired to a handler, an `AnimationPlayer`, a `Timer` and an audio bus. Prints the `applied: false` census with its control, groups `signal_list_connections` by `origin` and reads the saved `.tscn` beside the count, walks every route from an authored `Animation` to a player that will play it, and has a real engine load the two resources so the half that works is measured rather than claimed. |
+| `probes/resource_fidelity.py` | What `resource_create` writes, against what Godot reads back. The declared-type check asked with a scalar, a number, a boolean and an array as well as the object shape #730 was about, and the packed arrays asked in the spelling the schema documents. Needs no editor, so it runs in the platform workflow's offline job on both runners; `--godot` is the witness and a run without one says the load column could not be filled rather than passing. |
+| `probes/detached_launch.py` | `runtime_launch --detach`, the half of the loop #733 said was missing. The loop itself is the green half and stays as the regression guard -- attach, pause, step, stop, and the kernel asked directly whether the process went. The red half is what the call *says*: which engine ran the game, and which pid the prose names. Runs twice, once with the editor attached and once without, because the engine row has no comparison in the second. |
+| `probes/project_scope_and_cost.py` | The project-level tools asked what a maintainer asks, and what the answer costs. Whether `project_audit_assets` sees an asset referenced only from `project.godot`, with `project_analyze_impact` as the control; the size of `project_list_input_actions`; and the per-call overhead over a short authoring arc. Writes its own icon and its own input action, because a row skipped for want of a precondition is not a row that passed. |
 | `fixtures/write_csharp_fixture.py` | A `.csproj` with one error and one warning in it. Kept out of `sandbox.py` because a C# project changes what Godot does with the directory. |
 | `editor_exit_status.py` | Not a probe against the server: the same editor invocation with and without the built addon installed, exit statuses side by side. The control for a crash on shutdown. |
 | `wait_for_session.py` | Polls `runtime_list_sessions` through the same binary the probes use, so a slow first import reads as a slow import rather than as an absent session. |
@@ -1001,6 +1005,93 @@ what identified the cause: `describeProcessInstance` returns `alive` whenever
 identity lookup succeeds, and the exit check that would catch it sits on the
 fallback path. **A row that differs on one platform is a diagnosis, not noise.**
 
+**Grep the documentation before filing, not after.** Four of this session's
+sixteen draft findings were wrong about what the project already says, and the
+check that caught them was one `grep` over `docs/`. `TOOL_REFERENCE.md` names
+`anchors_preset` on a Control in `layout_mode` 0 as the worked example of
+`applied: false`; the doubled `shift`/`shift_pressed` spellings in
+`project_list_input_actions` are #737's *fix*, published deliberately "so a
+descriptor read from it can be written straight back"; `origin: "scene"` has a
+stated definition; and `signal_list_connections`'s `target_node` description
+does say which end it means. Each draft had to be rewritten or cut. The same
+grep cut the other way twice and made two findings much stronger:
+`TOOL_REFERENCE` promises "**Nothing falls through to JSON**" three lines above
+the behaviour where JSON falls through, and `runtime_launch`'s own entry states
+that Godot's Windows console build "launches the engine and waits on it" --
+which is the fact its `summary` pid gets wrong. **The docs are a claim about
+the handler too, and they are the cheapest control in the directory.**
+
+**Read the tool's defaults before reading its refusal.** `runtime_launch`
+defaults to `headless: true`. A capture refused against "a game launched with a
+window" was refused against a headless one, and the draft finding said the
+message was wrong about headlessness when it was only wrong about the noun. One
+re-run with `headless: false` turned a confused paragraph into a precise one --
+`viewport_capture_frame` works fine on a game and has a
+`godot_game_viewport_texture` source for it. **A default you did not pass is
+still an argument you sent.**
+
+**A game is not only a scene tree.** Fifteen sessions built physics, scripts,
+tilemaps and signals. A menu is the other half of every game and it moves
+different code: `Control` layout is a property whose write depends on another
+property, a theme override is a nested property path, a `Button`'s connection
+lands in a container full of engine-made connections, and an animation and an
+audio bus are both resources with no route from the resource to the node. Four
+findings came out of building one screen. **Ask which half of the product your
+fixtures have never had.**
+
+**Work on a project you did not write.** Every fixture in this directory was
+authored by the tool under test, which is why "a file the tool did not author
+is a different file" keeps recurring at larger scales. Godot's own
+`dodge_the_creeps` -- 8 MB, art, audio, fonts, `AnimatedSprite2D`, a HUD,
+`.uid` files -- is a `curl` and a `zip` away and needs only the built addon
+copied in and one `editor_plugins` line. It is where the orphaned project icon,
+the 69 KB input map and the rename that leaves a scene calling a method nothing
+declares all came from, because all three need a project with real structure.
+The refactor tools came out of it very well: `project_rename_references`
+reports `code_references_not_updated` in both the preview and the confirm
+(#716 stays fixed), names five limitations, and rewrites exactly the forms
+Godot serialises.
+
+**Count the bytes.** No session had ever measured what a call costs the caller,
+and an agent's budget is the context window. Seven ordinary authoring calls are
+11834 bytes on the wire and 8670 of them are the duplicate `content[0].text`
+copy, the session descriptor repeated verbatim, and the same `limitation`
+sentence: 73%. `project_list_input_actions` is 69 KB for five declared actions.
+None of it is a bug and each was a defensible choice, which is exactly why
+nothing had added them up. **A census can measure size as well as correctness.**
+
+**Run your own probe twice before you believe its first run -- and all four of
+this session's failed that.** `resource_fidelity.py` reported eleven rows as
+"Resource already exists" on its second run, because `resource_create` refuses
+an existing path and `overwrite` is confirmation gated; read quickly that is
+"the tool now refuses everything". `ui_authoring.py` met `scene_create`
+refusing an existing path *without opening it* -- session fifteen's trap, one
+session later, in a probe written by someone who had just read the warning --
+and ran the whole menu census against whichever scene the editor already had
+open, reporting every row as "Scene node not found". Both carry a per-run
+token now, the way `game_authoring.py` does, and `ui_authoring.py` falls back
+to `scene_open` and refuses to print rows whose subject it could not establish.
+`project_scope_and_cost.py` and `detached_launch.py` were idempotent already
+but had the other version of the same fault: one read a 503 as an empty answer
+and reported "0 actions, 0% engine" for a question it never asked, and the
+other used `os.kill(pid, 0)`, which cannot tell a running process from an
+unreaped zombie -- and the difference between those two is the whole of #786.
+
+**Asked and green this session.** `scene_duplicate_node` is correct and fast --
+twenty-one copies with sequential names, all persisted, about 100 ms each.
+`project_set_setting`'s `res://` existence check (#490) generalised properly:
+every path-valued setting is checked, and a type mismatch on
+`internationalization/locale/translations` is refused by type rather than by
+path. JSON-RPC batch arrays work through `tools/call`. A detached game attaches,
+pauses, steps and stops, and on Windows the kernel agrees it is gone within
+zero seconds. `runtime_explore_scene` against a *running* game is exactly right:
+the player crosses the screen, the probe sees it, `stopped_reason:
+duration_elapsed`. `runtime_checkpoint` refuses outside managed mode with the
+flags to turn it on. The editor log for the whole session carries four lines,
+all of them caused by this session's own deliberately bad input, and one of
+them is a finding in its own right -- Godot printed `Time should be greater
+than zero` for the write the response reported only as `applied: false`.
+
 ## Sessions so far
 
 | Date | Scope | Server | Findings |
@@ -1033,6 +1124,8 @@ fallback path. **A row that differs on one platform is a diagnosis, not noise.**
 | 2026-09-16 | The handshake's own claims rather than the tools': `listChanged: false` against a listing that moves with the bridge, and every parameter description against the schema keys beside it. Then `csharp_check_build` given a real `.csproj` for the first time in fourteen sessions, `project_export` and the ghost previews on Windows, the macOS `sun_path` overflow the twelfth session measured and never forced, the expression sandbox and the method channel walked for containment, and the old censuses re-run. | `2.0.0+28d1c2193b37`, and `2.0.0+5349d27e5f59` on the runners | #701-#717, sixteen findings. |
 
 | 2026-09-18 | A game rather than a census: a 2D platformer built end to end through the surface -- a physics root, a collision shape as a real resource, a TileSet over an atlas, an autoload, input actions, a signal, a HUD, a script patch, and the game launched, attached, paused, injected and stepped; then a 3D arena and the raycast tools, the only ones whose answer is a node, and a game that crashes. The first session to walk a whole authoring workflow in order rather than asking each tool one question. | `2.0.0+6393d1435a6a`, and the same on the runners | #728-#744, sixteen findings. The thirteen from the 2D arc reproduced on macOS and Ubuntu as well as Windows; #732 is Windows only and the difference diagnosed it. |
+
+| 2026-09-19 | The other half of a game, and somebody else's game. A menu built end to end -- anchors, a theme override, a Button wired to a handler, an `AnimationPlayer`, an audio bus -- then Godot's own `dodge_the_creeps` opened as a project to maintain: read it, search it, rename across a scene and a script, audit it. Then the detached game loop #733 asked for, now that it shipped, and the first measurement of what a call costs the caller. | `2.0.0+6b2627d77c88`, and the same on the runners | #764-#784 and #786, twenty-two findings. #764 and #765 reproduce byte for byte on Windows, macOS and Ubuntu, and so do all four rows of the menu arc. Two split on platform, which is what diagnosed both: #773 is Windows only (two binaries for one program) and #782 and #786 are POSIX only (a 3000 ms attach deadline, and a child nothing reaps). Four drafts were cut or rewritten against `docs/`, which is the session's main method lesson. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log
