@@ -1026,7 +1026,7 @@ Blocking is the default and is right for a test: run the project, see what it pr
 
 Nothing is captured. The game's output goes to the null device, because no one is left to drain a pipe once the call returns and a full one would block the game; `logs`, `errors` and `exit_code` are empty and `limitation` says so and points at `runtime_read_output`. `session_published` is the field to branch on: `false` means the process started and never published, which is a project without the Didi addon enabled, and the game is still running.
 
-The pid reported is the game's own. On Windows that is often not the process this tool started: Godot's console build, like a `godot.cmd` wrapper, launches the engine and waits on it, so the game is a grandchild with a pid of its own and the session it publishes is what identifies it.
+The pid reported is the game's own, in `pid`, in `game_session.pid` and in the `summary` sentence. On Windows that is often not the process this tool started: Godot's console build, like a `godot.cmd` wrapper, launches the engine and waits on it, so the game is a grandchild with a pid of its own and the session it publishes is what identifies it. When no session is published there is no game pid to name, and `summary` says so: the number it gives is the process Didi spawned, which may be a launcher.
 
 Godot is discovered newest-first unless `GODOT_BIN` says otherwise, so a detached game can be running a different engine line from the editor you are authoring in. `matches_attached_engine` says whether it is.
 
@@ -1037,6 +1037,13 @@ against the engine this project has a live session on, the same four fields
 newest-first, so the build that ran your project is not necessarily the one your
 editor is, and before this the only trace of it was the banner Godot prints into
 the captured `logs`.
+
+A detached run captures nothing, so there is no banner to read a version out of.
+There `engine_version` comes from the session the game published, and
+`attached_engine_version` is the session that was attached before the launch --
+not the game, which a detached launch selects for the calls that follow.
+`matches_attached_engine` is null when either side is unknown, which is what no
+attached session looks like.
 
 #### What a run-time error comes back as
 

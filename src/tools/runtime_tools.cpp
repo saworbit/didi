@@ -476,8 +476,22 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
     // process exists would hand the caller a pid and a race; this waits for the
     // descriptor, bounded by the same timeout the blocking mode uses, and says
     // plainly if it never appeared.
-    const auto sessions_for_detach =
-        detach ? std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc) : nullptr;
+    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
+    const auto sessions_for_detach = detach ? sessions : nullptr;
+
+    // Read before the detach path below selects the game it just started.
+    // Reading it afterwards asked the game about itself, so a 4.5 editor and a
+    // 4.7 game reported as agreement and there was no configuration in which
+    // the comparison could fail (#772).
+    const auto attached_before_launch = sessions
+                                            ? sessions->observableSession()
+                                            : std::optional<runtime::SessionDescriptor>{};
+
+    // The banner the blocking mode reads the version out of. A detached launch
+    // captures no output, so it has none and the game's own descriptor is where
+    // the launched engine names itself.
+    std::string launched_engine_version = session_res.engine_version;
+
     if (detach && session_res.pid != 0) {
         const auto deadline =
             std::chrono::steady_clock::now() + std::chrono::seconds(timeout_sec);
@@ -510,6 +524,9 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
         if (!published.is_null()) {
             // The pid that matters is the game's, not the launcher's.
             result["pid"] = published["pid"];
+            if (launched_engine_version.empty()) {
+                launched_engine_version = published.value("engine_version", std::string());
+            }
             // And it is the session the calls after this one mean. Publishing
             // it without selecting it left them going wherever the process was
             // already pointed, which is the editor this game was launched
@@ -529,14 +546,25 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
             "drive it with runtime_attach_session and the other runtime tools, and end it with "
             "runtime_stop.";
         if (published.is_null()) {
+            // No session, so the game's own pid is not knowable here and the
+            // spawned process is all there is. On Windows that can be the
+            // console build, which is a launcher rather than the engine, so
+            // this says which number it is rather than calling it the game.
             result["summary"] =
-                "The game was started as process " + std::to_string(session_res.pid) +
-                " and published no session within " + std::to_string(timeout_sec) +
+                "Process " + std::to_string(session_res.pid) +
+                " was started and published no session within " + std::to_string(timeout_sec) +
                 " seconds. It may still be starting, or the Didi addon may not be enabled in "
-                "this project. It is still running; stop it yourself if it should not be.";
+                "this project. On Windows this is the process Didi spawned, which for a console "
+                "build starts the engine as a child and is not the game itself. It is still "
+                "running; stop it yourself if it should not be.";
         } else {
+            // The pid the structured fields carry, which on Windows is not the
+            // process that was spawned: Godot's console build starts the engine
+            // as a child and waits on it, so the sentence named a launcher that
+            // runtime_stop, runtime_attach_session and Task Manager all
+            // disagreed with (#773).
             result["summary"] = "The game is running as process " +
-                                std::to_string(session_res.pid) +
+                                std::to_string(published.value("pid", session_res.pid)) +
                                 " and has published a session to attach to.";
         }
     } else if (detach) {
@@ -547,12 +575,10 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
     // have made since #617. This one had no engine fields at all, so a project
     // run by 4.7 while its editor is 4.5 could only be spotted by reading the
     // banner out of the captured logs (#687).
-    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
-    const auto attached = sessions ? sessions->observableSession()
-                                   : std::optional<runtime::SessionDescriptor>{};
-    versions::annotateCheckEngine(result, session_res.engine_version,
-                                  session_res.engine_executable,
-                                  attached.has_value() ? attached->engine_version : std::string());
+    versions::annotateCheckEngine(
+        result, launched_engine_version, session_res.engine_executable,
+        attached_before_launch.has_value() ? attached_before_launch->engine_version
+                                           : std::string());
     const auto configured = offline::resolveGodotExecutableDetailed();
     versions::annotateConfiguredEngine(result, configured.configured,
                                        configured.configured_rejected);

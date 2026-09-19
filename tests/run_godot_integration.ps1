@@ -3801,7 +3801,22 @@ try {
         (Tool-Request 5645 "runtime_step" @{ frames = 2 }),
         (Tool-Request 5646 "runtime_stop" @{ exit_code = 0 })
     )
-    $rawDetachResponses = Invoke-Didi -Requests $detachRequests -Arguments @("--project", $fixtureRoot)
+    # The console build for this block, when the download has one. Godot ships
+    # two binaries for one program on Windows: the console build starts the
+    # ordinary engine as a child and waits on it, so the process didi spawns is
+    # not the process that runs the game. That is the harder of the two and the
+    # one the summary got wrong (#773); every other step here drives the plain
+    # build already.
+    $previousDetachGodotBin = $env:GODOT_BIN
+    $detachConsoleBuild = $GodotExecutable -replace '\.exe$', '_console.exe'
+    if (Test-Path -LiteralPath $detachConsoleBuild) {
+        $env:GODOT_BIN = [IO.Path]::GetFullPath($detachConsoleBuild)
+    }
+    try {
+        $rawDetachResponses = Invoke-Didi -Requests $detachRequests -Arguments @("--project", $fixtureRoot)
+    } finally {
+        $env:GODOT_BIN = $previousDetachGodotBin
+    }
     $detachResponses = @($rawDetachResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
     Assert-True ($LASTEXITCODE -eq 0) "Detached-launch MCP process exited with $LASTEXITCODE."
     $detachById = @{}
@@ -3819,6 +3834,25 @@ try {
     $detachedPid = $detached.game_session.pid
     Assert-True ($detachedPid -gt 0) "The detached launch named no process."
     Assert-True ($detached.pid -eq $detachedPid) "The reported pid is not the game's own."
+    # And so is the one in the sentence. summary is the part a host shows and an
+    # agent quotes, and it named the process didi spawned rather than the one
+    # every structured field carries, so on a console build it named a live
+    # process nothing else in the system would match (#773).
+    $summaryPid = if ($detached.summary -match "process (\d+)") { [uint64]$Matches[1] } else { 0 }
+    Assert-True ($summaryPid -eq [uint64]$detachedPid) "The pid in the summary is not the pid in the payload: $($detached.summary)"
+
+    # Which engine ran the game, and whether it is the one the editor is on. A
+    # detached launch captures no output, so the banner these are read from
+    # elsewhere is not there and the game's own descriptor is the source. The
+    # attached session was read after the launch had selected the game it just
+    # started, so the game answered about itself: attached_engine_version named
+    # the launched engine and the comparison was never made (#772).
+    Assert-True ($detached.engine_version -eq $detached.game_session.engine_version) `
+        "A detached launch did not name the engine that ran the game: $($detached.engine_version)"
+    Assert-True ($detached.attached_engine_version -match "$($engineVersion.Major)\.$($engineVersion.Minor)") `
+        "A detached launch reported the attached engine as $($detached.attached_engine_version), which is not the $($engineVersion.Raw) this session is on."
+    Assert-True ($detached.matches_attached_engine -eq $true) `
+        "A detached launch did not compare the launched engine against the attached editor."
     # The game the harness started by hand is still there too, so this is the
     # right session and not merely a session.
     Assert-True ($detached.game_session.session_id -ne $gameSessionId) "The detached launch reported the game this harness started by hand."
