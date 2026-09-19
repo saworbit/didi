@@ -63,6 +63,21 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   the repository card and the contributing guide now say that Didi builds,
   tests and ships on Windows, macOS and Linux, which of those the live editor
   harness covers in CI, and that testers on macOS and Linux are wanted.
+- **The live editor matrix covers the whole supported range.** The extension
+  declares `compatibility_minimum = "4.5"` and 4.7 is the newest line, so the
+  supported range is three minor versions and CI loaded the addon into two of
+  them. Nothing anywhere opened a 4.6 editor (#759). That is the arrangement
+  that hides a regression rather than catching one, because GDExtension method
+  binds are pinned per version and the middle of a range is not something you
+  can interpolate: a fault that starts at 4.6 and is gone again by 4.7 is
+  invisible from both ends. #600 was a 4.6-affecting bridge fault and it was
+  only caught because it happened to show on 4.5 as well. The harness now runs
+  on 4.6.2 alongside 4.5.1 and 4.7.2, on every event rather than only on
+  `main`, because the leg is free: matrix legs get their own runners, all three
+  start in the same second, and the new one finishes inside the shadow of the
+  sanitizer job, which is what the run already waits for. A pull request waits
+  no longer than it did, and a 4.6 regression is found by the change that
+  caused it instead of after the merge.
 
 ### Added
 

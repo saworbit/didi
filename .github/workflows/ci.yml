@@ -864,8 +864,25 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
+      # The whole supported range, not just its ends. `compatibility_minimum`
+      # is 4.5 and 4.7 is the newest line, so testing only those two left 4.6,
+      # a released line in the middle, loaded into no editor anywhere (#759).
+      # Method binds are pinned per version, so the middle of a range is not
+      # something you can interpolate, and a fault that starts at 4.6 and is
+      # gone again by 4.7 is invisible from both ends. The harness knows this
+      # already: it reads the engine version and picks its assertions from it,
+      # and the branch it takes on 4.5 and 4.6 had only ever run on 4.5. Its
+      # #600 probe, which reads the editor's own error stream after a
+      # dashboard call, is the clearest case of an assertion written for an
+      # engine nothing in CI was running.
+      #
+      # The third leg is free, which is why it runs on every event rather
+      # than only on main. Matrix legs get their own runners, so all three
+      # start in the same second, and this one finishes inside the shadow of
+      # the sanitizer job, which is what the run already waits for. Six
+      # concurrent jobs becomes seven against a limit of twenty.
       matrix:
-        godot-version: [4.5.1, 4.7.2]
+        godot-version: [4.5.1, 4.6.2, 4.7.2]
     steps:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
