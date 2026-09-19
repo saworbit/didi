@@ -24,6 +24,10 @@ bool carriesReferences(const std::string& type) {
            type == "CSharpScript" || type == "Shader";
 }
 
+// The project manifest. It carries references and is not a resource, so it is
+// read through the same bounds as the rest and handed back on its own field.
+constexpr const char* kProjectManifest = "res://project.godot";
+
 } // namespace
 
 ProjectTextScan scanProjectText(const std::string& root_dir, ScanIndex index) {
@@ -48,7 +52,8 @@ ProjectTextScan scanProjectText(const std::string& root_dir, ScanIndex index) {
     const auto root = paths::projectPathFromUtf8(root_dir);
     uintmax_t scanned_bytes = 0;
     for (const auto& resource : scan.resources) {
-        if (!carriesReferences(resource.type)) continue;
+        const bool manifest = resource.path == kProjectManifest;
+        if (!manifest && !carriesReferences(resource.type)) continue;
         if (scan.sources.size() >= kSearchMaxFiles) {
             ++scan.skipped_files;
             scan.truncated = true;
@@ -72,6 +77,10 @@ ProjectTextScan scanProjectText(const std::string& root_dir, ScanIndex index) {
         auto text = readFile(absolute);
         if (text.empty()) continue;
         scanned_bytes += text.size();
+        if (manifest) {
+            scan.project_settings = ProjectTextSource{resource.path, std::move(text)};
+            continue;
+        }
         scan.sources.push_back({resource.path, std::move(text)});
     }
     return scan;
