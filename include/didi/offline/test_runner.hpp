@@ -155,20 +155,57 @@ struct TestSessionResult {
     // nothing under it. False on POSIX, where the process group does that job
     // and always works.
     bool contained{false};
+    // How the wait for the killed process tree ended.
+    //
+    // The timeout path terminates the job and then waits for it to empty, so
+    // the tool does not answer while its own game is still dying (#732). That
+    // wait is bounded, because a process that will not die must not hang the
+    // tool, and the bound used to leave no trace: the job emptying, the query
+    // failing and the bound expiring all reached the same exit and produced the
+    // same result, so a caller could not tell a kill that finished from one
+    // that was abandoned (#755). These are those outcomes kept apart.
+    enum class KillWait {
+        // No kill was waited on: the run ended on its own, or it timed out with
+        // no job to query, which is the `contained == false` host.
+        NotAttempted,
+        // The job held no processes. The tree is gone and a caller may say so.
+        TreeExited,
+        // The bound expired with processes still in the job. They were sent a
+        // terminate and did not go in time; something may still be running.
+        WaitExpired,
+        // The job could not be queried, so nothing is known either way. This is
+        // not load, it is a broken handle.
+        QueryFailed
+    };
+    KillWait kill_wait{KillWait::NotAttempted};
     // The process this call started, for a run that was left running. Zero for
     // an ordinary run, where the process is gone by the time anyone reads this.
     uint64_t pid{0};
     bool detached{false};
+
+    // The published spelling of kill_wait. Null for every run that did not wait
+    // on a kill, which is every run that did not time out.
+    static const char* killWaitName(KillWait wait) {
+        switch (wait) {
+            case KillWait::TreeExited: return "tree_exited";
+            case KillWait::WaitExpired: return "wait_expired";
+            case KillWait::QueryFailed: return "query_failed";
+            case KillWait::NotAttempted: break;
+        }
+        return nullptr;
+    }
 
     json toJson() const {
         json log_arr = json::array();
         for (const auto& l : logs) log_arr.push_back(l.toJson());
         json diagnostic_arr = json::array();
         for (const auto& d : diagnostics) diagnostic_arr.push_back(d.toJson());
+        const char* kill_wait_name = killWaitName(kill_wait);
 
         return {
             {"success", success},
             {"timed_out", timed_out},
+            {"kill_wait", kill_wait_name ? json(kill_wait_name) : json(nullptr)},
             {"detached", detached},
             {"pid", pid == 0 ? json(nullptr) : json(pid)},
             {"exit_code", detached ? json(nullptr) : json(exit_code)},

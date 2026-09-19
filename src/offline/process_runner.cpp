@@ -142,8 +142,16 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
     startup.hStdInput = null_input;
     PROCESS_INFORMATION process{};
     const std::wstring working_directory = request.working_directory.wstring();
+    // Suspended, so the child can be put in a job before it runs anything.
+    // Assigning after launch leaves a window in which the child is outside the
+    // job, and anything it spawns inside that window is outside it permanently
+    // and survives TerminateJobObject. That is not a theoretical window here:
+    // `dotnet build` starts MSBuild worker nodes almost immediately and
+    // `csharp_check_build` is a caller (#758). offline/test_runner.cpp has
+    // spawned this way since #351; this path was the one that did not.
     const BOOL launched = CreateProcessW(
-        nullptr, mutable_command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
+        nullptr, mutable_command.data(), nullptr, nullptr, TRUE,
+        CREATE_NO_WINDOW | CREATE_SUSPENDED,
         nullptr, working_directory.c_str(), &startup, &process);
     CloseHandle(write_pipe);
     CloseHandle(null_input);
@@ -161,6 +169,24 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
         if (SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))) {
             job_assigned = AssignProcessToJobObject(job, process.hProcess) != FALSE;
         }
+    }
+    result.contained = job_assigned;
+
+    // Resume whether or not the job was established, the way test_runner.cpp
+    // does: a host that runs this process inside a job with breakaway
+    // restricted can refuse the assignment, and refusing to run the check at
+    // all would be a worse failure than running it uncontained. The timeout
+    // path still terminates the process directly there, and `contained` says
+    // which of the two a caller got.
+    if (ResumeThread(process.hThread) == static_cast<DWORD>(-1)) {
+        const DWORD code = GetLastError();
+        TerminateProcess(process.hProcess, 1);
+        CloseHandle(read_pipe);
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+        if (job) CloseHandle(job);
+        return Error::internal("Failed to resume process after launch (Windows error " +
+                               std::to_string(code) + ")");
     }
 
     std::array<char, 4096> buffer{};
@@ -240,6 +266,30 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
         _exit(127);
     }
     close(output_pipe[1]);
+
+    // The same setpgid the child ran, from this side as well. The child's call
+    // happens before its exec and this one happens as soon as fork returns, and
+    // whichever wins, the group exists from here on. Doing it only in the child
+    // leaves a window where the parent's timeout fires before the child has
+    // reached setpgid: kill(-child, ...) then signals a group that does not
+    // exist, nothing is delivered, and the child is leaked (#758). EACCES means
+    // the child has already exec'd, which means its own call succeeded, so it
+    // is the good outcome and not an error. POSIX specifies both sides calling
+    // it for exactly this reason.
+    const bool group_established =
+        setpgid(child, child) == 0 || errno == EACCES;
+    result.contained = group_established;
+
+    // One kill for the whole tree, with the single process as the fallback.
+    // A group signal reaches every helper the child started, which is the
+    // contract the README states for these tools. When the group cannot be
+    // signalled -- it does not exist yet, or the call fails for any other
+    // reason -- signalling the child alone is worse than the group and much
+    // better than signalling nothing, which is what this did before.
+    const auto killChildTree = [&]() {
+        if (kill(-child, SIGKILL) != 0) kill(child, SIGKILL);
+    };
+
     const int flags = fcntl(output_pipe[0], F_GETFL, 0);
     fcntl(output_pipe[0], F_SETFL, flags | O_NONBLOCK);
     std::array<char, 4096> buffer{};
@@ -253,14 +303,14 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
         const pid_t wait_result = waitpid(child, &wait_status, WNOHANG);
         if (wait_result == child) break;
         if (wait_result < 0 && errno != EINTR) {
-            kill(-child, SIGKILL);
+            killChildTree();
             waitpid(child, &wait_status, 0);
             close(output_pipe[0]);
             return Error::internal("Failed while waiting for process completion");
         }
         if (std::chrono::steady_clock::now() - started >= request.timeout) {
             result.timed_out = true;
-            kill(-child, SIGKILL);
+            killChildTree();
             waitpid(child, &wait_status, 0);
             break;
         }
