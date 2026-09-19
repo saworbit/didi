@@ -4148,6 +4148,103 @@ static void test_a_declared_hint_range_is_read_as_the_engine_spells_it() {
     ASSERT_TRUE(!parseShaderHintRange("0,1x").has_value());
 }
 
+static void test_a_declared_resource_type_is_a_list_and_not_one_class_name() {
+    // Break caught: every resource property whose declared type carries a comma
+    // refused every resource, including the ones it names, because the whole
+    // string was compared as one class name. That is 34 properties in the
+    // pinned class reference, among them every material slot on every node in
+    // 2D and 3D, so no material could be assigned to anything (#783).
+    using didi::godot::describeResourceTypeRefusal;
+    using didi::godot::parseResourceTypeHint;
+    using didi::godot::resourceTypeVerdict;
+    using didi::godot::ResourceTypeVerdict;
+
+    const auto single = parseResourceTypeHint("Shape2D");
+    ASSERT_EQ(single.accepted.size(), 1u);
+    ASSERT_EQ(single.accepted[0], std::string("Shape2D"));
+    ASSERT_TRUE(single.excluded.empty());
+
+    const auto materials = parseResourceTypeHint("BaseMaterial3D,ShaderMaterial");
+    ASSERT_EQ(materials.accepted.size(), 2u);
+    ASSERT_EQ(materials.accepted[0], std::string("BaseMaterial3D"));
+    ASSERT_EQ(materials.accepted[1], std::string("ShaderMaterial"));
+    ASSERT_TRUE(materials.excluded.empty());
+
+    // Godot's hint syntax writes an exclusion with a leading "-", and the
+    // engine strips it before erasing the name from the allowed set.
+    const auto decal = parseResourceTypeHint(
+        "Texture2D,-AnimatedTexture,-AtlasTexture,-CameraTexture");
+    ASSERT_EQ(decal.accepted.size(), 1u);
+    ASSERT_EQ(decal.accepted[0], std::string("Texture2D"));
+    ASSERT_EQ(decal.excluded.size(), 3u);
+    ASSERT_EQ(decal.excluded[0], std::string("AnimatedTexture"));
+    ASSERT_EQ(decal.excluded[2], std::string("CameraTexture"));
+
+    const auto spaced = parseResourceTypeHint(" Mesh , -PlaneMesh ,, ");
+    ASSERT_EQ(spaced.accepted.size(), 1u);
+    ASSERT_EQ(spaced.accepted[0], std::string("Mesh"));
+    ASSERT_EQ(spaced.excluded.size(), 1u);
+    ASSERT_EQ(spaced.excluded[0], std::string("PlaneMesh"));
+
+    const auto nothing = parseResourceTypeHint("");
+    ASSERT_TRUE(nothing.accepted.empty() && nothing.excluded.empty());
+
+    // The verdict, with the engine's inheritance question answered by a table
+    // rather than by an engine. Matching any one entry is enough.
+    std::vector<std::string> asked;
+    const auto inherits_shader_material = [&](const std::string& base) {
+        asked.push_back(base);
+        return base == "ShaderMaterial";
+    };
+    ASSERT_EQ(resourceTypeVerdict(materials, "ShaderMaterial", inherits_shader_material),
+              ResourceTypeVerdict::Accepted);
+    ASSERT_EQ(asked.size(), 2u);
+
+    const auto inherits_base_material = [](const std::string& base) {
+        return base == "BaseMaterial3D";
+    };
+    ASSERT_EQ(resourceTypeVerdict(materials, "ORMMaterial3D", inherits_base_material),
+              ResourceTypeVerdict::Accepted);
+
+    const auto inherits_nothing = [](const std::string&) { return false; };
+    ASSERT_EQ(resourceTypeVerdict(materials, "RectangleShape2D", inherits_nothing),
+              ResourceTypeVerdict::NotAccepted);
+
+    // An exclusion beats the entry that admitted it: an AtlasTexture is a
+    // Texture2D and the slot still will not take one.
+    const auto inherits_texture = [](const std::string& base) { return base == "Texture2D"; };
+    ASSERT_EQ(resourceTypeVerdict(decal, "AtlasTexture", inherits_texture),
+              ResourceTypeVerdict::Excluded);
+    ASSERT_EQ(resourceTypeVerdict(decal, "PlaceholderTexture2D", inherits_texture),
+              ResourceTypeVerdict::Accepted);
+
+    // A declared type that names nothing to accept constrains nothing.
+    ASSERT_EQ(resourceTypeVerdict(nothing, "AudioStream", inherits_nothing),
+              ResourceTypeVerdict::Accepted);
+
+    // The sentence names every type the slot takes, and says when the refusal
+    // was an exclusion rather than a mismatch.
+    ASSERT_EQ(describeResourceTypeRefusal("material_override", materials, "res://m.tres",
+                                          "RectangleShape2D", ResourceTypeVerdict::NotAccepted),
+              std::string("Property \"material_override\" holds a BaseMaterial3D or a "
+                          "ShaderMaterial; res://m.tres is RectangleShape2D"));
+    ASSERT_EQ(describeResourceTypeRefusal("shape", single, "res://m.tres", "StandardMaterial3D",
+                                          ResourceTypeVerdict::NotAccepted),
+              std::string("Property \"shape\" holds a Shape2D; res://m.tres is "
+                          "StandardMaterial3D"));
+    ASSERT_EQ(describeResourceTypeRefusal("texture_albedo", decal, "res://a.tres", "AtlasTexture",
+                                          ResourceTypeVerdict::Excluded),
+              std::string("Property \"texture_albedo\" holds a Texture2D; res://a.tres is "
+                          "AtlasTexture, which that slot excludes"));
+    // A hint that is exclusions and nothing else names no type to report, and
+    // must still read as a sentence.
+    ASSERT_EQ(describeResourceTypeRefusal("odd", parseResourceTypeHint("-AtlasTexture"),
+                                          "res://a.tres", "AtlasTexture",
+                                          ResourceTypeVerdict::Excluded),
+              std::string("Property \"odd\" takes no type this resource is; res://a.tres is "
+                          "AtlasTexture, which that slot excludes"));
+}
+
 static void test_a_script_the_engine_cannot_read_is_not_a_script_with_nothing_in_it() {
     // Break caught: a .gd saved as UTF-16 or in a single-byte encoding reads as
     // an empty script with no syntax errors, which is byte for byte the answer a
@@ -6523,6 +6620,8 @@ struct RegisterToolTests {
                      test_a_write_is_applied_when_every_member_landed);
         registerTest("Tools.ShaderHintRangeIsReadAsTheEngineSpellsIt",
                      test_a_declared_hint_range_is_read_as_the_engine_spells_it);
+        registerTest("Tools.ResourceTypeHintIsAListOfClasses",
+                     test_a_declared_resource_type_is_a_list_and_not_one_class_name);
         registerTest("Tools.ScriptToolsRefuseAFileTheEngineCannotRead",
                      test_a_script_the_engine_cannot_read_is_not_a_script_with_nothing_in_it);
         registerTest("Tools.SpawnedCheckNamesTheEngineThatAnswered",
