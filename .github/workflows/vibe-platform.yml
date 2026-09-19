@@ -30,6 +30,8 @@ jobs:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    env:
+      GODOT_VERSION: 4.5.1-stable
     strategy:
       fail-fast: false
       matrix:
@@ -136,6 +138,35 @@ jobs:
           python3 tools/vibe/sandbox.py "$cs" --overwrite
           python3 tools/vibe/fixtures/write_csharp_fixture.py "$cs"
           python3 -u tools/vibe/probes/csharp_build.py "$cs"             --plain-project "$RUNNER_TEMP/vibe-proj" --not-dotnet "$(command -v python3)"
+
+      - name: Probe -- what resource_create writes, against what Godot reads back
+        continue-on-error: true
+        run: |
+          # resource_create is an offline writer, so this needs no editor -- but
+          # the witness has to be a real engine, because the tool that wrote the
+          # file cannot be the one that says it is well formed.
+          set -x
+          cd "$RUNNER_TEMP"
+          case "$RUNNER_OS" in
+            macOS) asset="Godot_v${GODOT_VERSION}_macos.universal.zip" ;;
+            *)     asset="Godot_v${GODOT_VERSION}_linux.x86_64.zip" ;;
+          esac
+          curl -fsSL -o godot-offline.zip \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/${asset}"
+          unzip -q godot-offline.zip -d godot-offline
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            bin="$RUNNER_TEMP/godot-offline/Godot.app/Contents/MacOS/Godot"
+          else
+            bin=$(find "$RUNNER_TEMP/godot-offline" -maxdepth 1 -type f -name 'Godot_v*' -print -quit)
+          fi
+          chmod +x "$bin"
+          cd "$GITHUB_WORKSPACE"
+          python3 -u tools/vibe/probes/resource_fidelity.py \
+            -p "$RUNNER_TEMP/vibe-proj" --godot "$bin"
+
+      - name: Probe -- the project tools' scope, and what their answers cost
+        continue-on-error: true
+        run: python3 -u tools/vibe/probes/project_scope_and_cost.py -p "$RUNNER_TEMP/vibe-proj"
 
       - name: Probe -- the published archive for this platform
         continue-on-error: true
@@ -295,6 +326,24 @@ jobs:
           # is prefixed vibe_, so it overwrites its own leavings and not the
           # sandbox fixtures.
           python3 -u tools/vibe/probes/game_authoring.py -p "$RUNNER_TEMP/live-proj"
+
+      - name: Probe -- a menu, an animation and an audio bus
+        continue-on-error: true
+        run: |
+          # The half of a game the platformer arc did not build: anchors, a theme
+          # override, a Button wired to a handler, an AnimationPlayer and an audio
+          # bus. Everything it writes is prefixed vibe_ui.
+          python3 -u tools/vibe/probes/ui_authoring.py \
+            -p "$RUNNER_TEMP/live-proj" --godot "$GODOT_BIN"
+
+      - name: Probe -- runtime_launch --detach, and what it says about the process
+        continue-on-error: true
+        run: |
+          # The pid row is expected to be green here and red on Windows: Godot
+          # ships one binary per program on POSIX and two on Windows, and the
+          # console one is a launcher. A difference on one platform is the
+          # diagnosis, not noise.
+          python3 -u tools/vibe/probes/detached_launch.py -p "$RUNNER_TEMP/live-proj"
 
       - name: What the Editor Printed
         if: always()
