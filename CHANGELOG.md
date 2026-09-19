@@ -51,6 +51,46 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Added
 
+- **The vendored headers have a watcher.** `THIRD_PARTY.md` ended by admitting
+  that the three copied single-header libraries in `include/` were "reviewed by
+  hand or not at all". They are files, not package manager entries, so
+  Dependabot cannot see them and neither can a lockfile scanner -- and the
+  review that was supposed to happen by hand is exactly the kind that does not.
+  `tools/check_vendored_versions.py` asks two questions and keeps them apart,
+  because they fail for different reasons. Whether this page still describes the
+  files on disk is answered by reading each header's own version banner and
+  comparing it with the table, needs no network, and runs in the documentation
+  suite on every pull request, so replacing a header and forgetting the table is
+  caught rather than inherited. Whether the file is still current is answered
+  against upstream, runs weekly in `supply-chain.yml`, and opens a tracking
+  issue rather than failing a check -- upstream shipping a release is news about
+  the world, not a defect in whichever branch happens to be open. The first run
+  found one: `json.hpp` is on 3.11.3 and nlohmann has published 3.12.0.
+  `nothings/stb` publishes no releases and tags nothing, so asking its releases
+  API returns an empty answer that would read as "up to date" forever; its
+  version is read out of the upstream header's banner instead.
+  `gdextension_interface.h` is deliberately untracked and the tool says so out
+  loud rather than omitting it, because it is a compatibility contract and
+  "is there a newer Godot?" is the wrong question to answer weekly.
+- **Dependabot watches the base image, and groups security fixes.** The Ubuntu
+  image `tools/localci/Dockerfile` builds on was the one moving part nothing
+  watched: the local CI lanes and the dev container both run on it, and an
+  unpatched base could sit there indefinitely while the tag beside it still read
+  the same. It is now pinned by digest, on the same reasoning the workflows pin
+  action SHAs -- `ubuntu:24.04` is rebuilt in place every few weeks, so the tag
+  alone makes a lane repeatable but not reproducible -- and Dependabot offers
+  the rebuilt image the way it offers a new action SHA, which is what keeps a
+  pin from becoming a way of staying unpatched. The release number stays a
+  manual decision, because that tag tracks what `ubuntu-latest` resolves to on
+  the GitHub runners; semver bumps are ignored and digest updates are not. Every
+  ecosystem also gained a second group, `applies-to: security-updates`, so a
+  disclosure affecting several packages at once arrives as one pull request
+  instead of six landing in the same minute. The security groups carry no
+  `update-types` filter deliberately: a fix is worth taking whether upstream
+  shipped it as a patch or as a major.
+
+### Added
+
 - **A project website.** [saworbit.github.io/didi](https://saworbit.github.io/didi/)
   is rendered from `site/` by a Pages workflow on every push to `main` and
   checked on every pull request: the landing page and the brand assets it

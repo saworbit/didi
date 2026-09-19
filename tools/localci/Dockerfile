@@ -4,7 +4,14 @@
 # #626, so this is a match rather than an approximation. When GitHub moves
 # `ubuntu-latest` on, this tag has to move with it or the lanes stop meaning
 # what they claim: check a recent run's "Operating System" group and bump it.
-FROM ubuntu:24.04
+#
+# Pinned by digest as well as tag, on the same reasoning the workflows pin
+# action SHAs: a tag is a pointer its publisher can move, and `ubuntu:24.04`
+# is rebuilt in place every few weeks. The digest is what makes a lane run
+# reproducible rather than merely repeatable. `.github/dependabot.yml` watches
+# it weekly and offers the rebuilt image as a pull request, so the pin does
+# not become a way of staying unpatched -- it is what makes the patch visible.
+FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
 
 ENV DEBIAN_FRONTEND=noninteractive
 

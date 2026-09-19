@@ -47,13 +47,30 @@ live harness runs against real 4.5.1 and 4.7.2 editors. Both have to stay true.
 
 ## What Dependabot does and does not cover
 
-Dependabot watches the GitHub Actions the workflows pin, weekly, and the Python
-pin in `requirements-dev.txt`, monthly, through
-[`.github/dependabot.yml`](.github/dependabot.yml). Both carry a seven-day
-cooldown, so a brand-new release is not adopted on the day it is published --
-long enough for a compromised publish to be caught and yanked. Cooldown does not
-apply to security updates, so a fix for a known vulnerability still arrives at
-once.
+Dependabot watches three things through
+[`.github/dependabot.yml`](.github/dependabot.yml): the GitHub Actions the
+workflows pin, weekly; the Python pin in `requirements-dev.txt`, monthly; and
+the Ubuntu base image `tools/localci/Dockerfile` builds on, weekly. All three
+carry a seven-day cooldown, so a brand-new release is not adopted on the day it
+is published -- long enough for a compromised publish to be caught and yanked.
+Cooldown does not apply to security updates, so a fix for a known vulnerability
+still arrives at once.
+
+Each ecosystem is grouped twice. Routine minor and patch bumps arrive as one
+pull request rather than six, because a grouped update passes CI as a set or
+fails as a set and that is the same review either way. Security updates are
+grouped separately and without an `update-types` filter, so a disclosure
+affecting several packages at once is still one pull request, and a fix is taken
+whether upstream shipped it as a patch or as a major.
+
+The base image is pinned by digest as well as tag, on the same reasoning as the
+action SHAs. `ubuntu:24.04` is rebuilt in place every few weeks, so the tag
+alone makes a lane run repeatable but not reproducible. Dependabot offers the
+rebuilt image the way it offers a new action SHA, which is what stops the pin
+becoming a way of staying unpatched. The release number itself is not
+Dependabot's to choose -- that tag tracks what `ubuntu-latest` resolves to on
+the GitHub runners and moves by hand when GitHub moves -- so semver bumps are
+ignored and digest updates are not.
 
 Actions are pinned to commit SHAs rather than tags, each with a `# vX.Y.Z`
 comment beside it. `tools/validate_documentation.py` rejects a workflow that
@@ -68,4 +85,41 @@ somebody edited two more lines. Both workflows now read the version out of
 it does not, and that is the whole review.
 
 It does not watch anything in the table above, and it cannot: there is no
-manifest for it to read. Those three files are reviewed by hand or not at all.
+manifest for it to read. That used to be the end of this page, and the sentence
+that followed admitted those three files were reviewed by hand or not at all.
+
+[`tools/check_vendored_versions.py`](tools/check_vendored_versions.py) is that
+review, automated. It asks two questions, and keeps them apart because they fail
+for different reasons and deserve different consequences.
+
+**Does this page still describe the files on disk?** Each vendored header states
+its own version in its upstream banner. The tool reads that string out of the
+file and compares it with the row above, so replacing a header and forgetting
+the table is caught rather than inherited. This needs no network and is
+deterministic, so it runs in the documentation suite on every pull request, via
+`tests/test_vendored_versions.py`. A drift here is a defect in the branch and
+fails the check.
+
+**Is the file still current?** For the sources that publish a version somewhere
+machine-readable, the tool fetches it and compares. `nlohmann/json` publishes
+releases, so the latest release tag is the answer. `nothings/stb` tags nothing
+and publishes no releases at all -- asking its releases API returns an empty
+result that would read as "up to date" forever -- so the version is read out of
+the upstream header's own banner instead. This needs the network, so it runs
+weekly in [`supply-chain.yml`](.github/workflows/supply-chain.yml) and opens a
+tracking issue rather than failing a check: upstream shipping a release is news
+about the world, not a defect in whichever branch happens to be open.
+
+`gdextension_interface.h` is deliberately not tracked, and the tool says so
+rather than omitting it. It is a compatibility contract, not a version to chase.
+`addons/didi/didi.gdextension` declares `compatibility_minimum = "4.5"` and the
+live harness runs against real 4.5.1 and 4.7.2 editors; that is what has to stay
+true. "Is there a newer Godot?" is the wrong question, and answering it weekly
+would teach everyone to ignore the answer.
+
+Run it by hand with:
+
+```
+python tools/check_vendored_versions.py            # both questions
+python tools/check_vendored_versions.py --offline  # this page vs the files
+```

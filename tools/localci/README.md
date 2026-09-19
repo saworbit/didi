@@ -199,6 +199,14 @@ The base image is pinned to `ubuntu:24.04` because `ubuntu-latest` resolved to
 `ubuntu-latest`, this tag has to move with it, or the lanes quietly stop being
 mirrors. A recent run's "Operating System" group is where to check.
 
+The tag carries a digest as well, for the reason the workflows pin action SHAs:
+`ubuntu:24.04` is rebuilt in place every few weeks, so the tag alone makes a
+lane repeatable but not reproducible. Dependabot watches that digest weekly and
+offers the rebuilt image as a pull request -- see
+[THIRD_PARTY.md](../../THIRD_PARTY.md) -- so the pin does not become a way of
+staying unpatched. The release number is still a manual decision; only the
+digest is automated.
+
 The same goes for `lane.sh`: it duplicates steps from `ci.yml` rather than
 reading them, so the two can drift. The duplication is deliberate — `act` and
 similar workflow runners bring their own fidelity gaps, and the steps here are

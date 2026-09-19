@@ -84,3 +84,87 @@ jobs:
           # it stops here and gets made deliberately.
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, LGPL-2.1, LGPL-3.0
           comment-summary-in-pr: on-failure
+
+  # The third question, and the one no off-the-shelf tool answers here: are the
+  # vendored single-header libraries in `include/` still current? They are
+  # copied files with no manifest, so Dependabot cannot see them and neither can
+  # a lockfile scanner. THIRD_PARTY.md used to end by admitting they were
+  # "reviewed by hand or not at all"; this is the hand, automated.
+  #
+  # Weekly rather than per-pull-request, and issue-opening rather than
+  # check-failing, because upstream shipping a release is news about the world
+  # and not a defect in the branch that happens to be open. The offline half of
+  # the same tool -- does THIRD_PARTY.md still describe the files on disk? --
+  # runs in the docs suite on every pull request, where it belongs, because that
+  # question is about the branch and needs no network.
+  vendored-sources:
+    name: Vendored Sources
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Check Vendored Versions
+        id: check
+        env:
+          # Lifts the GitHub API rate limit from per-IP to per-token. A shared
+          # runner's 60 an hour may already be spent by somebody else.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          if python tools/check_vendored_versions.py --check > report.txt 2>&1; then
+            echo 'stale=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'stale=true' >> "$GITHUB_OUTPUT"
+          fi
+          cat report.txt
+
+      - name: Open Or Update The Tracking Issue
+        if: steps.check.outputs.stale == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: 'Vendored sources are behind upstream'
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "A vendored source in \`include/\` no longer matches upstream."
+            echo
+            echo '```'
+            cat report.txt
+            echo '```'
+            echo
+            echo "Updating one of these is not a routine bump -- [THIRD_PARTY.md](../blob/main/THIRD_PARTY.md)"
+            echo "says what each change involves. \`json.hpp\` parses every request that"
+            echo "arrives from an MCP client, so a change to it is a change on the"
+            echo "untrusted input path."
+            echo
+            echo "Raised by [Supply Chain]($RUN_URL). This issue is reused rather than"
+            echo "reopened weekly; it closes when the tree catches up."
+          } > body.md
+
+          # One issue, refreshed, rather than a new one every Tuesday. Matched on
+          # the exact title this step writes, among the open issues carrying the
+          # label it applies, so a human retitling it starts a fresh one rather
+          # than silently losing the next report.
+          existing=$(gh issue list --repo "$REPO" --state open --label dependencies \
+            --json number,title --jq "[.[] | select(.title == \"$TITLE\")] | .[0].number // empty")
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body-file body.md
+            echo "Refreshed issue #$existing"
+          else
+            gh issue create --repo "$REPO" --title "$TITLE" \
+              --label dependencies --label tooling --body-file body.md
+          fi
