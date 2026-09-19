@@ -122,6 +122,38 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A timeout that could not finish the kill says so.** `runtime_launch`
+  terminates the job its child was spawned into and waits for the job to
+  empty, so the tool does not answer while its own game is still dying. The
+  wait is bounded at five seconds, because a process that will not die must
+  not hang the tool, and the bound left no trace: the job emptying, the
+  query failing and the bound expiring all reached the same exit and
+  produced the same answer, so a caller could not tell a kill that finished
+  from one that was abandoned (#755). A loaded machine reaches that bound
+  where an idle one does not, which is how it red-lighted a pull request
+  about tilemap coordinates that touches none of this. The answer now
+  carries `kill_wait`: `tree_exited`, `wait_expired`, `query_failed`, or
+  null for a run that never waited on a kill. `wait_expired` and
+  `query_failed` say so in the summary as well, because a tree that may
+  still be running changes what the next call can assume. The bound is
+  unchanged and the test asserts the strong form on the outcome that
+  earns it.
+- **The offline process tools take the whole tree down on timeout.** The
+  README states it as fact and the code only sometimes did it.
+  `process_runner.cpp` backs `csharp_check_build`, `shader_check_compile`,
+  `script_check_syntax`, `project_export` and `gridmap_export_mesh_library`,
+  and it had neither guard the sibling spawner grew in #351: on Windows it
+  started the child running and assigned the job afterwards, so anything
+  spawned in between was outside the job and survived `TerminateJobObject`,
+  and `dotnet build` starts MSBuild worker nodes almost immediately. On
+  POSIX only the child called `setpgid`, so a timeout that fired before the
+  child reached it signalled a process group that did not exist yet and
+  nothing was delivered at all (#758). The child is now created suspended,
+  put in the job, and then resumed; the parent calls `setpgid` too, the way
+  POSIX specifies for exactly this race; and the group signal falls back to
+  the single process rather than giving up. Didi is a long lived server, so
+  a leaked build accumulated over a session instead of dying with the call.
+
 - **One InputEvent vocabulary, spelled the engine's way, and published.**
   `project_set_input_action` and `runtime_inject_input` both describe their
   `events` as objects "in Godot's InputEvent shape" and did not agree on what

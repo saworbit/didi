@@ -459,6 +459,122 @@ static void offlineRunnerDoesNotHandChildrenTheServerStdin() {
         std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() < 4000);
 }
 
+static void offlineRunnerTimeoutKillsTheWholeProcessTree() {
+    // The README states the Phase 5 contract as fact: these tools "terminate
+    // the child process group on timeout". process_runner.cpp is what backs
+    // that for csharp_check_build, shader_check_compile, script_check_syntax,
+    // project_export and gridmap_export_mesh_library, and it had neither guard
+    // the sibling spawner in test_runner.cpp grew in #351 (#758). Nothing
+    // covered the contract at all, so a timeout could leave a dotnet build's
+    // MSBuild worker nodes running and answer 124 as though it had not.
+    //
+    // A wrapper, because without one the spawned process is the target and
+    // killing it directly is enough. cmd.exe or /bin/sh starts a background
+    // grandchild that publishes its own pid and holds; the grandchild is what
+    // has to be gone.
+    //
+    // What this proves, and what it does not. It proves the timeout reaches a
+    // descendant rather than the one process this call started, so removing the
+    // job object or the group signal fails it. It does not reproduce the
+    // assignment race itself: the window is between CreateProcessW returning
+    // and AssignProcessToJobObject, which is a few microseconds of parent work
+    // against a child that has not finished loading, so the parent wins on any
+    // machine. CREATE_SUSPENDED closes that window by construction rather than
+    // by timing, which is why the fix is the guard and not a retry.
+    Temp temp;
+    const auto published = temp.path / "runner-grandchild.pid";
+    const auto published_text = published.generic_string();
+    const auto self = selfPath().string();
+
+    didi::offline::ProcessRequest request;
+    request.working_directory = temp.path;
+    request.timeout = std::chrono::milliseconds(6000);
+
+#if defined(_WIN32)
+    const auto wrapper = temp.path / "spawner.cmd";
+    {
+        std::ofstream script(wrapper);
+        script << "@echo off\n"
+               << "start \"\" /b \"" << self << "\" --didi-managed-child "
+               << "publish_self_and_hold \"" << published_text << "\"\n"
+               << "\"" << self << "\" --didi-managed-child hold_long\n";
+    }
+    request.executable = "cmd.exe";
+    request.arguments = {"/c", wrapper.string()};
+#else
+    const auto wrapper = temp.path / "spawner.sh";
+    {
+        std::ofstream script(wrapper);
+        script << "#!/bin/sh\n"
+               << "\"" << self << "\" --didi-managed-child publish_self_and_hold \""
+               << published_text << "\" &\n"
+               << "\"" << self << "\" --didi-managed-child hold_long\n";
+    }
+    fs::permissions(wrapper, fs::perms::owner_all | fs::perms::group_read |
+                                 fs::perms::group_exec);
+    request.executable = "/bin/sh";
+    request.arguments = {wrapper.string()};
+#endif
+
+    const auto ran = didi::offline::runProcess(request);
+    CHECK_PROCESS(ran.isOk());
+    CHECK_PROCESS(ran.value().timed_out);
+    CHECK_PROCESS(ran.value().exit_code == 124);
+
+    uint64_t grandchild = 0;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    while (!grandchild && std::chrono::steady_clock::now() < deadline) {
+        std::ifstream(published) >> grandchild;
+        if (!grandchild) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    // Nothing to assert about if the wrapper never got far enough to publish,
+    // and passing on that would be pretending. The grandchild holds for two
+    // minutes, so a missing file means it never started.
+    CHECK_PROCESS(grandchild != 0);
+
+    struct Cleanup {
+        uint64_t pid;
+        ~Cleanup() {
+            if (processAlive(pid)) {
+#if defined(_WIN32)
+                if (HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, static_cast<DWORD>(pid))) {
+                    TerminateProcess(h, 1);
+                    CloseHandle(h);
+                }
+#else
+                kill(static_cast<pid_t>(pid), SIGKILL);
+#endif
+            }
+        }
+    } cleanup{grandchild};
+
+#if !defined(_WIN32)
+    // The parent's own setpgid ran, or returned EACCES because the child had
+    // already exec'd, which means the child's call had succeeded. Either way
+    // the group the timeout signals exists. This is the half of the fix that
+    // can be observed directly.
+    CHECK_PROCESS(ran.value().contained);
+#endif
+
+    // Asserted whatever `contained` says, and not skipped when it is false.
+    // A host that runs this process inside a job with breakaway restricted can
+    // refuse the assignment, and on that host nothing can reach a grandchild
+    // and this fails. Letting it pass instead would let a removed job object
+    // pass with it, which is the thing being guarded, and a test that cannot
+    // fail on the break it is named after is worth nothing. The sibling test
+    // below takes the same position.
+    //
+    // Bounded rather than immediate. runProcess makes no promise that the tree
+    // has finished going by the time it answers -- TerminateJobObject and
+    // SIGKILL both start a termination rather than complete one -- so the
+    // honest assertion is that the tree goes, well inside the two minutes the
+    // grandchild would otherwise hold for.
+    deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    while (processAlive(grandchild) && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    CHECK_PROCESS(!processAlive(grandchild));
+}
+
 static void testSessionTimeoutKillsTheWholeProcessTree() {
     // Break reported in #351: runSession spawned Godot with no job object on
     // Windows and no process group on POSIX, then killed a single process on
@@ -513,6 +629,7 @@ static void testSessionTimeoutKillsTheWholeProcessTree() {
     // Short, because the whole point is what survives the timeout.
     const auto result = didi::offline::TestRunner::runSession("res://none.tscn", 6, true, true, {});
     CHECK_PROCESS(result.exit_code == 124);
+    CHECK_PROCESS(result.timed_out);
 
     uint64_t grandchild = 0;
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
@@ -547,13 +664,35 @@ static void testSessionTimeoutKillsTheWholeProcessTree() {
     // asserting something the code cannot do rather than something it failed to
     // do. The bounded wait below is what is left to check there, and `contained`
     // says which of the two ran.
-    if (result.contained) {
+    //
+    // The wait is bounded at five seconds, and a loaded runner reaches that
+    // bound where an idle one does not: this assertion failed on a pull request
+    // about tilemap coordinate shapes, passed on the branch that introduced it,
+    // on main afterwards and on a local build of the same tree (#755). An
+    // assertion that turns CI load into a red branch on somebody else's work
+    // stops being read. So the strong form is asserted when the runner says the
+    // job emptied, which is the claim #732 is about, and when it says it gave
+    // up the generous poll below still requires the tree to be gone -- a kill
+    // that does not work at all fails either way. A query that failed is not
+    // load and is not excused: nothing is known about the tree then, and that
+    // is a broken handle rather than a busy machine.
+    CHECK_PROCESS(result.kill_wait != didi::offline::TestSessionResult::KillWait::QueryFailed);
+    if (result.contained &&
+        result.kill_wait == didi::offline::TestSessionResult::KillWait::TreeExited) {
         CHECK_PROCESS(!processAlive(grandchild));
     } else {
         deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
         while (processAlive(grandchild) && std::chrono::steady_clock::now() < deadline)
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         CHECK_PROCESS(!processAlive(grandchild));
+    }
+
+    // Whichever branch ran, the run that timed out inside a job must have
+    // waited on the kill and said so. NotAttempted here would mean the wait was
+    // skipped entirely, which is the state this field exists to make visible.
+    if (result.contained) {
+        CHECK_PROCESS(result.kill_wait !=
+                      didi::offline::TestSessionResult::KillWait::NotAttempted);
     }
 #else
     // POSIX kills the process group in the timeout path, and the group members
@@ -651,6 +790,8 @@ struct RegisterManagedProcess {
                      failedNativeLaunchLeavesObjectReusable);
         registerTest("ProcessRunner.ChildDoesNotInheritServerStdin",
                      offlineRunnerDoesNotHandChildrenTheServerStdin);
+        registerTest("ProcessRunner.TimeoutKillsTheWholeProcessTree",
+                     offlineRunnerTimeoutKillsTheWholeProcessTree);
         registerTest("TestRunner.TimeoutKillsTheWholeProcessTree",
                      testSessionTimeoutKillsTheWholeProcessTree);
 #if defined(_WIN32)

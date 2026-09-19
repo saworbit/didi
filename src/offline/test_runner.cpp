@@ -653,6 +653,15 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
             // is what a caller reading `alive` is entitled to assume. Bounded,
             // because a process that will not die must not hang the tool; the
             // wait on pi.hProcess below is the same bound this always had.
+            //
+            // The bound is kept and its expiry is now recorded. Three different
+            // things ended this wait and all three produced the same result, so
+            // "the tree is gone" and "we stopped waiting for a tree that is
+            // still there" read identically to a caller -- which is the one
+            // distinction the wait was added to make (#755). A loaded machine
+            // reaches the bound where an idle one does not, so the difference
+            // is not hypothetical: it red-lighted a branch that touches none of
+            // this. kill_wait is the answer, and the summary says it too.
             if (job) TerminateJobObject(job, 1);
             TerminateProcess(pi.hProcess, 1);
             WaitForSingleObject(pi.hProcess, 5000);
@@ -664,10 +673,17 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
                     DWORD returned = 0;
                     if (!QueryInformationJobObject(job, JobObjectBasicAccountingInformation,
                                                    &accounting, sizeof(accounting), &returned)) {
+                        result.kill_wait = TestSessionResult::KillWait::QueryFailed;
                         break;
                     }
-                    if (accounting.ActiveProcesses == 0) break;
-                    if (std::chrono::steady_clock::now() >= deadline) break;
+                    if (accounting.ActiveProcesses == 0) {
+                        result.kill_wait = TestSessionResult::KillWait::TreeExited;
+                        break;
+                    }
+                    if (std::chrono::steady_clock::now() >= deadline) {
+                        result.kill_wait = TestSessionResult::KillWait::WaitExpired;
+                        break;
+                    }
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 }
             }
@@ -881,6 +897,18 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
             result.summary = "Test session finished with " + std::to_string(result.errors.size()) +
                              " error(s) and exit code " + std::to_string(result.exit_code) + ".";
         }
+    }
+
+    // Last, so the branch above that replaces the timeout summary with the
+    // first error cannot drop it. A kill that was abandoned is a fact about
+    // this machine rather than about the project, and it changes what the next
+    // call can assume, so it belongs in the sentence a person reads and not
+    // only in the field a program reads.
+    if (result.kill_wait == TestSessionResult::KillWait::WaitExpired) {
+        result.summary += " Part of the process tree was still running when the wait for the "
+                          "kill expired, so something it started may still be going.";
+    } else if (result.kill_wait == TestSessionResult::KillWait::QueryFailed) {
+        result.summary += " Whether the process tree stopped could not be read back.";
     }
 
     return result;
