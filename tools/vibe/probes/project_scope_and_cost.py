@@ -77,15 +77,65 @@ def attach_here(session: Session, project: Path) -> bool:
     return False
 
 
-def audit_scope(session: Session) -> None:
+# The smallest valid PNG: 1x1, fully transparent. Written by the probe rather
+# than by a tool, because no tool on the surface can write one -- and because a
+# fixture the subject authored is a fixture the subject already agrees with.
+ONE_PIXEL_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+    "890000000d49444154789c6360606060000000050001a5f64540000000004945"
+    "4e44ae426082")
+
+
+def declared_icon(project: Path) -> str | None:
+    """The icon `project.godot` declares, read from the file.
+
+    Not through `project_get_setting`: that tool is live-only and answers 503
+    offline, so on a runner with no editor it would report "no icon" for a
+    project that has one, and the row would be skipped for the wrong reason.
+    """
+    try:
+        text = (project / "project.godot").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        if line.startswith("config/icon="):
+            return line.split("=", 1)[1].strip().strip('"') or None
+    return None
+
+
+def ensure_icon(session: Session, project: Path) -> str | None:
+    """Put the project in the state the row is about, if it is not already.
+
+    A bare sandbox declares no icon, and a row that is skipped because its
+    precondition failed is not a row that passed. Every real Godot project has
+    an icon, so making one here restores the ordinary case rather than
+    inventing an odd one. The PNG is written by this file because no tool on
+    the surface writes one.
+    """
+    existing = declared_icon(project)
+    if existing:
+        return existing
+    try:
+        (project / "vibe_icon.png").write_bytes(ONE_PIXEL_PNG)
+    except OSError as exc:
+        print(f"  could not write an icon to point at: {exc}")
+        return None
+    _, errored = session.call("project_set_setting",
+                              {"setting": "application/config/icon",
+                               "value": "res://vibe_icon.png"})
+    if errored:
+        return None
+    return declared_icon(project)
+
+
+def audit_scope(session: Session, project: Path) -> None:
     print("=== what project_audit_assets does not read ===")
-    icon, _ = session.call("project_get_setting", {"setting": "application/config/icon"})
-    icon_path = icon.get("value")
-    print(f"  project_get_setting application/config/icon -> {icon_path!r}")
+    icon_path = ensure_icon(session, project)
+    print(f"  project.godot declares config/icon = {icon_path!r}")
     if not icon_path:
-        # A sandbox with no icon cannot be put in this state, and a row that
-        # passes because its precondition failed is worse than a row that fails.
-        print("  this project declares no icon, so the row below cannot be asked")
+        # A row that cannot be set up is not a row that passed.
+        print("  this project declares no icon and one could not be made, "
+              "so the row below cannot be asked")
         return
     session.call("project_set_setting",
                  {"setting": "application/boot_splash/image", "value": icon_path})
@@ -110,8 +160,28 @@ def audit_scope(session: Session) -> None:
 def payload_costs(session: Session) -> None:
     print()
     print("=== what a project-level answer costs ===")
+    # A sandbox declares no actions of its own, and the finding is about the
+    # ratio between what the project declared and what the engine contributes.
+    # One declared action is enough to make that ratio meaningful.
+    session.call("project_set_input_action", {
+        "action": "vibe_move_right",
+        "events": [{"type": "key", "physical_keycode": 68}]})
     raw = session.request("tools/call", {"name": "project_list_input_actions", "arguments": {}})
-    body = raw.get("result", {}).get("structuredContent", {})
+    result = raw.get("result", {}) or {}
+    body = result.get("structuredContent") or {}
+    if result.get("isError") or "error" in body:
+        # This tool is live-only. Reading its 503 as an empty answer is how a
+        # probe reports "0 actions, 0% engine" for a question it never asked.
+        message = (body.get("error") or {}).get("message")
+        if not message:
+            try:
+                text = (result.get("content") or [{}])[0].get("text") or "{}"
+                message = (json.loads(text).get("error") or {}).get("message")
+            except (ValueError, AttributeError, IndexError):
+                message = None
+        print(f"  project_list_input_actions refused: {str(message)[:100]}")
+        print("  no editor on this project, so the rows below cannot be asked")
+        return
     actions = body.get("actions", [])
     builtin = [a for a in actions if str(a.get("action", "")).startswith("ui_")]
     declared = [a for a in actions if not str(a.get("action", "")).startswith("ui_")]
@@ -176,7 +246,7 @@ def main() -> int:
     with Session(project=str(project)) as session:
         live = attach_here(session, project)
         print(f"(live editor on this project: {live})\n")
-        audit_scope(session)
+        audit_scope(session, project)
         payload_costs(session)
         wire_overhead(session, live)
     return 0

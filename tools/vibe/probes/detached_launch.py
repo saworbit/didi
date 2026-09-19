@@ -125,17 +125,42 @@ def one_pass(project: Path, attach_first: bool) -> None:
 
         # The green half, stated so a regression is visible: the loop works.
         if game.get("session_id"):
-            _, errored = session.call("runtime_attach_session",
-                                      {"session_id": game["session_id"]})
+            attached, errored = session.call("runtime_attach_session",
+                                             {"session_id": game["session_id"]})
             row("the detached game can be attached to", False, bool(errored))
+            if errored:
+                # Printed in full: a refusal that only shows as a boolean is a
+                # row nobody can act on, and this one differs by platform.
+                print(f"       refusal: "
+                      f"{json.dumps(attached.get('error'), sort_keys=True)[:300]}")
             paused, _ = session.call("runtime_set_paused", {"paused": True})
             row("and paused", True, paused.get("paused"))
             stepped, _ = session.call("runtime_step", {"frames": 2})
             row("and stepped", 2, stepped.get("frames"))
             stopped, errored = session.call("runtime_stop", {})
             row("and stopped", True, stopped.get("shutdown_requested"))
-            time.sleep(2)
-            row("and the kernel agrees it is gone", False, os_says_alive(session_pid))
+            # Polled rather than slept once. A single check a fixed time after
+            # the stop measures how fast that platform shuts an engine down,
+            # not whether the stop worked, and the two read the same.
+            deadline = time.monotonic() + 20.0
+            waited = 0.0
+            while time.monotonic() < deadline:
+                if not os_says_alive(session_pid):
+                    break
+                time.sleep(0.5)
+                waited += 0.5
+            still_alive = os_says_alive(session_pid)
+            row("and the kernel agrees it is gone, within 20s", False, still_alive)
+            print(f"       it took {waited:.1f}s for the process to go away"
+                  if not still_alive else
+                  "       still running after 20s")
+            if still_alive:
+                # Do not leave an engine behind for the next probe; #387.
+                listed, _ = session.call("runtime_list_sessions", {})
+                mine = [e for e in listed.get("sessions", [])
+                        if e.get("pid") == session_pid]
+                print(f"       runtime_list_sessions still reports it: "
+                      f"{json.dumps(mine)[:220]}")
     print()
 
 
