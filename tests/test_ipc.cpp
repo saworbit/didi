@@ -16,6 +16,7 @@
 #include <csignal>
 #include <fcntl.h>
 #include <pthread.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -117,6 +118,25 @@ int createRawListener(const std::string& path) {
     ASSERT_TRUE(bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
     ASSERT_TRUE(listen(listener, 1) == 0);
     return listener;
+}
+
+// How many descriptors this process holds, by asking about each number rather
+// than reading /proc, which macOS does not have. The first version of this
+// asked open() for the lowest free number instead, and a deliberately leaked
+// descriptor did not move it: a leak lands wherever it lands, and the numbers
+// under it stay free. Counting is what actually sees one.
+int countOpenDescriptors() {
+    rlimit descriptor_limit{};
+    long ceiling = 4096;
+    if (getrlimit(RLIMIT_NOFILE, &descriptor_limit) == 0 &&
+        descriptor_limit.rlim_cur != RLIM_INFINITY) {
+        ceiling = std::min<long>(ceiling, static_cast<long>(descriptor_limit.rlim_cur));
+    }
+    int open_count = 0;
+    for (long descriptor = 0; descriptor < ceiling; ++descriptor) {
+        if (fcntl(static_cast<int>(descriptor), F_GETFD) >= 0) ++open_count;
+    }
+    return open_count;
 }
 
 bool rawReadExact(int socket_fd, void* buffer, size_t length) {
@@ -1281,7 +1301,7 @@ static void test_endpoint_path_limit_is_reported_rather_than_returned_false() {
 #if defined(_WIN32)
     // Named pipes are not paths; a long one is not this failure.
     ASSERT_TRUE(!didi::ipc::endpointPathRejection(
-        "\\.\pipe\\" + std::string(400, 'x')).has_value());
+        "\\\\.\\pipe\\" + std::string(400, 'x')).has_value());
 #else
     sockaddr_un addr{};
     const std::string overflowing =
@@ -1301,6 +1321,88 @@ static void test_endpoint_path_limit_is_reported_rather_than_returned_false() {
     ASSERT_TRUE(!server->isRunning());
 #endif
 }
+
+#if !defined(_WIN32)
+static void test_posix_stop_owns_the_descriptors_it_closes() {
+    // Break caught: stop() closed the listening descriptor and then joined the
+    // thread that was still polling and accepting on it, so for up to one poll
+    // slice the loop worked a number that any other open() in the editor could
+    // already have been handed. The race itself is a sanitiser finding rather
+    // than something an assertion can catch, so what is asserted here is the
+    // ownership rule the fix rests on: one owner closes each descriptor, and a
+    // connected client is still let go promptly.
+    //
+    // Nothing above this line runs on Windows. The named pipe branch is a
+    // different implementation with a stop event and no descriptor numbers.
+    ScopedIdleRecycleOverride override_margin(30000, 1500);
+
+    const auto path = rawSocketPath("stop-descriptor-ownership");
+    int settled_descriptor_count = -1;
+
+    for (int attempt = 0; attempt < 6; ++attempt) {
+        auto server = didi::ipc::createIpcServer();
+        server->setHandler([](const didi::json&) { return didi::json::object(); });
+        ASSERT_TRUE(server->start(path));
+
+        auto client = didi::ipc::createIpcClient();
+        ASSERT_TRUE(client->connect(path, 1000));
+        const auto echoed = client->sendRequest("session.handshake", {}, 1000);
+        ASSERT_TRUE(echoed.isOk());
+        // The server is now back in its read for this connection, waiting out
+        // an idle window thirty seconds wide.
+
+        // Take every descriptor number the teardown frees, immediately, and
+        // check the ones we hold are still ours. A close of a number this
+        // process did not own lands here as EBADF on a descriptor we opened.
+        std::atomic<bool> churning{true};
+        std::atomic<bool> lost_one{false};
+        std::thread churn([&] {
+            while (churning.load()) {
+                int held[8];
+                size_t taken = 0;
+                for (; taken < 8; ++taken) {
+                    held[taken] = open("/dev/null", O_RDONLY | O_CLOEXEC);
+                    if (held[taken] < 0) break;
+                }
+                std::this_thread::yield();
+                for (size_t index = 0; index < taken; ++index) {
+                    if (fcntl(held[index], F_GETFD) < 0) lost_one.store(true);
+                    close(held[index]);
+                }
+            }
+        });
+
+        const auto stop_started = std::chrono::steady_clock::now();
+        server->stop();
+        const auto stop_took = std::chrono::steady_clock::now() - stop_started;
+
+        churning.store(false);
+        churn.join();
+        client->disconnect();
+
+        ASSERT_TRUE(!server->isRunning());
+        ASSERT_TRUE(!lost_one.load());
+        // Bounded by the accept poll slice, not by the idle window the client
+        // is sitting in. Stop shutting the client down first and this is thirty
+        // seconds.
+        ASSERT_TRUE(stop_took < std::chrono::seconds(2));
+
+        // And one owner per descriptor means one close per descriptor. Each
+        // side assuming the other closes the accepted client shows up here, a
+        // cycle later, as a descriptor the process never got back. The first
+        // cycle sets the baseline because the client and the server allocate
+        // things on their first use that they keep.
+        const int descriptor_count = countOpenDescriptors();
+        if (attempt == 0) {
+            settled_descriptor_count = descriptor_count;
+        } else {
+            ASSERT_TRUE(descriptor_count <= settled_descriptor_count);
+        }
+    }
+
+    unlink(path.c_str());
+}
+#endif
 
 struct RegisterIpcTests {
     RegisterIpcTests() {
@@ -1344,6 +1446,7 @@ struct RegisterIpcTests {
         registerTest("IPC.PosixQueuedIoDeadline", test_posix_expired_deadline_rejects_synchronous_io);
         registerTest("IPC.PosixResponseIdCorrelation", test_posix_client_rejects_mismatched_response_id);
         registerTest("IPC.PosixSocketIsOwnerOnly", test_posix_socket_is_owner_only_before_it_listens);
+        registerTest("IPC.PosixStopOwnsItsDescriptors", test_posix_stop_owns_the_descriptors_it_closes);
 #endif
     }
 } g_registerIpcTests;
