@@ -3997,7 +3997,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "project_rename_references";
-        t.description = "Renames a symbol in the scene connections and animation tracks that serialize it, atomically across every file, and reports the GDScript references it deliberately does not touch.";
+        t.description = "Renames a symbol in the scene connections and animation tracks that serialize it, atomically across every file, and reports the references it deliberately does not touch, the project.godot [autoload] key among them.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {

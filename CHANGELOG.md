@@ -177,6 +177,23 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`project_rename_references` reports the `[autoload]` line that defines the
+  name.** The rename and the impact analysis are meant to agree about what a
+  rename touches, and for a singleton they did not. The analysis reads
+  `project.godot` and reports the `[autoload]` key; the rename never read the
+  file, so the one line that defines the global was in `updated_files` because
+  it was not rewritten, in `code_references_not_updated` because it was not
+  listed, and in no other field (#792). A caller worked through the list by
+  hand, finished it, and still had a global that no longer existed. Both tools
+  collect from the same place now, and the key arrives in
+  `code_references_not_updated` with kind `autoload` and its line. It leads the
+  list rather than trailing it, so `max_impacts` cuts a use of the name before
+  it cuts the definition. It is reported and never rewritten, because an
+  autoload key and a symbol that happens to share its spelling are different
+  things and rewriting the definition of a global on a whole-word match is the
+  breakage this tool exists to prevent. When there is one, a `limitations`
+  sentence says to edit `project.godot` too; when there is not, nothing is said.
+
 - **`project_audit_assets` follows the resources `project.godot` names.** The
   audit built its reference list from the project's resources, and
   `project.godot` is not one, so nothing it names was ever counted as used.
