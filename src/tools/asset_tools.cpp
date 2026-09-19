@@ -13,6 +13,7 @@
 #include "didi/runtime/session_client.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -107,13 +108,14 @@ const ComponentType kComponentTypes[] = {
     {"Quaternion", kXYZW, 4, false}, {"Color", kRGBA, 4, false},
 };
 
-// The packed arrays, whose members are written by the same writer as anything
-// else so a PackedColorArray of {r,g,b} objects comes out as Color(...) rather
-// than as JSON.
+// The packed arrays. The scalar ones are written element by element by the same
+// writer as anything else; the composite ones are written flat, see
+// packedElementType below.
 const char* const kPackedArrayTypes[] = {
     "PackedByteArray",    "PackedInt32Array",   "PackedInt64Array",
     "PackedFloat32Array", "PackedFloat64Array", "PackedStringArray",
-    "PackedVector2Array", "PackedVector3Array", "PackedColorArray",
+    "PackedVector2Array", "PackedVector3Array", "PackedVector4Array",
+    "PackedColorArray",
 };
 
 // The types whose payload is a single string.
@@ -130,6 +132,23 @@ const ComponentType* findComponentType(const std::string& name) {
     for (const auto& entry : kComponentTypes) {
         if (name == entry.name) return &entry;
     }
+    return nullptr;
+}
+
+// The element type of a packed array whose element is itself composite, and
+// null for the ones whose element is a scalar.
+//
+// Godot writes these flat -- `PackedVector2Array(0, 0, 512, 0)`, one number per
+// component -- and its text parser refuses a nested constructor with
+// "Expected float in constructor", which fails the whole resource rather than
+// the one property (#765). Confirmed against 4.5.1: ResourceSaver on a
+// NavigationPolygon and a Gradient writes the flat form, and var_to_str agrees
+// for all four.
+const ComponentType* packedElementType(const std::string& name) {
+    if (name == "PackedVector2Array") return findComponentType("Vector2");
+    if (name == "PackedVector3Array") return findComponentType("Vector3");
+    if (name == "PackedVector4Array") return findComponentType("Vector4");
+    if (name == "PackedColorArray") return findComponentType("Color");
     return nullptr;
 }
 
@@ -170,18 +189,105 @@ struct ReferenceScope {
     std::vector<std::string> visible_sub_ids;
 };
 
-// `declared` is the component type the class reference says this property has,
-// when it has one. It is passed at the top level of a property only: the shape
+// The JSON kind, for a refusal to name what it was given.
+const char* jsonKindOf(const json& value) {
+    if (value.is_string()) return "a string";
+    if (value.is_boolean()) return "a boolean";
+    if (value.is_number()) return "a number";
+    if (value.is_array()) return "an array";
+    if (value.is_object()) return "an object";
+    return "that";
+}
+
+// What a slot of this declared type takes, or empty for a type this writer
+// does not rule on.
+std::string wantedFor(const std::string& declared_type) {
+    if (declared_type == "int") return "a whole number";
+    if (declared_type == "float") return "a number";
+    if (declared_type == "bool") return "true or false";
+    if (declared_type == "String" || namesType(declared_type, kStringTypes,
+                                               std::size(kStringTypes))) {
+        return "a string";
+    }
+    if (declared_type == "Color") {
+        return "an object with \"r\", \"g\" and \"b\", or a colour string such as \"#ff8800\"";
+    }
+    if (const auto* component = findComponentType(declared_type)) {
+        std::string wanted = "an object with ";
+        for (size_t index = 0; index < component->member_count; ++index) {
+            if (index) wanted += index + 1 == component->member_count ? " and " : ", ";
+            wanted += "\"" + std::string(component->members[index]) + "\"";
+        }
+        return wanted;
+    }
+    if (declared_type == "Array" || declared_type.rfind("typedarray::", 0) == 0 ||
+        namesType(declared_type, kPackedArrayTypes, std::size(kPackedArrayTypes))) {
+        return "an array";
+    }
+    return {};
+}
+
+// Whether a value of this JSON kind survives being written into a slot the
+// class reference declares as `declared_type`.
+//
+// Godot converts what it can on load and silently keeps the property's default
+// for the rest, so a value it cannot convert produces a file that reports one
+// thing and holds another (#764). Measured on 4.5.1: `radius = "big"` loads as
+// 0.0, `size = 7` as (0, 0), `shadow_offset = "over there"` as (0, 0) and
+// `radius = Vector2(1, 2)` as 0.0, none of them with an error the caller sees.
+//
+// Objects are accepted wherever a constructor or a named type is a legitimate
+// spelling, and the #730 guard below decides those. The three types with no
+// object spelling at all are the exception.
+//
+// A declared type not listed here -- a Transform3D, a Dictionary, a Resource
+// slot, an enum -- is left alone. Refusing on a rule that was never checked is
+// its own wrong answer.
+bool declaredTypeAccepts(const std::string& declared_type, const json& value) {
+    // A whole number is a whole number however it was spelled. JSON does not
+    // separate 4 from 4.0 and plenty of clients serialise every number as a
+    // double, so the value decides and not the notation. int is the most
+    // common declared type on the surface, and refusing 4.0 there would break
+    // far more callers than it caught.
+    if (declared_type == "int") {
+        if (value.is_number_integer()) return true;
+        if (!value.is_number_float()) return false;
+        const double number = value.get<double>();
+        return number == std::floor(number) && std::isfinite(number);
+    }
+    if (declared_type == "float") return value.is_number();
+    if (declared_type == "bool") return value.is_boolean();
+    if (declared_type == "String" ||
+        namesType(declared_type, kStringTypes, std::size(kStringTypes))) {
+        return value.is_string() || asksForANamedType(value);
+    }
+    // Godot's own String -> Color conversion, which is the "#rrggbbaa"
+    // spelling scene_set_property documents for the same kind of slot.
+    if (declared_type == "Color") return value.is_string() || value.is_object();
+    if (findComponentType(declared_type)) return value.is_object();
+    if (declared_type == "Array" || declared_type.rfind("typedarray::", 0) == 0 ||
+        namesType(declared_type, kPackedArrayTypes, std::size(kPackedArrayTypes))) {
+        return value.is_array() || asksForANamedType(value);
+    }
+    return true;
+}
+
+// `declared_type` is what the class reference says this property holds, when it
+// carries the type. It is passed at the top level of a property only: the shape
 // of the JSON decides everything nested inside an array or a dictionary, as it
 // always has.
 Result<std::string> tresLiteral(const json& value, const std::string& property,
                                 ReferenceScope* scope = nullptr,
-                                const ComponentType* declared = nullptr);
+                                const std::string* declared_type = nullptr);
 
-Result<std::string> tresComponentLiteral(const ComponentType& type, const json& value,
-                                         const std::string& property) {
+// The components of one composite value, comma separated and nothing else.
+//
+// Separate from the literal because a packed array of these is written as one
+// flat run of components with no per-element constructor around them, which is
+// what Godot's own saver writes and the only form its parser accepts (#765).
+Result<std::string> tresComponentComponents(const ComponentType& type, const json& value,
+                                            const std::string& property) {
     std::ostringstream out;
-    out << type.name << "(";
     for (size_t index = 0; index < type.member_count; ++index) {
         const auto member = type.members[index];
         const auto found = value.find(member);
@@ -198,10 +304,16 @@ Result<std::string> tresComponentLiteral(const ComponentType& type, const json& 
         if (index) out << ", ";
         out << found->dump();
     }
+    return out.str();
+}
+
+Result<std::string> tresComponentLiteral(const ComponentType& type, const json& value,
+                                         const std::string& property) {
     // Color takes an alpha, and leaving it out is a common and harmless thing
     // to do, so it defaults rather than being demanded.
-    out << ")";
-    return out.str();
+    auto components = tresComponentComponents(type, value, property);
+    if (components.isErr()) return components.error();
+    return type.name + ("(" + components.value() + ")");
 }
 
 // Whether the project holds this path, and what Godot calls it.
@@ -283,6 +395,68 @@ Result<std::string> tresNamedTypeLiteral(const json& value, const std::string& p
         std::ostringstream out;
         out << name << "(";
         bool first = true;
+        // The composite packed arrays are one flat run of components. Both
+        // spellings reach the same file: an element per entry, which is the
+        // shape the rest of this writer documents, or the components already
+        // flattened, which is what the file looks like and what a caller who
+        // copied one out of a .tres will send. Mixing them is refused, because
+        // neither reading of the mixture is the one they meant.
+        if (const auto* element_type = packedElementType(name)) {
+            bool flattened = false;
+            bool per_element = false;
+            for (const auto& element : *items) {
+                if (element.is_number()) {
+                    flattened = true;
+                } else if (element.is_object()) {
+                    per_element = true;
+                } else {
+                    return Error::invalidArgument(
+                        "Property \"" + property + "\" declares type " + name +
+                        ", whose elements are each a " + element_type->name +
+                        " object or a run of plain numbers");
+                }
+            }
+            if (flattened && per_element) {
+                return Error::invalidArgument(
+                    "Property \"" + property + "\" declares type " + name +
+                    ", and its \"values\" mixes " + element_type->name +
+                    " objects with plain numbers. Send one or the other.");
+            }
+            if (flattened && items->size() % element_type->member_count != 0) {
+                return Error::invalidArgument(
+                    "Property \"" + property + "\" declares type " + name + " and was given " +
+                    std::to_string(items->size()) + " numbers, which is not a whole number of " +
+                    element_type->name + "s. Godot drops the trailing part-element on load.");
+            }
+            for (const auto& element : *items) {
+                if (!first) out << ", ";
+                first = false;
+                if (element.is_number()) {
+                    out << element.dump();
+                    continue;
+                }
+                // A named type inside the array has to be the array's own, or
+                // the caller is describing a file Godot cannot hold.
+                if (asksForANamedType(element)) {
+                    const auto named = element["type"].get<std::string>();
+                    if (named != element_type->name) {
+                        return Error::invalidArgument(
+                            "Property \"" + property + "\" declares type " + name +
+                            ", whose elements are " + element_type->name + ", and one of them is "
+                            "a " + named);
+                    }
+                }
+                json element_value = element;
+                if (std::strcmp(element_type->name, "Color") == 0 && !element_value.contains("a")) {
+                    element_value["a"] = 1.0;
+                }
+                auto components = tresComponentComponents(*element_type, element_value, property);
+                if (components.isErr()) return components.error();
+                out << components.value();
+            }
+            out << ")";
+            return out.str();
+        }
         for (const auto& element : *items) {
             auto rendered = tresLiteral(element, property, scope);
             if (rendered.isErr()) return rendered.error();
@@ -345,7 +519,26 @@ Result<std::string> tresNamedTypeLiteral(const json& value, const std::string& p
 // reading. A refusal costs the caller one call. A silent wrong write costs
 // them the time they spend debugging the animation instead of the file.
 Result<std::string> tresLiteral(const json& value, const std::string& property,
-                                ReferenceScope* scope, const ComponentType* declared) {
+                                ReferenceScope* scope, const std::string* declared_type) {
+    // The declared type decides before the shape of the JSON does. A value the
+    // slot cannot hold used to be written verbatim, reported in
+    // properties_written with property_check checked: true, and then dropped by
+    // Godot on load, so every tool in the chain reported success and the
+    // resource held its default (#764).
+    if (declared_type && !value.is_null() && !declaredTypeAccepts(*declared_type, value)) {
+        if (*declared_type == "int" && value.is_number()) {
+            return Error::invalidArgument(
+                "Property \"" + property + "\" is declared int by " +
+                offline::ClassReference::instance().apiVersion() +
+                ", and Godot truncates a fraction written into it on load. Send a whole number.");
+        }
+        return Error::invalidArgument(
+            "Property \"" + property + "\" is declared " + *declared_type + " by " +
+            offline::ClassReference::instance().apiVersion() + ", and " + jsonKindOf(value) +
+            " written into it is dropped when Godot loads the file. Send " +
+            wantedFor(*declared_type) + ".");
+    }
+    const ComponentType* declared = declared_type ? findComponentType(*declared_type) : nullptr;
     if (value.is_string()) return "\"" + escapeTresString(value.get<std::string>()) + "\"";
     if (value.is_boolean()) return std::string(value.get<bool>() ? "true" : "false");
     if (value.is_number()) return value.dump();
@@ -567,21 +760,18 @@ bool isStorageOnlyPropertyName(const std::string& name) {
     return name.empty() || name.front() == '_' || name.find('/') != std::string::npos;
 }
 
-// The component type each property of this type is declared as, for the ones
-// that have one. Empty for a type the class reference does not carry, which is
-// the same condition checkPropertiesAgainstType reports as unchecked.
-std::map<std::string, const ComponentType*> declaredComponentTypes(
-    const std::string& resource_type) {
-    std::map<std::string, const ComponentType*> found;
+// The type each property of this type is declared as. Empty for a type the
+// class reference does not carry, which is the same condition
+// checkPropertiesAgainstType reports as unchecked.
+//
+// The whole declared type rather than just the component ones: a slot declared
+// float or int or bool has no constructor to choose, and it is exactly those
+// slots that took any value at all before (#764).
+std::map<std::string, std::string> declaredPropertyTypes(const std::string& resource_type) {
     std::set<std::string> names;
     std::map<std::string, std::string> types;
-    if (!declaredPropertyNames(resource_type, names, &types)) return found;
-    for (const auto& entry : types) {
-        if (const auto* component = findComponentType(entry.second)) {
-            found.emplace(entry.first, component);
-        }
-    }
-    return found;
+    if (!declaredPropertyNames(resource_type, names, &types)) return {};
+    return types;
 }
 
 // The literal the shape of this JSON would have produced on its own, or empty
@@ -871,12 +1061,12 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         std::ostringstream block;
         block << "\n[sub_resource type=\"" << sub.resource_type << "\" id=\"" << sub.id << "\"]\n";
         json names = json::array();
-        const auto sub_declared = declaredComponentTypes(sub.resource_type);
+        const auto sub_declared = declaredPropertyTypes(sub.resource_type);
         for (const auto& [name, value] : sub.properties) {
             const auto declaration = sub_declared.find(name);
             auto literal = tresLiteral(
                 value, sub.id + "." + name, &scope,
-                declaration == sub_declared.end() ? nullptr : declaration->second);
+                declaration == sub_declared.end() ? nullptr : &declaration->second);
             if (literal.isErr()) return CallToolResult::fromError(literal.error());
             block << name << " = " << literal.value() << "\n";
             names.push_back(name);
@@ -892,13 +1082,13 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     std::ostringstream body;
     body << "\n[resource]\n";
     json written_order = json::array();
-    const auto root_declared = declaredComponentTypes(resource_type);
+    const auto root_declared = declaredPropertyTypes(resource_type);
     for (const auto& [name, value] : ordered.value()) {
         const auto declaration = root_declared.find(name);
         auto literal = tresLiteral(value, name, &scope,
                                    declaration == root_declared.end()
                                        ? nullptr
-                                       : declaration->second);
+                                       : &declaration->second);
         if (literal.isErr()) return CallToolResult::fromError(literal.error());
         body << name << " = " << literal.value() << "\n";
         written_order.push_back(name);
