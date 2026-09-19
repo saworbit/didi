@@ -2,6 +2,7 @@
 
 #include "didi/offline/resource_indexer.hpp"
 
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,6 +24,18 @@ struct ProjectTextSource {
 struct ProjectTextScan {
     std::vector<ResourceInfo> resources;
     std::vector<ProjectTextSource> sources;
+    // project.godot, when the project has one and the scan's bounds let it be
+    // read. It names resources -- config/icon, boot_splash/image,
+    // run/main_scene, the [autoload] entries and every res:// value under
+    // [internationalization] -- and nothing loads it, so the indexer types it
+    // GenericResource and it never reached sources. project_audit_assets
+    // therefore called the project icon an orphan in every project (#774).
+    //
+    // Held apart from sources rather than added to them, because
+    // project_analyze_impact reads this same file itself and names the section
+    // a line belongs to; a manifest in sources would report every setting
+    // twice, once properly and once as a bare code_reference.
+    std::optional<ProjectTextSource> project_settings;
     bool truncated{false};
     // Files a bound kept out of sources. Reported rather than dropped, because
     // an analysis of part of a project that reads like an analysis of the

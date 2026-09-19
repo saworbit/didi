@@ -1473,6 +1473,75 @@ static void test_audit_does_not_call_third_party_addon_files_orphans() {
                 with_addons["orphan_bytes"].get<uint64_t>());
 }
 
+static void test_audit_follows_the_resources_project_godot_names() {
+    // Break caught: the audit built its reference list from the project's
+    // resources, and project.godot is not one, so nothing it names was ever
+    // counted as used. Every Godot project ships an icon, so every project got
+    // at least one false orphan on the one question this tool answers, and
+    // acting on the answer deletes the icon (#774).
+    ScopedToolProject project("audit-project-godot-references");
+    writeAuditFile("project.godot",
+        "config_version=5\n"
+        "\n"
+        "[application]\n"
+        "\n"
+        "config/icon=\"res://icon.svg\"\n"
+        "boot_splash/image=\"res://splash.png\"\n"
+        "\n"
+        "[autoload]\n"
+        "\n"
+        "Global=\"*res://autoload.gd\"\n"
+        "\n"
+        "[internationalization]\n"
+        "\n"
+        "locale/translations=PackedStringArray(\"res://i18n/ui.en.translation\")\n");
+    writeAuditFile("icon.svg", "<svg/>\n");
+    writeAuditFile("splash.png", "png-bytes-splash");
+    writeAuditFile("autoload.gd", "extends Node\n");
+    writeAuditFile("unused.png", "png-bytes-unused");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto report = didi::json::parse(
+        registry.callTool("project_audit_assets",
+                          didi::json{{"include_dead_signals", false},
+                                     {"include_import_health", false}})
+            .content[0].text);
+
+    // The three forms project.godot writes a path in -- bare, with the
+    // autoload enabled marker, and inside PackedStringArray -- all count as
+    // use. Only the file nothing names is left.
+    ASSERT_EQ(report["orphans"].size(), 1u);
+    ASSERT_EQ(report["orphans"][0]["path"], "res://unused.png");
+    ASSERT_EQ(report["orphan_bytes"], std::string("png-bytes-unused").size());
+
+    // The manifest was read, so the count that says how much of the project
+    // the answer covers says so.
+    ASSERT_EQ(report["scanned_text_files"], 2u);
+
+    // The translation file does not exist and is not reported as broken. A
+    // quoted path is evidence of use and not of existence, because the same
+    // form in a script is "res://levels/" with the rest built at runtime.
+    for (const auto& entry : report["broken_references"]) {
+        ASSERT_TRUE(entry["source"] != "res://project.godot");
+    }
+
+    // And the manifest stays out of the shared source list, so the tool that
+    // reads project.godot itself still reports each setting once rather than
+    // once properly and once as a bare code_reference.
+    const auto impact = didi::json::parse(
+        registry.callTool("project_analyze_impact", didi::json{{"target", "res://icon.svg"}})
+            .content[0].text);
+    size_t manifest_impacts = 0;
+    for (const auto& entry : impact["impacts"]) {
+        if (entry["path"] != "res://project.godot") continue;
+        ++manifest_impacts;
+        ASSERT_EQ(entry["kind"], "project_setting");
+    }
+    ASSERT_EQ(manifest_impacts, 1u);
+}
+
 static void test_local_work_is_not_reported_as_a_fallback() {
     // Break caught: 26 tools reported execution_mode offline_fallback with a
     // healthy editor attached. offline_fallback is what this server says when
@@ -2360,7 +2429,8 @@ static void test_a_file_over_the_scan_bound_is_skipped_and_said_so() {
     const auto audit = registry.callTool("project_audit_assets", didi::json::object());
     ASSERT_TRUE(!audit.isError);
     const auto audit_report = didi::json::parse(audit.content[0].text);
-    ASSERT_EQ(audit_report["scanned_text_files"], 1u);
+    // project.godot and the script; the oversized resource is the skipped one.
+    ASSERT_EQ(audit_report["scanned_text_files"], 2u);
     ASSERT_EQ(audit_report["skipped_text_files"], 1u);
     ASSERT_EQ(audit_report["truncated"], true);
 
@@ -6684,6 +6754,8 @@ struct RegisterToolTests {
                      test_offline_setting_write_admits_it_did_not_check_the_name);
         registerTest("Tools.AuditSkipsAddonOrphans",
                      test_audit_does_not_call_third_party_addon_files_orphans);
+        registerTest("Tools.AuditFollowsProjectGodotReferences",
+                     test_audit_follows_the_resources_project_godot_names);
         registerTest("Tools.LocalWorkIsNotAFallback",
                      test_local_work_is_not_reported_as_a_fallback);
         registerTest("Tools.DryRunReadsItsTarget",

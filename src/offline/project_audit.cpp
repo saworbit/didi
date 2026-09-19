@@ -22,6 +22,12 @@ namespace {
 struct Reference {
     std::string target;   // "res://..." or "uid://..."
     bool is_uid{false};
+    // A plain quoted path, which is how project.godot and an exported string
+    // property name a file. It counts as use, so the target is not an orphan,
+    // and it is not checked for existence: "res://levels/" + name + ".tscn" is
+    // one complete literal to a regex and half a path on disk, and a broken
+    // reference that is not broken is worse than one that is not reported.
+    bool use_only{false};
 };
 
 // Whether a pattern can match at all, asked of the shortest literal every one
@@ -41,10 +47,10 @@ bool mayContain(const std::string& text, std::initializer_list<const char*> lite
 }
 
 void collectMatches(const std::string& text, const std::regex& pattern, bool is_uid,
-                    std::vector<Reference>& out) {
+                    std::vector<Reference>& out, bool use_only = false) {
     for (auto it = std::sregex_iterator(text.begin(), text.end(), pattern);
          it != std::sregex_iterator(); ++it) {
-        out.push_back({(*it)[1].str(), is_uid});
+        out.push_back({(*it)[1].str(), is_uid, use_only});
     }
 }
 
@@ -59,6 +65,16 @@ std::vector<Reference> referencesIn(const std::string& text) {
     static const std::regex gd_load(R"re((?:preload|load)\s*\(\s*"(res://[^"]+)")re");
     static const std::regex cs_load(R"re(Load\s*(?:<[^>]*>)?\s*\(\s*"(res://[^"]+)")re");
     static const std::regex uid_literal(R"re("(uid://[a-z0-9]+)")re");
+    // A quoted res:// value, which is the only form project.godot has:
+    // config/icon, boot_splash/image and run/main_scene write it bare, the
+    // [autoload] section prefixes it with the enabled marker, and
+    // locale/translations writes it inside PackedStringArray(...). Asked of
+    // every file for the same reason uid_literal is: a path in an exported
+    // string property is a use, and calling its target an orphan is the one
+    // mistake this list must not make. Bounded because an unbounded run over a
+    // packed metadata line is what overflowed the stack in #661, and a res://
+    // path is never a kilobyte.
+    static const std::regex res_literal(R"re("\*?(res://[^"]{1,1024})")re");
 
     std::vector<Reference> references;
     if (mayContain(text, {"[ext_resource"})) {
@@ -68,6 +84,7 @@ std::vector<Reference> referencesIn(const std::string& text) {
     if (mayContain(text, {"res://"})) {
         collectMatches(text, gd_load, false, references);
         collectMatches(text, cs_load, false, references);
+        collectMatches(text, res_literal, false, references, true);
     }
     if (mayContain(text, {"uid://"})) collectMatches(text, uid_literal, true, references);
     return references;
@@ -236,7 +253,7 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         broken.push_back({{"source", source}, {"target", target}, {"kind", kind}});
     };
 
-    for (const auto& [source_path, text] : sources) {
+    const auto collectReferences = [&](const std::string& source_path, const std::string& text) {
         for (const auto& reference : referencesIn(text)) {
             if (reference.is_uid) {
                 const auto found = by_uid.find(reference.target);
@@ -248,10 +265,20 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
                 continue;
             }
             referenced_paths.insert(reference.target);
+            if (reference.use_only) continue;
             if (by_path.find(reference.target) == by_path.end()) {
                 recordBroken(source_path, reference.target, "missing_file");
             }
         }
+    };
+
+    for (const auto& [source_path, text] : sources) collectReferences(source_path, text);
+    // project.godot names resources and is not one, so it was never in sources
+    // and its targets were reported as orphans in every project -- the icon
+    // every Godot project ships among them (#774). Read through the same scan
+    // as everything else, so there is still one read of the project.
+    if (scan.project_settings.has_value()) {
+        collectReferences(scan.project_settings->path, scan.project_settings->contents);
     }
 
     json orphans = json::array();
@@ -304,7 +331,7 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
 
     json result = {
         {"scanned_resources", resources.size()},
-        {"scanned_text_files", sources.size()},
+        {"scanned_text_files", sources.size() + (scan.project_settings.has_value() ? 1u : 0u)},
         {"skipped_text_files", scan.skipped_files},
         {"orphans", orphans},
         {"orphan_bytes", orphan_bytes},
