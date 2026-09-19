@@ -1316,15 +1316,33 @@ public:
 
     void stop() override {
         if (!m_running.exchange(false)) return;
-        if (m_listenSock >= 0) {
-            shutdown(m_listenSock, SHUT_RDWR);
-            close(m_listenSock);
-            m_listenSock = -1;
-        }
+
+        // Nothing touches the listening descriptor here. serverLoop polls it in
+        // 50 ms slices and rereads m_running every pass, so it leaves on its
+        // own, and closing a descriptor another thread is still polling hands
+        // that number to the next open() in a process that opens files
+        // constantly. POSIX names exactly that reuse in the rationale for
+        // close(), and it is not a wakeup either: shutdown() on a socket that
+        // is only listening is ENOTCONN, which is why the Linux behaviour that
+        // made this look harmless does not hold on macOS. The close is below
+        // the join, where this thread is the only one left holding the number.
+        //
+        // The client descriptor is different, and taking it here is load
+        // bearing twice over. It is connected, so shutdown() applies and ends
+        // the one long poll an idle client is sitting in; without it stop()
+        // would wait out the whole recycle window. And taking it makes
+        // serverLoop's compare_exchange fail, so the loop leaves this
+        // descriptor to the owner that is about to use it.
         const int active_client = m_activeClient.exchange(-1);
         if (active_client >= 0) shutdown(active_client, SHUT_RDWR);
         unlink(m_pipeName.c_str());
         if (m_thread.joinable()) m_thread.join();
+
+        if (active_client >= 0) close(active_client);
+        if (m_listenSock >= 0) {
+            close(m_listenSock);
+            m_listenSock = -1;
+        }
     }
 
     bool isRunning() const override { return m_running.load(); }
@@ -1423,14 +1441,28 @@ private:
                 const auto response_deadline = deadlineAfter(kServerResponseTimeoutMs);
                 if (!writeExact(client, frame.data(), frame.size(), response_deadline, &m_running)) break;
             }
+            // Close only while this loop still owns the descriptor. A failed
+            // exchange means stop() took it, is shutting it down right now, and
+            // closes it after the join. Closing it here as well would free a
+            // number the other thread still holds.
             int expected_client = client;
-            (void)m_activeClient.compare_exchange_strong(expected_client, -1);
-            close(client);
+            if (m_activeClient.compare_exchange_strong(expected_client, -1)) {
+                close(client);
+            }
         }
+
+        // The accept side belongs to this thread for as long as this thread
+        // runs, and to stop() once it has joined. See stop().
     }
 
     std::atomic<bool> m_running{false};
     std::atomic<int> m_activeClient{-1};
+    // Plain int on purpose. start() writes it before it creates the thread and
+    // stop() touches it only after the join, so both accesses are ordered by a
+    // synchronisation point and there is no concurrent reader to make atomic.
+    // That holds because start and stop are called from one thread, which is
+    // how the main loop drives this; it is the accept thread they are ordered
+    // against, not each other.
     int m_listenSock{-1};
     std::string m_pipeName;
     std::thread m_thread;

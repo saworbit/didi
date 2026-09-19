@@ -122,6 +122,28 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The Unix socket server stops without pulling a descriptor out from under
+  its own thread.** `PosixIpcServer::stop()` closed the listening socket and
+  then joined the thread that was still polling and accepting on it, so for up
+  to one 50 ms poll slice the accept loop worked a descriptor number the
+  process had already given back, and any `open` in that window could be handed
+  it (#757). POSIX names that reuse in the rationale for `close`, and this runs
+  inside a Godot editor, which opens files constantly. The `shutdown` that came
+  before the close was not buying a wakeup either: `shutdown` on a socket that
+  is only listening is `ENOTCONN`, so the Linux behaviour that made it look
+  deliberate does not hold on macOS, and the loop already left on its own
+  within a poll slice because the socket is non-blocking and it rereads the
+  running flag every pass. `stop` now leaves the listening descriptor alone,
+  joins, and closes it with no other thread left holding the number. The
+  connected client keeps its `shutdown` before the join, because that one is
+  connected, so the call applies, and it is what ends the long read an idle
+  client is sitting in. Taking it there now also stops the accept loop closing
+  it, so each descriptor has one owner and one close. The cost is up to 50 ms
+  on a teardown that already joins a thread. The POSIX branch had no test that
+  started and stopped a server at all; it now has one that holds a client open
+  across the stop, takes every descriptor number the teardown frees, and
+  fails on a stop that waits out the idle window, on a descriptor closed twice,
+  and on one closed by nobody.
 - **A timeout that could not finish the kill says so.** `runtime_launch`
   terminates the job its child was spawned into and waits for the job to
   empty, so the tool does not answer while its own game is still dying. The
