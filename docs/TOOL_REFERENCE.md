@@ -864,11 +864,13 @@ A file whose name is not valid UTF-8 is not in any of these answers and cannot b
 
 Orphan detection covers asset types only: `Texture2D`, `AudioStream`, `MeshResource`, `Font`, and `Shader`. Scenes and scripts are excluded on purpose, because a scene that nothing references is usually a level you open by hand. `.import` and `.uid` sidecars are excluded too.
 
-The project read behind this is the same bounded one `project_analyze_impact` uses, and `scanned_text_files` and `skipped_text_files` say how much of the project the answer covers. A dead signal is one nothing emits, connects or wires; a member call written with the name and the `.connect` on different lines is not seen, which is stated in `limitations` beside the variable-name case.
+The project read behind this is the same bounded one `project_analyze_impact` uses, and `scanned_text_files` and `skipped_text_files` say how much of the project the answer covers. `project.godot` is read with it and counted there: it names resources and is not one, so before #774 the project icon was an orphan in every project. `config/icon`, `boot_splash/image`, `run/main_scene`, the `[autoload]` entries and the `res://` values under `[internationalization]` all count as use. A dead signal is one nothing emits, connects or wires; a member call written with the name and the `.connect` on different lines is not seen, which is stated in `limitations` beside the variable-name case.
 
 Files under `res://addons/` are excluded by default. That is a conventional Godot boundary: it holds third-party code a developer did not write and is not responsible for tidying, and an addon's own assets otherwise dominate the list in a small project. `excluded_addon_orphans` reports how many were left out and `addon_orphans_included` reports which way the switch was set, so the number is explainable; pass `include_addon_orphans` to count them.
 
-References are followed in every form Godot writes and people type: `[ext_resource path="res://..."]`, its `uid="uid://..."` form, `preload()` and `load()` in GDScript, `Load<T>()` in C#, and bare `uid://` string literals. Broken references are reported as `missing_file` or `unresolved_uid`.
+References are followed in every form Godot writes and people type: `[ext_resource path="res://..."]`, its `uid="uid://..."` form, `preload()` and `load()` in GDScript, `Load<T>()` in C#, bare `uid://` string literals, and any quoted `res://` value. Broken references are reported as `missing_file` or `unresolved_uid`.
+
+A quoted `res://` value counts as use and is not checked for existence. It is the only form `project.godot` has, and it is also how an exported string property names a scene; in a script the same form can be `"res://levels/"` with the rest built at runtime, and a broken reference that is not broken is worse than one that is not reported.
 
 A signal counts as alive if any file emits it, connects to it, checks `is_connected`, or wires it through `[connection signal="..."]` in a scene.
 

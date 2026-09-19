@@ -137,6 +137,23 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`project_audit_assets` follows the resources `project.godot` names.** The
+  audit built its reference list from the project's resources, and
+  `project.godot` is not one, so nothing it names was ever counted as used.
+  Every Godot project ships an icon, so every project got at least one false
+  orphan on the one question this tool answers, and acting on the answer
+  deletes the icon (#774). The manifest is read through the same bounded scan
+  as everything else and counted in `scanned_text_files`, so `config/icon`,
+  `boot_splash/image`, `run/main_scene`, the `[autoload]` entries and the
+  `res://` values under `[internationalization]` all count as use. A quoted
+  `res://` value is a reference form now wherever it appears, which also covers
+  a path in an exported string property. It counts as use and is not checked
+  for existence: in a script the same form can be `"res://levels/"` with the
+  rest built at runtime, and a broken reference that is not broken is worse
+  than one that is not reported. The manifest stays out of the shared source
+  list, so `project_analyze_impact`, which reads that file itself and names the
+  section a line belongs to, still reports each setting once.
+
 - **`runtime_launch` names the process and the engine the rest of its answer
   means.** Two fields in one response pointed somewhere else. The `summary`
   sentence carried the pid of the process Didi spawned while `pid` and
