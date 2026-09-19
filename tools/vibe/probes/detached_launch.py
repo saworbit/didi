@@ -190,6 +190,24 @@ def one_pass(project: Path, attach_first: bool) -> None:
                         if e.get("pid") == session_pid]
                 print(f"       runtime_list_sessions still reports it: "
                       f"{json.dumps(mine)[:220]}")
+            # A POSIX child the launcher never reaps stays as a zombie. Whether
+            # that matters depends entirely on whether it is transient, and the
+            # only place that question can be asked is *inside* this `with`,
+            # while the server that spawned it is still running: once the
+            # Session closes, didi exits and init collects the entry either
+            # way, so a check after that cannot tell the two apart.
+            if process_state(session_pid).startswith("zombie"):
+                zombie_deadline = time.monotonic() + 20.0
+                held = 0.0
+                while time.monotonic() < zombie_deadline:
+                    if not process_state(session_pid).startswith("zombie"):
+                        break
+                    time.sleep(0.5)
+                    held += 0.5
+                final = process_state(session_pid)
+                print(f"       with the server still running, that entry became "
+                      f"{final!r} after {held:.1f}s")
+                row("the launcher reaps its own detached child", "absent", final)
     print()
 
 
@@ -201,11 +219,12 @@ def main() -> int:
     project = Path(args.project)
     one_pass(project, attach_first=False)
     one_pass(project, attach_first=True)
-    # A POSIX child whose parent never reaps it stays in the process table as a
-    # zombie. Checking once, straight after the stop, says the pid is still
-    # there and not whether it stays there -- so ask again at the end, several
-    # seconds and a whole second pass later, and print the word the kernel uses.
-    print("=== every pid this probe launched, re-asked at the end of the run ===")
+    # Every pid again, for the record. Note what this block can and cannot
+    # say: each pass closed its Session, so the server that spawned these has
+    # exited and init will have collected anything it left. "absent" here is
+    # therefore not evidence that didi reaped its own child -- that question is
+    # asked inside each pass, while the server is still up.
+    print("=== every pid this probe launched, re-asked after its server exited ===")
     for label, pid in LAUNCHED:
         print(f"  {label:32} pid {pid}: {process_state(pid)}")
     return 0
