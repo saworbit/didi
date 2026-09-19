@@ -10,6 +10,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
 #define ASSERT_EQ(a, b) ASSERT_TRUE((a) == (b))
@@ -466,10 +467,175 @@ void refuses_a_value_the_declared_type_cannot_hold() {
     ASSERT_TRUE(!project.exists("art/fraction.tres"));
 }
 
+// The composite packed arrays are one flat run of components (#765).
+//
+// A nested constructor is not a near miss. Godot's text parser answers
+// "Expected float in constructor" and the whole resource fails to load, so the
+// property this writer reported and every other property in the file are gone
+// together.
+void writes_composite_packed_arrays_flat() {
+    ProjectFixture project("packed-composites");
+
+    const auto vectors = create({
+        {"save_path", "res://art/nav.tres"},
+        {"resource_type", "NavigationPolygon"},
+        {"properties", {{"vertices", {{"type", "PackedVector2Array"},
+                                      {"values", json::array({
+                                          {{"x", 0}, {"y", 0}},
+                                          {{"x", 512}, {"y", 0}}
+                                      })}}}}}
+    });
+    ASSERT_TRUE(!vectors.isError);
+    ASSERT_TRUE(project.read("art/nav.tres").find(
+                    "vertices = PackedVector2Array(0, 0, 512, 0)") != std::string::npos);
+
+    // Colour elements default their alpha, the way a lone Color does.
+    const auto colours = create({
+        {"save_path", "res://art/grad.tres"},
+        {"resource_type", "Gradient"},
+        {"properties", {{"colors", {{"type", "PackedColorArray"},
+                                    {"values", json::array({
+                                        {{"r", 1}, {"g", 0}, {"b", 0}}
+                                    })}}}}}
+    });
+    ASSERT_TRUE(!colours.isError);
+    ASSERT_TRUE(project.read("art/grad.tres").find("colors = PackedColorArray(1, 0, 0, 1.0)") !=
+                std::string::npos);
+
+    // The components already flattened, which is what the file looks like and
+    // what a caller who copied one out of a .tres will send.
+    const auto flat = create({
+        {"save_path", "res://art/flat.tres"},
+        {"resource_type", "NavigationPolygon"},
+        {"properties", {{"vertices", {{"type", "PackedVector2Array"},
+                                      {"values", json::array({0, 0, 512, 0})}}}}}
+    });
+    ASSERT_TRUE(!flat.isError);
+    ASSERT_TRUE(project.read("art/flat.tres").find(
+                    "vertices = PackedVector2Array(0, 0, 512, 0)") != std::string::npos);
+
+    // Godot drops the trailing part-element and reports nothing, so a count
+    // that is not a whole number of elements is refused rather than written.
+    const auto ragged = create({
+        {"save_path", "res://art/ragged.tres"},
+        {"resource_type", "NavigationPolygon"},
+        {"properties", {{"vertices", {{"type", "PackedVector2Array"},
+                                      {"values", json::array({0, 0, 512})}}}}}
+    });
+    ASSERT_TRUE(ragged.isError);
+    ASSERT_TRUE(textOf(ragged).find("whole number of Vector2s") != std::string::npos);
+    ASSERT_TRUE(!project.exists("art/ragged.tres"));
+
+    const auto mixed = create({
+        {"save_path", "res://art/mixed.tres"},
+        {"resource_type", "NavigationPolygon"},
+        {"properties", {{"vertices", {{"type", "PackedVector2Array"},
+                                      {"values", json::array({0, 0, {{"x", 1}, {"y", 2}}})}}}}}
+    });
+    ASSERT_TRUE(mixed.isError);
+    ASSERT_TRUE(textOf(mixed).find("Send one or the other") != std::string::npos);
+
+    // The packed arrays whose element is already a scalar are unchanged.
+    const auto scalars = create({
+        {"save_path", "res://art/offsets.tres"},
+        {"resource_type", "Gradient"},
+        {"properties", {{"offsets", {{"type", "PackedFloat32Array"},
+                                     {"values", json::array({0.0, 0.5, 1.0})}}}}}
+    });
+    ASSERT_TRUE(!scalars.isError);
+    ASSERT_TRUE(project.read("art/offsets.tres").find(
+                    "offsets = PackedFloat32Array(0.0, 0.5, 1.0)") != std::string::npos);
+}
+
+// A scalar or an array into a slot that cannot hold it (#764).
+//
+// The #730 guard compared the shape of an object against the declared type, so
+// it never saw a string, a number, a boolean or an array. Godot keeps the
+// property's default for all of them and says nothing, which is the silent
+// wrong write this writer exists to refuse.
+void refuses_a_scalar_the_declared_type_cannot_hold() {
+    ProjectFixture project("declared-scalar-refusals");
+
+    struct Row {
+        const char* resource_type;
+        const char* property;
+        json value;
+        const char* expected_in_message;
+    };
+    const std::vector<Row> refused = {
+        {"CircleShape2D", "radius", "big", "Send a number"},
+        {"StyleBoxFlat", "expand_margin_top", true, "Send a number"},
+        {"StyleBoxFlat", "corner_detail", "many", "Send a whole number"},
+        {"StyleBoxFlat", "corner_detail", 4.7, "truncates a fraction"},
+        {"StyleBoxFlat", "anti_aliasing", "yes please", "Send true or false"},
+        // The message is serialised into the text item, so its own quotes come
+        // back escaped. Match the part that carries no quotes.
+        {"RectangleShape2D", "size", 7, "declared Vector2 by"},
+        {"StyleBoxFlat", "shadow_offset", "over there", "Send an object with"},
+        {"StyleBoxFlat", "bg_color", 3, "colour string"},
+        {"StyleBoxFlat", "bg_color", json::array({1.0, 0.5, 0.0, 1.0}), "colour string"},
+        // No constructor spells a float, so an object is wrong there too.
+        {"CircleShape2D", "radius", {{"x", 1}, {"y", 2}}, "Send a number"},
+    };
+    for (const auto& row : refused) {
+        const auto result = create({
+            {"save_path", "res://art/refused.tres"},
+            {"resource_type", row.resource_type},
+            {"properties", {{row.property, row.value}}}
+        });
+        ASSERT_TRUE(result.isError);
+        const auto message = textOf(result);
+        ASSERT_TRUE(message.find(row.property) != std::string::npos);
+        ASSERT_TRUE(message.find(row.expected_in_message) != std::string::npos);
+        ASSERT_TRUE(!project.exists("art/refused.tres"));
+    }
+
+    // The conversions Godot does anyway, and the spellings the surface
+    // documents, all still write. An integer into a float slot arrives as a
+    // float, and a string into a Color goes through Godot's own #rrggbbaa
+    // parsing, which is what scene_set_property documents for the same slot.
+    const std::vector<Row> written = {
+        {"CircleShape2D", "radius", 7, "radius = 7"},
+        {"StyleBoxFlat", "corner_detail", 4, "corner_detail = 4"},
+        // JSON does not separate 4 from 4.0, and a client that serialises
+        // every number as a double must not be refused for the spelling.
+        {"StyleBoxFlat", "corner_detail", 4.0, "corner_detail = 4.0"},
+        {"StyleBoxFlat", "anti_aliasing", true, "anti_aliasing = true"},
+        {"StyleBoxFlat", "bg_color", "#ff8800ff", "bg_color = \"#ff8800ff\""},
+        {"StyleBoxFlat", "resource_name", "panel", "resource_name = \"panel\""},
+        {"SpriteFrames", "animations", json::array(), "animations = []"},
+    };
+    for (const auto& row : written) {
+        const auto result = create({
+            {"save_path", "res://art/written.tres"},
+            {"resource_type", row.resource_type},
+            {"overwrite", true},
+            {"properties", {{row.property, row.value}}}
+        });
+        ASSERT_TRUE(!result.isError);
+        ASSERT_TRUE(project.read("art/written.tres").find(row.expected_in_message) !=
+                    std::string::npos);
+    }
+
+    // A name the class reference does not carry a type for is unchecked, and
+    // has to stay that way: `_data` on a Curve and `tracks/0/keys` on an
+    // Animation are legitimate and absent from the dump.
+    const auto storage_only = create({
+        {"save_path", "res://art/curve.tres"},
+        {"resource_type", "Curve"},
+        {"properties", {{"_data", json::array({0.0, 0.0, 0.0, 0.0, 0})}}}
+    });
+    ASSERT_TRUE(!storage_only.isError);
+}
+
 struct Register {
     Register() {
         registerTest("resource_references.writes_declared_vector_type",
                      writes_a_vector_as_the_type_the_property_declares);
+        registerTest("resource_references.packed_composites_written_flat",
+                     writes_composite_packed_arrays_flat);
+        registerTest("resource_references.refuses_wrong_declared_scalar",
+                     refuses_a_scalar_the_declared_type_cannot_hold);
         registerTest("resource_references.refuses_wrong_declared_type",
                      refuses_a_value_the_declared_type_cannot_hold);
         registerTest("resource_references.refuses_undeclared_properties",

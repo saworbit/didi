@@ -137,6 +137,36 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`resource_create` stops writing files Godot cannot load or silently empties.**
+  Two faults in the same writer, both reporting success. The composite packed
+  arrays came out with a constructor per element --
+  `PackedVector2Array(Vector2(0, 0), Vector2(512, 0))` -- and Godot's text
+  parser answers `Expected float in constructor` and fails the whole resource,
+  not just the property, so a `NavigationPolygon`, a `Polygon2D`, a `Line2D`'s
+  points, an `OccluderPolygon2D` or a `Gradient`'s colours could not be
+  authored through the surface at all (#765). Godot's own saver writes one flat
+  run of components and that is what these write now; `"values"` still takes an
+  element per entry, and also takes the components already flattened, which is
+  what a caller copying one out of a `.tres` will send. A flat run that is not
+  a whole number of elements is refused, because Godot drops the trailing
+  part-element and says nothing. `PackedVector4Array` is written too, where
+  before it was refused as a type the writer did not know.
+  The second is that the declared-type guard only ever inspected objects, so
+  any string, number, boolean or array went into any typed slot verbatim with
+  `property_check` reporting `checked: true` (#764). Godot keeps the property's
+  default for a value it cannot convert and prints nothing a caller sees:
+  `radius = "big"` loads as `0.0`, `corner_detail = "many"` as `1`, and
+  `size = 7` on a `RectangleShape2D` as `(0, 0)`, which is a collision shape
+  with no extent that every tool in the chain called written. The guard now
+  reads the whole declared type rather than only the vector and colour ones, so
+  a slot declared `int`, `float`, `bool`, `String`, `StringName`, `NodePath`,
+  `Array` or a packed array refuses a value it cannot hold, naming the property,
+  what it is declared as and what to send. The conversions Godot does anyway are
+  kept: an integer into a `float`, a `"#rrggbbaa"` string into a `Color`, and
+  `4.0` where `4` was meant, because JSON does not separate the two. A declared
+  type with no rule -- a `Transform3D`, a `Dictionary`, a resource slot -- is
+  left exactly as it was.
+
 - **The Unix socket server stops without pulling a descriptor out from under
   its own thread.** `PosixIpcServer::stop()` closed the listening socket and
   then joined the thread that was still polling and accepting on it, so for up
