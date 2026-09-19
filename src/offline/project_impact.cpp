@@ -759,6 +759,22 @@ Result<RenamePlan> planRename(const std::string& root_dir, const ProjectRenameOp
     }
 
     std::vector<Impact> impacts;
+    // project.godot is not in the scan, so the analysis reads it separately and
+    // this did not read it at all. An [autoload] key is the name every script
+    // in the project can say, and renaming the symbol while leaving the key
+    // produced a global that no longer exists, reported in no field of the
+    // answer (#792). The key is collected here so it lands in
+    // code_references_not_updated, which is the list a caller works through.
+    //
+    // Collected, not rewritten. An autoload key and the symbol that shares its
+    // spelling are different things -- a node called Player and a singleton
+    // called Player are unrelated -- and rewriting the definition of a global
+    // on a whole-word match is the silent breakage this tool exists to avoid.
+    //
+    // First, so that the entry the rest of the project depends on is the one
+    // site max_impacts cannot cut. Everything below it is a use of the name.
+    collectProjectSettingImpacts(paths::projectPathFromUtf8(root_dir), target,
+                                 /*file_target=*/false, impacts);
     collectNameTargetImpacts(scan, target, impacts);
 
     std::map<std::string, size_t> serialized_sites;
@@ -831,7 +847,8 @@ Result<RenamePlan> planRename(const std::string& root_dir, const ProjectRenameOp
         {"limitations", json::array({
             "Every reference outside a [connection] and an animation track is reported and "
             "never rewritten. Each carries a kind: code_reference for GDScript and C#, "
-            "resource_reference for a scene or resource line this does not rewrite. "
+            "resource_reference for a scene or resource line this does not rewrite, "
+            "autoload for the [autoload] key in project.godot. "
             "script_patch_method is the tool for the code_reference entries and cannot touch "
             "the others, so read the kind before acting on the list.",
             "A code_reference is reported rather than rewritten because the language is "
@@ -846,6 +863,22 @@ Result<RenamePlan> planRename(const std::string& root_dir, const ProjectRenameOp
             "and an editor holding unsaved changes will write over them."
         })}
     };
+
+    // Said only when there is one to say it about. The general line above names
+    // the kind; this one says what the caller has to go and do, and a sentence
+    // about autoloads on every rename in a project that has none is the
+    // boilerplate every live response is already carrying too much of.
+    const bool renames_an_autoload =
+        std::any_of(code_references.begin(), code_references.end(),
+                    [](const Impact& impact) { return impact.kind == "autoload"; });
+    if (renames_an_autoload) {
+        result["limitations"].push_back(
+            "An [autoload] entry is the line that defines the name rather than another use "
+            "of it, so renaming the symbol and leaving that key gives every script in the "
+            "project a global that no longer exists. Edit project.godot along with the code "
+            "references. It is reported rather than rewritten because an autoload key and a "
+            "symbol that shares its spelling can be different things.");
+    }
 
     return RenamePlan{std::move(result), std::move(planned)};
 }

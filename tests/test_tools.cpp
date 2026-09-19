@@ -5947,6 +5947,148 @@ static void test_rename_keeps_everything_it_is_not_renaming() {
     registry.setIpcClient(nullptr);
 }
 
+static void test_rename_reports_the_autoload_line_that_defines_the_name() {
+    // An autoload key is the most project-wide name a Godot project has: every
+    // script can say it, and the [autoload] line is what defines it.
+    // project_analyze_impact read project.godot and reported that line;
+    // project_rename_references did not read the file at all, so renaming a
+    // singleton left the defining key behind and said so in no field of the
+    // answer (#792). The caller works through code_references_not_updated, and
+    // the entry that matters most was the one missing from it.
+    ScopedToolProject project("rename-autoload");
+    writeAuditFile("project.godot",
+                   "config_version=5\n"
+                   "\n"
+                   "[autoload]\n"
+                   "\n"
+                   "GameState=\"*res://scripts/game_state.gd\"\n");
+    writeAuditFile("scripts/game_state.gd",
+                   "extends Node\n"
+                   "\n"
+                   "var score: int = 0\n");
+    writeAuditFile("scripts/player.gd",
+                   "extends Node\n"
+                   "\n"
+                   "func hit() -> void:\n"
+                   "\tGameState.score += 1\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+
+    // The control. This half always worked, and it is the half the rename is
+    // meant to agree with.
+    const auto impact = registry.callTool("project_analyze_impact",
+                                          didi::json{{"target", "GameState"}});
+    ASSERT_TRUE(!impact.isError);
+    const auto impact_payload = didi::json::parse(impact.content[0].text);
+    ASSERT_EQ(impact_payload["counts_by_kind"]["autoload"].get<size_t>(), 1u);
+
+    const auto preview = registry.callTool("project_rename_references", didi::json{
+        {"target", "GameState"}, {"new_name", "RunState"}, {"dry_run", true}});
+    ASSERT_TRUE(!preview.isError);
+    const auto preview_payload = didi::json::parse(preview.content[0].text);
+
+    // The preview is what the caller decides on, so the site has to be in it
+    // and not only in the answer that comes back after the token is spent.
+    const auto& previewed =
+        preview_payload["mutation_preview"]["changes"][0]["before"]["code_references_not_updated"];
+    bool previewed_autoload = false;
+    for (const auto& reference : previewed) {
+        if (reference["path"] == "res://project.godot" && reference["kind"] == "autoload") {
+            previewed_autoload = true;
+        }
+    }
+    ASSERT_TRUE(previewed_autoload);
+
+    const auto token =
+        preview_payload["mutation_preview"]["confirmation_token"].get<std::string>();
+    const auto applied = registry.callTool("project_rename_references", didi::json{
+        {"target", "GameState"}, {"new_name", "RunState"}, {"confirmation_token", token}});
+    ASSERT_TRUE(!applied.isError);
+    const auto payload = didi::json::parse(applied.content[0].text);
+
+    // Two sites in, two sites out: the autoload key and the one caller.
+    ASSERT_EQ(payload["code_reference_count"].get<size_t>(), 2u);
+    bool reported_autoload = false;
+    bool reported_caller = false;
+    for (const auto& reference : payload["code_references_not_updated"]) {
+        if (reference["path"] == "res://project.godot" && reference["kind"] == "autoload") {
+            reported_autoload = true;
+            ASSERT_TRUE(reference["detail"].get<std::string>().find("GameState=") !=
+                        std::string::npos);
+        }
+        if (reference["path"] == "res://scripts/player.gd") reported_caller = true;
+    }
+    ASSERT_TRUE(reported_autoload);
+    ASSERT_TRUE(reported_caller);
+
+    // Reported, never rewritten. An autoload key and a symbol that shares its
+    // spelling can be different things, so the definition of a global is not
+    // something a whole-word match gets to edit.
+    ASSERT_TRUE(readToolTestFile("project.godot").find("GameState=") != std::string::npos);
+    ASSERT_TRUE(readToolTestFile("project.godot").find("RunState") == std::string::npos);
+    ASSERT_EQ(payload["updated_file_count"].get<size_t>(), 0u);
+
+    // And the payload says what to do about it, not only that the line exists.
+    bool said_why = false;
+    for (const auto& limitation : payload["limitations"]) {
+        if (limitation.get<std::string>().find("global that no longer exists") !=
+            std::string::npos) {
+            said_why = true;
+        }
+    }
+    ASSERT_TRUE(said_why);
+
+    registry.setIpcClient(nullptr);
+}
+
+static void test_rename_says_nothing_about_autoloads_when_there_are_none() {
+    // The other half of #792, and the one that keeps the fix honest: a project
+    // with no autoload must not grow a project.godot entry it has no site for,
+    // or the sentence about singletons on every rename in every project.
+    ScopedToolProject project("rename-no-autoload");
+    writeAuditFile("project.godot",
+                   "config_version=5\n"
+                   "\n"
+                   "[application]\n"
+                   "\n"
+                   "config/name=\"GameState\"\n");
+    writeAuditFile("scripts/player.gd",
+                   "extends Node\n"
+                   "\n"
+                   "var GameState: int = 0\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+
+    const auto preview = registry.callTool("project_rename_references", didi::json{
+        {"target", "GameState"}, {"new_name", "RunState"}, {"dry_run", true}});
+    ASSERT_TRUE(!preview.isError);
+    const auto preview_payload = didi::json::parse(preview.content[0].text);
+    const auto token =
+        preview_payload["mutation_preview"]["confirmation_token"].get<std::string>();
+    const auto applied = registry.callTool("project_rename_references", didi::json{
+        {"target", "GameState"}, {"new_name", "RunState"}, {"confirmation_token", token}});
+    ASSERT_TRUE(!applied.isError);
+    const auto payload = didi::json::parse(applied.content[0].text);
+
+    // config/name happens to hold the word. It is a setting value, not a name
+    // anything can call, and a rename that reported it would be inventing work.
+    ASSERT_EQ(payload["code_reference_count"].get<size_t>(), 1u);
+    ASSERT_EQ(payload["code_references_not_updated"][0]["path"].get<std::string>(),
+              "res://scripts/player.gd");
+    // The kinds line names autoload because the list can carry one. The
+    // sentence about what to go and fix is only said when there is one.
+    for (const auto& limitation : payload["limitations"]) {
+        ASSERT_TRUE(limitation.get<std::string>().find("global that no longer exists") ==
+                    std::string::npos);
+    }
+
+    registry.setIpcClient(nullptr);
+}
+
 static void test_rename_refuses_what_it_cannot_do_safely() {
     // Every refusal here is a case where writing would be worse than not
     // writing, and the caller cannot tell the difference afterwards.
@@ -6825,6 +6967,10 @@ struct RegisterToolTests {
                      test_rename_updates_serialized_references_and_reports_the_code);
         registerTest("Tools.RenameKeepsWhatItIsNotRenaming",
                      test_rename_keeps_everything_it_is_not_renaming);
+        registerTest("Tools.RenameReportsTheAutoloadKey",
+                     test_rename_reports_the_autoload_line_that_defines_the_name);
+        registerTest("Tools.RenameIsSilentWithoutAnAutoload",
+                     test_rename_says_nothing_about_autoloads_when_there_are_none);
         registerTest("Tools.RenameRefusals",
                      test_rename_refuses_what_it_cannot_do_safely);
         registerTest("Tools.RequiredStringsRefuseEmpty",
